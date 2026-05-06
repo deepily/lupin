@@ -16,7 +16,11 @@ Five scenarios per design doc §3 Step 1.5:
     2. /clear with persona → persona preserved (release does NOT fire)
     3. /clear without persona → no preservation (release does NOT fire)
     4. /clear with corrupted bridge → no preservation, gate-2 logged
-    5. Legacy session_ids[] match (xfail until Phase 1.3 mitigation lands)
+    5. (REMOVED 2026-05-05) Legacy session_ids[] match — was pinned to the
+       gate-3 hypothesis disproved by Phase 1.2 diagnostics. The real bug is
+       in session_end.py releasing the persona on /clear; see
+       test_session_end.py::TestSessionEndPersonaReleaseGuard for the fix's
+       coverage.
 
 Plus one additional case verifying Fix 2 + Fix 3 wiring:
     6. /clear with persona BUT preservation fails (simulated via session_ids
@@ -194,31 +198,13 @@ class TestPreservationCases:
         # Phase 1.1 diagnostic should also fire the preserve-check
         assert "[register_session] preserve-check:" in captured.err
 
-    @pytest.mark.xfail(
-        reason="Phase 1.3 gate-3 broadening (session_ids[] membership) pending; "
-               "fires after user repro identifies the failed gate"
-    )
-    def test_legacy_session_ids_match_preserves( self, isolated_session_dir, patched_main ):
-        """
-        Legacy bridge: stable_session_id present in old_data["session_ids"][] but
-        old_data["session_id"] equals the NEW transient (e.g., a documented
-        hook double-fire on /clear). Once Phase 1.3 broadens gate-3 to accept
-        session_ids[] membership, preservation should fire.
-        """
-        legacy_stable_id = "legacy-uuid-9999-8888-7777-666666666666"
-        _write_lockfile( isolated_session_dir, legacy_stable_id )
-        _write_bridge( isolated_session_dir, {
-            "session_id"        : TEST_NEW_SESSION_ID,  # ← gate-3 sees equality, fails today
-            "stable_session_id" : legacy_stable_id,
-            "session_ids"       : [ legacy_stable_id, TEST_NEW_SESSION_ID ],
-            "voice_persona"     : TEST_PERSONA
-        } )
-
-        register_session.main()
-
-        bridge = _read_bridge( isolated_session_dir )
-        assert bridge is not None
-        assert bridge.get( "voice_persona" ) == TEST_PERSONA  # Will XPASS once Phase 1.3 lands
+    # Removed 2026-05-05 (Session d5e3cf21): the legacy session_ids[] match xfail
+    # was pinned to the gate-3 hypothesis disproved by Phase 1.2 diagnostics. Real
+    # root cause is in session_end.py (releases persona on /clear), not in
+    # register_session.py gate-3. See:
+    #   - src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md §0
+    #   - src/tests/unit/test_session_end.py::TestSessionEndPersonaReleaseGuard
+    #     (covers the actual fix at session_end.py:224-226)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

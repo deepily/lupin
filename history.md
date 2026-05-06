@@ -2,6 +2,62 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.05 PM - Session 45e6bf84 | Bug Fix Mode — Notification 503 Cascade for Offline Users (Expediter Flow)
+
+**Context**: Picked up Bug #2 from `bug-fix-queue.md` queue. Filed 2026-05-01 by session 31172845; evidence in `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md` §Phase 5. Server raises HTTP 503 in `src/cosa/rest/routers/notifications.py:727-731` when `target_user` is offline AND no `response_default` is set; client expediter `_batch_collect_args` at `src/cosa/agents/runtime_argument_expeditor/expeditor.py:821-833` does NOT set `response_default`. Symptom: ~21 cancellations across `test_expeditor_mock_job_smoke`, `test_proxy_integration[expediter scenarios]`, `test_swe_team_proxy` smoke tests when test user has no WS connection. 4 fix options pre-documented; Option B (client `response_default = JSON-encoded answer defaults`) is most surgical, Option C (auto-proxy WS connection for test user) is most architecturally correct.
+
+**Parallel session note**: Session d5e3cf21 (voice-persona /clear bug, this same date PM) has uncommitted work in working tree (`session_end.py` fix + tests + R&D docs) — kept isolated via separate `.claude-session.md` manifest sections per parallel-session-safety v2.0.
+
+**Fixes**
+
+(Individual fixes will be added here)
+
+**Session Summary**
+
+(Will be completed at session close)
+
+---
+
+### 2026.05.05 PM - Session d5e3cf21 | Bug Fix Mode — Voice Persona /clear Switch
+
+**Context**: Resuming the active investigation in `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/`. The user reported voice persona switching across `/clear` (Tiberius → Domi during all-day session 532b16e1). Previous Phase 1.2 diagnostic capture showed `vp_is_dict=False` at SessionStart hook time but the gate-3 hypothesis remained unverified.
+
+**Diagnosis (this session)**: Root cause overturned. Bug is NOT in `register_session.py` gate-3 — it is in `session_end.py:224-226`, which unconditionally calls `_release_voice_persona( session_id )` whenever SessionEnd fires. Claude Code fires SessionEnd on `/clear` (not just process exit), so the persona is nulled in the bridge BEFORE the post-/clear SessionStart can carry it forward. This session's apparent preservation (`d5e3cf21` → Tiberius after /clear) was lottery — the pre-/clear sub-session had no persona allocated, so the post-/clear `/allocate` happened to draw Tiberius from the pool.
+
+**Fixes**
+
+### Fix 1: SessionEnd reason-guard prevents persona release on /clear and /compact
+
+- **Source**: ad-hoc (originated from active investigation `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/`)
+- **Files**:
+  - `src/lupin_cli/claude_code/hooks/session_end.py` — added `reason = payload.get("reason", "")` and gated the `_release_voice_persona( session_id )` call on `reason not in ("clear", "compact")`. Hook payload's `reason` field discriminates `/clear` and `/compact` (intra-session lifecycle, persona must persist) from `logout`/`prompt_input_exit`/`other` (actual termination, release is correct). Missing-`reason` defaults to release for legacy hook-payload compat.
+  - `src/tests/unit/test_session_end.py` — NEW. 8 unit tests covering the reason matrix: skips_release_on_clear, skips_release_on_compact, releases_on_logout, releases_on_other, releases_on_prompt_input_exit, releases_when_reason_missing, skips_release_when_session_id_empty, release_failure_is_swallowed. All green.
+  - `src/tests/unit/test_register_session_preservation.py` — removed stale xfail `test_legacy_session_ids_match_preserves` (pinned to disproved gate-3 hypothesis); updated scenario-5 docstring with pointer to test_session_end.py coverage.
+  - `src/tests/unit/test_stop_hook.py` — TestConversationModeGate::test_conversation_mode_skips_everything: added missing `@patch( "..._try_auto_narrate" )` and updated docstring + assertion. Pre-existing fragility (test was relying on absence of narratable transcript content); my session's rich transcript exposed it.
+  - `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md` — added §0 UPDATE block overturning the gate-3 hypothesis, documenting the §0.4 fix and §0.5 phase disposition.
+  - `src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/90-execution-log.md` — Phase status table refreshed: Phase 1.2 ✅ (data captured + analyzed), Phase 1.3 ❌ OBSOLETE, Phase 1.4 NO-OP, new §0.4 + 1F + Verify rows added.
+- **Test**:
+  | Layer | Result |
+  |---|---|
+  | py_compile (session_end.py) | ✅ OK |
+  | Import chain (session_end module) | ✅ OK |
+  | Unit (new test_session_end.py) | ✅ 8/8 |
+  | Unit (test_register_session_preservation.py) | ✅ 8/8 (xfail removed cleanly) |
+  | Unit (test_stop_hook.py TestConversationModeGate) | ✅ 2/2 (flake fixed) |
+  | Full unit suite | ✅ 3958 passed, 1 xfailed, 0 failed in 130.86s |
+  | WS smoke `:7999` | ✅ 50/50 in 44.35s |
+  | Live /clear repro | ⏸ deferred — user-driven verification opportunity |
+- **Commit**: [pending]
+- **Follow-up tasks**:
+  - Live verification: do another `/clear` and confirm persona persists (pre-/clear get_session_info will show Tiberius; post-/clear should also show Tiberius, with `assigned_at` unchanged from pre-/clear).
+  - Once verified: remove the three `[register_session]` diagnostic prints (Phase 1F cleanup) — they served their purpose and are now dead weight.
+
+**Session Summary**
+
+(Will be completed at session close)
+
+---
+
 ### 2026.05.05 PM - Session 532b16e1 | Multiplexer Phase 5 — Renderer (notifications-list pane + tagged-template `html` helper + CSS port + action-required read-only)
 
 **Context**: The multiplexer is a TypeScript+esbuild greenfield rewrite of the legacy `/app/notifications` page. Phase 4 closed 2026-05-04 (commit `8f1f11c`) shipping the 5-store domain layer; Phase 5 ships the **renderer** — first UI pane (notifications list, read-only) plus the tagged-template `html` helper that all subsequent panes will reuse. Phase 0 (design + plan-review pipeline + Q-A through Q-L + D-A through D-L ratifications) closed earlier today; this session executed the implementation cycle end-to-end.

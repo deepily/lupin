@@ -407,6 +407,7 @@ class TestConversationModeGate:
     side effects interrupts the flow.
     """
 
+    @patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" )
     @patch( "lupin_cli.claude_code.hooks.stop.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
@@ -418,8 +419,16 @@ class TestConversationModeGate:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_conversation_mode_skips_everything( self, mock_read, mock_log, mock_conv,
                                                   mock_session, mock_resolve, mock_drain,
-                                                  mock_emit, mock_notify, mock_send_tts ):
-        """conversation_mode_active=True → emit {}, NO drain, NO notify, NO TTS."""
+                                                  mock_emit, mock_notify, mock_send_tts,
+                                                  mock_try_auto_narrate ):
+        """conversation_mode_active=True → emit {}, run auto-narrate safety net,
+        NO drain, NO notify, NO direct TTS via the prompt paths.
+
+        `_try_auto_narrate` (Phase 4 Layer 3) is patched as a no-op here so the
+        send_tts assertion specifically covers the prompt-path code; auto-narrate
+        has its own tests at TestAutoNarrate*. See:
+        src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+        """
         mock_read.return_value = {
             "stop_hook_active" : False,
             "session_id"       : "abc12345"
@@ -432,9 +441,13 @@ class TestConversationModeGate:
         mock_conv.assert_called_once_with( "abc12345" )
         # Allow the stop, no block payload
         mock_emit.assert_called_once_with( {} )
-        # NONE of the side-effecting paths fire
+        # The auto-narrate safety net DOES run (this is intentional in conv mode)
+        mock_try_auto_narrate.assert_called_once_with( "abc12345", mock_read.return_value )
+        # The prompt-path side effects MUST NOT fire
         mock_drain.assert_not_called()
         mock_notify.assert_not_called()
+        # send_tts was patched separately from _try_auto_narrate, so this asserts
+        # nothing in main()'s prompt path bypassed the gate to call TTS.
         mock_send_tts.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )

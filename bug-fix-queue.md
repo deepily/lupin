@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-05T11:15:00-04:00
+**Last Updated**: 2026-05-05T21:03:44-04:00
 
 ---
 
@@ -58,6 +58,8 @@
 | a6b318ea | 2026-05-01T15:53:00 | 2026-05-01T17:35:00 | closed |
 | 0022baba | 2026-05-02T10:50:00 | 2026-05-02T16:25:00 | closed |
 | 4ede5bad | 2026-05-02T11:30:00 | 2026-05-05T00:00:00 | closed |
+| d5e3cf21 | 2026-05-05T19:30:00 | 2026-05-05T19:30:00 | active |
+| 45e6bf84 | 2026-05-05T21:03:44 | 2026-05-05T21:03:44 | active |
 
 ---
 
@@ -98,12 +100,6 @@
 ### Queued
 
 (Available for any session to claim)
-
-- [ ] **Notification 503 cascade for offline users in expediter flow** (filed 2026-05-01 by session 31172845, evidence in execution log Phase 5)
-  - **Server**: `src/cosa/rest/routers/notifications.py:727-731` raises HTTP 503 when target_user is offline AND no `response_default` set.
-  - **Client**: `src/cosa/agents/runtime_argument_expeditor/expeditor.py:821-833` `_batch_collect_args` does NOT set `response_default` (only per-question `default_value` inside `response_options`).
-  - **Symptom**: ~21 cancellations across `test_expeditor_mock_job_smoke`, `test_proxy_integration[expediter scenarios]`, `test_swe_team_proxy` smoke tests when the test user has no WS connection. Confirmed reproducing in 2026-05-01 fresh container logs.
-  - **4 fix options documented**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md` §Phase 5. Option B (client-side `response_default = JSON-encoded answer defaults`) is the most surgical; Option C (auto-proxy maintains a WS connection for the test user) is the most architecturally correct. Picking requires a longer design conversation.
 
 - [ ] **Test_suite mode HTTP 500 — actual NoneType.split source** (filed 2026-05-01 by session 31172845, evidence in execution log Phase 2)
   - **Defensive fix already landed** (CoSA branch reorder in `todo_fifo_queue.py:634-655`) but my hypothesis was wrong: `MODE_TO_AGENT` and `AGENTIC_MODE_MAP` are disjoint as of 2026-05-01, so the dispatch reorder doesn't change behavior for the test_suite case.
@@ -183,6 +179,22 @@
 ### In Progress
 
 (Claimed by a specific session)
+
+- [ ] **Voice persona switches on `/clear` — SessionEnd hook releases persona unconditionally** | Owner: d5e3cf21 | Since: 2026-05-05T19:30:00
+  - **Symptom**: User-observed persona flip during all-day session 532b16e1 (Tiberius → Domi after a `/clear`). Previous gate-3 hypothesis in `register_session.py` was disproved by Phase 1.2 diagnostic (`vp_is_dict=False` despite a persona being assigned earlier).
+  - **Root cause** (session d5e3cf21): `src/lupin_cli/claude_code/hooks/session_end.py:224-226` unconditionally calls `_release_voice_persona( session_id )`. Claude Code's SessionEnd hook fires on `/clear` (with `reason="clear"`), not only on process exit, so the bridge `voice_persona` field is nulled BEFORE the post-/clear SessionStart hook reads it. The carry-forward gate at `register_session.py:770` then correctly skips (predicate `isinstance(old_data.get("voice_persona"), dict)` is False), and Phase 4.5 `/allocate` rolls a fresh random persona.
+  - **Why session d5e3cf21 looked OK**: Pre-/clear sub-session was a fresh start that never had a persona allocated; the post-/clear `/allocate` happened to draw Tiberius from the pool by chance.
+  - **Fix shape**: ~3-line guard in `session_end.py` — read `payload.get("reason")` and skip `_release_voice_persona` when reason ∈ {"clear", "compact"}; only release on actual termination (`"exit"`, `"logout"`, etc.).
+  - **Test gaps**: No unit tests exist for `session_end.py` today (`ls src/tests/unit/test_session_end*` returns nothing). Add `test_session_end_skips_release_on_clear`, `test_session_end_skips_release_on_compact`, `test_session_end_releases_on_exit`.
+  - **Cleanup**: Once verified live, remove the three `[register_session]` diagnostic prints (gate-result, gate-2-fail, preserve-check) added in Phase 1.1 — they're dead weight after the fix lands.
+  - **xfail re-evaluation**: `test_legacy_session_ids_match_preserves` is pinned to the wrong (gate-3) hypothesis — replace with `test_session_end_skips_release_on_clear` rather than flip.
+
+- [ ] **Notification 503 cascade for offline users in expediter flow** | Owner: 45e6bf84 | Since: 2026-05-05T21:03:44
+  - **Server**: `src/cosa/rest/routers/notifications.py:727-731` raises HTTP 503 when target_user is offline AND no `response_default` set.
+  - **Client**: `src/cosa/agents/runtime_argument_expeditor/expeditor.py:821-833` `_batch_collect_args` does NOT set `response_default` (only per-question `default_value` inside `response_options`).
+  - **Symptom**: ~21 cancellations across `test_expeditor_mock_job_smoke`, `test_proxy_integration[expediter scenarios]`, `test_swe_team_proxy` smoke tests when the test user has no WS connection. Confirmed reproducing in 2026-05-01 fresh container logs.
+  - **4 fix options documented**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md` §Phase 5. Option B (client-side `response_default = JSON-encoded answer defaults`) is the most surgical; Option C (auto-proxy maintains a WS connection for the test user) is the most architecturally correct. Picking requires a longer design conversation.
+  - **Original filing**: 2026-05-01 by session 31172845 (evidence in execution log Phase 5)
 
 - [x] ~~**Post-mortem remediation: 2026-04-30 22:15-EDT all-suite run (9 smoke failures, 6 root-cause clusters)**~~ → marked done by user | By: 31172845 | 2026-05-05 | Original entry preserved below for context. | Owner: 31172845 | Since: 2026-05-01T11:00:00
   - **Plan**: `/home/rruiz/.claude/plans/spicy-plotting-coral.md` (approved 2026-05-01)

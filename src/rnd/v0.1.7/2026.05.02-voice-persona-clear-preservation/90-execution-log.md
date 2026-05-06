@@ -9,13 +9,16 @@
 | Phase | Subject | Started | Completed | Outcome | Session |
 |---|---|---|---|---|---|
 | 1.1 | Diagnostic prints in register_session.py (Steps 1.1) | 2026-05-03 AM | 2026-05-03 AM | ✅ landed | aacd24b4 |
-| 1.2 | Reproduce + identify failed gate (user does /clear) | | | _pending — awaiting user /clear repro_ | |
-| 1.3 | Apply minimal patch to gate logic | | | _blocked on Phase 1.2_ | |
-| 1.4 | Sweep check + patch lines 699-703 if same gate change applies | | | _blocked on Phase 1.3_ | |
-| 1.5 | Unit tests at src/tests/unit/test_register_session_preservation.py | 2026-05-03 AM | 2026-05-03 AM | ✅ 8 passed + 1 xfailed (legacy `session_ids[]` case awaits Phase 1.3) | aacd24b4 |
-| 2 | Add `_release_voice_persona_via_http` helper + invoke before bridge overwrite | 2026-05-03 AM | 2026-05-03 AM | ✅ landed | aacd24b4 |
+| 1.2 | Reproduce + identify failed gate (user does /clear) | 2026-05-05 PM | 2026-05-05 PM | ✅ captured: `vp_is_dict=False` in BOTH success (d5e3cf21) and failure (532b16e1) cases — proved the gate-3 hypothesis WRONG; pointed to upstream bridge mutation | d5e3cf21 |
+| 1.3 | Apply minimal patch to gate logic | 2026-05-05 PM | — | ❌ OBSOLETE — root cause overturned (see 01-design.md §0). Replaced by §0.4 fix in `session_end.py` | d5e3cf21 |
+| 1.4 | Sweep check + patch lines 699-703 if same gate change applies | 2026-05-05 PM | 2026-05-05 PM | NO-OP — §0 finding does not affect idle-block carry-forward (session_end does not null idle state) | d5e3cf21 |
+| 1.5 | Unit tests at src/tests/unit/test_register_session_preservation.py | 2026-05-03 AM | 2026-05-03 AM | ✅ 8 passed + 1 xfailed (the xfail `test_legacy_session_ids_match_preserves` is pinned to the wrong hypothesis — being replaced by `test_session_end_skips_release_on_clear`) | aacd24b4 |
+| 2 | Add `_release_voice_persona_via_http` helper + invoke before bridge overwrite | 2026-05-03 AM | 2026-05-03 AM | ✅ landed (kept as defense-in-depth per §0.5 disposition) | aacd24b4 |
 | 3 | Add `previous_persona_name` query param to /allocate + push announcement | 2026-05-03 AM | 2026-05-03 AM | ✅ landed (router edit + hook threaded `previous_persona_name` kwarg through `_allocate_voice_persona_via_http`) | aacd24b4 |
-| Verify | py_compile + import chain + helper smoke + unit + endpoint smoke + manual /clear | 2026-05-03 AM | 2026-05-03 AM (partial) | py_compile ✅ · import chain ✅ · helper smoke ✅ · new unit tests ✅ · full unit suite ✅ (3950 passed, 2 xfailed, 0 failed in 132s — re-run after a flake fix in `test_voice_persona_helpers.py`) · endpoint smoke + manual /clear pending user | aacd24b4 |
+| §0.4 | Apply reason-guard fix in session_end.py | _pending_ | | _in progress — d5e3cf21_ | d5e3cf21 |
+| §0.4 tests | New unit tests at src/tests/unit/test_session_end.py | _pending_ | | _in progress — d5e3cf21_ | d5e3cf21 |
+| 1F | Remove diagnostic prints from register_session.py once §0 fix verified | _pending_ | | _will land after live verification_ | d5e3cf21 |
+| Verify (§0) | py_compile + import chain + new unit tests + full unit suite + WS smoke | _pending_ | | _in progress — d5e3cf21_ | d5e3cf21 |
 
 ## Notes
 
@@ -32,15 +35,24 @@ py_compile + import chain pass. Verified via two new tests in `TestPhase1Diagnos
 
 ### Phase 1.2 — Reproduce + identify failed gate
 
-_Pending — requires user to do one /clear with the prints live, then read stderr from CC's transcript log to identify which gate failed for session 0022baba's voice leak._
+✅ Completed in Session d5e3cf21 (2026-05-05 PM). Two diagnostic captures collected from `~/.claude/projects/-mnt-DATA01.../<UUID>.jsonl` files:
+
+| Source | Diagnostic |
+|---|---|
+| Session 532b16e1 /clear (fail case, persona changed Tiberius→Domi) | `gate-result: is_context_clear=True ... vp_is_dict=False` |
+| Session d5e3cf21 /clear (apparent success, persona stayed Tiberius) | `gate-result: is_context_clear=True ... vp_is_dict=False` |
+
+**Both diagnostics are identical.** The "success" was random pool draw — d5e3cf21 was a fresh sub-session with no prior persona, so the post-/clear `/allocate` happened to redraw Tiberius. The shared `vp_is_dict=False` overturns the gate-3 hypothesis: the gate was NOT failing; the bridge truly had no `voice_persona` field at hook-read-time, because something nulled it BEFORE the SessionStart hook fired.
+
+**Tracing the upstream null**: searched for all callers of `set_voice_persona( sid, None )` and found `session_end.py:224-226` calls `_release_voice_persona( session_id )` unconditionally on every SessionEnd hook fire — including `/clear` (which fires SessionEnd with `reason="clear"`). This is the bug. See `01-design.md §0` for the full root-cause writeup.
 
 ### Phase 1.3 — Patch gate logic
 
-_Blocked on Phase 1.2 outcome._
+❌ OBSOLETE per Phase 1.2 finding. The gate is not the problem. Replaced by §0.4 fix in `session_end.py`.
 
 ### Phase 1.4 — Sweep idle_block carry-forward
 
-_Blocked on Phase 1.3._
+NO-OP. The §0 root cause does not affect idle-block carry-forward — `session_end.py` does not null idle state on /clear, so the existing `register_session.py:806-810` carry-forward continues to work correctly. Verified by inspection of session_end.py main() — only `_release_voice_persona` and `kill_idle_waiter` fire; neither touches the bridge's `idle_detection` block.
 
 ### Phase 1.5 — Unit tests
 

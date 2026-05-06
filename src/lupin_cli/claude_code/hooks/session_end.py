@@ -215,13 +215,21 @@ def main():
         sys.exit( 0 )
 
     session_id = payload.get( "session_id", "" )
+    reason     = payload.get( "reason", "" )
 
     # ── Phase 1.5: Release voice persona (best-effort) ────────────────────
     # Returns the allocated voice slot to the pool so other sessions can
     # claim it. Fail-soft: if the server is unreachable, the dead-PID
     # filter on subsequent /allocate calls reclaims the slot anyway.
+    #
+    # Only release on actual session termination — NOT on /clear or
+    # /compact. SessionEnd fires for those intra-session lifecycle events
+    # too, and releasing on them would null the bridge's voice_persona
+    # before the post-/clear SessionStart hook can carry it forward,
+    # giving the user a randomly-different voice mid-session.
+    # See: src/rnd/v0.1.7/2026.05.02-voice-persona-clear-preservation/01-design.md §0
     # See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §4.4
-    if session_id:
+    if session_id and reason not in ( "clear", "compact" ):
         try:
             _release_voice_persona( session_id )
         except Exception as e:
