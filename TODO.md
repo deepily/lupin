@@ -73,7 +73,7 @@ User decision via `ask_multiple_choice` (verbatim voice response): **"Yeah optio
 
 ---
 
-Last updated: 2026-05-04 PM (Session ec746144 landed Multiplexer Phase 3: transport layer — ws-channel.ts port with Claude §1.1/§2.2/§2.5 fixes, ConnectionStateMachine XState v5 tracker with 100ms grace + full state×event matrix, QueueTransport + AudioTransport via shared `BaseTransportImpl` abstract base, ClaudeCodeTransport stub per Option C user decision, transport/index.ts createTransports factory, boot.ts rewritten with 5-event Lifecycle Emission Contract. 65 new unit tests + 4 WS smoke + 1 Playwright page-load smoke = 70 new tests. Total multiplexer suite 128/128 unit tests passing in ~330ms; `c8` coverage 100% lines per module across all 10 modules. AC#7 + AC#8 GREEN. tsc + ESLint + build clean. CoSA `pages.py` Phase 1 edit STILL pending user commit in CoSA context.)
+Last updated: 2026-05-05 PM (Session 45e6bf84 wrapped 503 cascade fix Phases 0-4a — overturned May-1 §Phase 5 misdiagnosis [proxy DOES support WS-as-test-user, proven empirically; UUID 50c73ba7-... appears in user_sessions when proxy runs with env-var creds]; shipped raise-on-failure WS-auth poll in EmbeddedProxyMixin._start_proxy + 7-caller try/except + http_error_* re-classification; `:7999` Phase 4a probes both green; `:8000` Phase 4b smoke run surfaced ADJACENT bug — pytest-mode `--auto-proxy` is registered in conftest but never starts the proxy because pre_run_hook only fires from `__main__` invocation, not pytest discovery; bug-fix-queue.md updated with follow-up. Bug stays In Progress under 45e6bf84 owner; commits 621be65, 8388df3 + this session-end commit.)
 
 ---
 

@@ -56,9 +56,34 @@
 
 **Commit**: 621be65
 
+#### Phase 4b finding | 2026.05.05 23:25 EDT | pytest-mode `--auto-proxy` is a no-op (adjacent bug surfaced)
+
+The Phase 4b smoke run on `:8000` (job_id `ts-5505dcf5...`) reproduced the cascade — 24 `HTTP 503` events / 24 `User cancelled batch collection` errors in container logs while the test was still running. **This is NOT a regression of my fix.** Investigation:
+
+- `run-smoke-tests.sh` invokes `pytest src/tests/smoke/ --auto-proxy ...`
+- `conftest.py:35` registers `--auto-proxy` as a pytest CLI flag (so pytest accepts it without error)
+- BUT `pre_run_hook` (which calls `_start_proxy`) is a custom method invoked only from `__main__` blocks in each test file — pytest discovery never calls it
+- Under pytest mode, `--auto-proxy` is a no-op; the proxy never starts; all `/api/notify` calls 503
+
+**Verification**: `/api/debug/websocket-state` on `:8000` mid-run shows `interactive.job.tester` UUID 50c73ba7-... has zero sessions (only the user's browser sessions are active). The test_suite job is running pytest, the pytest invocation has `--auto-proxy`, but no proxy subprocess registered for the test user.
+
+**My Phase 1+2+3 fix is verified working for the `__main__` path** (Phase 4a probes both green). The pytest path is a separate code-route gap.
+
+**Adjacent bug filed for follow-up**: add a session-scoped autouse pytest fixture in `conftest.py` that detects `--auto-proxy` and starts the proxy once at pytest session start (and stops it at session end). Until that lands, `pytest --auto-proxy` cannot replace `python -m ... --auto-proxy` for cascade verification. Bug-fix-queue.md updated.
+
+**Bug status update**: the original "503 cascade" entry stays In Progress under owner 45e6bf84 — Phase 4b did not deliver the verification it promised because of this code-path mismatch. Closing the bug requires either (a) re-running Phase 4b via the `__main__` invocation path (CLI mode, ad-hoc `:7999` is fine since this is non-destructive observation) OR (b) shipping the pytest-fixture fix and re-running. Next session can pick this up.
+
 **Session Summary**
 
-(Will be completed at session close)
+- **Bug**: Notification 503 cascade for offline users in expediter flow (filed 2026-05-01 by 31172845; claimed by 45e6bf84 today)
+- **Root-cause overturn**: §May-1 §Phase 5 diagnosis (proxy doesn't hold WS) was wrong; auto-proxy DOES make test user "online" when properly invoked. Real root cause: silent proxy-startup failure in `EmbeddedProxyMixin._start_proxy` (5-second blind sleep + WARNING-only abort)
+- **Fixes shipped (`__main__` path)**: WS-auth verification poll, raise-on-failure contract, 7-caller try/except + abort, label re-classification (`http_error_*` → `infra_error`)
+- **Verification**: Phase 4a `:7999` AI-discretionary probes both green (happy 1.63s; sad 14.30s with full diagnostics)
+- **Adjacent bug surfaced**: pytest-mode `--auto-proxy` is a no-op (Phase 4b discovery — filed for follow-up)
+- **Files changed (this session)**: 1 source mixin + 7 smoke test files + 2 R&D docs (NEW dir) + 4 tracking docs = **14 files** across **3 commits** (621be65, 8388df3, this session-end commit)
+- **Bug status at session close**: stays In Progress under 45e6bf84 (Phase 4b verification deferred pending CLI re-run or pytest-fixture fix)
+
+**Status**: Session closed 2026.05.05 PM ET
 
 ---
 

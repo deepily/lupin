@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-05T21:03:44-04:00
+**Last Updated**: 2026-05-05T23:25:00-04:00
 
 ---
 
@@ -59,7 +59,7 @@
 | 0022baba | 2026-05-02T10:50:00 | 2026-05-02T16:25:00 | closed |
 | 4ede5bad | 2026-05-02T11:30:00 | 2026-05-05T00:00:00 | closed |
 | d5e3cf21 | 2026-05-05T19:30:00 | 2026-05-06T01:50:00 | closed |
-| 45e6bf84 | 2026-05-05T21:03:44 | 2026-05-05T21:03:44 | active |
+| 45e6bf84 | 2026-05-05T21:03:44 | 2026-05-05T23:25:00 | closed |
 
 ---
 
@@ -100,6 +100,14 @@
 ### Queued
 
 (Available for any session to claim)
+
+- [ ] **`pytest --auto-proxy` is a no-op — `pre_run_hook` never fires under pytest discovery** (filed 2026-05-05 by session 45e6bf84, surfaced during Phase 4b verification of the 503 cascade fix)
+  - **Symptom**: `run-smoke-tests.sh` invokes `pytest src/tests/smoke/ --auto-proxy ...`. The flag is registered in `src/tests/smoke/conftest.py:35` so pytest accepts it without error. BUT `pre_run_hook` (which calls `_start_proxy`) is a custom method only invoked from `__main__` blocks in each test file — pytest discovery never calls it. So under pytest, `--auto-proxy` is a no-op; the proxy never starts; all `/api/notify` calls 503-cascade. Verified empirically during Phase 4b of session 45e6bf84: 24 `HTTP 503` events / 24 `User cancelled batch collection` errors in `:8000` container logs while smoke suite was running, even though the pytest invocation included `--auto-proxy`.
+  - **Files**: `src/tests/smoke/conftest.py` (currently registers the flag but doesn't honor it); 7 test files in `src/tests/smoke/` whose `pre_run_hook` only fires under `__main__`.
+  - **Fix design**: add a session-scoped autouse pytest fixture in `conftest.py` that detects `--auto-proxy` and calls `EmbeddedProxyMixin._start_proxy()` once at pytest session start (and stops it at session end). Until that lands, `pytest --auto-proxy` cannot replace `python -m ... --auto-proxy` for cascade verification.
+  - **Why this didn't surface during Phase 4a**: Phase 4a ran the proxy directly via `python -m cosa.agents.notification_proxy ...` (CLI mode). The bug only manifests through the pytest entry point.
+  - **Acceptance**: rerun `:8000` smoke suite; expect zero `HTTP 503` from `/api/notify` calls during expediter scenarios.
+  - **Cross-ref**: 503 cascade fix design at `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` — explicitly scoped to `__main__` path; this entry covers the pytest path gap.
 
 - [ ] **Test_suite mode HTTP 500 — actual NoneType.split source** (filed 2026-05-01 by session 31172845, evidence in execution log Phase 2)
   - **Defensive fix already landed** (CoSA branch reorder in `todo_fifo_queue.py:634-655`) but my hypothesis was wrong: `MODE_TO_AGENT` and `AGENTIC_MODE_MAP` are disjoint as of 2026-05-01, so the dispatch reorder doesn't change behavior for the test_suite case.
