@@ -219,13 +219,14 @@ Following the v0.1.7 convention (`feedback_plans_include_tracking_docs`):
 src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/
 ├── 2026.05.02-notifications-ui-js-refactor-analysis-claude.md    # input (existing)
 ├── 2026.05.02-notifications-ui-js-refactor-analysis-openai.md    # input (existing)
+├── 2026.05.05-phase5-pre-design-exploration.md                   # Phase 5 pre-design Explore-agent findings (citation-depth backing for 06-)
 ├── 00-synthesis-and-roadmap.md                                   # this doc
 ├── 01-phase0-decisions.md                                        # decisions captured (filled in after user signs off)
 ├── 02-phase1-scaffolding-design.md
 ├── 03-phase2-foundation-design.md
 ├── 04-phase3-transport-design.md
 ├── 05-phase4-domain-stores-design.md
-├── 06-phase5-renderer-design.md
+├── 06-phase5-renderer-design.md                                  # design landed 2026-05-05; Q-A through Q-L awaiting ratification
 ├── 07-phase6-parity-design.md                                    # large — likely sub-divided
 ├── 08-phase7-hardening-design.md
 ├── 09-phase8-adversarial-review-design.md
