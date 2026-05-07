@@ -955,7 +955,7 @@ Per the slicing manifest, Phase 6 ships in three slices:
 |---|---|---|---|---|---|
 | 0 | Tracking-doc seed + plan serialization | 🔄 In progress | 2026-05-06 PM | — | This section seed + `2026.05.06-phase6a-code-execution-plan.md` |
 | 1 | INI key + splainer + FastAPI client-config endpoint | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | `GET /api/multiplexer/config` returns `{multiplexer_max_meta_display_bytes:256000}` (verified via `urllib.request` on `:7999`); INI key landed in `[Lupin: Baseline]` cluster; splainer entry alongside the cj-flow cluster; router authored in CoSA per established convention; main.py register added; rest-api-reference.md gets new §24 Multiplexer row |
-| 2 | `formatDuration` in `render/time.ts` + 4-5 tests | ⏸ Pending | — | — | Per Pass 2 F24 (Genuinely New, not Reused) |
+| 2 | `formatDuration` in `render/time.ts` + 4-5 tests | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | Added `formatDuration(startTs, endTs?)` returning `Ns` / `Nm Ms` / `Nh Mm` / `running for ...`; 8 new tests added (17 total in `time.test.ts`); 17/17 PASS; c8 100% (lines/branches/functions/statements) maintained on `time.ts`. One `c8 ignore next` annotation added on the function-declaration line for the same tsx phantom-branch artifact that `formatDateKey:88` already suppresses. |
 | 3 | Templates `jobCard.ts` + `jobBucket.ts` + tests | ⏸ Pending | — | — | AC3 ≥6 + AC4 ≥6; 100% c8 coverage |
 | 4 | `JobsPaneRenderer.ts` + tests + barrel + types | ⏸ Pending | — | — | AC5 ≥18 (incl. Tests 13-18); 100% c8; AC2a grep guard LIFTS |
 | 5 | CSS port + page shell + boot wiring | ⏸ Pending | — | — | AC10b ≤800 LOC; AC9 stable lines emitted by boot.ts |
@@ -996,7 +996,7 @@ Per the slicing manifest, Phase 6 ships in three slices:
 | Author `src/cosa/rest/routers/multiplexer_config.py` | 1.2 | ✅ Complete |
 | Register router in `src/fastapi_app/main.py` | 1.2 | ✅ Complete |
 | Update `src/docs/rest-api-reference.md` | 1.2 | ✅ Complete |
-| Add `formatDuration` 4-5 tests to `time.test.ts` | 2 | ⏸ Pending |
+| Add `formatDuration` 4-5 tests to `time.test.ts` | 2 | ✅ Complete (8 tests added) |
 | Add `.stylelintrc.json` `overrides` block for `jobs-pane.css` | 5.2 | ⏸ Pending |
 | Update `dev-tools.html` line 145 description | 5.5 | ⏸ Pending |
 | Per-rule CSS port disposition table (kept / pruned / modified / new) | 5.1 | ⏸ Pending |

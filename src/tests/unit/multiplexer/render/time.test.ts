@@ -9,6 +9,7 @@ import {
   formatCountdown,
   formatHM,
   formatDateKey,
+  formatDuration,
 } from "../../../../fastapi_app/static/js/multiplexer/render/time";
 
 // ---------------------------------------------------------------------------
@@ -80,4 +81,79 @@ test("formatDateKey timezone boundary: midnight UTC vs America/Los_Angeles is pr
 test("formatDateKey with NaN/Infinity returns '----------'", () => {
   assert.equal(formatDateKey(Number.NaN), "----------");
   assert.equal(formatDateKey(Number.POSITIVE_INFINITY), "----------");
+});
+
+// ---------------------------------------------------------------------------
+// formatDuration — Phase 6a Pass 2 F24 (Genuinely New)
+// ---------------------------------------------------------------------------
+
+test("formatDuration with undefined endTs returns 'running for Ns' (sub-minute, Date.now stubbed)", () => {
+  // Stub Date.now so the elapsed window is deterministic.
+  const realNow = Date.now;
+  const start   = 1_000_000_000_000;        // arbitrary fixed start
+  Date.now = () => start + 23_000;          // 23s later
+  try {
+    assert.equal(formatDuration(start), "running for 23s");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("formatDuration sub-minute completion: '<N>s'", () => {
+  const start = 1_000_000_000_000;
+  const end   = start + 23_000;             // 23s
+  assert.equal(formatDuration(start, end), "23s");
+  // Boundary: 0s elapsed.
+  assert.equal(formatDuration(start, start), "0s");
+  // Boundary: 59s elapsed.
+  assert.equal(formatDuration(start, start + 59_000), "59s");
+});
+
+test("formatDuration sub-hour completion: '<N>m <M>s'", () => {
+  const start = 1_000_000_000_000;
+  // 5m 12s → 312s
+  assert.equal(formatDuration(start, start + 312_000), "5m 12s");
+  // Exactly 60s → "1m 0s" (boundary case from <60 to <3600)
+  assert.equal(formatDuration(start, start + 60_000), "1m 0s");
+  // 59m 59s → still in middle bucket
+  assert.equal(formatDuration(start, start + (59 * 60 + 59) * 1000), "59m 59s");
+});
+
+test("formatDuration multi-hour completion: '<N>h <M>m'", () => {
+  const start = 1_000_000_000_000;
+  // 1h 47m → 1*3600 + 47*60 = 6420s
+  assert.equal(formatDuration(start, start + 6420_000), "1h 47m");
+  // Exactly 3600s → "1h 0m" (boundary case from <3600 to ≥3600)
+  assert.equal(formatDuration(start, start + 3600_000), "1h 0m");
+  // 2h 0m
+  assert.equal(formatDuration(start, start + 7200_000), "2h 0m");
+});
+
+test("formatDuration with NaN/Infinity startTs returns '--'", () => {
+  assert.equal(formatDuration(Number.NaN), "--");
+  assert.equal(formatDuration(Number.POSITIVE_INFINITY), "--");
+  assert.equal(formatDuration(Number.NEGATIVE_INFINITY, 1_000_000_000_000), "--");
+});
+
+test("formatDuration with finite startTs but NaN/Infinity endTs returns '--'", () => {
+  const start = 1_000_000_000_000;
+  assert.equal(formatDuration(start, Number.NaN), "--");
+  assert.equal(formatDuration(start, Number.POSITIVE_INFINITY), "--");
+});
+
+test("formatDuration with endTs < startTs (clock skew) clamps to '0s'", () => {
+  const start = 1_000_000_000_000;
+  // Negative elapsed: completion before start (clock skew). Math.max clamps to 0.
+  assert.equal(formatDuration(start, start - 5_000), "0s");
+});
+
+test("formatDuration running case across hour boundary: 'running for Nh Mm'", () => {
+  const realNow = Date.now;
+  const start   = 1_000_000_000_000;
+  Date.now = () => start + 6420_000;        // 1h 47m later
+  try {
+    assert.equal(formatDuration(start), "running for 1h 47m");
+  } finally {
+    Date.now = realNow;
+  }
 });

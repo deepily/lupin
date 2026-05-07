@@ -106,3 +106,49 @@ export function formatDateKey(ts: number, appTimezone?: string): string {
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
+
+/**
+ * Format the elapsed duration between two epoch ms timestamps for human display.
+ *
+ * Phase 6a Pass 2 F24 — Genuinely New formatter (sibling of formatHM/formatDateKey).
+ * Used by `jobCard.ts` for the `.job-timing` field on each job card.
+ *
+ * Output forms:
+ *   - `endTs` undefined           → "running for Ns" / "running for 5m 12s" / "running for 1h 47m"
+ *   - `endTs` finite, < 60s       → "Ns"        (e.g., "23s")
+ *   - `endTs` finite, < 1h        → "Nm Ms"     (e.g., "5m 12s")
+ *   - `endTs` finite, ≥ 1h        → "Nh Mm"     (e.g., "1h 47m")
+ *   - `startTs` or `endTs` non-finite → "--"
+ *
+ * Requires:
+ *   - `startTs` is a finite ms-epoch timestamp; `endTs` is undefined OR a finite ms-epoch.
+ *
+ * Ensures:
+ *   - returns a humanized elapsed string per the table above.
+ *   - reads `Date.now()` only when `endTs` is undefined (running case); otherwise pure on inputs.
+ *   - never returns the empty string; non-finite input returns the literal "--".
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function formatDuration(startTs: number, endTs?: number): string {
+  if (!Number.isFinite(startTs)) return "--";
+  if (endTs !== undefined && !Number.isFinite(endTs)) return "--";
+
+  const isRunning      = endTs === undefined;
+  const effectiveEnd   = isRunning ? Date.now() : (endTs as number);
+  const elapsedSeconds = Math.max(0, Math.floor((effectiveEnd - startTs) / 1000));
+
+  let humanized: string;
+  if (elapsedSeconds < 60) {
+    humanized = `${elapsedSeconds}s`;
+  } else if (elapsedSeconds < 3600) {
+    const minutes = Math.floor(elapsedSeconds / 60);
+    const seconds = elapsedSeconds % 60;
+    humanized = `${minutes}m ${seconds}s`;
+  } else {
+    const hours   = Math.floor(elapsedSeconds / 3600);
+    const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+    humanized = `${hours}h ${minutes}m`;
+  }
+
+  return isRunning ? `running for ${humanized}` : humanized;
+}
