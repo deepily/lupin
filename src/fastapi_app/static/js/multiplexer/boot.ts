@@ -29,7 +29,11 @@ import { createAuthManager } from "./auth/AuthManager";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
-import { createNotificationsListRenderer } from "./render";
+import {
+  createNotificationsListRenderer,
+  createJobsPaneRenderer,
+  configureMetaDisplayCap,
+} from "./render";
 import type { BootCompletePayload, LifecyclePayload } from "./shared/types";
 
 // Session-ID generator mirroring `notifications.js:2134`. 10 × 10 = 100
@@ -125,6 +129,20 @@ function bootMultiplexer(): void {
     authManager,
   });
 
+  // Phase 6a Pass 2 F20 — fetch the multiplexer client-config endpoint and
+  // thread the meta-display cap into jobCard.ts. Floated as a non-blocking
+  // promise: the cap is read lazily on first card-header click (NOT on mount),
+  // so a small race window is acceptable — jobCard.ts ships with a 256000
+  // default that covers the gap if the user clicks before the fetch resolves
+  // (or if the endpoint is briefly unreachable). Boundary `.catch(() => null)`
+  // avoids unhandled rejection while preserving the default cap.
+  fetch(`${apiBaseUrl}/api/multiplexer/config`)
+    .then(r => r.ok ? r.json() : null)
+    .catch(() => null)
+    .then((serverConfig: { multiplexer_max_meta_display_bytes?: number } | null) => {
+      if (serverConfig !== null) configureMetaDisplayCap(serverConfig);
+    });
+
   // ---------------------------------------------------------------------
   // Per D-D ratification 2026-05-04 PM (Option B):
   //   1. createTransports(...) — factory only; transports NOT started yet
@@ -173,6 +191,18 @@ function bootMultiplexer(): void {
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
   renderer.mount(mountEl);
 
+  // Phase 6a — jobs-pane renderer mounts AFTER the Phase 5 renderer mount,
+  // BEFORE transports.queue.start (per F13 ordering invariant). Same factory
+  // shape; narrow stores option per Pass 2 F4.
+  const jobsRenderer = createJobsPaneRenderer({
+    eventBus,
+    stores : { jobs: stores.jobs },
+    api    : apiClient,
+  });
+  const jobsMountEl = document.getElementById("jobs-pane");
+  if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");
+  jobsRenderer.mount(jobsMountEl);
+
   attachLifecycleListeners();
 
   transports.queue.start(sessionId);
@@ -191,6 +221,7 @@ function bootMultiplexer(): void {
     handlers : {
       audioBinary           : stores.audio.binaryHandler.name,
       notificationsRenderer : "mounted",
+      jobsRenderer          : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -199,6 +230,13 @@ function bootMultiplexer(): void {
     source  : "boot",
     ts      : Date.now(),
   });
+  // Phase 6a Pass 2 F22 — emit two stable, non-JSON console lines BEFORE the
+  // JSON-form line so AC9's grep target is robust against future serialization
+  // refactors. AC9 asserts on the literal stable strings, NOT on the JSON
+  // form. Mirror-emit notificationsRenderer:mounted for Phase 5 surface
+  // consistency (same line-shape contract).
+  console.log("[multiplexer] notificationsRenderer:mounted");
+  console.log("[multiplexer] jobsRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

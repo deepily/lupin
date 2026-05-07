@@ -958,7 +958,7 @@ Per the slicing manifest, Phase 6 ships in three slices:
 | 2 | `formatDuration` in `render/time.ts` + 4-5 tests | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | Added `formatDuration(startTs, endTs?)` returning `Ns` / `Nm Ms` / `Nh Mm` / `running for ...`; 8 new tests added (17 total in `time.test.ts`); 17/17 PASS; c8 100% (lines/branches/functions/statements) maintained on `time.ts`. One `c8 ignore next` annotation added on the function-declaration line for the same tsx phantom-branch artifact that `formatDateKey:88` already suppresses. |
 | 3 | Templates `jobCard.ts` + `jobBucket.ts` + tests | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | AC3 (jobCard) 24 PASS / AC4 (jobBucket) 14 PASS / 38 total. c8 100% (lines + branches + functions + statements) on both new files. Templates use direct DOM ops for the cards container (the html`` tagged-template can't concatenate static strings with interpolations inside an attribute value — its ATTR_NAME_REGEX requires the segment to end with `attr="`). cycle-protection added to estimateSize via WeakSet visited tracker. F23 (no data-id-hash on delete button), F18 (only 4 valid Job.status values), F30 (Enter/Space keydown + aria-expanded) all enforced via dedicated tests. |
 | 4 | `JobsPaneRenderer.ts` + tests + barrel + types | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | 23 PASS (target was ≥18; superset includes Tests 13-18 from design + extras 11b/16b/19b for c8 100% coverage). c8 100% (lines/branches/functions/statements) on JobsPaneRenderer.ts. shared/types.ts gets `hydration_failed` LupinEventType + `HydrationFailedPayload` interface + `jobsRenderer?: string` on BootCompletePayload.handlers. Barrel exports add `createJobsPaneRenderer` + types + `formatDuration` + `configureMetaDisplayCap`. Full multiplexer regression: 470/470 unit tests PASS, tsc -p tsconfig.json clean. AC2a `grep -rn hydrateHistory src/.../render/` returns ≥1 match (Phase 5 ban now LIFTED — JobsPaneRenderer.ts:139 invokes it). |
-| 5 | CSS port + page shell + boot wiring | ⏸ Pending | — | — | AC10b ≤800 LOC; AC9 stable lines emitted by boot.ts |
+| 5 | CSS port + page shell + boot wiring | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | jobs-pane.css authored at 324 LOC (AC10b ≤800 ✓); stylelint clean (F28 layer-2 disallowed-list rule verified to fire on `body{}`); status-run translated to status-running; status-interrupted DROPPED per F18; multiplexer.html populated #jobs-pane structure + added CSS link; dev-tools.html line 145 text updated; boot.ts wires `createJobsPaneRenderer` after Phase 5 mount + `BootCompletePayload.handlers.jobsRenderer="mounted"` + emits 2 stable AC9 lines (`[multiplexer] notificationsRenderer:mounted` and `[multiplexer] jobsRenderer:mounted`) BEFORE the JSON form + floats `/api/multiplexer/config` fetch + `configureMetaDisplayCap`; eslint config gets `argsIgnorePattern:"^_"`. Build: `boot.65c779ac946b.js` gz=31484B (AC7 ceiling 60382 → ✅, +1822B vs Phase 5 baseline). Page serves 200 on :7999 with CSS link + buckets-container + load-history button present. |
 | 6 | Smoke + cross-phase verification (`:7999`) | ⏸ Pending | — | — | AC8a/AC8b/AC9/AC10/AC10b/AC10d |
 | 7 | E2E visual baseline + regression on `:8000` (scheduled) | ⏸ Pending | — | — | AC11a + AC11b via `/schedule-tests` skill |
 
@@ -997,9 +997,9 @@ Per the slicing manifest, Phase 6 ships in three slices:
 | Register router in `src/fastapi_app/main.py` | 1.2 | ✅ Complete |
 | Update `src/docs/rest-api-reference.md` | 1.2 | ✅ Complete |
 | Add `formatDuration` 4-5 tests to `time.test.ts` | 2 | ✅ Complete (8 tests added) |
-| Add `.stylelintrc.json` `overrides` block for `jobs-pane.css` | 5.2 | ⏸ Pending |
-| Update `dev-tools.html` line 145 description | 5.5 | ⏸ Pending |
-| Per-rule CSS port disposition table (kept / pruned / modified / new) | 5.1 | ⏸ Pending |
+| Add `.stylelintrc.json` `overrides` block for `jobs-pane.css` | 5.2 | ✅ Complete |
+| Update `dev-tools.html` line 145 description | 5.5 | ✅ Complete |
+| Per-rule CSS port disposition table (kept / pruned / modified / new) | 5.1 | ✅ Complete (inline in `jobs-pane.css` header comment) |
 
 #### Commits
 

@@ -15,6 +15,12 @@
     "es2022"  : true
   },
   "rules" : {
+    "@typescript-eslint/no-unused-vars" : [ 2, {
+      "argsIgnorePattern"            : "^_",
+      "varsIgnorePattern"            : "^_",
+      "caughtErrorsIgnorePattern"    : "^_",
+      "destructuredArrayIgnorePattern": "^_"
+    } ],
     "no-restricted-properties" : [ 2,
       {
         "object"   : "window",

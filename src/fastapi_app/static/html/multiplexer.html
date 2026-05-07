@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/css/lupin-base.css">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
 </head>
@@ -25,10 +26,19 @@
                  data-testid="multiplexer-sender-cards"></div>
         </section>
 
-        <!-- Phase 6 mount points (Q-L pre-add) -->
-        <section id="jobs-pane" hidden
-                 data-testid="multiplexer-jobs-pane"
-                 data-phase6-pending="true"></section>
+        <!-- Phase 6a jobs-pane (lit up 2026-05-06; data-phase6-pending lifted on mount) -->
+        <section id="jobs-pane"
+                 data-testid="multiplexer-jobs-pane">
+            <header class="jobs-pane-header">
+                <h2>Jobs</h2>
+                <button class="jobs-pane-history-load"
+                        data-testid="multiplexer-jobs-load-history">Load history</button>
+            </header>
+            <div id="jobs-buckets-container"
+                 data-testid="multiplexer-jobs-buckets"></div>
+        </section>
+
+        <!-- Phase 6b mount point (Q-L pre-add — TTS chrome lands in 6b) -->
         <section id="tts-pane" hidden
                  data-testid="multiplexer-tts-pane"
                  data-phase6-pending="true"></section>

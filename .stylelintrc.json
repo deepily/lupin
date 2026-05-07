@@ -18,5 +18,16 @@
     "at-rule-empty-line-before" : null,
     "shorthand-property-no-redundant-values" : null,
     "keyframes-name-pattern"    : null
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/fastapi_app/static/css/multiplexer/jobs-pane.css"],
+      "rules": {
+        "selector-disallowed-list": [
+          ["*", "html", "body", ":root"],
+          { "severity": "error", "message": "Phase 6a F28 layer-2: jobs-pane.css must not carry global selectors. Scope all rules under .jobs-bucket / .job-card / #jobs-pane / #jobs-buckets-container / .jobs-pane-* to prevent cross-pane CSS leak that would drift the Phase 5 visual baseline." }
+        ]
+      }
+    }
+  ]
 }

@@ -26,7 +26,6 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type {
-  Job,
   JobBucket,
   StoreJobsChangedPayload,
   HydrationFailedPayload,

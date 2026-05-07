@@ -1,0 +1,324 @@
+/* ============================================================================
+   Multiplexer Phase 6a — jobs-pane stylesheet.
+
+   Cherry-picked from `static/css/notifications.css` per Q-C + Q-D and the
+   audit protocol in design doc 08 § "CSS port":
+   - Q-C: legacy class names verbatim where applicable
+   - Q-D: separate <link rel="stylesheet"> tag
+
+   Source ranges (legacy notifications.css):
+   - .job-card + status-*           — lines 3542-3653 (status-run → status-running per Job.status enum; status-interrupted DROPPED per Pass 2 F18)
+   - .job-card.status-done .job-delete-button + status-dead — lines 4718-4725
+   - .job-card.job-paused           — lines 4841-4846 (visual-only in 6a per Q-A4; pause/resume controls land in 6b)
+
+   NOT ported (deferred to 6b):
+   - .job-card-header.has-cancel    — cancel button is Phase 6b interactive surface
+   - .job-cancel-button             — Phase 6b
+   - .job-card.status-interrupted   — Pass 2 F18: no producer; Job.status enum is exactly {todo,running,done,dead}
+
+   New surface (Phase 6a, no legacy precedent):
+   - .jobs-bucket section + collapsible header + count + toggle + empty-state
+   - .job-status-icon, .job-id-short, .job-timing, .job-meta-json
+   - Disabled `.job-delete-button` per Q-A6 + C-6 tooltip
+
+   Scope-leak protection (per Pass 2 F28 layer-1 grep + layer-2 stylelint):
+   - NO global selectors (*, html, body, :root) — fail-build rule in
+     .stylelintrc.json overrides for this file
+   - All rules are descendants of .jobs-bucket OR .job-card OR explicit ids
+     on the jobs pane scaffolding
+   ============================================================================ */
+
+/* ============================================================================
+   Pane scaffolding (new — no legacy precedent)
+   ============================================================================ */
+
+#jobs-pane {
+    margin           : 16px 0;
+    padding          : 0;
+    background-color : transparent;
+}
+
+.jobs-pane-header {
+    display       : flex;
+    align-items   : center;
+    gap           : 12px;
+    padding       : 4px 0 8px;
+    border-bottom : 1px solid #dee2e6;
+}
+
+.jobs-pane-header h2 {
+    margin    : 0;
+    font-size : 16px;
+    color     : #212529;
+    flex      : 1;
+}
+
+.jobs-pane-history-load {
+    background    : #f8f9fa;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    padding       : 4px 10px;
+    font-size     : 12px;
+    color         : #495057;
+    cursor        : pointer;
+}
+
+.jobs-pane-history-load:hover {
+    background : #e9ecef;
+}
+
+#jobs-buckets-container {
+    display        : flex;
+    flex-direction : column;
+    gap            : 8px;
+    padding        : 8px 0;
+}
+
+/* ============================================================================
+   Bucket section (new — 5-bucket layout; collapsible per Pass 1 F1 + F30)
+   ============================================================================ */
+
+.jobs-bucket {
+    border        : 1px solid #e9ecef;
+    border-radius : 4px;
+    background    : white;
+    overflow      : hidden;
+}
+
+.jobs-bucket-todo    { border-left : 3px solid #ffc107; }
+.jobs-bucket-running { border-left : 3px solid #007bff; }
+.jobs-bucket-done    { border-left : 3px solid #28a745; }
+.jobs-bucket-dead    { border-left : 3px solid #dc3545; }
+.jobs-bucket-history { border-left : 3px solid #6c757d; }
+
+.jobs-bucket-header {
+    display      : flex;
+    align-items  : center;
+    gap          : 8px;
+    padding      : 8px 12px;
+    cursor       : pointer;
+    user-select  : none;
+    font-size    : 13px;
+    font-weight  : 600;
+    color        : #212529;
+    background   : #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.jobs-bucket-header:hover {
+    background : #e9ecef;
+}
+
+.jobs-bucket-header:focus {
+    outline        : 2px solid #80bdff;
+    outline-offset : -2px;
+}
+
+.jobs-bucket-label {
+    flex            : 1;
+    text-transform  : capitalize;
+    letter-spacing  : 0.02em;
+}
+
+.jobs-bucket-count {
+    font-weight : 400;
+    color       : #6c757d;
+    font-size   : 12px;
+    font-variant-numeric : tabular-nums;
+}
+
+.jobs-bucket-toggle {
+    color    : #6c757d;
+    font-size: 12px;
+    width    : 14px;
+    text-align: center;
+    transition: transform 0.15s ease;
+}
+
+.jobs-bucket-cards {
+    display        : flex;
+    flex-direction : column;
+    gap            : 4px;
+    padding        : 6px 8px;
+    background     : #fff;
+    transition     : max-height 0.2s ease, padding 0.2s ease;
+    overflow       : hidden;
+    max-height     : 4000px;   /* enough for any realistic bucket; clipped on collapse */
+}
+
+.jobs-bucket-cards.collapsed {
+    max-height : 0;
+    padding    : 0 8px;
+    border-top : none;
+}
+
+.jobs-bucket-empty {
+    padding    : 8px 12px;
+    color      : #6c757d;
+    font-size  : 12px;
+    font-style : italic;
+    text-align : left;
+}
+
+/* ============================================================================
+   Job card (ported from notifications.css:3542-3653 + line ranges noted above)
+   ============================================================================ */
+
+.jobs-bucket .job-card {
+    margin-bottom : 4px;
+    border        : 1px solid #e9ecef;
+    border-radius : 4px;
+    background    : white;
+    border-left   : 3px solid #6c757d;
+}
+
+.jobs-bucket .job-card:last-child {
+    margin-bottom : 0;
+}
+
+/* Status-* left-border colors — translates legacy `.status-run` → `.status-running`
+   per Phase 4 Job.status enum {todo|running|done|dead}. Pass 2 F18: no
+   `.status-interrupted` rule. */
+.jobs-bucket .job-card.status-todo    { border-left-color : #ffc107; }
+.jobs-bucket .job-card.status-running { border-left-color : #007bff; }
+.jobs-bucket .job-card.status-done    { border-left-color : #28a745; }
+.jobs-bucket .job-card.status-dead    { border-left-color : #dc3545; }
+
+.jobs-bucket .job-card-header {
+    display      : flex;
+    align-items  : center;
+    gap          : 8px;
+    padding      : 6px 12px;
+    cursor       : pointer;
+    position     : relative;
+    font-size    : 13px;
+}
+
+.jobs-bucket .job-card-header:hover {
+    background : #f8f9fa;
+}
+
+.jobs-bucket .job-status-icon {
+    font-size : 14px;
+    width     : 18px;
+    text-align: center;
+    color     : #495057;
+}
+
+.jobs-bucket .job-card.status-todo    .job-status-icon { color : #b58900; }
+.jobs-bucket .job-card.status-running .job-status-icon { color : #007bff; }
+.jobs-bucket .job-card.status-done    .job-status-icon { color : #28a745; }
+.jobs-bucket .job-card.status-dead    .job-status-icon { color : #dc3545; }
+
+.jobs-bucket .job-type {
+    font-weight : 600;
+    color       : #212529;
+    font-size   : 12px;
+    white-space : nowrap;
+    text-overflow: ellipsis;
+    overflow    : hidden;
+    max-width   : 220px;
+}
+
+.jobs-bucket .job-id-short {
+    font-family : ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size   : 11px;
+    color       : #6c757d;
+    background  : #f1f3f5;
+    padding     : 1px 6px;
+    border-radius: 3px;
+}
+
+.jobs-bucket .job-timing {
+    flex      : 1;
+    font-size : 11px;
+    color     : #6c757d;
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric : tabular-nums;
+}
+
+/* Disabled delete button (Q-A6 + C-6) — visual placeholder only in 6a;
+   handler lands in 6b. The `aria-disabled` attribute carries the semantic
+   state; CSS reflects it visually. */
+.jobs-bucket .job-delete-button {
+    background    : transparent;
+    border        : none;
+    color         : #adb5bd;
+    cursor        : not-allowed;
+    font-size     : 18px;
+    line-height   : 1;
+    padding       : 2px 6px;
+    border-radius : 3px;
+    margin-left   : 4px;
+    user-select   : none;
+}
+
+.jobs-bucket .job-delete-button[ aria-disabled="true" ] {
+    opacity : 0.55;
+}
+
+.jobs-bucket .job-delete-button:hover {
+    background : #f1f3f5;
+    color      : #6c757d;
+}
+
+/* Done/dead delete-button positioning shift (legacy port, lines 4718-4725).
+   In 6a the button is always placed at the right of the header (no cancel
+   sibling), so this rule is reduced to a left-margin nudge for visual
+   consistency with the legacy layout when those statuses had no cancel. */
+.jobs-bucket .job-card.status-done .job-delete-button,
+.jobs-bucket .job-card.status-dead .job-delete-button {
+    /* No layout change in 6a — placeholder for parity with legacy ports. */
+    color : #adb5bd;
+}
+
+/* ============================================================================
+   Job card details (expanded — lazy-rendered meta JSON; ported from
+   notifications.css:3644-3653)
+   ============================================================================ */
+
+.jobs-bucket .job-card-details {
+    padding       : 8px 12px;
+    border-top    : 1px solid #e9ecef;
+    background    : #fafbfc;
+    max-height    : 500px;
+    overflow-y    : auto;
+    transition    : max-height 0.2s ease, padding 0.2s ease;
+}
+
+.jobs-bucket .job-card-details.collapsed {
+    max-height : 0;
+    padding    : 0 12px;
+    overflow   : hidden;
+    border-top : none;
+}
+
+.jobs-bucket .job-meta-json {
+    margin      : 0;
+    padding     : 8px;
+    background  : #f8f9fa;
+    border      : 1px solid #e9ecef;
+    border-radius: 3px;
+    font-family : ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size   : 11px;
+    color       : #212529;
+    white-space : pre-wrap;
+    overflow-wrap: anywhere;
+    max-height  : 360px;
+    overflow-y  : auto;
+}
+
+/* ============================================================================
+   Paused job-card (ported from notifications.css:4841-4846 — visual-only in
+   6a per Q-A4; pause/resume controls land in 6b)
+   ============================================================================ */
+
+.jobs-bucket .job-card.job-paused {
+    opacity            : 0.65;
+    border-left-color  : #ffc107 !important;
+}
+
+.jobs-bucket .job-card.job-paused .job-card-header {
+    background : #fffbeb;
+}
