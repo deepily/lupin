@@ -953,7 +953,7 @@ Per the slicing manifest, Phase 6 ships in three slices:
 
 | # | Phase | Status | Started | Completed | Notes |
 |---|---|---|---|---|---|
-| 0 | Tracking-doc seed + plan serialization | 🔄 In progress | 2026-05-06 PM | — | This section seed + `2026.05.06-phase6a-code-execution-plan.md` |
+| 0 | Tracking-doc seed + plan serialization | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | This section seed + `2026.05.06-phase6a-code-execution-plan.md` (committed in `362fa5d` alongside Phase 1) |
 | 1 | INI key + splainer + FastAPI client-config endpoint | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | `GET /api/multiplexer/config` returns `{multiplexer_max_meta_display_bytes:256000}` (verified via `urllib.request` on `:7999`); INI key landed in `[Lupin: Baseline]` cluster; splainer entry alongside the cj-flow cluster; router authored in CoSA per established convention; main.py register added; rest-api-reference.md gets new §24 Multiplexer row |
 | 2 | `formatDuration` in `render/time.ts` + 4-5 tests | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | Added `formatDuration(startTs, endTs?)` returning `Ns` / `Nm Ms` / `Nh Mm` / `running for ...`; 8 new tests added (17 total in `time.test.ts`); 17/17 PASS; c8 100% (lines/branches/functions/statements) maintained on `time.ts`. One `c8 ignore next` annotation added on the function-declaration line for the same tsx phantom-branch artifact that `formatDateKey:88` already suppresses. |
 | 3 | Templates `jobCard.ts` + `jobBucket.ts` + tests | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | AC3 (jobCard) 24 PASS / AC4 (jobBucket) 14 PASS / 38 total. c8 100% (lines + branches + functions + statements) on both new files. Templates use direct DOM ops for the cards container (the html`` tagged-template can't concatenate static strings with interpolations inside an attribute value — its ATTR_NAME_REGEX requires the segment to end with `attr="`). cycle-protection added to estimateSize via WeakSet visited tracker. F23 (no data-id-hash on delete button), F18 (only 4 valid Job.status values), F30 (Enter/Space keydown + aria-expanded) all enforced via dedicated tests. |
@@ -1003,7 +1003,17 @@ Per the slicing manifest, Phase 6 ships in three slices:
 
 #### Commits
 
-(none yet — per `feedback_never_auto_commit_push`, each phase boundary requires explicit user approval)
+| Commit | Phase | Subject |
+|---|---|---|
+| `362fa5d` | 0 + 1 | Tracking-doc seed + `/api/multiplexer/config` endpoint |
+| `1bf7ce9` | 2     | `formatDuration` in `render/time.ts` (Pass 2 F24) |
+| `597455d` | 3     | `jobCard.ts` + `jobBucket.ts` templates + tests (38 PASS, c8 100%) |
+| `4c9d207` | 4     | `JobsPaneRenderer.ts` + tests + barrel + types (23 PASS, c8 100%) |
+| `70a29ff` | 5     | CSS port + page shell + boot wiring (gz=31484B; AC7 ✓; AC10b ✓) |
+| `ac273e5` | 6     | Smoke tests + cross-phase verification (`:7999`) |
+| `5cd8b20` | 7     | E2E visual test authored (AC11a/AC11b await user `:8000` slot) |
+
+User authorized end-to-end execution + per-phase checkpoints in a single go-ahead — every phase boundary commits independently per `feedback_approved_sequences_execute_end_to_end`.
 
 #### Verification results
 
