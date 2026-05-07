@@ -116,6 +116,22 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ---
 
+## ☀️ FIRST THING IN THE MORNING — 2026.05.07
+
+### Pending — Multiplexer Phase 6a follow-ups
+
+- [ ] [LUPIN-COSA] **Commit the CoSA-side Phase 1 endpoint** in a CoSA-context session: `src/cosa/rest/routers/multiplexer_config.py` (NEW) — single GET endpoint `/api/multiplexer/config` returning `{multiplexer_max_meta_display_bytes:256000}` from `ConfigurationManager`. Endpoint verified live via `urllib.request` on `:7999` (parent Lupin commit `362fa5d` is the documenting reference + has the matching `main.py` register + INI key + splainer + `rest-api-reference.md` row). Per `feedback_lupin_only_never_cosa` the parent Lupin session never commits CoSA — handle this from `cd src/cosa && git commit ...` in a CoSA-context session, then bump the parent submodule pointer if applicable.
+
+- [ ] [LUPIN] **Schedule Phase 6a AC11a Run #1 (visual baseline capture)** via `/schedule-tests` once a non-overlapping `:8000` `scheduled_at` slot opens up. Submission body: `{"test_types": "e2e_ui", "scheduled_at": "<slot>", "args": "--update-snapshots -k multiplexer_phase6a", "auto_fix_on_failure": false}`. Test file: `src/tests/e2e_ui/test_multiplexer_phase6a_visual.py` (committed in `5cd8b20`, collects cleanly). Single test only — `-k multiplexer_phase6a` filter ensures the full ~285 functional + 12 visual sweep does NOT run. After the run, baseline PNG lands at `io/test-suite/visual-baselines/test_multiplexer_phase6a_visual/`; commit the baseline.
+
+- [ ] [LUPIN] **Schedule Phase 6a AC11b Run #2 (regression check)** at a separate `:8000` slot AFTER Run #1's baseline lands. Same submission body minus the `--update-snapshots` flag. Pass criterion: container log contains `Test suite complete` + `e2e: 1 passed, 0 errors` for Run #2.
+
+- [ ] [LUPIN] **Open Phase 6b** when AC11a/AC11b close. Phase 6b scope per `07-phase6-slicing-manifest.md`: TTS chrome + action-required interactive widgets + delete-button handler (Q-A6 wires the disabled `×` from 6a). Phase 6c (voice-persona modal + audio recorder + focus tray + conversation-mode UI pin) follows.
+
+- [ ] [LUPIN] **Optional**: history.md is at 19,719 tokens (CRITICAL threshold per session-end workflow). User deferred archival from this session-end. Consider invoking `/plan-history-management mode=archive` early in next session before adding new content.
+
+---
+
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.06
 
 ### ✅ Closed — Multiplexer Phase 6a Pass 1 Fitness ratification gate (2026-05-06 AM)
@@ -143,9 +159,13 @@ All 17 findings ratified via cosa-voice walkthrough (Session `5ced4868`, Mr. Rad
 
 **Phase 6a code-writing cycle is unblocked from the coverage side.** Pass 2 Adversarial ratification remains as the documentation gate.
 
-### Pending — Multiplexer Phase 6a Pass 2 Adversarial pass (next gate after backfill OR in parallel with backfill)
+### ✅ Closed — Multiplexer Phase 6a Pass 2 Adversarial ratification (2026-05-06 PM)
 
-- [ ] [LUPIN] **Run Pass 2 Adversarial Agent** against the Pass-1-resolved design state in `08-phase6a-jobs-surface-design.md`. Per Q11 amendment + sequential PIP: clean-context Explore agent sees the Pass-1-resolved doc (NOT the original draft). Findings land in `94-phase6a-review-findings.md` § "Pass 2 Adversarial Findings". After ratification + apply + convergence re-grep, the design doc is implementation-ready. Plan-mode cycle then opens to plan Phase 6a code execution.
+All 15 Pass 2 findings + 1 Layer 3 (C-6) ratified via cosa-voice walkthrough (Session `5ced4868`, Mr. Radio persona; per `feedback_pip_plan_review_is_sequential`): 5 Minors batch-walked + 10 Majors walked individually + C-6 walked via `ask_multiple_choice`. Apply pass complete; convergence re-grep clean; Phase 6a documentation cycle CLOSED. Commit `6fd95f5`.
+
+### ✅ Closed — Multiplexer Phase 6a code-writing cycle, Phases 0-7 (2026-05-06 PM/eve)
+
+All 7 implementation phases shipped across 8 commits (`362fa5d` → `744b6dd`). AC1-AC10d all green on `:7999`; AC11a/AC11b await user `:8000` slot-coordination (see new Pending below). Coverage: c8 100% (lines + branches + functions + statements) on every new render file (`JobsPaneRenderer.ts`, `templates/jobCard.ts`, `templates/jobBucket.ts`). Test pyramid: 23 (renderer) + 38 (templates) + 8 (formatDuration) + 5 (smoke) + 1 (E2E authored, not yet scheduled). Build: `boot.65c779ac946b.js` gz=31484B, AC7 ceiling 60382 ✓ (+1822B vs Phase 5 baseline 29662). Full audit trail in `90-execution-log.md` Phase 6a sub-section.
 
 ### Reference — Pass 1 Fitness Findings (closed 2026-05-06)
 
