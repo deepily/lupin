@@ -296,6 +296,14 @@ Watchdog auto-dispatch: requires `test fix expediter auto fix enabled = true` in
 | `/app/admin/proxy-dashboard` | Trust dashboard |
 | `/app/admin/dev-tools` | Developer tools |
 
+## 24. Multiplexer (`/api/multiplexer/*`)
+
+> Front-end client-config exposer. Returns display-tuning values fetched once at boot by `/static/js/multiplexer/boot.ts`. No auth required (display tuning, no PII or state).
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| GET | `/api/multiplexer/config` | None | Multiplexer client-config (boot-time tuning values) |
+
 ---
 
 ## Job ID Prefixes

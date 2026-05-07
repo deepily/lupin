@@ -925,15 +925,111 @@ Five submissions to land a clean baseline. Each submission via `POST /api/test-s
 
 ---
 
-## Phase 6 — Feature parity (jobs queue, TTS, action-required, focus tray, voice-persona, conversation-mode UI, sender cards, audio recorder, focus-mode)
+## Phase 6 — Feature parity (sliced into 6a / 6b / 6c per `07-phase6-slicing-manifest.md`)
 
-**Status**: ⏸ Not started
-**Started**: —
+**Status**: 🔄 In progress (slice 6a opened 2026-05-06)
+**Started**: 2026-05-06 (slice 6a)
 **Completed**: —
 
-### Deliverables, Commits, Verification, Notes
+Per the slicing manifest, Phase 6 ships in three slices:
+- **6a**: Jobs surface (jobs-pane renderer + JobStore.hydrateHistory invocation + 5-bucket layout) — IN FLIGHT
+- **6b**: TTS chrome + action-required interactive widgets + delete-button handler — Not started
+- **6c**: Voice-persona modal + audio recorder + focus tray + conversation-mode UI pin — Not started
 
-(populated when Phase 6 begins)
+---
+
+### Phase 6a — Jobs Surface (in flight)
+
+**Status**: 🔄 In progress
+**Started**: 2026-05-06 PM
+**Completed**: —
+
+**Authoritative design**: `08-phase6a-jobs-surface-design.md` (PASS-2-CLOSED 2026-05-06 PM)
+**Code-execution plan**: `2026.05.06-phase6a-code-execution-plan.md` (serialized 2026-05-06 PM)
+**Plan-mode origin**: `~/.claude/plans/imperative-prancing-peacock.md` (approved via ExitPlanMode 2026-05-06 PM)
+**Phase 5 baseline**: `boot.<hash>.js` at `gzip -9` = **29,662 bytes**; AC7 ceiling = **60,382 bytes** (29,662 + 30,720)
+
+#### Per-phase progress table (this implementation cycle)
+
+| # | Phase | Status | Started | Completed | Notes |
+|---|---|---|---|---|---|
+| 0 | Tracking-doc seed + plan serialization | 🔄 In progress | 2026-05-06 PM | — | This section seed + `2026.05.06-phase6a-code-execution-plan.md` |
+| 1 | INI key + splainer + FastAPI client-config endpoint | ✅ Complete | 2026-05-06 PM | 2026-05-06 PM | `GET /api/multiplexer/config` returns `{multiplexer_max_meta_display_bytes:256000}` (verified via `urllib.request` on `:7999`); INI key landed in `[Lupin: Baseline]` cluster; splainer entry alongside the cj-flow cluster; router authored in CoSA per established convention; main.py register added; rest-api-reference.md gets new §24 Multiplexer row |
+| 2 | `formatDuration` in `render/time.ts` + 4-5 tests | ⏸ Pending | — | — | Per Pass 2 F24 (Genuinely New, not Reused) |
+| 3 | Templates `jobCard.ts` + `jobBucket.ts` + tests | ⏸ Pending | — | — | AC3 ≥6 + AC4 ≥6; 100% c8 coverage |
+| 4 | `JobsPaneRenderer.ts` + tests + barrel + types | ⏸ Pending | — | — | AC5 ≥18 (incl. Tests 13-18); 100% c8; AC2a grep guard LIFTS |
+| 5 | CSS port + page shell + boot wiring | ⏸ Pending | — | — | AC10b ≤800 LOC; AC9 stable lines emitted by boot.ts |
+| 6 | Smoke + cross-phase verification (`:7999`) | ⏸ Pending | — | — | AC8a/AC8b/AC9/AC10/AC10b/AC10d |
+| 7 | E2E visual baseline + regression on `:8000` (scheduled) | ⏸ Pending | — | — | AC11a + AC11b via `/schedule-tests` skill |
+
+#### AC scorecard
+
+| AC | Description | Status |
+|---|---|---|
+| AC1 | `npx tsc --noEmit` exit 0 | ⏸ Pending |
+| AC2 | `npx eslint src/.../multiplexer/` exit 0 | ⏸ Pending |
+| AC2a | `hydrateHistory` grep ≥1 match (Phase 5 ban LIFTS) | ⏸ Pending |
+| AC3 | jobCard template tests ≥6 PASS | ⏸ Pending |
+| AC4 | jobBucket template tests ≥6 PASS (incl. F30 keyboard + aria-expanded) | ⏸ Pending |
+| AC5 | JobsPaneRenderer tests ≥18 PASS | ⏸ Pending |
+| AC6 | `c8 --100` on new render files (lines/branches/functions/statements all 100%) | ⏸ Pending |
+| AC7 | `boot.js` gz delta ≤ 60,382 bytes | ⏸ Pending |
+| AC8a | Functional smoke (5 buckets + 3-job fixture + exact `data-phase6-pending` count) | ⏸ Pending |
+| AC8b | Perf gate: 50-job pre-seed paints within 150ms of `boot_complete` | ⏸ Pending |
+| AC9 | Boot emits stable line `[multiplexer] jobsRenderer:mounted` | ⏸ Pending |
+| AC10 | Cross-phase verification (1)-(13) all green; sub-steps 10a-10e for visual baseline drift detection | ⏸ Pending |
+| AC10b | CSS port residual ≤ 800 LOC + stylelint clean | ⏸ Pending |
+| AC10d | Three-layer scope-leak (grep + stylelint + canary) all clean | ⏸ Pending |
+| AC11a | E2E submission via `/api/test-suite/submit` (HUMAN slot-coordination only) | ⏸ Pending |
+| AC11b | E2E post-run: visual baselines non-empty + container log "1 passed, 0 errors" on Run #2 | ⏸ Pending |
+
+#### AC10 / AC10b / AC10d audit table (populated at apply time)
+
+(empty — populated during Phase 6 step)
+
+#### Side-effect tasks paired with implementation
+
+| Task | Phase | Status |
+|---|---|---|
+| Add `multiplexer max meta display bytes = 256000` to `lupin-app.ini` `[Lupin: Baseline]` | 1.1 | ✅ Complete |
+| Add matching explanation to `lupin-app-splainer.ini` | 1.1 | ✅ Complete |
+| Author `src/cosa/rest/routers/multiplexer_config.py` | 1.2 | ✅ Complete |
+| Register router in `src/fastapi_app/main.py` | 1.2 | ✅ Complete |
+| Update `src/docs/rest-api-reference.md` | 1.2 | ✅ Complete |
+| Add `formatDuration` 4-5 tests to `time.test.ts` | 2 | ⏸ Pending |
+| Add `.stylelintrc.json` `overrides` block for `jobs-pane.css` | 5.2 | ⏸ Pending |
+| Update `dev-tools.html` line 145 description | 5.5 | ⏸ Pending |
+| Per-rule CSS port disposition table (kept / pruned / modified / new) | 5.1 | ⏸ Pending |
+
+#### Commits
+
+(none yet — per `feedback_never_auto_commit_push`, each phase boundary requires explicit user approval)
+
+#### Verification results
+
+(populated as each phase completes)
+
+#### Notes
+
+- Recon during Phase 0 (2026-05-06 PM) discovered the FastAPI client-config endpoint assumed by the design doc does NOT exist. `boot.ts` has zero fetch calls today. Plan therefore authors the endpoint as a Phase 1 deliverable in `src/cosa/rest/routers/multiplexer_config.py` per the existing all-routers-in-CoSA convention. (Parent-Lupin commits here only stage the main.py register + INI key + splainer + docs; CoSA file commit is the user's session-end concern per `feedback_lupin_only_never_cosa` + `feedback_cosa_edit_vs_manage_git`.)
+- `Job` interface has no `removed_at` field — the JobStore reducer physically moves done/dead jobs to the history bucket on `job_removed` events. The `status` field stays `'done'` or `'dead'` end-to-end. This simplifies the renderer (paints whatever `JobStore.bucket("history")` returns; no extra field-reading logic).
+- `keyedListMerge` accepts `T extends KeyedEntry { idHash: string }` — `Job.id_hash` is snake_case, so an adapter wrapper is required (likely mirrors a Phase 5 pattern; resolve during Phase 4 implementation).
+
+---
+
+### Phase 6b — TTS chrome + action-required interactive widgets (NOT STARTED)
+
+**Status**: ⏸ Not started
+
+(populated when Phase 6b begins)
+
+---
+
+### Phase 6c — Voice-persona modal + audio recorder + focus tray + conversation-mode UI pin (NOT STARTED)
+
+**Status**: ⏸ Not started
+
+(populated when Phase 6c begins)
 
 ---
 
