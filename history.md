@@ -2,6 +2,106 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.07 - Session 6825e6af | Bug Fix Mode — Notification 503 cascade reconciliation
+
+**Persona**: María 🌸 (warm, inquisitive female)
+
+**Context**: User opened a bug-fix session and asked to claim "Notification 503 cascade for offline users in expediter flow" (currently In Progress with stale owner 45e6bf84 — that session closed 2026-05-05T23:25). User flagged: "I thought that we had fixed it already." First task is reconciling the bug-queue entry against actual prior fixes before deciding scope.
+
+### Fixes
+
+#### Reconciliation — "thought we fixed it already"
+
+User's recollection was substantially right: session 45e6bf84 on 2026-05-05 (commit `24e4731` + checkpoint `621be65`) completed Phases 0-4a of a real root-cause fix. The May-1 bug-queue framing ("client doesn't set `response_default`, 4 fix options") was disproved on May-5 — quote from `01-design.md`: "The fix is in the test harness, not the expediter or the server." Real root cause was **silent proxy startup failure**; May-5 made `_start_proxy` raising-on-failure + made all 7 callers abort on failure. Phase 4b on `:8000` was prepared but never ran — a NEW bug surfaced ("`pytest --auto-proxy` is a no-op — `pre_run_hook` never fires under pytest discovery") and was filed Queued. The In Progress entry stayed open because the new bug blocked Phase 4b's pytest path.
+
+User chose **Path B**: fix the new pytest bug FIRST, then run Phase 4b through the canonical pytest path. Both bug-queue entries close together on AC11.
+
+#### Phase 5 — pytest fixture wiring (CODE + :7999 VERIFY DONE)
+
+- **R&D doc**: appended Phase 5 section to `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` + `90-execution-log.md`. Documents why module-scoped (not session-scoped — different test files have different `PROXY_PROFILE`) and why we did NOT take the alternative of wiring through pytest entry points.
+- **Code (parent repo only — no CoSA edits)**:
+  - `src/tests/smoke/conftest.py` — new module-scoped autouse fixture `_auto_proxy_for_module` + registered `--proxy-debug` CLI option. Fixture introspects test module for `EmbeddedProxyMixin` subclass DEFINED in the module (filter `obj.__module__ == module.__name__` to skip imported parents like `InteractiveSmokeTest`), instantiates it, calls `_start_proxy(...)` with env-var creds, and `pytest.fail(..., pytrace=False)` on `RuntimeError` to prevent cascade. Cleanup via `_stop_proxy()` at module teardown.
+  - `src/tests/smoke/test_auto_proxy_fixture.py` (NEW) — regression test for the fixture; asserts `"auto proxy"` session is registered in `/api/debug/websocket-state` with a non-empty user mapping. Marker class `AutoProxyFixtureProbe(EmbeddedProxyMixin)` drives the fixture (profile=`deep_research`).
+- **Class introspection sanity** across all 6 affected test modules picked the right concrete subclass: `ProxyIntegrationTest`/`proxy_integration_test`, `ExpeditorSmokeTest`/`expeditor_smoke`, `SweTeamProxySmokeTest`/`swe_team`, `PresentationLiveSmokeTest`/`presentation_gates`, `ResearchToPresentationLiveSmokeTest`/`research_to_presentation_gates`, `PresentationRenderOnlySmokeTest`/`presentation_gates`.
+- **AC9 happy-path on `:7999`**: `pytest src/tests/smoke/test_auto_proxy_fixture.py --auto-proxy -v -s` → **1 passed in 2.19s**. Proxy registered as UUID `50c73ba7-36dd-4eaf-a7e2-63256252c84f` (matches the test-user UUID quoted in May-5 design doc).
+- **AC10 sad-path on `:7999`**: same command with `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD=wrong-password` → **1 error in 32.33s**, `ERROR at setup of test_fixture_started_proxy`. Test body never executed (cascade prevention contract honored). pytest reported as setup ERROR not assertion FAILED — correct distinction.
+
+#### Phase 3 — `:8000` Phase 4b scheduling (DONE)
+
+User authorized immediate slot. First submission `ts-f04eed7f` failed at startup (exit=4) because `pytest_args = "-k 'expr1 or expr2 or expr3'"` got `.split()` on whitespace — pytest received `'expr1`, `or`, `expr2'`, etc. as positional args and crashed with `ERROR: file or directory not found: or`. Resubmitted as `ts-e6bb533b` using 55 `--ignore=src/tests/smoke/<file>.py` tokens to narrow the smoke run to 4 keepers (`test_proxy_integration`, `test_expeditor_mock_job_smoke`, `test_swe_team_proxy`, `test_auto_proxy_fixture`). `--auto-proxy --cost-cap-usd 5.00` auto-injected via INI key (Cluster B from 2026-04-30 post-mortem) — confirmed in the running pytest argv.
+
+Pre-flight: `preflight-test-container.sh` PASSED (all probes green). Direct container inspection confirmed bind-mount visibility: container saw the new fixture (`grep _auto_proxy_for_module conftest.py = 3 matches`) and the new test file (`test_auto_proxy_fixture.py` with today's mtime). No bounce required. `:8000` pool clean before submit (0 inflight, 0 pending).
+
+#### Phase 4b — :8000 cascade-elimination (DONE — AC11 GREEN)
+
+- **Job**: `ts-e6bb533b::50c73ba7-...`
+- **Started**: 2026-05-07T15:23:40 EDT
+- **Completed**: 2026-05-07T16:11:10 EDT
+- **Duration**: 47:27 (2847.86s)
+
+| Test | Result | Duration | Notes |
+|------|--------|----------|-------|
+| `test_auto_proxy_fixture::test_fixture_started_proxy` | ✅ PASS | <1s | Fixture regression test green |
+| `test_expeditor_mock_job_smoke::test_expeditor_mock_job_smoke` | ✅ PASS | 1620.93s (27 min) | All scenarios green |
+| `test_swe_team_proxy::test_swe_team_proxy` | ✅ PASS | 383.92s (6.4 min) | All scenarios green |
+| `test_proxy_integration::test_proxy_integration` | ❌ FAIL | ~13 min | 14/15 scenarios pass; **scenario 15 EXP_RTPRES_MISSING failed for an UNRELATED REASON** — voice-routing classifier mis-routes "research something and present it" → `deep_research` instead of `research_to_presentation` |
+
+**AC11 verification — zero `http_error_503`**:
+
+| Source | Count |
+|--------|-------|
+| Run log `/tmp/smoke-20260507-201109.log` | grep `http_error_503` / `HTTP 503` / `User cancelled` / `503 Service` → **0 hits** |
+| `lupin-rest-test` container logs (last 50 min) | grep `503` → 5 false positives, ALL source-port substrings (`127.0.0.1:45030`, `:45032`, etc.); zero actual HTTP 503 responses |
+| Proxy subprocess stats (final) | `Notifications Received=90, Responses Sent=19, Script Matcher Used=17, LLM Used=2, Skipped=71, Errors=0` |
+
+**Cascade is eliminated.** Both bug-queue entries close.
+
+**Per-module fixture evidence** captured mid-run:
+```
+python3 -m pytest src/tests/smoke/ -v --ignore=... --auto-proxy --cost-cap-usd 5.00
+└── python3 -m cosa.agents.notification_proxy --profile expeditor_smoke ...
+```
+The `--profile expeditor_smoke` matches `ExpeditorSmokeTest.PROXY_PROFILE` for that module — proof that `_auto_proxy_for_module` correctly introspects the test class and starts the right proxy per module.
+
+#### Bug-queue updates
+
+- ✅ "Notification 503 cascade for offline users in expediter flow" → **CLOSED** (resolved 2026-05-07 by 6825e6af; annotated In Progress entry with full closure evidence + folded into details)
+- ✅ "`pytest --auto-proxy` is a no-op — `pre_run_hook` never fires under pytest discovery" → **CLOSED** (resolved 2026-05-07 by 6825e6af; annotated Queued entry with closure evidence)
+- 🆕 **NEW Queued entry filed** (per TEST OWNERSHIP MANDATE): "Voice-routing classifier mis-routes 'research something and present it' → deep_research instead of research_to_presentation" — surfaced during Phase 4b run, NOT a regression of the cascade fix.
+
+### Session Summary
+
+**Outcome**: Two bug-queue entries closed in one session, one new bug filed.
+
+- **Notification 503 cascade for offline users in expediter flow** — RESOLVED. May-5 (45e6bf84) landed Phases 0-4a (test-harness raise-on-failure + 7-caller abort). May-7 (6825e6af) landed Phase 5 (module-scoped pytest fixture closing the pre_run_hook gap). Phase 4b on `:8000` (job `ts-e6bb533b`, 47:27 runtime) verified zero `http_error_503` / 0 proxy errors / 90 notifications received / 19 responses sent.
+- **`pytest --auto-proxy` is a no-op** — RESOLVED in same closure. Module-scoped autouse fixture in `src/tests/smoke/conftest.py` introspects test module for the concrete `EmbeddedProxyMixin` subclass (filter `obj.__module__ == module.__name__` to skip imported parents), instantiates it, calls `_start_proxy(...)` with env-var creds, `pytest.fail(..., pytrace=False)` on `RuntimeError`. Cleanup via `_stop_proxy()` at module teardown.
+- **Voice-routing classifier mis-route** (NEW) — Queued for future session; pre-existing classifier issue surfaced only because the new pytest-path coverage now exercises Scenario 15 properly.
+
+**Files modified (parent Lupin repo only — no CoSA edits)**:
+- `bug-fix-queue.md` — Active Sessions row added; "503 cascade" In Progress entry closed; "pytest --auto-proxy no-op" Queued entry closed; new "voice-routing classifier" Queued entry filed
+- `history.md` — this entry
+- `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` — Phase 5 section appended
+- `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/90-execution-log.md` — Phase 5 status + Phase 4b evidence
+- `src/tests/smoke/conftest.py` — fixture + `--proxy-debug` option
+- `src/tests/smoke/test_auto_proxy_fixture.py` (NEW) — fixture regression test
+
+**Status**: All work complete. Awaiting user `commit` authorization. No commits made automatically.
+
+#### Checkpoint | 2026.05.07 20:15 | 503 cascade fix (Phase 5) + Phase 4b verification + bug-queue closures
+
+**Files** (6 in Lupin parent + manifest):
+- `src/tests/smoke/conftest.py` (modified — fixture)
+- `src/tests/smoke/test_auto_proxy_fixture.py` (NEW)
+- `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` (Phase 5 section)
+- `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/90-execution-log.md` (Phase 5 + Phase 4b evidence)
+- `bug-fix-queue.md` (closures + new Queued entry)
+- `history.md` (session entry — this file)
+- `.claude-session.md` (manifest section for 6825e6af)
+
+**Commit**: [pending]
+
+---
+
 ### 2026.05.06 - Session 5ced4868 | Multiplexer Phase 6a — Pass 1 Fitness ratification + 100% coverage mandate ratified + full Phase 4 + Phase 5 coverage backfill closed
 
 **Context**: Resumed at the Pass 1 Fitness ratification gate from Session 532b16e1 (entry below). Mr. Radio persona. AM (lunch) session walked the 17 Pass 1 findings via cosa-voice (per-row), applied to design doc, then dispatched Pass 2 Adversarial agent. F15 ratification produced a global side-effect: **100% c8 coverage mandate** for the multiplexer TypeScript codebase. AM session brought 16 of 26 multiplexer files to 100% before the user went to lunch with directive "do as much as you can without me, try not to burn the server down." Session continued into PM after a `/clear`, resumed via `91-resume-here-coverage-backfill.md` pointer document, and closed the remaining 10 files in a single uninterrupted pass.

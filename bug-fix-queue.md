@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-05T23:25:00-04:00
+**Last Updated**: 2026-05-07T17:45:00-04:00
 
 ---
 
@@ -60,6 +60,7 @@
 | 4ede5bad | 2026-05-02T11:30:00 | 2026-05-05T00:00:00 | closed |
 | d5e3cf21 | 2026-05-05T19:30:00 | 2026-05-06T01:50:00 | closed |
 | 45e6bf84 | 2026-05-05T21:03:44 | 2026-05-05T23:25:00 | closed |
+| 6825e6af | 2026-05-07T17:45:00 | 2026-05-07T20:11:00 | active |
 
 ---
 
@@ -101,13 +102,34 @@
 
 (Available for any session to claim)
 
-- [ ] **`pytest --auto-proxy` is a no-op — `pre_run_hook` never fires under pytest discovery** (filed 2026-05-05 by session 45e6bf84, surfaced during Phase 4b verification of the 503 cascade fix)
+- [ ] **Voice-routing classifier mis-routes "research something and present it" → `deep_research` instead of `research_to_presentation`** (filed 2026-05-07 by session 6825e6af, surfaced during Phase 4b cascade-elimination run on `:8000`)
+  - **Symptom**: `test_proxy_integration::test_proxy_integration` Scenario 15 `EXP_RTPRES_MISSING` failed in job `ts-e6bb533b`. Voice command "research something and present it" was expected to route to "agent router go to research to presentation" but the classifier emitted "agent router go to deep research" instead. 14 of 15 scenarios passed; this is the only failure.
+  - **Reproducer**:
+    ```
+    Voice command: "research something and present it"
+    Expected:      agent router go to research to presentation
+    Actual:        agent router go to deep research
+    ```
+  - **NOT a regression of the 503-cascade fix** — proxy stats showed `Notifications Received=90, Responses Sent=19, Errors=0` during the run; cascade is eliminated. This is a pre-existing classifier issue surfaced by the new pytest-path coverage.
+  - **Files likely involved**: voice-router classifier model + training data, possibly `src/cosa/agents/agent_router/` or wherever the "research to presentation" intent is keyed. Closely-similar phrasings of the chained intent likely need additional training examples per `feedback_voice_routing_training_data` (PEFT examples via XML prompt generator).
+  - **Acceptance**: re-run `test_proxy_integration` Scenario 15 → routing emits "agent router go to research to presentation" not "agent router go to deep research".
+  - **Cross-ref**: Phase 4b evidence in `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/90-execution-log.md` §Phase 4b.
+
+- [x] ~~**`pytest --auto-proxy` is a no-op — `pre_run_hook` never fires under pytest discovery**~~ → **RESOLVED 2026-05-07** by session 6825e6af. Module-scoped autouse fixture `_auto_proxy_for_module` in `src/tests/smoke/conftest.py` introspects each test module for the concrete `EmbeddedProxyMixin` subclass and starts a proxy with that class's `PROXY_PROFILE`. Live `:8000` verification (job `ts-e6bb533b`, 47:27 runtime, 2026-05-07 15:23-16:11 EDT): proxy stats `Notifications Received=90, Responses Sent=19, Errors=0`. Closes the cascade-prevention loop opened on 2026-05-05. Files: `src/tests/smoke/conftest.py`, `src/tests/smoke/test_auto_proxy_fixture.py` (NEW regression test). Phase 5 design + evidence in `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/{01-design,90-execution-log}.md`.
+
+  <details>
+  <summary>Original entry preserved for context</summary>
+
+  - **Update 2026-05-07 (session 6825e6af)**: Implemented as a **module-scoped autouse fixture** (not session-scoped — different test files use different `PROXY_PROFILE` values). Design rationale + code in `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` §Phase 5. Code changes: `src/tests/smoke/conftest.py` (new `_auto_proxy_for_module` fixture + `--proxy-debug` option), `src/tests/smoke/test_auto_proxy_fixture.py` (NEW regression test). Class introspection verified across all 6 affected test modules picks the right concrete subclass. AC9 happy-path on `:7999` PASSED in 2.19s (proxy registered as UUID `50c73ba7-...`); AC10 sad-path on `:7999` PASSED — bad-creds run errored at fixture setup in 32.33s with full diagnostics, test body never executed. Phase 4b on `:8000` is the remaining gate; both this entry and "Notification 503 cascade…" close together on AC11 success.
+  - **Original entry preserved below for context.**
   - **Symptom**: `run-smoke-tests.sh` invokes `pytest src/tests/smoke/ --auto-proxy ...`. The flag is registered in `src/tests/smoke/conftest.py:35` so pytest accepts it without error. BUT `pre_run_hook` (which calls `_start_proxy`) is a custom method only invoked from `__main__` blocks in each test file — pytest discovery never calls it. So under pytest, `--auto-proxy` is a no-op; the proxy never starts; all `/api/notify` calls 503-cascade. Verified empirically during Phase 4b of session 45e6bf84: 24 `HTTP 503` events / 24 `User cancelled batch collection` errors in `:8000` container logs while smoke suite was running, even though the pytest invocation included `--auto-proxy`.
   - **Files**: `src/tests/smoke/conftest.py` (currently registers the flag but doesn't honor it); 7 test files in `src/tests/smoke/` whose `pre_run_hook` only fires under `__main__`.
   - **Fix design**: add a session-scoped autouse pytest fixture in `conftest.py` that detects `--auto-proxy` and calls `EmbeddedProxyMixin._start_proxy()` once at pytest session start (and stops it at session end). Until that lands, `pytest --auto-proxy` cannot replace `python -m ... --auto-proxy` for cascade verification.
   - **Why this didn't surface during Phase 4a**: Phase 4a ran the proxy directly via `python -m cosa.agents.notification_proxy ...` (CLI mode). The bug only manifests through the pytest entry point.
   - **Acceptance**: rerun `:8000` smoke suite; expect zero `HTTP 503` from `/api/notify` calls during expediter scenarios.
   - **Cross-ref**: 503 cascade fix design at `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` — explicitly scoped to `__main__` path; this entry covers the pytest path gap.
+
+  </details>
 
 - [ ] **Test_suite mode HTTP 500 — actual NoneType.split source** (filed 2026-05-01 by session 31172845, evidence in execution log Phase 2)
   - **Defensive fix already landed** (CoSA branch reorder in `todo_fifo_queue.py:634-655`) but my hypothesis was wrong: `MODE_TO_AGENT` and `AGENTIC_MODE_MAP` are disjoint as of 2026-05-01, so the dispatch reorder doesn't change behavior for the test_suite case.
@@ -188,12 +210,35 @@
 
 (Claimed by a specific session)
 
-- [ ] **Notification 503 cascade for offline users in expediter flow** | Owner: 45e6bf84 | Since: 2026-05-05T21:03:44
+- [x] ~~**Notification 503 cascade for offline users in expediter flow**~~ → **RESOLVED 2026-05-07** by session 6825e6af | Owner: 6825e6af (transferred from 45e6bf84, closed 2026-05-05). The May-1 client/server framing was disproved on May-5 (`01-design.md` TL;DR: "the fix is in the test harness, not the expediter or the server"); root cause was **silent proxy startup failure**. May-5 (session 45e6bf84) landed Phases 0-4a — `_start_proxy` raising-on-failure + 7 callers abort on failure. May-7 (this session) landed Phase 5 — module-scoped autouse fixture closes the pytest-path gap. Phase 4b verified on `:8000` (job `ts-e6bb533b`, 47:27 runtime, 2026-05-07 15:23-16:11 EDT): **zero `http_error_503` / zero `User cancelled` / proxy stats `Notifications Received=90, Responses Sent=19, Errors=0`**. Cascade is eliminated.
+
+  <details>
+  <summary>Original entry preserved for context</summary>
+
+  - **Update 2026-05-07 (session 6825e6af) — STATE RECONCILIATION**: The May-1 framing below ("client doesn't set `response_default`, 4 fix options to discuss") was **disproved** on May-5 in `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` TL;DR — quote: "The fix is in the test harness, not the expediter or the server. The expediter is behaving correctly; the server's offline-without-default 503 is the right contract." The actual root cause is **silent proxy startup failure** in the test harness; the May-5 fix (Phases 0-4a) made `_start_proxy` raising-on-failure + made all 7 callers abort on failure. Phase 4b on `:8000` (originally scheduled) surfaced a NEW bug — `pytest --auto-proxy` was a no-op because `pre_run_hook` doesn't fire under pytest. That new bug is the Queued entry above ("`pytest --auto-proxy` is a no-op…"), and is now also code-fixed + `:7999`-verified by this session's Phase 5. **Both entries close together when AC11 (Phase 4b on :8000 with the new fixture in place) shows zero `http_error_503` across the 3 affected suites.**
+  - **Phase 5 deliverables (2026-05-07, ready for `:8000`)**:
+    - `src/tests/smoke/conftest.py` — module-scoped autouse fixture `_auto_proxy_for_module` introspects each test module for the concrete `EmbeddedProxyMixin` subclass and starts a proxy with that class's `PROXY_PROFILE`. py_compile + import-chain green.
+    - `src/tests/smoke/test_auto_proxy_fixture.py` (NEW) — regression test for the fixture itself; passes only when `--auto-proxy` is set + proxy is registered as `"auto proxy"` session in `/api/debug/websocket-state`.
+    - AC9 happy-path on `:7999`: PASSED in 2.19s. Proxy registered as UUID `50c73ba7-36dd-4eaf-a7e2-63256252c84f` (matches design doc's expected test-user UUID).
+    - AC10 sad-path on `:7999`: PASSED — bad-creds run errored at fixture setup in 32.33s with full WS-auth-timeout diagnostics; test body never executed.
+  - **Phase 4b on `:8000` — pending user slot confirmation**. Submission shape:
+    ```
+    POST /api/test-suite/submit
+    {
+      "test_types": "smoke",
+      "pytest_args": "-k 'test_proxy_integration or test_expeditor_mock_job_smoke or test_swe_team_proxy'",
+      "scheduled_at": "<user-confirmed ISO time>"
+    }
+    ```
+    `--auto-proxy` is auto-injected via INI key `test suite smoke extra pytest args` (Cluster B fix from 2026-04-30 post-mortem); the new fixture takes it from there. Expected runtime ≤ 15 min for the 3 narrowed files.
+  - **Original entry preserved below for context.**
   - **Server**: `src/cosa/rest/routers/notifications.py:727-731` raises HTTP 503 when target_user is offline AND no `response_default` set.
   - **Client**: `src/cosa/agents/runtime_argument_expeditor/expeditor.py:821-833` `_batch_collect_args` does NOT set `response_default` (only per-question `default_value` inside `response_options`).
   - **Symptom**: ~21 cancellations across `test_expeditor_mock_job_smoke`, `test_proxy_integration[expediter scenarios]`, `test_swe_team_proxy` smoke tests when the test user has no WS connection. Confirmed reproducing in 2026-05-01 fresh container logs.
-  - **4 fix options documented**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md` §Phase 5. Option B (client-side `response_default = JSON-encoded answer defaults`) is the most surgical; Option C (auto-proxy maintains a WS connection for the test user) is the most architecturally correct. Picking requires a longer design conversation.
+  - **4 fix options documented**: `src/rnd/v0.1.7/2026.05.01-postmortem-fixes-90-execution-log.md` §Phase 5. Option B (client-side `response_default = JSON-encoded answer defaults`) is the most surgical; Option C (auto-proxy maintains a WS connection for the test user) is the most architecturally correct. Picking requires a longer design conversation. **(May-5 disproved this framing; see 01-design.md.)**
   - **Original filing**: 2026-05-01 by session 31172845 (evidence in execution log Phase 5)
+
+  </details>
 
 - [x] ~~**Post-mortem remediation: 2026-04-30 22:15-EDT all-suite run (9 smoke failures, 6 root-cause clusters)**~~ → marked done by user | By: 31172845 | 2026-05-05 | Original entry preserved below for context. | Owner: 31172845 | Since: 2026-05-01T11:00:00
   - **Plan**: `/home/rruiz/.claude/plans/spicy-plotting-coral.md` (approved 2026-05-01)

@@ -204,3 +204,111 @@ No other test areas use a similar "subprocess + blind sleep + warn-on-fail" patt
 - `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/90-execution-log.md` — paired tracker
 - `bug-fix-queue.md` — close 503 cascade + label improvement entries
 - `history.md` — Fix entry + Session Summary
+
+---
+
+## Phase 5 — pytest fixture wiring (added 2026-05-07, session 6825e6af)
+
+### Why this addendum exists
+
+Phase 4b verification on 2026-05-05 surfaced that `pytest --auto-proxy` is a **no-op**: pytest discovery never invokes `pre_run_hook`, so the May-5 Phase 1+2 protections (WS-auth poll, raise-on-failure, abort-on-failure) only fire on the `python -m … --auto-proxy` `__main__` path. Under pytest, the proxy never starts → 503 cascade reproduces despite the May-5 fix being correct for its target path.
+
+The Queued entry filed by 45e6bf84 ("`pytest --auto-proxy` is a no-op — `pre_run_hook` never fires under pytest discovery") proposed a **session-scoped autouse fixture in `conftest.py`**. Re-analysis on 2026-05-07 shows session scope is wrong: each test file declares its own `PROXY_PROFILE` attribute (`expeditor_smoke`, `proxy_integration_test`, `swe_team`, `presentation_gates`, `research_to_presentation_gates`), so one session-wide proxy cannot serve them all.
+
+### Design — module-scoped autouse fixture with class introspection
+
+Add to `src/tests/smoke/conftest.py`:
+
+```python
+import os
+import pytest
+
+
+@pytest.fixture( scope="module", autouse=True )
+def _auto_proxy_for_module( request ):
+    """
+    Auto-launch a notification proxy when `--auto-proxy` is passed under pytest.
+
+    Scope is module (not session) because each test file declares its own
+    PROXY_PROFILE on an EmbeddedProxyMixin subclass. The fixture introspects
+    the test module, finds the subclass, and starts a proxy using that
+    class's profile + strategy.
+
+    On startup failure: pytest.fail() — the cascade-prevention contract
+    requires aborting before scenarios run.
+    """
+    if not request.config.getoption( "--auto-proxy", default=False ):
+        yield
+        return
+
+    # Lazy import to avoid circular-import risk during conftest collection
+    from tests.smoke.utilities.embedded_proxy import EmbeddedProxyMixin
+
+    module      = request.module
+    proxy_class = None
+    for name in dir( module ):
+        obj = getattr( module, name )
+        if isinstance( obj, type ) and issubclass( obj, EmbeddedProxyMixin ) and obj is not EmbeddedProxyMixin:
+            proxy_class = obj
+            break
+
+    if proxy_class is None:
+        yield
+        return
+
+    holder   = proxy_class()
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+    debug    = request.config.getoption( "--proxy-debug", default=False )
+
+    try:
+        holder._start_proxy( debug=debug, email=email, password=password )
+    except RuntimeError as e:
+        pytest.fail(
+            f"Proxy startup failed for module {module.__name__} (class {proxy_class.__name__}): {e}",
+            pytrace=False,
+        )
+
+    yield
+
+    holder._stop_proxy()
+```
+
+Also register `--proxy-debug` in `pytest_addoption` (currently only `--auto-proxy` is registered).
+
+### Why module scope is correct
+
+- **Per-class profiles**: each test class subclasses `EmbeddedProxyMixin` with its own `PROXY_PROFILE`. Starting one proxy at session start cannot match all 6 profiles.
+- **Cleanup boundary**: proxy lifetime matches the test module's lifetime — when pytest moves to the next file, the previous proxy stops cleanly.
+- **No `__main__` collision**: under pytest, `__main__` blocks never execute; the fixture is the only `_start_proxy` caller. Under CLI invocation (`python -m … --auto-proxy`), `__main__` runs and the fixture is bypassed (pytest isn't the parent). Both paths coexist without double-start risk.
+- **Subclass detection**: the loop tolerates modules that don't subclass `EmbeddedProxyMixin` (e.g., utility modules that conftest.py also collects) — they yield through unchanged.
+
+### Why we did NOT take the alternative ("wire through pytest entry points")
+
+Alternative: add `request` parameter to each `def test_*()` pytest function, read `--auto-proxy`, pass through to `quick_smoke_test()` after extending its signature. Six file edits, all small and explicit.
+
+Tradeoff against the fixture:
+- ✅ More explicit (no introspection magic)
+- ❌ Six files to maintain, easy to miss when adding new test files
+- ❌ Future test files require remembering the wire-through pattern; fixture approach is automatic
+
+The fixture is preferred because new `EmbeddedProxyMixin` subclasses get auto-proxy support for free.
+
+### Acceptance criteria
+
+| AC | What |
+|----|------|
+| AC9  | `pytest src/tests/smoke/test_proxy_integration.py --auto-proxy` against `:7999` starts the proxy successfully (verified by `/api/debug/websocket-state` showing `"auto proxy"` session UUID) |
+| AC10 | Sad-path: `pytest --auto-proxy` with bad credentials fails the affected test module with the `_start_proxy` `RuntimeError` message; no scenarios attempted |
+| AC11 | Phase 4b on `:8000`: scheduled run of `test_proxy_integration` + `test_expeditor_mock_job_smoke` + `test_swe_team_proxy` via pytest path shows zero `http_error_503` |
+| AC12 | Bug-fix-queue: BOTH "Notification 503 cascade…" AND "`pytest --auto-proxy` is a no-op…" → Completed in same closure |
+
+### Files to be touched (Phase 5)
+
+- `src/tests/smoke/conftest.py` — new fixture + register `--proxy-debug` option
+- `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/01-design.md` — this addendum
+- `src/rnd/v0.1.7/2026.05.05-503-cascade-real-root-cause/90-execution-log.md` — Phase 5 row + evidence
+- `bug-fix-queue.md` — close BOTH entries on AC11+AC12 success
+- `history.md` — Phase 5 fix entry + session summary
+
+No test-file edits, no `src/cosa/` edits.
