@@ -81,7 +81,13 @@ export type LupinEventType =
   // Emitted at end of bootMultiplexer() with the resolved binary handler
   // identity so AC9's Playwright check can verify the wiring without the
   // no-globals-violation `window.audioTransport.binaryHandler` access path.
-  | "boot_complete";
+  | "boot_complete"
+  // Phase 6a (per design doc 08 § JobsPaneRenderer Pass 1 F3): emitted by a
+  // renderer when its async hydrate path rejects. Carries `source` to
+  // discriminate (e.g. `source: "jobs"` for JobsPaneRenderer's hydrateHistory
+  // failure). Subscribers (deferred to 6b) can paint a "Could not load
+  // history" retry affordance.
+  | "hydration_failed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -400,5 +406,23 @@ export interface BootCompletePayload {
     // intermediate boot states (mount throws, future no-renderer surfaces)
     // remain typed correctly; production wiring populates it unconditionally.
     notificationsRenderer? : string;
+    // Phase 6a F11+F12 extension (2026-05-06): literal string "mounted" emitted
+    // after `jobsRenderer.mount(mountEl)` completes. Optional in TS interface
+    // (forward/backward-compat per F12); runtime-unconditional in current
+    // boot.ts (per F11) — if mount throws, `boot_complete` is never emitted.
+    jobsRenderer?          : string;
   };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6a — hydration_failed payload (per design doc 08 § JobsPaneRenderer
+// hydration error path; emitted by JobsPaneRenderer when hydrateHistory(api)
+// rejects).
+// ---------------------------------------------------------------------------
+
+export interface HydrationFailedPayload {
+  /** Discriminator: which renderer's hydrate path rejected (e.g. "jobs"). */
+  source : string;
+  /** The Error that caused the rejection. */
+  error  : Error;
 }

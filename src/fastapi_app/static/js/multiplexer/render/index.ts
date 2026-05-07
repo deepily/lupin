@@ -16,8 +16,15 @@ export {
   type NotificationsListRendererOptions,
   type NotificationsListRendererStores,
 } from "./NotificationsListRenderer";
+export {
+  createJobsPaneRenderer,
+  type JobsPaneRenderer,
+  type JobsPaneRendererOptions,
+  type JobsPaneRendererStores,
+} from "./JobsPaneRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
-export { formatHM, formatDateKey, formatCountdown } from "./time";
+export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";
 export { keyedListMerge, replaceChildren, type KeyedEntry } from "./dom";
+export { configureMetaDisplayCap } from "./templates/jobCard";
 /* c8 ignore stop */
