@@ -2,6 +2,46 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-04-30 to 2026-05-02](history/2026-04-30-to-05-02-history.md).
 
+### 2026.05.07 - Session e8228026 | Multiplexer Phase 6a final closure on :8000 + Phase 6b planning launched (Q-decisions + REUSE done; Pass 1 paused)
+
+**Persona**: Mr. Radio 🦉 (authoritative warm male, #FFA000)
+
+**Accomplishments**:
+
+- **Phase 6a fully CLOSED on both `:7999` and `:8000`** — AC11a baseline captured (job `ts-b786315c`, 13:59 EDT, PNG at `io/test-suite/visual-baselines/test_multiplexer_phase6a_visual/`) + AC11b regression GREEN (job `ts-bd34af9b`, 1 passed in 5.6s, 14:48 EDT, `-k` filter honored: 398 deselected / 1 selected). Discovery: visual baselines are gitignored under `io/` (`.gitignore:68`), so the baseline lives host-only and bind-mounts into the test container; no commit needed for the PNG.
+
+- **Two `/api/test-suite/submit` silent-drop traps caught + documented as durable memories**:
+  - `test_types="e2e_ui"` → silently dropped to 0/0/0/0 (no HTTP error). Use `"e2e"`. Memory `feedback_test_types_e2e_not_e2e_ui.md`.
+  - Pydantic field is `pytest_args` (NOT `args`). v2 silently ignores unknown fields → submit body's `"args"` was dropped → full 23-min sweep ran instead of `-k` filtered. Memory `feedback_test_suite_submit_field_pytest_args.md`. Both `TODO.md` AC11a/AC11b entries fixed at source so the next session doesn't re-hit either trap.
+
+- **Phase 6b planning launched** — design doc `09-phase6b-interactive-widgets-design.md` (NEW, 289 LOC) at canonical R&D path. 12 Q-B decisions across 4 clusters (submit semantics, TTS chrome, delete-button, boot/CSS/scope) ratified via cosa-voice walkthrough. Q-B6 corrected mid-walk: per-notification corner buttons belong in 6b not 6c per slicing manifest line 46.
+
+- **REUSE pre-pass closed** — 28 RE-rows (16 reuse-as-is / 9 extend-existing / 3 genuinely-new) + 5 Layer-3 concerns ratified via 4-batch cadence. **C-4 confirmed empirically**: `JobStore.delete(idHash)` does NOT exist (only `indexById.delete(id)` internal Map call at `JobStore.ts:292`). Phase 6b Phase 4 must split into sub-step 4A (extend JobStore + 100% c8 tests) + 4B (wire delete-button click handler). AC table grew: AC2d (JobStore.delete grep + tsc guard), AC5c (delete-button extension tests ≥6 cases), AC10e (cross-phase count-cascade regression).
+
+- **Pass 1 Fitness dispatched** — clean-context Explore agent, 14 findings (0 Block / 9 Major / 5 Minor / 0 Layer 3). Ratification PAUSED at user break point. F-1 caught a real bug in my own doc work — AC10b said `tts-chrome.css ≤500` but Q-B12 ratified `≤700`. Resume via `93-resume-here-phase6b-pass1-ratification.md` (NEW, 109 LOC).
+
+- **Phase 6b cycle state**: Q-decisions ✅ → REUSE ✅ → Pass 1 ⏸️ paused → Pass 2 ⏳ → code-execution plan ⏳ → implementation ⏳.
+
+**Files** (parent-Lupin scope only):
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/09-phase6b-interactive-widgets-design.md` (NEW, 289 LOC)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/95-phase6b-review-findings.md` (NEW, 156 LOC)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/93-resume-here-phase6b-pass1-ratification.md` (NEW, 109 LOC)
+- `TODO.md` (AC11a/AC11b field-name fixes + 2026.05.08 morning section)
+- `history.md` (this entry)
+- 2 NEW auto-memory files (outside repo): `feedback_test_types_e2e_not_e2e_ui.md`, `feedback_test_suite_submit_field_pytest_args.md`
+
+**Commits**:
+- `243267b` — Phase 6a AC11a/AC11b CLOSED: TODO.md test-suite submit field-name fixes
+- `d70be64` — Phase 6b planning checkpoint: Q-decisions + REUSE closed; Pass 1 paused at break point
+- session-end commit pending (this entry)
+
+**Caveats / Notes**:
+- `history.md` remains at CRITICAL token threshold (~22.4k). Archival deferred per user direction earlier this session because parallel session 6825e6af (María) had uncommitted edits at that time. Carried forward to 2026.05.08 morning section in `TODO.md`.
+- Phase 0 prerequisites for Phase 6b implementation (verified at code-execution plan time): `DELETE /api/queue/<bucket>/<id>` exists ✅; `multiSelect` payload, `AudioStore.currentNotificationIdHash`, action-required mount surface, CoSA `multiplexer_config.py` commit, `JobStore.delete(idHash)` — all pending verification.
+- Parallel session 6825e6af (María 🌸) committed her own work (`4d2579f`) mid-session; her files cleanly isolated from my commits per parallel-session-safety v2.0.
+
+---
+
 ### 2026.05.07 - Session 6825e6af | Bug Fix Mode — Notification 503 cascade reconciliation
 
 **Persona**: María 🌸 (warm, inquisitive female)

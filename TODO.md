@@ -116,6 +116,56 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ---
 
+## ☀️ FIRST THING IN THE MORNING — 2026.05.08
+
+### Resume Phase 6b Pass 1 Fitness ratification
+
+**Resume pointer**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/93-resume-here-phase6b-pass1-ratification.md` (NEW today, commit `d70be64`). Contains: cycle state, 14 finding IDs + summaries, standout Majors to walk first, recommended ratification cadence, Phase 0 prerequisite status, read-order for fresh-context Claude.
+
+**Cycle state**:
+- Q-decisions ✅ CLOSED 12/12 (2026-05-07)
+- REUSE pre-pass ✅ CLOSED 28 RE + 5 L3 (2026-05-07)
+- Pass 1 Fitness ⏸️ PAUSED 14 findings (9 Major / 5 Minor / 0 Block / 0 Layer 3); 0 ratified
+- Pass 2 Adversarial ⏳
+- Code-execution plan ⏳
+- Implementation ⏳
+
+**Resume action**:
+- [ ] [LUPIN] Walk Pass 1 ratification — recommended cadence: 1 batch (6 Minors: F-8, F-9, F-10, F-11, F-12, F-14) + 8 individual Major walks (F-1, F-2, F-3, F-4, F-5, F-6, F-7, F-13). Total ~9 turns. Phase 6a Pass 1 precedent for rhythm.
+
+**Standout Majors** (walk first):
+- **F-1** — Real bug: AC10b says `tts-chrome.css ≤500` but Q-B12 ratified `≤700`. Trivial fix.
+- **F-2** — AC5 ≥18 cases unenumerated.
+- **F-3** — Q-B1 routing dispatch implementation unspecified (template helper vs renderer switch).
+- **F-5** — AC2d grep regex won't match TS method definitions; rely on `tsc --noEmit` instead.
+- **F-6** — Phase 0 #6 + 4A/4B sub-step DOD unclear.
+- **F-13** — R2 throttle covers `chunk_decoded` only; rapid state-toggle could thrash DOM.
+
+**After Pass 1 closes**:
+- [ ] [LUPIN] Pass 2 Adversarial dispatch (clean-context Explore agent; sees Pass-1-resolved doc state). Phase 6a precedent: 15 findings + 1 Layer 3 → walked individually with `ask_multiple_choice` for the Layer 3.
+- [ ] [LUPIN] After Pass 2 closes: convergence re-grep + author code-execution plan at `<date>-phase6b-code-execution-plan.md` per slicing-manifest naming convention.
+
+### Discussion topic — Broadcast messages from notifications UI
+
+- [ ] [LUPIN] **Brief design discussion: broadcast messages from notifications UI**. Initial scope: notifications UI sends a message that fans out to **all running Claude Code sessions** (not just one targeted session). Later expansion: extend the broadcast surface to **all running agents** (Claude Agent SDK background jobs — Deep Research, Podcast Generator, Presentation, BFE, TFE, etc.). Open questions to surface before implementation: addressing model (target = "all CC sessions" vs explicit session list vs role-based?), delivery semantics (best-effort fire-and-forget vs ack-required vs idempotent retry?), payload shape (free-form text vs structured `notify_user`-shaped envelope?), UI affordance for composition (one-shot text input vs persistent broadcast pane?), permissions / rate-limiting / abuse vectors. Bring to whiteboard / cosa-voice ratification cycle if it grows past a single discussion turn. **Cross-reference**: existing per-session targeted notifications already flow via `notify_user` MCP tool; the broadcast surface is the inverse direction. **Status**: discussion only — no code, no design doc yet. Decide whether to capture as an R&D note under `src/rnd/v0.1.7/` after the discussion if scope warrants.
+
+### Carried forward (from 2026.05.07; partly closed today)
+
+- [ ] [LUPIN-COSA] **Commit the CoSA-side Phase 1 endpoint** — `src/cosa/rest/routers/multiplexer_config.py` (NEW) still uncommitted on CoSA side. Parent Lupin commit `362fa5d` is the documenting reference. Handle from a CoSA-context session.
+- [ ] [LUPIN] **history.md archival** — was at 19,719 tokens (CRITICAL); María's parallel session added a 60-line entry today, so it's higher now. Was deferred today because María had uncommitted edits. Re-check at start of session — if María's session has committed (check `git log --oneline -5`), proceed with `/plan-history-management mode=archive`.
+
+### What closed today (2026.05.07)
+
+- ✅ Phase 6a AC11a baseline captured (`ts-b786315c`, baseline PNG at `io/test-suite/visual-baselines/test_multiplexer_phase6a_visual/`, 13:59 EDT)
+- ✅ Phase 6a AC11b regression GREEN (`ts-bd34af9b`, 1 passed in 5.6s, 14:48 EDT)
+- ✅ Phase 6a fully CLOSED on both `:7999` and `:8000`
+- ✅ Two test-suite-submit silent-drop traps documented (memories: `feedback_test_types_e2e_not_e2e_ui` + `feedback_test_suite_submit_field_pytest_args`)
+- ✅ Phase 6b design doc + findings doc + resume-here doc all landed at canonical paths (`d70be64`)
+- ✅ Q-decisions (12/12) + REUSE pre-pass (28 RE + 5 L3) ratified
+- ⏸️ Pass 1 Fitness paused at 14 findings produced
+
+---
+
 ## ☀️ FIRST THING IN THE MORNING — 2026.05.07
 
 ### Pending — Multiplexer Phase 6a follow-ups
