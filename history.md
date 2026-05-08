@@ -138,6 +138,32 @@ The `--profile expeditor_smoke` matches `ExpeditorSmokeTest.PROXY_PROFILE` for t
 - `history.md` (session entry — this file)
 - `.claude-session.md` (manifest section for 6825e6af)
 
+**Commit**: 4d2579f
+
+#### Checkpoint | 2026.05.07 23:00 | Bounded ClaudeCodeJob redesign — plan approved + serialized + REUSE closed + Pass 1 partial (4/11)
+
+**Topic shift mid-session**: After bug-fix work landed at `4d2579f`, user pivoted to a proactive redesign of the BOUNDED `ClaudeCodeJob` to bring it to canonical agentic-job shape. Sequence:
+
+1. **Investigation** — surveyed retired `/api/claude-code/dispatch` cluster (closed 2026-05-05 by `73bee1b`); audited current `src/cosa/agents/claude_code/` (4 of 8 canonical files; missing `config.py`/`state.py`/`orchestrator.py`/`__main__.py`); gold-reference is `src/cosa/agents/deep_research/`.
+2. **Plan mode** — drafted at `~/.claude/plans/so-it-looks-like-silly-map.md`; user revised twice (rejected facade-wrap in favor of relocation of `cosa/orchestration/claude_code/` → `cosa/agents/claude_code/`; added cross-agent regression contract after flagging TFE/BFE possible dependency, which Explore agents verified is zero-deps today). Approved via ExitPlanMode.
+3. **Serialization** — Phase 0 docs landed at `src/rnd/v0.1.7/2026.05.07-claude-code-bounded-redesign/{01-design.md,90-execution-log.md}`.
+4. **Plan-review install** — `/plan-install-wizard` (mode=install) added `/plan-review` slash command to `.claude/commands/plan-review.md` with Lupin-specific customization (project=Lupin, prefix=[LUPIN], `:7999`/`:8000` venue notes, CoSA git boundary callout, auto-memory feedback-loop callout).
+5. **Convention amendment** (pre-flight to plan-review): created `00-index.md` (master nav + idempotency marker home + Prior art referenced section + Open follow-ups) and `00-working-contract.md` (Layer 2 anchor — test-layer enumeration, user-involvement gate, cannot-execute rule, phase-complete definition). Reformatted `01-design.md` decisions as `Q1`/`Q2`/`Q3 FROZEN 2026-05-07` with Question/✅ Decision/Rationale/Implication structure. Added 42 `EXECUTOR: AI / HUMAN <reason>` tags throughout Phase 6 + Phase 7 + Verification section. All 5 conventions satisfied (Convention 5 false-positive Manual hits skip-logged in `00-index.md`).
+6. **REUSE pre-pass (§4)** — single Explore agent grep against `src/cosa/` + `src/fastapi_app/` + `src/tests/`. 18 findings; 4 user decisions via `AskUserQuestion`: F#3 reframe `ClaudeCodeRunResult` as rename-from-`TaskResult`, F#8 INI namespace `claude code bounded job *` (anticipates future `claude code interactive job *`), F#18 `Task`/`TaskType` to `state.py`, applied F#4 + SDK_AVAILABLE re-export + #16 deferral. Convergence ✓.
+7. **Pass 1 Fitness (§5)** — single Explore agent. 11 findings + zero TBDs + zero Layer-3 Design Concerns. **STRUCTURAL batch (4/4) closed via single-finding `ask_yes_no` ratification** with conversation-mode voice gates: F1 atomic-rename approach (no shim — user surfaced the overengineering), F4 canonical "all args on `__init__` + parameterless run methods + job-level routing" matching Podcast `do_all_async`/`do_review_only_async`/`do_audio_only_async` pattern (user's qualifier "how does this affect bounded vs interactive dispatch?" surfaced the cleanest answer), F8 `stream_thoughts_to_voice` removed (vestigial copy-paste), F10 baseline timing re-targeted "BEFORE Phase 1" (Phase 2a relocation could leak into siblings).
+8. **Pass 1 SUSPENDED at 7 remaining findings** (4 implementation-completeness + 3 operational). Resume with `/plan-review --from=fitness`. Detail in `90-execution-log.md` § "Pass 1 — Fitness — ⏸️ PARTIALLY CLOSED 2026-05-07; SUSPENDED at 4/11 findings applied".
+9. **Filed**: TODO entry for `cosa-voice ask_yes_no()` to grow a "Neither" / "Discuss further" button — surfaced because the user wanted to qualify a yes mid-flight ("yes BUT how does this differ from existing patterns?") and the only tool today is comment-text on the chosen answer.
+
+**Files** (this checkpoint, all Lupin parent — no CoSA edits):
+- `src/rnd/v0.1.7/2026.05.07-claude-code-bounded-redesign/00-index.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.07-claude-code-bounded-redesign/00-working-contract.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.07-claude-code-bounded-redesign/01-design.md` (NEW; serialized + heavily restructured during plan-review amendments + REUSE/Pass-1 fixes)
+- `src/rnd/v0.1.7/2026.05.07-claude-code-bounded-redesign/90-execution-log.md` (NEW; phase status table + REUSE closure + Pass 1 partial breadcrumbs)
+- `.claude/commands/plan-review.md` (NEW; installed via `/plan-install-wizard`)
+- `TODO.md` (modified — neither-button feature request appended to Pending section)
+- `.claude-session.md` (manifest section — touched-files entries added)
+- `history.md` (this file — this checkpoint)
+
 **Commit**: [pending]
 
 ---
