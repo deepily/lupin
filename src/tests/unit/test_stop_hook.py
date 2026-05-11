@@ -81,6 +81,30 @@ class TestExtractQualifierComment:
         assert answer is None
         assert qualifier is None
 
+    def test_neither_with_comment( self ):
+        """'neither [comment: re-frame please]' → ('neither', 're-frame please')."""
+        answer, qualifier = extract_qualifier_comment( "neither [comment: re-frame please]" )
+        assert answer == "neither"
+        assert qualifier == "re-frame please"
+
+    def test_neither_no_comment( self ):
+        """'neither' → ('neither', None)."""
+        answer, qualifier = extract_qualifier_comment( "neither" )
+        assert answer == "neither"
+        assert qualifier is None
+
+    def test_neither_case_insensitive( self ):
+        """'NEITHER' → ('neither', None)."""
+        answer, qualifier = extract_qualifier_comment( "NEITHER" )
+        assert answer == "neither"
+        assert qualifier is None
+
+    def test_neither_with_whitespace( self ):
+        """'  neither  ' → ('neither', None) after stripping."""
+        answer, qualifier = extract_qualifier_comment( "  neither  " )
+        assert answer == "neither"
+        assert qualifier is None
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TestSummarizeTask

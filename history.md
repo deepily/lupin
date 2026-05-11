@@ -2,6 +2,52 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.11 PM - Session 6d544991 | `ask_yes_no()` "Neither" affordance — landed end-to-end (parent Lupin scope); CoSA commit pending separate context
+
+**Persona**: Arnold 🪨 (gravelly male, #FFD600)
+
+**Accomplishments**:
+
+- **`ask_yes_no()` MCP tool gains a third "Neither" answer button** alongside Yes/No, wired end-to-end across CoSA helper + Lupin MCP + Lupin frontend + project docs. Return value `"neither"` (or `"neither [comment: ...]"`) is distinct from `"yes"`/`"no"` so Claude can branch on it explicitly. Comment field is **load-bearing** when Neither is selected — `format_qualified_response` has a dedicated branch with explicit Claude-directive: "treat as instruction to re-frame the question, not as a soft yes or no. Read the comment, then ask a clearer follow-up." Closes the open TODO filed 2026-05-07 by session 6825e6af.
+
+- **7-phase plan executed end-to-end** (single approved sequence, no mid-impl gates): Phase 0 R&D docs → Phase 1 CoSA backend → Phase 2 MCP docstring → Phase 3 frontend HTML+CSS → Phase 4 unit tests → Phase 5 project docs → Phase 6 TODO+history+commit. Phase 7 (MCP restart for end-to-end E2E verification) is EXECUTOR: HUMAN, parked for next session.
+
+- **Q-decisions ratified** (7): Q1 label=Neither (user-ratified via cosa-voice `ask_multiple_choice`), Q2 keyboard shortcut=none (mouse/touch only, user-ratified), Q3 return value=`"neither"` lowercase, Q4 schema=extend YES_NO response_value vocabulary (NO new ResponseType — minimum blast radius), Q5 default-on-timeout unchanged (yes/no only), Q6 comment qualifier works for all 3 buttons, Q7 visual=neutral gray (#6c757d, no green per `feedback_no_green_in_persona_pool`).
+
+- **R&D doc set landed** at `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/` (4 files, ~13KB total): `00-index.md` (master nav, Q-table, REUSE table), `01-design.md` (full design with §2a comment-parsing-for-Neither guarantee + §3a Pass 1 Fitness/Viability self-review + §3b Pass 2 Adversarial self-review — all findings ratified inline, 0 Block / 0 Major / 2 Minor across both passes), `02-handoff-summary.md` (CoSA-context-session pointer for the working-tree commit), `90-execution-log.md` (per-phase status with verification evidence).
+
+- **R1 (`format_qualified_response` wording) promoted from "deferred" to "applied"** during Pass 1 self-review after user voice-feedback confirmed the comment-parsing-for-Neither is load-bearing, not optional. The `if answer == "neither":` branch with re-framed copy now lives in `notification_utils.py`.
+
+- **Cross-sub-project handoff**: One CoSA file edited (`src/cosa/utils/notification_utils.py` — regex + format branch + smoke test). Per `feedback_lupin_only_never_cosa`, the parent Lupin commit does NOT stage this file; it stays in the CoSA working tree for the next CoSA-context session to commit. The 02-handoff-summary.md doc seeds the CoSA-context TODO.
+
+- **Tests**: 12/12 `TestExtractQualifierComment` unit tests passing (4 new `test_neither_*` methods + 8 pre-existing yes/no tests confirming additive regex). Full `test_stop_hook.py` suite: 50/50 passing. `quick_smoke_test()` in `notification_utils.py` extended with 3 neither parse cases + 1 neither format case, all green. `py_compile` clean on both `notification_utils.py` and `cosa_voice_mcp.py`.
+
+- **MCP server restart caveat documented**: The cosa-voice MCP runs as a stdio subprocess of Claude Code (`Type: stdio`); the Python process loaded `cosa_voice_mcp.py` once at startup and does not re-read the file. Current session (6d544991) will NOT see the docstring change — fresh CC session required for end-to-end E2E verification. Phase 7 captures this as EXECUTOR: HUMAN.
+
+**Files** (parent-Lupin scope only — CoSA file edited but NOT staged):
+
+- `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/00-index.md` (NEW — 65 LoC)
+- `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/01-design.md` (NEW — ~250 LoC post Pass 1 + Pass 2 additions)
+- `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/02-handoff-summary.md` (NEW — 70 LoC)
+- `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/90-execution-log.md` (NEW — phase status)
+- `src/lupin_mcp/cosa_voice_mcp.py` (docstring updated for `ask_yes_no` — 3-way return value contract)
+- `src/fastapi_app/static/js/notifications.js` (3rd `<button class="response-button neither">` added to yes_no render at line 13796)
+- `src/fastapi_app/static/css/notifications.css` (new `.response-button.neither` neutral-gray rule)
+- `src/tests/unit/test_stop_hook.py` (4 new `test_neither_*` methods in `TestExtractQualifierComment`)
+- `src/docs/notification-api.md` (3 rows updated: `yes_no` table row at line 895, `ask_yes_no()` tools row at line 1646, example block return-value comment at line 1672)
+- `TODO.md` (marked MCP-Neither task ✅ DONE with details; added ☀️ FIRST THING NEXT SESSION for CoSA-context commit + fresh-session E2E verify; refreshed Last-updated)
+- `history.md` (this entry)
+- `.claude-session.md` (registered session 6d544991 + touched files)
+- (outside repo, edited) `~/.claude/CLAUDE.md` (one row updated in Available MCP Tools table at line 322; routing-table label denied by auto-classifier — acceptable, tool-description row is the load-bearing entry)
+- (outside repo, plan source) `~/.claude/plans/swirling-watching-hinton.md`
+
+**Files edited in CoSA submodule but NOT committed** (per cross-sub-project handoff):
+- `src/cosa/utils/notification_utils.py` — regex extension `(yes|no)` → `(yes|no|neither)`; `format_qualified_response` "neither" branch; `quick_smoke_test` 3 neither parse + 1 neither format cases. Stays in CoSA working tree for next CoSA-context session to commit.
+
+**Status**: Parent Lupin scope ✅ DONE. CoSA scope ⏳ pending CoSA-context-session commit. Fresh CC session ⏳ pending for end-to-end MCP-driven E2E verification.
+
+---
+
 ### 2026.05.11 - Session 6e8a6a03 | CC notifications-card normalization — Phase 0 docs + plan-review (all 3 passes) CLOSED; Phase 1 implementation parked READY TO BEGIN
 
 **Persona**: Rachel 🕊️ (calm & clear female, #7B1FA2)

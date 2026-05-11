@@ -73,7 +73,7 @@ User decision via `ask_multiple_choice` (verbatim voice response): **"Yeah optio
 
 ---
 
-Last updated: 2026-05-11 (Session 6e8a6a03 Rachel — CC card normalization Phase 0 + plan-review closure all 3 passes; Phase 1 implementation parked READY TO BEGIN. Parallel-session work from Mr. Radio @ 017dc1cc — multiplexer Phase 6b Pass 1 closed — also bundled into this commit per user direction.)
+Last updated: 2026-05-11 PM (Session 6d544991 Arnold — `ask_yes_no()` Neither affordance landed end-to-end; CoSA commit pending in separate context per cross-sub-project handoff. Prior session-end @ 6e8a6a03 Rachel — CC card normalization Phase 0 + plan-review closure all 3 passes; Phase 1 implementation parked READY TO BEGIN.)
 
 ---
 
@@ -85,9 +85,15 @@ The 6-endpoint legacy `/api/claude-code/dispatch` cluster was retired today. Two
 
 - [ ] [LUPIN-COSA] **Per-turn streaming on the cj-flow path** (optional follow-up). The legacy WS streamed `text` / `tool_use` / `tool_result` per turn. The cj-flow path currently emits only coarse start/complete/fail notifications. If user-facing demand surfaces, add per-turn `notify_progress` calls inside `ClaudeCodeJob._execute()` keyed by job_id, and update the dispatcher card's `#cc-response` panel (currently a retirement banner) to consume them. Not blocking; the queue path is functional without per-turn streaming.
 
-- [ ] [LUPIN-MOBILE] **Migrate `claude_code_repository.dart` off the retired endpoints.** Production code at `src/lupin-mobile/lib/features/claude_code/data/claude_code_repository.dart:18` POSTs to `/api/claude-code/dispatch`. Will 404 against any post-retirement Lupin server. Migrate to `POST /api/claude-code/queue/submit`. Update `claude_code_models.dart` request/response shapes; update BLoC + repository tests in `test/unit/claude_code/`. Decide UX for the disabled INTERACTIVE controls (mirror parent's "visibly disabled" pattern, hide, or stub). Mobile breadcrumbs already filed in `src/lupin-mobile/src/rnd/v0.1.6-migration/2026.04.15-tier-3-queue-and-claude-code-plan.md` and `2026.04.15-resync-mobile-with-lupin-api-v0.1.6.md`. **This work happens in a mobile session, not parent context.**
+- [ ] [LUPIN-MOBILE] **Migrate `claude_code_repository.dart` off the retired endpoints.** Production code at `src/lupin-mobile/lib/features/claude_code/data/claude_code_repository.dart:18` POSTs to `/api/claude-code/dispatch`. Will 404 against any post-retirement Lupin server. Migrate to **`POST /api/claude-code/submit`** (canonical URL post-2026-05-11 CC card normalization; old `/queue/submit` alias works for one release cycle through v0.1.8 deploy then removed). Update `claude_code_models.dart` request/response shapes; update BLoC + repository tests in `test/unit/claude_code/`. Decide UX for the disabled INTERACTIVE controls (mirror parent's "visibly disabled" pattern, hide, or stub). Cross-ref: handoff doc at `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md` for full migration context (Q8 verdict = PRIMARY, alias live). Mobile breadcrumbs in `src/lupin-mobile/src/rnd/v0.1.6-migration/2026.04.15-tier-3-queue-and-claude-code-plan.md` + `2026.04.15-resync-mobile-with-lupin-api-v0.1.6.md`. Mobile-side TODO entry `[LUPIN-CC-SUBMIT-RENAME]` seeded at `src/lupin-mobile/TODO.md`. **This work happens in a mobile session, not parent context.**
 
-- [ ] [LUPIN] **Live UI probe (manual gate).** Open `/app/notifications` in a browser with dev tools Network tab open, hard-refresh to bust cache, submit a BOUNDED dry-run via the dispatcher card. Confirm: (a) request goes only to `/api/claude-code/queue/submit`, (b) zero requests to `/api/claude-code/dispatch` or `/api/claude-code/ws/`, (c) yellow `.cc-retired-banner` is visible inside the dispatcher card with prominent retirement copy, (d) submitted job appears in the CJ Flow accordion. The programmatic verification is GREEN — this is the one remaining manual check the user owns.
+- [x] [LUPIN] **Live UI probe (manual gate).** ~~Open `/app/notifications`...~~ **RESOLVED 2026-05-11** (session 658ea35d, Mr. Radio) via CC Card Normalization Phase 5a — superseded by the normalization work which (a) deleted the `.cc-retired-banner` block + disabled inject/interrupt/end inputs entirely from the HTML, (b) renamed submit URL to canonical `/api/claude-code/submit` with `/queue/submit` alias preserved for one release cycle, and (c) verified end-to-end via 5.4/5.5 live JWT POSTs (both return `cc-{uuid8}` jobs) + 5.6 6/6 dry-run smoke + 5.11 TFE/BFE regression GREEN. The "manual" label was legacy metadata — Phase 5.7 was an AI-headless probe per test-ownership mandate. See `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` Phase 5a.
+
+---
+
+## 🧩 MULTIPLEXER FOLLOW-UPS (Session 658ea35d, 2026-05-11)
+
+- [ ] [LUPIN] **Multiplexer R&D consumer notice: CC card normalization landed 2026-05-11**. The notifications-page CC card was reshaped to sibling shape (form + submit + status div; no response panel, no inject controls, no session-info row). `JobsPaneRenderer.ts` is unchanged — it's agent-agnostic via `metadata.agent_type` (`stores/JobStore.ts:215`) and CC jobs continue to render uniformly. **Phase 6b visual baseline impact**: if Phase 6b touches CC card screenshots, expect to regenerate baselines (parent already scheduled Phase 5.9 to regen Lupin-side baselines). Full context: handoff doc at `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md`. Q8 verdict = PRIMARY (alias live for one release cycle).
 
 ---
 
@@ -97,14 +103,7 @@ Surfaced when user called Claude "Maria" (the assigned voice persona name). Clau
 
 ### Pending
 
-- [ ] [LUPIN-MCP] **Add a "neither" / "discuss-further" option to cosa-voice `ask_yes_no()`** (filed 2026-05-07 by session 6825e6af during plan-review pipeline). Today the only escape hatch from a poorly-framed yes/no question is the comment-text on the chosen answer — but the user may want to send an EXPLICIT signal that the question as framed CAN'T be answered with yes/no and that further discussion is needed before a determination. **Concrete asks**:
-  - UI: third button alongside Yes / No labelled **"Neither"** (or "Discuss" — naming TBD).
-  - Return value: distinct string (e.g. `"neither"` / `"neither [comment: ...]"`) so Claude can branch on it explicitly without parsing comment text.
-  - MCP signature: no new parameter — option always rendered. Default behavior on timeout stays as-is (returns `default` value).
-  - Spec update: `~/.claude/CLAUDE.md` `INTERACTIVE TOOL ROUTING` table should mention the "neither" affordance so Claude expects + handles it correctly.
-  - **Why this matters**: surfaced today during the canonical-shape ratification — the user wanted to qualify "yes" with "but tell me first how does this differ from existing patterns?" and the only way to deliver that signal mid-flight was an interrupted yes-with-typed-comment. An explicit "Neither — discuss further" button matches the user's mental model of how plan-review yes/no gates should behave.
-  - **Files likely involved**: `src/lupin_mcp/cosa_voice_mcp.py` (`ask_yes_no` tool definition + return-value contract), `src/fastapi_app/static/js/notifications.js` (response card UI for yes/no), `src/lupin_mcp/cosa_voice_response_card.py` if applicable, `~/.claude/CLAUDE.md` INTERACTIVE TOOL ROUTING section.
-  - **Cross-ref**: workflow `workflow/plan-review.md` Gate 1 + Gate 2 explicitly call `ask_yes_no()`; the affordance helps these gates handle ambiguous findings cleanly.
+- [x] [LUPIN-MCP] **Add a "neither" / "discuss-further" option to cosa-voice `ask_yes_no()`** — ✅ **LANDED Session 6d544991 (Arnold, 2026-05-11 PM)**. Third button labelled **Neither** wired end-to-end: HTML render (notifications.js), CSS neutral gray (notifications.css), regex extension (CoSA notification_utils.py — staged for CoSA-context commit), `format_qualified_response` "neither" branch with explicit re-frame directive, MCP tool docstring updated, 4 new unit tests in test_stop_hook.py (12/12 green), 3 notification-api.md rows + 1 CLAUDE.md row. R&D doc set at `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/` (00-index, 01-design with Pass 1 Fitness + Pass 2 Adversarial inline, 02-handoff-summary, 90-execution-log). **Current session won't see docstring change** — fresh CC session required (MCP stdio subprocess restart). See ☀️ FIRST THING NEXT SESSION below for the CoSA-context commit followup.
 
 - [x] [LUPIN-COSA OR LUPIN] **Investigate explicit conversation-mode-exit notification to MCP client.** — **RESOLVED Session 05da2b39 (2026-05-05 PM, checkpoint).** Confirmed the gap experimentally + via code audit: the displace path (Session B activates → A's listener gets `action:exit_conversation_mode` push → tmux-injected `<system-reminder>`) was fully wired and worked. The self-exit path (UI toggle / MCP `exit_conversation_mode()` / voice phrase / slash) was NOT — the router's `else:` branch only flipped the bridge and broadcast a `conversation_mode_changed` UI event, never pushing the listener-targeted action. Result: model retained the contract from prior `<system-reminder>` blocks until they scrolled out. **Fix shipped**: (a) Lupin — `conv_mode_exit_reminder()` body made reason-agnostic in `hook_common.py`. (b) CoSA — symmetric self-exit action push added to `conversation_mode.py` router (mirror of displace branch's per-session push). (c) Tests updated: `test_deactivate_pushes_ui_sync_and_self_action` + `test_body_announces_deactivation`. Auto-tier verification 100% green (3950 unit + 13 router + 41 wrap + 10 MCP + 50 WS smoke). Design + execution log: `src/rnd/v0.1.7/2026.05.05-conv-mode-self-exit-signal-gap/`. Cross-repo handoff: Lupin commit done in checkpoint; CoSA commit pending in separate context. Manual live verification deferred (would disrupt active conv-mode dialogue — surfaces naturally on next user-initiated off→on cycle).
 
@@ -122,6 +121,25 @@ Both changes are SERVER-SIDE in the cosa-voice MCP server source. They require t
 - The CURRENT session (2622c356) won't see the changes. A fresh session opened after restart will: hook allocates persona → `get_session_info()` returns `voice_persona` → Claude reads updated instructions → Claude TTS-announces by name at Phase A.
 
 If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that would be a less disruptive path than full Claude Code restart — worth checking before next session.
+
+---
+
+## ☀️ FIRST THING NEXT SESSION — `ask_yes_no` Neither: CoSA-context commit + fresh-session E2E verify
+
+**Cycle state on resume**:
+- Parent Lupin scope: ✅ landed in commit `<hash>` (session 6d544991 Arnold, 2026-05-11 PM)
+- CoSA scope: ⏳ **`src/cosa/utils/notification_utils.py`** modified in working tree, not committed (per `feedback_lupin_only_never_cosa` — parent context never commits CoSA)
+- MCP server: ⏳ stdio subprocess holds the OLD docstring; fresh CC session required to pick up the new return-value contract documentation
+
+**Resume actions**:
+- [ ] [LUPIN-COSA] In a CoSA-context session (`cd src/cosa && claude` or equivalent): `git status` → expect `utils/notification_utils.py` modified; `git diff utils/notification_utils.py` → confirm regex extension + `format_qualified_response` "neither" branch + smoke-test additions; commit with message like "Extend ask_yes_no qualifier regex + format helper to accept 'neither' answer"
+- [ ] [LUPIN] (Optional) Bump CoSA submodule pointer in parent Lupin after the CoSA commit lands
+- [ ] [LUPIN] Fresh CC session E2E verify: call `ask_yes_no("test question?")` from a new session, click the new **Neither** button, confirm Claude receives `"neither"` (or `"neither [comment: ...]"` with comment). Without restart, the current session's MCP stdio subprocess still holds the old docstring.
+
+**Read on resume**:
+1. `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/00-index.md` — master nav, Q-decisions, REUSE table
+2. `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/02-handoff-summary.md` — CoSA-context-session pointer with exact commit steps
+3. `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/90-execution-log.md` — phase status + post-implementation verification evidence
 
 ---
 

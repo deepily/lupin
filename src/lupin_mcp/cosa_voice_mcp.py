@@ -896,17 +896,24 @@ def ask_yes_no(
     """
     Ask a yes/no question and get the user's response as a string.
 
-    Convenience wrapper for quick binary decisions. The user may optionally
-    attach a qualifying comment to their answer via the UI.
+    Convenience wrapper for quick binary decisions, with a third "Neither"
+    escape hatch for cases where the question itself needs re-framing.
+    The user may optionally attach a qualifying comment to any answer via the UI.
 
     Requires:
         - question is a non-empty string
-        - default is "yes" or "no"
+        - default is "yes" or "no" (Neither is never a default — it requires
+          an explicit user click)
         - timeout_seconds is a positive integer
 
     Ensures:
-        - returns "yes", "no", "yes [comment: ...]", or "no [comment: ...]"
+        - returns one of:
+          * "yes", "no", "neither"
+          * "yes [comment: ...]", "no [comment: ...]", "neither [comment: ...]"
         - returns the default value (as string) on timeout or error
+        - On "neither", Claude should treat the response as a signal that the
+          question needs re-framing rather than as a soft yes or no — read the
+          comment (if present) and ask a clearer follow-up question
 
     Args:
         question: The yes/no question to ask
@@ -917,11 +924,14 @@ def ask_yes_no(
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
 
     Returns:
-        Annotated string: "yes", "no", "yes [comment: ...]", or "no [comment: ...]"
+        Annotated string: one of "yes", "no", "neither",
+        optionally suffixed with "[comment: ...]"
 
     Examples:
         response = ask_yes_no("Delete the old backups?")
-        # response == "yes" or "no" or "yes [comment: only the March ones]"
+        # response == "yes" or "no" or "neither"
+        # or with qualifier: "yes [comment: only the March ones]"
+        # or signaling re-frame: "neither [comment: ambiguous which backups]"
     """
     logger.debug( f"ask_yes_no() called: {question[:50]}..." )
 

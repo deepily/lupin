@@ -892,7 +892,7 @@ class ResponseType( str, Enum ):
 
 | Value              | UI Rendering                      | Response Format                     |
 |--------------------|-----------------------------------|-------------------------------------|
-| `yes_no`           | Yes/No buttons + optional comment | `"yes"`, `"no"`, or with `[comment: ...]` |
+| `yes_no`           | Yes/No/Neither buttons + optional comment | `"yes"`, `"no"`, `"neither"`, or with `[comment: ...]` |
 | `open_ended`       | Text input + mic button           | Free-form string                    |
 | `multiple_choice`  | Radio/checkbox options            | Selected label(s)                   |
 | `open_ended_batch` | Multiple text inputs on one screen | Dict keyed by header               |
@@ -1643,7 +1643,7 @@ directly. No bash commands or HTTP calls required.
 | Tool | Blocking | Returns |
 |------|----------|---------|
 | `notify()` | No | Delivery status string |
-| `ask_yes_no()` | Yes | `"yes"`, `"no"`, or with comment `"yes [comment: ...]"` |
+| `ask_yes_no()` | Yes | `"yes"`, `"no"`, or `"neither"` (the question needs re-framing), optionally suffixed with `[comment: ...]` |
 | `converse()` | Yes | `{"response": "..."}` |
 | `ask_multiple_choice()` | Yes | `{"answers": {"header": "selection"}}` |
 | `ask_open_ended_batch()` | Yes | `{"answers": {"header": "value", ...}}` |
@@ -1669,7 +1669,8 @@ response = ask_yes_no(
     priority        = "high",
     abstract        = "**Branch**: feature/auth\n**Commit**: abc1234"
 )
-# response: "yes", "no", "yes [comment: only the API]", etc.
+# response: "yes", "no", "neither", or with comment "yes [comment: only the API]"
+# "neither" signals the question needs re-framing — read any comment for guidance
 ```
 
 **Open-ended question**:

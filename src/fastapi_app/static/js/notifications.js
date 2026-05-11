@@ -13793,6 +13793,9 @@ class NotificationsUI {
                     <button class="response-button no ${noClass}" data-notification-id="${notification.id}" data-response="no">
                         ✗ No <span class="keyboard-hint">(N)</span>
                     </button>
+                    <button class="response-button neither" data-notification-id="${notification.id}" data-response="neither" title="Neither — the question itself needs re-framing">
+                        ⊘ Neither
+                    </button>
                 </div>
                 <div class="yes-no-comment-hint" data-notification-id="${notification.id}">
                     ${notification.display_qualifier_widget ? 'You may comment on your answer here if you wish' : 'Press C to add comment'}
