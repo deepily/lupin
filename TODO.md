@@ -73,7 +73,7 @@ User decision via `ask_multiple_choice` (verbatim voice response): **"Yeah optio
 
 ---
 
-Last updated: 2026-05-05 PM (Session 45e6bf84 wrapped 503 cascade fix Phases 0-4a — overturned May-1 §Phase 5 misdiagnosis [proxy DOES support WS-as-test-user, proven empirically; UUID 50c73ba7-... appears in user_sessions when proxy runs with env-var creds]; shipped raise-on-failure WS-auth poll in EmbeddedProxyMixin._start_proxy + 7-caller try/except + http_error_* re-classification; `:7999` Phase 4a probes both green; `:8000` Phase 4b smoke run surfaced ADJACENT bug — pytest-mode `--auto-proxy` is registered in conftest but never starts the proxy because pre_run_hook only fires from `__main__` invocation, not pytest discovery; bug-fix-queue.md updated with follow-up. Bug stays In Progress under 45e6bf84 owner; commits 621be65, 8388df3 + this session-end commit.)
+Last updated: 2026-05-11 (Session 6e8a6a03 Rachel — CC card normalization Phase 0 + plan-review closure all 3 passes; Phase 1 implementation parked READY TO BEGIN. Parallel-session work from Mr. Radio @ 017dc1cc — multiplexer Phase 6b Pass 1 closed — also bundled into this commit per user direction.)
 
 ---
 
@@ -122,6 +122,46 @@ Both changes are SERVER-SIDE in the cosa-voice MCP server source. They require t
 - The CURRENT session (2622c356) won't see the changes. A fresh session opened after restart will: hook allocates persona → `get_session_info()` returns `voice_persona` → Claude reads updated instructions → Claude TTS-announces by name at Phase A.
 
 If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that would be a less disruptive path than full Claude Code restart — worth checking before next session.
+
+---
+
+## ☀️ FIRST THING NEXT SESSION — CC Card Normalization Phase 1 implementation begin
+
+**Cycle state on resume**:
+- Phase 0 Documentation ✅ CLOSED 2026-05-10 (R&D doc set serialized to `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/`)
+- `/plan-review` REUSE pre-pass ✅ CLOSED 2026-05-10 (3 fixes applied)
+- `/plan-review` Pass 1 Fitness ✅ CLOSED 2026-05-11 (8/11 findings applied — M1 + all 7 Minors)
+- `/plan-review` Pass 2 Adversarial ✅ CLOSED 2026-05-11 (7/7 findings + 1 swept pattern offender applied)
+- Idempotency marker stamped: `last-reviewed-at: 2026-05-11 (commit c1cec74)` in `00-index.md`
+- Phase 1 (Track A: HTML normalization) ⏳ **READY TO BEGIN** — gated on user go-ahead
+- Phases 2-6 ⏳ pending
+
+**Resume action**:
+- [ ] [LUPIN] Begin Phase 1 (HTML normalization in `src/fastapi_app/static/html/notifications.html` lines 117-218). 8 sub-steps: rename header, promote disabled INTERACTIVE option, delete 5 dead UI blocks (cc-execution-mode, cc-response, cc-option-b-controls, cc-session-info), insert `#cc-submit-status` div, delete `.cc-retired-banner` from `notifications.css`.
+- [ ] [LUPIN] Phase 2 (JS handler normalize) — rewrite `submitClaudeCodeToQueue()` mirroring research handler at `notifications.js:2870-2949`; switch fetch URL `/api/claude-code/queue/submit` → `/api/claude-code/submit`.
+- [ ] [LUPIN] Phase 3 (E2E test cleanup) — delete 2 obsolete test functions in `test_job_dispatch.py`, add `test_cc_card_renders_in_sibling_shape()`.
+- [ ] [LUPIN-COSA] Phase 4 (URL rename + alias) — `src/cosa/rest/routers/claude_code_queue.py`: rename primary route + add stacked-decorator alias with `deprecated=True`. Q8 verdict determined at Phase 5.3 `quick_smoke_test()`. CoSA file edits OK from parent context; CoSA git operations stay in CoSA-context session per `feedback_lupin_only_never_cosa`.
+- [ ] [LUPIN] Phase 4.5 (handoff doc finalize) — populate commit-date + Q8 verdict in `02-handoff-summary.md` mobile TODO template.
+- [ ] [LUPIN] Phase 5a verification on `:7999` — py_compile, import-chain, router-smoke (Q8 verdict gate), curl probes, dry-run smoke, headless UI probe, cross-agent regression (TFE + BFE).
+- [ ] [LUPIN] Phase 5b verification on `:8000` SCHEDULED via `/schedule-tests` skill — E2E functional, E2E visual baseline regen, subscription smoke. **EXECUTOR: HUMAN** confirms slot availability before AI fires the test-suite submit.
+- [ ] [LUPIN] Phase 6 wrap — TODO seeds for mobile + multiplexer, history.md, parent commit (NOT CoSA — that's separate context).
+
+**Read on resume**:
+1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`
+2. `history.md` (this session's entry: 2026.05.11 Session 6e8a6a03 Rachel)
+3. `TODO.md` (this section)
+4. `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/00-index.md` — master nav, Q-decisions table, REUSE table with verification spot-checks
+5. `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md` — full design with 9 Q-N FROZEN, 8 phases, 19 ACs (all post-plan-review-applied)
+6. `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md` — cross-sub-project handoff for mobile + multiplexer teams
+7. `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` — phase status table + REUSE/Pass1/Pass2 closure evidence
+
+**Key ratified decisions worth knowing on resume**:
+- Q1: URL renames `/queue/submit` → `/submit` with backward-compat alias (one release cycle)
+- Q2: INTERACTIVE option stays as disabled `<option>` with tooltip (visual breadcrumb for future return)
+- Q8 fallback: if FastAPI rejects stacked decorators, COMMENT OUT (not delete) the deviant decorator with breadcrumb; mobile + smoke tests migrate immediately
+- Q9: cross-sub-project handoff via `02-handoff-summary.md` + TODO seeds in mobile + multiplexer R&D folder
+
+**Origin plan file** (pre-merge reference): `~/.claude/plans/ok-so-far-so-swirling-pearl.md` (approved 2026-05-10 via ExitPlanMode).
 
 ---
 

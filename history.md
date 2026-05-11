@@ -2,6 +2,47 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.11 - Session 6e8a6a03 | CC notifications-card normalization — Phase 0 docs + plan-review (all 3 passes) CLOSED; Phase 1 implementation parked READY TO BEGIN
+
+**Persona**: Rachel 🕊️ (calm & clear female, #7B1FA2)
+
+**Accomplishments**:
+
+- **New R&D milestone serialized** at `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/` (4 docs, 665 lines total, all Phase 0 deliverables landed before any code edits per documentation-first protocol):
+  - `00-index.md` (141 LOC) — master nav, 9 Q-N FROZEN decisions table, REUSE-table with verification spot-checks, doc-conventions status, idempotency marker stamped
+  - `01-design.md` (256 LOC pre-review, ~290 LOC post-review fixes) — full design: context, Q1-Q9 FROZEN, 8 phases (Phase 0/1/2/3/4/4.5/5/6) with EXECUTOR: AI/HUMAN tags, 19 ACs, risks, out-of-scope, REUSE pre-pass anchor
+  - `02-handoff-summary.md` (110 LOC) — cross-sub-project handoff for Lupin mobile + multiplexer R&D teams (TL;DR / what changed / why / per-sub-project action / migration timeline / where to ask + 3-tier contact ladder)
+  - `90-execution-log.md` (158 LOC pre-review, ~280 LOC post-review evidence) — phase status table, per-phase scaffolds, REUSE + Pass 1 + Pass 2 closure sections
+
+- **`/plan-review` gate fully CLOSED 2026-05-11** — all 3 passes sequential per Q7, zero parallel dispatch:
+  - **REUSE pre-pass**: 8 findings (4 reuse-as-is + 1 extend-existing + 3 genuinely-new). 3 fixes applied: elevated `.cc-retired-banner` CSS orphan cleanup to explicit Phase 1.8 + AC1.5; updated 00-index REUSE table with verbatim file:line spot-checks (notifications.js:2870-2949 research handler shape confirmed; notifications.html:272/319/381/441 sibling status divs confirmed; JobStore.ts:215 agent-agnostic confirmed; FastAPI 0.115.12 stacked-decorator support confirmed); added Risk row for `deprecated=True` repo novelty.
+  - **Pass 1 Fitness**: 11 findings (0 Block / 4 Major / 7 Minor / 0 L3). 8/11 applied: M1 (Q8 verdict gate pinned to Phase 5.3) + all 7 Minors (function-name fossil note, literal mobile TODO entry shape, "one release cycle" tightened to v0.1.8+ trigger, WHO-to-contact 3-tier ladder, mobile TODO tag `[LUPIN-CC-SUBMIT-RENAME]` + section, backend coverage scope clarification, dropped `include_in_schema=False` so alias appears in OpenAPI as `deprecated: true`). M2/M3/M4 user-skipped.
+  - **Pass 2 Adversarial**: 7 findings + 1 swept pattern offender (0 Block / 5 Major / 2 Minor / 0 L3). All 8 applied: A1 (AC11 visual baseline criteria falsifiable with pytest count + diff allow-list), A2 (AC5 "manual submit" → programmatic), A3 (Two-phase E2E gate `EXECUTOR: HUMAN` tag with same-line justification), A4 (Phase 6.8 `EXECUTOR: AI` + explicit 13-file allow-list), A5 (Phase 6.9 `EXECUTOR: HUMAN` for CoSA commit with nested-repo-boundary justification), a1 (mobile TODO placeholder vs literal clarification), a2 ("manual" metadata in Phase 6.1 + AC13 explained as legacy-item-name), plus swept the same "manual" pattern at Risks row 216 per `feedback_sweep_for_pattern_offenders`.
+
+- **Idempotency marker stamped** in `00-index.md`: `last-reviewed-at: 2026-05-11 (commit c1cec74 — pre-implementation HEAD)`.
+
+- **Zero Layer-3 Design Concerns** across all 3 passes. All 9 Q-N FROZEN decisions stand unchanged.
+
+- **Plan file authored + serialized**: `~/.claude/plans/ok-so-far-so-swirling-pearl.md` (drafted in plan-mode 2026-05-09/10, approved via ExitPlanMode 2026-05-10, serialized into this R&D folder).
+
+- **New auto-memory filed**: `feedback_cross_project_handoff_doc.md` — when a change touches multiple sub-projects (mobile, multiplexer, plugin, CoSA, in-flight R&D), plan must include (1) one concise ~150-line handoff doc and (2) seed TODO entries in each affected sub-project. User-ratified 2026-05-10 during plan-mode walk.
+
+- **Channel switch mid-pass to cosa-voice high-priority action-required UI**: at user request mid-Pass-1, all subsequent gates routed through `mcp__cosa-voice__ask_multiple_choice` with `priority="high"` instead of built-in `AskUserQuestion`, so each plan-review decision surfaces as action-required notification in the UI (user not switching between terminal and browser).
+
+**Files**:
+- `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/00-index.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` (NEW)
+- `TODO.md` (modified — new "FIRST THING NEXT SESSION — CC Card Normalization Phase 1" section above Mr. Radio's parallel-session Phase 6b section; Last-updated line refreshed)
+- `history.md` (this entry)
+- 2 NEW auto-memory files (outside repo): `feedback_cross_project_handoff_doc.md`, MEMORY.md index updated
+- 1 NEW plan file (outside repo): `~/.claude/plans/ok-so-far-so-swirling-pearl.md`
+
+**Status**: Phase 1 implementation BLOCKED on next-session user go-ahead. Origin plan + R&D folder are self-contained — fresh-context session can pick up by reading the 4 R&D docs in order.
+
+---
+
 ### 2026.05.11 - Session 017dc1cc | Multiplexer Phase 6b Pass 1 Fitness CLOSED — 14/14 ratified via action-required UI
 
 **Persona**: Mr. Radio 🦉 (authoritative warm male, #FFA000)
