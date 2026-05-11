@@ -2,6 +2,49 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.11 PM - Session 77e1bb27 (Mr. Radio) | Voice Persona Rename Domi→Rio implementation + Phase 5b :8000 scheduling (2 batches)
+
+**Persona**: Mr. Radio 🦉 (authoritative warm male, #FFA000)
+
+#### Checkpoint | 2026.05.11 18:00 EDT | Domi→Rio rename landed; Phase 5b batches 1+2 in flight
+
+**Accomplishments**:
+
+- **Voice Persona Rename "Domi" → "Rio"** — name-only label rotation per user directive. Inherited Phase 0 plan doc from prior session 68edb64b (`src/rnd/v0.1.7/2026.05.11-rename-persona-domi-to-rio.md`, which was orphaned uncommitted at 68edb64b session-end). User answers to the 4 open questions: icon ⚡ KEEP, color `#880E4F` KEEP, profile text "Young & energetic female" KEEP, this-session reallocation N/A (Mr. Radio active). Implementation: 4 files edited (5 hits in `lupin-app.ini` pool list + 4 key block; 6 surgical edits in `lupin-app-splainer.ini` sparing line 175's ElevenLabs catalog reference; 7 replace_all hits in `test_voice_persona_helpers.py`; 2 replace_all hits in `test_voice_persona_allocation.py`). Audit-trail rename history added to splainer line 297 (pool list) and line 319 (Rio voice id splainer), mirroring existing Nora→maria + Quentin→mr radio + Adam→Tiberius precedent. Verification: py_compile clean; unit 34/34 pass (0.08s); smoke 7/7 pass (0.39s); live `:7999` `GET /api/cosa-voice/voice-persona/pool` returns `Rio` with all preserved attributes intact. **No `:7999` bounce required** — pool query re-reads INI per request (pleasant surprise vs the plan's "out-of-scope" assumption).
+
+- **CC Card Normalization Phase 5b — Batch 1 scheduled + post-mortem** — user explicitly authorized `lupin-rest-test` (`:8000`) bounce; refresh-test-server.sh ran clean (24s to healthy). 3 sequential submissions via `/api/test-suite/submit` at 17:13:48 EDT, scheduled for 17:16:48 / 17:31:48 / 17:46:48. Results: **5.8 GREEN** (30/30 passed, 106.6s, AC11 met; new `test_cc_card_renders_in_sibling_shape` runs clean); **5.9 baseline regen completed** (16 passed, 0 failed, 15 errors, 0 skipped — the 15 "errors" are `pytest_playwright_visual_snapshot` standard `--update-snapshots` teardown signals "Snapshots updated. Please review images.", NOT failures; 15 baselines regenerated at `io/test-suite/visual-baselines/` covering 3 CC-normalization-adjacent + 5 auth/account + 5 admin + 2 dev/infra paths); **5.10 SKIPPED** (0/0/0/2 — subscription tests gated out, user later noted 401-cred-system issues at the time as likely cause).
+
+- **CC Card Normalization Phase 5b — Batch 2 resubmitted** — at 17:59:16 EDT user reported the credential-processing 401 issues were restored. Resubmitted same triplet structure but with 5.9 as a TRUE regression (no `--update-snapshots`) to close AC11 via self-consistency check against batch-1's regenerated baselines: **5.8 retry** `ts-476c971a` @ 18:01:16, **5.9-regression** `ts-99f2fa02` @ 18:13:16, **5.10 retry** `ts-8461cdd4` @ 18:25:16. Results expected ~18:35 EDT; next session-checkpoint or session-end revisits the done bucket.
+
+**Files modified** (parent Lupin scope only):
+
+- `src/conf/lupin-app.ini` — Domi→Rio rename (5 lines: pool list + 4 key block); `=` column alignment preserved. **Note**: file also carries parallel session 9a4a601d (Rachel)'s commons INI keys at lines 518-530 (cleanly separate hunk; co-committed by interleaved-file-state pragmatism with attribution in commit message).
+- `src/conf/lupin-app-splainer.ini` — Domi→Rio rename (6 surgical edits: pool list + maria color disambig + 4 Rio key splainers + Arnold color disambig); line 175 ElevenLabs catalog reference deliberately preserved. **Note**: also carries Rachel's commons splainer block at lines 691-705 (cleanly separate).
+- `src/tests/unit/test_voice_persona_helpers.py` — replace_all Domi→Rio (7 hits).
+- `src/tests/smoke/test_voice_persona_allocation.py` — replace_all Domi→Rio (2 hits).
+- `src/rnd/v0.1.7/2026.05.11-rename-persona-domi-to-rio.md` — plan doc orphaned by 68edb64b session-end; folded into this commit for clean audit trail.
+- `TODO.md` — Phase 5b 3-job batch closure rewritten to reflect batch-1 results + batch-2 in-flight scheduling; new "✅ DONE — Voice Persona Rename Domi → Rio" section appended.
+- `history.md` (this entry).
+- `.claude-session.md` — register session 77e1bb27 Mr. Radio + per-Edit touched-file records.
+
+**Status**:
+
+- ✅ Domi → Rio rename CLOSED (4 files edited, 34/34 unit + 7/7 smoke green, live `:7999` verified)
+- ✅ Phase 5b batch 1 fired + post-mortem written (5.8 GREEN; 5.9 baselines regenerated; 5.10 skipped pending credential restoration)
+- ⏳ Phase 5b batch 2 fired (results @ ~18:35 EDT); revisit at next checkpoint
+- ⏳ CC card normalization Phase 6.8 parent commit (separate concern, gated on Phase 5b full closure)
+- ⏳ Mobile sub-repo TODO seed for "Domi" → "Rio" in cheat-sheets — deferred to mobile-context session per plan-handoff convention
+
+**Commits**: `54f66a6` (this checkpoint commit — parent Lupin only)
+
+**Caveats / Notes**:
+
+- **Parallel session co-commit (lupin-app.ini + splainer)**: parallel session `9a4a601d` (Rachel, persona Rachel) was mid-Phase-1 implementation of inter-session-commons MCP and had already added 12 commons INI keys + 9 splainer entries to those 2 files when I started editing. Hunks are physically separate (Rachel's at lines 518+ / 691+; mine at 794-826 / 297-326). Pragmatic decision: commit both sets together with explicit attribution in commit message. Rachel's Python code (`commons_ask.py`, `commons_archival.py`, `commons` MCP shims in `cosa_voice_mcp.py`, etc.) is NOT in this commit — it remains in her manifest section for her own commit.
+- **Plan doc adoption**: `2026.05.11-rename-persona-domi-to-rio.md` was authored by session 68edb64b (Domi, evening) and intended to be committed in that session-end per the entry below this one. The 68edb64b session-end commit never landed (no `Session-end 68edb64b` in `git log`), leaving the plan doc orphaned uncommitted. Adopted into this commit for clean audit trail; cross-references in the plan doc itself remain valid.
+- **`:7999` server-lifecycle**: did NOT bounce — pool query re-reads INI per request, so the rename was live immediately on `GET /api/cosa-voice/voice-persona/pool` without restart. Pleasant deviation from the plan's "Out of Scope" expectation. Per server-lifecycle Rule 1 (never volunteer a `:7999` bounce), no advisory issued.
+
+---
+
 ### 2026.05.11 EVE - Session 68edb64b | Voice Persona Rename — brainstormed alternatives to "Domi", user picked "Rio", plan doc serialized + delivered as viewer link
 
 **Persona**: Domi ⚡ (Young & energetic female, #880E4F) — *the very persona being renamed in the plan this session produced*

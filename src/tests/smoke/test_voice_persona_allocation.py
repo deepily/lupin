@@ -126,7 +126,7 @@ class TestVoicePersonaPool:
         pool_names = [ p[ "name" ] for p in body[ "pool" ] ]
         assert len( pool_names ) == 6, f"Expected 6-voice pool, got {pool_names}"
         assert "Sam" not in pool_names, "Sam must NOT be in the allocatable pool"
-        assert set( pool_names ) == { "maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" }
+        assert set( pool_names ) == { "maria", "mr radio", "Rachel", "Tiberius", "Rio", "Arnold" }
 
 
 class TestVoicePersonaAllocateAndRelease:
@@ -146,7 +146,7 @@ class TestVoicePersonaAllocateAndRelease:
         persona = body[ "voice_persona" ]
         assert persona is not None
         assert persona[ "voice_id" ]
-        assert persona[ "name" ] in { "maria", "mr radio", "Rachel", "Tiberius", "Domi", "Arnold" }
+        assert persona[ "name" ] in { "maria", "mr radio", "Rachel", "Tiberius", "Rio", "Arnold" }
         assert persona[ "voice_id" ] != "G7ILShrCNLfmS0A37SXS", "Sam's voice ID must NOT be allocated"
         assert "assigned_at" in persona
 
