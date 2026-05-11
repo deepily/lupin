@@ -323,3 +323,11 @@ Per `feedback_plan_self_audit_against_memory`:
 | `feedback_tests_parameterize_base_url` | ✅ Phase 6+ E2E tests will read `LUPIN_API_URL` (will document in phase doc) |
 
 No violations detected at draft time.
+
+---
+
+## 9. Open follow-ups (cross-cutting)
+
+| Filed | Source | Note |
+|-------|--------|------|
+| 2026-05-11 | Parent Lupin CC Card Normalization (session 658ea35d) | CC card on `/app/notifications` reshaped to sibling shape (form + submit + status div; no response panel, no inject controls, no session-info row). Submit URL renamed to canonical `/api/claude-code/submit`; old `/queue/submit` alias preserved for one release cycle (Q8 verdict PRIMARY). `JobsPaneRenderer.ts` unchanged — agent-agnostic via `metadata.agent_type`. **Phase 6b visual-baseline impact**: if Phase 6b touches CC card screenshots, expect to regen baselines. Full handoff: [`../2026.05.09-cc-card-normalization/02-handoff-summary.md`](../2026.05.09-cc-card-normalization/02-handoff-summary.md). |

@@ -116,7 +116,7 @@
                 <!-- Claude Code Dispatcher Card -->
                 <div class="job-submit-card" id="claude-code-submit-card" data-testid="notifications-cc-card">
                     <div class="job-submit-card-header" onclick="toggleSection('claude-code-section')">
-                        <h4>🤖 Claude Code Dispatcher</h4>
+                        <h4>🤖 Submit Claude Code Task</h4>
                         <button class="toggle-button" id="claude-code-toggle">▶</button>
                     </div>
                     <div class="section-content collapsed" id="claude-code-section">
@@ -143,13 +143,7 @@
                                 <label for="cc-task-type" style="font-size: 12px; color: #666;">Task:</label>
                                 <select id="cc-task-type" data-testid="notifications-cc-task-type-select" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
                                     <option value="BOUNDED" selected>Bounded</option>
-                                    <!-- INTERACTIVE option retired 2026-05-05 with /api/claude-code/dispatch (no inject/interrupt parity yet on cj-flow path). -->
-                                </select>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 6px;" title="Direct/Socket execution retired 2026-05-05 — CJ Flow is the sole submission path">
-                                <label for="cc-execution-mode" style="font-size: 12px; color: #666;">Flow:</label>
-                                <select id="cc-execution-mode" data-testid="notifications-cc-execution-mode-select" disabled style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; background: #fff3cd; color: #856404; cursor: not-allowed;">
-                                    <option value="queue" selected>CJ Flow (only path)</option>
+                                    <option value="INTERACTIVE" disabled title="Returns when ClaudeCodeJob.inject/interrupt/end_session ship — see TODO.md 'CC DISPATCH RETIREMENT — Follow-ups'">Interactive (coming back later)</option>
                                 </select>
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
@@ -163,6 +157,8 @@
                                 </span>
                             </button>
                         </div>
+
+                        <div id="cc-submit-status" data-testid="notifications-cc-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
 
                         <!-- Scheduling Options -->
                         <div class="schedule-section" data-testid="notifications-cc-schedule-section">
@@ -179,41 +175,6 @@
                             </div>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Response:</label>
-                            <pre id="cc-response" data-testid="notifications-cc-response" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px; min-height: 100px; max-height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;">⚠️ Live per-turn streaming retired 2026-05-05.
-
-Submitted jobs now appear in the CJ Flow accordion below as cc-* job cards. This panel is preserved as a DOM contract (submitClaudeCodeToQueue rewrites .textContent on submit) but no longer streams per-turn output.
-
-Coarse-grained progress notifications still arrive via the standard notifications channel.
-
-See: src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md</pre>
-                        </div>
-
-                        <!-- Option B Controls retired 2026-05-05 with /api/claude-code/dispatch.
-                             The cj-flow ClaudeCodeJob lacks inject/interrupt/end_session.
-                             Banner replaces the live controls so the retirement is visible in dev tools.
-                             Original DOM ids preserved as disabled stubs (data-testids stay so E2E tests
-                             find them and report-skip with a breadcrumb pointing here). -->
-                        <div id="cc-option-b-controls" class="cc-retired-banner" data-testid="notifications-cc-option-b-controls" style="padding: 12px; margin-bottom: 12px;">
-                            <strong>⚠️ INTERACTIVE control panel retired 2026-05-05.</strong><br>
-                            The legacy <code>/api/claude-code/dispatch</code> endpoint and its inject / interrupt / end-session controls have been eliminated. Inject &amp; interrupt &amp; end-session controls will return when <code>ClaudeCodeJob</code> gains bidirectional control on the cj-flow path. See <code>src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md</code> and the <code>bug-fix-queue.md</code> retirement entry.
-                            <div style="display: flex; gap: 8px; align-items: center; margin-top: 10px; opacity: 0.45;">
-                                <input type="text" id="cc-inject-input" data-testid="notifications-cc-inject-input" placeholder="(retired — see banner above)" disabled style="flex: 1; padding: 8px; border: 1px dashed #856404; border-radius: 4px; background: #fff8e1; cursor: not-allowed;">
-                                <button id="cc-inject-btn" data-testid="notifications-cc-inject-btn" type="button" disabled style="padding: 8px 12px; background: #ccc; color: #666; border: none; border-radius: 4px; cursor: not-allowed;">💬 Inject (retired)</button>
-                            </div>
-                            <div style="display: flex; gap: 8px; margin-top: 6px; opacity: 0.45;">
-                                <button id="cc-interrupt-btn" data-testid="notifications-cc-interrupt-btn" type="button" disabled style="padding: 8px 12px; background: #ccc; color: #666; border: none; border-radius: 4px; cursor: not-allowed;">⏹️ Interrupt (retired)</button>
-                                <button id="cc-end-btn" data-testid="notifications-cc-end-btn" type="button" disabled style="padding: 8px 12px; background: #ccc; color: #666; border: none; border-radius: 4px; cursor: not-allowed;">🛑 End Session (retired)</button>
-                            </div>
-                        </div>
-
-                        <!-- Session Info -->
-                        <div id="cc-session-info" data-testid="notifications-cc-session-info" style="display: none; padding: 8px 12px; background: #e7f3ff; border-radius: 4px; font-size: 12px;">
-                            <span style="margin-right: 16px;">Task ID: <code id="cc-task-id">--</code></span>
-                            <span style="margin-right: 16px;">Status: <span id="cc-status">--</span></span>
-                            <span>Cost: <span id="cc-cost">$0.00</span></span>
-                        </div>
                     </div>
                 </div>
 

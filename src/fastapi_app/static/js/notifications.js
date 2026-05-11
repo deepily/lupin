@@ -37,9 +37,10 @@ class NotificationsUI {
         // WebSocket connections
         this.queueChannel = null;
         this.audioChannel = null;
-        // Claude Code direct-dispatch WebSocket + task-id state retired 2026-05-05
-        // (see src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/). Submissions
-        // now route through /api/claude-code/queue/submit and surface in the CJ Flow accordion.
+        // Claude Code submissions route through /api/claude-code/submit (canonical) and
+        // surface in the CJ Flow accordion via agent-agnostic job_state_transition events.
+        // The /api/claude-code/queue/submit alias is preserved for one release cycle per
+        // src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.
 
         // Session management
         this.queueSessionId = null;
@@ -3729,40 +3730,44 @@ class NotificationsUI {
     }
 
     async submitClaudeCode() {
-        // Direct-dispatch path retired 2026-05-05; queue submission is now the sole path.
         const project = document.getElementById( 'cc-project' ).value;
         const prompt = document.getElementById( 'cc-prompt' ).value;
         const taskType = document.getElementById( 'cc-task-type' ).value;
         const dryRunCheckbox = document.getElementById( 'cc-dry-run' );
         const dryRun = dryRunCheckbox ? dryRunCheckbox.checked : false;
 
+        await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun );
+    }
+
+    async submitClaudeCodeToQueue( project, prompt, taskType, dryRun ) {
+        /**
+         * Submit a Claude Code task to CJ Flow queue for background execution.
+         *
+         * Mirrors the sibling-card pattern (research handler at ~L2865-2949):
+         * statusDiv updates, button disable + spinner, no response panel.
+         * Submitted jobs surface in the multiplexer Jobs pane via agent-agnostic
+         * job_state_transition events.
+         */
+        const submitButton = document.getElementById( 'cc-submit' );
+        const loadingSpinner = document.getElementById( 'cc-loading' );
+        const statusDiv = document.getElementById( 'cc-submit-status' );
+
         if ( !prompt.trim() ) {
-            alert( 'Please enter a task prompt' );
+            statusDiv.textContent = '⚠️ Please enter a task prompt.';
+            statusDiv.style.color = '#dc3545';
             return;
         }
 
-        // Show loading state
-        const loadingEl = document.getElementById( 'cc-loading' );
-        const submitBtn = document.getElementById( 'cc-submit' );
-        const responseEl = document.getElementById( 'cc-response' );
-
-        if ( loadingEl ) loadingEl.style.display = 'inline-block';
-        if ( submitBtn ) submitBtn.disabled = true;
-
-        await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl );
-    }
-
-    async submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl ) {
-        /**
-         * Submit Claude Code task to CJF queue for background execution.
-         * Jobs appear in the queue section and are tracked via job cards.
-         */
-        if ( responseEl ) responseEl.textContent = 'Submitting to CJF queue...';
-
-        this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
-
         try {
-            const response = await fetch( '/api/claude-code/queue/submit', {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Submitting to CJ Flow queue...';
+            statusDiv.style.color = '#666';
+
+            this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
+
+            const response = await fetch( '/api/claude-code/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -3780,48 +3785,39 @@ class NotificationsUI {
             } );
 
             if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'Queue submission failed' );
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
             }
 
             const data = await response.json();
-
             this.log( `Claude Code job queued: ${data.job_id} at position ${data.queue_position}` );
 
-            // Update UI for queue mode
-            document.getElementById( 'cc-task-id' ).textContent = data.job_id;
-            document.getElementById( 'cc-status' ).textContent = 'Queued';
-            document.getElementById( 'cc-session-info' ).style.display = 'flex';
+            // Success feedback
+            statusDiv.textContent = `✓ Claude Code job submitted! Job ID: ${data.job_id}, Position: ${data.queue_position}`;
+            statusDiv.style.color = '#28a745';
 
-            // Update response area with queue info
-            if ( responseEl ) {
-                responseEl.textContent = `Job ${data.job_id} queued at position ${data.queue_position}.\n\nThe job will appear in the CJF queue section and send notifications via the job card.\n\nNo WebSocket streaming in queue mode - check the queue section for progress.`;
-            }
-
-            // Clear cost display (not available until job completes)
-            document.getElementById( 'cc-cost' ).textContent = '$0.00 (pending)';
-
-            // Refresh queues to show new job
+            // Refresh queues to show new job in the CJ Flow accordion
             this.refreshAllQueues();
 
         } catch ( error ) {
             this.error( 'Claude Code queue submit failed:', error );
-            if ( responseEl ) responseEl.textContent = `Error: ${error.message}`;
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
         } finally {
-            if ( loadingEl ) loadingEl.style.display = 'none';
-            if ( submitBtn ) submitBtn.disabled = false;
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
         }
     }
 
-    // submitClaudeCodeDirect / connectClaudeCodeWebSocket / handleClaudeCodeMessage /
-    // injectClaudeCode / interruptClaudeCode / endClaudeCodeSession retired 2026-05-05.
-    // The legacy /api/claude-code/dispatch + /api/claude-code/ws/{task_id} cluster
-    // (auth-free, URL-mismatched, module-state, parallel-pre-cj-flow) was eliminated.
-    // Survivor: /api/claude-code/queue/submit via submitClaudeCodeToQueue() above.
-    // INTERACTIVE inject/interrupt/end-session controls will return when ClaudeCodeJob
-    // gains bidirectional control. See:
-    //   src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md
-    //   bug-fix-queue.md "🔥 Top of Queue — IMMEDIATE" entry (now Completed).
+    // submitClaudeCode / submitClaudeCodeToQueue normalized 2026-05-11 to mirror the
+    // sibling research-handler pattern (statusDiv + spinner + button disable; no
+    // response panel; submitted jobs surface in the multiplexer Jobs pane via
+    // agent-agnostic job_state_transition events). URL switched to the canonical
+    // /api/claude-code/submit; the /api/claude-code/queue/submit alias is preserved
+    // server-side for one release cycle. See:
+    //   src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md
+    // Inject / interrupt / end-session controls remain retired (since 2026-05-05)
+    // and will return when ClaudeCodeJob gains bidirectional control on cj-flow.
 
     // ========================================
     // TTS FUNCTIONALITY

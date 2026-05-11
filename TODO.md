@@ -1,5 +1,36 @@
 # TODO
 
+## ⏰ NEXT SESSION — Schedule Phase 5b `:8000` E2E for CC Card Normalization (session 658ea35d, 2026-05-11)
+
+**Awaiting user-confirmed `:8000` slot per `feedback_test_server_monopolize_mode`** — 3 sequential scheduled submissions. Plan + Q8 PRIMARY verdict already CLOSED at `:7999`; these are the final monopolize-mode gates.
+
+- [ ] [LUPIN] **5.8 — E2E functional** (runs the NEW `test_cc_card_renders_in_sibling_shape` + verifies the 2 deleted obsolete tests are gone):
+  ```
+  POST /api/test-suite/submit
+    {"test_types": "e2e", "scheduled_at": "<USER>", "pytest_args": "-k test_job_dispatch"}
+  ```
+  Pass criterion: `0 failures, N passed` where N ≥ 3 (per AC11). Field-name traps to remember: `test_types="e2e"` (NOT `e2e_ui`) per `feedback_test_types_e2e_not_e2e_ui`; pass-through key is `pytest_args` (NOT `args`) per `feedback_test_suite_submit_field_pytest_args` — both silent-drop traps.
+
+- [ ] [LUPIN] **5.9 — E2E visual baseline regeneration** (the deleted `.cc-retired-banner` block changes the snapshot — INTENTIONAL diff, commit new baseline):
+  ```
+  POST /api/test-suite/submit
+    {"test_types": "e2e", "scheduled_at": "<USER>", "pytest_args": "-k visual --update-snapshots"}
+  ```
+  Pass criterion (per AC11): git-diff of regenerated visual baselines contains ONLY the `.cc-retired-banner` removal + expected layout changes (card height reduction, INTERACTIVE-disabled visibility, removed-element shifts). Diffs outside this allow-list = regression → AC11 FAILS.
+
+- [ ] [LUPIN] **5.10 — Subscription smoke** against the renamed URL (asserts `cost_usd == 0.0`):
+  ```
+  POST /api/test-suite/submit
+    {"test_types": "smoke", "scheduled_at": "<USER>", "pytest_args": "-k test_claude_code_max_subscription"}
+  ```
+  Pass criterion (per AC10): green pass + `cost_usd == 0.0`.
+
+**Sequencing**: 5.8 → 5.9 → 5.10 (each on a separate non-overlapping slot). After all 3 close: Phase 5b done; Phase 6.8 parent-Lupin commit unblocks (still gated on explicit user commit authorization per `feedback_never_auto_commit_push`); Phase 6.9 CoSA commit handled in a separate CoSA-context session.
+
+**Reference**: `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` Phase 5b table (rows already scaffolded; populate when slot fires). Phase 5a evidence is already populated and GREEN.
+
+---
+
 ## ✅ D1 RATIFIED — A-extended (2026-05-04 PM)
 
 User ratified **Option A-extended** for D1 after investigating the legacy `/api/claude-code/ws/{task_id}` endpoint and finding it structurally defective. ClaudeCodeTransport is OUT OF SCOPE for Phase 3 + all subsequent multiplexer phases. The endpoint is queued for elimination — see `bug-fix-queue.md` "🔥 Top of Queue — IMMEDIATE" section. A future CC transport will be built only when UI surfaces a missing-functionality gap, against a properly authenticated endpoint.
@@ -1068,6 +1099,8 @@ bcbf5af  checkpoint: ts-d3df4d87 scheduled for Bug 13 validation
 **Triage doc**: `src/rnd/v0.1.6/2026.04.13-session-triage-and-option-c-docker-non-root.md` — 12 HIGH PRIORITY items (red), 3 TFE follow-ups (yellow), 14 older carry-overs (green). Items #1 #2 #3 closed Session 23f409c8. **Resume at item #9** (quick win: grep today's startup log for `[Watchdogs] BFE=ENABLED, TFE=ENABLED` to confirm already satisfied by rebuild), then #5 (schedule TFE Resume Live E2E) or #6 / #7 (Phase D/E follow-ups).
 
 ## Pending — HIGH PRIORITY
+
+- [ ] [LUPIN] **Voice persona rename: Domi → Rio** (Session 68edb64b, 2026-05-11 EVE) — Plan doc at `src/rnd/v0.1.7/2026.05.11-rename-persona-domi-to-rio.md`. Awaiting user answers to 4 open questions in the doc (icon ⚡ rotate? color #880E4F rotate? profile text? this-session reallocation on next /clear?). Implementation is small: 4 files (`lupin-app.ini` 5 lines, `lupin-app-splainer.ini` 4 keys, `test_voice_persona_helpers.py` 7 hits, `test_voice_persona_allocation.py` 2 hits). No TTS change — `voice_id` stays at `AZnzlk1XvdvUeBnXmlld`. Bounce `:7999` after edits per `server-lifecycle` skill.
 
 - [ ] [LUPIN] **Review three scheduled TFE jobs' outcomes (23:15 / 23:20 / 23:25 EDT)** — `ts-1139f28d` dry, `ts-996dafbc` live (with env_vars fixture), `ts-d2d890ed` all. Logs inside test container: `docker exec lupin-rest-test tail -80 /tmp/{pytest-direct,all}-latest.log`. Live run's outcome informs whether `/api/agentic-jobs/submit` exists (live test skips cleanly if missing).
 

@@ -67,12 +67,10 @@ The Claude Code submit endpoint is renamed: **new canonical `POST /api/claude-co
 **Where mobile's TODO lives**: `src/lupin-mobile/TODO.md` — a new entry pointing back to this handoff doc has been seeded by the parent Lupin session that produced this change. **Expected entry shape** (look for this line under the Pending section):
 
 ```
-- [ ] [LUPIN-CC-SUBMIT-RENAME] Update Claude Code submit endpoint from /api/claude-code/queue/submit to /api/claude-code/submit. Alias active for one release cycle from <commit-date>. See parent Lupin src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md for full context. [Q8 verdict: PRIMARY|FALLBACK]
+- [ ] [LUPIN-CC-SUBMIT-RENAME] Update Claude Code submit endpoint from /api/claude-code/queue/submit to /api/claude-code/submit. Alias active for one release cycle from <commit-date>. See parent Lupin src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md for full context. [Q8 verdict: PRIMARY]
 ```
 
-The `[Q8 verdict]` field will be filled at Phase 6 — PRIMARY means alias works (full release-cycle window), FALLBACK means alias was rejected by FastAPI and you must migrate immediately on next deploy.
-
-**Important — placeholder vs literal**: the `[Q8 verdict: PRIMARY|FALLBACK]` text shown above is a PLACEHOLDER. The parent Lupin session populates it at Phase 6.8 commit time with either the literal word `PRIMARY` or the literal word `FALLBACK` — NEVER the pipe characters or both words. Mobile should only ever see the populated form (e.g. `[Q8 verdict: PRIMARY]`). If you see the literal `PRIMARY|FALLBACK`, the parent session forgot to fill it — flag back to the parent before acting on the TODO.
+**Q8 verdict resolved 2026-05-11 (session 658ea35d, Mr. Radio)**: **PRIMARY**. FastAPI 0.115.12 accepts stacked-`@router.post(...)` decorators; both `/api/claude-code/submit` (canonical) and `/api/claude-code/queue/submit` (deprecated alias, OpenAPI `deprecated: true`) are registered live on `:7999`. Mobile has the full one-release-cycle migration window — the old URL continues to work and prints a per-request deprecation log line server-side. No immediate-break risk.
 
 ### 🧩 Multiplexer R&D (`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/`, Phase 6b in flight)
 
@@ -90,10 +88,13 @@ The `[Q8 verdict]` field will be filled at Phase 6 — PRIMARY means alias works
 | Date | Event |
 |------|-------|
 | 2026-05-10 | Phase 0 docs serialized (this folder); `/plan-review` REUSE → Pass 1 → Pass 2 sequential review begins |
-| TBD (post-plan-review) | Phases 1-4 implementation lands in parent Lupin + CoSA submodule |
-| TBD (post-implementation) | Phase 5 verification (`:7999` smoke + `:8000` scheduled E2E + visual baseline regen) |
-| TBD (post-verification) | Phase 6 wrap (TODO updates, history.md, commits) — alias goes live |
-| **TBD + 1 release cycle** | **Alias `/api/claude-code/queue/submit` REMOVED.** Mobile must have migrated by this date. |
+| 2026-05-11 | `/plan-review` all 3 passes CLOSED (commit `c1cec74`) — REUSE, Pass 1 Fitness, Pass 2 Adversarial |
+| 2026-05-11 | Phases 1-4 implementation landed in parent Lupin + CoSA submodule (session 658ea35d) — Q8 verdict = PRIMARY |
+| 2026-05-11 | Phase 5a `:7999` verification all GREEN (5.1-5.6 + 5.11 with cross-agent regression) |
+| **TBD (Phase 5b)** | `:8000` scheduled E2E + visual baseline regen + subscription smoke — pending user slot confirmation |
+| **TBD (Phase 6.8)** | Parent Lupin commit lands — alias goes live (pending user authorization per `feedback_never_auto_commit_push`) |
+| **TBD (Phase 6.9)** | CoSA submodule commit lands (separate context) — alias becomes canonical post-deploy |
+| **Next stable release tag (v0.1.8+)** | **Alias `/api/claude-code/queue/submit` REMOVED.** Mobile must have migrated by this date. |
 
 **"One release cycle" — concrete trigger**: the alias `/api/claude-code/queue/submit` is REMOVED when the NEXT stable release of Lupin (`v0.1.8` or later) is cut and deployed to production. The next development cycle after that release tag will land the alias-removal commit. **Mobile MUST migrate during the window between the parent Lupin commit landing (Phase 6.8 of the parent's serialization) and the next stable release being cut.** Phase 6.2 of the parent plan will pin the target release tag once the parent commit hash is known.
 

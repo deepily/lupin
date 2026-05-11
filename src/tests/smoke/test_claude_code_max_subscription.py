@@ -42,7 +42,7 @@ import pytest
 
 
 TEST_SERVER_BASE = "http://localhost:8000"
-SUBMIT_ENDPOINT  = f"{TEST_SERVER_BASE}/api/claude-code/queue/submit"
+SUBMIT_ENDPOINT  = f"{TEST_SERVER_BASE}/api/claude-code/submit"
 AUTH_ENDPOINT    = f"{TEST_SERVER_BASE}/auth/login"
 JOB_ENDPOINT     = f"{TEST_SERVER_BASE}/api/job-history"
 TEST_CONTAINER   = "lupin-rest-test"

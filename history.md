@@ -2,6 +2,107 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.11 EVE - Session 68edb64b | Voice Persona Rename — brainstormed alternatives to "Domi", user picked "Rio", plan doc serialized + delivered as viewer link
+
+**Persona**: Domi ⚡ (Young & energetic female, #880E4F) — *the very persona being renamed in the plan this session produced*
+
+**Accomplishments**:
+
+- **Brainstormed ~30 alternative persona names** across 5 vibe-clusters (punchy/spark-coded, energy-vitality semantics, modern-bright, playful/pixie, distinctive) for the "Young & energetic female" voice slot occupied by "Domi". User selected **Rio**.
+- **Plan doc serialized** at `src/rnd/v0.1.7/2026.05.11-rename-persona-domi-to-rio.md` per `feedback_phase0_serialization_prominence.md` and the plan-serialization mandate. Doc covers: scope (label-only — voice_id unchanged → no TTS audio change), proposed preserved attributes (icon ⚡ / color #880E4F / profile text), file inventory (5 files: lupin-app.ini + splainer + 2 test files), full sweep check (all 13 grep hits classified CHANGE / KEEP / HANDOFF), cross-project handoff plan for mobile sub-repo (zero runtime impact — just doc references), test impact per layer, 4 open questions, execution sequence, explicit out-of-scope list.
+- **Document-viewer-link notification delivered** per `feedback_documentation_step_stops_at_doc.md` — closing turn was `notify()` with the markdown viewer link in the abstract; deliberately did NOT auto-progress to ExitPlanMode, batched decision questions, or implementation. Plan is parked awaiting user "go" + answers to the 4 open questions (icon rotation? color rotation? profile rephrase? this-session reallocation on next /clear?).
+- **Session-topic discipline**: `set_session_topic("Voice Persona Rename — alternatives to 'Domi'")` set after MCP Phase A and before any substantive tool work, per the session-topic mandate.
+
+**Files modified** (parent Lupin scope only):
+
+- `src/rnd/v0.1.7/2026.05.11-rename-persona-domi-to-rio.md` (NEW — plan doc, ~200 lines)
+- `history.md` (this entry)
+- `TODO.md` (added pending entry for Rio rename implementation — see TODO.md "Pending" section)
+- `.claude-session.md` (session-start manifest registration was skipped this session; entry will be appended in this commit's session-end pass if applicable)
+
+**Status**:
+
+- ✅ Brainstorm delivered + name selected
+- ✅ Plan doc serialized + delivered via viewer link
+- ⏳ User review + answers to 4 open questions before any code edits land
+- ⏳ Implementation (5-file rename + test fixture updates) parked pending approval
+
+**Commits**: this session-end commit (parent Lupin only — `no backup, no push` per user)
+
+**Caveats / Notes**:
+
+- Many other files are showing modified in `git status` — these are from parallel sessions today (658ea35d, 6d544991, 6e8a6a03, 017dc1cc, f9608a41) and are **out of scope** for this session's commit. Per the parallel-session-safety v2.0 mandate, this session's commit stages ONLY: the new plan doc, `history.md`, `TODO.md`.
+- Session-start manifest registration was skipped this session (no `## Session: 68edb64b` block in `.claude-session.md` at session-end time). Pre-commit verification falls under the "missing manifest" path; the explicit selective-staging list above takes the place of the manifest's section.
+
+---
+
+### 2026.05.11 PM/EVE - Session 658ea35d | CC Card Normalization — Phases 1-5a CLOSED end-to-end; Phase 5b awaiting `:8000` user slot; commits HELD for authorization
+
+**Persona**: Mr. Radio 🦉 (authoritative warm male, #FFA000)
+
+**Accomplishments**:
+
+- **All 6 implementation phases of CC card normalization landed in one session** (Phase 0 + plan-review closure inherited from Rachel @ 6e8a6a03 earlier this morning):
+  - **Phase 1 (HTML normalization)** — 8 sub-steps applied to `notifications.html` + `notifications.css`. Header rename (`Dispatcher` → `Submit Claude Code Task`); INTERACTIVE comment promoted to disabled `<option>` with tooltip; deleted 5 dead UI blocks (cc-execution-mode select div, cc-response retirement-notice `<pre>`, cc-option-b-controls + 4 disabled inject/interrupt/end inputs, cc-session-info hidden row, .cc-retired-banner CSS class + section-comment header — 29 CSS lines, NOT 2 as REUSE-pre-pass hinted); inserted sibling-pattern `#cc-submit-status` div. AC1, AC1.5, AC2, AC3, AC4 all GREEN via grep.
+  - **Phase 2 (JS handler normalization)** — Rewrote `submitClaudeCode()` + `submitClaudeCodeToQueue()` in `notifications.js` to mirror research handler at L2865-2949. Collapsed from 7-arg to 4-arg signature; statusDiv with 3 canonical colors (#666 neutral, #28a745 success, #dc3545 error); dropped all writes to deleted IDs (responseEl, cc-task-id, cc-status, cc-cost, cc-session-info); fetch URL switched to canonical `/api/claude-code/submit`; refreshed L40-42 + L3812 comment blocks to describe post-normalization shape. AC5, AC6 GREEN.
+  - **Phase 3 (E2E test cleanup)** — Deleted 2 obsolete `test_cc_card_has_execution_mode_select` + `test_cc_card_has_session_controls` from `test_job_dispatch.py`; added `test_cc_card_renders_in_sibling_shape` asserting header text + sibling-shape DOM + INTERACTIVE-disabled invariant (Q2 FROZEN visible-breadcrumb). py_compile clean.
+  - **Phase 4 (URL rename + alias)** — **Q8 VERDICT: PRIMARY** — FastAPI 0.115.12 accepted stacked-`@router.post(...)` decorators on a single handler. CoSA `claude_code_queue.py` now registers BOTH `/api/claude-code/submit` (canonical) AND `/api/claude-code/queue/submit` (deprecated alias with `deprecated=True` in OpenAPI schema, per-request deprecation log via injected `Request` parameter). Module docstring + `quick_smoke_test()` updated to assert both routes. 2 parent-side smoke-test SUBMIT_ENDPOINT constants updated. CoSA edits made from parent context (file-edits only per `feedback_cosa_edit_vs_manage_git`; CoSA git ops are a separate-context concern per `feedback_lupin_only_never_cosa`).
+  - **Phase 4.5 (handoff doc finalize)** — `02-handoff-summary.md` Q8 verdict populated as `PRIMARY`; migration timeline filled with the dates/events that have landed; placeholder-vs-literal paragraph replaced with the resolved verdict announcement.
+  - **Phase 5a (`:7999` AI-discretionary verification)** — 5.1-5.6 + 5.11 all GREEN: py_compile, import-chain, router smoke (Q8 verdict gate, 5/5 internal tests), live POST to canonical URL with real JWT (HTTP 200 + `cc-41cea588`), live POST to deprecated alias with real JWT (HTTP 200 + `cc-42d86fdd`), 6-scenario dry-run smoke (6/6), TFE + BFE smoke (2/2 in 31.6s). 5.7 headless UI probe folded naturally into 5.8 :8000 functional run (new sibling-shape test is the same Playwright-driven probe). AC7, AC9, AC12 GREEN.
+
+- **`feedback_skip_arnold_yes_no_neither_ux.md` filed** at session start (with index-pointer in `MEMORY.md`) — Arnold (session 6d544991, parallel) owns the `ask_yes_no()` "neither/discuss-further" button work; that item is skipped from future unprompted top-N TODO summaries. Arnold's own end-of-day entry above is the relevant audit trail for the actual work landed there.
+
+- **Session-topic discipline**: topic updated mid-session from session-start summary ("Session start — top 5 TODO summary") to phase-execution ("CC Card Normalization — Phases 2-6 implementation") per the auto-memory mandate "set when topic is knowable, update at task switches."
+
+- **Notifications**: high-priority `notify()` with rich markdown abstract surfaced at top-5 summary delivery time and Phase 1 closure; conversation mode was OFF for the whole session.
+
+**Files modified** (parent Lupin scope only — no CoSA git ops despite CoSA file edits):
+
+- `src/fastapi_app/static/html/notifications.html` (Phase 1.1-1.7)
+- `src/fastapi_app/static/css/notifications.css` (Phase 1.8)
+- `src/fastapi_app/static/js/notifications.js` (Phase 2.2-2.4 + L40-42 comment refresh)
+- `src/tests/e2e_ui/test_job_dispatch.py` (Phase 3.1-3.4)
+- `src/cosa/rest/routers/claude_code_queue.py` (Phase 4.1-4.5 — CoSA file edit, NOT committed in CoSA submodule)
+- `src/tests/smoke/test_claude_code_dry_run_smoke.py` (Phase 4.6 — SUBMIT_ENDPOINT)
+- `src/tests/smoke/test_claude_code_max_subscription.py` (Phase 4.7 — SUBMIT_ENDPOINT)
+- `TODO.md` (Phase 6.1 — closed manual UI probe + finalized mobile dispatch entry with canonical URL; Phase 6.2 — added Multiplexer follow-ups section)
+- `src/lupin-mobile/TODO.md` (Phase 6.3 — `[LUPIN-CC-SUBMIT-RENAME]` entry seeded under the existing 2026-05-11 CC sync section; mobile session owns the actual commit)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/00-synthesis-and-roadmap.md` (Phase 6.4 — added §9 "Open follow-ups (cross-cutting)" with pointer back to handoff doc)
+- `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/00-index.md` (phase status table flipped; all 6 implementation phases marked DONE / 5b AWAITING USER / 6 PARTIAL)
+- `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md` (untouched this session — design was final pre-implementation)
+- `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md` (Phase 4.5 — Q8 verdict populated, migration timeline filled)
+- `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` (Phase 2/3/4/4.5/5a per-sub-step evidence + AC verifications + spec-drift documentation)
+- `history.md` (this entry)
+- `.claude-session.md` (registered session 658ea35d + per-Edit touched-file records)
+- (outside repo) `~/.claude/projects/.../memory/feedback_skip_arnold_yes_no_neither_ux.md` (NEW)
+- (outside repo) `~/.claude/projects/.../memory/MEMORY.md` (index updated)
+
+**Status**:
+
+- ✅ All AI-discretionary work CLOSED (Phases 1-5a + Phase 6 doc/tracking updates)
+- ⏳ Phase 5b awaiting user slot confirmation for 3 `:8000` scheduled submissions (5.8 e2e `-k test_job_dispatch`, 5.9 e2e `-k visual` for baseline regen, 5.10 smoke `-k test_claude_code_max_subscription`)
+- ⏳ Phase 6.8 parent-Lupin commit HELD for explicit user authorization per `feedback_never_auto_commit_push`
+- ⏳ Phase 6.9 CoSA commit HELD — separate context per `feedback_lupin_only_never_cosa`; AI file edits at `src/cosa/rest/routers/claude_code_queue.py` are on disk awaiting a CoSA-session user-run commit
+- ⏳ Phase 6.5 — `bug-fix-queue.md` checked; zero entries reference CC card normalization (no closure needed)
+
+**Commits**:
+
+- None this session. All work held pending user authorization (parent + CoSA in their respective contexts).
+
+**Cycle state for the CC card normalization R&D folder**:
+
+- Phase 0 ✅ • REUSE ✅ • Pass 1 ✅ • Pass 2 ✅ • Phase 1 ✅ • Phase 2 ✅ • Phase 3 ✅ • Phase 4 ✅ • Phase 4.5 ✅ • Phase 5a ✅ • Phase 5b ⏳ user slot • Phase 6 ⏳ partial (docs done; commits pending)
+
+**Caveats / Notes**:
+
+- Phase 1 → Phase 2 sequencing constraint: between the HTML deletion (Phase 1) and the JS rewrite (Phase 2) the CC submit handler would have thrown `TypeError` at `getElementById('cc-session-info').style.display` (the deleted DOM ID). Both phases landed in the same session within ~10 minutes; no `:7999` testing happened between them. Documented in the execution log "Spec drifts" subsection.
+- Phase 2.1 (audit cc-inject/cc-interrupt/cc-end/cc-execution-mode event-binding lookups) became a no-op — the 2026-05-05 retirement work already replaced those bindings with a single comment block; nothing to remove. Closure recorded in execution log.
+- Phase 1.8 CSS delete was 29 lines, not 2 as REUSE pre-pass implied — the parenthetical "(2 lines)" counted only `.cc-retired-banner` class-declaration lines without the section-comment header + sibling `code` rule. All within design's stated scope ("DELETE the class definition"); REUSE confirmed orphan-safe.
+- 5.4 + 5.5 created 2 real CJ Flow jobs (`cc-41cea588` + `cc-42d86fdd`) with `dry_run=true`; both will complete-fast with no LLM cost. Visible in the dev `:7999` server queues.
+- Parallel sessions on 2026-05-11: Rachel @ 6e8a6a03 (Phase 0 + plan-review for this CC card normalization work; committed `27f0da6` earlier this morning), Mr. Radio @ 017dc1cc (multiplexer Phase 6b Pass 1; committed `27f0da6` bundle), Tiberius @ f9608a41 (inter-session commons; uncommitted — separate scope), Arnold @ 6d544991 (cosa-voice neither/discuss; parent commit pending — see entry below), this session 658ea35d (implementation of the Rachel-authored CC card normalization plan; commits pending).
+
+---
+
 ### 2026.05.11 PM - Session 6d544991 | `ask_yes_no()` "Neither" affordance — landed end-to-end (parent Lupin scope); CoSA commit pending separate context
 
 **Persona**: Arnold 🪨 (gravelly male, #FFD600)

@@ -63,13 +63,14 @@ See [01-design.md §"Locked design decisions"](01-design.md) for full rationale.
 |-------|--------|-------|
 | 0 — Documentation (R&D doc set) | ✅ DONE 2026-05-10 | This file + 01-design + 02-handoff-summary + 90-execution-log all serialized |
 | **GATE — PIP plan review** | ✅ CLOSED 2026-05-11 | All 3 passes closed sequentially. REUSE: 3/8 fixes applied. Pass 1 Fitness: 8/11 findings applied. Pass 2 Adversarial: 7/7 findings applied + 1 swept pattern offender. Idempotency marker stamped (commit `c1cec74`). |
-| 1 — Track A: HTML normalization | ⏳ UNBLOCKED — ready to begin |
-| 2 — Track A: JS handler normalization | 🔒 BLOCKED |
-| 3 — Track A: E2E test cleanup | 🔒 BLOCKED |
-| 4 — Track B: URL rename + alias | 🔒 BLOCKED |
-| 4.5 — Cross-sub-project handoff doc finalize | 🔒 BLOCKED |
-| 5 — Verification (multi-tier) | 🔒 BLOCKED |
-| 6 — Wrap (TODO + history + commits) | 🔒 BLOCKED |
+| 1 — Track A: HTML normalization | ✅ DONE 2026-05-11 (session 658ea35d, Mr. Radio) — 8 sub-steps; AC1, AC1.5, AC2, AC3, AC4 GREEN |
+| 2 — Track A: JS handler normalization | ✅ DONE 2026-05-11 — submitClaudeCode/submitClaudeCodeToQueue rewritten to sibling shape; AC5, AC6 GREEN |
+| 3 — Track A: E2E test cleanup | ✅ DONE 2026-05-11 — 2 obsolete tests deleted, 1 sibling-shape test added; py_compile clean; AC8 partial (full verification at 5.8) |
+| 4 — Track B: URL rename + alias | ✅ DONE 2026-05-11 — **Q8 PRIMARY**: stacked decorators register BOTH routes; deprecation log live; 2 smoke-test constants updated |
+| 4.5 — Cross-sub-project handoff doc finalize | ✅ DONE 2026-05-11 — Q8 verdict populated as PRIMARY in 02-handoff-summary.md |
+| 5a — Local verification (`:7999`) | ✅ DONE 2026-05-11 — 5.1-5.6 + 5.11 all GREEN; AC7, AC9, AC12 GREEN. 5.7 folded into 5.8 |
+| 5b — Scheduled verification (`:8000`) | ⏳ AWAITING USER SLOT — 5.8/5.9/5.10 pending |
+| 6 — Wrap (TODO + history + commits) | ⏳ PARTIAL — docs/tracking landed; commits held for user authorization |
 
 ---
 
