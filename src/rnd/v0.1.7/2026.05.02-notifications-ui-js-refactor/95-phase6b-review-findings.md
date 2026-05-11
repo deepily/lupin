@@ -154,3 +154,52 @@ Phase 6a Pass 1 produced 17 (10 Major / 7 Minor); 6b is tighter — likely becau
 ### Detailed findings
 
 (See agent output for F-1 through F-14 detailed Description + Suggested resolution. Will be applied to design doc + this section closed once user ratification gate completes.)
+
+---
+
+## Pass 1 Fitness — closed 2026-05-11
+
+**Date**: 2026-05-11 (resumed from 2026-05-07 break point)
+**Owner**: Mr. Radio session (`017dc1cc`)
+**Ratification mode**: Per-decision-point cosa-voice `ask_yes_no` notifications routed to action-required UI (per user directive — "push every decision point into the action-required UI"). 1 Minors batch + 8 individual Major walks = 9 firings; all returned `yes`.
+
+### Ratification record
+
+| Turn | Scope | IDs | Result | Resolution applied to 09-design.md |
+|---|---|---|---|---|
+| 1 | Minors batch | F-8, F-9, F-10, F-11, F-12, F-14 | ✅ yes | F-8: AC7 post-6a baseline capture step; F-9: AC5b ≥12 enumerated sub-table; F-10: Q-B9 renderer-side throttling specified; F-11: Phase 0 #3 target API shape specified; F-12: "mount() is synchronous" addendum in Boot wiring; F-14: AC10e command rewritten to unified `-k "pending_count"` |
+| 2 | Individual | F-1 | ✅ yes | AC10b `tts-chrome.css` ceiling corrected from ≤500 → ≤700 per Q-B12 |
+| 3 | Individual | F-2 | ✅ yes | AC5 enumerated sub-table added (≥18 cases across 7 clusters; subtotal 21) |
+| 4 | Individual | F-3 | ✅ yes | New § "Q-B1 dispatch contract" subsection in Strategic design with template-internal switch contract snippet |
+| 5 | Individual | F-4 | ✅ yes | Q-B3 state machine extended with `expired_visual` + `responded_default` vertices; Q-B5 ratified text rewritten with local RAF timer + clock-skew handling; new Phase 0 prerequisite #7 (`countdown_expires_at` payload field) |
+| 6 | Individual | F-5 | ✅ yes | AC2d rewritten — grep regex replaced with unit-test contract (`jobstore_delete_api.test.ts`) + tsc check |
+| 7 | Individual | F-6 | ✅ yes | Phase 0 prerequisite #6 reworded with sub-step 4A/4B split + DOD tables; new § "Phase 4 sub-step DOD" subsection with explicit `delete()` signature returning `restoreState` closure |
+| 8 | Individual | F-7 | ✅ yes | § Inertness-lift contract rewritten — single-write template swap (`replaceChildren`), atomicity contract spec; AC2c rewritten as MutationObserver assertion (count = 1 per widget) |
+| 9 | Individual | F-13 | ✅ yes | Q-B9 ratified text amended — state-change events also RAF-coalesced (NOT 100ms throttle); R7 risk row added; AC5b storm-safety case (b) added |
+
+**Convergence re-grep** (run 2026-05-11):
+- All 14 findings have applied resolutions traceable in `09-phase6b-interactive-widgets-design.md` via the `Pass 1 F-NN` annotation markers
+- No proposed resolution conflicts with another (cross-referenced manually during apply)
+- AC5 + AC5b sub-tables provide concrete test contracts; floors hold
+
+### Doc-state delta
+
+| File | Net LOC change | Sections touched |
+|---|---|---|
+| `09-phase6b-interactive-widgets-design.md` | +~220 LOC | Status header; Strategic design (Boot wiring, Inertness-lift, NEW Q-B1 dispatch contract); Q-B3/B5/B9 ratified texts; AC2c/2d/5/5b/7/10b/10e rows; NEW AC5/AC5b enumeration sub-tables; Risks (NEW R7); Phase 0 prereq list (#3 reword, #6 reword, NEW #7); NEW § Phase 4 sub-step DOD |
+| `95-phase6b-review-findings.md` | +~70 LOC (this section) | NEW "Pass 1 Fitness — closed 2026-05-11" subsection |
+
+### Phase 6b cycle state
+
+```
+Q-decisions      ✅ CLOSED  (12/12 ratified)        2026-05-07
+REUSE pre-pass   ✅ CLOSED  (28 RE + 5 L3 ratified) 2026-05-07
+Pass 1 Fitness   ✅ CLOSED  (14/14 ratified, applied) 2026-05-11
+Pass 2 Adversarial   ⏳ pending — gated on user go-ahead
+Code-execution plan  ⏳ pending
+Implementation       ⏳ pending
+```
+
+### Resume pointer status
+
+`93-resume-here-phase6b-pass1-ratification.md` is now historical. Pass 2 dispatch will produce its own findings doc section in this file (`95-phase6b-review-findings.md` § "Pass 2 Adversarial — Findings") when the user gives the go-ahead.

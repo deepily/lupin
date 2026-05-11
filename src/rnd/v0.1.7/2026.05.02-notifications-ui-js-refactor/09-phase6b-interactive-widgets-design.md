@@ -1,7 +1,7 @@
 # Phase 6b — Interactive Widgets Design
 
 **Date**: 2026-05-07
-**Status**: Q-decisions ✅ CLOSED 2026-05-07 (12/12 ratified) — REUSE pre-pass ✅ CLOSED 2026-05-07 (28 RE-rows + 5 Layer-3 concerns ratified across 4 batched turns) — Pass 1 Fitness ⏸️ **DISPATCHED 2026-05-07; 14 findings produced; ratification PAUSED at user break point**. Resume pointer at `93-resume-here-phase6b-pass1-ratification.md`. Pass 2 Adversarial pending.
+**Status**: Q-decisions ✅ CLOSED 2026-05-07 (12/12 ratified) — REUSE pre-pass ✅ CLOSED 2026-05-07 (28 RE-rows + 5 Layer-3 concerns ratified across 4 batched turns) — Pass 1 Fitness ✅ **CLOSED 2026-05-11** (14/14 ratified across 1 Minors batch + 8 individual Majors; all resolutions applied to this doc). Pass 2 Adversarial pending — gated on user go-ahead. Resume pointer at `93-resume-here-phase6b-pass1-ratification.md` is now historical.
 **Slice owner**: Phase 6b (Phase 6a closed 2026-05-06; AC11a/AC11b verified 2026-05-07 — commits `362fa5d` → `243267b`)
 **Naming convention**: per `07-phase6-slicing-manifest.md` line 99 — design doc `09-phase6b-interactive-widgets-design.md`, review findings `95-phase6b-review-findings.md`, code-execution plan `<date>-phase6b-code-execution-plan.md`
 
@@ -68,15 +68,63 @@ console.log('[multiplexer] ttsChromeRenderer:mounted');
 
 Extend `BootCompletePayload.handlers` with two new optional string keys: `actionRequiredRenderer?: string` and `ttsChromeRenderer?: string` (mirrors Phase 6a's `jobsRenderer?: string`).
 
-### Inertness-lift contract
+**`mount()` is synchronous** (per Pass 1 F-12). Both `actionRequiredRenderer.mount()` and `ttsChromeRenderer.mount()` return `void`; the `console.log('[multiplexer] X:mounted')` lines execute synchronously after the DOM write. The boot-complete handshake fires after all four mount calls return — no `await`, no floating promise. AC9 grep guard verifies the four stable `:mounted` lines emit in observed order. If a future refactor wants async work inside mount, it must complete before the `:mounted` console.log line (the line is the AC9 contract).
 
-When a renderer mounts a widget interactively, it removes ALL FOUR Phase 5 inertness markers atomically:
-1. `data-phase6-pending="true"` attribute → removed
-2. `aria-disabled="true"` attribute → removed
-3. `style="cursor: not-allowed"` → cleared
-4. `.action-required-pending-notice` child element → removed (innerHTML re-render or explicit `.remove()`)
+### Inertness-lift contract (per Q-B2 + Pass 1 F-7)
 
-Failure to strip any marker = test failure (AC2c grep guard, see AC table).
+The inertness-lift is conceptually a **template swap**, not a marker strip. Phase 5's `actionRequiredReadOnly.ts` rendered the widget WITH all 4 inertness markers. Phase 6b's `actionRequiredInteractive.ts` renders the widget WITHOUT them. At mount, the renderer replaces the widget's inner content via a single `innerHTML`/`replaceChildren` write per widget — the markers vanish because the new template never sets them.
+
+**Mechanism (concrete)**:
+
+```ts
+mount(): void {
+    const widgets = this.container.querySelectorAll<HTMLElement>("[data-action-required-id]");
+    for (const widget of widgets) {
+        const notification = this.stores.actionRequired.getByDomElement(widget);
+        if (!notification) continue;
+        // Single atomic write — children replaced in one tick, all 4 markers gone
+        const interactiveDom = renderActionRequiredInteractive(notification, {
+            onSubmit: (response) => this.handleSubmit(notification.idHash, response)
+        });
+        widget.replaceChildren(...interactiveDom.children);
+    }
+    console.log("[multiplexer] actionRequiredRenderer:mounted");
+}
+```
+
+**Atomicity contract** (verified by AC2c MutationObserver assertion): exactly **1** `childList` mutation entry per widget; post-tick DOM contains NONE of the 4 markers:
+1. `data-phase6-pending="true"` attribute — gone
+2. `aria-disabled="true"` attribute — gone
+3. `style="cursor: not-allowed"` — gone
+4. `.action-required-pending-notice` child element — gone
+
+**Post-mount updates use targeted mutations only**. After the initial mount, state changes (countdown tick, submitting state, error stripe, button enable/disable) MUST use targeted mutations (`element.classList.add/remove`, `textNode.data = ...`, `element.appendChild(...)`). NEVER `innerHTML = ...` on the widget post-mount — would destroy user-typed text in `<input>` elements + reset state. AC5 mount-idempotency case + the state-machine transition cases verify this contract.
+
+### Q-B1 dispatch contract (per Pass 1 F-3)
+
+Routing per response_type lives **inside** `actionRequiredInteractive.ts` as a single internal switch — mirrors Phase 5's `actionRequiredReadOnly.ts:71-109` precedent (REUSE row RE-28 ratified). Single exported render function; private helper builders per branch.
+
+**Contract**:
+
+```ts
+// src/fastapi_app/static/js/multiplexer/render/templates/actionRequiredInteractive.ts
+export function renderActionRequiredInteractive(
+    notification: ActionRequiredNotification,
+    handlers: { onSubmit: (response: unknown) => void }
+): HTMLElement {
+    switch (notification.response_type) {
+        case "yes_no":            return buildYesNo(notification, handlers);
+        case "multiple_choice":   return notification.multiSelect
+                                      ? buildCheckbox(notification, handlers)
+                                      : buildRadio(notification, handlers);
+        case "open_ended":        return buildOpenEnded(notification, handlers);
+        case "open_ended_batch":  return buildOpenEndedBatch(notification, handlers);
+        default:                  throw new Error(`Unknown response_type: ${notification.response_type}`);
+    }
+}
+```
+
+The `build*` helpers are private functions in the same module. Tests cover them via the public `renderActionRequiredInteractive` function (black-box; counts toward AC5 and AC3 c8 100%).
 
 ### Delete-button (Q-A6 follow-through)
 
@@ -96,9 +144,9 @@ Click handler attaches in 6b's `JobsPaneRenderer` (NOT a new renderer — extend
 |---|---|---|---|
 | Q-B1 ✅ Ratified 2026-05-07 | Submit pattern per `response_type` | `yes_no` → 2 buttons (Yes / No, direct on-click; decision UX); `multiple_choice` (`multiSelect: false`) → **radio group** + Submit; `multiple_choice` (`multiSelect: true`) → **checkbox group** + Submit; `open_ended` → text input + Submit (Enter-to-submit); `open_ended_batch` → per-question inputs + ONE Submit-All | Original draft proposed buttons-not-radios for `multiple_choice` — REJECTED 2026-05-07 by user: "use radios for exclusive selection and checkboxes for multi-select". Corrected mapping mirrors web-canonical form controls. **Phase 0 prerequisite**: verify the server `action_required` notification payload carries `multiSelect: bool` for `multiple_choice` type. If absent, it's a CoSA-side prerequisite (alongside the `DELETE /api/queue/<bucket>/<id>` check). |
 | Q-B2 ✅ Ratified 2026-05-07 | Inertness-lift mechanism | Strip all 4 markers atomically on mount; one renderer call (not per-marker). The 4 markers: `data-phase6-pending`, `aria-disabled`, `cursor: not-allowed`, `.action-required-pending-notice` child. AC2c unit test verifies single-tick atomicity. | Atomic vs per-marker affects whether a partial-mount can leave an invariant-broken DOM; atomic is obviously safer (per-marker leaves windows where some assistive-tech sees enabled while sighted users see disabled cursor). |
-| Q-B3 ✅ Ratified 2026-05-07 | Optimistic UI vs wait-for-response | **Wait-for-response**: disable widget, show "Submitting…" microcopy, on-success transition to responded-historical state; on-rejection re-enable with error indicator. Renderer state machine: `pending` → `submitting` → `responded` \| `failed`. AC5 covers all three transitions. | Optimistic feels snappier but rollback adds renderer-state complexity for a non-latency-critical UX; `respond()` returns `Promise<void>` so the gate is clean. |
+| Q-B3 ✅ Ratified 2026-05-07 (+ Pass 1 F-4 amendment 2026-05-11) | Optimistic UI vs wait-for-response | **Wait-for-response**: disable widget, show "Submitting…" microcopy, on-success transition to responded-historical state; on-rejection re-enable with error indicator. **State machine** (extended by F-4 — see Q-B5 row for countdown vertices): `pending` → `submitting` → `responded` \| `failed`; PLUS `pending` → `expired_visual` → `responded_default` (client-only intermediate; server eventually emits default response). AC5 covers all five primary transitions + 2 expiry transitions. | Optimistic feels snappier but rollback adds renderer-state complexity for a non-latency-critical UX; `respond()` returns `Promise<void>` so the gate is clean. F-4 amendment: expired_visual is a client-side-only visual state; server is canonical for "default applied" determination via its normal response event. |
 | Q-B4 ✅ Ratified 2026-05-07 | Error-recovery UX on `respond()` rejection | Re-enable widget + render **inline** error stripe (`.action-required-error-stripe`) reading `"Couldn't submit — try again"`; NO toast/snackbar dependency (none exists in multiplexer codebase, would be scope creep). NO auto-retry. Clearing-on-retry: next click clears stripe + transitions to `submitting`. | Auto-retry conflicts with user intent (they may have meant a different answer); inline-not-toast keeps Phase 6b dependency-free. Project-wide toast system can be added later as separate concern. |
-| Q-B5 | Countdown-expiry behavior | Visual-only: countdown ticks to 0, widget transitions to "expired — default applied" state via store event; NO client-side auto-submit | Server is canonical for countdown expiry; client auto-submit risks double-submit on flaky networks |
+| Q-B5 ✅ Ratified 2026-05-07 (+ Pass 1 F-4 amendment 2026-05-11) | Countdown-expiry behavior | **Local RAF-driven countdown reading notification.countdown_expires_at (ISO8601)**; renderer computes remaining time via `new Date(...) - Date.now()`; RAF-driven visible digit with text-node updates throttled to 1/sec. When local clock crosses expires_at → renderer transitions widget to `expired_visual` state (all controls disabled + aria-disabled; submit area swapped for `<div class="action-required-expired" aria-live="polite">Expired — default applied</div>`; widget chrome retained). NO client auto-submit. Server is canonical: server eventually emits a normal `notification` update with `response: <default>` + `responded_by: "server-default"` → Phase 4 ActionRequiredStore reduces it as a "responded" transition → renderer transitions `expired_visual` → `responded_default` (rendered like `responded` plus "(default applied)" tag). Clock-skew tolerant: if client transitions to `expired_visual` before server records default, server's eventual response event reconciles. | Server is canonical for countdown expiry; client auto-submit risks double-submit on flaky networks. F-4 amendment: client-side timer is best-effort UI only; `expired_visual` is a client-only intermediate state that resolves via the server's normal response channel — no new store events needed for the tick. |
 
 ### Cluster 2 — TTS chrome semantics
 
@@ -107,7 +155,7 @@ Click handler attaches in 6b's `JobsPaneRenderer` (NOT a new renderer — extend
 | Q-B6 ✅ Ratified 2026-05-07 | TTS chrome surface | **BOTH surfaces in 6b**: (a) `#tts-pane` centralized chrome — queue rendering + pause/resume/stop/skip controls + current-track indicator; (b) per-notification corner buttons + state classes — `.notification-corner-pause-btn`, `.notification-corner-stop-btn`, `.tts-playing`, `.is-paused-current`. Only `.cc-voice-input` (audio recorder) stays 6c. | Self-audit during walkthrough caught that original draft incorrectly deferred corner buttons to 6c — slicing manifest line 46 explicitly includes them in 6b. Both surfaces share the same AudioStore subscription + control logic, just different render targets. |
 | Q-B7 ✅ Ratified 2026-05-07 | Pause/resume/stop/skip control set | **Pane chrome**: 4 controls (Pause/Resume single toggle, Stop, Skip). **Per-notification corner**: 2 controls (Pause, Stop) — verbatim legacy. Skip is pane-only because per-notification skip is semantically ambiguous (this one? whole queue?). State-driven enable/disable per AudioPlaybackState (idle/decoding/playing/paused/ended/error) per table in design. | Pane-only Skip resolves the ambiguity (skip = "advance the queue", which lives where the queue renders); pause/resume as single toggle matches user mental model + legacy `notifications.js:11617`. |
 | Q-B8 ✅ Ratified 2026-05-07 | Current-track indicator | **Two-part**: (a) port legacy `.is-playing-current` (`notifications.css:4692-4712`) + `.is-paused-current` (`4718-4725`) verbatim into `tts-chrome.css`; (b) pane chrome shows textual `<div class="tts-current-track">Playing: <track-name></div>` mapped to the notification whose audio is in flight. **Phase 0 prerequisite added**: verify `AudioStore` exposes `currentNotificationIdHash` (or equivalent linkage). If absent, CoSA-side prerequisite to extend `audio_chunk` events with the originating notification's id-hash, OR `AudioStore` maintains the linkage internally. | Verbatim CSS port preserves visual continuity; the AudioStore-linkage Phase-0 check is the third on the list (alongside `multiSelect` payload + `DELETE /api/queue/<bucket>/<id>`). |
-| Q-B9 ✅ Ratified 2026-05-07 | AudioStore event subscriptions | Subscribe to BOTH `store_audio_state_change` (drives button-enable/disable + list-item state classes) AND `store_audio_chunk_decoded` (drives queue-length indicator on pane chrome). State changes pass through unthrottled; `chunk_decoded` is throttled (e.g., 100ms RAF debounce) per R2 to prevent DOM thrash on chunk-heavy playback. AC5b tests cover both subscription paths + throttling. | Slicing manifest line 47 specifies both events; throttling addresses chunk-storm risk without sacrificing state-change responsiveness. |
+| Q-B9 ✅ Ratified 2026-05-07 (+ Pass 1 F-10 + F-13 amendment 2026-05-11) | AudioStore event subscriptions | Subscribe to BOTH `store_audio_state_change` AND `store_audio_chunk_decoded`. **Throttling lives renderer-side** (per F-10) — store stays semantically pure (emits every event; other future subscribers see full stream). **Both events RAF-coalesced** (per F-13 — symmetric design): max 1 render per animation frame (≤16ms latency), latest event wins. Implementation uses a `pendingRender = false` flag + `requestAnimationFrame` schedule on first event; subsequent events within the same frame are absorbed. AC5b tests cover both subscription paths + storm-safety: (a) chunk_decoded storm — 100 events synchronously → ≤1 DOM mutation cycle; (b) state_change storm — 5 transitions synchronously → ≤1 DOM mutation cycle. | Slicing manifest line 47 specifies both events. F-10 amendment: renderer-side throttling preserves store purity. F-13 amendment: state-change events ALSO storm under scrub/flaky-network/queue-advance bursts (per-card state classes × N widgets) — needs symmetric coalescing, NOT a fixed 100ms throttle (would lag user clicks). |
 
 ### Cluster 3 — Delete button (Q-A6 follow-through)
 
@@ -142,29 +190,57 @@ Inherits AC1-AC10b machinery from Phase 5 + Phase 6a. AC11a/AC11b scheduled `:80
 | AC2 | eslint clean | AI | none | `npx eslint src/fastapi_app/static/js/multiplexer/` |
 | AC2a | grep guard: NO `data-phase6-pending` in DOM after mount | AI | none | `pytest src/tests/smoke/test_multiplexer_phase6b_smoke.py::test_no_pending_markers_after_mount` |
 | AC2b | grep guard: NO `aria-disabled="true"` on action-required-widget post-mount | AI | none | (smoke test above, parameterized) |
-| AC2c | grep guard: ALL 4 inertness markers stripped atomically (one render → no partial state) | AI | none | unit test on renderer |
-| AC2d (NEW per C-4) | grep guard + tsc check: `JobStore.prototype.delete(idHash)` exists | AI | none | `grep -nE 'delete\\s*\\(\\s*idHash' src/fastapi_app/static/js/multiplexer/stores/JobStore.ts` returns ≥1 + `npx tsc --noEmit` clean |
+| AC2c (rewritten per Pass 1 F-7) | unit test: ActionRequiredRenderer.mount() produces exactly 1 MutationObserver `childList` entry per action-required widget; post-tick DOM contains NONE of the 4 inertness markers (`data-phase6-pending`, `aria-disabled`, `cursor: not-allowed`, `.action-required-pending-notice`) | AI | none | `vitest src/tests/unit/multiplexer/action_required_renderer.test.ts` |
+| AC2d (NEW per C-4 + rewritten per Pass 1 F-5) | unit test asserts JobStore exposes public `delete(idHash): { restoreState: () => void }` + tsc check confirms type signature | AI | none | `vitest src/tests/unit/multiplexer/jobstore_delete_api.test.ts` + `npx tsc --noEmit` clean |
 | AC3 | template tests `actionRequiredInteractive.ts` | AI | none | `vitest src/tests/unit/multiplexer/templates_action_required_interactive.test.ts` |
 | AC4 | template tests `ttsChrome.ts` | AI | none | `vitest src/tests/unit/multiplexer/templates_tts_chrome.test.ts` |
-| AC5 | renderer tests `ActionRequiredRenderer.ts` (≥18 cases — submit per response_type, error rollback, expiry, mount-idempotency) | AI | none | `vitest src/tests/unit/multiplexer/action_required_renderer.test.ts` |
-| AC5b | renderer tests `TtsChromeRenderer.ts` (≥12 cases — state transitions, control wiring, queue-length) | AI | none | `vitest src/tests/unit/multiplexer/tts_chrome_renderer.test.ts` |
+| AC5 (enumerated per Pass 1 F-2) | renderer tests `ActionRequiredRenderer.ts` (≥18 cases — see § AC5 case enumeration sub-table below for full breakdown across submit-happy-path × 5 response_types + error-rollback × 5 + state-machine transitions × 6 + countdown expiry + mount-idempotency + inertness-lift atomic strip + inline error stripe render) | AI | none | `vitest src/tests/unit/multiplexer/action_required_renderer.test.ts` |
+| AC5b (enumerated per Pass 1 F-9 + F-13) | renderer tests `TtsChromeRenderer.ts` (≥12 cases — see § AC5b case enumeration sub-table below: 7 state transitions + 4 control-wiring + 2 storm-safety assertions) | AI | none | `vitest src/tests/unit/multiplexer/tts_chrome_renderer.test.ts` |
 | AC5c (NEW per Q-B11) | renderer tests for `JobsPaneRenderer` delete-button extension (≥6 cases — 2xx, 404-as-success, 5xx rollback, network-err rollback, idempotency, no-op-on-non-delete-button) | AI | none | `vitest src/tests/unit/multiplexer/jobs_pane_renderer.test.ts` (extend existing) |
 | AC6 | c8 100% lines/branches/functions/statements on ALL new TS files | AI | none | `npx c8 --100 vitest src/tests/unit/multiplexer/` |
-| AC7 | gz `boot.js` ≤ 60382 + 6b delta budget (≤ +8 KB → 68382 B ceiling); re-baselined per slicing manifest line 110 | AI | none | bundle script |
+| AC7 (re-baselined per Pass 1 F-8) | **Pre-implementation step**: capture `gz boot.js` size at HEAD `243267b` (Phase 6a closed) → record as post-6a baseline `B6a` in this doc + 6a execution log. **6b ceiling** = `B6a + 8 KB` (gz). The previously-cited `60382` was the pre-6a baseline and is invalid for 6b delta verification. | AI | none | bundle script + grep for recorded `B6a` value in this doc |
 | AC8a | functional smoke test | AI | none | `pytest src/tests/smoke/test_multiplexer_phase6b_smoke.py -v` |
 | AC8b | perf gate (50 prompts < 200ms render) | AI | none | (smoke parameterized) |
 | AC9 | boot_complete handshake — 4 stable lines (`notifications` + `jobs` + `actionRequired` + `ttsChrome` all `:mounted`) | AI | none | grep on smoke output |
 | AC10 | Phase 1+3+4+5+6a regression sweeps green | AI | none | per-phase smoke + unit suites |
-| AC10b | CSS LOC ceiling: `action-required.css` ≤500, `tts-chrome.css` ≤500 | AI | none | wc -l |
+| AC10b (corrected per Pass 1 F-1) | CSS LOC ceiling: `action-required.css` ≤500, `tts-chrome.css` ≤700 (per Q-B12 — bumped from 500 due to Q-B6 scope expansion to both pane chrome + per-notification corner buttons) | AI | none | wc -l |
 | AC10c | stylelint layer-2 `selector-disallowed-list [*, html, body, :root]` honored | AI | none | `npx stylelint src/fastapi_app/static/css/multiplexer/*.css` |
 | AC10d | layer-3 CSS-canary: programmatically disable each new CSS file → prove ZERO body-style drift | AI | none | smoke parameterized |
-| AC10e (NEW per C-5) | cross-phase count-cascade regression: re-run Phase 5 + Phase 6a `data-phase6-pending` count assertions with floor = 0 (post-6b lift) | AI | none | `pytest src/tests/smoke/test_multiplexer_phase5_smoke.py::test_data_phase6_pending_count + src/tests/smoke/test_multiplexer_phase6a_smoke.py -k pending_count` |
+| AC10e (NEW per C-5 + corrected per Pass 1 F-14) | cross-phase count-cascade regression: re-run Phase 5 + Phase 6a `data-phase6-pending` count assertions with floor = 0 (post-6b lift). Both phases use `pending_count` substring in their assertion test names; verify substring matches both files before commit. | AI | none | `pytest src/tests/smoke/test_multiplexer_phase5_smoke.py src/tests/smoke/test_multiplexer_phase6a_smoke.py -k "pending_count"` |
 | AC11a | scheduled `:8000` visual baseline — `pytest_args="-k multiplexer_phase6b"` + `--update-snapshots` | AI | slot-coordination only | `POST /api/test-suite/submit` |
 | AC11b | scheduled `:8000` visual regression — same filter, no `--update-snapshots`; pass: `e2e: 1 passed, 0 errors` | AI | slot-coordination only | `POST /api/test-suite/submit` |
 
 **AC11 field-name reminders** (per `feedback_test_types_e2e_not_e2e_ui` + `feedback_test_suite_submit_field_pytest_args`):
 - `test_types`: `"e2e"` (NEVER `"e2e_ui"`)
 - pytest pass-through: `"pytest_args"` (NEVER `"args"`)
+
+### AC5 case enumeration (per Pass 1 F-2)
+
+`ActionRequiredRenderer.ts` unit tests — ≥18 cases. Each implementer must cover every cluster's enumerated cases at minimum; extras encouraged.
+
+| Cluster | Count | Cases |
+|---|---|---|
+| **Submit happy-path per response_type** (Q-B1) | 6 | (a) `yes_no` — Yes button → `respond("yes")`; (b) `yes_no` — No button → `respond("no")`; (c) `multiple_choice` multiSelect=false — radio select → Submit → `respond(label)`; (d) `multiple_choice` multiSelect=true — checkbox set → Submit → `respond([labels])`; (e) `open_ended` — text input + Enter → `respond(text)`; (f) `open_ended_batch` — per-question inputs + Submit-All → `respond({header: value, ...})` |
+| **Error rollback per response_type** (Q-B4) | 5 | each of (a-e above) with `respond()` rejecting → inline error stripe renders + widget re-enables |
+| **State machine transitions** (Q-B3 + Pass 1 F-4 amendment) | 6 | `pending→submitting` (on click); `submitting→responded` (on resolve); `submitting→failed` (on reject); `failed→submitting` (retry click clears stripe); `pending→expired_visual` (local timer crosses `expires_at`); `expired_visual→responded_default` (server emits default response event) |
+| **Countdown expiry behavior** (Q-B5) | 1 | local RAF timer reaches 0 → `expired_visual` state visual contract (all controls disabled; submit area swapped for `Expired — default applied`); NO client auto-submit asserted |
+| **Mount idempotency** | 1 | `renderer.mount()` called twice → second call is no-op (no duplicate event listeners; assert single dispatch on subsequent click) |
+| **Inertness-lift atomic strip** (Q-B2 + Pass 1 F-7 integration view) | 1 | mount() removes all 4 markers via `replaceChildren` template swap (verified via MutationObserver count = 1) |
+| **Inline error stripe render** (Q-B4 render view) | 1 | `respond()` reject → `.action-required-error-stripe` appears with correct copy + `aria-live="polite"` |
+
+**Subtotal**: 21. Floor ≥18 met with margin. AC5 wording stays "≥18" so future additions don't trip the AC.
+
+### AC5b case enumeration (per Pass 1 F-9 + F-13)
+
+`TtsChromeRenderer.ts` unit tests — ≥12 cases.
+
+| Cluster | Count | Cases |
+|---|---|---|
+| **State transitions** | 7 | `idle→decoding`; `decoding→playing`; `playing→paused`; `paused→playing`; `playing→ended`; `ended→idle`; `any→error` |
+| **Control wiring** | 4 | pause toggle dispatches `AudioStore.pause()`; resume toggle dispatches `AudioStore.resume()`; stop dispatches stop intent; skip dispatches `AudioStore.skip()` (pane-only — Q-B7) |
+| **Storm safety** (Q-B9 + Pass 1 F-13) | 2 | (a) `store_audio_chunk_decoded` storm — 100 events fired synchronously within one frame → ≤1 DOM mutation cycle; (b) `store_audio_state_change` storm — 5 state transitions fired synchronously within one frame → ≤1 DOM mutation cycle |
+
+**Subtotal**: 13. Floor ≥12 met with margin. AC5b wording stays "≥12".
 
 ---
 
@@ -208,6 +284,7 @@ Strict sequential per `feedback_pip_plan_review_is_sequential`:
 | R4 | Phase 5 inertness markers split across attribute + style + child element → easy to leave one stale | AC2c covers atomic-strip; one renderer call = one DOM mutation point |
 | R5 | Q-A6 delete-button on jobs-pane lives in 6a renderer — 6b mutates 6a code | Keep change minimal: extend `JobsPaneRenderer` with one new event handler; do NOT refactor; covered by AC2/AC10 regression |
 | R6 | Legacy `notifications.css:4692-4712` rules carry !important / specificity hacks that break in multiplexer scope | CSS port reviews each rule individually during Phase 5 (CSS port subphase); fall back to authoring fresh rules if a port doesn't lift cleanly |
+| R7 (NEW per Pass 1 F-13) | `store_audio_state_change` storm during seek/scrub, flaky-network buffering, or queue advance — per-card state classes × N widgets → thrashing DOM (R2 covered chunk_decoded only) | Renderer-side RAF coalescing on state-change rendering (symmetric to R2 chunk_decoded throttle): at most 1 render per animation frame regardless of event burst size; latest state wins. AC5b storm-safety case (b) asserts 5 synchronous state changes → ≤1 DOM mutation cycle |
 
 ---
 
@@ -250,13 +327,81 @@ All Phase 0 verification checks. Run BEFORE Phase 6b code-writing begins.
 
 2. **`action_required` payload `multiSelect` flag** — verify the server `action_required` notification carries `multiSelect: bool` for `multiple_choice` type. The renderer needs this to route to radios vs checkboxes. If absent, it's a CoSA-side prerequisite (server-side payload extension). Per Q-B1 ratification.
 
-3. **`AudioStore` notification linkage** — verify `AudioStore` exposes `currentNotificationIdHash` (or equivalent linkage from a playing chunk to its originating notification). If absent, CoSA-side prerequisite to extend `audio_chunk` events with the originating notification's id-hash, OR `AudioStore` maintains the linkage internally. Per Q-B8 ratification.
+3. **`AudioStore` notification linkage** (target API shape per Pass 1 F-11) — verify `AudioStore` exposes the linkage from a playing chunk to its originating notification. **Preferred contract**: `AudioStore.currentNotificationIdHash(): string | null` (synchronous getter; returns `null` when idle). **Acceptable alternative**: event payload field `notificationIdHash: string | null` on `store_audio_state_change` (renderer reads on every state change). If neither exists, CoSA-side prerequisite to extend the chunk events with the originating notification's id-hash OR add the getter to `AudioStore`. Phase 0 verification: grep for the chosen shape + tsc clean. Per Q-B8 ratification.
 
 4. **Action-required render mount surface** — verify where Phase 5 mounted the read-only action-required widget. The `boot.ts` snippet in this doc assumed `#action-required-pane`; if Phase 5 actually rendered widgets inline within `#notifications-pane` or elsewhere, `createActionRequiredRenderer` mounts there instead. Read `06-phase5-renderer-design.md` § Action-required template + grep `actionRequiredReadOnly` callers. Discovered during Q-B12 walkthrough.
 
 5. **CoSA-side `multiplexer_config.py` commit** still pending (carries over from Phase 6a; not blocking 6b but worth flagging in the code-execution plan).
 
-6. **`JobStore.delete(idHash)` method** (NEW per C-4) — verify the method exists in `src/fastapi_app/static/js/multiplexer/stores/JobStore.ts`. If absent, extend JobStore as a tightly-coupled sub-step within Phase 6b's Phase 4 (delete-button wiring): sub-step 4A adds the method + 100% c8 unit tests; sub-step 4B wires the click handler in `JobsPaneRenderer`. Verified empirically post-ratification — see `95-phase6b-review-findings.md` § "REUSE — closed" for the grep result.
+6. **`JobStore.delete(idHash)` method** (NEW per C-4 + DOD per Pass 1 F-6) — **verified MISSING 2026-05-07** (grep on `JobStore.ts` returned only `this.indexById.delete(id)` internal Map call at line 292). **Phase 6b implementation Phase 4 splits into**:
+   - **sub-step 4A** — extend `JobStore` with `public delete(idHash: string): { restoreState: () => void }` returning a rollback closure (signature in § Phase 4 sub-step DOD below); add AC2d unit tests (≥3 cases enumerated in F-6 ratification: exposes method, removes entry + emits event, no-op on nonexistent); c8 100% on the new method
+   - **sub-step 4B** — wire the click handler in `JobsPaneRenderer` consuming the `restoreState` closure for Q-B10 rollback; AC5c (≥6 cases); strip Q-A6 inertness markers; c8 100% on the renderer delta
+   - **Ordering**: natural compile-time gate (4B's tests import `JobStore.delete` → `tsc --noEmit` fails 4B without 4A). The code-execution plan tracks 4A → 4B as separate progress-table rows; split-commit preferred for reviewability
+   - DOD tables per sub-step appear in new § Phase 4 sub-step DOD subsection below
+
+7. **`action_required` payload `countdown_expires_at` field** (NEW per Pass 1 F-4) — verify the server `action_required` notification carries `countdown_expires_at: ISO8601 string | null` (set when expiry is configured; null when not). The Phase 6b renderer uses this field to drive the local RAF-based countdown + `expired_visual` transition per Q-B5 ratification. If absent, CoSA-side prerequisite to extend the notification payload before Phase 6b implementation Phase 2 (ActionRequiredRenderer). Verification: grep server-side payload construction + integration smoke check that the field appears in a captured `action_required` notification.
+
+---
+
+## Phase 4 sub-step DOD (per Pass 1 F-6)
+
+Phase 6b's implementation Phase 4 (delete-button wiring) splits into two tightly-coupled sub-steps. Each has an explicit DOD; 4B's tests transitively require 4A's API → `tsc` enforces the ordering.
+
+### `JobStore.delete` signature (4A produces)
+
+```ts
+public delete(idHash: string): { restoreState: () => void } {
+    const previous = this.indexById.get(idHash);
+    if (!previous) {
+        return { restoreState: () => {} };  // no-op rollback
+    }
+    this.indexById.delete(idHash);
+    this.emit("store_jobs_changed", { changeKind: "removed", idHash });
+    return {
+        restoreState: () => {
+            this.indexById.set(idHash, previous);
+            this.emit("store_jobs_changed", { changeKind: "added", idHash });
+        }
+    };
+}
+```
+
+### Sub-step 4A — DOD (extend JobStore + AC2d tests)
+
+| # | Check | Pass criterion |
+|---|---|---|
+| 4A-1 | Method exists on `JobStore.prototype` | `typeof store.delete === "function"` |
+| 4A-2 | Method removes entry on hit | `getById(idHash)` returns `undefined` post-`delete()` |
+| 4A-3 | Method emits `store_jobs_changed` with `changeKind="removed"` | event subscriber receives correct payload |
+| 4A-4 | `restoreState()` re-inserts identical previous state | round-trip `getById()` returns deep-equal entry |
+| 4A-5 | `restoreState()` emits `changeKind="added"` | event subscriber receives correct payload |
+| 4A-6 | Nonexistent idHash → no-op + no-op `restoreState` | no exception, no event emission |
+| 4A-7 | c8 100% on `delete()` + closure | `c8 --100` clean on `JobStore.ts` |
+| 4A-8 | AC2d test file exists + passes | `vitest jobstore_delete_api.test.ts` green |
+
+**4A is complete when all 8 rows pass.**
+
+### Sub-step 4B — DOD (wire delete-button in JobsPaneRenderer)
+
+| # | Check | Pass criterion |
+|---|---|---|
+| 4B-1 | `JobsPaneRenderer` click delegation handles `.job-delete-button` | unit test asserts handler attached |
+| 4B-2 | Click calls `JobStore.delete(idHash)` + captures `restoreState` closure | spy on `delete` returns closure |
+| 4B-3 | 2xx response → closure discarded; no rollback | assert `restoreState` NOT called |
+| 4B-4 | 404 response → treated as success per Q-B10 | same as 2xx |
+| 4B-5 | 5xx response → `restoreState()` invoked + inline error stripe rendered | assert `restoreState` called + DOM has stripe |
+| 4B-6 | Network error → same as 5xx | same |
+| 4B-7 | Idempotency — rapid double-click → only first emits `delete` | spy call count = 1 |
+| 4B-8 | Non-delete-button clicks within row → handler is no-op | spy call count = 0 |
+| 4B-9 | Q-A6 inertness markers stripped from `.job-delete-button` (4 markers) | querySelector returns null for each marker |
+| 4B-10 | c8 100% on `JobsPaneRenderer.ts` delta | `c8 --100` clean on the file |
+| 4B-11 | AC5c (≥6 cases) green | `vitest jobs_pane_renderer.test.ts` green |
+
+**4B is complete when all 11 rows pass.**
+
+### Commit chain
+
+Preferred: 4A and 4B ship as **two separate commits** in the same PR — 4A first (JobStore.delete + AC2d tests), 4B second (renderer extension + AC5c tests). Single combined commit acceptable if both DODs are met, but split-commit gives reviewers focal points per concern.
 
 ---
 

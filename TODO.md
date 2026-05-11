@@ -125,29 +125,82 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ---
 
-## ☀️ FIRST THING IN THE MORNING — 2026.05.08
+## ☀️ FIRST THING NEXT SESSION — Multiplexer Phase 6b Pass 2 Adversarial dispatch
 
-### Resume Phase 6b Pass 1 Fitness ratification
-
-**Resume pointer**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/93-resume-here-phase6b-pass1-ratification.md` (NEW today, commit `d70be64`). Contains: cycle state, 14 finding IDs + summaries, standout Majors to walk first, recommended ratification cadence, Phase 0 prerequisite status, read-order for fresh-context Claude.
-
-**Cycle state**:
+**Cycle state on resume**:
 - Q-decisions ✅ CLOSED 12/12 (2026-05-07)
 - REUSE pre-pass ✅ CLOSED 28 RE + 5 L3 (2026-05-07)
-- Pass 1 Fitness ⏸️ PAUSED 14 findings (9 Major / 5 Minor / 0 Block / 0 Layer 3); 0 ratified
-- Pass 2 Adversarial ⏳
+- Pass 1 Fitness ✅ CLOSED 14/14 (2026-05-11) — all resolutions applied to `09-phase6b-interactive-widgets-design.md`; closure section in `95-phase6b-review-findings.md`
+- Pass 2 Adversarial ⏳ **READY TO DISPATCH** — gated on user go-ahead (per 2026-05-11 user direction)
 - Code-execution plan ⏳
 - Implementation ⏳
 
 **Resume action**:
-- [ ] [LUPIN] Walk Pass 1 ratification — recommended cadence: 1 batch (6 Minors: F-8, F-9, F-10, F-11, F-12, F-14) + 8 individual Major walks (F-1, F-2, F-3, F-4, F-5, F-6, F-7, F-13). Total ~9 turns. Phase 6a Pass 1 precedent for rhythm.
+- [ ] [LUPIN] User gives go-ahead → dispatch Pass 2 Adversarial Explore agent (clean context, walks Pass-1-resolved doc state). Cluster focus: security, DOS, race, contract-drift. Expect ~10 findings per Phase 6a Pass 2 precedent. Findings doc section: `95-phase6b-review-findings.md` § "Pass 2 Adversarial — Findings" (new).
+- [ ] [LUPIN] After Pass 2 findings produced → walk ratifications via cosa-voice action-required UI per established cadence (per user directive — "push every decision point into the action-required UI"). Likely 1 batch of Minors + N individual Majors.
+- [ ] [LUPIN] Apply Pass 2 resolutions → convergence re-grep → "Pass 2 Adversarial — closed" subsection appended.
+- [ ] [LUPIN] After Pass 2 closes → author code-execution plan doc (`<date>-phase6b-code-execution-plan.md`).
+- [ ] [LUPIN] Code-execution plan landed → user gate to begin implementation Phase 0 (tracking docs) → Phase 1 (interactive templates) → ... → Phase 7 (E2E scheduled-`:8000`).
 
-**Standout Majors** (walk first):
-- **F-1** — Real bug: AC10b says `tts-chrome.css ≤500` but Q-B12 ratified `≤700`. Trivial fix.
-- **F-2** — AC5 ≥18 cases unenumerated.
-- **F-3** — Q-B1 routing dispatch implementation unspecified (template helper vs renderer switch).
-- **F-5** — AC2d grep regex won't match TS method definitions; rely on `tsc --noEmit` instead.
-- **F-6** — Phase 0 #6 + 4A/4B sub-step DOD unclear.
+**Read on resume**:
+1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`
+2. `history.md` (this session's entry: 2026.05.11 Session 017dc1cc)
+3. `TODO.md` (this section)
+4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/09-phase6b-interactive-widgets-design.md` (current doc state — Pass 1 closed)
+5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/95-phase6b-review-findings.md` (Pass 1 closure section at bottom for ratification record)
+6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/07-phase6-slicing-manifest.md` (context for what's in 6b vs 6c)
+7. Phase 6a Pass 2 for precedent: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/94-phase6a-review-findings.md` § "Pass 2 Adversarial — closed"
+
+**Outstanding Phase 0 prerequisites** (informational; verified at code-execution plan time, NOT at Pass 2):
+1. `DELETE /api/queue/<bucket>/<id>` exists in CoSA — ✅ verified (`queues.py:1193`)
+2. `action_required` payload carries `multiSelect: bool` — ⏳ pending
+3. `AudioStore.currentNotificationIdHash` linkage (preferred shape: sync getter; alternative: event payload field) — ⏳ pending
+4. Action-required render mount surface — ⏳ pending
+5. Phase 6a CoSA `multiplexer_config.py` commit — ⏳ pending
+6. `JobStore.delete(idHash)` exists — ❌ verified MISSING 2026-05-07 (Phase 4 splits into 4A + 4B per F-6 DOD)
+7. `countdown_expires_at` payload field — ⏳ pending verification (NEW per Pass 1 F-4)
+
+---
+
+## ✅ DONE — Phase 6b Pass 1 Fitness ratification (2026-05-11, session 017dc1cc, Mr. Radio)
+
+All 14 Pass 1 findings ratified + resolutions applied to `09-phase6b-interactive-widgets-design.md`. Pass 1 closed subsection appended to `95-phase6b-review-findings.md`.
+
+- [x] [LUPIN] Walk Pass 1 ratification — 9 turns (1 Minors batch + 8 individual Majors). Per-decision routing via cosa-voice `ask_yes_no` action-required UI per user directive ("push every decision point into the action-required UI"). All firings returned `yes`.
+
+**Cycle state**:
+- Q-decisions ✅ CLOSED 12/12 (2026-05-07)
+- REUSE pre-pass ✅ CLOSED 28 RE + 5 L3 (2026-05-07)
+- Pass 1 Fitness ✅ CLOSED 14/14 (2026-05-11) — all resolutions applied
+- Pass 2 Adversarial ⏳ gated on user go-ahead
+- Code-execution plan ⏳
+- Implementation ⏳
+
+**Resolutions applied** (full record in `95-phase6b-review-findings.md` § "Pass 1 Fitness — closed 2026-05-11"):
+- F-1 → AC10b ceiling 500 → 700 (tts-chrome.css per Q-B12)
+- F-2 → AC5 ≥18 cases enumerated in new sub-table (subtotal 21)
+- F-3 → New "Q-B1 dispatch contract" subsection with template-internal switch
+- F-4 → Q-B3 state machine extended (expired_visual + responded_default); Q-B5 ratified text rewritten (local RAF timer); new Phase 0 prereq #7 (countdown_expires_at payload)
+- F-5 → AC2d grep regex replaced with unit-test contract
+- F-6 → Phase 0 #6 reworded; new "Phase 4 sub-step DOD" subsection with 4A (8 rows) + 4B (11 rows) DOD tables; `delete()` returns `{ restoreState: () => void }`
+- F-7 → Inertness-lift mechanism specified as single-write template swap; AC2c rewritten as MutationObserver assertion
+- F-8 → AC7 post-6a baseline capture as pre-implementation step
+- F-9 → AC5b ≥12 cases enumerated in new sub-table
+- F-10 → Q-B9 throttling specified as renderer-side (not store-side)
+- F-11 → Phase 0 #3 target API shape specified (`currentNotificationIdHash(): string | null` preferred)
+- F-12 → Boot wiring "mount() is synchronous" addendum
+- F-13 → Q-B9 ratified text: state-change events RAF-coalesced (not 100ms throttle); new R7 risk row; AC5b storm-safety case (b) added
+- F-14 → AC10e pytest command rewritten as unified `-k "pending_count"` over both files
+
+**Next**: when user gives go-ahead, dispatch Pass 2 Adversarial (Explore agent, clean context, walks Pass-1-resolved doc state for security/DOS/race/contract-drift cluster).
+
+---
+
+## ☀️ HISTORICAL — was "FIRST THING IN THE MORNING — 2026.05.08"
+
+(Superseded by 2026-05-11 ratification above. Kept as audit trail.)
+
+**Resume pointer (historical)**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/93-resume-here-phase6b-pass1-ratification.md` — now historical; can be removed in a future cleanup.
 - **F-13** — R2 throttle covers `chunk_decoded` only; rapid state-toggle could thrash DOM.
 
 **After Pass 1 closes**:
