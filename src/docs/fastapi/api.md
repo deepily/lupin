@@ -1995,6 +1995,28 @@ Return sorted list of all available WebSocket event types.
 | 200 | Successful Response | ... |
 ## POST `/api/claude-code/queue/submit`
 
+> **DEPRECATED: use /api/claude-code/submit**
+
+Alias for /api/claude-code/submit. Removed after one release cycle. See src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.
+
+
+
+
+
+### 📦 Request Body 
+
+[ClaudeCodeQueueRequest](#claudecodequeuerequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [ClaudeCodeQueueResponse](#claudecodequeueresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/claude-code/submit`
+
 > **Submit Claude Code queue job**
 
 Submit a Claude Agent SDK task to the CJ Flow queue in BOUNDED or INTERACTIVE mode.
@@ -2302,9 +2324,9 @@ Report io/ directory status and file counts in research and podcast subdirectori
 | 200 | Successful Response | ... |
 ## GET `/api/docs/file`
 
-> **Serve project documentation file**
+> **Serve project documentation file or directory listing**
 
-Serve text documents from a whitelisted set of project paths (src/docs/, src/rnd/, src/workflow/, root-level *.md). Path traversal is blocked.
+Polymorphic: returns text content for files OR JSON directory listing for whitelisted directories. Whitelist covers src/docs/, src/rnd/, src/workflow/ and root-level *.md. Path traversal is blocked.
 
 
 
@@ -2989,6 +3011,72 @@ Returns audio/mpeg bytes inline. The voice_id MUST belong to the configured pers
 | 503 | ElevenLabs API unavailable or returned an error |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/multiplexer/config`
+
+> **Multiplexer client-config**
+
+Returns display-tuning values that the multiplexer boot path fetches once at startup. Values are sourced from `ConfigurationManager` INI (`[Lupin: Baseline]` section). No auth required (no PII, no state).
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [MultiplexerConfigResponse](#multiplexerconfigresponse)
+ |
+## GET `/api/commons/active-sessions`
+
+> **List active CC sessions belonging to the authenticated user**
+
+Returns same-user-scoped active sessions with persona info for the broadcast recipient preview.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/commons/broadcast-to-cc-sessions`
+
+> **Fan out a broadcast to active CC sessions belonging to the authenticated user**
+
+Posts a per-recipient `broadcasts` entry + a per-session listener notification for each active CC session belonging to the caller. Returns the broadcast_id + recipient count + any failed recipients.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[BroadcastRequestBody](#broadcastrequestbody)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ---
 
 # 📋 Components
@@ -3051,6 +3139,20 @@ Response model for batch user deletion.
 | Field | Type | Description |
 |-------|------|-------------|
 | file | string |  |
+
+
+## BroadcastRequestBody
+
+
+POST /broadcast-to-cc-sessions request body.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| message | string |  |
+| broadcast_id |  |  |
+| require_ack | boolean |  |
+| include_originator | boolean |  |
 
 
 ## BugFixExpediterSubmitRequest
@@ -3468,6 +3570,21 @@ Request body for setting user mode.
 | Field | Type | Description |
 |-------|------|-------------|
 | mode |  |  |
+
+
+## MultiplexerConfigResponse
+
+
+Display-tuning values for the multiplexer front-end.
+
+Field names use snake_case to match server convention. Keys here become
+properties on the JSON object that `boot.ts` reads via
+`configureMetaDisplayCap(serverConfig)` per Phase 6a design F20.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| multiplexer_max_meta_display_bytes | integer |  |
 
 
 ## PeerQueueResponse
@@ -4172,4 +4289,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.05.05 11:06:28 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.05.12 11:49:59 by `src/scripts/generate-api-docs.sh`_

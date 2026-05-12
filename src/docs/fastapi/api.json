@@ -4961,9 +4961,57 @@
                 "tags": [
                     "claude-code-queue"
                 ],
+                "summary": "DEPRECATED: use /api/claude-code/submit",
+                "description": "Alias for /api/claude-code/submit. Removed after one release cycle. See src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.",
+                "operationId": "submit_claude_code_to_queue_api_claude_code_queue_submit_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ClaudeCodeQueueRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ClaudeCodeQueueResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "deprecated": true,
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ]
+            }
+        },
+        "/api/claude-code/submit": {
+            "post": {
+                "tags": [
+                    "claude-code-queue"
+                ],
                 "summary": "Submit Claude Code queue job",
                 "description": "Submit a Claude Agent SDK task to the CJ Flow queue in BOUNDED or INTERACTIVE mode.",
-                "operationId": "submit_claude_code_to_queue_api_claude_code_queue_submit_post",
+                "operationId": "submit_claude_code_to_queue_api_claude_code_submit_post",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -5609,8 +5657,8 @@
                 "tags": [
                     "docs-files"
                 ],
-                "summary": "Serve project documentation file",
-                "description": "Serve text documents from a whitelisted set of project paths (src/docs/, src/rnd/, src/workflow/, root-level *.md). Path traversal is blocked.",
+                "summary": "Serve project documentation file or directory listing",
+                "description": "Polymorphic: returns text content for files OR JSON directory listing for whitelisted directories. Whitelist covers src/docs/, src/rnd/, src/workflow/ and root-level *.md. Path traversal is blocked.",
                 "operationId": "get_docs_file_api_docs_file_get",
                 "parameters": [
                     {
@@ -7286,6 +7334,166 @@
                     }
                 }
             }
+        },
+        "/api/multiplexer/config": {
+            "get": {
+                "tags": [
+                    "multiplexer"
+                ],
+                "summary": "Multiplexer client-config",
+                "description": "Returns display-tuning values that the multiplexer boot path fetches once at startup. Values are sourced from `ConfigurationManager` INI (`[Lupin: Baseline]` section). No auth required (no PII, no state).",
+                "operationId": "get_multiplexer_config_api_multiplexer_config_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MultiplexerConfigResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/commons/active-sessions": {
+            "get": {
+                "tags": [
+                    "commons"
+                ],
+                "summary": "List active CC sessions belonging to the authenticated user",
+                "description": "Returns same-user-scoped active sessions with persona info for the broadcast recipient preview.",
+                "operationId": "get_active_sessions_api_commons_active_sessions_get",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/commons/broadcast-to-cc-sessions": {
+            "post": {
+                "tags": [
+                    "commons"
+                ],
+                "summary": "Fan out a broadcast to active CC sessions belonging to the authenticated user",
+                "description": "Posts a per-recipient `broadcasts` entry + a per-session listener notification for each active CC session belonging to the caller. Returns the broadcast_id + recipient count + any failed recipients.",
+                "operationId": "post_broadcast_to_cc_sessions_api_commons_broadcast_to_cc_sessions_post",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BroadcastRequestBody"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "components": {
@@ -7403,6 +7611,41 @@
                     "file"
                 ],
                 "title": "Body_upload_and_transcribe_wav_file_api_upload_and_transcribe_wav_post"
+            },
+            "BroadcastRequestBody": {
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "broadcast_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Broadcast Id"
+                    },
+                    "require_ack": {
+                        "type": "boolean",
+                        "title": "Require Ack",
+                        "default": true
+                    },
+                    "include_originator": {
+                        "type": "boolean",
+                        "title": "Include Originator",
+                        "default": true
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "message"
+                ],
+                "title": "BroadcastRequestBody",
+                "description": "POST /broadcast-to-cc-sessions request body."
             },
             "BugFixExpediterSubmitRequest": {
                 "properties": {
@@ -8476,6 +8719,20 @@
                 "type": "object",
                 "title": "ModeSetRequest",
                 "description": "Request body for setting user mode."
+            },
+            "MultiplexerConfigResponse": {
+                "properties": {
+                    "multiplexer_max_meta_display_bytes": {
+                        "type": "integer",
+                        "title": "Multiplexer Max Meta Display Bytes"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "multiplexer_max_meta_display_bytes"
+                ],
+                "title": "MultiplexerConfigResponse",
+                "description": "Display-tuning values for the multiplexer front-end.\n\nField names use snake_case to match server convention. Keys here become\nproperties on the JSON object that `boot.ts` reads via\n`configureMetaDisplayCap(serverConfig)` per Phase 6a design F20."
             },
             "PeerQueueResponse": {
                 "properties": {

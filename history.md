@@ -2,6 +2,52 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.12 PM - Session 02e5cd9d (Arnold 🪨) | Doc Viewer Directory Listing Extension — backend polymorphic dispatch + scope=docs/io parity + inline image rendering
+
+**Persona**: Arnold 🪨 (Gravelly male, #FFD600)
+
+**Topic**: Extended `/app/docs?path=...&scope=...` document viewer to render a clickable directory listing when `path` resolves to a whitelisted directory. Single polymorphic endpoint per scope (`/api/docs/file` and `/api/io/file`) — files return text/markdown as today, directories return JSON `{kind, scope, path, parent, entries[]}`. Per-extension `view_url` routing built server-side so frontend stays dumb. As a follow-on, added PNG (+jpg/jpeg/gif/webp) support to the io endpoint and switched inline-renderable types (pdf, images, mp3/wav) from `Content-Disposition: attachment` to `inline` so they render in the browser instead of downloading — incidentally fixed a latent PDF download bug.
+
+**Accomplishments**:
+
+- **Design doc serialized** — `src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md` with full context, recon, design, file map, risk register, and implementation log. Five open questions resolved via cosa-voice MCP step-through with Rick (scope=both, bare prefix root allowed, name+size only, dirs-first alphabetical, hidden always excluded).
+
+- **Backend** — NEW `src/cosa/rest/routers/_dir_listing.py` (~130 lines) is the single source of truth for `list_directory()` + `_build_view_url()` (per-extension routing table: directories + .md/.txt/.json/.yaml/.yml → `/app/docs`, .mp3/.wav → `/app/audio`, .pdf → `/api/io/file` inline, .pptx → `&download=true`, images → `/api/io/file` inline). `docs_files.py` got the bare-prefix-root whitelist tweak (`src/rnd` AND `src/rnd/` both list) + `isdir` branch. `io_files.py` got parallel `isdir` branch + `INLINE_TYPES` set + `content_disposition_type` argument to `FileResponse` + image MEDIA_TYPES additions.
+
+- **Frontend** — `document-viewer.html` extended with Content-Type dispatch (text → existing markdown path; application/json → new `renderDirectoryListing`), ~30 lines CSS for `.doc-dir-listing`/`.doc-dir-breadcrumb`/`.doc-dir-entry`/`.doc-dir-meta`/`.doc-dir-icon`, breadcrumb up-navigation, icon-by-extension (📁 dir, 🔊 audio, 📑 pdf, 📊 pptx, 📄 default). Padding iterated 10px → 7.5px → 5.625px → 4.21875px → 3.1640625px (Rick four 25% reductions to taste). Caught a latent empty-path JS bug at the :8000 E2E gate — `params.get('path')` returns `null` when missing but `""` when present-and-empty; `if (!path)` was rejecting both equally, killing scope=io root browsing. Fix: `params.get('path') ?? ''` (nullish-coalescing) so empty string is valid; error only fires when key is genuinely absent AND scope is docs.
+
+- **Tests** — Three new test files + one extended (LUPIN parent): `src/tests/unit/test_dir_listing.py` (30 unit tests covering routing table + list_directory semantics), `src/tests/smoke/test_io_files_endpoint.py` (13 smoke tests covering listing JSON shape + per-extension view_url + inline disposition + download override), `src/tests/e2e_ui/test_doc_viewer_directory.py` (8 Playwright tests covering scope=docs + scope=io rendering + breadcrumb + visual regression baselines); `test_docs_files_endpoint.py` extended with +9 directory tests.
+
+- **Verification pyramid** — 77 tests green / 2 conditional skips / 0 failed. :7999 (unit + smoke + 8-URL browser sweep) all green in 0.16s. :8000 E2E (`-k doc_viewer_directory`) green after 3 runs: 1) baseline-creation with --update-snapshots found the empty-path bug, 2) baseline refresh after fix, 3) clean verify run without --update-snapshots → 8/0/0/0.
+
+- **OpenAPI** — regenerated `src/docs/fastapi/api.json` + `api.md` via `src/scripts/generate-api-docs.sh`. New polymorphic-endpoint summary picked up automatically.
+
+**Status**: Implemented and tested. Visual baselines parked under `io/test-suite/visual-baselines/test_doc_viewer_directory/` (gitignored, captured at 10px padding so now slightly stale post-compression — re-submit E2E with `--update-snapshots` to refresh if needed; not blocking).
+
+**Files modified** (parent Lupin — this checkpoint):
+
+- NEW: `src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md`
+- NEW: `src/tests/unit/test_dir_listing.py`
+- NEW: `src/tests/smoke/test_io_files_endpoint.py`
+- NEW: `src/tests/e2e_ui/test_doc_viewer_directory.py`
+- MODIFIED: `src/fastapi_app/static/html/document-viewer.html`
+- MODIFIED: `src/tests/smoke/test_docs_files_endpoint.py`
+- MODIFIED: `src/docs/fastapi/api.json` (OpenAPI regen)
+- MODIFIED: `src/docs/fastapi/api.md` (OpenAPI regen)
+
+**Files modified** (CoSA submodule — separate commit by Rick per `feedback_cosa_edit_vs_manage_git`):
+
+- NEW: `src/cosa/rest/routers/_dir_listing.py`
+- MODIFIED: `src/cosa/rest/routers/docs_files.py`
+- MODIFIED: `src/cosa/rest/routers/io_files.py`
+
+#### Checkpoint | 2026.05.12 PM EDT | Doc viewer dir listing — full impl + inline image rendering (Arnold 🪨)
+
+**Files**: 4 NEW + 4 MOD in Lupin parent (CoSA edits pending Rick's separate commit)
+**Commit**: `9e1869e`
+
+---
+
 ### 2026.05.12 PM - Session 83ba1e51 (Rio ⚡) | Speakerphone solo/chorus — full design doc set + Q4 audit resolved (Phase 1 unblocked)
 
 **Persona**: Rio ⚡ (Young & energetic female, #880E4F)

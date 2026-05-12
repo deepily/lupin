@@ -134,6 +134,74 @@
         }
         .doc-frontmatter dt { font-weight: 600; color: #374151; }
         .doc-frontmatter dd { margin: 0; color: #6b7280; word-break: break-word; }
+
+        /* Directory listing — added 2026-05-12 per
+           src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md */
+        .doc-dir-breadcrumb {
+            margin: 16px 0 24px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        .doc-dir-breadcrumb a {
+            color: #4f46e5;
+            text-decoration: none;
+        }
+        .doc-dir-breadcrumb a:hover { text-decoration: underline; }
+        .doc-dir-breadcrumb .sep {
+            margin: 0 6px;
+            color: #d1d5db;
+        }
+        .doc-dir-breadcrumb .current {
+            color: #1f2937;
+            font-weight: 600;
+        }
+        .doc-dir-listing {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .doc-dir-entry {
+            display: flex;
+            align-items: center;
+            padding: 3.1640625px 16px;
+            border-bottom: 1px solid #f3f4f6;
+            transition: background 0.1s ease;
+        }
+        .doc-dir-entry:last-child { border-bottom: none; }
+        .doc-dir-entry:hover { background: #f9fafb; }
+        .doc-dir-entry a {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            color: #1f2937;
+            text-decoration: none;
+        }
+        .doc-dir-entry a:hover { color: #4f46e5; }
+        .doc-dir-icon {
+            margin-right: 12px;
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
+        }
+        .doc-dir-name {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+        }
+        .doc-dir-meta {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+            color: #6b7280;
+            margin-left: 16px;
+        }
+        .doc-dir-empty {
+            padding: 32px 16px;
+            text-align: center;
+            color: #9ca3af;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -148,10 +216,12 @@
         ( async function() {
             const target = document.getElementById( 'doc-viewer-target' );
             const params = new URLSearchParams( window.location.search );
-            const path   = params.get( 'path' );
+            // Use ?? not || — empty string is a VALID path for scope=io (root listing)
+            const path   = params.get( 'path' ) ?? '';
             const scope  = params.get( 'scope' ) || 'io';
 
-            if ( !path ) {
+            // Missing path is only an error for scope=docs (scope=io tolerates empty → io root listing)
+            if ( params.get( 'path' ) === null && scope === 'docs' ) {
                 target.className = 'doc-viewer-error';
                 target.textContent = 'No document path specified. Use ?path=<file>&scope=io|docs';
                 return;
@@ -169,6 +239,17 @@
                 if ( !response.ok ) {
                     throw new Error( 'Failed to load document (HTTP ' + response.status + ')' );
                 }
+
+                // Polymorphic dispatch by Content-Type:
+                // - application/json → directory listing (renderDirectoryListing)
+                // - text/* → markdown / text rendering (existing path below)
+                const contentType = response.headers.get( 'content-type' ) || '';
+                if ( contentType.includes( 'application/json' ) ) {
+                    const listing = await response.json();
+                    renderDirectoryListing( listing, target );
+                    return;
+                }
+
                 const markdown = await response.text();
 
                 // Configure marked (mirrors notifications.js renderMarkdown config)
@@ -228,6 +309,82 @@
                 target.textContent = err.message;
             }
         } )();
+
+        // Directory-listing renderer — added 2026-05-12 per
+        // src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md
+        function renderDirectoryListing( listing, target ) {
+            const scope = listing.scope || 'docs';
+            const segments = listing.path ? listing.path.split( '/' ) : [];
+
+            // Page title
+            const last = segments.length > 0 ? segments[ segments.length - 1 ] : ( scope === 'io' ? 'Lupin IO' : 'Lupin Docs' );
+            document.title = last + ' — Lupin';
+
+            // Breadcrumb
+            let breadcrumbHtml = '<div class="doc-dir-breadcrumb">';
+            const rootLabel = scope === 'io' ? 'IO' : 'Docs';
+            if ( segments.length > 0 ) {
+                let accumulated = '';
+                const parts = [ '<a href="/app/docs?scope=' + scope + '">' + rootLabel + '</a>' ];
+                for ( let i = 0; i < segments.length; i++ ) {
+                    accumulated = accumulated ? accumulated + '/' + segments[ i ] : segments[ i ];
+                    if ( i < segments.length - 1 ) {
+                        parts.push( '<a href="/app/docs?path=' + encodeURIComponent( accumulated ) + '&scope=' + scope + '">' + segments[ i ] + '</a>' );
+                    } else {
+                        parts.push( '<span class="current">' + segments[ i ] + '</span>' );
+                    }
+                }
+                breadcrumbHtml += parts.join( ' <span class="sep">›</span> ' );
+            } else {
+                breadcrumbHtml += '<span class="current">' + rootLabel + '</span>';
+            }
+            breadcrumbHtml += '</div>';
+
+            // Entry icon — purely cosmetic, derived from kind + extension
+            function iconFor( entry ) {
+                if ( entry.kind === 'directory' ) return '📁';
+                const dotIdx = entry.name.lastIndexOf( '.' );
+                const ext = dotIdx >= 0 ? entry.name.slice( dotIdx ).toLowerCase() : '';
+                if ( ext === '.mp3' || ext === '.wav' ) return '🔊';
+                if ( ext === '.pdf' ) return '📑';
+                if ( ext === '.pptx' ) return '📊';
+                return '📄';
+            }
+
+            function formatSize( bytes ) {
+                if ( bytes === null || bytes === undefined ) return '';
+                if ( bytes < 1024 ) return bytes + ' B';
+                if ( bytes < 1024 * 1024 ) return ( bytes / 1024 ).toFixed( 1 ) + ' KB';
+                if ( bytes < 1024 * 1024 * 1024 ) return ( bytes / ( 1024 * 1024 ) ).toFixed( 1 ) + ' MB';
+                return ( bytes / ( 1024 * 1024 * 1024 ) ).toFixed( 1 ) + ' GB';
+            }
+
+            let entriesHtml = '<ul class="doc-dir-listing">';
+            if ( !listing.entries || listing.entries.length === 0 ) {
+                entriesHtml += '<li class="doc-dir-empty">(empty directory)</li>';
+            } else {
+                for ( const entry of listing.entries ) {
+                    entriesHtml += '<li class="doc-dir-entry">';
+                    entriesHtml += '<a href="' + entry.view_url + '">';
+                    entriesHtml += '<span class="doc-dir-icon">' + iconFor( entry ) + '</span>';
+                    entriesHtml += '<span class="doc-dir-name">' + entry.name + '</span>';
+                    entriesHtml += '</a>';
+                    if ( entry.size !== null && entry.size !== undefined ) {
+                        entriesHtml += '<span class="doc-dir-meta">' + formatSize( entry.size ) + '</span>';
+                    }
+                    entriesHtml += '</li>';
+                }
+            }
+            entriesHtml += '</ul>';
+
+            const sanitized = DOMPurify.sanitize( breadcrumbHtml + entriesHtml, {
+                ALLOWED_TAGS : [ 'div', 'span', 'a', 'ul', 'li' ],
+                ALLOWED_ATTR : [ 'href', 'class' ]
+            } );
+
+            target.className = 'doc-viewer-content';
+            target.innerHTML = sanitized;
+        }
     </script>
 </body>
 </html>
