@@ -14,6 +14,32 @@ The Phase 1 work is not blocking anything else; pick it up whenever Rick says "g
 
 ---
 
+## 💰 LUPIN Cost Migration — three agents flagged for bounded-CC migration (2026-05-12)
+
+**Empirical foundation**: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` confirms bounded ClaudeCodeJobs are zero per-token cost (covered by Max 200 plan). Console balance moved $0.00 across 10 probe jobs reporting $2.05 in `cost_usd` telemetry.
+
+**Canonical policy**: `CLAUDE.md` § "COST MODEL — BOUNDED CC vs FIREWALLED SDK"
+**Human-facing playbook**: `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`
+**Auto-memory rule**: `feedback_prefer_bounded_cc_over_anthropic_sdk.md`
+
+**Three candidates** — each currently calls `AsyncAnthropic` via `ANTHROPIC_API_KEY_FIREWALLED` and is a structural fit for bounded CC (Anthropic-only, prompt-shaped, fits CC tool surface, async-batch-friendly):
+
+- [ ] **[LUPIN] Migrate Deep Research agent (`src/cosa/agents/deep_research/`) to bounded CC** — largest current firewalled-account line-item; uses WebSearch + WebFetch natively (already in CC tool surface). Migration must default `scheduled_at` to post-midnight window per off-peak rule.
+
+- [ ] **[LUPIN] Migrate podcast script-generation phase (`src/cosa/agents/podcast_generator/`) to bounded CC** — script phase only; audio TTS phase stays as-is. Multi-paragraph structured-text synthesis fits cleanly. Default `scheduled_at` post-midnight for non-interactive runs.
+
+- [ ] **[LUPIN] Migrate presentation content-generation phase (`src/cosa/agents/presentation_generator/`) to bounded CC** — content/YAML phase only; pptx-assembly stays as-is. Default `scheduled_at` post-midnight.
+
+**Migration playbook**: see `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md` § "Migration playbook" (8-step sequence: Q1–Q5 fit check → identify boundary → refactor invocation → drop firewalled-key dep → default scheduled_at → update user-facing doc → update agent banner → verify with console-balance check).
+
+**Precedent**: BFE (`src/cosa/agents/bug_fix_expediter/`) and TFE (`src/cosa/agents/test_fix_expediter/`) — both already on bounded CC, use as code-shape reference.
+
+**NOT migrating** (guardrails): `notification_proxy/strategies/llm_fallback.py` (high-QPS classifier) and `decision_proxy/` (latency-sensitive). Subprocess spawn overhead would break those budgets.
+
+**Not blocking anything** — sequence pick-up after the speakerphone + commons items above settle.
+
+---
+
 ## ☀️ FIRST THING NEXT SESSION — Inter-Session Commons Phase 3 Pass 1 Fitness, mid-walk (F2-fit picker resume)
 
 **Resume pointer**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/91-resume-here-phase3-pass1-f2-fit.md`

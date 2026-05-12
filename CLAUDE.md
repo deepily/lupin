@@ -61,6 +61,62 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 
 **Packaging Guide**: `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
 
+## COST MODEL — BOUNDED CC vs FIREWALLED SDK
+
+Two LLM-cost paths exist in Lupin. Knowing which one a feature lands on is a design-time concern, not a runtime detail.
+
+| Path | Auth | Billing |
+|---|---|---|
+| **Bounded `ClaudeCodeJob`** (CJ Flow, `task_type=BOUNDED`) | Claude Code CLI / Claude Agent SDK using Max-subscription OAuth | **Covered by Max 200 plan — zero per-token cost** |
+| **Direct Anthropic SDK** (`AsyncAnthropic( api_key=… )`) | `ANTHROPIC_API_KEY_FIREWALLED` env var | **Billed per token against the firewalled Anthropic account** |
+
+**Empirical confirmation (2026-05-12)**: A 10-job probe reported $2.0514 in SDK `cost_usd` telemetry while the Anthropic console credit balance moved **$0.00**. Forensic record: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`.
+
+The "firewalled" naming is intentional defense-in-depth: the API key is stored under `ANTHROPIC_API_KEY_FIREWALLED`, **not** the bare `ANTHROPIC_API_KEY` that the Anthropic SDK auto-discovers. The CC CLI ignores the firewalled name and uses OAuth instead. Verbatim per `src/cosa/agents/deep_research/__init__.py:27`: "NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI."
+
+### Mandate: prefer bounded CC when migrating or designing a new LLM-driven agent
+
+The bounded CC pattern is the cost-optimal default for LLM-driven agents that:
+
+1. Express as a self-contained prompt with bounded turn count
+2. Fit Claude Code's tool surface (Read / Write / Bash / Grep / WebSearch / WebFetch / etc.)
+3. Tolerate ~1-3s SDK-subprocess spawn overhead per invocation
+4. Use Anthropic-backed models only
+
+Already migrated: **BFE** (`src/cosa/agents/bug_fix_expediter/`), **TFE** (`src/cosa/agents/test_fix_expediter/`).
+
+Migration candidates (tracked in TODO.md): **Deep Research**, **podcast script generation**, **presentation content generation**.
+
+**Framing**: this is a **cost-shift, not zero-cost**. The Max 200 plan is a fixed monthly bill. Migrations convert per-token metered spend into already-paid fixed cost. Never describe a migration as "free" — describe it as "covered by existing fixed cost."
+
+### When NOT to migrate
+
+- High-frequency tiny calls (>~10 QPS) — subprocess spawn overhead dominates. Keeps: `notification_proxy/strategies/llm_fallback.py`, `decision_proxy/`.
+- Hard latency budget < ~2 seconds.
+- Non-Anthropic models required (OpenAI/Groq/Mistral/etc. — Max plan only covers Claude).
+- Token-by-token streaming UX (bounded CC returns on completion, no progressive streaming).
+
+### Off-peak scheduling rule (operational)
+
+Max-plan usage has rolling-window limits. Batch bounded jobs running during Rick's interactive peak window can throttle his real Claude Code work.
+
+- **Peak (avoid scheduling here)**: 9 PM – 12 AM EDT
+- **Optimal (schedule batch work here)**: 12 AM – 9 AM EDT (Rick asleep, zero interactive use)
+- **Acceptable**: 9 AM – 9 PM EDT (some interactive use but well below peak)
+
+**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` to the post-midnight window via `/api/claude-code/submit` (field defined at `src/cosa/rest/routers/claude_code_queue.py:49`). User-clicked synchronous bounded jobs are exempt.
+
+Example:
+```json
+{
+  "prompt"       : "…",
+  "task_type"    : "BOUNDED",
+  "scheduled_at" : "2026-05-13T02:30:00-04:00"
+}
+```
+
+**Mandate for new design**: any proposal for a new LLM-driven feature MUST first answer "can this be a bounded CC job?" and document the answer. If "no", document which guardrail it hits.
+
 ## CODE STYLE
 - **Imports**: Group by stdlib, third-party, local
 - **Naming**: snake_case for functions, PascalCase for classes, UPPER_SNAKE_CASE for constants
@@ -551,6 +607,7 @@ When modifying code in these areas, update the corresponding documentation:
 | BFE/TFE endpoint rows | `src/docs/rest-api-reference.md` sections 17/17a/17b |
 | `routers/voice_persona.py` + `voice_persona_helpers.py` | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (architecture, allocation flow, /clear preservation, conversation-mode orthogonality) |
 | `lupin-app.ini` `cc session voice persona *` keys | Same R&D doc — INI reference is in §3 (Voice Pool) |
+| New LLM-driven agent OR migration of an existing agent between bounded-CC and firewalled-SDK paths | `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`, R&D doc `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`, auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md`, and CLAUDE.md § "COST MODEL — BOUNDED CC vs FIREWALLED SDK" if guardrails or candidate list change |
 
 **Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
 

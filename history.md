@@ -48,6 +48,20 @@
 
 ---
 
+**Postscript (same session, ~30 min after checkpoint 1)**: ran a throwaway empirical probe (`src/scripts/probe-cc-bounded-billing-2026.05.12.py`, gitignored, deleted post-use) to definitively confirm whether bounded `ClaudeCodeJobs` bill against the firewalled Anthropic key or are covered by Rick's Max 200 plan. 10 probe jobs (2 clusters × 5: in-repo Read/Grep/Write + web search/synthesis) reported **$2.0514** in SDK-side `cost_usd` telemetry; Anthropic console credit balance moved **$0.00** confirmed by Rick at probe completion + 10 min post. Theory empirically confirmed — bounded CC path uses Max-subscription OAuth, firewalled key is never touched.
+
+**Policy spawned from this finding** (single follow-up commit, Checkpoint 2):
+
+- NEW R&D doc `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` — load-bearing forensic record + migration policy + off-peak scheduling rule (9 PM – 12 AM EDT peak / 12 AM – 9 AM EDT optimal batch window).
+- NEW auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md` (indexed in MEMORY.md).
+- NEW CLAUDE.md § "COST MODEL — BOUNDED CC vs FIREWALLED SDK" between CJ FLOW and CODE STYLE; new row in the DOCUMENTATION TOUCHPOINTS table.
+- NEW `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md` (indexed in src/docs/README.md) — human-onboarding decision framework + 8-step migration playbook.
+- TODO.md — three migration items added under new "💰 LUPIN Cost Migration" section: Deep Research, podcast script generation, presentation content generation. NOT migrating: notification_proxy LLM fallback (high-QPS) and decision_proxy (latency-sensitive).
+
+**Why this matters**: Lupin already migrated BFE + TFE to bounded CC on this cost assumption; now empirically grounded. Three more agents queued for migration. Net effect when all three land: removes the largest per-token Anthropic spend lines, shifts that cost into the already-paid Max 200 monthly bill.
+
+---
+
 ### 2026.05.12 PM - Session 83ba1e51 (Rio ⚡) | Speakerphone solo/chorus — full design doc set + Q4 audit resolved (Phase 1 unblocked)
 
 **Persona**: Rio ⚡ (Young & energetic female, #880E4F)
