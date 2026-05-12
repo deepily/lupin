@@ -93,6 +93,15 @@ export interface JobStore {
   getById(idHash: string): Job | undefined;
   hydrateHistory(api: JobHistoryApiClient): Promise<void>;
   isHistoryHydrated(): boolean;
+  /**
+   * Phase 6b: remove a job from its current bucket and emit
+   * `store_jobs_changed{changeKind:"removed"}`. Returns a closure
+   * (`restoreState`) that puts the entry back at its original bucket + index
+   * and emits `changeKind:"added"`. Nonexistent idHash → no-op delete +
+   * no-op `restoreState` (no exception, no event). Used by JobsPaneRenderer
+   * delete-button (Q-B10 optimistic + rollback).
+   */
+  delete(idHash: string): { restoreState: () => void };
   /** Test/cleanup helper: detach EventBus listeners. */
   disposeForTesting(): void;
 }
@@ -175,6 +184,28 @@ class JobStoreImpl implements JobStore {
 
   isHistoryHydrated(): boolean {
     return this.historyHydrated;
+  }
+
+  delete(idHash: string): { restoreState: () => void } {
+    const bucketName = this.indexById.get(idHash);
+    if (!bucketName) {
+      return { restoreState: () => {} };
+    }
+    const list = this.buckets[bucketName];
+    const idx  = list.findIndex(j => j.id_hash === idHash);
+    /* c8 ignore next */ // defensive: indexById and bucket arrays are kept in lockstep by every reducer path; "out of sync" is a never-reached invariant violation.
+    if (idx < 0) return { restoreState: () => {} };
+    const job = list[idx]!;
+    list.splice(idx, 1);
+    this.indexById.delete(idHash);
+    this.emit({ changeKind: "removed", id_hash: idHash });
+
+    const restoreState = (): void => {
+      list.splice(idx, 0, job);
+      this.indexById.set(idHash, bucketName);
+      this.emit({ changeKind: "added", id_hash: idHash, to: bucketName });
+    };
+    return { restoreState };
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.

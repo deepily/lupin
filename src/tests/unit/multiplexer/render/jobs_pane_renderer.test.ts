@@ -1,6 +1,8 @@
 // Multiplexer Phase 6a — JobsPaneRenderer unit tests.
 // AC5 floor: ≥18 tests per design § Verification matrix.
 // Includes Pass 1 F3 + F6 + F13 + Pass 2 F23 + F26 + F27 dedicated coverage.
+// Phase 6b extension: Tests 21–30 cover AC5c (delete-button click delegation
+// + Q-B10 optimistic + rollback + Q-A6 inertness-marker strip).
 
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
@@ -8,7 +10,11 @@ import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
 import { createJobStore, type JobHistoryApiClient } from "../../../../fastapi_app/static/js/multiplexer/stores/JobStore";
-import { createJobsPaneRenderer } from "../../../../fastapi_app/static/js/multiplexer/render/JobsPaneRenderer";
+import {
+  createJobsPaneRenderer,
+  type JobsPaneApiClient,
+} from "../../../../fastapi_app/static/js/multiplexer/render/JobsPaneRenderer";
+import { ApiError } from "../../../../fastapi_app/static/js/multiplexer/api/ApiClient";
 import type {
   EventBus,
 } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
@@ -53,7 +59,7 @@ function makeRoot(): HTMLElement {
   return root;
 }
 
-interface SimpleApiStub extends JobHistoryApiClient {
+interface SimpleApiStub extends JobsPaneApiClient {
   calls : Array<string>;
 }
 function makeStubApi(jobs: ReadonlyArray<Job> = []): SimpleApiStub {
@@ -63,6 +69,10 @@ function makeStubApi(jobs: ReadonlyArray<Job> = []): SimpleApiStub {
     get: async <T>(path: string): Promise<T> => {
       calls.push(path);
       return { jobs } as unknown as T;
+    },
+    delete: async <T>(path: string): Promise<T> => {
+      calls.push(`DELETE ${path}`);
+      return null as T;
     },
   };
 }
@@ -710,5 +720,364 @@ test("Test 20: store events fired AFTER unmount do NOT trigger renders (subscrip
   emitJobAdded(bus, makeJob({ id_hash: "post-unmount-1" }));
   assert.equal(container.querySelectorAll(".jobs-bucket").length, 0);
 
+  jobs.disposeForTesting();
+});
+
+// =============================================================================
+// Phase 6b — AC5c: delete-button click delegation + Q-B10 optimistic + rollback
+// =============================================================================
+
+interface ControllableDeleteApi extends JobsPaneApiClient {
+  calls : Array<string>;
+  /** Replace with a resolved Promise (default) or a rejected one for testing. */
+  responder : (path: string) => Promise<unknown>;
+}
+
+function makeControllableApi(
+  hydrateJobs: ReadonlyArray<Job> = [],
+  responder: (path: string) => Promise<unknown> = async () => null,
+): ControllableDeleteApi {
+  const calls: string[] = [];
+  const api: ControllableDeleteApi = {
+    calls,
+    responder,
+    get: async <T>(path: string): Promise<T> => {
+      return { jobs: hydrateJobs } as unknown as T;
+    },
+    delete: <T>(path: string): Promise<T> => {
+      calls.push(path);
+      return api.responder(path) as Promise<T>;
+    },
+  };
+  return api;
+}
+
+/** Yield once so any pending then/catch/finally microtasks settle. */
+async function flushMicrotasks(): Promise<void> {
+  await new Promise(r => setTimeout(r, 0));
+}
+
+// ---------------------------------------------------------------------------
+// Test 21 (5B-1 + 5B-2): click delegation handles `.job-delete-button` and
+//   dispatches to `JobStore.delete(idHash)` + captures the restoreState closure.
+// ---------------------------------------------------------------------------
+
+test("Test 21: delete-button click invokes JobStore.delete(idHash) + captures restoreState (5B-1, 5B-2)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi();
+  const jobs = createJobStore({ bus });
+
+  const deleteCalls: string[] = [];
+  const originalDelete = jobs.delete.bind(jobs);
+  (jobs as unknown as { delete: (id: string) => { restoreState: () => void } }).delete =
+    (id: string) => {
+      deleteCalls.push(id);
+      return originalDelete(id);
+    };
+
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-21", status: "running" }));
+  const button = root.querySelector(".job-delete-button") as HTMLButtonElement;
+  assert.ok(button, "delete button should be present");
+
+  button.click();
+  await flushMicrotasks();
+
+  assert.deepEqual(deleteCalls, ["del-21"], "JobStore.delete should be called exactly once with idHash");
+  assert.deepEqual(api.calls,   ["/api/queue/run/del-21"], "api.delete should be called with UI-status → server-queue mapping (running → run)");
+  assert.equal(jobs.getById("del-21"), undefined, "job should be removed from store post-success");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 22 (5B-3): 2xx response → restoreState NOT called; no rollback.
+// ---------------------------------------------------------------------------
+
+test("Test 22: 2xx response discards restoreState; no rollback (5B-3)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi([], async () => null);
+  const jobs = createJobStore({ bus });
+  const events: LupinEvent<StoreJobsChangedPayload>[] = [];
+  bus.on<StoreJobsChangedPayload>("store_jobs_changed", (e) => events.push(e));
+
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-22", status: "running" }));
+  const before = events.length;
+  const button = root.querySelector(".job-delete-button") as HTMLButtonElement;
+  button.click();
+  await flushMicrotasks();
+
+  // Exactly ONE "removed" event; NO "added" event for the restore path.
+  const delta = events.slice(before);
+  const removeds = delta.filter(e => e.payload.changeKind === "removed");
+  const addeds   = delta.filter(e => e.payload.changeKind === "added");
+  assert.equal(removeds.length, 1, "exactly one removed event");
+  assert.equal(addeds.length,   0, "no added event (no rollback)");
+  assert.equal(root.querySelector('[data-id-hash="del-22"]'), null, "card stays gone");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 23 (5B-4): 404 response → treated as success per Q-B10; no rollback.
+// ---------------------------------------------------------------------------
+
+test("Test 23: 404 response is treated as success per Q-B10 (5B-4)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi([], async () => {
+    throw new ApiError(404, "/api/queue/run/del-23", "not found");
+  });
+  const jobs = createJobStore({ bus });
+  const events: LupinEvent<StoreJobsChangedPayload>[] = [];
+  bus.on<StoreJobsChangedPayload>("store_jobs_changed", (e) => events.push(e));
+
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-23", status: "running" }));
+  const before = events.length;
+  const button = root.querySelector(".job-delete-button") as HTMLButtonElement;
+  button.click();
+  await flushMicrotasks();
+
+  const delta = events.slice(before);
+  assert.equal(delta.filter(e => e.payload.changeKind === "removed").length, 1);
+  assert.equal(delta.filter(e => e.payload.changeKind === "added").length,   0, "404 is success — no rollback");
+  assert.equal(root.querySelector('[data-id-hash="del-23"]'), null);
+  // No error stripe rendered on success-path 404.
+  assert.equal(root.querySelector(".job-card-error-stripe"), null);
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 24 (5B-5): 5xx response → restoreState invoked + inline error stripe rendered.
+// ---------------------------------------------------------------------------
+
+test("Test 24: 5xx response invokes restoreState + renders inline error stripe (5B-5)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi([], async () => {
+    throw new ApiError(500, "/api/queue/run/del-24", "server error");
+  });
+  const jobs = createJobStore({ bus });
+  const events: LupinEvent<StoreJobsChangedPayload>[] = [];
+  bus.on<StoreJobsChangedPayload>("store_jobs_changed", (e) => events.push(e));
+
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-24", status: "running" }));
+  const before = events.length;
+  const button = root.querySelector(".job-delete-button") as HTMLButtonElement;
+  button.click();
+  await flushMicrotasks();
+
+  const delta = events.slice(before);
+  assert.equal(delta.filter(e => e.payload.changeKind === "removed").length, 1, "optimistic removal fired");
+  assert.equal(delta.filter(e => e.payload.changeKind === "added").length,   1, "restoreState fired added event");
+
+  // Card is back in DOM after rollback.
+  const restoredCard = root.querySelector('[data-id-hash="del-24"]') as HTMLElement | null;
+  assert.ok(restoredCard, "card should be back in DOM after rollback");
+  const stripe = restoredCard!.querySelector(".job-card-error-stripe") as HTMLElement | null;
+  assert.ok(stripe, "inline error stripe should be present");
+  assert.equal(stripe!.getAttribute("role"),      "alert");
+  assert.equal(stripe!.getAttribute("aria-live"), "polite");
+  assert.match(stripe!.textContent ?? "", /HTTP 500/);
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 25 (5B-6): Network error → same rollback behavior as 5xx.
+// ---------------------------------------------------------------------------
+
+test("Test 25: network error invokes restoreState + renders inline error stripe (5B-6)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi([], async () => {
+    throw new TypeError("Failed to fetch");
+  });
+  const jobs = createJobStore({ bus });
+  const events: LupinEvent<StoreJobsChangedPayload>[] = [];
+  bus.on<StoreJobsChangedPayload>("store_jobs_changed", (e) => events.push(e));
+
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-25", status: "running" }));
+  const before = events.length;
+  const button = root.querySelector(".job-delete-button") as HTMLButtonElement;
+  button.click();
+  await flushMicrotasks();
+
+  const delta = events.slice(before);
+  assert.equal(delta.filter(e => e.payload.changeKind === "removed").length, 1);
+  assert.equal(delta.filter(e => e.payload.changeKind === "added").length,   1);
+
+  const restoredCard = root.querySelector('[data-id-hash="del-25"]') as HTMLElement | null;
+  assert.ok(restoredCard);
+  const stripe = restoredCard!.querySelector(".job-card-error-stripe");
+  assert.ok(stripe);
+  assert.match(stripe!.textContent ?? "", /Failed to fetch/);
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 26 (5B-7): rapid double-click — only the first click dispatches `delete`.
+// ---------------------------------------------------------------------------
+
+test("Test 26: rapid double-click — only first click emits delete (5B-7)", async () => {
+  const bus  = createEventBusForTesting();
+  // Pending-forever promise so the in-flight set stays populated.
+  const pending: Promise<unknown> = new Promise(() => {});
+  const api = makeControllableApi([], () => pending);
+  const jobs = createJobStore({ bus });
+
+  // Spy on JobStore.delete (replace with no-op stub so the card stays in DOM
+  // and a second click can dispatch).
+  const deleteCalls: string[] = [];
+  (jobs as unknown as { delete: (id: string) => { restoreState: () => void } }).delete =
+    (id: string) => {
+      deleteCalls.push(id);
+      // No-op delete — card stays in DOM so the second click is dispatchable.
+      return { restoreState: () => {} };
+    };
+
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-26", status: "running" }));
+  const button = root.querySelector(".job-delete-button") as HTMLButtonElement;
+
+  button.click();
+  button.click();
+  button.click();
+  await flushMicrotasks();
+
+  assert.deepEqual(deleteCalls, ["del-26"], "JobStore.delete called exactly once across 3 rapid clicks");
+  assert.equal(api.calls.length, 1, "api.delete also called exactly once");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 27 (5B-8): non-delete-button clicks within a row are NO-OP for delete.
+// ---------------------------------------------------------------------------
+
+test("Test 27: non-delete-button clicks within row do NOT trigger delete (5B-8)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi();
+  const jobs = createJobStore({ bus });
+
+  const deleteCalls: string[] = [];
+  const originalDelete = jobs.delete.bind(jobs);
+  (jobs as unknown as { delete: (id: string) => { restoreState: () => void } }).delete =
+    (id: string) => { deleteCalls.push(id); return originalDelete(id); };
+
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-27", status: "running" }));
+  // Click the status icon (a span inside the card-header, NOT the delete button).
+  const header = root.querySelector(".job-card-header") as HTMLElement;
+  const icon   = header.querySelector(".job-status-icon") as HTMLElement;
+  icon.click();
+  await flushMicrotasks();
+
+  assert.deepEqual(deleteCalls, [],          "delete handler should not fire on non-delete clicks");
+  assert.equal(api.calls.length, 0,          "api.delete should not be called");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 28 (5B-9): Q-A6 inertness markers stripped from `.job-delete-button`.
+// ---------------------------------------------------------------------------
+
+test("Test 28: inertness markers stripped from .job-delete-button post-render (5B-9)", () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeControllableApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-28a", status: "running" }));
+  emitJobAdded(bus, makeJob({ id_hash: "del-28b", status: "done" }));
+
+  // No `aria-disabled="true"` should remain on any delete button after render.
+  assert.equal(
+    root.querySelector('.job-delete-button[aria-disabled="true"]'),
+    null,
+    "aria-disabled='true' should be stripped",
+  );
+  // No "Delete coming in Phase 6b" title should remain.
+  assert.equal(
+    root.querySelector('.job-delete-button[title="Delete coming in Phase 6b"]'),
+    null,
+    "Phase 6b placeholder title should be stripped",
+  );
+  // tabindex=-1 is also stripped (was part of the disabled state).
+  assert.equal(
+    root.querySelector('.job-delete-button[tabindex="-1"]'),
+    null,
+    "tabindex='-1' should be stripped",
+  );
+
+  // Sanity: buttons themselves still exist.
+  assert.equal(root.querySelectorAll(".job-delete-button").length, 2);
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Test 29: deriveErrorMessage covers non-ApiError Error branch + verifies the
+//   `todo` UI-status → `todo` server-queue mapping (the non-collapsing path).
+// ---------------------------------------------------------------------------
+
+test("Test 29: non-ApiError Error still produces stripe; verifies todo → todo queue mapping", async () => {
+  const bus  = createEventBusForTesting();
+  // Reject with a plain Error (non-ApiError) — exercises the `err instanceof Error` branch.
+  const api  = makeControllableApi([], async () => {
+    throw new Error("connection reset by peer");
+  });
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  emitJobAdded(bus, makeJob({ id_hash: "del-30", status: "todo" }));
+  // Verify the todo-status mapping too.
+  const button = root.querySelector(".job-delete-button") as HTMLButtonElement;
+  button.click();
+  await flushMicrotasks();
+
+  assert.equal(api.calls[0], "/api/queue/todo/del-30", "todo status maps directly to 'todo' queue");
+  const stripe = root.querySelector(".job-card-error-stripe") as HTMLElement | null;
+  assert.ok(stripe);
+  assert.match(stripe!.textContent ?? "", /connection reset/);
+
+  renderer.unmount();
   jobs.disposeForTesting();
 });
