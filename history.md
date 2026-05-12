@@ -2,6 +2,95 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.11 → 2026.05.12 AM - Session 9a4a601d (Rachel 🕊️) | Inter-Session Commons: Phase 1 wrap + Phase 2 plan-review pipeline + Phase 2 backend (steps 1-8)
+
+**Persona**: Rachel 🕊️ (calm & clear female, #7B1FA2)
+
+**Accomplishments**:
+
+- **Phase 1 (file-based commons MVP) — landed steps 4-8** (started by Tiberius 🌑 earlier in the day with steps 3a + 3b). Authored `commons_archival.py` (24h rotation daemon, 117 stmts, 26 branches, 100%) + `commons_ask.py` (hybrid-grace ask_sync + ask_async, 29 stmts, 8 branches, 100%) + 5 MCP tool registrations on the existing cosa-voice server (`commons_post`, `commons_read`, `commons_who`, `commons_ask_sync`, `commons_ask_async`) + `LUPIN_COMMONS_TEST_OVERRIDE` JSON env-var hatch for the AC12 config-toggle subprocess test + reusable `mcp_stdio_test_client.py` helper. Final Phase 1 milestone: **88 tests / 100% lines + branches across all 4 commons modules** (309 stmts, 80 branches, 0 missing); all 14 ACs + 4 deviations documented in `92-phase1-closure.md`.
+
+- **Phase 2 design draft authored** — `03-phase2-user-broadcast-design.md` (568 LOC, 14 ACs, 16 sections, 15 open questions, 3 deviation flags) modeled on the Phase 1 design template. UI panel + 2 endpoints + listener action + live ack aggregation via the canonical `notification_queue_update` envelope, per the 2026-04-29 ws-event-cleanup mandate.
+
+- **Phase 2 plan-review pipeline — REUSE + Pass 1 Fitness + Pass 2 Adversarial all CLOSED.** Plan APPROVED FOR CODE-WRITE.
+  - **REUSE**: 10 prior-art mappings confirmed with file:line citations; surfaced 4 corrections C1-C4 (most critically F10 — the WS-event mechanism was wrong; should be a custom notification type, not a top-level event).
+  - **Pass 1 Fitness**: 20 fitness findings applied across AC1-AC14 including 2 implementation-blocking bugs (F8 — server-pseudo-sid `broadcast@` would fail `_HEADER_RE` regex; F20 — stale filenames in AC12 coverage gate) and 1 HIGH-severity security gap (F5 — same-user scoping missing from fanout filter). 13/15 open questions closed; D2 + D3 deviations ratified.
+  - **Pass 2 Adversarial**: 12 threats walked (T1-T12), 11 ACs hardened inline. Sanitization step ratified (endpoint reject `<system-reminder>` substrings + listener belt-and-suspenders re-check; preserves wrapper format per `feedback_sanitize_at_boundary_not_format_strip`). 2 NEW threats surfaced via code inspection: T8 bridge `Path` leak in `find_active_voice_persona_sessions` return-tuple + T9 broadcast_id collision TOCTOU race — both mitigated.
+
+- **Phase 2 backend implementation — steps 1-8 all CLOSED** with 100% coverage on every new pure-logic module. The full user-broadcast surface is wired backend-side: rate limiter + listener-side orchestrator + ack watcher daemon + 2 FastAPI endpoints + listener `_handle_action` 3rd `elif` branch + 2 new INI keys + `commons_broadcast_ack` registered in `notifications.py` `valid_types` + `main.py` lifespan startup/shutdown wiring + `app.include_router(commons.router)` + AC14 router-registration smoke test.
+
+- **Memory cleanup** — User flagged the `feedback_bug_fix_mode_for_multi_phase.md` rule as misapplied (bug-fix mode is for bug fixes, not new feature implementation). Deleted the memory file + removed the MEMORY.md index entry + scrubbed the citation from the Phase 2 design doc.
+
+**Files modified** (parent Lupin only — CoSA untouched per `feedback_lupin_only_never_cosa`):
+
+Phase 1 (steps 4-8):
+- `src/lupin_mcp/commons_archival.py` (NEW)
+- `src/lupin_mcp/commons_ask.py` (NEW)
+- `src/lupin_mcp/cosa_voice_mcp.py` (MODIFIED — 5 `@mcp.tool` shims + `LUPIN_COMMONS_TEST_OVERRIDE` hatch)
+- `src/tests/helpers/mcp_stdio_test_client.py` (NEW)
+- `src/tests/unit/commons/test_commons_archival.py` (NEW)
+- `src/tests/unit/commons/test_commons_ask.py` (NEW)
+- `src/tests/unit/commons/test_commons_mcp_subprocess.py` (NEW)
+- `src/tests/unit/commons/test_commons_mcp_config_toggle_subprocess.py` (NEW)
+- `src/tests/unit/commons/test_commons_store.py` (branch-coverage backfill)
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/{90-execution-log.md,00-index.md,91-resume-here-phase1-step{4,5,6,7,8}.md,92-phase1-closure.md}` — Phase 1 tracking
+
+Phase 2 (design + steps 1-8):
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md` (NEW + REUSE/Pass 1/Pass 2 walks)
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/90-phase2-execution-log.md` (NEW)
+- `src/lupin_mcp/commons_store.py` (MODIFIED — `broadcasts` added to `RESERVED_TOPICS`)
+- `src/cosa/rest/commons_rate_limiter.py` (NEW)
+- `src/lupin_mcp/broadcast_handler.py` (NEW)
+- `src/cosa/rest/commons_ack_watcher.py` (NEW)
+- `src/cosa/rest/routers/commons.py` (NEW — 2 endpoints + pure-logic helpers)
+- `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (MODIFIED — 3rd `elif` + `_handle_broadcast_received` method)
+- `src/cosa/rest/routers/notifications.py` (MODIFIED — `commons_broadcast_ack` in valid_types)
+- `src/conf/lupin-app.ini` + `src/conf/lupin-app-splainer.ini` (2 new keys + paired explanations)
+- `src/fastapi_app/main.py` (MODIFIED — 3 commons singletons + lifespan startup/shutdown + router include)
+- `src/tests/unit/commons/{test_commons_rate_limiter,test_broadcast_handler,test_commons_ack_watcher,test_commons_router,test_commons_ac14_registration}.py` (NEW × 5)
+- `TODO.md` (resume-pointer section at top)
+- `MEMORY.md` (removed bug-fix-mode-for-multi-phase entry per user)
+
+**Status**:
+
+- ✅ Phase 1 milestone COMPLETE (commit pending in next session — uncommitted on disk).
+- ✅ Phase 2 plan APPROVED FOR CODE-WRITE; design + REUSE + Pass 1 + Pass 2 all closed.
+- ✅ Phase 2 steps 1-8 CLOSED; aggregate suite: **211 tests, 100% lines + branches across 8 commons modules (622 stmts, 170 branches, 0 missing)**.
+- ⏳ Phase 2 steps 9-13 pending (2-session E2E smoke + UI + Playwright + docs + closure post-mortem). Resume pointer in TODO.md.
+- ⏳ No commit this session per user direction (no-push handled by next-session commit).
+
+**Commits**: This session-end commit (parent Lupin; CoSA untouched).
+
+---
+
+### 2026.05.11 EOD - Session 77e1bb27 (Mr. Radio) | Speakerphone-mode thought exercise — design serialized to R&D
+
+**Persona**: Mr. Radio 🦉 (authoritative warm male, #FFA000)
+
+**Accomplishments**:
+
+- **Voice-driven design exploration** — Think-out-loud session on a contemplated refactor of cosa-voice "conversation mode" from monopoly-enforced single-session toggle to per-session **speakerphone vs phone** render-mode toggle. Many sessions can be on speakerphone simultaneously; the cosa-voice TTS queue serializes playback at the user's ear; each persona's voice carries disambiguation. At-distance becomes the default interaction mode. The `<voice-message>` + `<system-reminder>` micro-prompt is preserved and load-bearing — the rider's content varies by per-session speakerphone state, the wrapping mechanism itself is unchanged. CLAUDE.md slims to always-on notification rules; speakerphone-conditional rules migrate into the MCP-server-built per-turn rider.
+
+- **Plan serialized to R&D** — `src/rnd/v0.1.7/2026.05.11-per-session-speakerphone-mode.md` captures the full design exploration with a status banner marking it as 💭 **NOT approved for implementation** — thought exercise only. Post-serialization addendum at top of the doc documents the user's refinement: **preserve the monopoly plumbing as a runtime-flag-gated fallback** rather than tearing it out. Both paths stay first-class and tested per `feedback_feature_flag_preserves_old_path`.
+
+- **Memory note added** — `feedback_exit_plan_mode_is_not_user_approval.md` protects against future false-positive reads of `ExitPlanMode`'s framework-default "approved" return value as actual user consent. Lesson captured after the user clarified mid-flow that they had been elsewhere when `ExitPlanMode` resolved; I had started TaskCreate scaffolding + a `find /` of the R&D dir structure before they redirected to serialize-only.
+
+**Files modified** (parent Lupin only — CoSA untouched per `feedback_lupin_only_never_cosa`):
+
+- `src/rnd/v0.1.7/2026.05.11-per-session-speakerphone-mode.md` (NEW — design + addendum, 8 phases + verification matrix + risk register, all marked "if/when revisited")
+- `history.md` (this entry)
+- `.claude-session.md` (Checkpoint 3 touched-files block — speakerphone thought exercise)
+
+**Status**:
+
+- 💭 Speakerphone-mode plan **NOT** scheduled for implementation — captured for possible future revisit per user direction.
+- ⏸️ No code touched, no tests run, no `:7999` bounce, no `:8000` scheduling.
+- ✅ Memory feedback note landed; index updated.
+
+**Commits**: This session-end commit only (parent Lupin; CoSA untouched).
+
+---
+
 ### 2026.05.11 late PM - Session df880556 (María) | Multiplexer Phase 6b Phase 1 — store API prereqs + Phase 5 ownership-flag guard
 
 **Persona**: María 🌸 (warm inquisitive female, #F06292)

@@ -1,5 +1,63 @@
 # TODO
 
+## ☀️ FIRST THING NEXT SESSION — Inter-Session Commons Phase 2 step 9 (session 9a4a601d Rachel 🕊️, 2026-05-12 early AM)
+
+**Resume pointer**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/90-phase2-execution-log.md` — steps 1-8 ✅ CLOSED, steps 9-13 ⏳ pending.
+
+### Where we are
+
+The Inter-Session Commons + User-Broadcast initiative landed Phase 1 (file-based commons MVP) yesterday and the Phase 2 plan-review pipeline (REUSE + Pass 1 Fitness + Pass 2 Adversarial) all closed earlier today. **Phase 2 backend implementation steps 1-8 ALL CLOSED** — the full user-broadcast surface is wired backend-side:
+
+| Step | Artifact | Tests |
+|---|---|---|
+| 1 | `broadcasts` added to `RESERVED_TOPICS` in `commons_store.py` | parametric — existing test adapts |
+| 2 | `src/cosa/rest/commons_rate_limiter.py` | 12 tests, 100% |
+| 3 | `src/lupin_mcp/broadcast_handler.py` | 28 tests, 100% |
+| 4 | `src/cosa/rest/commons_ack_watcher.py` | 26 tests, 100% |
+| 5 | `src/cosa/rest/routers/commons.py` (2 endpoints) | 55 tests, 100% on pure-logic helpers |
+| 6 | `cc_notification_listener._handle_action()` 3rd `elif` + `_handle_broadcast_received()` method | py_compile + import-chain clean (cross-process smoke deferred to step 9) |
+| 7 | 2 new INI keys + paired splainer + `commons_broadcast_ack` registered in `notifications.py:359-362` `valid_types` | n/a |
+| 8 | `main.py` lifespan wiring (startup + shutdown) + `app.include_router(commons.router)` + AC14 registration smoke | 5 tests pass |
+
+**Aggregate: 211 tests, 100% lines + branches across 8 commons modules (622 stmts, 170 branches, 0 missing).**
+
+### Steps remaining
+
+- [ ] **Step 9** — 2-session E2E smoke on `:7999` (`test_broadcast_two_session_e2e.py`). Spawns 2 listener subprocesses with distinct personas, hits `POST /api/commons/broadcast-to-cc-sessions` with a persona-targeted directive ("All sessions: X. @Maria: Y."), asserts both listeners receive the right injection AND post acks AND the AckWatcher fires `commons_broadcast_ack` notifications. **Operational note**: `find_active_voice_persona_sessions()` reads from real `~/.claude/sessions/` bridge files — the smoke test will need to either (a) mock the helper or (b) seed bridge files in a tempdir + monkeypatch `SESSION_DIR`. Also requires `:7999` server to pick up the new `commons` router (FastAPI auto-reload should handle this, per `feedback_fastapi_auto_reload.md`).
+- [ ] **Step 10** — UI panel: `broadcast-panel.js` + `broadcast-panel.css` + `notifications.html` insertion. Includes DOMPurify wiring per T2 + `textContent` rendering per T10 + one-step confirm modal per Q10.
+- [ ] **Step 11** — Playwright E2E on `:8000` (scheduled monopolize-mode).
+- [ ] **Step 12** — Docs: `src/docs/notification-types.md` (NEW — document `commons_broadcast_ack`) + `src/docs/rest-api-reference.md` §17 (2 new endpoints).
+- [ ] **Step 13** — Phase 2 closure `92-phase2-closure.md` post-mortem.
+
+### What's ready to pick up tomorrow
+
+1. **The backend is feature-complete.** All wiring is in place; the next session can immediately start step 9 (2-session E2E smoke) without re-deriving context.
+2. **The design doc is APPROVED FOR CODE-WRITE** with all 14 ACs + 12 mitigations + sanitization ratified.
+3. **No commit done this session** — Phase 2 steps 1-8 are uncommitted on disk per `feedback_never_auto_commit_push.md`. The work is preserved in `.claude-session.md`'s session `9a4a601d` touched-files manifest.
+
+### Verification commands for next session
+
+```bash
+# Confirm steps 1-8 still pass
+PYTHONPATH=src:$PYTHONPATH /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/.venv/bin/python \
+  -m pytest src/tests/unit/commons/ \
+  --cov=lupin_mcp.commons_persona_matcher --cov=lupin_mcp.commons_store \
+  --cov=lupin_mcp.commons_archival --cov=lupin_mcp.commons_ask \
+  --cov=lupin_mcp.broadcast_handler --cov=cosa.rest.commons_rate_limiter \
+  --cov=cosa.rest.commons_ack_watcher --cov=cosa.rest.routers.commons \
+  --cov-branch --cov-fail-under=100
+
+# Should report: 211 passed; 100% lines + branches across 8 commons modules
+
+# Also confirm Phase 1 smoke still passes (sanity)
+PYTHONPATH=src:$PYTHONPATH /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/.venv/bin/python \
+  -m pytest src/tests/smoke/test_commons_two_session_roundtrip.py -v
+```
+
+If both green, step 9 implementation can begin.
+
+---
+
 ## 🚧 Phase 5b PARTIAL — CC Card Normalization (session 77e1bb27 Mr. Radio, 2026-05-11 PM)
 
 User-authorized test-server bounce at 17:13 EDT → 3 batch-1 submissions fired sequentially → some skips suspected to be 401-cred-system fallout → 3 batch-2 submissions resubmitted at 17:59 EDT. Phase 6.8 parent commit remains gated on Phase 5b verdict.
@@ -236,15 +294,19 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ---
 
-## ☀️ FIRST THING NEXT SESSION — Multiplexer Phase 6b Phase 1 implementation (store API prereqs + Phase 5 short-circuit)
+## ☀️ FIRST THING TOMORROW — Multiplexer Phase 6b Phase 5A → 5B (JobStore.delete + delete-button click handler)
 
-**Cycle state on resume**:
+**Cycle state on resume (2026-05-12 AM)**:
 - Q-decisions ✅ CLOSED 12/12 (2026-05-07)
 - REUSE pre-pass ✅ CLOSED 28 RE + 5 L3 (2026-05-07)
-- Pass 1 Fitness ✅ CLOSED 14/14 (2026-05-11) — resolutions applied
-- **Pass 2 Adversarial ✅ CLOSED 11/11 (2026-05-11)** — 8 Majors A1-A8 + 3 Minors a1-a3; all resolutions applied to `09-phase6b-interactive-widgets-design.md`; convergence re-grep clean; closure subsection in `95-phase6b-review-findings.md`
-- **Code-execution plan ✅ AUTHORED 2026-05-11** at `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/2026.05.11-phase6b-code-execution-plan.md` — full 9-phase sequence (Phase 0 tracking → Phase 1 store prereqs → Phase 2 templates → Phase 3 ActionRequiredRenderer → Phase 4 TtsChromeRenderer → Phase 5 delete-button 5A→5B → Phase 6 CSS+boot → Phase 7 smoke → Phase 8 scheduled-`:8000` E2E); AC scorecard + pre-exit self-audit included
-- Implementation ⏳ **READY TO BEGIN** at Phase 1 — gated on user go-ahead per `feedback_plan_approval_means_go`
+- Pass 1 Fitness ✅ CLOSED 14/14 (2026-05-11)
+- Pass 2 Adversarial ✅ CLOSED 11/11 (2026-05-11)
+- Code-execution plan ✅ AUTHORED 2026-05-11
+- **Phase 1 ✅ COMMITTED** as `057dbd8` (df880556 María, 2026-05-11 PM) — store API prereqs landed
+- **Phase 2 ✅ COMMITTED** as `ed4fc94` (df880556 María, 2026-05-11 PM) — interactive widget templates landed
+- **Phase 3 ✅ IMPLEMENTED + uncommitted** (df880556 María, 2026-05-11 late PM) — `ActionRequiredRenderer.ts` 100% c8; 34 tests; **session-end commit will land it**
+- **Phase 4 ✅ IMPLEMENTED + uncommitted** (df880556 María, 2026-05-11 late PM) — `TtsChromeRenderer.ts` 100% c8; 20 tests; batched with Phase 3 in session-end commit
+- Phase 5A → 5B → 6 → 7 → 8 ⏳ **READY TO BEGIN** at Phase 5A tomorrow morning
 
 **Resume action**:
 - [x] [LUPIN] Re-audit at execute time per `feedback_audit_plans_at_execute_time` — re-grep recent feedback memories for constraints landed since 2026-05-11; surface conflicts before code edits — Done df880556 María (only `feedback_skip_arnold_yes_no_neither_ux` newer; not relevant to Phase 6b)
@@ -265,8 +327,28 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
   - [x] 2.3b 18 tests on `ttsChrome.test.ts` (≥15 floor) — 6 state-driven renders + 4 click-dispatch + currentTrackName present/absent/empty + queueLength + .is-playing/paused-current + 1 AC2e grep ban
   - [x] 2.4 `c8 --100` GREEN on both new files (used Phase 6a `jobCard.ts:251` precedent for tagged-template phantom-branch ignores); tsc + eslint clean; 528/528 multiplexer unit sweep PASS
   - [x] Type extension: added `multiSelect?: boolean` to `ActionRequiredItem` (defaults undefined → radio path; wire-side population still Phase 0 prereq #2 pending)
-- [ ] [LUPIN] **Begin Phase 3 (`ActionRequiredRenderer.ts`) — gated on user go-ahead per `feedback_never_auto_commit_push`** — consumes Phase 2 interactive template + `respondAndAwait` from Phase 1; lifecycle pattern mirroring Phase 5's `NotificationsListRenderer` with the Pass 2 A3 ownership-flag claim
-- [ ] [LUPIN] Phases 4-8 follow per `2026.05.11-phase6b-code-execution-plan.md` execution sequence (per-phase commits each gated on user authorization)
+- [x] [LUPIN] **Begin Phase 3 (`ActionRequiredRenderer.ts`)** — Done df880556 María 2026-05-11 late PM (session-end commit pending; uncommitted on disk):
+  - [x] 3.1 `ActionRequiredRenderer.ts` (NEW, ~360 LOC) — factory + mount/unmount + `dataset.phase6bOwner="true"` ownership claim BEFORE any DOM write (Pass 2 A3) + 5 widget builders (interactive/submitting/responded/expired/cancelled) + countdown + click→`respondAndAwait` (Pass 2 A1) + onChange dispatcher + tick handler (NO RAF per Pass 2 a2)
+  - [x] 3.2 34 tests on `action_required_renderer.test.ts` (≥21 AC5 floor) — 6 submit happy-path + 5 error-rollback + 6 state-machine transitions + countdown/NO-RAF spy + mount idempotency + AC2c atomic strip (1-2 MutationRecords; happy-dom microbatches replaceWith) + inline error stripe + ownership-flag + cssEscape fallback + multi-item + offline-frozen/resumed
+  - [x] 3.3 `c8 --100` GREEN; tsc + eslint clean; 562/562 multiplexer unit sweep PASS
+- [x] [LUPIN] **Begin Phase 4 (`TtsChromeRenderer.ts`)** — Done df880556 María 2026-05-11 late PM (session-end commit pending; uncommitted on disk, batched with Phase 3):
+  - [x] 4.1 `TtsChromeRenderer.ts` (NEW, ~155 LOC) — factory + mount/unmount + dual subscription (`store_audio_state_change` AND `store_audio_chunk_decoded`) with single shared `pendingRender` flag + RAF coalescing (per Q-B9 + Pass 1 F-13); test-injectable RAF; click handlers wire to `AudioStore.pause/resume/stop/skip`; uses `replaceChildren` for atomic single-childList swap; currentTrackName intentionally omitted (Phase 0 prereq #3 pending)
+  - [x] 4.2 20 tests on `tts_chrome_renderer.test.ts` (≥13 AC5b floor) — 7 state transitions + 4 control wiring + 2 storm safety (chunk_decoded × 100 → 1 RAF; state_change × 5 → 1 RAF) + mount idempotency + stop semantics (queue=0, state=idle per Phase 1.3) + mixed-event coalescing
+  - [x] 4.3 `c8 --100` GREEN ON FIRST TRY (no phantom-branch issues with `replaceChildren`); tsc + eslint clean; 582/582 multiplexer unit sweep PASS
+- [ ] [LUPIN] **Begin Phase 5A → 5B** per `2026.05.11-phase6b-code-execution-plan.md` Step 5 — `JobStore.delete()` then delete-button click handler on `JobsPaneRenderer`. **5A → 5B is a natural compile-time gate** (5B imports `JobStore.delete` from 5A). Q-A6 + Q-B10 follow-through; strips 4 inertness markers from `.job-delete-button`; rollback closure pattern for 5xx/network errors; 404 treated as success per Q-B10. **DOD tables**: 5A has 8 rows (5A-1..5A-8), 5B has 11 rows (5B-1..5B-11) — both must pass before commit
+- [ ] [LUPIN] Phases 6-8 follow per `2026.05.11-phase6b-code-execution-plan.md` execution sequence (per-phase commits each gated on user authorization)
+
+**Phase 5 quick-start checklist (so you can dive straight in tomorrow)**:
+
+| What | Where | Notes |
+|---|---|---|
+| Read the Phase 5 plan | `2026.05.11-phase6b-code-execution-plan.md` Step 5 (lines ~256-320) | full DOD tables for 5A + 5B |
+| Verify `JobStore` lacks `delete()` | `src/fastapi_app/static/js/multiplexer/stores/JobStore.ts` | already verified MISSING 2026-05-07 per execution log |
+| Verify `JobsPaneRenderer` delete button is inert | `src/fastapi_app/static/js/multiplexer/render/JobsPaneRenderer.ts` + `templates/jobCard.ts:258` | inert markers: `data-phase6-pending`, `aria-disabled`, `cursor: not-allowed`, `title="Delete coming in Phase 6b"` |
+| 5A signature | `JobStore.delete(idHash: string): { restoreState: () => void }` | per design § Phase 4 sub-step DOD signature |
+| 5A test file | NEW `src/tests/unit/multiplexer/stores/jobstore_delete_api.test.ts` | actually goes in `src/tests/unit/multiplexer/` per existing test layout (NOT in stores/ subdir) |
+| 5B test file | EDIT `src/tests/unit/multiplexer/render/jobs_pane_renderer.test.ts` (existing) | extend with ≥6 new AC5c cases |
+| API endpoint | `DELETE /api/queue/<bucket>/<idHash>` | already verified exists at `queues.py:1193` (Phase 0 prereq #1 ✅) |
 
 **Read on resume (in this order)**:
 1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`

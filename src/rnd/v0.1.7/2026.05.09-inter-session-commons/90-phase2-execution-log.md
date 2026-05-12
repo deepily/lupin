@@ -1,0 +1,39 @@
+# Phase 2 — Execution Log
+
+| Field | Value |
+|---|---|
+| **Initiative** | Inter-Session Commons + User-Broadcast — Phase 2 (user-broadcast surface) |
+| **Plan-review pipeline** | CLOSED 2026-05-11 (REUSE + Pass 1 Fitness + Pass 2 Adversarial all closed) |
+| **Implementation start** | 2026-05-12 |
+| **Owner** | Rachel 🕊️ (session `9a4a601d`) |
+| **Design doc** | [`03-phase2-user-broadcast-design.md`](03-phase2-user-broadcast-design.md) — APPROVED FOR CODE-WRITE |
+
+---
+
+## Phase 2 step status
+
+Per §5 of the design doc. Each step gated by py_compile clean + tests-green-where-applicable.
+
+| Step | Description | Status | Notes |
+|---|---|---|---|
+| 1 | Add `broadcasts` to `RESERVED_TOPICS` in `commons_store.py` + update test + Phase 1 regression check | ✅ CLOSED 2026-05-12 | Single-line edit to `RESERVED_TOPICS` tuple. **Test edit NOT needed** — existing `test_init_seeds_reserved_topics` iterates `for topic in RESERVED_TOPICS:` and adapts automatically (parametric over the tuple). 85 unit tests + 3 smoke tests still passing under `--cov-branch --cov-fail-under=100`. |
+| 2 | `commons_rate_limiter.py` + unit tests + 100% coverage | ✅ CLOSED 2026-05-12 | NEW `src/cosa/rest/commons_rate_limiter.py` (97 LOC, 29 stmts, 8 branches, 100% lines + branches). NEW `src/tests/unit/commons/test_commons_rate_limiter.py` (12 tests, 0.10s, all pass). AC3 verifications: sliding-window allow/block; per-user isolation; `Retry-After` value correctness (monkeypatched clock); F6 `reset()` test hook (specific user + all + missing-user-silent); concurrent-thread race (10 threads → exactly 1 winner). T4 single-uvicorn-worker assumption documented in module docstring. |
+| 3 | `broadcast_handler.py` + unit tests + 100% coverage | ✅ CLOSED 2026-05-12 | NEW `src/lupin_mcp/broadcast_handler.py` (190 LOC, 57 stmts, 18 branches, 100%). NEW `src/tests/unit/commons/test_broadcast_handler.py` (28 tests, 0.17s). AC6 + T1 + T3 + A6 verifications: happy path (default + matched directive composition), T1+T3 sanitization (both opening + closing tag substrings, case-insensitive), A6 skip-with-ack (only-non-matching-directives + empty body), 5 error paths (missing payload/body/broadcast_id/non-string body), summary truncation at 200 chars. Helper functions all covered: `_contains_reminder_framing`, `_parse_body` (10 sub-cases incl. all/everyone aliases, case-insensitive + punctuation-tolerant matching via `match_persona`, malformed directive treated as default), `_build_reminder`, `_post_ack`. |
+| 4 | `commons_ack_watcher.py` + unit tests + 100% coverage | ✅ CLOSED 2026-05-12 | NEW `src/cosa/rest/commons_ack_watcher.py` (252 LOC, 103 stmts, 24 branches, 100%). NEW `src/tests/unit/commons/test_commons_ack_watcher.py` (26 tests, 0.65s). AC7 + T9 verifications: in-flight tracker atomic insert with TTL pruning + collision raises ValueError (T9); is_in_flight TTL semantics (pruned after expiry); daemon lifecycle start/stop/idempotent/restartable/safe-on-never-started; startup last_seen_ts cursor (skips pre-existing acks per AC7); tick() dispatches matching acks via mock push_fn capturing all kwargs, ignores unknown bids + missing-broadcast-id metadata, advances last_seen_ts monotonically, increments received_acks count, handles FileNotFoundError race + swallows push exceptions, prunes-then-checks (expired TTL → ack treated as unknown), empty-entries no-op leaves last_seen unchanged; run_loop swallows tick exceptions + survives. |
+| 5 | `src/cosa/rest/routers/commons.py` (2 endpoints) + unit tests | ✅ CLOSED 2026-05-12 | NEW `src/cosa/rest/routers/commons.py` (375 LOC, 124 stmts, 40 branches, 100% via pure-logic helpers; route bodies `# pragma: no cover` per AC12). NEW `src/tests/unit/commons/test_commons_router.py` (55 tests, 0.71s). Pure-logic helpers covered: `validate_broadcast_body` (T1 substring rejection both tags case-insensitive + empty/whitespace/non-string), `validate_broadcast_id` (UUIDv4 shape + None allowed + v1/garbage/non-string rejected), `build_pseudo_sender_id` (F8 hyphen-not-at + deterministic + collision-resistant + round-trips through CommonsStore), `_load_bridge_fields` (success + missing + bad-json), `_bridge_last_activity_epoch` (3 field-name fallbacks + None on missing/bad-type), `project_session_response` (T8 no-path-leak + ISO-field fallback + conv-mode default), `filter_and_project_sessions` (T7 same-user scoping + stale-exclusion + originator inclusion/exclusion + skip-unloadable + no-timestamp-treated-as-active), `perform_fanout` (AC4 + AC5 happy path + per-recipient store-fail + per-recipient push-fail continuing), `execute_broadcast` (full pipeline: 400 empty/reminder-substring/bad-bid, 429 rate-limited, 409 collision, 200 zero-recipients + happy-path-with-recipients + require_ack=False + TOCTOU-race-on-inflight-prune covering 355→358). All branches green under `--cov-branch`. **Aggregate suite: 206 tests, 100% across 8 commons modules (622 stmts, 170 branches).** |
+| 6 | Listener — 3rd `elif` branch in `_handle_action()` + cross-process smoke test | ✅ CLOSED 2026-05-12 (smoke deferred to step 9) | `cc_notification_listener.py` MODIFIED — added `elif action == "broadcast_received"` to dispatcher at L300 + new `_handle_broadcast_received()` method (~40 LOC). Method delegates to `lupin_mcp.broadcast_handler.handle_broadcast()` with: `inject_fn = lambda text: self._inject_via_tmux(text, wrap=False)`, `local_persona` from `get_session_metadata().voice_persona`, `store = CommonsStore(LUPIN_ROOT)`, `sender_session_id` from bridge `stable_session_id`. py_compile + import chain clean. **Cross-process smoke test deferred to step 9** (the full 2-session E2E flow) — step 6 lands the wiring only. |
+| 7 | INI keys + paired splainer entries + register `commons_broadcast_ack` in `notifications.py` valid_types | ✅ CLOSED 2026-05-12 | `lupin-app.ini` + 2 new keys under existing "Inter-Session Commons" block: `commons broadcast active session threshold seconds = 600` + `commons broadcast ack watch interval seconds = 1`. `lupin-app-splainer.ini` + 2 paired explanations. `notifications.py:359-362` `valid_types` extended with `"commons_broadcast_ack"` (alongside the existing 3 custom-notification-type entries — voice_persona_assigned / voice_persona_released / conversation_mode_changed). py_compile clean. |
+| 8 | FastAPI wiring — register router + start `CommonsAckWatcher` daemon + AC14 verification | ✅ CLOSED 2026-05-12 | `main.py` MODIFIED: added `commons` to router imports at L66; added 3 module-level singletons (`commons_store`, `commons_rate_limiter`, `commons_ack_watcher`); added startup wiring inside `lifespan()` after CJ Flow recovery — gated by `commons enabled` INI key, constructs all 3 singletons + calls `commons.init_commons_state(...)` + `watcher.start()`; added shutdown wiring before peer-watcher cancel — `watcher.stop(join_timeout=3.0)`; added `app.include_router(commons.router)` after `multiplexer_config.router`. NEW `src/tests/unit/commons/test_commons_ac14_registration.py` (5 tests, 0.34s, all pass): GET /active-sessions present, POST /broadcast-to-cc-sessions present, methods correct (GET vs POST), router prefix + tag. **Aggregate suite: 211 tests, 100% across 8 commons modules.** |
+| 9 | 2-session E2E smoke (`test_broadcast_two_session_e2e.py`) on :7999 | ⏳ pending | |
+| 10 | UI — `broadcast-panel.js` + `broadcast-panel.css` + `notifications.html` insertion | ⏳ pending | |
+| 11 | Playwright E2E (`test_broadcast_panel.py`) on :8000 scheduled | ⏳ pending | |
+| 12 | Docs — `notification-types.md` + `rest-api-reference.md` §17 | ⏳ pending | |
+| 13 | Phase 2 closure — `92-phase2-closure.md` post-mortem | ⏳ pending | |
+
+**Failure handling rule** (per §5 of design doc, Phase 1 precedent): if any step fails, HALT implementation. File the failure as a new bug. Do NOT proceed until root-caused.
+
+---
+
+## Execution sequence
+
+(Filled in as each step completes.)

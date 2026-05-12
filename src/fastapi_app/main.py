@@ -63,7 +63,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, conversation_mode, voice_persona, multiplexer_config
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, conversation_mode, voice_persona, multiplexer_config, commons
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs
 
@@ -93,6 +93,11 @@ jobs_notification_queue = None
 snapshot_mgr = None
 io_tbl = None
 id_generator = None
+
+# Inter-Session Commons (Phase 2 — user-broadcast surface)
+commons_store        = None
+commons_rate_limiter = None
+commons_ack_watcher  = None
 
 # WebSocket connection management
 websocket_manager = WebSocketManager()
@@ -513,6 +518,45 @@ async def lifespan( app: FastAPI ):
         print( f"[WARN] CJ Flow startup recovery failed: {e}" )
 
     # ===================================================================
+    # Inter-Session Commons — Phase 2 (user-broadcast surface)
+    # ===================================================================
+    # Per src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md
+    # AC14 (router) + AC7 (CommonsAckWatcher daemon). Gated by `commons enabled`
+    # INI key — when False, the subsystem is fully absent and the router
+    # endpoints will 503 per `_require_initialized()`.
+    global commons_store, commons_rate_limiter, commons_ack_watcher
+    if config_mgr.get( "commons enabled", default=True, return_type="boolean" ):
+        try:
+            import os
+            from cosa.rest.commons_ack_watcher import CommonsAckWatcher
+            from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
+            from cosa.rest.routers.commons import init_commons_state
+            from lupin_mcp.commons_store import CommonsStore
+
+            commons_root = os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
+            commons_store        = CommonsStore( commons_root )
+            commons_rate_limiter = CommonsBroadcastRateLimiter(
+                window_seconds = config_mgr.get( "commons broadcast rate limit seconds", default=30, return_type="int" )
+            )
+            commons_ack_watcher  = CommonsAckWatcher(
+                store                  = commons_store,
+                push_notification_fn   = jobs_notification_queue.push_notification,
+                poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
+            )
+            init_commons_state(
+                store                            = commons_store,
+                rate_limiter                     = commons_rate_limiter,
+                ack_watcher                      = commons_ack_watcher,
+                active_session_threshold_seconds = config_mgr.get( "commons broadcast active session threshold seconds", default=600, return_type="int" ),
+            )
+            commons_ack_watcher.start()
+            print( f"[COMMONS] Phase 2 broadcast subsystem started (root={commons_root})" )
+        except Exception as e:
+            print( f"[COMMONS] WARN — Phase 2 init failed: {e}" )
+    else:
+        print( "[COMMONS] Disabled via `commons enabled = false` — skipping Phase 2 init" )
+
+    # ===================================================================
     # GPU Model Loading (smallest → largest to minimize CUDA fragmentation)
     # ===================================================================
 
@@ -717,6 +761,15 @@ async def lifespan( app: FastAPI ):
     except Exception as e:
         print( f"[PEER-WATCH] Error cancelling watchers: {e}" )
 
+    # Stop the commons ack watcher daemon (Phase 2)
+    if commons_ack_watcher is not None:
+        try:
+            print( "[COMMONS] Stopping CommonsAckWatcher daemon..." )
+            commons_ack_watcher.stop( join_timeout=3.0 )
+            print( "[COMMONS] CommonsAckWatcher stopped" )
+        except Exception as e:
+            print( f"[COMMONS] Error stopping watcher: {e}" )
+
     # Add any other cleanup code here if needed
 
 app = FastAPI(
@@ -798,6 +851,7 @@ app.include_router(peer.router)
 app.include_router(conversation_mode.router)
 app.include_router(voice_persona.router)
 app.include_router(multiplexer_config.router)
+app.include_router(commons.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

@@ -40,6 +40,7 @@ import signal
 import sys
 import time
 import threading
+from pathlib import Path
 from typing import Optional
 
 from pydantic import ValidationError
@@ -1464,5 +1465,352 @@ def exit_conversation_mode() -> dict:
     return _flip_conversation_mode( False )
 
 
+# ============================================================================
+# Commons Tools (Phase 1 — file-based inter-session blackboard)
+# ============================================================================
+#
+# Per src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md
+# AC3 + AC4 + AC5 + AC6 + AC7. Five thin MCP shims wrapping CommonsStore +
+# commons_ask. The MCP server lazily constructs a single CommonsStore rooted at
+# `<LUPIN_ROOT>/io/commons` (step 6 will wire INI-driven storage path override).
+# Tools redundantly check `_commons_enabled()` at call-time as defense per AC12;
+# step 6/8 will wire the actual INI key.
+
+from lupin_mcp.commons_store import CommonsStore, DEFAULT_PERSONA_NAME, DEFAULT_PERSONA_ICON, DEFAULT_PERSONA_COLOR
+from lupin_mcp.commons_ask import ask_sync as _commons_ask_sync_impl, ask_async as _commons_ask_async_impl
+from lupin_mcp.commons_archival import CommonsArchiver
+
+_commons_store_singleton:    Optional[ CommonsStore ]     = None
+_commons_archiver_singleton: Optional[ CommonsArchiver ]  = None
+
+# 6 commons INI keys, paired in src/conf/lupin-app.ini + lupin-app-splainer.ini under
+# the "Inter-Session Commons" block. Loaded once at module import via ConfigurationManager;
+# falls back to these hardcoded defaults if the manager is unavailable (env var unset,
+# config file missing, etc.). No hot-reload — restart the MCP server to pick up changes.
+_COMMONS_CONFIG_DEFAULTS = {
+    "commons_enabled"                       : True,
+    "commons_storage_path"                  : "/io/commons",
+    "commons_retention_hours"               : 24,
+    "commons_archival_interval_seconds"     : 3600,
+    "commons_broadcast_rate_limit_seconds"  : 30,
+    "commons_ask_sync_grace_seconds"        : 1.0,
+}
+
+
+def _load_commons_config() -> dict:
+    """
+    Resolve the 6 commons INI keys via ConfigurationManager.
+
+    Defensive: returns `_COMMONS_CONFIG_DEFAULTS` (a copy) on any failure
+    (env var unset, config-mgr exception, key missing). The MCP server keeps
+    working with sensible defaults even if the larger config infrastructure
+    is unavailable.
+
+    Test-only override: when `LUPIN_COMMONS_TEST_OVERRIDE` is set to a JSON
+    object, its key/value pairs replace matching `_COMMONS_CONFIG_DEFAULTS`
+    entries and the normal ConfigurationManager path is bypassed. This hatch
+    is used exclusively by the AC12 config-toggle subprocess test — production
+    behavior is unaffected when the env var is unset.
+    """
+    config = dict( _COMMONS_CONFIG_DEFAULTS )
+    test_override_json = os.environ.get( "LUPIN_COMMONS_TEST_OVERRIDE" )
+    if test_override_json:
+        try:
+            import json as _json
+            overrides = _json.loads( test_override_json )
+            if isinstance( overrides, dict ):
+                config.update( overrides )
+                logger.info( f"[commons] LUPIN_COMMONS_TEST_OVERRIDE applied: {overrides}" )
+                return config
+            logger.warning( f"[commons] LUPIN_COMMONS_TEST_OVERRIDE is not a JSON object; ignoring: {test_override_json!r}" )
+        except Exception as e:
+            logger.warning( f"[commons] LUPIN_COMMONS_TEST_OVERRIDE parse failed: {e}" )
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        cm = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        config[ "commons_enabled" ]                      = cm.get( "commons enabled",                      default=config[ "commons_enabled" ],                      return_type="boolean", silent=True )
+        config[ "commons_storage_path" ]                 = cm.get( "commons storage path",                 default=config[ "commons_storage_path" ],                 return_type="string",  silent=True )
+        config[ "commons_retention_hours" ]              = cm.get( "commons retention hours",              default=config[ "commons_retention_hours" ],              return_type="int",     silent=True )
+        config[ "commons_archival_interval_seconds" ]    = cm.get( "commons archival interval seconds",    default=config[ "commons_archival_interval_seconds" ],    return_type="int",     silent=True )
+        config[ "commons_broadcast_rate_limit_seconds" ] = cm.get( "commons broadcast rate limit seconds", default=config[ "commons_broadcast_rate_limit_seconds" ], return_type="int",     silent=True )
+        config[ "commons_ask_sync_grace_seconds" ]       = cm.get( "commons ask sync grace seconds",       default=config[ "commons_ask_sync_grace_seconds" ],       return_type="float",   silent=True )
+    except Exception as e:
+        logger.warning( f"[commons] ConfigurationManager unavailable; using hardcoded defaults. Reason: {e}" )
+    return config
+
+
+_COMMONS_CONFIG = _load_commons_config()
+
+
+def _commons_project_root() -> str:
+    """Resolve project root for commons file storage. Prefers LUPIN_ROOT env."""
+    env_root = os.environ.get( "LUPIN_ROOT" )
+    if env_root: return env_root
+    return str( Path( __file__ ).resolve().parents[ 2 ] )
+
+
+def _commons_storage_root() -> str:
+    """
+    Resolve the CommonsStore root path.
+
+    `commons storage path` is interpreted as relative to LUPIN_ROOT (matches the
+    project's existing config convention — see `solution snapshots lancedb path`
+    pattern in lupin-app.ini). CommonsStore appends `io/commons` internally, so
+    we strip a leading `/io/commons` segment when the user has left the default
+    in place; otherwise we pass through.
+    """
+    raw = _COMMONS_CONFIG[ "commons_storage_path" ]
+    # Default `/io/commons` → CommonsStore's hardcoded subpath already covers this;
+    # pass the project root through. Custom values pass through directly.
+    if raw == "/io/commons":
+        return _commons_project_root()
+    return _commons_project_root() + raw
+
+
+def _commons_enabled() -> bool:
+    """Defense-in-depth flag per AC12. Reads the cached INI value."""
+    return bool( _COMMONS_CONFIG[ "commons_enabled" ] )
+
+
+def _commons_ask_sync_grace_default() -> float:
+    """Cached default for `commons_ask_sync` grace_seconds when caller omits it."""
+    return float( _COMMONS_CONFIG[ "commons_ask_sync_grace_seconds" ] )
+
+
+def _get_commons_store() -> CommonsStore:
+    """Lazy singleton CommonsStore bound to the resolved storage root."""
+    global _commons_store_singleton
+    if _commons_store_singleton is None:
+        _commons_store_singleton = CommonsStore( _commons_storage_root() )
+    return _commons_store_singleton
+
+
+def _maybe_start_commons_archival_daemon() -> Optional[ CommonsArchiver ]:
+    """
+    Boot the 24h archival daemon IF commons is enabled. Returns the archiver
+    (started) or None (skipped). Called from `if __name__ == "__main__":` so
+    the daemon does not start on bare module imports (tests, dev shells).
+    """
+    global _commons_archiver_singleton
+    if not _commons_enabled():
+        logger.info( "[commons] disabled — archival daemon NOT started" )
+        return None
+    if _commons_archiver_singleton is not None:
+        return _commons_archiver_singleton
+    _commons_archiver_singleton = CommonsArchiver(
+        root             = _commons_storage_root(),
+        interval_seconds = int( _COMMONS_CONFIG[ "commons_archival_interval_seconds" ] ),
+        retention_hours  = int( _COMMONS_CONFIG[ "commons_retention_hours" ] ),
+    )
+    _commons_archiver_singleton.start()
+    logger.info(
+        f"[commons] archival daemon started "
+        f"(interval={_COMMONS_CONFIG[ 'commons_archival_interval_seconds' ]}s, "
+        f"retention={_COMMONS_CONFIG[ 'commons_retention_hours' ]}h)"
+    )
+    return _commons_archiver_singleton
+
+
+def _commons_persona_fields() -> dict:
+    """
+    Extract (name, icon, color) from the session bridge's voice_persona block.
+
+    Falls back to AC3 defaults (`<unknown>`, 💬, #888888) when the bridge is
+    unavailable or the persona allocation failed.
+    """
+    try:
+        cc_meta = _get_cc_metadata()
+        vp      = cc_meta.get( "voice_persona" ) or { }
+    except Exception:
+        vp = { }
+    return {
+        "persona_name"  : vp.get( "name" )  or DEFAULT_PERSONA_NAME,
+        "persona_icon"  : vp.get( "icon" )  or DEFAULT_PERSONA_ICON,
+        "persona_color" : vp.get( "color" ) or DEFAULT_PERSONA_COLOR,
+    }
+
+
+@mcp.tool
+def commons_post(
+    topic    : str,
+    body     : str,
+    metadata : Optional[ dict ] = None,
+) -> dict:
+    """
+    Append an entry to a commons topic (file-based inter-session blackboard).
+
+    Per AC3 in
+    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+
+    Free-form topics auto-create on first post. Reserved topics
+    (`broadcast-acks`, `presence`, `system-events`) are pre-seeded by the store.
+    Persona fields are stamped from the session bridge at post-time and are
+    immutable thereafter (per C4 ratification).
+
+    Args:
+        topic: Topic name (free-form or one of the reserved topics)
+        body: The message body (any string)
+        metadata: Optional dict of extra metadata fields (e.g., `{kind: "status"}`)
+
+    Returns:
+        dict with `ts`, `sender_session_id`, `persona_name`, `persona_icon`,
+        `persona_color`, `body`, `metadata`
+    """
+    if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
+    persona = _commons_persona_fields()
+    return _get_commons_store().post(
+        topic             = topic,
+        body              = body,
+        sender_session_id = SESSION_ID,
+        persona_name      = persona[ "persona_name" ],
+        persona_icon      = persona[ "persona_icon" ],
+        persona_color     = persona[ "persona_color" ],
+        metadata          = metadata,
+    )
+
+
+@mcp.tool
+def commons_read(
+    topic : str,
+    since : Optional[ str ] = None,
+    limit : int = 50,
+) -> list:
+    """
+    Read entries from a commons topic.
+
+    Per AC4 in
+    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+
+    Returns newest-first when `since` is None, ascending when `since` is supplied.
+    Honors `limit` strictly. Missing free-form topic → empty list.
+
+    Args:
+        topic: Topic name to read from
+        since: Optional ISO-8601 timestamp; only entries with `ts > since` are returned
+        limit: Maximum number of entries to return (default 50)
+
+    Returns:
+        List of entry dicts, each containing ts, sender_session_id, persona_*,
+        body, metadata
+    """
+    if not _commons_enabled(): return [ ]
+    return _get_commons_store().read( topic=topic, since=since, limit=limit )
+
+
+@mcp.tool
+def commons_who(
+    topic            : Optional[ str ] = None,
+    retention_hours  : int = 24,
+) -> list:
+    """
+    List sessions that have posted to commons within the retention window.
+
+    Per AC5 in
+    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+
+    If `topic` is supplied, scans only that topic; otherwise scans every active
+    topic file. Each row gives the most recent post timestamp for that session
+    plus their persona name/icon/color.
+
+    Args:
+        topic: Optional topic name; if omitted, scans all topics
+        retention_hours: Freshness window in hours (default 24)
+
+    Returns:
+        List of dicts `{session_id, persona_name, persona_icon, persona_color, last_post_ts}`,
+        sorted by last_post_ts descending
+    """
+    if not _commons_enabled(): return [ ]
+    return _get_commons_store().who( topic=topic, retention_hours=retention_hours )
+
+
+@mcp.tool
+def commons_ask_sync(
+    topic            : str,
+    body             : str,
+    timeout_seconds  : float = 120.0,
+    grace_seconds    : Optional[ float ] = None,
+) -> dict:
+    """
+    Post a question to commons and block until the first reply arrives + grace expires.
+
+    Per AC6 in
+    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+
+    Hybrid first+grace timing (A3b ratification): the call blocks until the
+    FIRST matching reply arrives in `topic`, then waits an additional
+    `grace_seconds` to coalesce any fast follow-up replies, and returns the
+    accumulated list. Replies are correlated via `metadata.in_reply_to`
+    matching the question's auto-generated `question_id`.
+
+    On timeout with zero replies, returns `{..., replies: []}`.
+
+    Args:
+        topic: Topic to post the question to (and listen on for replies)
+        body: The question text
+        timeout_seconds: Maximum wait for the first reply (default 120)
+        grace_seconds: Additional wait after first reply for follow-up replies
+            (default from `commons ask sync grace seconds` INI key; falls back to 1.0)
+
+    Returns:
+        dict `{question_id, posted_ts, replies: [entry, ...]}`
+    """
+    if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
+    grace = grace_seconds if grace_seconds is not None else _commons_ask_sync_grace_default()
+    persona = _commons_persona_fields()
+    return _commons_ask_sync_impl(
+        store             = _get_commons_store(),
+        topic             = topic,
+        body              = body,
+        sender_session_id = SESSION_ID,
+        persona_name      = persona[ "persona_name" ],
+        persona_icon      = persona[ "persona_icon" ],
+        persona_color     = persona[ "persona_color" ],
+        timeout_seconds   = timeout_seconds,
+        grace_seconds     = grace,
+    )
+
+
+@mcp.tool
+def commons_ask_async(
+    topic       : str,
+    body        : str,
+    question_id : Optional[ str ] = None,
+) -> dict:
+    """
+    Post a question to commons and return immediately (fire-and-forget).
+
+    Per AC7 in
+    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+
+    Phase 1 polling-mode contract (D1 deviation): caller polls via
+    `commons_read(topic, since=...)` and filters for entries whose
+    `metadata.in_reply_to == question_id` to detect answers. Phase 3 will
+    promote this to push-based `<system-reminder>` injection without changing
+    the tool signature.
+
+    Args:
+        topic: Topic to post the question to
+        body: The question text
+        question_id: Optional UUID; if omitted, the store auto-generates one
+
+    Returns:
+        dict `{question_id, posted_ts}`
+    """
+    if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
+    persona = _commons_persona_fields()
+    return _commons_ask_async_impl(
+        store             = _get_commons_store(),
+        topic             = topic,
+        body              = body,
+        sender_session_id = SESSION_ID,
+        persona_name      = persona[ "persona_name" ],
+        persona_icon      = persona[ "persona_icon" ],
+        persona_color     = persona[ "persona_color" ],
+        question_id       = question_id,
+    )
+
+
 if __name__ == "__main__":
+    _maybe_start_commons_archival_daemon()
     mcp.run()

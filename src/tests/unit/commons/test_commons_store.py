@@ -334,6 +334,35 @@ def test_who_freshness_cutoff_excludes_old():
         assert store.who( retention_hours=0 ) == [ ]
 
 
+def test_who_same_session_older_entry_skipped():
+    """
+    Branch coverage (commons_store.py:306->303): when read() returns multiple
+    entries for the same session and a later iteration sees an OLDER ts than
+    the already-recorded prior, the update body must be skipped. This is the
+    defensive false-branch of `if prior is None or e[ts] > prior[ts]`.
+
+    Trigger by mocking read() to return entries in newest-first order so the
+    second-seen entry for session "sA" is older than the first-seen one.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        store = CommonsStore( tmp )
+        store.post( "status", "first", "sA", persona_name="A", persona_icon="🅰", persona_color="#A00" )
+        time.sleep( 0.01 )
+        store.post( "status", "second", "sA", persona_name="A", persona_icon="🅰", persona_color="#A00" )
+
+        original_read = store.read
+        def newest_first_read( topic, since=None, limit=50 ):
+            # Force descending order even though who() requested since-based ascending.
+            entries = original_read( topic, since=None, limit=limit )
+            return entries  # newest-first by default
+
+        with patch.object( store, "read", side_effect=newest_first_read ):
+            result = store.who( topic="status" )
+        # Both posts collapse to a single session entry; the older second-seen post is skipped.
+        assert len( result ) == 1
+        assert result[ 0 ][ "session_id" ] == "sA"
+
+
 def test_who_skips_missing_reserved_files():
     """who() over all topics gracefully handles a reserved file going missing mid-scan (race)."""
     with tempfile.TemporaryDirectory() as tmp:

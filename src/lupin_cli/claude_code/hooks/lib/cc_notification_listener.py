@@ -296,8 +296,58 @@ class CCNotificationListener( BaseWebSocketListener ):
                 self._update_session_topic( topic )
         elif action == "exit_conversation_mode":
             self._inject_exit_conversation_reminder()
+        elif action == "broadcast_received":
+            self._handle_broadcast_received( notification )
         else:
             self._log( f"{self.LOG_PREFIX} Unknown action: {action}" )
+
+    def _handle_broadcast_received( self, notification ):
+        """
+        Handle an `action:broadcast_received` notification from the user-broadcast
+        endpoint (Phase 2 step 6 — see
+        src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md AC6).
+
+        Delegates to `lupin_mcp.broadcast_handler.handle_broadcast` which is the
+        keystone orchestrator — pure-logic + 100% covered + identical contract
+        whether invoked from this listener or from a future MCP tool path.
+
+        The listener provides:
+        - `inject_fn`: lambda wrapping `_inject_via_tmux(text, wrap=False)`
+        - `store`: a fresh `CommonsStore` rooted at `<LUPIN_ROOT>/io/commons`
+        - `local_persona`: pulled from `get_session_metadata().voice_persona`
+        - `sender_session_id`: the local session id from bridge metadata
+        """
+        import os
+        try:
+            from lupin_mcp.broadcast_handler import handle_broadcast
+            from lupin_mcp.commons_store import CommonsStore
+            from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
+        except ImportError as e:
+            self._log( f"{self.LOG_PREFIX} broadcast_handler import failed: {e}" )
+            return
+
+        meta = get_session_metadata()
+        local_persona     = meta.get( "voice_persona" )
+        sender_session_id = meta.get( "stable_session_id" ) or meta.get( "session_id" ) or "<unknown>"
+
+        commons_root = os.environ.get( "LUPIN_ROOT" )
+        if not commons_root:
+            self._log( f"{self.LOG_PREFIX} LUPIN_ROOT unset — cannot post broadcast ack" )
+            return
+
+        try:
+            store = CommonsStore( commons_root )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} CommonsStore init failed at {commons_root}: {e}" )
+            return
+
+        handle_broadcast(
+            notification      = notification,
+            local_persona     = local_persona,
+            inject_fn         = lambda text: self._inject_via_tmux( text, wrap=False ),
+            store             = store,
+            sender_session_id = sender_session_id,
+        )
 
     def _inject_exit_conversation_reminder( self ):
         """

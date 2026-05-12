@@ -15,10 +15,15 @@
 | Doc | Status | Purpose |
 |---|---|---|
 | [`01-design.md`](01-design.md) | ✅ CLOSED 2026-05-09 | Phase 0 design + ratification (15 Q-decisions) + 3 architectural principles |
-| [`02-phase1-file-commons-design.md`](02-phase1-file-commons-design.md) | ✅ APPROVED for code-write (REUSE + Pass 1 + Pass 2 all closed); steps 3a + 3b implemented | Phase 1 file-based commons MVP execution plan (14 ACs + AC10b stress, 5 NEW + 4 MODIFIED files) |
-| `03-phase2-user-broadcast-design.md` | ⏳ Future | Phase 2 user→all broadcast surface (UI + endpoints + persona-aware parse) |
-| [`90-execution-log.md`](90-execution-log.md) | 🟡 Steps 3a + 3b CLOSED; steps 4-8 pending | Phase 1 execution status; per-step AC closure tracking |
-| [`91-resume-here-phase1-step4.md`](91-resume-here-phase1-step4.md) | 🟡 Active resume pointer | Single-file pointer for the next session to pick up at step 4 (`commons_archival.py`) |
+| [`02-phase1-file-commons-design.md`](02-phase1-file-commons-design.md) | ✅ CLOSED 2026-05-11 — all 14 ACs verified | Phase 1 file-based commons MVP execution plan (14 ACs + AC10b stress, 5 NEW + 4 MODIFIED files) |
+| [`92-phase1-closure.md`](92-phase1-closure.md) | 🟢 NEW — Phase 1 post-mortem | What landed, deferred items, Phase 2 unblock summary |
+| [`03-phase2-user-broadcast-design.md`](03-phase2-user-broadcast-design.md) | 🟢 **APPROVED FOR CODE-WRITE 2026-05-11** — full plan-review pipeline closed | Phase 2 user→all broadcast surface. REUSE + Pass 1 + Pass 2 all closed: 10 prior-art mappings + 4 plan corrections + 20 fitness findings + 12 threats walked + 11 ACs hardened + sanitization ratified + 2 new threats surfaced and mitigated |
+| [`90-execution-log.md`](90-execution-log.md) | ✅ All 8 steps CLOSED | Phase 1 execution status; per-step AC closure tracking |
+| ~~[`91-resume-here-phase1-step4.md`](91-resume-here-phase1-step4.md)~~ | ⚪ Superseded 2026-05-11 | Step 4 closed; kept for history |
+| ~~[`91-resume-here-phase1-step5.md`](91-resume-here-phase1-step5.md)~~ | ⚪ Superseded 2026-05-11 | Step 5 closed; kept for history |
+| ~~[`91-resume-here-phase1-step6.md`](91-resume-here-phase1-step6.md)~~ | ⚪ Superseded 2026-05-11 | Step 6 closed; kept for history |
+| ~~[`91-resume-here-phase1-step7.md`](91-resume-here-phase1-step7.md)~~ | ⚪ Superseded 2026-05-11 | Step 7 closed; kept for history |
+| ~~[`91-resume-here-phase1-step8.md`](91-resume-here-phase1-step8.md)~~ | ⚪ Superseded 2026-05-11 | Step 8 closed; kept for history |
 
 ---
 
@@ -67,8 +72,8 @@
 | Phase | Scope | Status |
 |---|---|---|
 | **0** | Design + ratification | ✅ CLOSED 2026-05-09 (15 Q-decisions) |
-| **1** | File-based commons MVP — 5 MCP tools, store, matcher, archival, tests | 🟡 DRAFT — REUSE closed 2026-05-10; Pass 1 Fitness pending |
-| **2** | User → all broadcast — UI + 2 endpoints + persona-aware parse + ack aggregation + markdown rendering (Q15) | ⏳ Future (Phase 1 prerequisite) |
+| **1** | File-based commons MVP — 5 MCP tools, store, matcher, archival, tests | ✅ CLOSED 2026-05-11 — all 8 steps + 14 ACs complete; 88 tests / 100% coverage |
+| **2** | User → all broadcast — UI + 2 endpoints + persona-aware parse + ack aggregation + markdown rendering (Q15) | 🟢 **DESIGN APPROVED 2026-05-11** — plan-review pipeline closed (REUSE + Pass 1 + Pass 2 all CLOSED); code-write may begin |
 | **3** | WS push for commons + LLM-fallback wiring + ask_async injection (D1 deviation closure) | ⏳ Future |
 | **4** | Postgres-backed commons + Multiplexer Commons tab | ⏳ Future (multiplexer Phase 6c prerequisite) |
 

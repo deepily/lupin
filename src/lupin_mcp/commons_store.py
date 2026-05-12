@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
-RESERVED_TOPICS              = ( "broadcast-acks", "presence", "system-events" )
+RESERVED_TOPICS              = ( "broadcast-acks", "broadcasts", "presence", "system-events" )
 DEFAULT_PERSONA_NAME         = "<unknown>"
 DEFAULT_PERSONA_ICON         = "💬"
 DEFAULT_PERSONA_COLOR        = "#888888"
