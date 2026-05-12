@@ -184,6 +184,40 @@ Phase 2 (design + steps 1-8):
 
 **Commits**: `ad2f479` (this checkpoint — parent Lupin only; CoSA untouched)
 
+#### Session-end | 2026.05.12 00:30 EDT | Phase 6b Phases 3 + 4 — both renderers landed (batched commit per user direction)
+
+**Accomplishments**:
+
+- **Phase 3 — `ActionRequiredRenderer.ts`** (NEW, ~360 LOC) — claims pane ownership via `dataset.phase6bOwner="true"` BEFORE any DOM write (Pass 2 A3 Path A); 5 widget builders (interactive/submitting/responded/expired/cancelled) with state-driven dispatch; click handlers route to `respondAndAwait` from Phase 1 (NOT optimistic respond per Pass 2 A1); store events drive UI state transitions; tick events update countdown via `.textContent` only — NO renderer-side `requestAnimationFrame` (per Pass 2 a2; spy-asserted in tests). Includes inline error stripe rendering on `failed` state, atomic widget swap via `replaceWith` (1-2 MutationObserver records — happy-dom microbatches, browsers may behave the same; AC2c atomicity invariant verified).
+
+- **Phase 4 — `TtsChromeRenderer.ts`** (NEW, ~155 LOC) — dual-subscription (`store_audio_state_change` AND `store_audio_chunk_decoded`) with single shared `pendingRender` flag + RAF coalescing (per Q-B9 + Pass 1 F-13); test-injectable `requestAnimationFrameFn` / `cancelAnimationFrameFn` lets storm-safety tests deterministically flush; click handlers wire to `AudioStore.pause/resume/stop/skip`; uses `replaceChildren` for atomic full-pane swap (cleaner than `replaceWith` — no phantom-branch issues); `currentTrackName` intentionally omitted (Phase 0 prereq #3 still pending verification).
+
+- **Test coverage** — 34 tests on `action_required_renderer.test.ts` (≥21 AC5 floor) covering 6 submit happy-path + 5 error-rollback + 6 state-machine transitions + countdown/NO-RAF spy + mount idempotency + AC2c atomic strip + inline error stripe + ownership-flag + cssEscape fallback + multi-item + offline-frozen/resumed + edge cases. 20 tests on `tts_chrome_renderer.test.ts` (≥13 AC5b floor) covering 7 state transitions + 4 control wiring + 2 storm safety (chunk_decoded × 100 → 1 RAF; state_change × 5 → 1 RAF) + mount idempotency + stop semantics (Phase 1.3 contract) + mixed-event coalescing.
+
+- **c8 100% gate** — both new renderer files at 100% lines/branches/functions/statements. `ActionRequiredRenderer.ts` required one `c8 ignore start/stop` bracket on the `cssEscape` polyfill (defensive cross-environment helper, regex-character-class branches are V8-instrumentation-implementation-dependent — mirrors `NotificationsListRenderer.ts:423` precedent). `TtsChromeRenderer.ts` hit 100% on first try (no phantom-branch issues thanks to `replaceChildren`). Full multiplexer unit sweep: **582/582 PASS** (was 528 pre-Phase-3+4; **+54 new tests**).
+
+- **Verification matrix (all GREEN, all on `:7999`-equivalent unit harness)**: `npx tsc --noEmit` exit 0; `npx eslint src/fastapi_app/static/js/multiplexer/` exit 0; `c8 --100` on both new renderer files exit 0; full multiplexer unit sweep 582/582 PASS.
+
+**Files modified** (parent Lupin only — CoSA untouched per `feedback_lupin_only_never_cosa`):
+
+- `src/fastapi_app/static/js/multiplexer/render/ActionRequiredRenderer.ts` — NEW (~360 LOC)
+- `src/fastapi_app/static/js/multiplexer/render/TtsChromeRenderer.ts` — NEW (~155 LOC)
+- `src/tests/unit/multiplexer/render/action_required_renderer.test.ts` — NEW (34 tests)
+- `src/tests/unit/multiplexer/render/tts_chrome_renderer.test.ts` — NEW (20 tests)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` — Phase 3 + 4 closure rows
+- `TODO.md` — Phase 3 + 4 sub-step checkboxes marked done; Phase 5A → 5B starting-point quick-start checklist added; resume pointer rewritten to "FIRST THING TOMORROW — Phase 5A → 5B"
+- `history.md` (this entry)
+- `.claude-session.md` — per-Edit touched-file records appended; status will flip to `committed` post-commit
+
+**Status**:
+
+- ✅ Phase 6b Phase 3 (ActionRequiredRenderer) — CLOSED (this session-end commit lands it)
+- ✅ Phase 6b Phase 4 (TtsChromeRenderer) — CLOSED (batched in this commit per user direction "skip checkpoint, just start Phase 4 work")
+- ⏳ Phase 5A → 5B (JobStore.delete + delete-button click handler) — **starting point for tomorrow** (resume pointer at top of TODO.md)
+- ⏳ Phases 6-8 (CSS port + boot wiring + smoke + scheduled `:8000` E2E) — sequence per `2026.05.11-phase6b-code-execution-plan.md`
+
+**Commits**: (this session-end commit hash filled in post-commit; no push per user direction)
+
 ---
 
 ### 2026.05.11 PM - Session 77e1bb27 (Mr. Radio) | Voice Persona Rename Domi→Rio implementation + Phase 5b :8000 scheduling (2 batches)
