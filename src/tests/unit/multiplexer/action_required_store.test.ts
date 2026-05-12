@@ -573,3 +573,137 @@ test("thawAll skips terminal entries AND skips already-non-frozen pending entrie
   const idsResumed = resumed.map((e) => e.payload.id_hash).sort();
   assert.deepEqual(idsResumed, ["ar1", "ar2"], "only frozen pending entries resume");
 });
+
+// ===========================================================================
+// Phase 6b — respondAndAwait() (Pass 2 A1) + widened respond() (Pass 2 A2)
+// ===========================================================================
+
+test("respondAndAwait() success: emits responded-pending then responded; final state=responded", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  const before = ctx.events.length;
+  await ctx.store.respondAndAwait("ar1", "yes");
+  const after = ctx.events.slice(before);
+  const pending = after.find(e => e.payload.changeKind === "responded-pending");
+  const ok      = after.find(e => e.payload.changeKind === "responded");
+  assert.ok(pending, "responded-pending emitted");
+  assert.ok(ok,      "responded emitted");
+  // responded-pending must precede responded.
+  assert.ok(after.indexOf(pending!) < after.indexOf(ok!), "responded-pending precedes responded");
+  assert.equal(pending!.payload.response, "yes", "pending event carries response payload");
+  assert.equal(ok!.payload.response,      "yes", "responded event carries response payload");
+  assert.equal(ctx.store.getById("ar1")!.state,    "responded");
+  assert.equal(ctx.store.getById("ar1")!.response, "yes");
+  assert.equal(ctx.timers.pending(), 0, "interval cleared on submitting transition");
+});
+
+test("respondAndAwait() rejection: emits responded-pending then failed; final state=failed; re-throws", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  ctx.setPostRejects(true);
+  const before = ctx.events.length;
+  let thrown: unknown = null;
+  try { await ctx.store.respondAndAwait("ar1", "yes"); } catch (err) { thrown = err; }
+  assert.ok(thrown instanceof Error, "respondAndAwait re-throws on POST failure");
+  assert.equal((thrown as Error).message, "network down");
+  const after = ctx.events.slice(before);
+  const pending = after.find(e => e.payload.changeKind === "responded-pending");
+  const failed  = after.find(e => e.payload.changeKind === "failed");
+  assert.ok(pending, "responded-pending emitted");
+  assert.ok(failed,  "failed emitted");
+  assert.ok(after.indexOf(pending!) < after.indexOf(failed!), "responded-pending precedes failed");
+  assert.equal(failed!.payload.response, "yes",  "failed event carries response payload");
+  assert.ok(failed!.payload.error instanceof Error, "failed event carries error");
+  assert.equal(ctx.store.getById("ar1")!.state, "failed");
+  assert.equal(ctx.store.getById("ar1")!.response, undefined, "response NOT stored on failure");
+  assert.equal(ctx.timers.pending(), 0, "interval not restarted after failure");
+});
+
+test("respondAndAwait() unknown idHash throws Error", async () => {
+  const ctx = setup();
+  let thrown: unknown = null;
+  try { await ctx.store.respondAndAwait("ghost", "yes"); } catch (err) { thrown = err; }
+  assert.ok(thrown instanceof Error);
+  assert.match((thrown as Error).message, /Unknown action_required id: ghost/);
+  assert.equal(ctx.postCalls.length, 0);
+});
+
+test("respondAndAwait() retry after failure: failed → submitting → responded", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  ctx.setPostRejects(true);
+  await ctx.store.respondAndAwait("ar1", "yes").catch(() => {});
+  assert.equal(ctx.store.getById("ar1")!.state, "failed");
+  // Retry — server back online.
+  ctx.setPostRejects(false);
+  await ctx.store.respondAndAwait("ar1", "yes");
+  assert.equal(ctx.store.getById("ar1")!.state, "responded");
+  assert.equal(ctx.postCalls.length, 2, "second attempt POSTed");
+});
+
+test("respondAndAwait() on already-responded entry throws (cannot re-submit terminal state)", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respondAndAwait("ar1", "yes");
+  let thrown: unknown = null;
+  try { await ctx.store.respondAndAwait("ar1", "no"); } catch (err) { thrown = err; }
+  assert.ok(thrown instanceof Error);
+  assert.match((thrown as Error).message, /Cannot respondAndAwait in state responded/);
+});
+
+test("respondAndAwait() POSTs structured wire shape: notification_id + response_value: { response }", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respondAndAwait("ar1", "yes");
+  assert.equal(ctx.postCalls.length, 1);
+  assert.equal(ctx.postCalls[0]!.path, "/api/notify/response");
+  const body = ctx.postCalls[0]!.body as { notification_id: string; response_value: { response: unknown } };
+  assert.equal(body.notification_id, "ar1");
+  assert.equal(body.response_value.response, "yes");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6b A2 — widened response shape (string | array | record)
+// ---------------------------------------------------------------------------
+
+test("respond() accepts ReadonlyArray<string> for multi-select response", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respond("ar1", ["red", "blue"]);
+  assert.deepEqual(ctx.store.getById("ar1")!.response, ["red", "blue"]);
+  const body = ctx.postCalls[0]!.body as { response_value: { response: unknown } };
+  assert.deepEqual(body.response_value.response, ["red", "blue"]);
+});
+
+test("respond() accepts Record<string, string> for open_ended_batch response", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respond("ar1", { Topic: "AI", Budget: "100" });
+  assert.deepEqual(ctx.store.getById("ar1")!.response, { Topic: "AI", Budget: "100" });
+  const body = ctx.postCalls[0]!.body as { response_value: { response: unknown } };
+  assert.deepEqual(body.response_value.response, { Topic: "AI", Budget: "100" });
+});
+
+test("respond() back-compat: still accepts a plain string response", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respond("ar1", "yes");
+  assert.equal(ctx.store.getById("ar1")!.response, "yes");
+});
+
+test("respondAndAwait() accepts ReadonlyArray<string> + emits payload with array response", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  const before = ctx.events.length;
+  await ctx.store.respondAndAwait("ar1", ["A", "B", "C"]);
+  const responded = ctx.events.slice(before).find(e => e.payload.changeKind === "responded");
+  assert.deepEqual(responded!.payload.response, ["A", "B", "C"]);
+  assert.deepEqual(ctx.store.getById("ar1")!.response, ["A", "B", "C"]);
+});
+
+test("respondAndAwait() accepts Record<string, string> + emits payload with object response", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respondAndAwait("ar1", { q1: "yes", q2: "no" });
+  assert.deepEqual(ctx.store.getById("ar1")!.response, { q1: "yes", q2: "no" });
+});

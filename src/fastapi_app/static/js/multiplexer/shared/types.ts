@@ -333,7 +333,20 @@ export interface StoreSendersChangedPayload {
 // `response_type` field). One actor per active prompt.
 // ---------------------------------------------------------------------------
 
-export type ActionRequiredState = "pending" | "responded" | "expired" | "cancelled";
+export type ActionRequiredState =
+  | "pending"
+  | "submitting"     // Phase 6b — non-optimistic respondAndAwait() in flight (per Pass 2 A1)
+  | "responded"
+  | "failed"         // Phase 6b — respondAndAwait() POST rejected; user may retry (per Pass 2 A1)
+  | "expired"
+  | "cancelled";
+
+// Phase 6b — widened response shape (per Pass 2 A2). Wire-side:
+//   - string                       : single answer (yes_no, single-select multiple_choice, open_ended)
+//   - ReadonlyArray<string>        : multi-select multiple_choice (multiSelect: true)
+//   - Record<string, string>       : open_ended_batch (per-question header → answer)
+// `response_value: { response: <this shape> }` on the wire.
+export type ActionRequiredResponse = string | ReadonlyArray<string> | Record<string, string>;
 
 export interface ActionRequiredItem {
   id_hash       : string;
@@ -343,13 +356,15 @@ export interface ActionRequiredItem {
   default?      : string;
   expires_at    : number;            // ms epoch
   state         : ActionRequiredState;
-  response?     : string;             // populated on respond
+  response?     : ActionRequiredResponse;   // Phase 6b — widened from string per Pass 2 A2
 }
 
 export type ActionRequiredChangeKind =
   | "added"
-  | "tick"               // countdown tick (1Hz UX update; UI repaints countdown)
+  | "tick"                  // countdown tick (1Hz UX update; UI repaints countdown)
+  | "responded-pending"     // Phase 6b — respondAndAwait() POST in flight (per Pass 2 A1)
   | "responded"
+  | "failed"                // Phase 6b — respondAndAwait() POST rejected (per Pass 2 A1)
   | "expired"
   | "cancelled"
   | "offline-frozen"
@@ -358,7 +373,9 @@ export type ActionRequiredChangeKind =
 export interface StoreActionRequiredChangedPayload {
   changeKind   : ActionRequiredChangeKind;
   id_hash      : string;
-  countdownMs? : number;              // remaining ms; present on "tick" + "offline-frozen"
+  countdownMs? : number;                          // remaining ms; present on "tick" + "offline-frozen"
+  response?    : ActionRequiredResponse;          // Phase 6b — present on "responded-pending" / "responded" (respondAndAwait path) / "failed"
+  error?       : unknown;                         // Phase 6b — present on "failed"
 }
 
 // ---------------------------------------------------------------------------

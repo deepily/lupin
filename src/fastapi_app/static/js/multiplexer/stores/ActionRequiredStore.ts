@@ -10,6 +10,9 @@
 //   - connection_state_change subscription → backoff/offline pauses interval
 //                                              + emits "offline-frozen"
 //   - respond(idHash, response) POSTs `/api/notify/response` via ApiClient
+//                                       (optimistic, fire-and-forget; Phase 5 backward-compat)
+//   - respondAndAwait(idHash, response) POSTs and awaits server confirmation
+//                                       (Phase 6b — non-optimistic path per Pass 2 A1)
 //
 // Spec drifts vs design doc, recorded in execution log:
 //   1. Action-required prompts arrive via `notification_queue_update` (with
@@ -28,6 +31,7 @@ import type { EventBus } from "../shared/EventBus";
 import type {
   ActionRequiredItem,
   ActionRequiredChangeKind,
+  ActionRequiredResponse,
   ConnectionStateChangePayload,
   LupinEvent,
   StoreActionRequiredChangedPayload,
@@ -113,7 +117,21 @@ interface RespondedPayload {
 export interface ActionRequiredStore {
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
-  respond(idHash: string, response: string): Promise<void>;
+  /**
+   * Optimistic respond — flips local state to "responded" before the network
+   * round-trip. Phase 5 backward-compat path. Network failure is silently
+   * swallowed (UI feedback already delivered). No-op on unknown idHash or
+   * non-pending state. Phase 6b widened the response param per Pass 2 A2.
+   */
+  respond(idHash: string, response: ActionRequiredResponse): Promise<void>;
+  /**
+   * Non-optimistic respond — Phase 6b per Pass 2 A1. Transitions through
+   * "submitting" → "responded" | "failed". Throws on unknown idHash or
+   * non-retryable state. Network failure leaves entry in "failed" state and
+   * re-throws so the caller (renderer) can render an inline error stripe and
+   * re-enable the widget for retry.
+   */
+  respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void>;
   /** Test/cleanup helper: stop all per-prompt intervals + actors. */
   disposeForTesting(): void;
 }
@@ -179,7 +197,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     return this.entries.get(idHash)?.data;
   }
 
-  async respond(idHash: string, response: string): Promise<void> {
+  async respond(idHash: string, response: ActionRequiredResponse): Promise<void> {
     const entry = this.entries.get(idHash);
     if (!entry) return;
     if (entry.data.state !== "pending") return;
@@ -203,6 +221,38 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       // delivered to user); a reconnect + server-side fanout would re-converge.
       // No retry is wired for Phase 4; Phase 6+ may add one.
     }
+  }
+
+  // Phase 6b — non-optimistic path (per Pass 2 A1). Lifecycle:
+  //   pending|failed → submitting → (POST) → responded (terminal) | failed (re-tryable)
+  // Failed entries can be re-driven through respondAndAwait() again. The interval
+  // is stopped when state leaves "pending" (existing tick guard); we do NOT restart
+  // it on failure (countdown is suspended for the duration of the user's retry).
+  async respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void> {
+    const entry = this.entries.get(idHash);
+    if (!entry) throw new Error(`Unknown action_required id: ${idHash}`);
+    if (entry.data.state !== "pending" && entry.data.state !== "failed") {
+      throw new Error(`Cannot respondAndAwait in state ${entry.data.state}: ${idHash}`);
+    }
+
+    entry.data = { ...entry.data, state: "submitting" };
+    this.stopInterval(entry);
+    this.emitWithDetails("responded-pending", idHash, { response });
+
+    try {
+      await this.api.post<unknown>("/api/notify/response", {
+        notification_id : idHash,
+        response_value  : { response },
+      });
+    } catch (err) {
+      entry.data = { ...entry.data, state: "failed" };
+      this.emitWithDetails("failed", idHash, { response, error: err });
+      throw err;
+    }
+
+    entry.data = { ...entry.data, state: "responded", response };
+    entry.actor.send({ type: "RESPOND" });
+    this.emitWithDetails("responded", idHash, { response });
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
@@ -412,6 +462,24 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.bus.emit<StoreActionRequiredChangedPayload>({
       type    : "store_action_required_changed",
       payload : { changeKind, id_hash: idHash },
+      source  : "ActionRequiredStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  // Phase 6b — emit helper for change kinds that carry response/error details
+  // (responded-pending / responded / failed via respondAndAwait path).
+  private emitWithDetails(
+    changeKind : ActionRequiredChangeKind,
+    idHash     : string,
+    details    : { response?: ActionRequiredResponse; error?: unknown },
+  ): void {
+    const payload: StoreActionRequiredChangedPayload = { changeKind, id_hash: idHash };
+    if (details.response !== undefined) payload.response = details.response;
+    if (details.error    !== undefined) payload.error    = details.error;
+    this.bus.emit<StoreActionRequiredChangedPayload>({
+      type    : "store_action_required_changed",
+      payload,
       source  : "ActionRequiredStore",
       ts      : this.nowFn(),
     });

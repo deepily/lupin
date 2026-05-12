@@ -323,3 +323,69 @@ test("emit count: each state mutation emits exactly one state_change (via subscr
   // (The companion error-emission only fires on the failure path.)
   assert.equal(stateEvents.length, 2);
 });
+
+// ===========================================================================
+// Phase 6b — stop() (per Pass 2 A6) — full halt to idle, queue cleared,
+// distinct from skip() (which goes to ended).
+// ===========================================================================
+
+test("stop() from playing: → idle; queueLength=0; emits state-change to idle", () => {
+  const { store, stateEvents } = setup();
+  store.binaryHandler(makePCM16(100));
+  store.binaryHandler(makePCM16(100));
+  assert.equal(store.state(), "playing");
+  assert.equal(store.queueLength(), 2);
+  const before = stateEvents.length;
+  store.stop();
+  assert.equal(store.state(),       "idle");
+  assert.equal(store.queueLength(), 0);
+  const idleTransition = stateEvents.slice(before).find(e => e.payload.state === "idle");
+  assert.ok(idleTransition, "stop() emits a state-change to idle");
+  assert.equal(idleTransition!.payload.prev, "playing");
+});
+
+test("stop() from paused: → idle; queueLength=0", () => {
+  const { store } = setup();
+  store.binaryHandler(makePCM16(100));
+  store.pause();
+  assert.equal(store.state(), "paused");
+  store.stop();
+  assert.equal(store.state(),       "idle");
+  assert.equal(store.queueLength(), 0);
+});
+
+test("stop() from ended: → idle (explicit reset, distinct from skip's terminal-ended)", () => {
+  const { store } = setup();
+  store.binaryHandler(makePCM16(100));
+  store.skip();
+  assert.equal(store.state(), "ended");
+  store.stop();
+  assert.equal(store.state(), "idle");
+});
+
+test("stop() from idle is a no-op (no event emission)", () => {
+  const { store, stateEvents } = setup();
+  const before = stateEvents.length;
+  store.stop();
+  assert.equal(store.state(), "idle");
+  assert.equal(stateEvents.length, before, "no state-change emitted from idle stop");
+});
+
+test("stop() vs skip() — stop ends in idle, skip ends in ended (semantic distinction)", () => {
+  const a = setup();
+  const b = setup();
+  a.store.binaryHandler(makePCM16(100));
+  b.store.binaryHandler(makePCM16(100));
+  a.store.stop();
+  b.store.skip();
+  assert.equal(a.store.state(), "idle",  "stop returns to idle");
+  assert.equal(b.store.state(), "ended", "skip terminates at ended");
+});
+
+test("stop() from error: → idle (recovery path)", () => {
+  const { store } = setup({ decodeThrows: true });
+  store.binaryHandler(makePCM16(100));
+  assert.equal(store.state(), "error");
+  store.stop();
+  assert.equal(store.state(), "idle");
+});

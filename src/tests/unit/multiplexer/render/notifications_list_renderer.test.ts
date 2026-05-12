@@ -665,3 +665,63 @@ test("cssEscape fallback works when globalThis.CSS.escape is unavailable", () =>
     (globalThis as { CSS?: unknown }).CSS = originalCSS;
   }
 });
+
+// ===========================================================================
+// Phase 6b — ownership-flag early-return guard (per Pass 2 A3 Path A)
+// When ActionRequiredRenderer.mount() sets dataset.phase6bOwner="true", this
+// renderer's renderActionRequiredSection() must short-circuit so it does not
+// nuke the interactive widget out from under the Phase 6b owner.
+// ===========================================================================
+
+test("ownership flag set: renderActionRequiredSection() short-circuits — interactive widget DOM survives", () => {
+  const { renderer, root, bus, arList } = setupRenderer();
+  arList.push(makeAR());
+  renderer.mount(root);
+  // Phase 5 read-only widget rendered initially (1 widget).
+  assert.equal(root.querySelectorAll(".action-required-widget").length, 1);
+
+  // Simulate Phase 6b ActionRequiredRenderer mount: claim ownership + replace
+  // the widget DOM with a marker the test will check for.
+  const arSection = root.querySelector("#action-required-section") as HTMLElement;
+  arSection.dataset.phase6bOwner = "true";
+  arSection.innerHTML = '<div class="phase6b-interactive-marker" data-id-hash="ar1">phase6b</div>';
+
+  // A non-tick store change would normally trigger renderActionRequiredSection().
+  // With ownership claimed, the guard early-returns and leaves the marker intact.
+  arList.push(makeAR({ id_hash: "ar2", prompt: "Second" }));
+  bus.emit({
+    type    : "store_action_required_changed",
+    payload : { changeKind: "added", id_hash: "ar2" },
+    source  : "test",
+    ts      : 0,
+  });
+  // Phase 6b marker survives the would-be re-render.
+  assert.equal(arSection.querySelector(".phase6b-interactive-marker") !== null, true,
+    "ownership-flag short-circuit must preserve the Phase 6b widget");
+  // Phase 5 read-only widget did NOT get re-rendered into the section.
+  assert.equal(arSection.querySelector(".action-required-widget"), null,
+    "Phase 5 path must not touch the section while phase6bOwner=true");
+  renderer.unmount();
+});
+
+test("ownership flag absent: renderActionRequiredSection() runs normally (Phase 5 default behavior)", () => {
+  const { renderer, root, bus, arList } = setupRenderer();
+  arList.push(makeAR());
+  renderer.mount(root);
+  const arSection = root.querySelector("#action-required-section") as HTMLElement;
+  // Confirm flag is NOT set by default.
+  assert.equal(arSection.dataset.phase6bOwner, undefined);
+  assert.equal(arSection.querySelectorAll(".action-required-widget").length, 1);
+
+  // Add a second widget — non-tick store change triggers the section re-render.
+  arList.push(makeAR({ id_hash: "ar2", prompt: "Second" }));
+  bus.emit({
+    type    : "store_action_required_changed",
+    payload : { changeKind: "added", id_hash: "ar2" },
+    source  : "test",
+    ts      : 0,
+  });
+  // Both widgets present — the Phase 5 read-only path ran (no early return).
+  assert.equal(arSection.querySelectorAll(".action-required-widget").length, 2);
+  renderer.unmount();
+});

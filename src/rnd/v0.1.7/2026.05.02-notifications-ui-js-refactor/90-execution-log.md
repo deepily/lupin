@@ -1027,11 +1027,95 @@ User authorized end-to-end execution + per-phase checkpoints in a single go-ahea
 
 ---
 
-### Phase 6b — TTS chrome + action-required interactive widgets (NOT STARTED)
+### Phase 6b — TTS chrome + action-required interactive widgets (Phase 0 seeded 2026-05-11; Phase 1 READY TO BEGIN)
 
-**Status**: ⏸ Not started
+**Status**: ⏳ Phase 0 (design) ✅ CLOSED 2026-05-11 (Q-decisions + REUSE + Pass 1 Fitness + Pass 2 Adversarial all CLOSED); code-execution plan ✅ AUTHORED 2026-05-11; Phase 1 (implementation) ⏳ READY TO BEGIN — gated on user go-ahead
 
-(populated when Phase 6b begins)
+**Authoritative documents**:
+- Design: `09-phase6b-interactive-widgets-design.md` (522 lines, Pass 2 closed)
+- Findings: `95-phase6b-review-findings.md` (470 lines, "Pass 2 Adversarial — closed 2026-05-11" subsection at bottom)
+- Code-execution plan: `2026.05.11-phase6b-code-execution-plan.md` (full 9-phase sequence + AC scorecard + pre-exit self-audit)
+
+**Plan-review pipeline**:
+
+| Pass | Status | Closed | Findings |
+|------|--------|--------|----------|
+| Q-decisions | ✅ CLOSED | 2026-05-07 | 12/12 ratified |
+| REUSE pre-pass | ✅ CLOSED | 2026-05-07 | 28 RE-rows + 5 Layer-3 concerns ratified across 4 batched turns |
+| Pass 1 Fitness | ✅ CLOSED | 2026-05-11 | 14/14 ratified across 1 Minors batch + 8 individual Majors |
+| **Pass 2 Adversarial** | ✅ CLOSED | 2026-05-11 | 11/11 ratified: 8 Majors A1-A8 (contract-drift × 6, race × 2) + 3 Minors a1-a3 (security/DOS/testability) |
+| Code-execution plan | ✅ AUTHORED | 2026-05-11 | 9 phases, 12 NEW files, 11 EDITED files |
+| Implementation | ⏳ READY | — | gated on user go-ahead at Phase 1 |
+
+**Per-phase progress table** (per `2026.05.11-phase6b-code-execution-plan.md` execution sequence):
+
+| Phase | Description | Status | Started | Completed | Commit | Notes |
+|-------|-------------|--------|---------|-----------|--------|-------|
+| 0 | Tracking-doc seed (this section + code-execution plan) | ✅ DONE | 2026-05-11 | 2026-05-11 | (uncommitted) | Plan serialized; execution log seeded; **B6a captured 2026-05-11 PM = 31484 bytes** (boot.65c779ac946b.js, built 2026-05-07T01:40:36Z; HEAD 243267b only changed TODO.md so artifact unchanged); AC7 ceiling = 39676 bytes |
+| 1 | Store API prereqs + Phase 5 short-circuit (4 sub-steps 1.1-1.4 + 1.5 c8 100%) | ✅ DONE (gated on commit auth) | 2026-05-11 PM | 2026-05-11 PM | (uncommitted — awaiting user) | All verifications GREEN: tsc clean, eslint clean, c8 --100 = 100% on 3 edited files (ActionRequiredStore.ts + AudioStore.ts + NotificationsListRenderer.ts), 22 new tests (14 + 6 + 2), 489/489 multiplexer unit tests pass. Edits: types.ts (extended ActionRequiredState/ChangeKind/Payload + new ActionRequiredResponse), ActionRequiredStore (respondAndAwait + widened respond), AudioStore (stop() + STOP_REQUESTED machine event), NotificationsListRenderer (phase6bOwner ownership-flag guard at L228). |
+| 2 | Interactive widget templates (`actionRequiredInteractive.ts` + `ttsChrome.ts`) | ⏸ | — | — | — | AC2e safe-write guards in header comments |
+| 3 | `ActionRequiredRenderer.ts` | ⏸ | — | — | — | Pass 2 A3 ownership flag + A1 respondAndAwait + a2 store-tick countdown (NO RAF) |
+| 4 | `TtsChromeRenderer.ts` | ⏸ | — | — | — | Pass 2 A6 `AudioStore.stop()` wiring + Q-B9 RAF-coalesced audio subscriptions |
+| 5A | `JobStore.delete()` + AC2d tests (DOD 5A-1..5A-8) | ⏸ | — | — | — | 8-row DOD per Pass 1 F-6 ratification |
+| 5B | Delete-button click handler on `JobsPaneRenderer` (DOD 5B-1..5B-11) | ⏸ | — | — | — | Q-A6 + Q-B10 follow-through; 5A→5B compile-time gate |
+| 6 | CSS port + page shell + boot wiring | ⏸ | — | — | — | Pass 2 A7/A8 ordering invariants enforced |
+| 7 | Smoke + cross-phase verification (`:7999` AI-discretionary) | ⏸ | — | — | — | AC1-AC10e tabular pass/fail report |
+| 8 | E2E scheduled-`:8000` (AC11a + AC11b) | ⏸ | — | — | — | Run #1 baseline + Run #2 regression; HUMAN slot-coordination |
+
+**AC scorecard** (populate at each phase boundary):
+
+| AC | Pass criterion | Status |
+|----|----------------|--------|
+| AC1 | `npx tsc --noEmit` exit 0 | ✅ (post-Phase 1) |
+| AC2 | `npx eslint src/fastapi_app/static/js/multiplexer/` exit 0 | ✅ (post-Phase 1) |
+| AC2a | `data-phase6-pending` 0 hits on action-required widgets post-mount | ⏸ |
+| AC2b | `aria-disabled="true"` 0 hits on action-required widgets post-mount | ⏸ |
+| AC2c | 1 MutationObserver childList entry per widget; 4 markers gone | ⏸ |
+| AC2d | `vitest jobstore_delete_api.test.ts` green | ⏸ |
+| **AC2e** (NEW per Pass 2 a1) | grep ban on `.innerHTML =` / `rawHTML(` / `.outerHTML =` in interactive template files | ⏸ |
+| AC3 | `templates_action_required_interactive.test.ts` ≥15 PASS | ⏸ |
+| AC4 | `templates_tts_chrome.test.ts` ≥15 PASS | ⏸ |
+| AC5 | `action_required_renderer.test.ts` ≥21 PASS | ⏸ |
+| AC5b | `tts_chrome_renderer.test.ts` ≥13 PASS | ⏸ |
+| AC5c | `jobs_pane_renderer.test.ts` AC5c cases (≥6 new) | ⏸ |
+| AC6 | `c8 --100` on all new + edited multiplexer TS files | 🟡 partial: ✅ on Phase 1 edited files (ActionRequiredStore + AudioStore + NotificationsListRenderer = 100%); other phases pending |
+| AC7 | `boot.js` gz ≤ `B6a + 8192` = **39676 bytes** (B6a = 31484, captured 2026-05-11 PM) | ⏸ (gate runs at Phase 7) |
+| AC8a | smoke functional + no-pending-markers | ⏸ |
+| AC8b | smoke perf gate (50 prompts, first paint <200ms) | ⏸ |
+| AC9 | smoke `boot_complete_handshake` (4 stable lines, canonical order asserted) | ⏸ |
+| **AC9b** (NEW per Pass 2 A8) | smoke `audio_chunks_arrive_after_mount` (4 `:mounted` lines BEFORE first `store_audio_chunk_decoded`) | ⏸ |
+| AC10 | cross-phase verification sweep | ⏸ |
+| AC10b | action-required.css ≤500, tts-chrome.css ≤700 + stylelint exit 0 | ⏸ |
+| AC10d | 3-layer CSS scope-leak detection (grep + stylelint + canary) | ⏸ |
+| AC10e | Phase 5 + 6a `pending_count` regression with floor=0 | ⏸ |
+| AC11a | `/schedule-tests` Run #1 baseline submission | ⏸ (HUMAN slot-coord) |
+| AC11b | Run #2 regression: visual baselines non-empty + "1 passed, 0 errors" | ⏸ (HUMAN slot-coord) |
+
+**Side-effect tasks checklist** (track explicitly to avoid drift):
+
+- [x] **`B6a` byte count captured** + recorded in code-execution plan top + this row — `B6a = 31484` bytes (2026-05-11 PM, df880556 María)
+- [ ] Phase 0 prereq #2 verification (`multiSelect: bool` on `action_required` payload)
+- [ ] Phase 0 prereq #3 verification (`AudioStore.currentNotificationIdHash` linkage shape)
+- [ ] Phase 0 prereq #4 verification (action-required render mount surface — `#action-required-pane` vs inline)
+- [ ] Phase 0 prereq #5 — Phase 6a CoSA `multiplexer_config.py` commit landed (carries from Phase 6a)
+- [ ] A2 server-handler payload acceptance verification (`grep -n "response_value" src/cosa/rest/routers/notifications.py` — confirm wire schema accepts array/object; if string-coerced, file CoSA-context task)
+- [ ] Phase 5 `NotificationsListRenderer.tick` text-node-only contract cited in design (per Pass 2 noted-out-of-scope item — anchor convention)
+
+**Pass 2 closure summary** (full record in `95-phase6b-review-findings.md` § "Pass 2 Adversarial — closed 2026-05-11"):
+
+| ID | Cluster | Decision | Net effect |
+|----|---------|----------|------------|
+| A1 | contract-drift | Path A — add `respondAndAwait()` non-optimistic | Phase 0 prereq #8 NEW |
+| A2 | contract-drift | YES — widen `respond()` signature + POST body shape table | Phase 0 prereq #9 NEW |
+| A3 | race | Path A — ownership flag `dataset.phase6bOwner` on Phase 5 short-circuit | Phase 1.4 edit |
+| A4 | contract-drift | YES — `data-id-hash` + `getById()` (real names) | Mechanism snippet rewrite |
+| A5 | contract-drift | YES — strike Phase 0 prereq #7; use `item.expires_at` directly | Phase 0 prereq #7 STRUCK |
+| A6 | contract-drift | Path A — extend `AudioStore.stop(): void` | Phase 0 prereq #10 NEW |
+| A7 | contract-drift | YES — align mount signatures to Phase 6a `mount(root: HTMLElement)` | Boot wiring + Mechanism + Q-B11 |
+| A8 | race | YES — pin boot order (renderers FIRST, transports LAST) + AC9b smoke | New AC9b + R9 risk row |
+| a1 | security | YES — AC2e grep ban on unsafe HTML write sinks | New AC2e row |
+| a2 | DOS | YES — drop renderer-side RAF loop; reuse store's 1Hz `tick` event | Q-B5 + AC5 countdown case rewritten |
+| a3 | testability | YES — pin AC9 mount order: notifications → jobs → actionRequired → ttsChrome | AC9 row pinned |
 
 ---
 

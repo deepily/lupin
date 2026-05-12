@@ -50,7 +50,8 @@ type AudioMachineEvent =
   | { type: "PLAYBACK_ENDED" }
   | { type: "PAUSE_REQUESTED" }
   | { type: "RESUME_REQUESTED" }
-  | { type: "SKIP_REQUESTED" };
+  | { type: "SKIP_REQUESTED" }
+  | { type: "STOP_REQUESTED" };       // Phase 6b — full halt to idle (per Pass 2 A6)
 
 const audioMachine = setup({
   types : {
@@ -79,24 +80,28 @@ const audioMachine = setup({
         PAUSE_REQUESTED : "paused",
         PLAYBACK_ENDED  : "ended",
         SKIP_REQUESTED  : "ended",
+        STOP_REQUESTED  : "idle",        // Phase 6b — stop returns to idle (vs skip → ended)
       },
     },
     paused : {
       on : {
         RESUME_REQUESTED : "playing",
         SKIP_REQUESTED   : "ended",
+        STOP_REQUESTED   : "idle",       // Phase 6b
       },
     },
     ended : {
       on : {
         // New chunk after silence resumes the pipeline.
-        CHUNK_ARRIVED : "decoding",
+        CHUNK_ARRIVED  : "decoding",
+        STOP_REQUESTED : "idle",         // Phase 6b — explicit reset from ended
       },
     },
     error : {
       on : {
         // Recover by treating a fresh chunk as a new start.
-        CHUNK_ARRIVED : "decoding",
+        CHUNK_ARRIVED  : "decoding",
+        STOP_REQUESTED : "idle",         // Phase 6b — explicit reset from error
       },
     },
   },
@@ -112,6 +117,12 @@ export interface AudioStore {
   pause(): void;
   resume(): void;
   skip(): void;
+  /**
+   * Phase 6b (per Pass 2 A6) — full halt to idle, clear in-burst counter.
+   * Distinct from skip() (advance one track within the burst → ended) and
+   * pause() (suspend keeping queue intact). No-op when already idle/decoding.
+   */
+  stop(): void;
   /** Per D-D — the bound binary handler whose Function.name === "audioStoreBinaryHandler". */
   readonly binaryHandler: (data: Blob | ArrayBuffer) => void;
   /** Test/cleanup helper. */
@@ -220,6 +231,16 @@ class AudioStoreImpl implements AudioStore {
       this.actor.send({ type: "SKIP_REQUESTED" });
       this.chunksInBurst = 0;
     }
+  }
+
+  // Phase 6b — full halt (per Pass 2 A6). Reachable from playing/paused/ended/error;
+  // no-op from idle/decoding. State transitions to idle and queue counter clears.
+  // The state-change emission flows through the existing actor.subscribe() path.
+  stop(): void {
+    const s = this.state();
+    if (s === "idle" || s === "decoding") return;
+    this.actor.send({ type: "STOP_REQUESTED" });
+    this.chunksInBurst = 0;
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.

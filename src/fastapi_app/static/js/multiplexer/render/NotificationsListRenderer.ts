@@ -228,6 +228,12 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private renderActionRequiredSection(): void {
     /* c8 ignore next */ // defensive: actionRequiredMount is set in mount() and only nulled in unmount(); subscriptions are detached in unmount BEFORE this null happens.
     if (this.actionRequiredMount === null) return;
+    // Phase 6b ownership flag (per Pass 2 A3 Path A in `09-phase6b-interactive-widgets-design.md`):
+    // when ActionRequiredRenderer.mount() has fired, this section is owned by Phase 6b
+    // and we must not nuke the interactive widget out from under it. The early-return
+    // here is a no-op for the read-only Phase 5 path; the interactive renderer drives
+    // its own DOM updates via store_action_required_changed subscriptions.
+    if (this.actionRequiredMount.dataset.phase6bOwner === "true") return;
     const items = this.stores.actionRequired.list();
     keyedListMerge({
       parent  : this.actionRequiredMount,

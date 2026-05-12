@@ -247,19 +247,19 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 - Implementation ⏳ **READY TO BEGIN** at Phase 1 — gated on user go-ahead per `feedback_plan_approval_means_go`
 
 **Resume action**:
-- [ ] [LUPIN] Re-audit at execute time per `feedback_audit_plans_at_execute_time` — re-grep recent feedback memories for constraints landed since 2026-05-11; surface conflicts before code edits
-- [ ] [LUPIN] Capture Phase 6a baseline `B6a` = `gzip -9 -c src/fastapi_app/static/dist/multiplexer/boot.<hash>.js | wc -c` at HEAD `243267b` (Phase 6a closure). Record value in code-execution plan + execution log. Update AC7 ceiling to `B6a + 8192`.
-- [ ] [LUPIN] Verify pre-existing store API signatures (Pass 2 findings' file:line citations: `respond(`, `tick`, `expires_at`, `pause()`, `resume()`, `skip()`, `state()`, `queueLength()` in `src/fastapi_app/static/js/multiplexer/stores/*.ts`)
-- [ ] [LUPIN] Verify Phase 5 `NotificationsListRenderer.renderActionRequiredSection` still at lines 228-243 — A3 Path A ownership-flag edit lands here
-- [ ] [LUPIN] Verify `actionRequiredReadOnly.ts:49` still sets `data-id-hash` (real attribute, per Pass 2 A4)
-- [ ] [LUPIN] **Begin Phase 1 (Step 1 of code-execution plan)**: 4 store/renderer prereq edits:
-  - 1.1 `ActionRequiredStore.respondAndAwait()` (Pass 2 A1, Phase 0 prereq #8)
-  - 1.2 Widen `respond()` + `respondAndAwait()` signature to `string | ReadonlyArray<string> | Record<string, string>` (Pass 2 A2, Phase 0 prereq #9)
-  - 1.3 `AudioStore.stop()` (Pass 2 A6, Phase 0 prereq #10)
-  - 1.4 Phase 5 `NotificationsListRenderer` ownership-flag early-return guard (Pass 2 A3 Path A)
-  - 1.5 `c8 --100` on all 4 edited files; new unit tests green (≥9 new test cases across the 4 files)
-  - Commit boundary: "Phase 6b Phase 1: store API prereqs (respondAndAwait + widen respond + AudioStore.stop) + Phase 5 ownership-flag guard" (user-authorized per `feedback_never_auto_commit_push`)
-- [ ] [LUPIN] Phases 2-8 follow per `2026.05.11-phase6b-code-execution-plan.md` execution sequence (per-phase commits each gated on user authorization)
+- [x] [LUPIN] Re-audit at execute time per `feedback_audit_plans_at_execute_time` — re-grep recent feedback memories for constraints landed since 2026-05-11; surface conflicts before code edits — Done df880556 María (only `feedback_skip_arnold_yes_no_neither_ux` newer; not relevant to Phase 6b)
+- [x] [LUPIN] Capture Phase 6a baseline `B6a` — Done df880556 María: `B6a = 31484` bytes (boot.65c779ac946b.js); AC7 ceiling = 39676 bytes; recorded in code-execution plan + 90-execution-log.md
+- [x] [LUPIN] Verify pre-existing store API signatures — Done df880556 María: all signatures match Pass 2 file:line citations (ActionRequiredStore.respond at L182, tick at L291, expires_at at L266; AudioStore state/queueLength/pause/resume/skip at L201-218; AudioStore.stop() public method confirmed MISSING)
+- [x] [LUPIN] Verify Phase 5 `NotificationsListRenderer.renderActionRequiredSection` still at lines 228-243 — Done df880556 María: confirmed at L228
+- [x] [LUPIN] Verify `actionRequiredReadOnly.ts:49` still sets `data-id-hash` — Done df880556 María: confirmed exact line + correct attribute (no contract drift)
+- [x] [LUPIN] **Begin Phase 1 (Step 1 of code-execution plan)**: 4 store/renderer prereq edits — Done df880556 María (checkpoint pending):
+  - [x] 1.1 `ActionRequiredStore.respondAndAwait()` (Pass 2 A1, Phase 0 prereq #8) — implemented + 6 tests
+  - [x] 1.2 Widen `respond()` + `respondAndAwait()` signature to `string | ReadonlyArray<string> | Record<string, string>` (Pass 2 A2, Phase 0 prereq #9) — implemented + 5 tests + ActionRequiredItem.response widened + new ActionRequiredResponse union in shared/types.ts
+  - [x] 1.3 `AudioStore.stop()` (Pass 2 A6, Phase 0 prereq #10) — implemented + STOP_REQUESTED machine event + 6 tests
+  - [x] 1.4 Phase 5 `NotificationsListRenderer` ownership-flag early-return guard (Pass 2 A3 Path A) — implemented at L228 + 2 tests
+  - [x] 1.5 `c8 --100` on all 3 edited files: GREEN (100% lines/branches/functions/statements); 22 new unit tests; tsc + eslint clean; 489/489 multiplexer unit sweep PASS
+- [ ] [LUPIN] **Begin Phase 2 (templates: actionRequiredInteractive.ts + ttsChrome.ts) — gated on user go-ahead per `feedback_never_auto_commit_push`**
+- [ ] [LUPIN] Phases 3-8 follow per `2026.05.11-phase6b-code-execution-plan.md` execution sequence (per-phase commits each gated on user authorization)
 
 **Read on resume (in this order)**:
 1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`

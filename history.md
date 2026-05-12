@@ -2,6 +2,54 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.11 late PM - Session df880556 (María) | Multiplexer Phase 6b Phase 1 — store API prereqs + Phase 5 ownership-flag guard
+
+**Persona**: María 🌸 (warm inquisitive female, #F06292)
+
+#### Checkpoint | 2026.05.11 23:00 EDT | Phase 6b Phase 1 — store API prereqs landed; ready for Phase 2
+
+**Accomplishments**:
+
+- **Phase 6b code-execution pre-flight** — Re-audited feedback memories since 2026-05-11 plan author time (only `feedback_skip_arnold_yes_no_neither_ux` newer; not relevant); captured **`B6a = 31484` bytes** baseline from `boot.65c779ac946b.js` (Phase 6a closure artifact, built 2026-05-07T01:40:36Z, unchanged by HEAD 243267b which only touched TODO.md); recorded `B6a` + **AC7 ceiling = 39676 bytes** in both `2026.05.11-phase6b-code-execution-plan.md` and `90-execution-log.md`; verified all Pass 2 file:line citations still accurate (ActionRequiredStore.respond at L182, tick at L291, expires_at at L266; AudioStore state/queueLength/pause/resume/skip at L201-218; NotificationsListRenderer.renderActionRequiredSection at L228; actionRequiredReadOnly.ts:49 sets `data-id-hash` — confirmed no contract drift); confirmed `AudioStore.stop()` public method MISSING (Phase 1.3 must add).
+
+- **Phase 1.1 — `ActionRequiredStore.respondAndAwait()`** (Pass 2 A1, Phase 0 prereq #8) — new non-optimistic public method: validates entry exists (throws on unknown id), validates state is `pending`/`failed` (throws otherwise — terminal states reject re-submission), flips state `pending → submitting`, stops countdown interval, emits `responded-pending` change kind with response payload, awaits POST, on success emits `responded` + transitions XState actor; on rejection emits `failed` + re-throws so caller can render inline error stripe and re-enable widget for retry. 6 new unit tests cover success path, rejection path, unknown idHash, retry-after-failure, terminal-state rejection, structured POST shape verification.
+
+- **Phase 1.2 — Widen `respond()` + `respondAndAwait()` signature** (Pass 2 A2, Phase 0 prereq #9) — both methods now accept `string | ReadonlyArray<string> | Record<string, string>`. Added new `ActionRequiredResponse` discriminated union type to `shared/types.ts`. Widened `ActionRequiredItem.response?` to match. Server-side reconnaissance: `/api/notify/response` handler at `cosa/rest/routers/notifications.py:929-1040` treats `response_value` as `Dict[str, Any]` — accepts widened shape without changes (no CoSA-context task needed). 5 new unit tests cover array (multiSelect), Record (open_ended_batch), back-compat string for both `respond()` and `respondAndAwait()`.
+
+- **Phase 1.3 — `AudioStore.stop()`** (Pass 2 A6, Phase 0 prereq #10) — extended XState machine with new `STOP_REQUESTED` event; added transitions `playing | paused | ended | error → idle`. Public `stop(): void` no-ops from idle/decoding; otherwise sends `STOP_REQUESTED` + clears `chunksInBurst = 0`. Semantically distinct from `skip()` (which terminates at `ended`) — design contract: idle + cleared queue + no auto-resume. 6 new unit tests cover all 4 entry states (playing/paused/ended/error), idle no-op, and the stop-vs-skip semantic contrast.
+
+- **Phase 1.4 — `NotificationsListRenderer` ownership-flag early-return guard** (Pass 2 A3 Path A) — added single-line guard at `NotificationsListRenderer.ts:228` in `renderActionRequiredSection()`: `if (this.actionRequiredMount.dataset.phase6bOwner === "true") return;`. When the Phase 6b `ActionRequiredRenderer.mount()` claims ownership of the section, this read-only path short-circuits so the interactive widget DOM survives non-tick `store_action_required_changed` events from sibling widgets. 2 new unit tests cover both branches (flag set → short-circuit preserves Phase 6b marker DOM; flag absent → Phase 5 read-only path runs normally).
+
+- **Phase 6b types extension** — `shared/types.ts`: `ActionRequiredState` gained `submitting` + `failed` (re-tryable, NOT terminal); `ActionRequiredChangeKind` gained `responded-pending` + `failed`; `StoreActionRequiredChangedPayload` gained optional `response?: ActionRequiredResponse` + `error?: unknown` for the new change kinds. Forward-compatible: existing Phase 4/5 consumers continue to read `id_hash` + `countdownMs` without changes.
+
+- **Phase 1 verification (all GREEN, all on `:7999`-equivalent unit harness)** — `npx tsc --noEmit` exit 0; `npx eslint src/fastapi_app/static/js/multiplexer/` exit 0; **`c8 --100`** on the 3 edited TS files (ActionRequiredStore + AudioStore + NotificationsListRenderer) = 100% lines/branches/functions/statements; full multiplexer unit sweep **489/489 PASS** (was ~467 pre-edit; **22 new tests** added: 14 ActionRequiredStore + 6 AudioStore + 2 NotificationsListRenderer).
+
+**Files modified** (parent Lupin only — CoSA untouched per `feedback_lupin_only_never_cosa`):
+
+- `src/fastapi_app/static/js/multiplexer/shared/types.ts` — extended `ActionRequiredState` + `ActionRequiredChangeKind` + `StoreActionRequiredChangedPayload`; new `ActionRequiredResponse` union
+- `src/fastapi_app/static/js/multiplexer/stores/ActionRequiredStore.ts` — `respondAndAwait()` + widened `respond()` + `emitWithDetails()` helper
+- `src/fastapi_app/static/js/multiplexer/stores/AudioStore.ts` — `stop()` public + `STOP_REQUESTED` machine event + transitions from playing/paused/ended/error → idle
+- `src/fastapi_app/static/js/multiplexer/render/NotificationsListRenderer.ts` — `phase6bOwner` ownership-flag guard at L228
+- `src/tests/unit/multiplexer/action_required_store.test.ts` — +14 tests (32 → 46)
+- `src/tests/unit/multiplexer/audio_store.test.ts` — +6 tests (23 → 29)
+- `src/tests/unit/multiplexer/render/notifications_list_renderer.test.ts` — +2 tests (25 → 27)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/2026.05.11-phase6b-code-execution-plan.md` — Phase 0 plan serialization (B6a + AC7 ceiling recorded)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` — Phase 1 closure row, AC1/AC2 ✅, AC6 partial, B6a captured marker checked
+- `TODO.md` — Phase 1 resume action checkboxes marked complete; new Phase 2 entry added
+- `history.md` (this entry)
+- `.claude-session.md` — register df880556 María + per-Edit touched-file records
+
+**Status**:
+
+- ✅ Phase 6b Phase 1 (store API prereqs + Phase 5 ownership-flag guard) — CLOSED; all sub-steps 1.1-1.5 GREEN
+- ⏳ Phase 2 (interactive widget templates: `actionRequiredInteractive.ts` + `ttsChrome.ts`) — gated on user go-ahead
+- ⏳ Phases 3-8 (renderers + delete-button wiring + CSS port + smoke + scheduled `:8000` E2E) — sequence per `2026.05.11-phase6b-code-execution-plan.md`
+- ⏳ Mr. Radio session 77e1bb27 Phase 5b batch-2 results (`ts-476c971a`/`ts-99f2fa02`/`ts-8461cdd4`) — separate concern, owned by 77e1bb27 / future session
+
+**Commits**: `b697c4c` (this checkpoint — parent Lupin only; CoSA untouched)
+
+---
+
 ### 2026.05.11 PM - Session 77e1bb27 (Mr. Radio) | Voice Persona Rename Domi→Rio implementation + Phase 5b :8000 scheduling (2 batches)
 
 **Persona**: Mr. Radio 🦉 (authoritative warm male, #FFA000)
