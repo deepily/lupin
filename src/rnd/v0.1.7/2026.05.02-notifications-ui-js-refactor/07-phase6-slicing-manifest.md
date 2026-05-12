@@ -4,6 +4,14 @@
 **Status**: Slicing boundaries decided 2026-05-05; per-slice design docs land as separate artifacts (`08-phase6a-*-design.md` etc.).
 **Cadence per slice**: identical to Phase 4 + 5 — design doc → plan-review pipeline (REUSE + Pass 1 + Pass 2) → user ratifies Q-decisions + D-tier → Resolution Loop → user go-ahead → code-execution plan (separate plan-mode session) → implementation + AC matrix → commit gate → AC11-style scheduled `:8000` visual baseline.
 
+## Slice status (live)
+
+| Slice | Status | Closed | Closure doc |
+|---|---|---|---|
+| 6a — Jobs surface | ✅ **CLOSED** | 2026-05-06 | `90-execution-log.md` § "Phase 6a — Jobs Surface" |
+| 6b — Interactive widgets (action-required + TTS chrome + delete-button handler) | ✅ **CLOSED** | 2026-05-12 | `97-phase6b-closure.md` |
+| 6c — Persona + focus + audio recorder | ⏸ Not started | — | — |
+
 ---
 
 ## Why slice (recap)

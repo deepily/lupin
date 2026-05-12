@@ -32,6 +32,8 @@ import { createStores } from "./stores";
 import {
   createNotificationsListRenderer,
   createJobsPaneRenderer,
+  createActionRequiredRenderer,
+  createTtsChromeRenderer,
   configureMetaDisplayCap,
 } from "./render";
 import type { BootCompletePayload, LifecyclePayload } from "./shared/types";
@@ -194,6 +196,13 @@ function bootMultiplexer(): void {
   // Phase 6a — jobs-pane renderer mounts AFTER the Phase 5 renderer mount,
   // BEFORE transports.queue.start (per F13 ordering invariant). Same factory
   // shape; narrow stores option per Pass 2 F4.
+  //
+  // Order INVARIANT (per Pass 2 A7 + A8 — Phase 6b ordering): renderers FIRST,
+  // transports LAST. Canonical mount order is
+  //   notificationsRenderer → jobsRenderer → actionRequiredRenderer → ttsChromeRenderer
+  // AC9 asserts the four `:mounted` console lines in this order; AC9b asserts
+  // all four lines appear BEFORE the first `store_audio_chunk_decoded` event
+  // (transports.audio.start(...) MUST land after every renderer mount).
   const jobsRenderer = createJobsPaneRenderer({
     eventBus,
     stores : { jobs: stores.jobs },
@@ -203,8 +212,39 @@ function bootMultiplexer(): void {
   if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");
   jobsRenderer.mount(jobsMountEl);
 
+  // Phase 6b — action-required renderer mounts AFTER jobs renderer per A7
+  // ordering. Claims `dataset.phase6bOwner="true"` on the mount surface so
+  // Phase 5's NotificationsListRenderer short-circuits its read-only path
+  // (Pass 2 A3).
+  const actionRequiredRenderer = createActionRequiredRenderer({
+    eventBus,
+    stores : { actionRequired: stores.actionRequired },
+  });
+  const actionRequiredMountEl = document.getElementById("action-required-section");
+  if (actionRequiredMountEl === null) throw new Error("multiplexer: #action-required-section not found");
+  actionRequiredRenderer.mount(actionRequiredMountEl);
+
+  // Phase 6b — TTS chrome renderer mounts AFTER action-required renderer
+  // (canonical AC9 order: notifications → jobs → actionRequired → ttsChrome).
+  const ttsChromeRenderer = createTtsChromeRenderer({
+    eventBus,
+    stores : { audio: stores.audio },
+  });
+  const ttsMountEl = document.getElementById("tts-pane");
+  if (ttsMountEl === null) throw new Error("multiplexer: #tts-pane not found");
+  ttsChromeRenderer.mount(ttsMountEl);
+  // Lift the hidden + data-phase6-pending markers from #tts-pane now that the
+  // renderer owns the surface (mirrors JobsPaneRenderer's in-mount lift for
+  // #jobs-pane; TtsChromeRenderer keeps the lift here in boot.ts to preserve
+  // its narrow scope to AudioStore-driven rendering only).
+  ttsMountEl.removeAttribute("hidden");
+  ttsMountEl.removeAttribute("data-phase6-pending");
+
   attachLifecycleListeners();
 
+  // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
+  // chunk_decoded subscription in TtsChromeRenderer is wired before the first
+  // audio frame arrives. AC9b smoke test asserts this invariant.
   transports.queue.start(sessionId);
   transports.audio.start(sessionId, stores.audio.binaryHandler);
 
@@ -219,9 +259,11 @@ function bootMultiplexer(): void {
   // surface for AC9 Playwright equality check).
   const bootCompletePayload: BootCompletePayload = {
     handlers : {
-      audioBinary           : stores.audio.binaryHandler.name,
-      notificationsRenderer : "mounted",
-      jobsRenderer          : "mounted",
+      audioBinary             : stores.audio.binaryHandler.name,
+      notificationsRenderer   : "mounted",
+      jobsRenderer            : "mounted",
+      actionRequiredRenderer  : "mounted",
+      ttsChromeRenderer       : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -230,13 +272,14 @@ function bootMultiplexer(): void {
     source  : "boot",
     ts      : Date.now(),
   });
-  // Phase 6a Pass 2 F22 — emit two stable, non-JSON console lines BEFORE the
-  // JSON-form line so AC9's grep target is robust against future serialization
-  // refactors. AC9 asserts on the literal stable strings, NOT on the JSON
-  // form. Mirror-emit notificationsRenderer:mounted for Phase 5 surface
-  // consistency (same line-shape contract).
+  // Phase 6a Pass 2 F22 + Phase 6b Pass 2 a3 — emit four stable, non-JSON
+  // console lines BEFORE the JSON-form line so AC9's grep target is robust
+  // against future serialization refactors. AC9 asserts the literal canonical
+  // order: notifications → jobs → actionRequired → ttsChrome.
   console.log("[multiplexer] notificationsRenderer:mounted");
   console.log("[multiplexer] jobsRenderer:mounted");
+  console.log("[multiplexer] actionRequiredRenderer:mounted");
+  console.log("[multiplexer] ttsChromeRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

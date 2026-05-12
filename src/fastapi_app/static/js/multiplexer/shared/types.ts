@@ -429,6 +429,14 @@ export interface BootCompletePayload {
     // (forward/backward-compat per F12); runtime-unconditional in current
     // boot.ts (per F11) — if mount throws, `boot_complete` is never emitted.
     jobsRenderer?          : string;
+    // Phase 6b F11+F12 extension (2026-05-12): literal string "mounted" emitted
+    // after each new renderer's `mount(root)` completes. Optional per F12 +
+    // runtime-unconditional per F11 — boot.ts populates both unconditionally
+    // once the renderer mounts land in the boot sequence (Pass 2 A7/A8 order:
+    // notifications → jobs → actionRequired → ttsChrome, transports LAST).
+    // AC9 grep guard asserts the canonical 4-line console-mount order.
+    actionRequiredRenderer? : string;
+    ttsChromeRenderer?      : string;
   };
 }
 

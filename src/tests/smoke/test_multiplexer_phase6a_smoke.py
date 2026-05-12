@@ -181,9 +181,12 @@ def test_phase6a_functional_smoke():
 # ---------------------------------------------------------------------------
 
 def test_phase6a_data_phase6_pending_exact_count():
-    """AC8a F7+C-5 — exactly 1 element carries data-phase6-pending=true after
-    Phase 6a mounts (the #tts-pane stub; #jobs-pane has been lifted).
-    Hard-coded count beats `>=` so silent drift can't slip through."""
+    """AC8a F7+C-5 + AC10e Phase 6b cascade — exactly 0 elements carry
+    data-phase6-pending=true after the full Phase 6a + Phase 6b mount stack
+    lifts every remaining placeholder. Phase 5 baseline was ≥3; Phase 6a
+    dropped to 1 (#tts-pane); Phase 6b lifted #tts-pane → floor = 0. Per the
+    plan's AC10e regression spec, this assertion stays as a cross-phase
+    safety net so any future re-introduction of a placeholder fails loudly."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -195,17 +198,11 @@ def test_phase6a_data_phase6_pending_exact_count():
             _wait_for_test_hook( page )
 
             pending_count = page.locator( '[data-phase6-pending="true"]' ).count()
-            assert pending_count == 1, (
-                f"expected exactly 1 data-phase6-pending element after Phase 6a mount, got {pending_count}"
-            )
-
-            # Sanity: confirm it's the #tts-pane (not, say, a regression in #jobs-pane).
-            pending_ids = page.evaluate(
-                "() => Array.from(document.querySelectorAll('[data-phase6-pending=\"true\"]'))"
-                ".map(el => el.id)"
-            )
-            assert pending_ids == [ "tts-pane" ], (
-                f"expected #tts-pane to be the lone phase6-pending; got {pending_ids}"
+            assert pending_count == 0, (
+                f"AC10e cascade violated: expected 0 data-phase6-pending elements after "
+                f"Phase 6a + Phase 6b mount, got {pending_count}. Phase 6b lifts the "
+                f"final placeholder on #tts-pane; any non-zero count means a new "
+                f"placeholder was reintroduced without being claimed by a renderer."
             )
         finally:
             browser.close()

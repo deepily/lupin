@@ -28,6 +28,24 @@
           { "severity": "error", "message": "Phase 6a F28 layer-2: jobs-pane.css must not carry global selectors. Scope all rules under .jobs-bucket / .job-card / #jobs-pane / #jobs-buckets-container / .jobs-pane-* to prevent cross-pane CSS leak that would drift the Phase 5 visual baseline." }
         ]
       }
+    },
+    {
+      "files": ["src/fastapi_app/static/css/multiplexer/action-required.css"],
+      "rules": {
+        "selector-disallowed-list": [
+          ["*", "html", "body", ":root"],
+          { "severity": "error", "message": "Phase 6b F28 layer-2: action-required.css must not carry global selectors. Scope all rules under .action-required-widget / #action-required-section to prevent cross-pane CSS leak that would drift the multiplexer visual baseline." }
+        ]
+      }
+    },
+    {
+      "files": ["src/fastapi_app/static/css/multiplexer/tts-chrome.css"],
+      "rules": {
+        "selector-disallowed-list": [
+          ["*", "html", "body", ":root"],
+          { "severity": "error", "message": "Phase 6b F28 layer-2: tts-chrome.css must not carry global selectors. Scope all rules under .tts-chrome / #tts-pane to prevent cross-pane CSS leak that would drift the multiplexer visual baseline." }
+        ]
+      }
     }
   ]
 }

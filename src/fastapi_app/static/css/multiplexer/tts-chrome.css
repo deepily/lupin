@@ -1,0 +1,187 @@
+/* ============================================================================
+   Multiplexer Phase 6b — tts-chrome.css
+
+   Per-pane CSS for the TTS chrome (transport controls) rendered by
+   TtsChromeRenderer.ts via templates/ttsChrome.ts.
+
+   Mount surface: `#tts-pane` (top-level under `<main class="container">`).
+   Boot.ts removes `hidden` + `data-phase6-pending` from `#tts-pane`
+   AFTER TtsChromeRenderer.mount() lands (Pass 2 A7/A8 ordering).
+
+   Class taxonomy (from templates/ttsChrome.ts):
+   - `.tts-chrome`              — root container set on `#tts-pane` by template
+   - `.tts-chrome.is-playing-current` / `.tts-chrome.is-paused-current`
+                                — legacy state classes per Q-B8 (ported semantics
+                                  from notifications.css)
+   - `.tts-controls`            — button-row container
+   - `.tts-btn` + variants:
+       `.tts-btn-toggle`        — play/pause toggle
+       `.tts-btn-skip`          — skip-current
+       `.tts-btn-stop`          — stop + clear queue
+   - `.tts-current-track`       — currently-speaking track name (placeholder
+                                  until Phase 0 prereq #3 resolves)
+   - `.tts-queue-length`        — pending-chunk counter
+
+   Scope-leak protection (per Pass 2 F28 layer-1 grep + layer-2 stylelint):
+   - NO global selectors (*, html, body, :root) — fail-build rule in
+     .stylelintrc.json overrides for this file
+   - All rules are descendants of `#tts-pane` OR `.tts-chrome` (the
+     template-set root class)
+   ============================================================================ */
+
+/* ============================================================================
+   Pane scaffolding
+   ============================================================================ */
+
+#tts-pane {
+    margin           : 16px 0 0;
+    padding          : 10px 14px;
+    background-color : #f9fafb;
+    border           : 1px solid #e5e7eb;
+    border-radius   : 6px;
+    color            : #111827;
+    font-size        : 13px;
+}
+
+.tts-chrome {
+    display     : flex;
+    flex-direction : column;
+    gap         : 6px;
+}
+
+/* ============================================================================
+   Idle / playing / paused state shading
+   ============================================================================ */
+
+.tts-chrome.is-playing-current {
+    background-color : transparent;
+    color            : #065f46;
+}
+
+.tts-chrome.is-playing-current .tts-current-track {
+    color : #065f46;
+}
+
+.tts-chrome.is-paused-current {
+    background-color : transparent;
+    color            : #92400e;
+}
+
+.tts-chrome.is-paused-current .tts-current-track {
+    color : #92400e;
+}
+
+/* ============================================================================
+   Controls row
+   ============================================================================ */
+
+.tts-chrome .tts-controls {
+    display     : flex;
+    flex-wrap   : wrap;
+    align-items : center;
+    gap         : 8px;
+}
+
+.tts-chrome .tts-btn {
+    padding       : 4px 12px;
+    border        : 1px solid #d1d5db;
+    border-radius : 4px;
+    background    : #fff;
+    color         : #111827;
+    font-size     : 13px;
+    cursor        : pointer;
+    transition    : background-color 0.15s, border-color 0.15s;
+}
+
+.tts-chrome .tts-btn:hover {
+    background   : #f3f4f6;
+    border-color : #9ca3af;
+}
+
+.tts-chrome .tts-btn:focus-visible {
+    outline      : 2px solid #2563eb;
+    outline-offset : 2px;
+}
+
+.tts-chrome .tts-btn:disabled {
+    opacity        : 0.5;
+    cursor         : not-allowed;
+    pointer-events : none;
+}
+
+.tts-chrome .tts-btn-toggle {
+    min-width : 70px;
+}
+
+.tts-chrome.is-playing-current .tts-btn-toggle {
+    background   : #10b981;
+    color        : #fff;
+    border-color : #059669;
+}
+
+.tts-chrome.is-playing-current .tts-btn-toggle:hover {
+    background : #059669;
+}
+
+.tts-chrome.is-paused-current .tts-btn-toggle {
+    background   : #f59e0b;
+    color        : #fff;
+    border-color : #d97706;
+}
+
+.tts-chrome.is-paused-current .tts-btn-toggle:hover {
+    background : #d97706;
+}
+
+.tts-chrome .tts-btn-stop {
+    color        : #b91c1c;
+    border-color : #fca5a5;
+}
+
+.tts-chrome .tts-btn-stop:hover {
+    background   : #fee2e2;
+    border-color : #ef4444;
+}
+
+.tts-chrome .tts-btn-skip {
+    color : #1e40af;
+}
+
+.tts-chrome .tts-btn-skip:hover {
+    background : #dbeafe;
+}
+
+/* ============================================================================
+   Track name + queue length
+   ============================================================================ */
+
+.tts-chrome .tts-current-track {
+    margin-left : 4px;
+    flex        : 1 1 auto;
+    min-width   : 0;
+    overflow    : hidden;
+    text-overflow : ellipsis;
+    white-space : nowrap;
+    color       : #4b5563;
+    font-style  : italic;
+}
+
+.tts-chrome .tts-queue-length {
+    flex          : 0 0 auto;
+    padding       : 2px 8px;
+    border-radius : 999px;
+    background    : #e5e7eb;
+    color         : #374151;
+    font-size     : 12px;
+    font-variant-numeric : tabular-nums;
+}
+
+.tts-chrome.is-playing-current .tts-queue-length {
+    background : #d1fae5;
+    color      : #065f46;
+}
+
+.tts-chrome.is-paused-current .tts-queue-length {
+    background : #fef3c7;
+    color      : #92400e;
+}

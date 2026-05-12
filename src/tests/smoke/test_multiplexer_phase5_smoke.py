@@ -221,10 +221,17 @@ def test_phase5_functional_smoke():
                 f"countdown did not tick: t1={cd_t1!r} t2={cd_t2!r}"
             )
 
-            # AC8a (D-K) — data-phase6-pending count ≥ 3 (2 hidden panes +
-            # ≥1 action-required widget).
+            # AC8a (D-K) + AC10e Phase 6b cascade — Phase 5 originally asserted
+            # ≥3 phase6-pending markers (2 hidden panes + action-required widget
+            # placeholders). The cross-phase cascade lifted every marker:
+            #   Phase 5  → floor = 3 (2 panes + ≥1 action-required widget)
+            #   Phase 6a → floor = 1 (#jobs-pane lifted; #tts-pane remains)
+            #   Phase 6b → floor = 0 (#tts-pane lifted; action-required widgets
+            #                          render interactive without placeholders)
+            # Assertion now enforces the post-6b floor; any non-zero count means
+            # a placeholder was reintroduced without being claimed by a renderer.
             pending_count = page.locator( '[data-phase6-pending="true"]' ).count()
-            assert pending_count >= 3, f"expected ≥3 phase6-pending, got {pending_count}"
+            assert pending_count == 0, f"AC10e cascade violated: expected 0 phase6-pending post-6b, got {pending_count}"
         finally:
             browser.close()
 
@@ -351,10 +358,14 @@ def test_phase5_boot_complete_handler_handshake():
                 f"matched line missing 'mounted' literal: {matched!r}"
             )
 
-            # AC9 spec: the substring 'notificationsRenderer:mounted' (or
-            # JSON form) appears at least once.
-            count = sum( 1 for line in console_messages if "notificationsRenderer" in line and "mounted" in line )
-            assert count == 1, f"expected exactly 1 boot_complete with notificationsRenderer:mounted, got {count}"
+            # AC9 spec (Phase 6a F22 + Phase 6b extension): the literal stable
+            # line `[multiplexer] notificationsRenderer:mounted` appears
+            # exactly once. The substring `notificationsRenderer:mounted` (no
+            # quotes between key and value) only matches the stable line, NOT
+            # the JSON-form boot_complete line (which has `"notificationsRenderer":"mounted"`
+            # with quote-colon-quote between key and value).
+            count = sum( 1 for line in console_messages if "notificationsRenderer:mounted" in line )
+            assert count == 1, f"expected exactly 1 stable line `notificationsRenderer:mounted`, got {count}"
         finally:
             browser.close()
 

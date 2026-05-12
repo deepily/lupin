@@ -21,7 +21,22 @@ export {
   type JobsPaneRenderer,
   type JobsPaneRendererOptions,
   type JobsPaneRendererStores,
+  type JobsPaneApiClient,
 } from "./JobsPaneRenderer";
+export {
+  createActionRequiredRenderer,
+  type ActionRequiredRenderer,
+  type ActionRequiredRendererOptions,
+  type ActionRequiredRendererStores,
+  type ActionRequiredStoreLike,
+} from "./ActionRequiredRenderer";
+export {
+  createTtsChromeRenderer,
+  type TtsChromeRenderer,
+  type TtsChromeRendererOptions,
+  type TtsChromeRendererStores,
+  type AudioStoreLike,
+} from "./TtsChromeRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";
