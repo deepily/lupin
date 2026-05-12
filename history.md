@@ -2,6 +2,74 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.12 PM - Session 83ba1e51 (Rio ⚡) | Speakerphone solo/chorus — full design doc set + Q4 audit resolved (Phase 1 unblocked)
+
+**Persona**: Rio ⚡ (Young & energetic female, #880E4F)
+
+**Topic**: Per-session speakerphone mode thought exercise — design serialization through to Phase 1 implementation readiness. Reframed the May 11 hard-cut framing (Mr. Radio session) around `tts interaction mode = solo | chorus` with parallel preservation (both modes first-class permanent per `feedback_feature_flag_preserves_old_path`); drafted complete per-phase design doc set; resolved Q4 mode-coupling audit.
+
+**Accomplishments**:
+
+- **Subdirectory + canonical plan rewrite** — Created `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`. May 11 doc moved into subdir via `git mv` + restored to original content + superseded-by banner. May 12 canonical plan rewritten with parallel-preservation framing as lead narrative (replacing the May 11 hard-cut framing). INI key naming: `solo | chorus` over `per-session | monopoly` (vivid TTS-native metaphor; extensible to `duet`/`trio`/`quartet`).
+
+- **Complete design doc set drafted (13 NEW docs)** — `00-index.md` (orientation + reading order + status snapshot), `02-background-synthesis.md` (predecessor distillation of `2026.04.27-conversation-mode-design.md` + `2026.04.30-conv-mode-three-layer-enforcement/`), `03-open-questions.md` (8 deferred questions tracker), `90-decisions-log.md` (append-only ledger). Per-phase design docs `10-phase1-ini-plumbing-design.md` through `17-phase8-color-glyph-uxs-design.md` — uniform shape: Goal / Scope / Deliverables / Implementation order / Verification / Risks / Cross-cutting concerns (memory audit + naming + doc touchpoints) / Timing / Hand-off. Plus `20-test-parameterization-matrix.md` (~85 target tests across phases, mode-parameterization patterns for both pytest and Vitest).
+
+- **Q4 mode-coupling audit resolved → Phase 1 unblocked** — NEW `04-mode-coupling-audit.md`. Grep audit confirmed 14 mode-independent couplings (rename-only, covered by Phase 2 / 5: stop-hook auto-narrate, idle-waiter, all three `conv_mode_wrap` callsites, `_notify_impl` on-branch, `get_session_info`, bridge helpers, TTS queue, `set_session_topic`, voice_persona field, `last_autonarrated_turn_id`), surfaced 1 new finding (MCP `instructions=` block at `cosa_voice_mcp.py:598-603` + `enable_speakerphone` tool docstring at line 1436 area have hard-coded mutual-exclusion language — folded into Phase 4 §3.6 as a single mode-aware paragraph covering both branches), confirmed 3 out-of-scope items (inbound mic-routing, persona pool sizing, MCP HTTP-fallback bypass), identified 1 false-positive grep hit (CJ Flow `monopolize` field is an unrelated job-scheduling concept). Phase 4 design doc (`13-phase4-mcp-tool-rename-design.md`) updated to fold this in.
+
+- **Cold-pickup hygiene** — `project_speakerphone_thought_exercise.md` memory rewritten to point at the index doc (not the canonical plan directly); MEMORY.md inventory line updated to reflect implementation-readiness; TODO.md pickup pointer added at top (Tiberius's Inter-Session Commons Phase 3 pointer preserved as separate track below). Index doc status snapshot now reads "✅ Q4 audit resolved; ✅ all Phase 1–8 design docs drafted; ⏸️ awaiting Rick's explicit go-ahead."
+
+**Status**: Implementation-ready. **No code written.** Awaiting Rick's explicit go-ahead to begin Phase 1 (`10-phase1-ini-plumbing-design.md`).
+
+**Files modified** (parent Lupin only — per `feedback_lupin_only_never_cosa`):
+
+- 13 NEW docs in `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`: `00-index.md`, `02-background-synthesis.md`, `03-open-questions.md`, `04-mode-coupling-audit.md`, `10` through `17` per-phase design docs, `20-test-parameterization-matrix.md`, `90-decisions-log.md`
+- 1 MOVED file via `git mv`: `2026.05.11-per-session-speakerphone-mode.md` (from `src/rnd/v0.1.7/` into the new subdir; restored to original content + superseded-by banner)
+- 1 NEW canonical plan: `2026.05.12-tts-interaction-mode-solo-chorus.md` (the conceptual `01` slot of the subdir; created today as the rewrite of the May 11 doc with parallel-preservation framing as lead)
+- `TODO.md` (MODIFIED — speakerphone pickup pointer added at top)
+
+#### Checkpoint | 2026.05.12 PM EDT | Speakerphone solo/chorus — full design doc set + Q4 audit (Rio ⚡)
+
+**Files**: 15 NEW docs in subdir + 1 MOVED May 11 doc + 1 MOD TODO.md
+
+---
+
+### 2026.05.12 PM - Session 6a054460 (Tiberius 🌑) | Inter-Session Commons Phase 3 — Pass 0 + REUSE closed; Pass 1 Fitness in flight (paused at F2-fit)
+
+**Persona**: Tiberius 🌑 (Deep male, #3F51B5)
+
+**Topic**: Inter-Session Commons + User-Broadcast — Phase 3 plan-review (D1 polling→push for `ask_async` + LLM fallback for persona matcher). Session paused mid-Pass-1 ahead of context clear; resume doc landed.
+
+**Accomplishments**:
+
+- **Pass 0 CLOSED — 8/8 Q-decisions ratified.** Q1 hybrid base class (refactor `CommonsAckWatcher` → `CommonsTopicWatcher` base + `Ack`/`Question` subclasses); Q2 dynamic registration (only-outstanding); Q3 `COMMONS PEER REPLY` framing (peer-attributed with persona, honors INTRA-AI principle); Q4 1-hour default TTL with per-call override; **Q5 local PHI-4 first via `LlmClientFactory` + `BaseXMLModel` Pydantic XML pattern, Haiku 4.5 stubbed for future fallback** (Rick override of original Haiku/Sonnet/tiered framing); Q6 no cache (YAGNI); Q7 configurable 5s timeout via INI; Q8 in-memory tracker matching Phase 2.
+
+- **NEW directive captured**: every multi-option `ask_multiple_choice` carries pros + cons + "My recommendation" block + "becomes correct if..." flip-condition in BOTH spoken text AND abstract. Saved as memory `feedback_always_include_pros_cons_recommendation`.
+
+- **REUSE pass CLOSED + applied.** 8 F-mappings confirmed with file:line citations; 4 new F-findings (F9-F12) added (`BaseXMLModel.from_xml/to_xml` round-trip at `util_xml_pydantic.py:128,245`; `notification_proxy/strategies/llm_script_matcher.py` as structurally closest disambiguator template; proposed listener verb `"commons_answer_received"`; `main.py:527+` extends-in-place for Phase 2 commons block). 3 corrections applied: **C1** F4 pivot from stale `Llm` class to `LlmClientFactory` at `cosa/agents/llm_client_factory.py:17` (canonical call template `runtime_argument_expeditor/expeditor.py:82,167-168`); **C2** new INI key `llm spec key for commons persona disambiguator = Deepily/kaitchup/Phi-4-AutoRound-GPTQ-4bit` required; **C3** Q2 sub-question RESOLVED — HTTP register endpoint wins via REUSE grounds (`conversation_mode.py:116-` is directly-applicable template; shared-file would require new primitive). New endpoint `POST /api/commons/register-question` + `DELETE .../register-question/{question_id}` locked in. §4 file touchpoints bumped from 5 NEW + 4 MODIFIED to **9 NEW + 8 MODIFIED**.
+
+- **Pass 1 Fitness — 13 ACs derived + 13 fitness findings surfaced**. 2 blockers (F1-fit missing push-mode toggle INI; F2-fit hardcoded localhost dependency), 3 high (F3-fit cursor strategy, F4-fit same-user scoping on register/unregister, F5-fit PHI-4 prompt envelope undesigned), 6 medium (F6-fit TTL bounds, F7-fit topic regex, F8-fit concurrent register collision, F9-fit persona attribution source, F10-fit sync-mode interaction, F11-fit E2E endpoint hit), 2 low (F12-fit import chain, F13-fit base-vs-subclass naming). Walk paused per Rick's standing directive of "one finding at a time, highest severity first" — F1-fit ratified as Option A (default True + try-except + warning log + best-effort isolation matching Phase 2 `failed_recipients` pattern); F2-fit picker fired but Rick called timeout mid-picker.
+
+- **Pre-context-clear resume doc landed.** NEW `91-resume-here-phase3-pass1-f2-fit.md` (~440 LOC) — self-contained handoff with Pass 0 + REUSE summary, F1-fit ratification rationale, F2-fit picker framing verbatim (3 options with full pros/cons/recommendation ready to re-fire), 11 remaining findings tabulated by severity with one-line fixes, process reminders (conversation-mode rules, sequential-plan-review rule, no-auto-commit, Lupin-only-not-CoSA), file-location cheatsheet, and code-references cheatsheet. Fresh-context Claude reading this doc can resume exactly at F2-fit without re-deriving any prior decisions.
+
+**Files modified** (parent Lupin only):
+
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md` (Pass 0 ratifications applied to §2; REUSE applied to §3 + §4; status banner flipped to Pass 1 IN FLIGHT)
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/91-resume-here-phase3-pass1-f2-fit.md` (NEW — pre-context-clear handoff)
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/00-index.md` (added resume doc entry; Phase 3 row updated to "Pass 1 IN FLIGHT")
+- `TODO.md` (FIRST THING NEXT SESSION block repointed to the resume doc with the Pass 1 sequence + standing directive recap)
+- `/home/rruiz/.claude/projects/.../memory/feedback_always_include_pros_cons_recommendation.md` (NEW memory file)
+- `/home/rruiz/.claude/projects/.../memory/MEMORY.md` (entry appended to feedback section)
+- `history.md` (this entry)
+- `.claude-session.md` (this session's section updated with second checkpoint metadata)
+
+#### Checkpoint | 2026.05.12 PM | Phase 3 plan-review — Pass 0 + REUSE closed; Pass 1 paused at F2-fit; resume doc landed
+
+**Files**: 8 (1 NEW resume doc + 1 NEW memory + 6 MOD across design doc, index, TODO, history, memory index, manifest)
+
+**Commit**: [pending]
+
+---
+
 ### 2026.05.12 - Session 6a054460 (Tiberius 🌑) | Inter-Session Commons Phase 2 — CLOSED (steps 9-13: E2E + UI + Playwright + docs + closure)
 
 **Persona**: Tiberius 🌑 (Deep male, #3F51B5)
@@ -44,7 +112,7 @@
 
 **Files**: 13 (3 NEW UI + 1 NEW smoke + 1 NEW Playwright + 1 NEW docs + 1 NEW closure + 2 MOD docs + 2 MOD R&D + 1 MOD TODO + 2 MOD frontend wiring)
 
-**Commit**: 3c66ffc
+**Commit**: f9f11f0 (post-amend with manifest checkpoint metadata; pre-amend was 3c66ffc)
 
 ---
 

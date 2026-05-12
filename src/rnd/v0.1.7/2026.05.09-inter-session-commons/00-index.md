@@ -18,7 +18,9 @@
 | [`02-phase1-file-commons-design.md`](02-phase1-file-commons-design.md) | ✅ CLOSED 2026-05-11 — all 14 ACs verified | Phase 1 file-based commons MVP execution plan (14 ACs + AC10b stress, 5 NEW + 4 MODIFIED files) |
 | [`92-phase1-closure.md`](92-phase1-closure.md) | 🟢 NEW — Phase 1 post-mortem | What landed, deferred items, Phase 2 unblock summary |
 | [`03-phase2-user-broadcast-design.md`](03-phase2-user-broadcast-design.md) | ✅ CLOSED 2026-05-12 — all 14 ACs verified | Phase 2 user→all broadcast surface. REUSE + Pass 1 + Pass 2 all closed: 10 prior-art mappings + 4 plan corrections + 20 fitness findings + 12 threats walked + 11 ACs hardened + sanitization ratified + 2 new threats surfaced and mitigated. Implementation closed 2026-05-12. |
-| [`92-phase2-closure.md`](92-phase2-closure.md) | 🟢 NEW — Phase 2 post-mortem | What landed, deferred items (D1 polling→push, LLM-fallback), Phase 3 unblock summary |
+| [`92-phase2-closure.md`](92-phase2-closure.md) | ✅ CLOSED 2026-05-12 — Phase 2 post-mortem | What landed, deferred items (D1 polling→push, LLM-fallback), Phase 3 unblock summary |
+| [`04-phase3-push-mode-and-llm-fallback-design.md`](04-phase3-push-mode-and-llm-fallback-design.md) | 🟡 **Pass 1 IN FLIGHT 2026-05-12** — Pass 0 ✅ (8/8 Q's); REUSE ✅; Pass 1 mid-walk (F1-fit ratified, F2-fit paused mid-picker). Pass 2 Adversarial NOT YET RUN. | Phase 3 scope: D1 polling→push + LLM fallback. 13 ACs derived. |
+| [`91-resume-here-phase3-pass1-f2-fit.md`](91-resume-here-phase3-pass1-f2-fit.md) | 🟢 NEW 2026-05-12 — pre-context-clear resume pointer | Self-contained handoff. Pass 0 + REUSE + F1-fit summarized; F2-fit picker framing verbatim; 11 remaining findings tabulated; process reminders + file-location cheatsheet. **Start here on next session.** |
 | [`90-execution-log.md`](90-execution-log.md) | ✅ All 8 steps CLOSED | Phase 1 execution status; per-step AC closure tracking |
 | ~~[`91-resume-here-phase1-step4.md`](91-resume-here-phase1-step4.md)~~ | ⚪ Superseded 2026-05-11 | Step 4 closed; kept for history |
 | ~~[`91-resume-here-phase1-step5.md`](91-resume-here-phase1-step5.md)~~ | ⚪ Superseded 2026-05-11 | Step 5 closed; kept for history |
@@ -75,7 +77,7 @@
 | **0** | Design + ratification | ✅ CLOSED 2026-05-09 (15 Q-decisions) |
 | **1** | File-based commons MVP — 5 MCP tools, store, matcher, archival, tests | ✅ CLOSED 2026-05-11 — all 8 steps + 14 ACs complete; 88 tests / 100% coverage |
 | **2** | User → all broadcast — UI + 2 endpoints + persona-aware parse + ack aggregation + markdown rendering (Q15) | ✅ **CLOSED 2026-05-12** — all 13 steps + 14 ACs complete; 224 tests (216 unit/smoke + 8 Playwright); 100% coverage gate held across 8 commons modules (622 stmts, 170 branches) |
-| **3** | WS push for commons + LLM-fallback wiring + ask_async injection (D1 deviation closure) | ⏳ Future |
+| **3** | Push-mode `ask_async` (D1 closure) + LLM-fallback wiring for persona matcher | 🟡 **SKELETON 2026-05-12** — [`04-phase3-push-mode-and-llm-fallback-design.md`](04-phase3-push-mode-and-llm-fallback-design.md). Plan-review pipeline NOT YET RUN (Pass 0 / REUSE / Pass 1 / Pass 2 all pending). |
 | **4** | Postgres-backed commons + Multiplexer Commons tab | ⏳ Future (multiplexer Phase 6c prerequisite) |
 
 ---

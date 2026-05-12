@@ -1,10 +1,50 @@
 # TODO
 
+## ⏸️ Speakerphone (solo/chorus) — implementation-ready, awaiting Rick's go-ahead (2026-05-12)
+
+**Start here**: `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/00-index.md`
+
+Full design doc set drafted in one session (2026-05-12 PM, Rio persona). 15 docs: index, canonical plan (May 12), background synthesis, open questions, Q4 audit resolution, 8 per-phase design docs (`10`–`17`), test parameterization matrix, decisions log.
+
+**Status**: Q4 mode-coupling audit ✅ resolved; Phase 1 unblocked; **no code written**.
+
+**When go-ahead arrives**: begin Phase 1 (`10-phase1-ini-plumbing-design.md`) — INI key + `get_tts_interaction_mode()` helper. Smallest phase, ~30-45 minutes. Phases 2–7 land as a coordinated single PR after that.
+
+The Phase 1 work is not blocking anything else; pick it up whenever Rick says "go."
+
+---
+
+## ☀️ FIRST THING NEXT SESSION — Inter-Session Commons Phase 3 Pass 1 Fitness, mid-walk (F2-fit picker resume)
+
+**Resume pointer**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/91-resume-here-phase3-pass1-f2-fit.md`
+
+That doc is **self-contained** — pre-context-clear handoff with Pass 0 + REUSE summary, F1-fit ratification, the F2-fit picker framing verbatim (re-fire on resume), 11 remaining findings tabulated, process reminders, and a file-location cheatsheet.
+
+### Where we are
+
+- **Pass 0** ✅ CLOSED — 8/8 Q-decisions ratified (Q1 hybrid base class / Q2 dynamic registration / Q3 `COMMONS PEER REPLY` framing / Q4 1hr TTL + per-call override / Q5 PHI-4 first → stubbed Haiku / Q6 no cache / Q7 5s timeout / Q8 in-memory tracker)
+- **REUSE pass** ✅ CLOSED + applied — 8 F-mappings + 4 new F-findings + 3 corrections (C1 LlmClientFactory pivot, C2 PHI-4 spec INI key, C3 Q2 sub-question lock-in for HTTP register endpoint)
+- **Pass 1 Fitness** 🟡 IN FLIGHT — F1-fit ratified (Option A: default True + try-except + warning log); F2-fit ⏸ paused mid-picker. 11 findings remaining.
+
+### Required next-session sequence
+
+1. **Re-fire F2-fit picker** with the verbatim framing in §4 of the resume doc.
+2. Walk F3-fit through F13-fit **one at a time** (3 high → 6 medium → 2 low) per Rick's standing directive.
+3. After all 13 findings ratify: apply phase — write AC table to §6, add §8 prompt envelope, finalize INI key count.
+4. **Pass 2 Adversarial** — threat-walk push surface (user gate before applying).
+5. Only after Pass 2 closes → flip status to APPROVED FOR CODE-WRITE.
+
+### Standing directive (mandatory)
+
+Every multi-option `ask_multiple_choice` carries per-option pros + cons + a "My recommendation: X because Y" block in both spoken `question` and `abstract`, plus a "becomes correct if..." flip-condition. See memory `feedback_always_include_pros_cons_recommendation`.
+
+---
+
 ## ✅ Inter-Session Commons Phase 2 — ALL CLOSED 2026-05-12 (session 6a054460 Tiberius 🌑, AM)
 
 **Closure doc**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/92-phase2-closure.md`
 
-Phase 2 is functionally complete. Phase 3 (D1 polling→push for `commons_ask_async`, LLM-fallback wiring for persona matcher) is eligible to begin — no plan-review gates outstanding. The original "FIRST THING NEXT SESSION" pointer below is retained as historical context.
+Phase 2 is functionally complete. Phase 3 skeleton ready (see above). The original "FIRST THING NEXT SESSION" pointer below is retained as historical context.
 
 ---
 
