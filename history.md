@@ -48,6 +48,53 @@
 
 **Commits**: `b697c4c` (this checkpoint — parent Lupin only; CoSA untouched)
 
+#### Checkpoint | 2026.05.11 23:45 EDT | Phase 6b Phase 2 — interactive widget templates landed
+
+**Accomplishments**:
+
+- **Phase 2.1 — `actionRequiredInteractive.ts`** (NEW, 228 LOC) — pure DOM template producer with switch over 5 response_type variants (yes_no / multiple_choice+radio / multiple_choice+checkbox / open_ended / open_ended_batch) plus a default-throws schema-drift defense. Each sub-builder (`buildYesNo`, `buildRadio`, `buildCheckbox`, `buildOpenEnded`, `buildOpenEndedBatch`) builds its own DOM via `html\`\`` tagged template + queries the resulting elements + attaches `addEventListener` handlers (mirrors Phase 6a `jobBucket.ts:126` precedent for self-contained interactive widgets). Submit semantics: yes_no buttons fire on direct click; radio fires `onSubmit(string)` on Submit click after at least one selection; checkbox fires `onSubmit(string[])` on Submit click (empty array if nothing checked); open_ended supports both Enter-key and Submit-click; open_ended_batch builds a `Record<header, value>` from per-row inputs. AC2e safe-write invariant header documents the no-`.innerHTML`/`rawHTML(`/`.outerHTML` rule; verified by grep-ban test (strips comments first so doc-mentions don't trigger).
+
+- **Phase 2.2 — `ttsChrome.ts`** (NEW, 147 LOC) — TTS pane chrome with 3 controls (Pause/Resume single toggle, Stop, Skip) driven by an explicit state→enable matrix table:
+
+| state    | toggle           | stop  | skip  |
+|----------|------------------|-------|-------|
+| idle     | disabled         | ✗     | ✗     |
+| decoding | disabled         | ✗     | ✗     |
+| playing  | enabled "Pause"  | ✓     | ✓     |
+| paused   | enabled "Resume" | ✓     | ✓     |
+| ended    | disabled         | ✓     | ✗     |
+| error    | disabled         | ✓     | ✗     |
+
+  Plus `currentTrackName` line (rendered only when present + non-empty), `queueLength` indicator, `.is-playing-current` / `.is-paused-current` classes per Q-B8 (ported from legacy `notifications.css:4692-4712, 4718-4725`). `data-state` + `data-testid` always set for E2E observability. AC2e safe-write invariant + grep-ban test mirror the interactive template's contract.
+
+- **Type extension — `ActionRequiredItem.multiSelect?: boolean`** — added to `shared/types.ts` to support the Pass 2 A2 dispatch contract (`multiple_choice + multiSelect:true → checkbox`, default `false`/undefined → radio). Wire-side population still gated on Phase 0 prereq #2 verification (server payload schema field name).
+
+- **Test coverage** — 22 tests in `templates_action_required_interactive.test.ts` (≥15 floor) covering 5 happy-path renders + 5 click-dispatch scenarios + unknown-response_type throws + multi-instance independence + prompt-rendering parametric across all response_types + multiSelect-undefined defaults to radio + empty-options batch + AC2e grep ban. 18 tests in `templates_tts_chrome.test.ts` (≥15 floor) covering 6 state-driven renders + 4 click-dispatch + currentTrackName present/absent/empty + queueLength + class invariants + multi-instance independence + disabled-controls non-interactive + data-testid/data-state observability + AC2e grep ban.
+
+- **c8 100% gate** — both new template files hit 100% lines / branches / functions / statements after applying the canonical `/* c8 ignore next N */` annotation pattern from Phase 6a `jobCard.ts:251` (tagged-template literal phantom-branch artifact: c8 reports phantom branches on `${...}` interpolations that are straight-line at runtime; pattern documented inline with reason citation). Full multiplexer unit sweep stayed clean — **528/528 PASS** (was 489/489 pre-Phase-2; 39 new tests added: 22 + 18 templates − 1 nominal duplicate).
+
+- **Verification matrix (all GREEN, all on `:7999`-equivalent unit harness)**: `npx tsc --noEmit` exit 0; `npx eslint src/fastapi_app/static/js/multiplexer/` exit 0; `c8 --100` on both new templates exit 0; full multiplexer unit sweep 528/528 PASS.
+
+**Files modified** (parent Lupin only — CoSA untouched):
+
+- `src/fastapi_app/static/js/multiplexer/shared/types.ts` — added `multiSelect?: boolean` to `ActionRequiredItem`
+- `src/fastapi_app/static/js/multiplexer/render/templates/actionRequiredInteractive.ts` — NEW (228 LOC)
+- `src/fastapi_app/static/js/multiplexer/render/templates/ttsChrome.ts` — NEW (147 LOC)
+- `src/tests/unit/multiplexer/render/templates_action_required_interactive.test.ts` — NEW (22 tests)
+- `src/tests/unit/multiplexer/render/templates_tts_chrome.test.ts` — NEW (18 tests)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` — Phase 2 closure row + AC3/AC4/AC2e/AC6 status updates
+- `TODO.md` — Phase 2 sub-step checkboxes marked done; Phase 3 entry added
+- `history.md` (this entry)
+- `.claude-session.md` — per-Edit touched-file records appended
+
+**Status**:
+
+- ✅ Phase 6b Phase 2 (interactive widget templates) — CLOSED; both new files at c8 100%; 40 new tests landed
+- ⏳ Phase 3 (`ActionRequiredRenderer.ts` — consumes Phase 2 template + Phase 1 `respondAndAwait`) — gated on user go-ahead
+- ⏳ Phases 4-8 — sequence per `2026.05.11-phase6b-code-execution-plan.md`
+
+**Commits**: `ad2f479` (this checkpoint — parent Lupin only; CoSA untouched)
+
 ---
 
 ### 2026.05.11 PM - Session 77e1bb27 (Mr. Radio) | Voice Persona Rename Domi→Rio implementation + Phase 5b :8000 scheduling (2 batches)

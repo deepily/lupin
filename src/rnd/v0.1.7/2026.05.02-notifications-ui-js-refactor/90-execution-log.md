@@ -1053,7 +1053,7 @@ User authorized end-to-end execution + per-phase checkpoints in a single go-ahea
 |-------|-------------|--------|---------|-----------|--------|-------|
 | 0 | Tracking-doc seed (this section + code-execution plan) | ✅ DONE | 2026-05-11 | 2026-05-11 | (uncommitted) | Plan serialized; execution log seeded; **B6a captured 2026-05-11 PM = 31484 bytes** (boot.65c779ac946b.js, built 2026-05-07T01:40:36Z; HEAD 243267b only changed TODO.md so artifact unchanged); AC7 ceiling = 39676 bytes |
 | 1 | Store API prereqs + Phase 5 short-circuit (4 sub-steps 1.1-1.4 + 1.5 c8 100%) | ✅ DONE (gated on commit auth) | 2026-05-11 PM | 2026-05-11 PM | (uncommitted — awaiting user) | All verifications GREEN: tsc clean, eslint clean, c8 --100 = 100% on 3 edited files (ActionRequiredStore.ts + AudioStore.ts + NotificationsListRenderer.ts), 22 new tests (14 + 6 + 2), 489/489 multiplexer unit tests pass. Edits: types.ts (extended ActionRequiredState/ChangeKind/Payload + new ActionRequiredResponse), ActionRequiredStore (respondAndAwait + widened respond), AudioStore (stop() + STOP_REQUESTED machine event), NotificationsListRenderer (phase6bOwner ownership-flag guard at L228). |
-| 2 | Interactive widget templates (`actionRequiredInteractive.ts` + `ttsChrome.ts`) | ⏸ | — | — | — | AC2e safe-write guards in header comments |
+| 2 | Interactive widget templates (`actionRequiredInteractive.ts` + `ttsChrome.ts`) | ✅ DONE (gated on commit auth) | 2026-05-11 PM | 2026-05-11 PM | (uncommitted — awaiting user) | NEW: `actionRequiredInteractive.ts` (228 LOC, 5 sub-builders) + `ttsChrome.ts` (147 LOC, 4-control chrome) + 2 test files (22 + 18 tests). AC2e safe-write headers + grep-ban tests landed. Phase 6a `jobCard.ts:251` precedent applied for tagged-template phantom-branch c8 ignores (with explicit reason citation). Type extension: `ActionRequiredItem.multiSelect?: boolean` (Pass 2 A2 dispatch contract). 528/528 multiplexer unit sweep PASS; c8 100% on both new files. |
 | 3 | `ActionRequiredRenderer.ts` | ⏸ | — | — | — | Pass 2 A3 ownership flag + A1 respondAndAwait + a2 store-tick countdown (NO RAF) |
 | 4 | `TtsChromeRenderer.ts` | ⏸ | — | — | — | Pass 2 A6 `AudioStore.stop()` wiring + Q-B9 RAF-coalesced audio subscriptions |
 | 5A | `JobStore.delete()` + AC2d tests (DOD 5A-1..5A-8) | ⏸ | — | — | — | 8-row DOD per Pass 1 F-6 ratification |
@@ -1072,13 +1072,13 @@ User authorized end-to-end execution + per-phase checkpoints in a single go-ahea
 | AC2b | `aria-disabled="true"` 0 hits on action-required widgets post-mount | ⏸ |
 | AC2c | 1 MutationObserver childList entry per widget; 4 markers gone | ⏸ |
 | AC2d | `vitest jobstore_delete_api.test.ts` green | ⏸ |
-| **AC2e** (NEW per Pass 2 a1) | grep ban on `.innerHTML =` / `rawHTML(` / `.outerHTML =` in interactive template files | ⏸ |
-| AC3 | `templates_action_required_interactive.test.ts` ≥15 PASS | ⏸ |
-| AC4 | `templates_tts_chrome.test.ts` ≥15 PASS | ⏸ |
+| **AC2e** (NEW per Pass 2 a1) | grep ban on `.innerHTML =` / `rawHTML(` / `.outerHTML =` in interactive template files | ✅ green on both new templates (test cases at end of each test file strip comments then grep) |
+| AC3 | `templates_action_required_interactive.test.ts` ≥15 PASS | ✅ 22/22 PASS (post-Phase 2) |
+| AC4 | `templates_tts_chrome.test.ts` ≥15 PASS | ✅ 18/18 PASS (post-Phase 2) |
 | AC5 | `action_required_renderer.test.ts` ≥21 PASS | ⏸ |
 | AC5b | `tts_chrome_renderer.test.ts` ≥13 PASS | ⏸ |
 | AC5c | `jobs_pane_renderer.test.ts` AC5c cases (≥6 new) | ⏸ |
-| AC6 | `c8 --100` on all new + edited multiplexer TS files | 🟡 partial: ✅ on Phase 1 edited files (ActionRequiredStore + AudioStore + NotificationsListRenderer = 100%); other phases pending |
+| AC6 | `c8 --100` on all new + edited multiplexer TS files | 🟡 partial: ✅ Phase 1 (ActionRequiredStore + AudioStore + NotificationsListRenderer = 100%); ✅ Phase 2 (actionRequiredInteractive + ttsChrome = 100% with phantom-branch ignores per `jobCard.ts:251` precedent); Phases 3-6 pending |
 | AC7 | `boot.js` gz ≤ `B6a + 8192` = **39676 bytes** (B6a = 31484, captured 2026-05-11 PM) | ⏸ (gate runs at Phase 7) |
 | AC8a | smoke functional + no-pending-markers | ⏸ |
 | AC8b | smoke perf gate (50 prompts, first paint <200ms) | ⏸ |

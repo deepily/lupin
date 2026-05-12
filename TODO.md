@@ -258,8 +258,15 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
   - [x] 1.3 `AudioStore.stop()` (Pass 2 A6, Phase 0 prereq #10) — implemented + STOP_REQUESTED machine event + 6 tests
   - [x] 1.4 Phase 5 `NotificationsListRenderer` ownership-flag early-return guard (Pass 2 A3 Path A) — implemented at L228 + 2 tests
   - [x] 1.5 `c8 --100` on all 3 edited files: GREEN (100% lines/branches/functions/statements); 22 new unit tests; tsc + eslint clean; 489/489 multiplexer unit sweep PASS
-- [ ] [LUPIN] **Begin Phase 2 (templates: actionRequiredInteractive.ts + ttsChrome.ts) — gated on user go-ahead per `feedback_never_auto_commit_push`**
-- [ ] [LUPIN] Phases 3-8 follow per `2026.05.11-phase6b-code-execution-plan.md` execution sequence (per-phase commits each gated on user authorization)
+- [x] [LUPIN] **Begin Phase 2 (templates: actionRequiredInteractive.ts + ttsChrome.ts)** — Done df880556 María (checkpoint pending):
+  - [x] 2.1 `actionRequiredInteractive.ts` (NEW, 228 LOC) — switch over 5 response_types (yes_no/radio/checkbox/open_ended/open_ended_batch); addEventListener-based handler attachment; AC2e safe-write header
+  - [x] 2.2 `ttsChrome.ts` (NEW, 147 LOC) — 3 controls (toggle/stop/skip) + state-driven enable matrix per AudioPlaybackState + `.is-playing-current` / `.is-paused-current` + currentTrackName + queueLength
+  - [x] 2.3a 22 tests on `actionRequiredInteractive.test.ts` (≥15 floor) — all 5 happy-path renders + 5 click-dispatch + 1 unknown-response_type throws + 1 AC2e grep ban + edge cases
+  - [x] 2.3b 18 tests on `ttsChrome.test.ts` (≥15 floor) — 6 state-driven renders + 4 click-dispatch + currentTrackName present/absent/empty + queueLength + .is-playing/paused-current + 1 AC2e grep ban
+  - [x] 2.4 `c8 --100` GREEN on both new files (used Phase 6a `jobCard.ts:251` precedent for tagged-template phantom-branch ignores); tsc + eslint clean; 528/528 multiplexer unit sweep PASS
+  - [x] Type extension: added `multiSelect?: boolean` to `ActionRequiredItem` (defaults undefined → radio path; wire-side population still Phase 0 prereq #2 pending)
+- [ ] [LUPIN] **Begin Phase 3 (`ActionRequiredRenderer.ts`) — gated on user go-ahead per `feedback_never_auto_commit_push`** — consumes Phase 2 interactive template + `respondAndAwait` from Phase 1; lifecycle pattern mirroring Phase 5's `NotificationsListRenderer` with the Pass 2 A3 ownership-flag claim
+- [ ] [LUPIN] Phases 4-8 follow per `2026.05.11-phase6b-code-execution-plan.md` execution sequence (per-phase commits each gated on user authorization)
 
 **Read on resume (in this order)**:
 1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`

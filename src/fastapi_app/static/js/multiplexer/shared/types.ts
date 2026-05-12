@@ -357,6 +357,7 @@ export interface ActionRequiredItem {
   expires_at    : number;            // ms epoch
   state         : ActionRequiredState;
   response?     : ActionRequiredResponse;   // Phase 6b — widened from string per Pass 2 A2
+  multiSelect?  : boolean;                  // Phase 6b — multiple_choice dispatch (radio if false/undefined, checkbox if true). Wire-side population is Phase 0 prereq #2 (verification pending).
 }
 
 export type ActionRequiredChangeKind =
