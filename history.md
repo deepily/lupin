@@ -2,6 +2,52 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.12 - Session 6a054460 (Tiberius 🌑) | Inter-Session Commons Phase 2 — CLOSED (steps 9-13: E2E + UI + Playwright + docs + closure)
+
+**Persona**: Tiberius 🌑 (Deep male, #3F51B5)
+
+**Topic**: Inter-Session Commons + User-Broadcast — Phase 2 closure. Picked up where session 9a4a601d (Rachel) left off (steps 1-8 backend wired, uncommitted) and drove the remaining 5 steps to closure end-to-end with explicit `:8000` bounce authorization.
+
+**Accomplishments**:
+
+- **Step 9 — 2-session E2E smoke (`:7999`)** ✅ — NEW `src/tests/smoke/test_broadcast_two_session_e2e.py` (~280 LOC, 1 test, 0.76s). Architecture: `mp.get_context("spawn")` forks 2 mock-listener subprocesses (Maria 🌸 / Tiberius 🌑); parent calls `execute_broadcast()` directly with DI'd deps (stub `raw_sessions_fn`, `bridge_loader`, `build_sender_id`; routing `notification_queue.push_notification` to the right child queue by `job_id`); body = default line + `@Maria:` directive. Exercises all 7 design-doc gates: HTTP response shape, `broadcasts` topic content + System Broadcast persona stamp + hyphen-only pseudo-sid, listener-specific injection content (Maria sees directive, Tiberius does not), `broadcast-acks` correlated content, AckWatcher.tick() dispatch with cursor-advance verified via second-tick==0. Full commons regression: 215 passed in 14.76s.
+
+- **Step 10 — UI broadcast panel** ✅ — NEW `src/fastapi_app/static/js/broadcast-panel.js` (~350 LOC IIFE) + NEW `src/fastapi_app/static/css/broadcast-panel.css` (~220 LOC). Recipient chip-row populated via `GET /api/commons/active-sessions`; textarea with live markdown preview via `DOMPurify.sanitize(marked.parse(body))` (AC10 + T2); Send button gated on body-non-empty + recipients-non-empty (AC8 + F17 whitespace-trim mirror); one-step confirm modal (Q10) with sanitized preview + Confirm/Cancel; POST with Bearer auth from `localStorage.lupin_access_token`; rate-limit-aware error path reads `Retry-After`; aggregate panel with named-pending list + 5-min auto-dismiss timer + timed-out passive banner (AC9 + F18); T10 defense-in-depth — `body_summary` rendered via `.textContent`, never `.innerHTML`; T2 defense-in-depth — bare-text fallback if `marked` or `DOMPurify` fails to load. MODIFIED `notifications.html` (+30 LOC: link + script + panel insertion between presentation + test-suite cards). MODIFIED `notifications.js` (+9 LOC: `case "commons_broadcast_ack"` delegating to `window.broadcastPanel.handleAck`). DOMPurify already vendored as `purify.min.js` — design-doc speculation about adding it was unneeded.
+
+- **`:8000` test container bounced** (explicit user authorization) — `docker restart lupin-rest-test` after verifying `inflight=0/pending=0`; container healthy after 8 health-poll attempts (~24s); post-bounce verification confirmed `/api/commons/active-sessions` + `/api/commons/broadcast-to-cc-sessions` registered in OpenAPI + `broadcast-panel.js` (19,240 bytes) + `broadcast-panel.css` (5,612 bytes) served.
+
+- **Step 11 — Playwright E2E (`:8000` scheduled)** ✅ — NEW `src/tests/e2e_ui/test_broadcast_panel.py` (~280 LOC, **10 tests** across 4 classes): `TestBroadcastPanelRendering` (AC8 — panel + Send-gating; 3 tests), `TestBroadcastPreview` (AC10 + T2 — markdown + DOMPurify XSS hardening including bold/script/onerror; 3 tests), `TestBroadcastAggregate` (AC9 + T10 — 0/2 → 1/2 → 2/2 progression + body_summary XSS-as-text; 2 tests), `TestBroadcastSendFlow` (AC8 — Send→modal→Confirm→POST mocked end-to-end with `page.route`; 2 tests). Submitted via `/api/test-suite/submit` (`test_types=e2e`, `pytest_args="-k test_broadcast_panel -v"`, `scheduled_at=2026-05-12T10:00:00-04:00`) → job_id `ts-436237f6`. **Result: 10 passed / 0 failed / 0 errors / 0 skipped in 40.97s.** Report at `io/test-suite/2026.05.12-at-10:00-EDT-e2e-results.md`.
+
+- **Step 12 — Documentation** ✅ — NEW `src/docs/notification-types.md` (~135 LOC) — catalog of all 10 valid `type` values across user-facing / session-control / custom state-update categories, deep section on `commons_broadcast_ack` covering trigger conditions, payload shape, UI handler delegation, TTL semantics, T10 defense-in-depth, cross-references. MODIFIED `src/docs/rest-api-reference.md` — added §17c "Inter-Session Commons" between §17b (TFE) and §18 (Decision Proxy) covering both endpoints, broadcast directive parsing rules, ack flow walkthrough, 3-key INI configuration table. Note: design doc said "section 17" but §17 was already Test Suite — used 17c to stay adjacent to TFE/BFE (other agentic submission surfaces). MODIFIED `src/docs/README.md` — added notification-types.md to WebSocket/notifications cluster.
+
+- **Step 13 — Phase 2 closure** ✅ — NEW `src/rnd/v0.1.7/2026.05.09-inter-session-commons/92-phase2-closure.md` (~180 LOC) — post-mortem covering what landed (backend modules + REST endpoints + listener wiring + ack-watcher daemon + custom notif type + UI + INI keys + test coverage), Step 11 Playwright result table, AC verification matrix, deviations (D1 section numbering / D2 DOMPurify already vendored / D3 step 9 architecture using direct `execute_broadcast` call), deferred items (Phase 3 polling→push + LLM fallback), cross-project follow-ups, file touch summary. MODIFIED `00-index.md` — last-reviewed-at updated, Phase 2 marked CLOSED with 92-phase2-closure link added. MODIFIED `TODO.md` — top-of-file "FIRST THING NEXT SESSION" replaced with closure summary; step checklist all marked complete.
+
+- **Aggregate test posture**: 100% coverage gate held across all 8 commons modules (622 stmts / 170 branches / 0 missing). `:7999` regression: 215 passed in 14.76s (211 unit + 3 Phase 1 smoke + 1 step 9 smoke). `:8000` scheduled: 10 passed in 40.97s.
+
+**Files modified** (parent Lupin only — per `feedback_lupin_only_never_cosa`):
+
+- `src/tests/smoke/test_broadcast_two_session_e2e.py` (NEW)
+- `src/fastapi_app/static/css/broadcast-panel.css` (NEW)
+- `src/fastapi_app/static/js/broadcast-panel.js` (NEW)
+- `src/fastapi_app/static/html/notifications.html` (MODIFIED — +30 LOC panel + link + script)
+- `src/fastapi_app/static/js/notifications.js` (MODIFIED — +9 LOC commons_broadcast_ack case)
+- `src/tests/e2e_ui/test_broadcast_panel.py` (NEW)
+- `src/docs/notification-types.md` (NEW)
+- `src/docs/rest-api-reference.md` (MODIFIED — §17c added)
+- `src/docs/README.md` (MODIFIED — notification-types.md entry)
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/92-phase2-closure.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/00-index.md` (MODIFIED — Phase 2 CLOSED)
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/90-phase2-execution-log.md` (MODIFIED — steps 9/10/11/12/13 closure rows)
+- `TODO.md` (MODIFIED — top-of-file Phase 2 closure summary; old resume-pointer retained as historical context)
+
+#### Checkpoint | 2026.05.12 10:30 EDT | Phase 2 closure (steps 9-13 + closure doc)
+
+**Files**: 13 (3 NEW UI + 1 NEW smoke + 1 NEW Playwright + 1 NEW docs + 1 NEW closure + 2 MOD docs + 2 MOD R&D + 1 MOD TODO + 2 MOD frontend wiring)
+
+**Commit**: 3c66ffc
+
+---
+
 ### 2026.05.11 → 2026.05.12 AM - Session 9a4a601d (Rachel 🕊️) | Inter-Session Commons: Phase 1 wrap + Phase 2 plan-review pipeline + Phase 2 backend (steps 1-8)
 
 **Persona**: Rachel 🕊️ (calm & clear female, #7B1FA2)

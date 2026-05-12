@@ -218,6 +218,54 @@ TFE is submitted via the generic `/api/push` endpoint using the agent router com
 
 Watchdog auto-dispatch: requires `test fix expediter auto fix enabled = true` in `lupin-app.ini`. See the TFE guide for full INI reference (16 keys), six-phase pipeline, and the `TestSuiteCompletionWatchdog` eligibility gates.
 
+## 17c. Inter-Session Commons (`/api/commons/*`)
+
+> **Deep-dive**: See [`../rnd/v0.1.7/2026.05.09-inter-session-commons/`](../rnd/v0.1.7/2026.05.09-inter-session-commons/) (design + execution log) and [`notification-types.md`](notification-types.md) §`commons_broadcast_ack` for the ack notification contract.
+
+The commons subsystem layers two related capabilities on the same file-backed transport (`<LUPIN_ROOT>/io/commons/*.md`):
+
+1. **Session ↔ Session commons** — Claude Code instances post / read from a shared blackboard via the 5 cosa-voice MCP tools (`commons_post`, `commons_read`, `commons_who`, `commons_ask_sync`, `commons_ask_async`).
+2. **User → All Sessions broadcast** — single message from the notifications UI fans out to every active CC session belonging to the authenticated user, with persona-aware directive parsing (`@PersonaName:` lines).
+
+The endpoints below cover surface #2. The MCP tools are surface #1 and are not REST endpoints.
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| GET    | `/api/commons/active-sessions`           | JWT | Returns same-user-scoped active CC sessions for the broadcast recipient preview. Same-user filter (per `user_id` on each bridge file) + freshness filter (`commons broadcast active session threshold seconds`, default 600). Response: `{ sessions: [{ session_id, persona_name, persona_icon, persona_color, last_seen_iso, conversation_mode_active }] }`. Never leaks bridge filesystem paths. |
+| POST   | `/api/commons/broadcast-to-cc-sessions`  | JWT | Fans out a message to every active CC session belonging to the caller. Body: `{ message, broadcast_id?, require_ack=true, include_originator=true }`. Rate-limited at 1 broadcast per `commons broadcast rate limit seconds` (default 30) per `user_id`; exceeded → `HTTP 429` with `Retry-After` header. Body containing literal `<system-reminder>` / `</system-reminder>` substring → `HTTP 400`. Caller-supplied `broadcast_id` colliding with an in-flight broadcast → `HTTP 409`. Zero recipients → `HTTP 200` with `status="no-active-sessions"`. Success → `HTTP 200` with `{ broadcast_id, recipients, failed_recipients, status="queued" }`. When `require_ack=true`, downstream `commons_broadcast_ack` notifications stream in via the existing `notification_queue_update` envelope as each recipient listener acks. |
+
+### Broadcast directive parsing
+
+`message` body is free-form text with optional `@PersonaName:` directive lines:
+
+```text
+Run the daily smoke check on master.
+@Maria: also re-baseline the visual snapshots.
+```
+
+Default lines (no leading `@`) apply to every recipient. `@PersonaName:` lines apply only to sessions whose persona matches (case-insensitive + punctuation-tolerant per `commons_persona_matcher.match_persona`). `@all:` / `@everyone:` aliases match the default scope. Sessions whose persona doesn't match any `@` line — and the body has no default lines — ack with `status="skipped"`.
+
+### Ack flow
+
+When `require_ack=true`:
+
+1. Server registers the `broadcast_id` in the `CommonsAckWatcher` in-flight tracker (5-min TTL).
+2. Per-recipient fanout writes one entry to the `broadcasts` reserved topic + pushes one `user_initiated_message` notification with `title="action:broadcast_received"` to each listener.
+3. Each listener's `_handle_action()` dispatcher routes to `broadcast_handler.handle_broadcast()`, which parses the directive, injects the effective text as a `<system-reminder>` block, and posts an ack to the `broadcast-acks` reserved topic.
+4. `CommonsAckWatcher` daemon (poll every `commons broadcast ack watch interval seconds`, default 1) tails `broadcast-acks` and dispatches one `commons_broadcast_ack` notification per ack to the originating user — see [`notification-types.md`](notification-types.md) for the payload shape.
+
+When `require_ack=false`: steps 1–3 still happen, but no acks fan back to the user — the watcher's in-flight tracking is skipped for this broadcast.
+
+### INI configuration
+
+| Key | Default | Effect |
+|---|---|---|
+| `commons broadcast rate limit seconds` | `30` | Per-user sliding-window rate limit |
+| `commons broadcast active session threshold seconds` | `600` | Inactivity threshold (s) — sessions older than this are excluded from fanout |
+| `commons broadcast ack watch interval seconds` | `1` | Poll period for the `CommonsAckWatcher` daemon |
+
+Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
+
 ## 18. Decision Proxy (`/api/proxy/*`)
 
 > **Deep-dive**: See [`proxy-admin-guide.md`](proxy-admin-guide.md)

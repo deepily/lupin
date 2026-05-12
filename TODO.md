@@ -1,8 +1,16 @@
 # TODO
 
-## ☀️ FIRST THING NEXT SESSION — Inter-Session Commons Phase 2 step 9 (session 9a4a601d Rachel 🕊️, 2026-05-12 early AM)
+## ✅ Inter-Session Commons Phase 2 — ALL CLOSED 2026-05-12 (session 6a054460 Tiberius 🌑, AM)
 
-**Resume pointer**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/90-phase2-execution-log.md` — steps 1-8 ✅ CLOSED, steps 9-13 ⏳ pending.
+**Closure doc**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/92-phase2-closure.md`
+
+Phase 2 is functionally complete. Phase 3 (D1 polling→push for `commons_ask_async`, LLM-fallback wiring for persona matcher) is eligible to begin — no plan-review gates outstanding. The original "FIRST THING NEXT SESSION" pointer below is retained as historical context.
+
+---
+
+## Historical resume pointer (kept for reference)
+
+**Original pointer**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/90-phase2-execution-log.md` — steps 1-8 ✅ CLOSED, steps 9-13 ⏳ pending.
 
 ### Where we are
 
@@ -23,11 +31,11 @@ The Inter-Session Commons + User-Broadcast initiative landed Phase 1 (file-based
 
 ### Steps remaining
 
-- [ ] **Step 9** — 2-session E2E smoke on `:7999` (`test_broadcast_two_session_e2e.py`). Spawns 2 listener subprocesses with distinct personas, hits `POST /api/commons/broadcast-to-cc-sessions` with a persona-targeted directive ("All sessions: X. @Maria: Y."), asserts both listeners receive the right injection AND post acks AND the AckWatcher fires `commons_broadcast_ack` notifications. **Operational note**: `find_active_voice_persona_sessions()` reads from real `~/.claude/sessions/` bridge files — the smoke test will need to either (a) mock the helper or (b) seed bridge files in a tempdir + monkeypatch `SESSION_DIR`. Also requires `:7999` server to pick up the new `commons` router (FastAPI auto-reload should handle this, per `feedback_fastapi_auto_reload.md`).
-- [ ] **Step 10** — UI panel: `broadcast-panel.js` + `broadcast-panel.css` + `notifications.html` insertion. Includes DOMPurify wiring per T2 + `textContent` rendering per T10 + one-step confirm modal per Q10.
-- [ ] **Step 11** — Playwright E2E on `:8000` (scheduled monopolize-mode).
-- [ ] **Step 12** — Docs: `src/docs/notification-types.md` (NEW — document `commons_broadcast_ack`) + `src/docs/rest-api-reference.md` §17 (2 new endpoints).
-- [ ] **Step 13** — Phase 2 closure `92-phase2-closure.md` post-mortem.
+- [x] **Step 9** — 2-session E2E smoke on `:7999` (`test_broadcast_two_session_e2e.py`). Closed 2026-05-12 — 1 test, 7 design-doc gates, 0.76s.
+- [x] **Step 10** — UI panel: `broadcast-panel.js` + `broadcast-panel.css` + `notifications.html` insertion. Closed 2026-05-12.
+- [x] **Step 11** — Playwright E2E on `:8000` (scheduled monopolize-mode). Closed 2026-05-12 — job_id `ts-436237f6`, 10 passed / 0 failed in 40.97s.
+- [x] **Step 12** — Docs: NEW `src/docs/notification-types.md` + UPDATED `src/docs/rest-api-reference.md` §17c + UPDATED `src/docs/README.md`. Closed 2026-05-12.
+- [x] **Step 13** — Phase 2 closure `92-phase2-closure.md` post-mortem. Closed 2026-05-12.
 
 ### What's ready to pick up tomorrow
 

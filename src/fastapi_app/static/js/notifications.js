@@ -5367,6 +5367,16 @@ class NotificationsUI {
                     displaced_by            : notification.payload?.displaced_by
                 });
                 return;
+
+            case "commons_broadcast_ack":
+                // Phase 2 inter-session-commons — delegate to broadcast-panel.js
+                // for live aggregate update. The panel module is loaded after
+                // notifications.js; window.broadcastPanel is its public hook.
+                // See: src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md AC9
+                if ( window.broadcastPanel && typeof window.broadcastPanel.handleAck === "function" ) {
+                    window.broadcastPanel.handleAck( notification );
+                }
+                return;
         }
 
         // Check for duplicates (same logic as old queue.js)

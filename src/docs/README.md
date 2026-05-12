@@ -14,6 +14,7 @@
 | [websocket-configuration.md](websocket-configuration.md) | WebSocket config keys and tuning | `lupin-app.ini`, `lupin-app-splainer.ini` |
 | [websocket-troubleshooting.md](websocket-troubleshooting.md) | WebSocket diagnostic procedures | — |
 | [notification-api.md](notification-api.md) | Notification system architecture, lifecycle, proxy | `routers/notifications.py` |
+| [notification-types.md](notification-types.md) | Catalogue of `type` values + custom state-update types (incl. `commons_broadcast_ack`) | `routers/notifications.py` `valid_types` |
 | [proxy-admin-guide.md](proxy-admin-guide.md) | Trust Dashboard and ratification guide | `routers/decision_proxy.py` |
 | [lupin-mpa-frontend-architecture.md](lupin-mpa-frontend-architecture.md) | Multi-page app frontend design | `src/lib/clients/` |
 

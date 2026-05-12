@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="/static/css/lupin-base.css">
     <link rel="stylesheet" href="/static/css/notifications.css?v=20260505c">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260512a">
 </head>
 <body>
     <!-- Floating Section Visibility Toolbar -->
@@ -400,6 +401,32 @@
                             </span>
                         </button>
                         <div id="presentation-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- Commons Broadcast Panel (Phase 2 — inter-session-commons) -->
+                <div class="job-submit-card" id="broadcast-submit-card" data-testid="notifications-broadcast-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('broadcast-submit-section')">
+                        <h4>📢 Broadcast to all CC sessions</h4>
+                        <button class="toggle-button" id="broadcast-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="broadcast-submit-section">
+                        <div id="broadcast-panel-body">
+                            <div id="broadcast-recipients-row">
+                                <span id="broadcast-recipients-label">Sending to:</span>
+                                <button type="button" id="broadcast-recipients-refresh" data-testid="notifications-broadcast-refresh-btn" title="Refresh active session list">↻ refresh</button>
+                            </div>
+                            <textarea id="broadcast-textarea"
+                                      data-testid="notifications-broadcast-textarea"
+                                      placeholder="Message body — use @PersonaName: lines for persona-specific directives. Markdown supported."></textarea>
+                            <div id="broadcast-preview-label">live preview (markdown):</div>
+                            <div id="broadcast-preview" class="empty" data-testid="notifications-broadcast-preview">preview appears here…</div>
+                            <button id="broadcast-send-button" data-testid="notifications-broadcast-send-btn" type="button" disabled>
+                                📢 Send broadcast
+                            </button>
+                            <div id="broadcast-submit-status" data-testid="notifications-broadcast-status"></div>
+                            <div id="broadcast-aggregate-panel" data-testid="notifications-broadcast-aggregate"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -932,6 +959,7 @@
     <script src="/static/js/job-completion-cache.js"></script>
     <script src="/static/js/audio-recorder.js"></script>
     <script src="/static/js/notifications.js?v=20260505c"></script>
+    <script src="/static/js/broadcast-panel.js?v=20260512a"></script>
     <script>
         function toggleSection(sectionId) {
             const content = document.getElementById(sectionId);
