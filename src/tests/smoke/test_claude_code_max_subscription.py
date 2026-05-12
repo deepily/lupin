@@ -41,7 +41,66 @@ from typing import Optional
 import pytest
 
 
-TEST_SERVER_BASE = "http://localhost:8000"
+# ────────────────────────────────────────────────────────────────────────────
+# Test RETIRED 2026-05-11 (session 77e1bb27, Mr. Radio)
+# ────────────────────────────────────────────────────────────────────────────
+# The `cost_usd == 0.0` premise this test was built on is unsalvageable.
+#
+# Empirically verified end-to-end on 2026-05-11:
+#   - User has NO ANTHROPIC_API_KEY anywhere (host or test container).
+#   - User has a valid Max OAuth credentials file (`subscriptionType: "max"`),
+#     bind-mounted into the test container.
+#   - Yet `claude -p ...` non-interactive invocations report a non-zero
+#     `total_cost_usd` on every call, both on host (~$0.32) AND in container
+#     (~$0.05). Different prompts → different reported costs, all > 0.
+#
+# Insight (user, 2026-05-11 EVE): the cost field is COUNTERFACTUAL API
+# pricing reported as informational metadata, not actual billing. Nothing
+# is being billed — there's no API key for the CLI to bill against. The
+# actual call is being authorized + paid for by the Max OAuth subscription
+# at its flat rate. The CLI just always reports "what this WOULD cost via
+# API" in its result envelope regardless of which auth path was used.
+#
+# Consequence: `cost_usd == 0.0` cannot validate "we're on the subscription
+# path" from the CLI's own output. The test as authored cannot pass on any
+# valid CC CLI invocation. Retire it.
+#
+# The test file is kept (rather than deleted) as the audit trail for the
+# four architecture-correctness fixes applied this session — these patterns
+# remain useful for future CC-related smoke tests that need to work both on
+# host (with `docker exec`) and inside the test container (where the docker
+# CLI doesn't exist and `localhost:8000` is unreachable):
+#   1. `_running_inside_container()` helper (detects `/.dockerenv`)
+#   2. `_container_running()` short-circuits inside container
+#   3. `TEST_SERVER_BASE` honors `LUPIN_API_URL`
+#   4. Sentinel verify + cleanup branch in-container vs host-side
+#   5. `_extract_cost_usd()` reads `cost_summary` inside `metadata_json`
+#
+# Companion CoSA fix (uncommitted, separate commit context):
+#   `src/cosa/agents/claude_code/job.py` Bounded path now puts `cost_summary`
+#   into `self.artifacts` (parity with the dry-run path) — this is a
+#   correctness improvement independent of this retirement.
+#
+# Paired doc: `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md`
+# should be amended to drop the "cost reduction via subscription" thesis or
+# pivot it to a more verifiable invariant (e.g., "no ANTHROPIC_API_KEY in
+# container env" — provable from `env | grep ANTHROPIC_API_KEY` returning
+# empty).
+# ────────────────────────────────────────────────────────────────────────────
+
+pytestmark = pytest.mark.skip(
+    reason = (
+        "RETIRED 2026-05-11: cost_usd == 0.0 premise is invalid. CC CLI reports "
+        "counterfactual API pricing as metadata on every -p invocation regardless "
+        "of which auth path actually paid (OAuth subscription vs API key). With "
+        "no ANTHROPIC_API_KEY present, Max OAuth is paying the flat rate but the "
+        "CLI still populates total_cost_usd > 0. See module docstring + the "
+        "retirement block at the top of this file for full forensic trail."
+    )
+)
+
+
+TEST_SERVER_BASE = os.environ.get( "LUPIN_API_URL", "http://localhost:8000" )
 SUBMIT_ENDPOINT  = f"{TEST_SERVER_BASE}/api/claude-code/submit"
 AUTH_ENDPOINT    = f"{TEST_SERVER_BASE}/auth/login"
 JOB_ENDPOINT     = f"{TEST_SERVER_BASE}/api/job-history"
@@ -90,7 +149,19 @@ def _server_reachable() -> bool:
         return False
 
 
+def _running_inside_container() -> bool:
+    """True when this pytest process is itself running inside a Docker container.
+    Detected via the canonical `/.dockerenv` marker file Docker writes at container
+    image build / runtime."""
+    return os.path.exists( "/.dockerenv" )
+
+
 def _container_running() -> bool:
+    # When pytest is scheduled via /api/test-suite/submit it runs INSIDE the test
+    # container, where the `docker` CLI does not exist. In that case we ARE the
+    # container we'd otherwise be probing — short-circuit to True.
+    if _running_inside_container():
+        return True
     try:
         out = subprocess.run(
             [ "docker", "ps", "--filter", f"name=^{TEST_CONTAINER}$", "--format", "{{.Names}}" ],
@@ -124,10 +195,16 @@ def _extract_cost_usd( job: dict ) -> Optional[ float ]:
     if isinstance( cost_summary, dict ) and "total_cost_usd" in cost_summary:
         return float( cost_summary[ "total_cost_usd" ] )
 
-    # Metadata fallback
+    # Metadata fallback — DB job_history.metadata_json may carry either a bare
+    # cost_usd or a nested cost_summary dict (see _build_metadata_json + the
+    # CC job's `self.artifacts` shape; the production Bounded path lands here).
     metadata = job.get( "metadata_json" ) or {}
-    if isinstance( metadata, dict ) and "cost_usd" in metadata:
-        return float( metadata[ "cost_usd" ] )
+    if isinstance( metadata, dict ):
+        if "cost_usd" in metadata:
+            return float( metadata[ "cost_usd" ] )
+        cs = metadata.get( "cost_summary" )
+        if isinstance( cs, dict ) and "total_cost_usd" in cs:
+            return float( cs[ "total_cost_usd" ] )
 
     return None
 
@@ -266,28 +343,49 @@ def test_claude_code_bounded_job_uses_max_subscription( auth_headers ):
         )
 
         # 4. End-to-end: sentinel file must exist inside the container
-        check = subprocess.run(
-            [ "docker", "exec", TEST_CONTAINER, "cat", sentinel_path ],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert check.returncode == 0, (
-            f"Sentinel file {sentinel_path} not found inside {TEST_CONTAINER}. "
-            f"Job reported success but Write tool path may be broken. "
-            f"docker exec stderr: {check.stderr!r}"
-        )
-        assert sentinel_body in check.stdout, (
-            f"Sentinel file exists but contents differ. "
-            f"Expected substring: {sentinel_body!r}. "
-            f"Actual: {check.stdout!r}"
-        )
+        if _running_inside_container():
+            # pytest is itself running inside lupin-rest-test — read the file
+            # directly. /tmp is the same filesystem the CC job wrote to.
+            try:
+                with open( sentinel_path, "r" ) as f:
+                    sentinel_content = f.read()
+            except FileNotFoundError:
+                pytest.fail(
+                    f"Sentinel file {sentinel_path} not found (in-container read). "
+                    f"Job reported success but Write tool path may be broken."
+                )
+            assert sentinel_body in sentinel_content, (
+                f"Sentinel file exists but contents differ. "
+                f"Expected substring: {sentinel_body!r}. "
+                f"Actual: {sentinel_content!r}"
+            )
+        else:
+            check = subprocess.run(
+                [ "docker", "exec", TEST_CONTAINER, "cat", sentinel_path ],
+                capture_output=True, text=True, timeout=10,
+            )
+            assert check.returncode == 0, (
+                f"Sentinel file {sentinel_path} not found inside {TEST_CONTAINER}. "
+                f"Job reported success but Write tool path may be broken. "
+                f"docker exec stderr: {check.stderr!r}"
+            )
+            assert sentinel_body in check.stdout, (
+                f"Sentinel file exists but contents differ. "
+                f"Expected substring: {sentinel_body!r}. "
+                f"Actual: {check.stdout!r}"
+            )
 
     finally:
         # Best-effort cleanup
         try:
-            subprocess.run(
-                [ "docker", "exec", TEST_CONTAINER, "rm", "-f", sentinel_path ],
-                capture_output=True, timeout=5,
-            )
+            if _running_inside_container():
+                if os.path.exists( sentinel_path ):
+                    os.remove( sentinel_path )
+            else:
+                subprocess.run(
+                    [ "docker", "exec", TEST_CONTAINER, "rm", "-f", sentinel_path ],
+                    capture_output=True, timeout=5,
+                )
         except Exception:
             pass
         if "job_id" in locals() and job_id:

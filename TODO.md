@@ -14,7 +14,7 @@ User-authorized test-server bounce at 17:13 EDT → 3 batch-1 submissions fired 
   - Admin (5): admin-dashboard, admin-snapshots, admin-users, admin-ratify, admin-trust
   - Dev/infra (2): dev-tools, ws_circuit_banner_open
 
-- [⚠️] [LUPIN] **5.10 — Subscription smoke** (`ts-f5535947`, 17:46:48 → 17:46:58 EDT, 9.6s): 0 passed, 0 failed, 0 errors, **2 skipped**. AC10 NOT met. User noted post-run that the credential processing system had 401 issues at the time — possibly the skip cause. Retry submitted in batch 2.
+- [x] ~~[LUPIN] **5.10 — Subscription smoke**~~ **RETIRED 2026-05-11 EVE.** Deep investigation surfaced: the `cost_usd == 0.0` premise is invalid. CC CLI always reports counterfactual API pricing as metadata regardless of which auth path actually paid for the call. With no `ANTHROPIC_API_KEY` present, Max OAuth is paying flat rate, but `total_cost_usd > 0` is still populated. Verified empirically on both host (~$0.32/call) and container (~$0.05/call). Test cannot pass on any valid CC CLI invocation. Module-level `pytest.mark.skip` added with full forensic trail in module docstring. The 4 architecture fixes applied during investigation (in-container detection, env-var URL routing, schema-drift cost extraction) are preserved as patterns for future CC-related smoke tests.
 
 ### Batch 2 in flight (resubmitted 17:59:16 EDT after user credential-system restoration)
 
@@ -22,11 +22,21 @@ User-authorized test-server bounce at 17:13 EDT → 3 batch-1 submissions fired 
 
 - [ ] [LUPIN] **5.9 regression** (`ts-99f2fa02`, scheduled 18:13:16 EDT): `-k visual` **WITHOUT** `--update-snapshots`. Verifies the 15 batch-1 regenerated baselines are self-consistent. Pass = 15 visual tests green against their freshly-written baselines. This closes AC11 by replacing the "manual git-diff inspection of `io/`" step with an automated self-regression check.
 
-- [ ] [LUPIN] **5.10 retry** (`ts-8461cdd4`, scheduled 18:25:16 EDT): identical to batch-1 5.10; first run with credential system restored. AC10 pass = green pass + `cost_usd == 0.0`. If still skipped, the skip is environmental (no Claude Code Max creds in test container) not credential-system-related; will require docker-compose env wiring as a separate compose-level change.
+- [x] ~~[LUPIN] **5.10 retry**~~ — superseded by retirement above. AC10 closed-as-retired (premise invalid, no test we can make pass without changing the assertion).
 
-**Sequencing**: results expected by ~18:35 EDT. Next session-checkpoint or session-end revisits the done bucket and confirms Phase 5b closure verdict.
+### Phase 5b NET STATUS (post-retirement, 2026-05-11 EVE)
 
-**Reference**: `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` Phase 5b table; report markdowns at `io/test-suite/2026.05.11-at-{17:18,17:32,17:46,18:01,18:13,18:25}-EDT-*-results.md`.
+- 5.8 ✅ functional regression GREEN both batches
+- 5.9 ✅ visual baselines regenerated + self-consistency confirmed (batch 2 `ts-99f2fa02` 16P/0F/0E/0S in 53.0s)
+- 5.10 ✅ **RETIRED** (premise invalid — see retirement note above)
+
+**Phase 6.8 parent commit is functionally unblocked on the CC card normalization scope.** 5.10's premise issue is pre-existing — exposed by, not caused by, this session's work.
+
+### Follow-up filed
+
+- [ ] [LUPIN] **TFE-to-CC design doc amendment** — `src/rnd/v0.1.6/2026.04.10-test-fix-expediter/19-tfe-to-cc-design.md` should be amended to drop the "cost reduction via Max subscription" thesis OR pivot to a more verifiable invariant (e.g., "no `ANTHROPIC_API_KEY` in container env" — provable from `env | grep ANTHROPIC_API_KEY` returning empty). Defer to a follow-up session.
+
+**Reference**: `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` Phase 5b table; report markdowns at `io/test-suite/2026.05.11-at-{17:18,17:32,17:46,18:01,18:13,18:25,19:47,19:57,20:06}-EDT-*-results.md`.
 
 ---
 
@@ -129,7 +139,7 @@ The 6-endpoint legacy `/api/claude-code/dispatch` cluster was retired today. Two
 
 - [ ] [LUPIN-COSA] **Per-turn streaming on the cj-flow path** (optional follow-up). The legacy WS streamed `text` / `tool_use` / `tool_result` per turn. The cj-flow path currently emits only coarse start/complete/fail notifications. If user-facing demand surfaces, add per-turn `notify_progress` calls inside `ClaudeCodeJob._execute()` keyed by job_id, and update the dispatcher card's `#cc-response` panel (currently a retirement banner) to consume them. Not blocking; the queue path is functional without per-turn streaming.
 
-- [ ] [LUPIN-MOBILE] **Migrate `claude_code_repository.dart` off the retired endpoints.** Production code at `src/lupin-mobile/lib/features/claude_code/data/claude_code_repository.dart:18` POSTs to `/api/claude-code/dispatch`. Will 404 against any post-retirement Lupin server. Migrate to **`POST /api/claude-code/submit`** (canonical URL post-2026-05-11 CC card normalization; old `/queue/submit` alias works for one release cycle through v0.1.8 deploy then removed). Update `claude_code_models.dart` request/response shapes; update BLoC + repository tests in `test/unit/claude_code/`. Decide UX for the disabled INTERACTIVE controls (mirror parent's "visibly disabled" pattern, hide, or stub). Cross-ref: handoff doc at `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md` for full migration context (Q8 verdict = PRIMARY, alias live). Mobile breadcrumbs in `src/lupin-mobile/src/rnd/v0.1.6-migration/2026.04.15-tier-3-queue-and-claude-code-plan.md` + `2026.04.15-resync-mobile-with-lupin-api-v0.1.6.md`. Mobile-side TODO entry `[LUPIN-CC-SUBMIT-RENAME]` seeded at `src/lupin-mobile/TODO.md`. **This work happens in a mobile session, not parent context.**
+- [x] [LUPIN-MOBILE] **Migrate `claude_code_repository.dart` off the retired endpoints.** — ✅ **VERIFIED COMPLETE 2026-05-11** (user-requested verification). Mobile production code at `src/lupin-mobile/lib/features/claude_code/data/claude_code_repository.dart:19` already POSTs to canonical `/api/claude-code/submit`; header comments L5 + L11 confirm "Canonical successor: POST /api/claude-code/submit (this file)". Q8 verdict = PRIMARY (alias `/queue/submit` live through v0.1.8 release cycle). Cross-ref handoff doc: `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md`. (UX decision for disabled INTERACTIVE controls + BLoC/repository test updates happen in the mobile session if/when needed — not blocking the canonical endpoint cutover.)
 
 - [x] [LUPIN] **Live UI probe (manual gate).** ~~Open `/app/notifications`...~~ **RESOLVED 2026-05-11** (session 658ea35d, Mr. Radio) via CC Card Normalization Phase 5a — superseded by the normalization work which (a) deleted the `.cc-retired-banner` block + disabled inject/interrupt/end inputs entirely from the HTML, (b) renamed submit URL to canonical `/api/claude-code/submit` with `/queue/submit` alias preserved for one release cycle, and (c) verified end-to-end via 5.4/5.5 live JWT POSTs (both return `cc-{uuid8}` jobs) + 5.6 6/6 dry-run smoke + 5.11 TFE/BFE regression GREEN. The "manual" label was legacy metadata — Phase 5.7 was an AI-headless probe per test-ownership mandate. See `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/90-execution-log.md` Phase 5a.
 
@@ -187,26 +197,25 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ---
 
-## ☀️ FIRST THING NEXT SESSION — CC Card Normalization Phase 1 implementation begin
+## ✅ CC Card Normalization — Phases 1–5a SHIPPED (2026-05-11, session 658ea35d Mr. Radio, commit `eab6fac`)
 
-**Cycle state on resume**:
-- Phase 0 Documentation ✅ CLOSED 2026-05-10 (R&D doc set serialized to `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/`)
-- `/plan-review` REUSE pre-pass ✅ CLOSED 2026-05-10 (3 fixes applied)
-- `/plan-review` Pass 1 Fitness ✅ CLOSED 2026-05-11 (8/11 findings applied — M1 + all 7 Minors)
-- `/plan-review` Pass 2 Adversarial ✅ CLOSED 2026-05-11 (7/7 findings + 1 swept pattern offender applied)
+**Cycle state**:
+- Phase 0 Documentation ✅ CLOSED 2026-05-10
+- `/plan-review` REUSE / Pass 1 / Pass 2 ✅ ALL CLOSED 2026-05-11
 - Idempotency marker stamped: `last-reviewed-at: 2026-05-11 (commit c1cec74)` in `00-index.md`
-- Phase 1 (Track A: HTML normalization) ⏳ **READY TO BEGIN** — gated on user go-ahead
-- Phases 2-6 ⏳ pending
+- Phase 1–5a ✅ **DONE 2026-05-11** (Mr. Radio, commit `eab6fac`)
+- Phase 5b `:8000` E2E ⏳ **IN FLIGHT** via Mr. Radio (user voice update 2026-05-11)
+- Phase 6 wrap ⏳ PARTIAL — 6.1–6.7 docs DONE; 6.8 parent commit + 6.9 CoSA commit HELD for user authorization per `feedback_never_auto_commit_push`
 
-**Resume action**:
-- [ ] [LUPIN] Begin Phase 1 (HTML normalization in `src/fastapi_app/static/html/notifications.html` lines 117-218). 8 sub-steps: rename header, promote disabled INTERACTIVE option, delete 5 dead UI blocks (cc-execution-mode, cc-response, cc-option-b-controls, cc-session-info), insert `#cc-submit-status` div, delete `.cc-retired-banner` from `notifications.css`.
-- [ ] [LUPIN] Phase 2 (JS handler normalize) — rewrite `submitClaudeCodeToQueue()` mirroring research handler at `notifications.js:2870-2949`; switch fetch URL `/api/claude-code/queue/submit` → `/api/claude-code/submit`.
-- [ ] [LUPIN] Phase 3 (E2E test cleanup) — delete 2 obsolete test functions in `test_job_dispatch.py`, add `test_cc_card_renders_in_sibling_shape()`.
-- [ ] [LUPIN-COSA] Phase 4 (URL rename + alias) — `src/cosa/rest/routers/claude_code_queue.py`: rename primary route + add stacked-decorator alias with `deprecated=True`. Q8 verdict determined at Phase 5.3 `quick_smoke_test()`. CoSA file edits OK from parent context; CoSA git operations stay in CoSA-context session per `feedback_lupin_only_never_cosa`.
-- [ ] [LUPIN] Phase 4.5 (handoff doc finalize) — populate commit-date + Q8 verdict in `02-handoff-summary.md` mobile TODO template.
-- [ ] [LUPIN] Phase 5a verification on `:7999` — py_compile, import-chain, router-smoke (Q8 verdict gate), curl probes, dry-run smoke, headless UI probe, cross-agent regression (TFE + BFE).
-- [ ] [LUPIN] Phase 5b verification on `:8000` SCHEDULED via `/schedule-tests` skill — E2E functional, E2E visual baseline regen, subscription smoke. **EXECUTOR: HUMAN** confirms slot availability before AI fires the test-suite submit.
-- [ ] [LUPIN] Phase 6 wrap — TODO seeds for mobile + multiplexer, history.md, parent commit (NOT CoSA — that's separate context).
+**Action items**:
+- [x] [LUPIN] Phase 1 (HTML normalization in `notifications.html`) — 8 sub-steps applied; AC1, AC1.5, AC2, AC3, AC4 GREEN per 90-execution-log.md
+- [x] [LUPIN] Phase 2 (JS handler normalize) — `submitClaudeCode` + `submitClaudeCodeToQueue` rewritten; fetch URL → `/api/claude-code/submit`; statusDiv 3-color verified
+- [x] [LUPIN] Phase 3 (E2E test cleanup) — 2 obsolete tests deleted; `test_cc_card_renders_in_sibling_shape` added; py_compile clean
+- [x] [LUPIN-COSA] Phase 4 (URL rename + alias) — Q8 verdict = **PRIMARY**; stacked decorators register canonical `/api/claude-code/submit` + deprecated alias `/api/claude-code/queue/submit`
+- [x] [LUPIN] Phase 4.5 (handoff doc finalize) — Q8 verdict populated as PRIMARY in `02-handoff-summary.md`
+- [x] [LUPIN] Phase 5a verification on `:7999` — 5.1–5.6 + 5.11 all GREEN; 5.7 headless UI probe folded into 5.8
+- [ ] [LUPIN] Phase 5b verification on `:8000` — **IN FLIGHT via Mr. Radio's session** (3 submissions: `-k test_job_dispatch`, `-k visual --update-snapshots`, `-k test_claude_code_max_subscription`). Tracking row at top of TODO.md "⏰ NEXT SESSION — Schedule Phase 5b" remains Mr. Radio's working record.
+- [ ] [LUPIN] Phase 6.8 parent commit + 6.9 CoSA commit (CoSA-context session) — held for user authorization
 
 **Read on resume**:
 1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`
@@ -227,40 +236,52 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ---
 
-## ☀️ FIRST THING NEXT SESSION — Multiplexer Phase 6b Pass 2 Adversarial dispatch
+## ☀️ FIRST THING NEXT SESSION — Multiplexer Phase 6b Phase 1 implementation (store API prereqs + Phase 5 short-circuit)
 
 **Cycle state on resume**:
 - Q-decisions ✅ CLOSED 12/12 (2026-05-07)
 - REUSE pre-pass ✅ CLOSED 28 RE + 5 L3 (2026-05-07)
-- Pass 1 Fitness ✅ CLOSED 14/14 (2026-05-11) — all resolutions applied to `09-phase6b-interactive-widgets-design.md`; closure section in `95-phase6b-review-findings.md`
-- Pass 2 Adversarial ⏳ **READY TO DISPATCH** — gated on user go-ahead (per 2026-05-11 user direction)
-- Code-execution plan ⏳
-- Implementation ⏳
+- Pass 1 Fitness ✅ CLOSED 14/14 (2026-05-11) — resolutions applied
+- **Pass 2 Adversarial ✅ CLOSED 11/11 (2026-05-11)** — 8 Majors A1-A8 + 3 Minors a1-a3; all resolutions applied to `09-phase6b-interactive-widgets-design.md`; convergence re-grep clean; closure subsection in `95-phase6b-review-findings.md`
+- **Code-execution plan ✅ AUTHORED 2026-05-11** at `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/2026.05.11-phase6b-code-execution-plan.md` — full 9-phase sequence (Phase 0 tracking → Phase 1 store prereqs → Phase 2 templates → Phase 3 ActionRequiredRenderer → Phase 4 TtsChromeRenderer → Phase 5 delete-button 5A→5B → Phase 6 CSS+boot → Phase 7 smoke → Phase 8 scheduled-`:8000` E2E); AC scorecard + pre-exit self-audit included
+- Implementation ⏳ **READY TO BEGIN** at Phase 1 — gated on user go-ahead per `feedback_plan_approval_means_go`
 
 **Resume action**:
-- [ ] [LUPIN] User gives go-ahead → dispatch Pass 2 Adversarial Explore agent (clean context, walks Pass-1-resolved doc state). Cluster focus: security, DOS, race, contract-drift. Expect ~10 findings per Phase 6a Pass 2 precedent. Findings doc section: `95-phase6b-review-findings.md` § "Pass 2 Adversarial — Findings" (new).
-- [ ] [LUPIN] After Pass 2 findings produced → walk ratifications via cosa-voice action-required UI per established cadence (per user directive — "push every decision point into the action-required UI"). Likely 1 batch of Minors + N individual Majors.
-- [ ] [LUPIN] Apply Pass 2 resolutions → convergence re-grep → "Pass 2 Adversarial — closed" subsection appended.
-- [ ] [LUPIN] After Pass 2 closes → author code-execution plan doc (`<date>-phase6b-code-execution-plan.md`).
-- [ ] [LUPIN] Code-execution plan landed → user gate to begin implementation Phase 0 (tracking docs) → Phase 1 (interactive templates) → ... → Phase 7 (E2E scheduled-`:8000`).
+- [ ] [LUPIN] Re-audit at execute time per `feedback_audit_plans_at_execute_time` — re-grep recent feedback memories for constraints landed since 2026-05-11; surface conflicts before code edits
+- [ ] [LUPIN] Capture Phase 6a baseline `B6a` = `gzip -9 -c src/fastapi_app/static/dist/multiplexer/boot.<hash>.js | wc -c` at HEAD `243267b` (Phase 6a closure). Record value in code-execution plan + execution log. Update AC7 ceiling to `B6a + 8192`.
+- [ ] [LUPIN] Verify pre-existing store API signatures (Pass 2 findings' file:line citations: `respond(`, `tick`, `expires_at`, `pause()`, `resume()`, `skip()`, `state()`, `queueLength()` in `src/fastapi_app/static/js/multiplexer/stores/*.ts`)
+- [ ] [LUPIN] Verify Phase 5 `NotificationsListRenderer.renderActionRequiredSection` still at lines 228-243 — A3 Path A ownership-flag edit lands here
+- [ ] [LUPIN] Verify `actionRequiredReadOnly.ts:49` still sets `data-id-hash` (real attribute, per Pass 2 A4)
+- [ ] [LUPIN] **Begin Phase 1 (Step 1 of code-execution plan)**: 4 store/renderer prereq edits:
+  - 1.1 `ActionRequiredStore.respondAndAwait()` (Pass 2 A1, Phase 0 prereq #8)
+  - 1.2 Widen `respond()` + `respondAndAwait()` signature to `string | ReadonlyArray<string> | Record<string, string>` (Pass 2 A2, Phase 0 prereq #9)
+  - 1.3 `AudioStore.stop()` (Pass 2 A6, Phase 0 prereq #10)
+  - 1.4 Phase 5 `NotificationsListRenderer` ownership-flag early-return guard (Pass 2 A3 Path A)
+  - 1.5 `c8 --100` on all 4 edited files; new unit tests green (≥9 new test cases across the 4 files)
+  - Commit boundary: "Phase 6b Phase 1: store API prereqs (respondAndAwait + widen respond + AudioStore.stop) + Phase 5 ownership-flag guard" (user-authorized per `feedback_never_auto_commit_push`)
+- [ ] [LUPIN] Phases 2-8 follow per `2026.05.11-phase6b-code-execution-plan.md` execution sequence (per-phase commits each gated on user authorization)
 
-**Read on resume**:
+**Read on resume (in this order)**:
 1. `~/.claude/CLAUDE.md` + `/mnt/DATA01/include/www.deepily.ai/projects/lupin/CLAUDE.md` + `CLAUDE.local.md`
-2. `history.md` (this session's entry: 2026.05.11 Session 017dc1cc)
-3. `TODO.md` (this section)
-4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/09-phase6b-interactive-widgets-design.md` (current doc state — Pass 1 closed)
-5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/95-phase6b-review-findings.md` (Pass 1 closure section at bottom for ratification record)
-6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/07-phase6-slicing-manifest.md` (context for what's in 6b vs 6c)
-7. Phase 6a Pass 2 for precedent: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/94-phase6a-review-findings.md` § "Pass 2 Adversarial — closed"
+2. `TODO.md` (this section)
+3. **`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/2026.05.11-phase6b-code-execution-plan.md`** — THE authoritative resume target; contains full 9-phase sequence + AC scorecard + pre-exit self-audit + resume pointer
+4. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/09-phase6b-interactive-widgets-design.md` (frozen design — Pass 2 closed)
+5. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/95-phase6b-review-findings.md` § "Pass 2 Adversarial — closed 2026-05-11" (ratification record for audit trail)
+6. `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` Phase 6b section (per-phase progress table — Phase 1 row to populate first)
+7. `history.md` (today's session entry if seeded)
+8. Phase 6a precedent (only if Phase 6a patterns ambiguous): `2026.05.06-phase6a-code-execution-plan.md` + `94-phase6a-review-findings.md` § "Pass 2 Adversarial — closed"
 
-**Outstanding Phase 0 prerequisites** (informational; verified at code-execution plan time, NOT at Pass 2):
+**Phase 0 prerequisites — net status post-Pass-2** (informational; verified at execute time):
 1. `DELETE /api/queue/<bucket>/<id>` exists in CoSA — ✅ verified (`queues.py:1193`)
-2. `action_required` payload carries `multiSelect: bool` — ⏳ pending
-3. `AudioStore.currentNotificationIdHash` linkage (preferred shape: sync getter; alternative: event payload field) — ⏳ pending
-4. Action-required render mount surface — ⏳ pending
-5. Phase 6a CoSA `multiplexer_config.py` commit — ⏳ pending
-6. `JobStore.delete(idHash)` exists — ❌ verified MISSING 2026-05-07 (Phase 4 splits into 4A + 4B per F-6 DOD)
-7. `countdown_expires_at` payload field — ⏳ pending verification (NEW per Pass 1 F-4)
+2. `action_required` payload carries `multiSelect: bool` — ⏳ pending verification
+3. `AudioStore.currentNotificationIdHash` linkage — ⏳ pending verification (preferred sync getter per Pass 1 F-11; alternative event payload field)
+4. Action-required render mount surface — ⏳ pending verification (`#action-required-pane` vs inline)
+5. Phase 6a CoSA `multiplexer_config.py` commit — ⏳ pending (carries from Phase 6a)
+6. `JobStore.delete(idHash)` — ❌ verified MISSING 2026-05-07; lands as Phase 5A of code-execution plan
+7. ~~`countdown_expires_at` payload field~~ — **STRUCK 2026-05-11 per Pass 2 A5** (redundant; use existing `expires_at: number`)
+8. **NEW** — `ActionRequiredStore.respondAndAwait()` method — Phase 1.1 of code-execution plan (per Pass 2 A1)
+9. **NEW** — Widen `respond()` signature to `string | ReadonlyArray<string> | Record<string, string>` — Phase 1.2 (per Pass 2 A2)
+10. **NEW** — `AudioStore.stop()` method — Phase 1.3 (per Pass 2 A6)
 
 ---
 

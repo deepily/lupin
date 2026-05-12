@@ -37,6 +37,38 @@
 
 **Commits**: `54f66a6` (this checkpoint commit — parent Lupin only)
 
+#### Post-checkpoint addendum | 2026.05.11 20:00-20:15 EDT | 5.10 deep dive → test RETIRED
+
+**Triggered by**: user request to investigate why the 5.10 subscription test was skipping in batch 1 / 2.
+
+**Findings** (chained):
+
+1. **Gate #1 — `_container_running()` skip**: test was authored as a host-side "deployment probe" calling `docker ps`, but `/api/test-suite/submit` schedules pytest INSIDE the container where the `docker` CLI doesn't exist → `FileNotFoundError` → fixture skipped the whole test. Fixed via `/.dockerenv` short-circuit (new `_running_inside_container()` helper).
+
+2. **Gate #2 — `_server_reachable()` skip**: `TEST_SERVER_BASE = "http://localhost:8000"` hardcoded — but inside the container `:8000` is unreachable (container listens on `:7999` internally). Fixed via `os.environ.get("LUPIN_API_URL", "http://localhost:8000")` — aligns with `feedback_tests_parameterize_base_url.md`.
+
+3. **Gate #3 — stale credentials (Docker bind-mount inode capture)**: `~/.claude/.credentials.json` bind-mounted as a single file → bound to host inode at container-start time. User refreshed creds at 17:52 EDT (atomic write-then-rename → new inode), but container kept seeing the pre-refresh content (hash `4cfccc...` vs host `734012...`). Fixed via test-server bounce (re-bound to current host inode). Long-term mitigation: mount the parent `~/.claude/` directory instead of just the file — directory bind mounts DO follow inode changes inside them.
+
+4. **Gate #4 — schema-drift in `_extract_cost_usd()`**: helper looked for `cost_summary` inside `artifacts` key at top of job record, but the job-history persistence layer stores it inside `metadata_json`. Fixed two-file: (a) `src/cosa/agents/claude_code/job.py` Bounded path now puts `cost_summary` in `self.artifacts` (parity with the dry-run path); (b) `_extract_cost_usd()` now also reads `metadata_json.cost_summary.total_cost_usd`.
+
+5. **THE PREMISE — AC10's `cost_usd == 0.0` is unsalvageable**: with all 4 gates above unblocked, the test finally executed end-to-end and the underlying CC CLI behavior surfaced: `claude -p` non-interactive mode reports `total_cost_usd > 0` on every call (~$0.05 in container, ~$0.32 on host) **even with no `ANTHROPIC_API_KEY` and valid Max OAuth credentials**. User insight (the breakthrough): the cost field is COUNTERFACTUAL API pricing reported as metadata, NOT actual billing. With no API key for the CLI to bill against, Max OAuth is paying the flat rate; the CLI just always reports "what this would cost via API" in its result envelope regardless of auth path. **The test as authored cannot pass on any valid CC CLI invocation.**
+
+**Decision**: 5.10 RETIRED. Module-level `pytestmark = pytest.mark.skip(reason=...)` added to `src/tests/smoke/test_claude_code_max_subscription.py` with full forensic trail in module docstring. The 4 architecture fixes are preserved as patterns for future CC-related smoke tests that need to work both on host and inside the test container.
+
+**Files modified (post-checkpoint, uncommitted)**:
+- `src/tests/smoke/test_claude_code_max_subscription.py` — 5 surgical edits + module-level skip marker + forensic-trail docstring
+- `src/cosa/agents/claude_code/job.py` — Bounded path artifacts dict now includes `cost_summary` (CoSA edit, separate commit context per `feedback_lupin_only_never_cosa`)
+- `TODO.md` — 5.10 rows marked retired; AC10 closed; new TFE-to-CC design-doc amendment item filed
+- `history.md` (this addendum)
+
+**:8000 test server bounces this session**: 2 total (17:13 EDT for batch-2 setup, 19:55 EDT after credential refresh + CoSA cost_summary fix; queues confirmed empty before each per server-lifecycle courtesy).
+
+**Phase 5b NET STATUS after retirement**:
+- 5.8 ✅ functional regression GREEN both batches
+- 5.9 ✅ visual baselines regenerated + self-consistency confirmed
+- 5.10 ✅ RETIRED (premise invalid)
+- Phase 6.8 parent commit functionally unblocked on CC card normalization scope.
+
 **Caveats / Notes**:
 
 - **Parallel session co-commit (lupin-app.ini + splainer)**: parallel session `9a4a601d` (Rachel, persona Rachel) was mid-Phase-1 implementation of inter-session-commons MCP and had already added 12 commons INI keys + 9 splainer entries to those 2 files when I started editing. Hunks are physically separate (Rachel's at lines 518+ / 691+; mine at 794-826 / 297-326). Pragmatic decision: commit both sets together with explicit attribution in commit message. Rachel's Python code (`commons_ask.py`, `commons_archival.py`, `commons` MCP shims in `cosa_voice_mcp.py`, etc.) is NOT in this commit — it remains in her manifest section for her own commit.
