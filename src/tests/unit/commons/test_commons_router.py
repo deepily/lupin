@@ -17,17 +17,24 @@ from pathlib import Path
 
 import pytest
 
+from pydantic import ValidationError
+
 from cosa.rest.commons_ack_watcher import CommonsAckWatcher
+from cosa.rest.commons_question_watcher import CommonsQuestionWatcher
 from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
 from cosa.rest.routers.commons import (
     BroadcastRequestBody,
+    RegisterQuestionRequest,
     _bridge_last_activity_epoch,
     _load_bridge_fields,
     _body_contains_reminder_framing,
     build_pseudo_sender_id,
     execute_broadcast,
+    execute_register_question,
+    execute_unregister_question,
     filter_and_project_sessions,
     init_commons_state,
+    make_question_inject_fn,
     perform_fanout,
     project_session_response,
     validate_broadcast_body,
@@ -782,3 +789,260 @@ def test_init_commons_state_sets_singletons( store, rate_limiter, ack_watcher ):
     assert commons_module._commons_rate_limiter             is rate_limiter
     assert commons_module._commons_ack_watcher              is ack_watcher
     assert commons_module._active_session_threshold_seconds == 42.0
+
+
+# ─── Step 6: RegisterQuestionRequest Pydantic validation ────────────────────
+
+
+def test_register_question_request_happy_path():
+    """All required fields populated; defaults applied."""
+    req = RegisterQuestionRequest(
+        topic            = "q-topic",
+        question_id      = "qid-1234",
+        asker_session_id = "abc12345",
+    )
+    assert req.topic            == "q-topic"
+    assert req.question_id      == "qid-1234"
+    assert req.asker_session_id == "abc12345"
+    assert req.ttl_seconds      == 3600
+
+
+def test_register_question_request_rejects_empty_topic():
+    with pytest.raises( ValidationError ):
+        RegisterQuestionRequest( topic="", question_id="q1", asker_session_id="sid" )
+
+
+def test_register_question_request_rejects_topic_with_disallowed_chars():
+    with pytest.raises( ValidationError ):
+        RegisterQuestionRequest( topic="q.topic", question_id="q1", asker_session_id="sid" )
+
+
+def test_register_question_request_rejects_oversize_question_id():
+    with pytest.raises( ValidationError ):
+        RegisterQuestionRequest( topic="t", question_id="a" * 65, asker_session_id="sid" )
+
+
+def test_register_question_request_rejects_ttl_below_min():
+    with pytest.raises( ValidationError ):
+        RegisterQuestionRequest( topic="t", question_id="q1", asker_session_id="sid", ttl_seconds=0 )
+
+
+def test_register_question_request_rejects_ttl_above_max():
+    with pytest.raises( ValidationError ):
+        RegisterQuestionRequest( topic="t", question_id="q1", asker_session_id="sid", ttl_seconds=604801 )
+
+
+def test_register_question_request_rejects_empty_asker_session_id():
+    with pytest.raises( ValidationError ):
+        RegisterQuestionRequest( topic="t", question_id="q1", asker_session_id="" )
+
+
+# ─── Step 6: make_question_inject_fn ────────────────────────────────────────
+
+
+def test_make_question_inject_fn_pushes_notification_with_expected_shape( store, captured_pushes, push_fn ):
+    """The inject_fn closure pushes a notification matching the AC4 framing."""
+    inject = make_question_inject_fn(
+        notification_queue = push_fn,
+        user_id            = "user-A",
+        question_id        = "qid-1",
+        asker_session_id   = "asker-session-12345678",
+        build_sender_id    = lambda sid: f"cc:{sid}",
+    )
+    entry = {
+        "body"              : "answer body here",
+        "persona_name"      : "Tiberius",
+        "persona_icon"      : "🌑",
+        "persona_color"     : "#000",
+        "sender_session_id" : "answerer-session-abc",
+        "ts"                : "2026-05-13T10:00:00+00:00",
+    }
+    inject( entry )
+
+    assert len( captured_pushes ) == 1
+    push = captured_pushes[ 0 ]
+    assert push[ "type" ]              == "user_initiated_message"
+    assert push[ "title" ]             == "action:commons_answer_received"
+    assert push[ "sender_id" ]         == "cc:asker-session-12345678"
+    assert push[ "job_id" ]            == "asker-se"  # first 8 chars
+    assert push[ "user_id" ]           == "user-A"
+    assert push[ "suppress_ding" ]     is True
+    assert push[ "response_requested" ] is False
+    payload = push[ "payload" ]
+    assert payload[ "question_id" ]      == "qid-1"
+    assert payload[ "body" ]             == "answer body here"
+    assert payload[ "persona_name" ]     == "Tiberius"
+    assert payload[ "persona_icon" ]     == "🌑"
+    assert payload[ "answerer_session" ] == "answerer-session-abc"
+    assert payload[ "answer_ts" ]        == "2026-05-13T10:00:00+00:00"
+
+
+# ─── Step 6: execute_register_question ──────────────────────────────────────
+
+
+@pytest.fixture
+def question_watcher( store ):
+    return CommonsQuestionWatcher(
+        store        = store,
+        per_user_max = 3,
+        global_max   = 5,
+    )
+
+
+def _build_req( topic="t", qid="q1", sid="asker-sess", ttl=3600 ):
+    return RegisterQuestionRequest(
+        topic            = topic,
+        question_id      = qid,
+        asker_session_id = sid,
+        ttl_seconds      = ttl,
+    )
+
+
+def test_execute_register_question_happy_path( question_watcher, push_fn ):
+    """201 on success; question becomes in flight."""
+    result = execute_register_question(
+        authenticated_user_id = "user-A",
+        body                  = _build_req( qid="q1" ),
+        question_watcher      = question_watcher,
+        notification_queue    = push_fn,
+        build_sender_id       = lambda s: f"cc:{s}",
+    )
+    assert result[ "http_status" ] == 201
+    assert result[ "question_id" ] == "q1"
+    assert result[ "ttl_seconds" ] == 3600
+    assert question_watcher.is_in_flight( "q1" ) is True
+
+
+def test_execute_register_question_collision_returns_409( question_watcher, push_fn ):
+    """Duplicate question_id → 409."""
+    execute_register_question(
+        authenticated_user_id = "user-A",
+        body                  = _build_req( qid="q1" ),
+        question_watcher      = question_watcher,
+        notification_queue    = push_fn,
+        build_sender_id       = lambda s: f"cc:{s}",
+    )
+    result = execute_register_question(
+        authenticated_user_id = "user-A",
+        body                  = _build_req( qid="q1" ),
+        question_watcher      = question_watcher,
+        notification_queue    = push_fn,
+        build_sender_id       = lambda s: f"cc:{s}",
+    )
+    assert result[ "http_status" ] == 409
+    assert "collision" in result[ "detail" ]
+
+
+def test_execute_register_question_per_user_cap_returns_429( question_watcher, push_fn ):
+    """Per-user cap exceeded → 429."""
+    for i in range( 3 ):
+        execute_register_question(
+            authenticated_user_id = "user-A",
+            body                  = _build_req( qid=f"q{i}" ),
+            question_watcher      = question_watcher,
+            notification_queue    = push_fn,
+            build_sender_id       = lambda s: f"cc:{s}",
+        )
+    result = execute_register_question(
+        authenticated_user_id = "user-A",
+        body                  = _build_req( qid="q-overflow" ),
+        question_watcher      = question_watcher,
+        notification_queue    = push_fn,
+        build_sender_id       = lambda s: f"cc:{s}",
+    )
+    assert result[ "http_status" ] == 429
+    assert "cap reached" in result[ "detail" ]
+
+
+def test_execute_register_question_global_cap_returns_429( store, push_fn ):
+    """Global cap exceeded → 429 (different users)."""
+    w = CommonsQuestionWatcher( store=store, per_user_max=100, global_max=2 )
+    execute_register_question( authenticated_user_id="u1", body=_build_req( qid="q1" ),
+                                question_watcher=w, notification_queue=push_fn,
+                                build_sender_id=lambda s: f"cc:{s}" )
+    execute_register_question( authenticated_user_id="u2", body=_build_req( qid="q2" ),
+                                question_watcher=w, notification_queue=push_fn,
+                                build_sender_id=lambda s: f"cc:{s}" )
+    result = execute_register_question( authenticated_user_id="u3", body=_build_req( qid="q3" ),
+                                         question_watcher=w, notification_queue=push_fn,
+                                         build_sender_id=lambda s: f"cc:{s}" )
+    assert result[ "http_status" ] == 429
+
+
+# ─── Step 6: execute_unregister_question (T5) ───────────────────────────────
+
+
+def test_execute_unregister_question_happy_path( question_watcher, push_fn ):
+    """204 on successful removal."""
+    execute_register_question(
+        authenticated_user_id = "user-A",
+        body                  = _build_req( qid="q1" ),
+        question_watcher      = question_watcher,
+        notification_queue    = push_fn,
+        build_sender_id       = lambda s: f"cc:{s}",
+    )
+    result = execute_unregister_question(
+        authenticated_user_id = "user-A",
+        question_id           = "q1",
+        question_watcher      = question_watcher,
+    )
+    assert result == { "http_status": 204 }
+
+
+def test_execute_unregister_question_unknown_returns_404( question_watcher ):
+    """Unknown question_id → uniform 404."""
+    result = execute_unregister_question(
+        authenticated_user_id = "user-A",
+        question_id           = "ghost",
+        question_watcher      = question_watcher,
+    )
+    assert result[ "http_status" ] == 404
+    assert "not found or not owned" in result[ "detail" ]
+
+
+def test_execute_unregister_question_wrong_owner_returns_404( question_watcher, push_fn ):
+    """T5 — known question, wrong user → SAME uniform 404 (no enumeration)."""
+    execute_register_question(
+        authenticated_user_id = "user-A",
+        body                  = _build_req( qid="q1" ),
+        question_watcher      = question_watcher,
+        notification_queue    = push_fn,
+        build_sender_id       = lambda s: f"cc:{s}",
+    )
+    result = execute_unregister_question(
+        authenticated_user_id = "user-B",
+        question_id           = "q1",
+        question_watcher      = question_watcher,
+    )
+    assert result[ "http_status" ] == 404
+    assert "not found or not owned" in result[ "detail" ]
+    # The record is NOT removed
+    assert question_watcher.is_in_flight( "q1" ) is True
+
+
+# ─── Step 6: init_commons_state accepts question_watcher ────────────────────
+
+
+def test_init_commons_state_accepts_question_watcher( store, rate_limiter, ack_watcher, question_watcher ):
+    """init_commons_state wires the question_watcher singleton too."""
+    import cosa.rest.routers.commons as commons_module
+    init_commons_state(
+        store                            = store,
+        rate_limiter                     = rate_limiter,
+        ack_watcher                      = ack_watcher,
+        active_session_threshold_seconds = 600.0,
+        question_watcher                 = question_watcher,
+    )
+    assert commons_module._commons_question_watcher is question_watcher
+
+
+def test_init_commons_state_question_watcher_optional( store, rate_limiter, ack_watcher ):
+    """Backward-compat: init_commons_state still accepts the Phase 2 4-arg signature."""
+    import cosa.rest.routers.commons as commons_module
+    init_commons_state(
+        store                            = store,
+        rate_limiter                     = rate_limiter,
+        ack_watcher                      = ack_watcher,
+        active_session_threshold_seconds = 600.0,
+    )
+    assert commons_module._commons_question_watcher is None
