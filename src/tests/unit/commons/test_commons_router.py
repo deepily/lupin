@@ -336,6 +336,69 @@ def test_filter_excludes_other_user():
     assert out == [ ]
 
 
+def test_filter_graceful_includes_bridge_without_user_id():
+    """
+    2026-05-13 fix — bridge lacking a `user_id` field passes through (graceful
+    degradation for legacy / un-stamped bridges per the broadcast-UI bug doc
+    `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`).
+    """
+    raw = [ _make_session_tuple( "/bridge/legacy", "sid-legacy", { "name": "Maria" } ) ]
+    # Bridge has NO user_id key
+    loader = lambda p: { "last_activity_epoch": 1000.0 }
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = loader,
+    )
+    assert len( out ) == 1
+    assert out[ 0 ][ "session_id" ] == "sid-legacy"
+
+
+def test_filter_graceful_includes_bridge_with_null_user_id():
+    """
+    2026-05-13 fix — bridge with explicit `user_id: null` is treated as
+    un-stamped (same as missing key) and passes through.
+    """
+    raw = [ _make_session_tuple( "/bridge/null", "sid-null", { "name": "Maria" } ) ]
+    loader = lambda p: { "user_id": None, "last_activity_epoch": 1000.0 }
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = loader,
+    )
+    assert len( out ) == 1
+
+
+def test_filter_strict_when_bridge_has_user_id():
+    """
+    Regression: bridges that DO carry user_id still enforce strict equality —
+    the graceful path only relaxes for missing/null user_id.
+    """
+    raw = [
+        _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ),
+        _make_session_tuple( "/bridge/B", "sid-B", { "name": "Tiberius" } ),
+    ]
+    def loader( p ):
+        # A is owned by alice; B is owned by bob; bridge for path /unknown has no user_id
+        if str( p ) == "/bridge/A": return { "user_id": "alice", "last_activity_epoch": 1000.0 }
+        if str( p ) == "/bridge/B": return { "user_id": "bob",   "last_activity_epoch": 1000.0 }
+        return None
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = loader,
+    )
+    # Only alice's bridge is included — bob's is rejected because his bridge HAS user_id and it doesn't match
+    assert len( out ) == 1
+    assert out[ 0 ][ "session_id" ] == "sid-A"
+
+
 def test_filter_skips_unloadable_bridge():
     """Bridge loader returns None → session skipped."""
     raw = [ _make_session_tuple( "/bridge/A", "sid-A", { } ) ]
