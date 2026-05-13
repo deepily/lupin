@@ -2,6 +2,44 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.12 Evening - Session 56ee76d6 (Rachel 🕊️) | Multiplexer Phase 6b CLOSED + Phase 6c design phase opened (Cluster A 5/5)
+
+**Persona**: Rachel 🕊️ (Calm & clear female, #7B1FA2)
+
+**Topic**: Closed Phase 6b of the multiplexer notifications-UI rebuild end-to-end (Phases 5A → 8 + closure post-mortem). Opened Phase 6c design phase (persona modal / focus tray / audio recorder / conversation-mode UI pin) and walked Cluster A through 5/5 Q-decision ratifications.
+
+**Accomplishments**:
+
+- **Phase 6b Phase 5A — `JobStore.delete(idHash)`** (commit `118ed10`): NEW public `delete(idHash): { restoreState: () => void }` captures bucket + index + job, splices out, deletes from `indexById`, emits `removed`; `restoreState` re-inserts at original index, restores `indexById`, emits `added`. Nonexistent idHash → no-op closure + zero events. 11 new tests covering all 8 DOD rows; c8 100% on `JobStore.ts`.
+
+- **Phase 6b Phase 5B — Delete-button click handler on `JobsPaneRenderer`** (commit `118ed10`): NEW `JobsPaneApiClient extends JobHistoryApiClient` adds `delete<T>`. Click delegation dispatches `.job-delete-button` BEFORE card-header toggle path (preserves Pass 2 F23 invariant). `handleDeleteClick()` w/ optimistic-removal + `Set<string> deleteInFlight` idempotency + `DELETE /api/queue/${UI_STATUS_TO_SERVER_QUEUE[status]}/${idHash}` (running→run legacy map). 2xx + 404 → discard restoreState; 5xx + non-ApiError Error → restoreState + inline error stripe. `stripInertnessMarkers()` post-renderAll removes `aria-disabled`/`tabindex`/`title`. 9 new AC5c tests; c8 100%.
+
+- **Phase 6b Phase 6 — CSS port + page shell + boot wiring** (commit `e324e6c`): NEW `action-required.css` (295 LOC ≤500) + `tts-chrome.css` (187 LOC ≤700); stylelint clean. `.stylelintrc.json` extended with 2 F28 layer-2 overrides. `multiplexer.html` gains both `<link>` entries. `BootCompletePayload.handlers` extended with optional `actionRequiredRenderer`/`ttsChromeRenderer`. `boot.ts` A7/A8 ordering: notifications → jobs → actionRequired → ttsChrome → transports LAST; 4 stable `:mounted` console lines. `boot.js` gz = **34,647 B** = B6a + 3,163 (AC7 ceiling 39,676 → 5,029 B headroom).
+
+- **Phase 6b Phase 7 — `:7999` smoke + AC10 cross-phase sweep** (commit `e324e6c`): NEW `test_multiplexer_phase6b_smoke.py` — 6 Playwright sub-tests, 6/6 PASS in 6.76s. AC10e cascade in Phase 5 + 6a smoke: `pending_count` floor cascaded ≥3 → ==1 → **==0**; Phase 5 boot-handshake substring filter tightened. Full sweep: tsc + eslint + stylelint clean; 602/602 unit; 14/14 smoke; c8 --100 across all 9 Phase 6b TS files.
+
+- **Phase 6b Phase 8 — `:8000` scheduled E2E AC11a + AC11b** (commit `e324e6c`): NEW `test_multiplexer_phase6b_visual.py`. AC11a baseline `ts-5b88515c` wrote 2 PNGs. AC11b regression `ts-83e38e5f` returned **2 passed, 0 errors in 9.9s — AC11 GREEN**. TFE auto-fix tripped on AC11a library-convention errors and stalled at voice gate (proposing baselines for parallel session's `test_doc_viewer_directory.py` — left for doc-viewer team).
+
+- **Phase 6b closure post-mortem** (commit `e324e6c`): NEW `97-phase6b-closure.md` (197 lines) — field-summary header, per-phase what-landed, 24-row AC verification matrix, 8 deviation entries, 5 deferred items, idempotency marker. `07-phase6-slicing-manifest.md` gains live slice-status table.
+
+- **Phase 6c design phase opened** — NEW `10-phase6c-persona-focus-recorder-design.md` draft (4 clusters × 20 Q-decisions). Pre-design recon completed (persona shape, legacy class names with line numbers, `--persona-color-rgb` CSS-var pre-wired).
+
+- **Cluster A ratified (5/5)**: Q-A1 trigger = `.sender-persona-badge` chip; Q-A2 modal = HTML Popover API w/ `popover="auto"` + declarative `popovertarget`; Q-A3 close = ESC + outside-click + × button; Q-A4 color = subtle thin top accent + tinted name; Q-A5 borrowed = `(borrowed)` label only (attribution deferred — no `original_owner` server field; follow-on filed).
+
+**Files modified**: 23 files (10 NEW + 13 MOD) under `src/fastapi_app/static/js/multiplexer/`, `src/fastapi_app/static/css/multiplexer/`, `src/tests/{unit,smoke,e2e_ui}/multiplexer/`, `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/`, plus `.stylelintrc.json`, `multiplexer.html`, `dev-tools.html`, `TODO.md`.
+
+**Auto-memory captured**:
+
+- NEW `feedback_baseline_capture_disable_tfe.md` — always include `auto_fix_on_failure: False` on `--update-snapshots` test-suite submits.
+- NEW `feedback_tts_body_headline_and_takeaway_only.md` — spoken `notify(message=)` / `ask_multiple_choice(question=)` body is headline + one-sentence recommendation only; pros/cons/inventory go in `abstract`.
+- MOD `~/.claude/skills/schedule-tests/SKILL.md` — NEW "Mode: list-pending" section documenting the auth + `/api/get-queue/todo` queue-coordination snippet.
+
+**Commits this session**: `118ed10` (Phases 5A+5B), `e324e6c` (Phases 6+7+8+closure).
+
+**Status**: ✅ Phase 6b end-to-end CLOSED. Phase 6c Cluster A ratified; Clusters B/C/D + REUSE + Pass 1/2 + code-execution plan + implementation are the remaining cycle.
+
+---
+
 ### 2026.05.12 Evening - Session 02e5cd9d (Arnold 🪨) | Multi-Repo Doc Viewer — N-scope INI registry + JWT gate + secrets blocklist + source-code rendering
 
 **Persona**: Arnold 🪨 (Gravelly male, #FFD600)

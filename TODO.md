@@ -1,5 +1,49 @@
 # TODO
 
+## ☀️ FIRST THING NEXT SESSION — Multiplexer Phase 6c kickoff (session 56ee76d6 Rachel 🕊️, 2026-05-12 evening)
+
+**Resume pointer**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md`
+
+### Where we are
+
+Phase 6b is **CLOSED** (commits `118ed10` Phases 5A+5B; `e324e6c` Phases 6+7+8+closure + `97-phase6b-closure.md`). Phase 6c (persona modal + focus tray + audio recorder + conversation-mode UI pin) **design phase opened today** and Cluster A is fully ratified.
+
+### Cluster A — CLOSED 2026-05-12 (5/5 ratified)
+
+| Q | Decision |
+|---|---|
+| Q-A1 | Trigger = `.sender-persona-badge` chip embedded in sender card |
+| Q-A2 | Modal = HTML Popover API; `popover="auto"` mode; chip carries `popovertarget` (declarative wiring) |
+| Q-A3 | Close affordances = ESC + outside-click (built-in) + explicit × button |
+| Q-A4 | Persona color = subtle thin top accent + tinted name text; body neutral |
+| Q-A5 | Borrowed display = `(borrowed)` label only; attribution deferred (server has no `original_owner` field) |
+
+### Remaining Q-decisions for Phase 6c design phase
+
+- [ ] **Cluster B — Focus tray** (Q-B1..Q-B5) — mount surface, toggle UI, focus-target selection (couples to Cluster D), tray contents, flash animation
+- [ ] **Cluster C — Audio recorder** (Q-C1..Q-C6) — mount placement, MediaRecorder MIME, state machine, STT endpoint, Send payload, concurrency
+- [ ] **Cluster D — Conversation-mode UI pin** (Q-D1..Q-D4) — pin state location (store vs DOM), top-of-list mechanism, mic-monopoly indicator, multi-sender race
+
+### After Q-decisions close
+
+1. REUSE pre-pass (catalog reusable patterns from Phases 5/6a/6b)
+2. Pass 1 Fitness review
+3. Pass 2 Adversarial review
+4. Code-execution plan
+5. Implementation
+
+Per `feedback_pip_plan_review_is_sequential` — no auto-progression between gates.
+
+### Follow-on filed during Cluster A walk
+
+- [ ] **[LUPIN-COSA]** Server-side extension: add `original_owner` field to `ServerVoicePersona` payload (`cosa/rest/voice_persona_helpers.py:borrowed_persona_for_sid`). When that lands, Phase 6c popover swaps `(borrowed)` → `(borrowed from {name})`. Not blocking Phase 6c.
+
+### TTS format rule learned this session
+
+Spoken `notify(message=…)` / `ask_multiple_choice(question=…)` body is **headline + one-sentence recommendation only**. Detail (pros/cons, flip-conditions, file paths, inventory) goes in `abstract`. Filed as `feedback_tts_body_headline_and_takeaway_only.md`. Rick told me twice during the Q-A walk; sticks now.
+
+---
+
 ## ⏸️ Speakerphone (solo/chorus) — implementation-ready, awaiting Rick's go-ahead (2026-05-12)
 
 **Start here**: `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/00-index.md`
@@ -40,25 +84,26 @@ The Phase 1 work is not blocking anything else; pick it up whenever Rick says "g
 
 ---
 
-## ☀️ FIRST THING NEXT SESSION — Inter-Session Commons Phase 3 Pass 1 Fitness, mid-walk (F2-fit picker resume)
+## ✅ Inter-Session Commons Phase 3 — ALL 4 PLAN-REVIEW PASSES CLOSED 2026-05-12 PM (Tiberius 🌑, session 6a054460)
 
-**Resume pointer**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/91-resume-here-phase3-pass1-f2-fit.md`
+**Primary doc**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md`
 
-That doc is **self-contained** — pre-context-clear handoff with Pass 0 + REUSE summary, F1-fit ratification, the F2-fit picker framing verbatim (re-fire on resume), 11 remaining findings tabulated, process reminders, and a file-location cheatsheet.
+### State
 
-### Where we are
+- **Pass 0** ✅ — 8/8 Q-decisions ratified
+- **REUSE pass** ✅ — 8 F-mappings + 4 new F-findings + 3 corrections applied
+- **Pass 1 Fitness** ✅ — 13/13 findings ratified + Rick's AC15 amendment
+- **Pydantic-native validation retrofit** ✅ — AC1/AC2/AC6 + §8 model use `Field` + `field_validator` declaratively (memory `feedback_pydantic_native_validation` saved)
+- **Pass 2 Adversarial** ✅ — 8/8 threats T1-T8 ratified + apply phase
+- **Final state**: 20 ACs (AC1-AC15 Pass 1 + AC16-AC20 Pass 2 tests), 10 new INI keys, 9 NEW files + 8 MODIFIED, NEW §6 Testing Ownership Mandate, NEW §8 PHI-4 prompt envelope, NEW Pass 2 ratifications table in §3.
 
-- **Pass 0** ✅ CLOSED — 8/8 Q-decisions ratified (Q1 hybrid base class / Q2 dynamic registration / Q3 `COMMONS PEER REPLY` framing / Q4 1hr TTL + per-call override / Q5 PHI-4 first → stubbed Haiku / Q6 no cache / Q7 5s timeout / Q8 in-memory tracker)
-- **REUSE pass** ✅ CLOSED + applied — 8 F-mappings + 4 new F-findings + 3 corrections (C1 LlmClientFactory pivot, C2 PHI-4 spec INI key, C3 Q2 sub-question lock-in for HTTP register endpoint)
-- **Pass 1 Fitness** 🟡 IN FLIGHT — F1-fit ratified (Option A: default True + try-except + warning log); F2-fit ⏸ paused mid-picker. 11 findings remaining.
+### Next gate (when implementation begins)
 
-### Required next-session sequence
+Per CLAUDE.local.md §"THE USER IS NEVER A TESTER" + §6 Testing Ownership Mandate:
 
-1. **Re-fire F2-fit picker** with the verbatim framing in §4 of the resume doc.
-2. Walk F3-fit through F13-fit **one at a time** (3 high → 6 medium → 2 low) per Rick's standing directive.
-3. After all 13 findings ratify: apply phase — write AC table to §6, add §8 prompt envelope, finalize INI key count.
-4. **Pass 2 Adversarial** — threat-walk push surface (user gate before applying).
-5. Only after Pass 2 closes → flip status to APPROVED FOR CODE-WRITE.
+The AI executes the §6 test-pyramid tiers (`py_compile` → unit → smoke → router-registration → coverage gate → scheduled `:8000` integration E2E AC15) during + at closure of implementation. Tabular pass/fail reported per tier. The user is never asked to verify or run tests.
+
+Implementation flow: §5 sequencing → 9 steps → at each step, the AI runs the appropriate tier → at all-steps-closure, AI runs full pyramid + reports tabular → user authorizes APPROVED FOR CODE-WRITE flip (which is really "approved for the next phase").
 
 ### Standing directive (mandatory)
 
