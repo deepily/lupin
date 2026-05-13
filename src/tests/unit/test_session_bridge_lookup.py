@@ -19,8 +19,8 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     find_session_by_id, find_session_by_tmux,
-    find_session_path_by_id, get_conversation_mode, set_conversation_mode,
-    find_active_conversation_sessions,
+    find_session_path_by_id, get_speakerphone, set_speakerphone,
+    find_active_speakerphone_sessions,
     build_sender_id_for_cc, _resolve_project_from_bridge_cwd
 )
 from lupin_cli.claude_code.hooks.register_session import main
@@ -777,18 +777,19 @@ class TestFindSessionPathById:
 class TestConversationMode:
 
     def test_default_is_false( self ):
-        """Bridge without conversation_mode_active reads as False."""
+        """Bridge without speakerphone_on reads as False under solo mode."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             sid = "session1-1111-2222-3333-444455556666"
             data = _make_session_data( sid )
             _write_session_file( sessions_dir, os.getpid(), data )
 
-            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                assert get_conversation_mode( sid ) is False
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "cosa.utils.util.get_tts_interaction_mode", return_value="solo" ):
+                assert get_speakerphone( sid ) is False
 
     def test_set_then_get_round_trip( self ):
-        """set_conversation_mode(True) then get_conversation_mode returns True; flipping back returns False."""
+        """set_speakerphone(True) then get_speakerphone returns True; flipping back returns False."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             sid = "rndtrip1-1111-2222-3333-444455556666"
@@ -796,13 +797,13 @@ class TestConversationMode:
             _write_session_file( sessions_dir, os.getpid(), data )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                assert set_conversation_mode( sid, True ) is True
-                assert get_conversation_mode( sid ) is True
-                assert set_conversation_mode( sid, False ) is True
-                assert get_conversation_mode( sid ) is False
+                assert set_speakerphone( sid, True ) is True
+                assert get_speakerphone( sid ) is True
+                assert set_speakerphone( sid, False ) is True
+                assert get_speakerphone( sid ) is False
 
     def test_per_session_isolation( self ):
-        """Two sessions in same SESSION_DIR have independent flags."""
+        """Two sessions in same SESSION_DIR have independent flags (solo default = false)."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             sid_a = "aaaaaaaa-1111-2222-3333-444455556666"
@@ -813,34 +814,35 @@ class TestConversationMode:
             _write_session_file( sessions_dir, 90002, _make_session_data( sid_b ) )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
-                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
-                assert set_conversation_mode( sid_a, True ) is True
-                # Session A is on, B should still be off (default)
-                assert get_conversation_mode( sid_a ) is True
-                assert get_conversation_mode( sid_b ) is False
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ), \
+                 patch( "cosa.utils.util.get_tts_interaction_mode", return_value="solo" ):
+                assert set_speakerphone( sid_a, True ) is True
+                # Session A is on, B should still be off (default in solo mode)
+                assert get_speakerphone( sid_a ) is True
+                assert get_speakerphone( sid_b ) is False
                 # Flip B, A must remain on
-                assert set_conversation_mode( sid_b, True ) is True
-                assert get_conversation_mode( sid_a ) is True
-                assert get_conversation_mode( sid_b ) is True
+                assert set_speakerphone( sid_b, True ) is True
+                assert get_speakerphone( sid_a ) is True
+                assert get_speakerphone( sid_b ) is True
 
     def test_get_on_missing_session_returns_false( self ):
-        """get_conversation_mode for unknown session_id returns False (no exception)."""
+        """get_speakerphone for unknown session_id returns False (no exception)."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                assert get_conversation_mode( "nonexistent" ) is False
+                assert get_speakerphone( "nonexistent" ) is False
 
     def test_set_on_missing_session_returns_false( self ):
-        """set_conversation_mode for unknown session_id returns False (no bridge created)."""
+        """set_speakerphone for unknown session_id returns False (no bridge created)."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                assert set_conversation_mode( "nonexistent", True ) is False
+                assert set_speakerphone( "nonexistent", True ) is False
                 # No file should have been created
                 assert not list( sessions_dir.glob( "cc-*.json" ) )
 
     def test_set_preserves_other_fields( self ):
-        """set_conversation_mode round-trip preserves session_id, cwd, etc."""
+        """set_speakerphone round-trip preserves session_id, cwd, etc."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             sid = "preserve-1111-2222-3333-444455556666"
@@ -849,7 +851,7 @@ class TestConversationMode:
             _write_session_file( sessions_dir, os.getpid(), data )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                set_conversation_mode( sid, True )
+                set_speakerphone( sid, True )
 
             # Re-read directly to confirm preservation
             with open( sessions_dir / f"cc-{os.getpid()}.json" ) as f:
@@ -859,16 +861,16 @@ class TestConversationMode:
             assert after[ "tmux_session" ] == "my-tmux"
             assert after[ "cwd" ] == "/some/path"
             assert after[ "session_topic" ] == "important topic"
-            assert after[ "conversation_mode_active" ] is True
+            assert after[ "speakerphone_on" ] is True
 
 
-# ── Tests: find_active_conversation_sessions (mutex enforcement helper) ────────
+# ── Tests: find_active_speakerphone_sessions (mutex enforcement helper) ────────
 
 
 class TestFindActiveConversationSessions:
     """
     The mutex-enforcement helper used by the conversation-mode endpoint to find
-    every bridge whose conversation_mode_active=true at the moment a new session
+    every bridge whose speakerphone_on=true at the moment a new session
     activates. It must:
       - Return empty list when no bridge has it set
       - Return all matching bridges with canonical session_id
@@ -880,23 +882,23 @@ class TestFindActiveConversationSessions:
 
     def _write_active( self, sessions_dir, pid, sid, active=True ):
         data = _make_session_data( sid )
-        data[ "conversation_mode_active" ] = active
+        data[ "speakerphone_on" ] = active
         return _write_session_file( sessions_dir, pid, data )
 
     def test_empty_dir_returns_empty_list( self ):
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                assert find_active_conversation_sessions() == []
+                assert find_active_speakerphone_sessions() == []
 
     def test_no_active_bridges_returns_empty_list( self ):
-        """All bridges with conversation_mode_active=false → empty."""
+        """All bridges with speakerphone_on=false → empty."""
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             self._write_active( sessions_dir, os.getpid(), "aaaa1111-2222-3333-4444-555566667777", active=False )
             self._write_active( sessions_dir, os.getpid() + 1, "bbbb2222-3333-4444-5555-666677778888", active=False )
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                assert find_active_conversation_sessions() == []
+                assert find_active_speakerphone_sessions() == []
 
     def test_returns_single_active_bridge( self ):
         with tempfile.TemporaryDirectory() as tmp:
@@ -907,7 +909,7 @@ class TestFindActiveConversationSessions:
             self._write_active( sessions_dir, os.getpid() + 1, sid_b, active=False )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                results = find_active_conversation_sessions()
+                results = find_active_speakerphone_sessions()
 
             assert len( results ) == 1
             assert results[0] == ( written_a, sid_a )
@@ -925,7 +927,7 @@ class TestFindActiveConversationSessions:
             # Patch _is_pid_alive so the synthetic PIDs all "look alive"
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
-                results = find_active_conversation_sessions()
+                results = find_active_speakerphone_sessions()
 
             sids = sorted( sid for _path, sid in results )
             assert sids == sorted( [ sid_a, sid_b ] )
@@ -940,7 +942,7 @@ class TestFindActiveConversationSessions:
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
-                results = find_active_conversation_sessions( exclude_session_id=sid_a )
+                results = find_active_speakerphone_sessions( exclude_session_id=sid_a )
 
             sids = [ sid for _path, sid in results ]
             assert sids == [ sid_b ]
@@ -956,7 +958,7 @@ class TestFindActiveConversationSessions:
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
-                results = find_active_conversation_sessions( exclude_session_id="deadbeef" )
+                results = find_active_speakerphone_sessions( exclude_session_id="deadbeef" )
 
             sids = [ sid for _path, sid in results ]
             assert sids == [ sid_b ]
@@ -973,7 +975,7 @@ class TestFindActiveConversationSessions:
             ( sessions_dir / "cc-listener-ccc.log" ).write_text( "not json either" )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                results = find_active_conversation_sessions()
+                results = find_active_speakerphone_sessions()
 
             assert len( results ) == 1
             assert results[0][1] == sid_a
@@ -993,7 +995,7 @@ class TestFindActiveConversationSessions:
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=False ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=False ):
-                results = find_active_conversation_sessions()
+                results = find_active_speakerphone_sessions()
 
             assert len( results ) == 1
             assert results[0][1] == sid_a
@@ -1008,7 +1010,7 @@ class TestFindActiveConversationSessions:
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=False ):
-                assert find_active_conversation_sessions() == []
+                assert find_active_speakerphone_sessions() == []
 
     def test_prefers_stable_session_id_in_returned_tuple( self ):
         """When a bridge has stable_session_id, that's what's returned (matches find_session_path_by_id semantics)."""
@@ -1016,11 +1018,11 @@ class TestFindActiveConversationSessions:
             sessions_dir = Path( tmp )
             data = _make_session_data( "transient-1234-5555-6666-777788889999" )
             data[ "stable_session_id" ] = "stable000-1234-5555-6666-777788889999"
-            data[ "conversation_mode_active" ] = True
+            data[ "speakerphone_on" ] = True
             _write_session_file( sessions_dir, os.getpid(), data )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                results = find_active_conversation_sessions()
+                results = find_active_speakerphone_sessions()
 
             assert len( results ) == 1
             _path, sid = results[0]

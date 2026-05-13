@@ -650,13 +650,36 @@ def find_session_path_by_id( session_id ):
     return None
 
 
-def find_active_conversation_sessions( exclude_session_id=None ):
-    """
-    Scan all bridge files for sessions whose conversation_mode_active=true.
+BRIDGE_FORMAT_VERSION = 2
 
-    Used by the conversation-mode HTTP endpoint to enforce the "at most one
-    active conversation mode session at a time" invariant — when a session
-    activates, all OTHER active sessions are deactivated atomically.
+
+def _get_default_speakerphone():
+    """
+    Return the mode-aware default for `speakerphone_on` when a bridge has no
+    explicit field (i.e., v1 bridges from before the Phase 2 rename, OR
+    freshly-created bridges that haven't been touched by set_speakerphone yet).
+
+    Solo  → False (today's monopoly-mode default: sessions opt in to TTS render)
+    Chorus → True (at-distance is the default in chorus mode)
+
+    Defers the cosa.utils.util import to break any circular-import risk and to
+    keep this function side-effect-free at import time.
+    """
+    try:
+        from cosa.utils import util as cu
+        return cu.get_tts_interaction_mode() == "chorus"
+    except Exception:
+        return False  # solo default if anything blows up
+
+
+def find_active_speakerphone_sessions( exclude_session_id=None ):
+    """
+    Scan all bridge files for sessions whose speakerphone_on=true.
+
+    Used by the speakerphone HTTP endpoint's SOLO branch to enforce the
+    "at most one active speakerphone session at a time" invariant — when a
+    session activates, all OTHER active sessions are deactivated atomically.
+    In CHORUS mode this scan is not invoked (no displacement enforcement).
 
     Honors the same staleness filtering as find_session_path_by_id:
     skips buffer/listener files, skips bridges whose host PID is dead
@@ -667,7 +690,7 @@ def find_active_conversation_sessions( exclude_session_id=None ):
 
     Ensures:
         - Returns a list of (Path, session_id) tuples for every bridge with
-          conversation_mode_active=true (never None; empty list if none)
+          speakerphone_on=true (never None; empty list if none)
         - When exclude_session_id is provided, bridges matching that id
           (full UUID OR 8-char prefix, mirroring find_session_path_by_id)
           are NOT included in the returned list
@@ -675,6 +698,8 @@ def find_active_conversation_sessions( exclude_session_id=None ):
           (prefers stable_session_id, falls back to session_id)
         - Never raises exceptions
         - Skips bridge files that fail to parse or open
+        - v1 bridges (without `speakerphone_on` field) treated as inactive
+          (no destructive discard — Phase 2 uses upgrade-on-write semantics)
 
     Args:
         exclude_session_id: Optional session id (full UUID or 8-char prefix)
@@ -703,7 +728,7 @@ def find_active_conversation_sessions( exclude_session_id=None ):
             with open( path ) as f:
                 data = json.load( f )
 
-            if not bool( data.get( "conversation_mode_active", False ) ):
+            if not bool( data.get( "speakerphone_on", False ) ):
                 continue
 
             sid = data.get( "stable_session_id" ) or data.get( "session_id" )
@@ -732,27 +757,31 @@ def find_active_conversation_sessions( exclude_session_id=None ):
     return results
 
 
-def get_conversation_mode( session_id ):
+def get_speakerphone( session_id ):
     """
-    Read conversation_mode_active flag from the bridge file for a given session_id.
+    Read `speakerphone_on` flag from the bridge file for a given session_id.
 
-    Conversation mode is the session-level toggle that, when True, makes Claude
+    Speakerphone mode is the per-session toggle that, when True, makes Claude
     auto-call notify(full_text, suppress_ding=True) after every assistant turn.
-    Default state is False (notification mode — current selective TTS behavior).
+    The default state when the bridge has no `speakerphone_on` field is
+    mode-aware: False in solo mode (today's monopoly behavior), True in chorus
+    mode (at-distance default). See _get_default_speakerphone.
 
     Requires:
         - session_id is a non-empty string (full UUID or 8-char prefix)
 
     Ensures:
-        - Returns True only if bridge file exists and conversation_mode_active is truthy
-        - Returns False on any failure (missing bridge, parse error, missing field)
+        - Returns True only if bridge file exists and speakerphone_on is truthy
+        - Returns mode-aware default if bridge exists but field is missing
+          (v1 bridges, freshly-created bridges)
+        - Returns False on any failure (missing bridge, parse error)
         - Never raises exceptions
 
     Args:
         session_id: Session ID to look up
 
     Returns:
-        bool: True if conversation mode is active, False otherwise
+        bool: True if speakerphone is on, False otherwise
     """
     path = find_session_path_by_id( session_id )
     if not path:
@@ -761,32 +790,40 @@ def get_conversation_mode( session_id ):
     try:
         with open( path ) as f:
             data = json.load( f )
-        return bool( data.get( "conversation_mode_active", False ) )
+        return bool( data.get( "speakerphone_on", _get_default_speakerphone() ) )
     except ( json.JSONDecodeError, OSError ):
         return False
 
 
-def set_conversation_mode( session_id, active ):
+def set_speakerphone( session_id, on ):
     """
-    Write conversation_mode_active flag to the bridge file for a given session_id.
+    Write `speakerphone_on` flag to the bridge file for a given session_id.
 
-    Read-modify-write the bridge JSON to set the flag, preserving all other fields.
-    Does NOT create a new bridge file if missing — bridge must already exist
-    (created by SessionStart hook).
+    Read-modify-write the bridge JSON to set the flag, preserving all other
+    fields and stamping `format_version=2` on the bridge for future schema
+    evolution. Does NOT create a new bridge file if missing — bridge must
+    already exist (created by SessionStart hook).
+
+    Upgrade-on-write semantics: a v1 bridge (with `conversation_mode_active`
+    but no `speakerphone_on`) gets `speakerphone_on` + `format_version` added
+    on the first set_speakerphone call. The stale `conversation_mode_active`
+    key is removed in the same write to avoid two-source-of-truth confusion.
 
     Requires:
         - session_id is a non-empty string (full UUID or 8-char prefix)
-        - active is a bool
+        - on is a bool
 
     Ensures:
         - Returns True if bridge was found and successfully updated
         - Returns False if bridge not found or write failed
         - Never raises exceptions
-        - Preserves all existing fields in the bridge JSON
+        - Preserves all existing fields in the bridge JSON except the
+          legacy `conversation_mode_active` key, which is removed if present
+        - Stamps `format_version=2` (BRIDGE_FORMAT_VERSION)
 
     Args:
         session_id: Session ID to look up
-        active: Target state for conversation_mode_active
+        on: Target state for speakerphone_on
 
     Returns:
         bool: True on successful write, False otherwise
@@ -798,7 +835,11 @@ def set_conversation_mode( session_id, active ):
     try:
         with open( path ) as f:
             data = json.load( f )
-        data[ "conversation_mode_active" ] = bool( active )
+        data[ "speakerphone_on" ] = bool( on )
+        data[ "format_version" ] = BRIDGE_FORMAT_VERSION
+        # Drop the v1 field if it lingers from a pre-Phase-2 bridge, to avoid
+        # two-source-of-truth ambiguity. The v2 field is now authoritative.
+        data.pop( "conversation_mode_active", None )
         with open( path, "w" ) as f:
             json.dump( data, f, indent=2 )
         return True
@@ -1161,7 +1202,7 @@ def find_active_voice_persona_sessions():
     `/allocate` excludes occupied persona names so each session gets a
     unique voice; `/pool` returns a snapshot for diagnostics.
 
-    Honors the same staleness filtering as find_active_conversation_sessions:
+    Honors the same staleness filtering as find_active_speakerphone_sessions:
     skips buffer/listener files, skips bridges whose host PID is dead
     (when host PIDs are trustworthy — see _can_trust_host_pids). A dead-PID
     bridge with a non-null voice_persona is treated as "free" — its slot

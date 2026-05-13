@@ -2,15 +2,15 @@
 """
 Unit tests for the cosa-voice conversation mode router.
 
-Tests the GET / POST endpoints at /api/cosa-voice/conversation-mode/{session_id}:
-    - GET reads conversation_mode_active from the session bridge
-    - POST writes the flag AND queues a conversation_mode_changed notification
+Tests the GET / POST endpoints at /api/cosa-voice/speakerphone/{session_id}:
+    - GET reads speakerphone_on from the session bridge
+    - POST writes the flag AND queues a speakerphone_changed notification
     - 404 when bridge file is missing
     - 500 when bridge found but write fails
 
 The router was migrated 2026-04-29 from ad-hoc `ws_manager.emit_to_user(...)`
 calls to the canonical notification subsystem via `notification_queue.push_notification(
-type="conversation_mode_changed", payload={...})`. Tests verify the migrated
+type="speakerphone_changed", payload={...})`. Tests verify the migrated
 contract: a single push_notification call carrying the payload dict, instead
 of a top-level WS event with positional args. See:
     src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
@@ -55,14 +55,27 @@ def _push_kwargs( mock_nq, call_index=0 ):
     return mock_nq.push_notification.call_args_list[ call_index ].kwargs
 
 
+# ── Mode mock — file-wide default ────────────────────────────────────────────
+# Existing tests inherited from the conversation-mode era assume monopoly /
+# displacement semantics, which the speakerphone refactor preserves only in
+# SOLO mode. Default the mode to "solo" for every test in this file so legacy
+# behavior is exercised; chorus-specific behavior is tested separately at the
+# bottom of this file via per-test mode override.
+
+@pytest.fixture( autouse=True )
+def _default_solo_mode():
+    with patch( "cosa.utils.util.get_tts_interaction_mode", return_value="solo" ):
+        yield
+
+
 # ── Tests: GET endpoint ──────────────────────────────────────────────────────
 
-class TestGetConversationModeEndpoint:
+class TestGetSpeakerphoneEndpoint:
 
     @pytest.mark.asyncio
     async def test_returns_default_false_when_flag_missing( self ):
-        """GET reads False when bridge has no conversation_mode_active field."""
-        from cosa.rest.routers.conversation_mode import get_conversation_mode_endpoint
+        """GET reads False when bridge has no speakerphone_on field."""
+        from cosa.rest.routers.speakerphone import get_speakerphone_endpoint
 
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
@@ -70,15 +83,15 @@ class TestGetConversationModeEndpoint:
             _write_session_file( sessions_dir, os.getpid(), sid )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                resp = await get_conversation_mode_endpoint( sid, authenticated_user_id="user@test.com" )
+                resp = await get_speakerphone_endpoint( sid, authenticated_user_id="user@test.com" )
 
             body = json.loads( resp.body.decode() )
-            assert body == { "session_id": sid, "active": False }
+            assert body == { "session_id": sid, "on": False }
 
     @pytest.mark.asyncio
     async def test_returns_true_when_flag_set( self ):
-        """GET reads True when bridge has conversation_mode_active=True."""
-        from cosa.rest.routers.conversation_mode import get_conversation_mode_endpoint
+        """GET reads True when bridge has speakerphone_on=True."""
+        from cosa.rest.routers.speakerphone import get_speakerphone_endpoint
 
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
@@ -87,39 +100,39 @@ class TestGetConversationModeEndpoint:
             # Pre-set the flag
             with open( path ) as f:
                 data = json.load( f )
-            data[ "conversation_mode_active" ] = True
+            data[ "speakerphone_on" ] = True
             with open( path, "w" ) as f:
                 json.dump( data, f )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                resp = await get_conversation_mode_endpoint( sid, authenticated_user_id="user@test.com" )
+                resp = await get_speakerphone_endpoint( sid, authenticated_user_id="user@test.com" )
 
             body = json.loads( resp.body.decode() )
-            assert body == { "session_id": sid, "active": True }
+            assert body == { "session_id": sid, "on": True }
 
     @pytest.mark.asyncio
     async def test_returns_404_when_bridge_missing( self ):
         """GET raises 404 when session_id does not match any bridge file."""
-        from cosa.rest.routers.conversation_mode import get_conversation_mode_endpoint
+        from cosa.rest.routers.speakerphone import get_speakerphone_endpoint
 
         with tempfile.TemporaryDirectory() as tmp:
             sessions_dir = Path( tmp )
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 with pytest.raises( HTTPException ) as exc_info:
-                    await get_conversation_mode_endpoint( "nonexistent", authenticated_user_id="user@test.com" )
+                    await get_speakerphone_endpoint( "nonexistent", authenticated_user_id="user@test.com" )
 
             assert exc_info.value.status_code == 404
 
 
 # ── Tests: POST endpoint ─────────────────────────────────────────────────────
 
-class TestSetConversationModeEndpoint:
+class TestSetSpeakerphoneEndpoint:
 
     @pytest.mark.asyncio
     async def test_post_writes_bridge_and_pushes_notification( self ):
-        """POST writes flag to bridge and pushes conversation_mode_changed notification."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        """POST writes flag to bridge and pushes speakerphone_changed notification."""
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -130,9 +143,9 @@ class TestSetConversationModeEndpoint:
             mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid,
-                    body=ConversationModeBody( active=True ),
+                    body=SpeakerphoneBody( on=True ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
@@ -140,28 +153,28 @@ class TestSetConversationModeEndpoint:
             # Bridge mutated
             with open( path ) as f:
                 data = json.load( f )
-            assert data[ "conversation_mode_active" ] is True
+            assert data[ "speakerphone_on" ] is True
 
             # Single push_notification call carrying the migrated shape
             mock_nq.push_notification.assert_called_once()
             kw = _push_kwargs( mock_nq )
-            assert kw[ "type"     ] == "conversation_mode_changed"
+            assert kw[ "type"     ] == "speakerphone_changed"
             assert kw[ "user_id"  ] == "user@test.com"
-            assert kw[ "payload"  ] == { "session_id": sid, "active": True }
+            assert kw[ "payload"  ] == { "session_id": sid, "on": True }
             assert kw[ "suppress_ding" ]      is True
             assert kw[ "response_requested" ] is False
 
             # Response shape
             body = json.loads( resp.body.decode() )
             assert body[ "session_id" ] == sid
-            assert body[ "active" ] is True
+            assert body[ "on" ] is True
             assert body[ "broadcast_delivered" ] is True
 
     @pytest.mark.asyncio
     async def test_post_with_active_false_round_trip( self ):
-        """POST active=False clears the flag and pushes a notification."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        """POST on=False clears the flag and pushes a notification."""
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -170,32 +183,32 @@ class TestSetConversationModeEndpoint:
             path = _write_session_file( sessions_dir, os.getpid(), sid )
             with open( path ) as f:
                 data = json.load( f )
-            data[ "conversation_mode_active" ] = True
+            data[ "speakerphone_on" ] = True
             with open( path, "w" ) as f:
                 json.dump( data, f )
 
             mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid,
-                    body=ConversationModeBody( active=False ),
+                    body=SpeakerphoneBody( on=False ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
 
             with open( path ) as f:
                 data = json.load( f )
-            assert data[ "conversation_mode_active" ] is False
+            assert data[ "speakerphone_on" ] is False
 
             body = json.loads( resp.body.decode() )
-            assert body[ "active" ] is False
+            assert body[ "on" ] is False
 
     @pytest.mark.asyncio
     async def test_post_returns_404_when_bridge_missing( self ):
         """POST returns 404 when no bridge matches session_id."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -204,9 +217,9 @@ class TestSetConversationModeEndpoint:
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 with pytest.raises( HTTPException ) as exc_info:
-                    await set_conversation_mode_endpoint(
+                    await set_speakerphone_endpoint(
                         session_id="nonexistent",
-                        body=ConversationModeBody( active=True ),
+                        body=SpeakerphoneBody( on=True ),
                         authenticated_user_id="user@test.com",
                         notification_queue=mock_nq
                     )
@@ -217,8 +230,8 @@ class TestSetConversationModeEndpoint:
     @pytest.mark.asyncio
     async def test_post_succeeds_even_if_push_fails( self ):
         """POST is canonical write; notification-push failure is logged but does not fail the request."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -230,9 +243,9 @@ class TestSetConversationModeEndpoint:
             mock_nq.push_notification.side_effect = RuntimeError( "queue dispatch broken" )
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid,
-                    body=ConversationModeBody( active=True ),
+                    body=SpeakerphoneBody( on=True ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
@@ -240,10 +253,10 @@ class TestSetConversationModeEndpoint:
             # Bridge write still happened
             with open( path ) as f:
                 data = json.load( f )
-            assert data[ "conversation_mode_active" ] is True
+            assert data[ "speakerphone_on" ] is True
 
             body = json.loads( resp.body.decode() )
-            assert body[ "active" ] is True
+            assert body[ "on" ] is True
             assert body[ "broadcast_delivered" ] is False
 
 
@@ -253,8 +266,8 @@ class TestSetConversationModeEndpoint:
 class TestAutoDisplaceOnActivate:
     """
     The mutex contract: when session B activates, ANY other bridge with
-    conversation_mode_active=true must be flipped off, with a separate
-    conversation_mode_changed notification carrying displaced=True and
+    speakerphone_on=true must be flipped off, with a separate
+    speakerphone_changed notification carrying displaced=True and
     displaced_by=<B's session_id> in the payload. The activate-then-displace
     sequence is serialized by an asyncio.Lock at module scope.
     """
@@ -262,8 +275,8 @@ class TestAutoDisplaceOnActivate:
     @pytest.mark.asyncio
     async def test_activate_displaces_existing_active_session( self ):
         """A is active; activate B → A flipped off + displaced notification + B activated."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -276,7 +289,7 @@ class TestAutoDisplaceOnActivate:
             # Pre-set A active
             with open( path_a ) as f:
                 data_a = json.load( f )
-            data_a[ "conversation_mode_active" ] = True
+            data_a[ "speakerphone_on" ] = True
             with open( path_a, "w" ) as f:
                 json.dump( data_a, f )
 
@@ -284,9 +297,9 @@ class TestAutoDisplaceOnActivate:
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid_b,
-                    body=ConversationModeBody( active=True ),
+                    body=SpeakerphoneBody( on=True ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
@@ -294,16 +307,16 @@ class TestAutoDisplaceOnActivate:
             # A's bridge flipped off
             with open( path_a ) as f:
                 data_a = json.load( f )
-            assert data_a[ "conversation_mode_active" ] is False
+            assert data_a[ "speakerphone_on" ] is False
 
             # B's bridge flipped on
             with open( path_b ) as f:
                 data_b = json.load( f )
-            assert data_b[ "conversation_mode_active" ] is True
+            assert data_b[ "speakerphone_on" ] is True
 
             # Three push_notification calls per displacement:
-            #   1) conversation_mode_changed (displaced=True) — UI sync for A
-            #   2) user_initiated_message (action:exit_conversation_mode) — listener
+            #   1) speakerphone_changed (displaced=True) — UI sync for A
+            #   2) user_initiated_message (action:disable_speakerphone) — listener
             #      injects deactivation reminder into A's tmux pane so the
             #      model's in-context state catches up to the bridge flip
             #   3) activate for B
@@ -311,11 +324,11 @@ class TestAutoDisplaceOnActivate:
 
             # First call: displaced notification for A
             kw_first = _push_kwargs( mock_nq, 0 )
-            assert kw_first[ "type"    ] == "conversation_mode_changed"
+            assert kw_first[ "type"    ] == "speakerphone_changed"
             assert kw_first[ "user_id" ] == "user@test.com"
             assert kw_first[ "payload" ] == {
                 "session_id"   : sid_a,
-                "active"       : False,
+                "on"       : False,
                 "displaced"    : True,
                 "displaced_by" : sid_b
             }
@@ -323,25 +336,25 @@ class TestAutoDisplaceOnActivate:
             # Second call: action push for A's listener
             kw_action = _push_kwargs( mock_nq, 1 )
             assert kw_action[ "type"   ] == "user_initiated_message"
-            assert kw_action[ "title"  ] == "action:exit_conversation_mode"
+            assert kw_action[ "title"  ] == "action:disable_speakerphone"
             assert kw_action[ "job_id" ] == sid_a[:8]
 
             # Third call: B's activate notification (no displaced flag)
             kw_third = _push_kwargs( mock_nq, 2 )
-            assert kw_third[ "type"    ] == "conversation_mode_changed"
-            assert kw_third[ "payload" ] == { "session_id": sid_b, "active": True }
+            assert kw_third[ "type"    ] == "speakerphone_changed"
+            assert kw_third[ "payload" ] == { "session_id": sid_b, "on": True }
 
             # Response payload includes the displaced session id
             body = json.loads( resp.body.decode() )
             assert body[ "session_id" ] == sid_b
-            assert body[ "active" ] is True
+            assert body[ "on" ] is True
             assert body[ "displaced_sessions" ] == [ sid_a ]
 
     @pytest.mark.asyncio
     async def test_activate_with_no_other_active_pushes_only_activate( self ):
         """No other bridges active → only B's activate notification pushed; displaced_sessions is empty."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -352,9 +365,9 @@ class TestAutoDisplaceOnActivate:
             mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid_b,
-                    body=ConversationModeBody( active=True ),
+                    body=SpeakerphoneBody( on=True ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
@@ -362,7 +375,7 @@ class TestAutoDisplaceOnActivate:
             # Exactly one push — the activate
             assert mock_nq.push_notification.call_count == 1
             kw = _push_kwargs( mock_nq )
-            assert kw[ "payload" ] == { "session_id": sid_b, "active": True }
+            assert kw[ "payload" ] == { "session_id": sid_b, "on": True }
 
             body = json.loads( resp.body.decode() )
             assert body[ "displaced_sessions" ] == []
@@ -370,8 +383,8 @@ class TestAutoDisplaceOnActivate:
     @pytest.mark.asyncio
     async def test_activate_displaces_multiple_active_sessions( self ):
         """Three pre-active sessions → all three displaced, four total pushes (3 displaced + 1 activate)."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -387,7 +400,7 @@ class TestAutoDisplaceOnActivate:
                 p = _write_session_file( sessions_dir, 80001 + i, sid )
                 with open( p ) as f:
                     data = json.load( f )
-                data[ "conversation_mode_active" ] = True
+                data[ "speakerphone_on" ] = True
                 with open( p, "w" ) as f:
                     json.dump( data, f )
                 paths.append( p )
@@ -397,9 +410,9 @@ class TestAutoDisplaceOnActivate:
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid_b,
-                    body=ConversationModeBody( active=True ),
+                    body=SpeakerphoneBody( on=True ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
@@ -408,7 +421,7 @@ class TestAutoDisplaceOnActivate:
             for p in paths:
                 with open( p ) as f:
                     data = json.load( f )
-                assert data[ "conversation_mode_active" ] is False
+                assert data[ "speakerphone_on" ] is False
 
             # Per-displaced-session push pair (displaced WS event + action push) ×3
             # plus the final activate push for B = 7 total.
@@ -416,13 +429,13 @@ class TestAutoDisplaceOnActivate:
 
             # Last call is the activate event for B
             last_kw = _push_kwargs( mock_nq, -1 )
-            assert last_kw[ "payload" ] == { "session_id": sid_b, "active": True }
+            assert last_kw[ "payload" ] == { "session_id": sid_b, "on": True }
 
             # Action pushes interleaved with displaced pushes — each displaced
-            # session got an action:exit_conversation_mode targeted at its hash
+            # session got an action:disable_speakerphone targeted at its hash
             action_calls = [
                 _push_kwargs( mock_nq, i ) for i in range( 6 )
-                if _push_kwargs( mock_nq, i ).get( "title" ) == "action:exit_conversation_mode"
+                if _push_kwargs( mock_nq, i ).get( "title" ) == "action:disable_speakerphone"
             ]
             assert len( action_calls ) == 3
             action_job_ids = sorted( c[ "job_id" ] for c in action_calls )
@@ -436,15 +449,15 @@ class TestAutoDisplaceOnActivate:
         """active=false bypasses the lock + scan; pushes UI sync + self-targeted action.
 
         Two pushes per self-exit:
-          1) conversation_mode_changed (active=false) — UI sync to all of B's tabs
-          2) user_initiated_message (action:exit_conversation_mode) — listener
+          1) speakerphone_changed (active=false) — UI sync to all of B's tabs
+          2) user_initiated_message (action:disable_speakerphone) — listener
              injects deactivation reminder into B's own tmux pane so the model's
              in-context state catches up to the bridge flip. Mirror of the
              displace branch's per-displaced action push, applied to the
              deactivating session itself.
         """
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -456,7 +469,7 @@ class TestAutoDisplaceOnActivate:
             # A is active; we are deactivating B (which is not active) — A must NOT be touched
             with open( path_a ) as f:
                 data_a = json.load( f )
-            data_a[ "conversation_mode_active" ] = True
+            data_a[ "speakerphone_on" ] = True
             with open( path_a, "w" ) as f:
                 json.dump( data_a, f )
 
@@ -464,9 +477,9 @@ class TestAutoDisplaceOnActivate:
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid_b,
-                    body=ConversationModeBody( active=False ),
+                    body=SpeakerphoneBody( on=False ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
@@ -474,32 +487,32 @@ class TestAutoDisplaceOnActivate:
             # A is untouched — deactivate path skips the scan
             with open( path_a ) as f:
                 data_a = json.load( f )
-            assert data_a[ "conversation_mode_active" ] is True
+            assert data_a[ "speakerphone_on" ] is True
 
             # Two pushes — UI sync, then self-targeted action
             assert mock_nq.push_notification.call_count == 2
 
-            # First call: UI-sync conversation_mode_changed for B
+            # First call: UI-sync speakerphone_changed for B
             kw_ui = _push_kwargs( mock_nq, 0 )
-            assert kw_ui[ "type"    ] == "conversation_mode_changed"
-            assert kw_ui[ "payload" ] == { "session_id": sid_b, "active": False }
+            assert kw_ui[ "type"    ] == "speakerphone_changed"
+            assert kw_ui[ "payload" ] == { "session_id": sid_b, "on": False }
 
             # Second call: self-targeted action push for B's own listener
             kw_action = _push_kwargs( mock_nq, 1 )
             assert kw_action[ "type"    ] == "user_initiated_message"
-            assert kw_action[ "title"   ] == "action:exit_conversation_mode"
+            assert kw_action[ "title"   ] == "action:disable_speakerphone"
             assert kw_action[ "job_id"  ] == sid_b[:8]
             assert kw_action[ "payload" ] == { "session_id": sid_b, "reason": "self" }
 
             body = json.loads( resp.body.decode() )
-            assert body[ "active" ] is False
+            assert body[ "on" ] is False
             assert body[ "displaced_sessions" ] == []
 
     @pytest.mark.asyncio
     async def test_displace_push_failure_does_not_block_activate( self ):
         """If displaced-event push raises, the bridge writes still happen and B still activates."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -510,7 +523,7 @@ class TestAutoDisplaceOnActivate:
             path_b = _write_session_file( sessions_dir, 70002, sid_b )
             with open( path_a ) as f:
                 data_a = json.load( f )
-            data_a[ "conversation_mode_active" ] = True
+            data_a[ "speakerphone_on" ] = True
             with open( path_a, "w" ) as f:
                 json.dump( data_a, f )
 
@@ -523,28 +536,28 @@ class TestAutoDisplaceOnActivate:
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
                  patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid_b,
-                    body=ConversationModeBody( active=True ),
+                    body=SpeakerphoneBody( on=True ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
 
             # Both bridge writes succeeded despite push failure
             with open( path_a ) as f:
-                assert json.load( f )[ "conversation_mode_active" ] is False
+                assert json.load( f )[ "speakerphone_on" ] is False
             with open( path_b ) as f:
-                assert json.load( f )[ "conversation_mode_active" ] is True
+                assert json.load( f )[ "speakerphone_on" ] is True
 
             body = json.loads( resp.body.decode() )
-            assert body[ "active" ] is True
+            assert body[ "on" ] is True
             assert body[ "displaced_sessions" ] == [ sid_a ]
 
     @pytest.mark.asyncio
     async def test_self_activation_does_not_displace_self( self ):
         """Activating an already-active session is a no-op displacement (exclude_session_id filters it)."""
-        from cosa.rest.routers.conversation_mode import (
-            set_conversation_mode_endpoint, ConversationModeBody
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody
         )
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -553,16 +566,16 @@ class TestAutoDisplaceOnActivate:
             path_a = _write_session_file( sessions_dir, os.getpid(), sid_a )
             with open( path_a ) as f:
                 data = json.load( f )
-            data[ "conversation_mode_active" ] = True
+            data[ "speakerphone_on" ] = True
             with open( path_a, "w" ) as f:
                 json.dump( data, f )
 
             mock_nq = MagicMock()
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
-                resp = await set_conversation_mode_endpoint(
+                resp = await set_speakerphone_endpoint(
                     session_id=sid_a,
-                    body=ConversationModeBody( active=True ),
+                    body=SpeakerphoneBody( on=True ),
                     authenticated_user_id="user@test.com",
                     notification_queue=mock_nq
                 )
@@ -572,6 +585,113 @@ class TestAutoDisplaceOnActivate:
 
             body = json.loads( resp.body.decode() )
             assert body[ "displaced_sessions" ] == []
+
+
+# ── Tests: Chorus-mode activation (NEW Phase 3 branch) ──────────────────────
+
+class TestChorusActivation:
+    """
+    Chorus-mode activate path: NO Lock, NO scan, NO displacement.
+    Self is activated, broadcast goes out, response shape preserved
+    (displaced_sessions: [] for stability so UI doesn't special-case modes).
+    """
+
+    @pytest.mark.asyncio
+    async def test_chorus_no_displacement_of_others( self ):
+        """In chorus mode, activating session B does NOT touch session A's flag."""
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid_a = "chorus-a-1111-2222-3333-444455556666"
+            sid_b = "chorus-b-1111-2222-3333-444455556666"
+            path_a = _write_session_file( sessions_dir, 90001, sid_a )
+            _write_session_file( sessions_dir, 90002, sid_b )
+
+            # Pre-set A active.
+            with open( path_a ) as f:
+                data_a = json.load( f )
+            data_a[ "speakerphone_on" ] = True
+            data_a[ "format_version" ] = 2
+            with open( path_a, "w" ) as f:
+                json.dump( data_a, f )
+
+            mock_nq = MagicMock()
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive", return_value=True ), \
+                 patch( "cosa.utils.util.get_tts_interaction_mode", return_value="chorus" ):
+                resp = await set_speakerphone_endpoint(
+                    session_id=sid_b,
+                    body=SpeakerphoneBody( on=True ),
+                    authenticated_user_id="user@test.com",
+                    notification_queue=mock_nq
+                )
+
+            body = json.loads( resp.body.decode() )
+            # Self is on.
+            assert body[ "on" ] is True
+            # Critically: nobody was displaced.
+            assert body[ "displaced_sessions" ] == []
+            # And A's flag is UNTOUCHED on disk.
+            with open( path_a ) as f:
+                data_a_after = json.load( f )
+            assert data_a_after[ "speakerphone_on" ] is True
+
+    @pytest.mark.asyncio
+    async def test_chorus_response_includes_empty_displaced_sessions( self ):
+        """Schema stability: response always has displaced_sessions, even when empty."""
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "chorus-solo-1111-2222-3333-444455556666"
+            _write_session_file( sessions_dir, os.getpid(), sid )
+
+            mock_nq = MagicMock()
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "cosa.utils.util.get_tts_interaction_mode", return_value="chorus" ):
+                resp = await set_speakerphone_endpoint(
+                    session_id=sid,
+                    body=SpeakerphoneBody( on=True ),
+                    authenticated_user_id="user@test.com",
+                    notification_queue=mock_nq
+                )
+
+            body = json.loads( resp.body.decode() )
+            assert "displaced_sessions" in body
+            assert body[ "displaced_sessions" ] == []
+
+    @pytest.mark.asyncio
+    async def test_chorus_pushes_self_activate_notification( self ):
+        """Chorus path still emits speakerphone_changed for self."""
+        from cosa.rest.routers.speakerphone import (
+            set_speakerphone_endpoint, SpeakerphoneBody,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "chorus-notif-1-2222-3333-444455556666"
+            _write_session_file( sessions_dir, os.getpid(), sid )
+
+            mock_nq = MagicMock()
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "cosa.utils.util.get_tts_interaction_mode", return_value="chorus" ):
+                await set_speakerphone_endpoint(
+                    session_id=sid,
+                    body=SpeakerphoneBody( on=True ),
+                    authenticated_user_id="user@test.com",
+                    notification_queue=mock_nq
+                )
+
+            # Exactly one push: self-activate. No displace pushes, no displace-action pushes.
+            assert mock_nq.push_notification.call_count == 1
+            kw = mock_nq.push_notification.call_args_list[ 0 ].kwargs
+            assert kw[ "type" ] == "speakerphone_changed"
+            assert kw[ "payload" ] == { "session_id": sid, "on": True }
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────
