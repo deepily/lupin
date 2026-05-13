@@ -13,6 +13,28 @@ import re
 from typing import List, Optional
 
 
+# Phase 3 wiring (Q5): set by `configure_llm_disambiguator()` from main.py lifespan.
+# Defaults to None — `disambiguate_via_llm()` returns None when unset, preserving
+# the Phase 1 stub contract for callers that don't wire the singleton.
+_disambiguator_singleton = None
+
+
+def configure_llm_disambiguator( disambiguator ) -> None:
+    """
+    Phase 3 setter: install the LLM disambiguator singleton.
+
+    Requires:
+        - `disambiguator` is a `CommonsLlmDisambiguator` exposing
+          `.disambiguate(active_personas, ambiguous_reference, context=None)`
+          OR None (clears the singleton, restoring Phase 1 stub behavior).
+
+    Called from `main.py` lifespan during Phase 3. Tests reset between cases
+    via `configure_llm_disambiguator(None)`.
+    """
+    global _disambiguator_singleton
+    _disambiguator_singleton = disambiguator
+
+
 def _normalize_for_match( s: str ) -> str:
     """
     Strip non-alphanumerics and lowercase.
@@ -48,7 +70,18 @@ def disambiguate_via_llm( input_str: str, candidate_personas: List[ str ] ) -> O
         - Phase 1: always returns None
         - Phase 3: returns a matched persona display name from candidate_personas, or None
     """
-    return None  # Phase 3 wires actual LLM call here
+    # Phase 3 wiring: route through the configured LLM disambiguator when present.
+    # When the singleton is None (Phase 1 default / unwired startup), preserve
+    # the stub's "always None" contract for backward-compat callers.
+    if _disambiguator_singleton is None or not candidate_personas:
+        return None
+    # Convert display-name list to PersonaInfo with placeholder icon.
+    # Broadcast-handler call sites don't have icons at the matcher boundary;
+    # the disambiguator's whitelist only checks `.name`, so the placeholder
+    # icon ("💬") is dispatched but never compared.
+    from lupin_mcp.commons_xml_models import PersonaInfo
+    personas = [ PersonaInfo( name=name, icon="💬" ) for name in candidate_personas ]
+    return _disambiguator_singleton.disambiguate( personas, input_str )
 
 
 def match_persona( input_str: str, candidate_personas: List[ str ] ) -> Optional[ str ]:
