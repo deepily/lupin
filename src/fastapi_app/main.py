@@ -94,10 +94,11 @@ snapshot_mgr = None
 io_tbl = None
 id_generator = None
 
-# Inter-Session Commons (Phase 2 — user-broadcast surface)
-commons_store        = None
-commons_rate_limiter = None
-commons_ack_watcher  = None
+# Inter-Session Commons (Phase 2 — user-broadcast surface; Phase 3 — push-mode + LLM)
+commons_store            = None
+commons_rate_limiter     = None
+commons_ack_watcher      = None
+commons_question_watcher = None  # Phase 3 step 9
 
 # WebSocket connection management
 websocket_manager = WebSocketManager()
@@ -524,13 +525,16 @@ async def lifespan( app: FastAPI ):
     # AC14 (router) + AC7 (CommonsAckWatcher daemon). Gated by `commons enabled`
     # INI key — when False, the subsystem is fully absent and the router
     # endpoints will 503 per `_require_initialized()`.
-    global commons_store, commons_rate_limiter, commons_ack_watcher
+    global commons_store, commons_rate_limiter, commons_ack_watcher, commons_question_watcher
     if config_mgr.get( "commons enabled", default=True, return_type="boolean" ):
         try:
             import os
             from cosa.rest.commons_ack_watcher import CommonsAckWatcher
+            from cosa.rest.commons_question_watcher import CommonsQuestionWatcher
             from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
             from cosa.rest.routers.commons import init_commons_state
+            from lupin_mcp.commons_llm_disambiguator import CommonsLlmDisambiguator
+            from lupin_mcp.commons_persona_matcher import configure_llm_disambiguator
             from lupin_mcp.commons_store import CommonsStore
 
             commons_root = os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
@@ -543,18 +547,34 @@ async def lifespan( app: FastAPI ):
                 push_notification_fn   = jobs_notification_queue.push_notification,
                 poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
             )
+            # Phase 3 — CommonsQuestionWatcher for push-mode ask_async
+            commons_question_watcher = CommonsQuestionWatcher(
+                store                  = commons_store,
+                poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
+                in_flight_ttl_seconds  = float( config_mgr.get( "commons question tracker ttl seconds", default=3600, return_type="int" ) ),
+                per_user_max           = config_mgr.get( "commons question tracker per user max", default=50, return_type="int" ),
+                global_max             = config_mgr.get( "commons question tracker global max", default=1000, return_type="int" ),
+            )
             init_commons_state(
                 store                            = commons_store,
                 rate_limiter                     = commons_rate_limiter,
                 ack_watcher                      = commons_ack_watcher,
                 active_session_threshold_seconds = config_mgr.get( "commons broadcast active session threshold seconds", default=600, return_type="int" ),
+                question_watcher                 = commons_question_watcher,
             )
             commons_ack_watcher.start()
-            print( f"[COMMONS] Phase 2 broadcast subsystem started (root={commons_root})" )
+            commons_question_watcher.start()
+            # Phase 3 — wire the LLM disambiguator singleton for commons_persona_matcher
+            try:
+                configure_llm_disambiguator( CommonsLlmDisambiguator( config_mgr ) )
+                print( "[COMMONS] Phase 3 LLM disambiguator installed" )
+            except Exception as e:
+                print( f"[COMMONS] WARN — LLM disambiguator init failed (matcher falls back to Phase 1 stub): {e}" )
+            print( f"[COMMONS] Phase 2+3 subsystem started (root={commons_root})" )
         except Exception as e:
-            print( f"[COMMONS] WARN — Phase 2 init failed: {e}" )
+            print( f"[COMMONS] WARN — Phase 2+3 init failed: {e}" )
     else:
-        print( "[COMMONS] Disabled via `commons enabled = false` — skipping Phase 2 init" )
+        print( "[COMMONS] Disabled via `commons enabled = false` — skipping Phase 2+3 init" )
 
     # ===================================================================
     # GPU Model Loading (smallest → largest to minimize CUDA fragmentation)
@@ -769,6 +789,15 @@ async def lifespan( app: FastAPI ):
             print( "[COMMONS] CommonsAckWatcher stopped" )
         except Exception as e:
             print( f"[COMMONS] Error stopping watcher: {e}" )
+
+    # Stop the commons question watcher daemon (Phase 3)
+    if commons_question_watcher is not None:
+        try:
+            print( "[COMMONS] Stopping CommonsQuestionWatcher daemon..." )
+            commons_question_watcher.stop( join_timeout=3.0 )
+            print( "[COMMONS] CommonsQuestionWatcher stopped" )
+        except Exception as e:
+            print( f"[COMMONS] Error stopping question watcher: {e}" )
 
     # Add any other cleanup code here if needed
 
