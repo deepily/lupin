@@ -23,12 +23,20 @@
 #broadcast-compose-row {
     display: flex;
     flex-direction: row;
-    gap: 8px;
-    align-items: stretch;
+    gap: 6px;
+    align-items: center;
 }
 
+/* Mic button — matches the cc-session row mic per Rick (2026-05-13).
+   Mirrors `.cc-voice-input .stt-button` rules in notifications.css:4764. */
 #broadcast-compose-row .stt-button {
     flex: 0 0 auto;
+    align-self: center;
+    height: 34px;
+    min-width: 40px;
+    padding: 4px 8px;
+    font-size: 14px;
+    flex-shrink: 0;
 }
 
 #broadcast-textarea {
@@ -104,26 +112,26 @@
 
 /* ── Send button ──────────────────────────────────────────────────────── */
 
+/* Send button — matches the cc-session row send button per Rick (2026-05-13).
+   Mirrors `.cc-voice-input .response-submit-button` rules in notifications.css:4804.
+   The `.response-submit-button` base class (notifications.css:1452) supplies
+   color + hover; we override sizing only. */
 #broadcast-send-button {
     flex: 0 0 auto;
-    padding: 8px 16px;
-    background: #fd7e14;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: 500;
+    padding: 6px 14px;
+    font-size: 13px;
+    height: 34px;
+    flex-shrink: 0;
 }
 
-#broadcast-send-button:disabled {
-    background: #ced4da;
-    cursor: not-allowed;
-}
-
-#broadcast-submit-status {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #666;
+/* Submit-status + aggregate-panel containers removed from HTML 2026-05-13 per
+   Rick — empty containers were rendering as a visual artifact below the compose
+   row. JS null-guards make `setStatus()` + `renderAggregate()` silent no-ops.
+   Selectors retained as display:none so a revert path doesn't need a fresh CSS pass. */
+#broadcast-submit-status,
+#broadcast-aggregate-panel,
+#broadcast-aggregate-summary {
+    display: none;
 }
 
 /* ── Confirm modal (matches showErrorModal pattern) ───────────────────── */
