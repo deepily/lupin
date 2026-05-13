@@ -3403,6 +3403,16 @@ class NotificationsUI {
             cancelListener       : null,
             durationInterval     : null,
             MAX_DURATION_SECONDS : 30,
+            TTS_RESUME_DELAY_MS  : 750,
+
+            // TTS pause/recording coordination state.
+            // _ttsPausedByRecording: true if WE caused the current pause (so we know
+            //   it's safe to auto-resume; never auto-resume a user-initiated pause).
+            // _resumeTimeoutHandle: pending setTimeout handle for the delayed resume;
+            //   non-null between recording-stop and resume-fire. Cleared when a new
+            //   recording starts mid-delay to prevent audible blip.
+            _ttsPausedByRecording : false,
+            _resumeTimeoutHandle  : null,
 
             /**
              * Start recording for a given context.
@@ -3422,6 +3432,28 @@ class NotificationsUI {
                 if ( this.activeRecording ) {
                     this.ui.log( `Auto-cancelling previous recording: ${this.activeRecording.contextId}` );
                     this.cancelRecording();
+                }
+
+                // Pause TTS synchronously, BEFORE the mic engages, so other personas
+                // don't barge in while the user is recording. State-preserving: we only
+                // auto-resume on stop if WE caused the pause.
+                if ( self._resumeTimeoutHandle ) {
+                    // Cancel a delayed-resume left pending by a just-finished recording
+                    // so we don't flicker (resume → re-pause when chaining mic presses).
+                    clearTimeout( self._resumeTimeoutHandle );
+                    self._resumeTimeoutHandle = null;
+                }
+                if ( !self._ttsPausedByRecording ) {
+                    self._ttsPausedByRecording = !self.ui.isTTSPaused;
+                    if ( self._ttsPausedByRecording ) {
+                        self.ui.pauseTTS();
+                        // pauseTTS() early-returns when nothing's currently playing,
+                        // leaving isTTSPaused false — which means new TTS items arriving
+                        // mid-recording would bypass the activateNextTTS gate (line 12950)
+                        // and barge in. Force-set the gate flag to block queue advance
+                        // even when no item is active at pause-time.
+                        self.ui.isTTSPaused = true;
+                    }
                 }
 
                 // Get auth token
@@ -3462,6 +3494,9 @@ class NotificationsUI {
                             button.textContent = '⏳';
                             button.title = 'Transcribing audio...';
                             button.disabled = true;
+
+                            // Resume TTS 750ms after recording stops (no audible blip).
+                            self._scheduleTTSResume();
                         },
 
                         onTranscription: ( text ) => {
@@ -3539,6 +3574,9 @@ class NotificationsUI {
 
                 this._resetButton( button );
                 this.activeRecording = null;
+
+                // ESC-cancel does not fire onRecordingStop, so schedule resume here too.
+                this._scheduleTTSResume();
             },
 
             /**
@@ -3575,6 +3613,25 @@ class NotificationsUI {
                     clearInterval( this.durationInterval );
                     this.durationInterval = null;
                 }
+            },
+
+            _scheduleTTSResume: function() {
+                const self = this;
+                if ( !self._ttsPausedByRecording ) return;
+                if ( self._resumeTimeoutHandle ) clearTimeout( self._resumeTimeoutHandle );
+                self._resumeTimeoutHandle = setTimeout( () => {
+                    self.ui.resumeTTS();
+                    // resumeTTS() only kicks playback for the suspended item (if any).
+                    // If nothing was playing when we paused but items accumulated in the
+                    // queue during recording, the queue is now stalled — no completion
+                    // event will fire to drain it. Kick activateNextTTS() directly when
+                    // no item is active.
+                    if ( !self.ui.activeTTSItem && self.ui.ttsQueue && self.ui.ttsQueue.length > 0 ) {
+                        self.ui.activateNextTTS();
+                    }
+                    self._ttsPausedByRecording = false;
+                    self._resumeTimeoutHandle  = null;
+                }, self.TTS_RESUME_DELAY_MS );
             },
 
             _attachCancelListener: function( button ) {
@@ -8923,7 +8980,12 @@ class NotificationsUI {
         const iconId = this._stripIconIdFor( senderId );
         if ( document.getElementById( iconId ) ) return;  // idempotent
 
-        const initial     = ( projectName || "?" ).charAt( 0 ).toUpperCase();
+        const initial     = (
+            persona?.display_name
+            || persona?.name
+            || projectName
+            || "?"
+        ).charAt( 0 ).toUpperCase();
         const color       = persona?.color || null;
         const personaName = persona?.display_name || persona?.name || null;
 

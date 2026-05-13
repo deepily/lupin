@@ -2,6 +2,32 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: ⚠️ WARNING at 21073 tokens (84% of 25k) — archive deferred to next session per `TODO.md` entry.
 
+### 2026.05.13 Morning - Session 66d534ab (Tiberius 🌑) | Notifications UI — persona-initial focus bar + TTS pause-on-record + barge-in queue gate
+
+**Persona**: Tiberius 🌑 (Deep male, #3F51B5)
+
+**Topic**: Two notifications-UI tweaks requested by Rick in voice/chorus mode: (1) focus-bar pill initials should show the persona's first letter, not the project's (four Lupin sessions were all showing "L"); (2) TTS queue must pause BEFORE the mic engages and resume ~750ms AFTER recording stops, so other personas can't barge in mid-record. Plan written + serialized + ratified, code landed, barge-in queue-gate bug surfaced + fixed during live testing.
+
+**Accomplishments**:
+
+- **Tweak 1 — focus-bar persona initial** (`notifications.js:8967-8972`). Changed `_addStripIcon` initial computation to prefer `persona?.display_name || persona?.name` over `projectName`. Single-line semantic shift; persona was already a function parameter so no new wiring needed. Pills now show T/R/M/etc. instead of four identical L's. Rick's verdict: "perfect."
+
+- **Tweak 2 — pause-on-record + delayed resume** (`notifications.js:3406, 3414-3415, 3437-3449, 3486-3491, 3568-3571, 3608-3624`). Pause is synchronous BEFORE `new AudioRecorder(...)` in `startRecording` — pre-empts the `getUserMedia` permission/resolve window. Resume scheduled 750ms after `onRecordingStop` (or `cancelRecording` for ESC-cancel) via new `_scheduleTTSResume` helper. `TTS_RESUME_DELAY_MS=750` constant on `recordingManager` for trivial tunability. State-preserving: tracks `_ttsPausedByRecording` flag so a user-initiated manual pause is never auto-resumed. Chained recordings within the 750ms window clear the pending timeout to prevent audible flicker.
+
+- **Barge-in queue-gate fix added during testing** (`notifications.js:3447-3454, 3613-3624`). Plan called barge-in a "known limitation"; live testing confirmed: at T-0 of a 15s countdown with mic already engaged, fresh TTS pushed straight through. Root cause: `pauseTTS()` early-returns when `!activeTTSItem` (line 13501), leaving `isTTSPaused` false — `activateNextTTS` (line 12950) then sees an open gate. Fix: (a) force `self.ui.isTTSPaused = true` after `pauseTTS()` to close the gate even when nothing was playing at pause-time; (b) after `resumeTTS()`, kick `activateNextTTS()` if `activeTTSItem` is null but `ttsQueue.length > 0`, draining backlogged messages that piled up during recording. Rick verified the fix live: "I'm preventing auto TTS for incoming notifications while I'm recording — wonderful, you've fixed barge-in for me."
+
+- **R&D doc serialized** to `src/rnd/v0.1.7/2026.05.13-notifications-ui-persona-initial-and-tts-pause.md`. Mirrors the approved plan; "Known limitation" section replaced with "Barge-in fix" section reflecting the live-verified queue-gate edits.
+
+- **Verification**: Node `--check` syntax pass on `notifications.js` after every edit batch. Skipped Python unit + WS smoke per change-impact-analysis carve-out — neither suite covers plain `notifications.js`; would only catch import-chain breakage that the Node parse-check already covers. UI-observable behavior verified end-to-end by Rick in chorus mode with multiple Lupin sessions active.
+
+**Files modified**:
+- `src/fastapi_app/static/js/notifications.js` (single file, 7 edits: 1 persona-initial + 6 pause/resume/gate-related)
+- `src/rnd/v0.1.7/2026.05.13-notifications-ui-persona-initial-and-tts-pause.md` (NEW)
+- `history.md` (this entry)
+- `.claude-session.md` (session manifest section)
+
+**Out of scope** (per memory rules): no Python touched, no INI, no CoSA, no new test files. Plain-JS frontend tweak does not engage the 100% c8 coverage mandate (that applies only to `src/fastapi_app/static/js/multiplexer/` TS).
+
 ### 2026.05.12 Late Evening - Session 6a054460 (Tiberius 🌑) | Inter-Session Commons Phase 3 — Pass 1 + Pydantic retrofit + Pass 2 closed + Steps 1-2 implementation
 
 **Persona**: Tiberius 🌑 (Deep male, #3F51B5)
