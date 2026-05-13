@@ -25,7 +25,9 @@ from pathlib import Path
 import pytest
 
 # Add `src/` to sys.path so the helper module is importable as `tests.helpers...`
-_SRC = Path( __file__ ).resolve().parents[ 2 ]
+# parents[3] = src/ (test file lives at src/tests/unit/commons/); spawned subprocess
+# inherits PYTHONPATH=src/ via env[] build below so it can find `lupin_mcp`.
+_SRC = Path( __file__ ).resolve().parents[ 3 ]
 if str( _SRC ) not in sys.path:
     sys.path.insert( 0, str( _SRC ) )
 

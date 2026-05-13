@@ -33,8 +33,9 @@ from pathlib import Path
 
 import pytest
 
-# Make tests.helpers importable when this test is invoked directly via pytest.
-_SRC = Path( __file__ ).resolve().parents[ 2 ]
+# Make tests.helpers importable AND set spawned subprocess PYTHONPATH=src/ so it can
+# find `lupin_mcp`. parents[3] = src/  (test file lives at src/tests/unit/commons/).
+_SRC = Path( __file__ ).resolve().parents[ 3 ]
 if str( _SRC ) not in sys.path:
     sys.path.insert( 0, str( _SRC ) )
 
