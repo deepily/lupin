@@ -597,7 +597,7 @@ def find_session_path_by_id( session_id ):
     Scan ~/.claude/sessions/cc-*.json for a session_id match and return the file path.
 
     Sibling of find_session_by_id() that returns the Path instead of the data dict,
-    enabling read-modify-write workflows (e.g., conversation_mode toggle).
+    enabling read-modify-write workflows (e.g., speakerphone toggle).
 
     Supports both full UUID and 8-char prefix matching. Skips files from dead PIDs.
 
@@ -804,9 +804,9 @@ def set_speakerphone( session_id, on ):
     evolution. Does NOT create a new bridge file if missing — bridge must
     already exist (created by SessionStart hook).
 
-    Upgrade-on-write semantics: a v1 bridge (with `speakerphone_on`
+    Upgrade-on-write semantics: a v1 bridge (with `conversation_mode_active`
     but no `speakerphone_on`) gets `speakerphone_on` + `format_version` added
-    on the first set_speakerphone call. The stale `speakerphone_on`
+    on the first set_speakerphone call. The stale `conversation_mode_active`
     key is removed in the same write to avoid two-source-of-truth confusion.
 
     Requires:
@@ -818,7 +818,7 @@ def set_speakerphone( session_id, on ):
         - Returns False if bridge not found or write failed
         - Never raises exceptions
         - Preserves all existing fields in the bridge JSON except the
-          legacy `speakerphone_on` key, which is removed if present
+          legacy `conversation_mode_active` key, which is removed if present
         - Stamps `format_version=2` (BRIDGE_FORMAT_VERSION)
 
     Args:
@@ -839,7 +839,7 @@ def set_speakerphone( session_id, on ):
         data[ "format_version" ] = BRIDGE_FORMAT_VERSION
         # Drop the v1 field if it lingers from a pre-Phase-2 bridge, to avoid
         # two-source-of-truth ambiguity. The v2 field is now authoritative.
-        data.pop( "speakerphone_on", None )
+        data.pop( "conversation_mode_active", None )
         with open( path, "w" ) as f:
             json.dump( data, f, indent=2 )
         return True

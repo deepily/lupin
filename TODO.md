@@ -1,5 +1,11 @@
 # TODO
 
+## 📦 history.md archive — deferred from session 83ba1e51 (Rio ⚡, 2026-05-12 evening)
+
+- [ ] **[LUPIN] Archive history.md** — currently ⚠️ WARNING at 20281 tokens (81% of 25k limit). Per session-end ritual, archive deferred to next session to respect wrap-up flow. Run `/history-management mode=archive` early next session before adding new content.
+
+---
+
 ## ☀️ FIRST THING NEXT SESSION — Multiplexer Phase 6c kickoff (session 56ee76d6 Rachel 🕊️, 2026-05-12 evening)
 
 **Resume pointer**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md`
@@ -44,17 +50,35 @@ Spoken `notify(message=…)` / `ask_multiple_choice(question=…)` body is **hea
 
 ---
 
-## ⏸️ Speakerphone (solo/chorus) — implementation-ready, awaiting Rick's go-ahead (2026-05-12)
+## 🔧 Speakerphone (solo/chorus) — Phases 5b/6/7 done on disk, uncommitted (2026-05-12 evening, Rio 83ba1e51)
 
-**Start here**: `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/00-index.md`
+**Resume pointer**: `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/00-index.md`
 
-Full design doc set drafted in one session (2026-05-12 PM, Rio persona). 15 docs: index, canonical plan (May 12), background synthesis, open questions, Q4 audit resolution, 8 per-phase design docs (`10`–`17`), test parameterization matrix, decisions log.
+### Where we are
 
-**Status**: Q4 mode-coupling audit ✅ resolved; Phase 1 unblocked; **no code written**.
+| Phase | Status | Commit | Notes |
+|---|---|---|---|
+| 1 — INI key + helper | ✅ Committed | `c82ee04` | — |
+| 2 + 3 — Bridge rename + server router | ✅ Committed | `8a8c31c` | CoSA-side edits in same logical change, committed separately by Rick |
+| 4 — MCP tool rename + `_notify_impl` mode-conditional | ✅ Committed | `9ba4db5` | — |
+| 5 — Hook layer renames (function names only) | ✅ Committed | `e17d7d7` | — |
+| 5b — 4-variant rider matrix + brevity migration | ✅ On disk, uncommitted | — | Replaces 1-variant `_system_reminder_body` with 4-variant `_speakerphone_reminder_body(source, mode, speakerphone_on)`. Brevity rules + routing reminder migrated from `~/.claude/CLAUDE.md` into rider. Behavior change: rider always fires (was gated on speakerphone_on=True). Bonus bug fix: Phase 2 sed-rename regression in `session_bridge.set_speakerphone` (popping v2 key instead of v1) |
+| 6 — CLAUDE.md migration + skill retire | ✅ On disk, uncommitted | — | `~/.claude/CLAUDE.md` slimmed 928→889 lines (3 sections stripped, 1 pointer added). `~/.claude/skills/conversation-mode-guardrails/` retired with backup. Project-local `.claude/commands/conversation-mode-{on,off}.md` → `speakerphone-{on,off}.md`. Doc touchpoints fixed in `src/docs/notification-types.md` + `rest-api-reference.md` |
+| 7 — Multiplexer rename + legacy notifications.js wire-fix | ✅ On disk, uncommitted | — | 3 multiplexer source files + 2 tests renamed; 100% c8 maintained. Legacy `notifications.js` wire-field bug from Phase 3 fixed (`conversation_mode_changed` → `speakerphone_changed`, `payload?.active` → `payload?.on`) |
 
-**When go-ahead arrives**: begin Phase 1 (`10-phase1-ini-plumbing-design.md`) — INI key + `get_tts_interaction_mode()` helper. Smallest phase, ~30-45 minutes. Phases 2–7 land as a coordinated single PR after that.
+**Test posture**: Python unit regression 4267 passed, 1 xfailed, 0 failures. Multiplexer 329/329 + c8 100/100/100/100 on touched files.
 
-The Phase 1 work is not blocking anything else; pick it up whenever Rick says "go."
+**Execution logs**: `95-phase5b-execution-log.md`, `96-phase6-execution-log.md`, `97-phase7-execution-log.md`.
+
+### Outstanding work (Rick to decide ordering)
+
+- [ ] **[LUPIN] Commit Phases 5b + 6 + 7 to the parent Lupin repo** — 18+ files staged; user-confirmed message at commit time. No CoSA-side commits from parent context per `feedback_lupin_only_never_cosa`.
+
+- [ ] **[LUPIN-COSA] Commit CoSA-side comment fixes from Phase 5b** — 3 files: `src/cosa/rest/commons_rate_limiter.py`, `src/cosa/rest/routers/voice_persona.py`, `src/cosa/rest/routers/speakerphone.py`. Rick handles in a CoSA-context session.
+
+- [ ] **[LUPIN] Phase 7b — Multiplexer toggle widget migration** (NEW, surfaced by Phase 7 audit) — Migrate the 📞/🔔 toggle widget + monopoly-pin logic from legacy `notifications.js` (lines 9590-9736) into the multiplexer with mode-aware rendering (solo bell↔phone, chorus phone↔speaker), green pin solo-only, 100% c8 coverage. Estimated ~3 hours. NOT in the original canonical plan — design assumed the widget already lived in the multiplexer; audit revealed it doesn't. See `97-phase7-execution-log.md` §7 for the recommendation to scope this as its own phase vs absorbing into Phase 8.
+
+- [ ] **[LUPIN] Phase 8 — Chorus-mode UX color/glyph polish** (deferred post-merge per canonical plan, but **Rick believes still TODO** — confirm intent on resume) — Design stub at `17-phase8-color-glyph-uxs-design.md`. Three options sketched in `90-decisions-log.md`; recommendation is option C (drop green reservation in chorus). Originally framed as "happens AFTER Phases 1-7 PR merges"; since nothing merged yet, scheduling is open.
 
 ---
 

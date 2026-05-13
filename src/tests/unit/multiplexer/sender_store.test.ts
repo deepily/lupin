@@ -179,13 +179,13 @@ test("queue resync (no notification field) is a no-op", () => {
   assert.equal(events.length, before);
 });
 
-test("conversation_mode_changed type is treated as state-update (no unread bump)", () => {
+test("speakerphone_changed type is treated as state-update (no unread bump)", () => {
   const { bus, store } = setup();
   // First a real notification to establish baseline.
   emitNotification(bus, { type: "task", sender_id: "a@x" });
   const baseline = store.get("a@x")!.unread_count;
-  // Then a conversation-mode-change for the same sender.
-  emitNotification(bus, { type: "conversation_mode_changed", sender_id: "a@x" });
+  // Then a speakerphone-change for the same sender.
+  emitNotification(bus, { type: "speakerphone_changed", sender_id: "a@x" });
   assert.equal(store.get("a@x")!.unread_count, baseline);
 });
 

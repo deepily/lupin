@@ -172,9 +172,9 @@ class NotificationsUI {
         // Session names cache (loaded from localStorage)
         this.sessionNames = JSON.parse( localStorage.getItem( this.SESSION_NAMES_KEY ) ) || {};
 
-        // Conversation mode cache (per-session: { [sessionId]: bool }). Read-through cache for instant
-        // render — server-canonical state lives in the cosa-voice bridge file and arrives via the
-        // conversation_mode_changed WebSocket event.
+        // Speakerphone state cache (per-session: { [sessionId]: bool }). Read-through cache for
+        // instant render — server-canonical state lives in the cosa-voice bridge file and arrives via
+        // the speakerphone_changed notification type (wrapped in notification_queue_update).
         this.conversationModes = JSON.parse( localStorage.getItem( this.CONVERSATION_MODES_KEY ) ) || {};
 
         // CC focus mode state (client-only, per-browser). Persists across reload via localStorage.
@@ -2254,7 +2254,7 @@ class NotificationsUI {
                 "notification_queue_update",
                 "notification_responded",  // Phase 2.2 SSE - multi-device sync
                 "notification_expired",    // Phase 2.2 SSE - timeout handling
-                // conversation_mode_changed / voice_persona_assigned / voice_persona_released
+                // speakerphone_changed / voice_persona_assigned / voice_persona_released
                 // arrive via notification_queue_update (custom notification_type values),
                 // not as top-level WS events. See:
                 // src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
@@ -5353,16 +5353,18 @@ class NotificationsUI {
                 }
                 return;
 
-            case "conversation_mode_changed":
+            case "speakerphone_changed":
                 // Re-shape from notification.payload to the legacy envelope keys
-                // that handleConversationModeChanged reads (session_id,
-                // conversation_mode_active, displaced, displaced_by). The
-                // strip-icon mic overlay is updated INSIDE handleConversationModeChanged
-                // so it benefits from the full→8-char session_id normalization
+                // that handleConversationModeChanged reads. Server-side wire field
+                // is `on` (boolean) per Phase 3 of the 2026.05.11 speakerphone
+                // refactor; the legacy handler still reads
+                // `conversation_mode_active`, so map here. The strip-icon mic
+                // overlay is updated INSIDE handleConversationModeChanged so it
+                // benefits from the full→8-char session_id normalization
                 // (mismatched-key bug logged at line 9553-9564).
                 this.handleConversationModeChanged({
                     session_id              : notification.payload?.session_id,
-                    conversation_mode_active: notification.payload?.active,
+                    conversation_mode_active: notification.payload?.on,
                     displaced               : notification.payload?.displaced,
                     displaced_by            : notification.payload?.displaced_by
                 });

@@ -1,6 +1,30 @@
 # Lupin Project History
 
-> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
+> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: ⚠️ WARNING at 20281 tokens (81% of 25k) — archive deferred to next session per `TODO.md` entry.
+
+### 2026.05.12 Evening - Session 83ba1e51 (Rio ⚡) | Speakerphone refactor — Phases 5b / 6 / 7 landed on disk
+
+**Persona**: Rio ⚡ (Young & energetic female, #880E4F)
+
+**Topic**: Resumed the speakerphone solo/chorus refactor from the prior session's stop-point (Phase 5 function renames committed at `e17d7d7`). Crushed through Phases 5b (4-variant rider matrix + brevity migration), 6 (global CLAUDE.md slim + skill retire), and 7 (multiplexer rename + legacy notifications.js wire-fix). Phase 8 (chorus UX color/glyph polish) stays deferred per the canonical plan.
+
+**Accomplishments**:
+
+- **Phase 5b — 4-variant rider matrix + CLAUDE.md brevity migration** (`hook_common.py` rewrite): Replaced 1-variant `_system_reminder_body(source)` with `_speakerphone_reminder_body(source, mode, speakerphone_on)`. New private helpers `_source_preamble`, `_brevity_rules`, `_routing_reminder`. **Behavior change**: rider now fires on EVERY inbound user turn (voice / terminal-typed / idle re-prompt / permission-request) when `session_id` resolves — was previously gated on `speakerphone_on=True`. Content varies by `(mode, speakerphone_on)` 4-variant matrix. Sentinel renamed `_CONV_MODE_WRAP_SENTINEL` → `_SPEAKERPHONE_WRAP_SENTINEL` (matches both ON and OFF bodies). `speakerphone_exit_reminder(mode)` now 2-variant: solo body covers displaced-or-toggled-off; chorus omits displacement framing. Caller (`cc_notification_listener._inject_exit_conversation_reminder`) reads mode via `cu.get_tts_interaction_mode()`. **Bonus bug fix**: `session_bridge.set_speakerphone` had a Phase 2 sed-rename regression — popping the v2 key (`speakerphone_on`) instead of the legacy v1 key (`conversation_mode_active`); silently masked 7 pre-existing test failures across `test_session_bridge_speakerphone.py` + `test_session_bridge_lookup.py::TestConversationMode`. Fixed (one-line pop-target change).
+
+- **Phase 6 — Global CLAUDE.md slim + skill retire + slash-command rename**: `~/.claude/CLAUDE.md` shrank 928 → 889 lines. Three sections removed (INTERACTIVE TOOL ROUTING, CRITICAL: USER IS NOT WATCHING TERMINAL, CONVERSATION MODE & TTS RESPONSE BREVITY MANDATE) — content now lives in the per-turn server rider after Phase 5b. One pointer section added (`### SPEAKERPHONE & TTS BEHAVIOR — SERVER-RIDER-DRIVEN`) directing readers to honor the rider as authoritative. Skill `~/.claude/skills/conversation-mode-guardrails/` retired with backup at `~/.claude/.phase6-backups/`. Project-local `.claude/commands/conversation-mode-{on,off}.md` → `speakerphone-{on,off}.md` (content also updated to call `enable_speakerphone()` / `disable_speakerphone()`). Doc touchpoints fixed: `src/docs/notification-types.md` (5 edits: state-update table, action verb example, router file reference, section heading, body) + `src/docs/rest-api-reference.md` (1 edit: response field `conversation_mode_active` → `speakerphone_on`).
+
+- **Phase 7 — Multiplexer rename + legacy notifications.js wire-fix** (100% c8 maintained): 3 multiplexer source files renamed: `types.ts` (`LupinEventType` literal `conversation_mode_change` → `speakerphone_change`), `broadcast.ts` (`BROADCAST_WHITELIST`), `SenderStore.ts` (`STATE_UPDATE_TYPES` set entry `conversation_mode_changed` → `speakerphone_changed`). 2 test files updated. c8 100/100/100/100 across all dimensions on touched files. **Audit discovery**: design doc anticipated `multiplexer/render/*` touches for a `SpeakerphoneToggle` component — code reality is the multiplexer doesn't render the toggle (lives in legacy `notifications.js:9590-9736`). Phase 7 scope-down captured in `97-phase7-execution-log.md §7`; recommended follow-up as "Phase 7b — toggle widget migration". **Pre-existing bug surfaced + fixed**: legacy `notifications.js` had been silently broken since Phase 3 — dispatch case still matched `conversation_mode_changed` (server-emitted name renamed in Phase 3) and payload field-read still expected `active` (server now emits `on`). Single-edit fix to lines 5356 + 5365 + 2 comment touchups.
+
+- **Test posture across all 3 phases**: Python unit regression 4267 passed, 1 xfailed, 0 failures. Multiplexer 329/329 + c8 `--100` clean on touched files.
+
+- **Per-phase execution logs** (BFE-pattern tracking per `feedback_plans_include_tracking_docs`): `95-phase5b-execution-log.md`, `96-phase6-execution-log.md`, `97-phase7-execution-log.md`.
+
+**Files modified**: 17 parent-Lupin files (5b: hook_common, cc_notification_listener, session_bridge + 6 test files; 6: ~/.claude/CLAUDE.md ⚠️not git-tracked, 2 project-local slash commands, 2 docs; 7: 3 multiplexer TS + 2 test files + legacy notifications.js). CoSA-side: 3 comment-only edits (commons_rate_limiter.py, voice_persona.py, speakerphone.py) — Rick handles git separately per `feedback_lupin_only_never_cosa`.
+
+**Status**: ✅ Phases 5b / 6 / 7 complete on disk, all tests green, awaiting Rick's commit auth. Phase 7b (multiplexer toggle migration) + Phase 8 (chorus UX polish) tracked in TODO.md for next session.
+
+---
 
 ### 2026.05.12 Evening - Session 56ee76d6 (Rachel 🕊️) | Multiplexer Phase 6b CLOSED + Phase 6c design phase opened (Cluster A 5/5)
 

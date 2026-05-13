@@ -226,7 +226,7 @@ test("BROADCAST_WHITELIST contains the documented Phase 2 + Phase 3 entries", ()
     "notification_received",
     "voice_persona_assigned",
     "voice_persona_released",
-    "conversation_mode_change",
+    "speakerphone_change",
   ];
   for (const t of expected) assert.ok(BROADCAST_WHITELIST.has(t), `whitelist contains ${t}`);
   assert.equal(BROADCAST_WHITELIST.size, expected.length);

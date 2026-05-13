@@ -247,7 +247,13 @@ class TestFindTmuxSession:
 class TestListenerTmuxTrigger:
 
     def test_inject_calls_subprocess_literal_then_enter( self ):
-        """_inject_via_tmux sends literal text then Enter with delay."""
+        """_inject_via_tmux sends literal text then Enter with delay.
+
+        Patches hook_common.speakerphone_wrap to an identity function so the
+        assertion focuses on the tmux invocation pattern (literal + Enter
+        + delay), not the per-turn rider content (which has its own tests
+        in test_speakerphone_wrap.py).
+        """
         from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
 
         listener = CCNotificationListener.__new__( CCNotificationListener )
@@ -261,7 +267,11 @@ class TestListenerTmuxTrigger:
         listener.verbose           = False
 
         with patch( "subprocess.run" ) as mock_run, \
-             patch( "time.sleep" ) as mock_sleep:
+             patch( "time.sleep" ) as mock_sleep, \
+             patch(
+                "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap",
+                side_effect=lambda text, **_kw: text
+             ):
             listener._inject_via_tmux( "run the tests" )
             assert mock_run.call_count == 2
             mock_run.assert_any_call(

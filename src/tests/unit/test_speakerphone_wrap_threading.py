@@ -1,6 +1,6 @@
 """
 Integration-style tests for Phase 2 threading: each inbound text-injection
-callsite invokes conv_mode_wrap (or conv_mode_reminder_block) with the
+callsite invokes speakerphone_wrap (or speakerphone_reminder_block) with the
 correct source label and session_id.
 
 Per Phase 2 + Phase 5 of
@@ -23,16 +23,16 @@ import pytest
 
 class TestListenerTmuxInjectThreading:
 
-    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.conv_mode_wrap" )
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap" )
     @patch( "lupin_cli.claude_code.hooks.lib.cc_notification_listener.subprocess.run" )
-    def test_inject_via_tmux_calls_conv_mode_wrap( self, mock_run, mock_wrap ):
+    def test_inject_via_tmux_calls_speakerphone_wrap( self, mock_run, mock_wrap ):
         """
-        _inject_via_tmux must invoke conv_mode_wrap(text, source='voice',
+        _inject_via_tmux must invoke speakerphone_wrap(text, source='voice',
         session_id=<hash>) before tmux send-keys.
         """
         from lupin_cli.claude_code.hooks.lib.cc_notification_listener import CCNotificationListener
 
-        # conv_mode_wrap returns a marker we can verify was passed to tmux
+        # speakerphone_wrap returns a marker we can verify was passed to tmux
         mock_wrap.return_value = "WRAPPED_OUTPUT_SENTINEL"
 
         listener = CCNotificationListener(
@@ -70,11 +70,11 @@ class TestListenerTmuxInjectThreading:
 class TestInjectQualifierViaTmuxThreading:
 
     @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
-    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.conv_mode_wrap" )
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap" )
     @patch( "lupin_cli.claude_code.hooks.lib.hook_common.subprocess.Popen" )
-    def test_inject_qualifier_calls_conv_mode_wrap( self, mock_popen, mock_wrap, mock_find ):
+    def test_inject_qualifier_calls_speakerphone_wrap( self, mock_popen, mock_wrap, mock_find ):
         """
-        inject_qualifier_via_tmux must invoke conv_mode_wrap(text,
+        inject_qualifier_via_tmux must invoke speakerphone_wrap(text,
         source='hook-idle-prompt', session_id=<sid>) before tmux send-keys.
         """
         from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux
@@ -102,11 +102,11 @@ class TestInjectQualifierViaTmuxThreading:
         assert "WRAPPED_QUALIFIER_SENTINEL" in cmd_list
 
 
-# ── user_prompt_submit conv_mode_reminder_block ───────────────────────────────
+# ── user_prompt_submit speakerphone_reminder_block ───────────────────────────────
 
 class TestUserPromptSubmitThreading:
     """
-    Verify user_prompt_submit.main() invokes conv_mode_reminder_block with
+    Verify user_prompt_submit.main() invokes speakerphone_reminder_block with
     the correct source label, and combines its output with voice_ctx
     when both are present.
 
@@ -139,7 +139,7 @@ class TestUserPromptSubmitThreading:
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.format_voice_context" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.enrich_voice_context" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.build_additional_context" )
-    @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.conv_mode_reminder_block" )
+    @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.emit_json" )
@@ -179,7 +179,7 @@ class TestUserPromptSubmitThreading:
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.format_voice_context" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.enrich_voice_context" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.build_additional_context" )
-    @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.conv_mode_reminder_block" )
+    @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.emit_json" )
@@ -190,7 +190,7 @@ class TestUserPromptSubmitThreading:
         drain_m, resolve_m, get_sid_m,
         set_idle_m, kill_idle_m, write_marker_m
     ):
-        # Voice messages present + conv mode active → combine both
+        # Voice messages present + speakerphone active → combine both
         drain_m.return_value      = [ { "msg": "test" } ]
         format_voice_m.return_value = "FORMATTED_VOICE"
         enrich_m.return_value     = "ENRICHED_VOICE"
@@ -221,7 +221,7 @@ class TestUserPromptSubmitThreading:
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.format_voice_context" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.enrich_voice_context" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.build_additional_context" )
-    @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.conv_mode_reminder_block" )
+    @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.read_hook_input" )
     @patch( "lupin_cli.claude_code.hooks.user_prompt_submit.emit_json" )

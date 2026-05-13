@@ -250,14 +250,14 @@ def test_project_session_response_basic_shape():
     out = project_session_response(
         session_id = "sid-1",
         persona    = { "name": "Maria", "icon": "🌸", "color": "#A040A0" },
-        bridge     = { "user_id": "alice", "last_activity_iso": "2026-05-12T00:00:00", "conversation_mode_active": True },
+        bridge     = { "user_id": "alice", "last_activity_iso": "2026-05-12T00:00:00", "speakerphone_on": True },
     )
     assert out[ "session_id" ]               == "sid-1"
     assert out[ "persona_name" ]             == "Maria"
     assert out[ "persona_icon" ]             == "🌸"
     assert out[ "persona_color" ]            == "#A040A0"
     assert out[ "last_seen_iso" ]            == "2026-05-12T00:00:00"
-    assert out[ "conversation_mode_active" ] is True
+    assert out[ "speakerphone_on" ] is True
 
 
 def test_project_session_response_no_bridge_path_leak():
@@ -285,9 +285,9 @@ def test_project_session_response_fallback_iso_field():
     assert out[ "last_seen_iso" ] == "2026-05-12T00:00:00"
 
 
-def test_project_session_response_missing_conv_mode_defaults_false():
+def test_project_session_response_missing_speakerphone_on_defaults_false():
     out = project_session_response( "sid", { }, { } )
-    assert out[ "conversation_mode_active" ] is False
+    assert out[ "speakerphone_on" ] is False
 
 
 # ─── filter_and_project_sessions (AC2 + T7 + T8) ────────────────────────────
@@ -502,10 +502,10 @@ def _make_raw_sessions_fn( sessions ):
     return lambda: sessions
 
 
-def _bridge_loader_fixed( user_id="alice", last_epoch=1000.0, conv_mode=False ):
+def _bridge_loader_fixed( user_id="alice", last_epoch=1000.0, speakerphone_on=False ):
     return lambda p: {
         "user_id": user_id, "last_activity_epoch": last_epoch,
-        "conversation_mode_active": conv_mode,
+        "speakerphone_on": speakerphone_on,
     }
 
 

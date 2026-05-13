@@ -16,7 +16,7 @@
 // unread on every event; no addressed-to-self predicate is feasible
 // client-side (no addressee field on the wire). State-update typed
 // notifications (voice_persona_assigned / voice_persona_released /
-// conversation_mode_changed) do NOT bump unread / last_active — they only
+// speakerphone_changed) do NOT bump unread / last_active — they only
 // affect the persona slot.
 
 import type { EventBus } from "../shared/EventBus";
@@ -29,11 +29,12 @@ import type {
 } from "../shared/types";
 
 // State-update notification types — see notifications.py:359 valid_types
-// and the 2026-04-29 cleanup design doc.
+// and the 2026-04-29 cleanup design doc. Server-canonical type names
+// (post-Phase-3 of the 2026.05.11 speakerphone refactor).
 const STATE_UPDATE_TYPES = new Set<string>([
   "voice_persona_assigned",
   "voice_persona_released",
-  "conversation_mode_changed",
+  "speakerphone_changed",
 ]);
 
 // Server payload shape for notification_queue_update — same as

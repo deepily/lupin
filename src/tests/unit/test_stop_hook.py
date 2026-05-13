@@ -441,7 +441,7 @@ class TestConversationModeGate:
     @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=True )
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
-    def test_conversation_mode_skips_everything( self, mock_read, mock_log, mock_conv,
+    def test_speakerphone_on_skips_everything( self, mock_read, mock_log, mock_conv,
                                                   mock_session, mock_resolve, mock_drain,
                                                   mock_emit, mock_notify, mock_send_tts,
                                                   mock_try_auto_narrate ):
@@ -906,10 +906,17 @@ class TestNotifyUserSync:
 class TestInjectQualifierViaTmux:
     """Tests for inject_qualifier_via_tmux() in hook_common."""
 
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap",
+            side_effect=lambda text, **_kw: text )
     @patch( "subprocess.Popen" )
     @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
-    def test_spawns_popen( self, mock_find, mock_popen ):
-        """Valid session → spawns Popen with tmux send-keys command."""
+    def test_spawns_popen( self, mock_find, mock_popen, _mock_wrap ):
+        """Valid session → spawns Popen with tmux send-keys command.
+
+        Patches hook_common.speakerphone_wrap to identity so the assertion
+        focuses on the bash-positional-args structure (security boundary),
+        not the per-turn rider content (covered by test_speakerphone_wrap.py).
+        """
         mock_find.return_value = { "tmux_session": "lupin", "session_id": "abc12345" }
 
         from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux
@@ -937,10 +944,17 @@ class TestInjectQualifierViaTmux:
 
         mock_popen.assert_not_called()
 
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap",
+            side_effect=lambda text, **_kw: text )
     @patch( "subprocess.Popen" )
     @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
-    def test_special_chars_safe( self, mock_find, mock_popen ):
-        """Special chars in text → passed as separate positional arg, not embedded in shell."""
+    def test_special_chars_safe( self, mock_find, mock_popen, _mock_wrap ):
+        """Special chars in text → passed as separate positional arg, not embedded in shell.
+
+        Patches hook_common.speakerphone_wrap to identity so the assertion
+        targets the bash-positional-args injection boundary, not the per-turn
+        rider content.
+        """
         mock_find.return_value = { "tmux_session": "lupin", "session_id": "abc12345" }
 
         from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux

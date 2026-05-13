@@ -22,10 +22,10 @@ Three categories exist:
 |---|---|---|
 | **User-facing messages** | `task`, `progress`, `alert`, `custom`, `user_initiated_message` | Render as a notification card; may speak via TTS |
 | **Session-scoped control** | `session_topic` | Header span update only — no notification card |
-| **Custom state-update** | `voice_persona_assigned`, `voice_persona_released`, `conversation_mode_changed`, `commons_broadcast_ack` | Dispatch through a `switch` in `notifications.js:5332` that handles the state mutation and returns BEFORE the message-render path |
+| **Custom state-update** | `voice_persona_assigned`, `voice_persona_released`, `speakerphone_changed`, `commons_broadcast_ack` | Dispatch through a `switch` in `notifications.js:5332` that handles the state mutation and returns BEFORE the message-render path |
 
 The **custom state-update** category exists because the multiplexer / notifications-UI
-needs out-of-band state changes (persona allocation, conversation-mode toggles,
+needs out-of-band state changes (persona allocation, speakerphone toggles,
 broadcast acks) but the team agreed in
 [`src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md`](../rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md)
 that the notification envelope is the canonical transport — NOT new top-level
@@ -45,13 +45,13 @@ agentic jobs or MCP shims.
 ### `user_initiated_message`
 
 Notification envelope carrying an **action directive** for a CC session listener.
-The `title` field encodes the action verb (e.g., `"action:conversation_mode_enter"`,
+The `title` field encodes the action verb (e.g., `"action:disable_speakerphone"`,
 `"action:broadcast_received"`). The listener's `_handle_action()` dispatcher reads
 the verb after `action:` and routes to the appropriate handler. UI does NOT render
 these as visible notifications — they are consumed by the listener and produce
 side effects (tmux injection, ack post).
 
-Producers: `cosa/rest/routers/conversation_mode.py`, `cosa/rest/routers/commons.py`.
+Producers: `cosa/rest/routers/speakerphone.py`, `cosa/rest/routers/commons.py`.
 
 ### `session_topic`
 
@@ -70,13 +70,15 @@ render with the persona badge. See `src/rnd/v0.1.7/2026.04.28-per-session-voice-
 Fires when a CC session's persona is released (session ended or `/clear`). UI
 removes the persona from `senderPersonaMap` and from any visible card headers.
 
-### `conversation_mode_changed`
+### `speakerphone_changed`
 
-Fires when a CC session enters or exits conversation mode. Payload includes
-`session_id`, `active`, `displaced`, `displaced_by`. UI updates the strip-icon
-mic overlay + monopoly-pin state. See
-[`src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md`](../rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md)
-for the full lifecycle.
+Fires when a CC session enables or disables speakerphone mode. Payload includes
+`session_id`, `on`, `displaced`, `displaced_by`. UI updates the toggle widget
+state + (solo mode only) the monopoly-pin / green glow. In chorus mode the
+`displaced` field is always `false` and no pinning fires. See
+[`src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`](../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/)
+for the mode-aware lifecycle and the bridge field rename from
+`conversation_mode_active` → `speakerphone_on` (Phase 2).
 
 ### `commons_broadcast_ack` (Phase 2)
 

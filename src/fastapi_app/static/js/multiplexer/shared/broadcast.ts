@@ -30,7 +30,7 @@ export const BROADCAST_WHITELIST: ReadonlySet<LupinEventType> = new Set<LupinEve
   "notification_received",
   "voice_persona_assigned",
   "voice_persona_released",
-  "conversation_mode_change",
+  "speakerphone_change",
 ]);
 
 const BROADCAST_SOURCE = "broadcast";

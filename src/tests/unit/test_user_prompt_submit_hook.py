@@ -104,12 +104,19 @@ class TestUserPromptSubmitHook:
         result = json.loads( captured.getvalue().strip() )
         assert result == {}
 
-    def test_no_buffer_returns_empty( self ):
-        """No JSONL buffer file -> {}."""
+    def test_no_buffer_returns_rider_only( self ):
+        """No JSONL buffer file -> rider only (always-fire post-Phase-5b)."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             payload = { "session_id": "abc12345-fake-uuid" }
             result  = _run_hook_main( payload, tmp_dir )
-            assert result == {}
+            # Phase 5b: the rider fires on every turn (when session_id
+            # resolves), so the hook always emits hookSpecificOutput. With
+            # no buffered voice content, the additionalContext is the
+            # rider block alone (no [Voice]: prefix lines).
+            assert "hookSpecificOutput" in result
+            ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
+            assert "<system-reminder>" in ctx
+            assert "[Voice]" not in ctx
 
     def test_buffer_with_messages_injects_context( self ):
         """JSONL buffer with messages -> additionalContext."""
@@ -151,14 +158,20 @@ class TestUserPromptSubmitHook:
             assert "[Voice]: first message" in ctx
             assert "[Voice]: second message" in ctx
 
-    def test_empty_buffer_file_returns_empty( self ):
-        """Empty buffer file -> {}."""
+    def test_empty_buffer_file_returns_rider_only( self ):
+        """Empty buffer file -> rider only (always-fire post-Phase-5b)."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             _write_buffer( tmp_dir, "abc12345", [] )
 
             payload = { "session_id": "abc12345-fake-uuid" }
             result  = _run_hook_main( payload, tmp_dir )
-            assert result == {}
+            # Phase 5b: rider fires on every turn (when session_id
+            # resolves). An empty buffer drains to zero voice messages, so
+            # additionalContext is the rider block alone.
+            assert "hookSpecificOutput" in result
+            ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
+            assert "<system-reminder>" in ctx
+            assert "[Voice]" not in ctx
 
     def test_session_id_from_payload( self ):
         """session_id from payload is used for buffer lookup."""

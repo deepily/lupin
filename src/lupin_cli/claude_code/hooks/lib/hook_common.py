@@ -621,11 +621,11 @@ def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY ):
             } )
             return
 
-        # Phase 2 — Layer 1 threading: wrap qualifier text with conv-mode
-        # envelope when active. The qualifier comes from the user's reply
-        # to the idle-aware Stop hook's "Anything else?" prompt and is
-        # injected back into Claude's input — clear inbound path.
-        # See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+        # Phase 5b — speakerphone rider: wrap qualifier text with the per-turn
+        # rider. The qualifier comes from the user's reply to the idle-aware
+        # Stop hook's "Anything else?" prompt and is injected back into
+        # Claude's input — clear inbound path.
+        # See: src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md
         try:
             text = speakerphone_wrap(
                 text,
@@ -953,21 +953,25 @@ def build_permission_decision( behavior, message=None, interrupt=False ):
     }
 
 
-# ── Conversation Mode Wrap (Layer 1) ──────────────────────────────────────────
+# ── Speakerphone Wrap (per-turn rider) ────────────────────────────────────────
 #
-# Per src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
-# Phase 1: helper to wrap inbound text with the conv-mode XML envelope when
-# the session bridge has speakerphone_on=true. Sanitization at the
-# boundary closes the prompt-injection escape vector (§2.4a of design doc).
+# Per src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md
+# (predecessor: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md)
+# Phase 5b: wrap inbound text with a <system-reminder> rider on every turn.
+# Body varies by (tts_interaction_mode, speakerphone_on) per a 4-variant
+# matrix (solo+speaker / solo+phone / chorus+speaker / chorus+phone).
+# Sanitization at the boundary closes the prompt-injection escape vector
+# (§2.4a of the predecessor design doc).
 
 # Markers stripped by sanitize_for_wrap to prevent user content from escaping
 # the wrapper or injecting a fake system-reminder. First-marker-wins; case
 # insensitive.
 _SANITIZE_MARKERS = ( "</voice-message", "<system-reminder" )
 
-# Sentinel substring used to detect already-wrapped strings for idempotency
-# (the appended system-reminder always contains this exact phrase).
-_CONV_MODE_WRAP_SENTINEL = "Conversation mode is active. After your response"
+# Sentinel substring used to detect already-wrapped strings for idempotency.
+# Appears in BOTH on-variant and off-variant rider bodies so the check is
+# universal across the 4-variant matrix.
+_SPEAKERPHONE_WRAP_SENTINEL = "This session has speakerphone mode"
 
 
 def sanitize_for_wrap( text ):
@@ -1002,57 +1006,183 @@ def sanitize_for_wrap( text ):
     return text[ :min( indices ) ]
 
 
-def _system_reminder_body( source ):
+def _source_preamble( source ):
     """
-    Build the conv-mode system-reminder body for a given injection source.
-
-    Body text varies by source so the reminder names where the input came
-    from (helpful for Claude's framing and for transcript readability).
+    Build the source-attribution preamble for the rider — one sentence that
+    names where the input came from. Helpful for Claude's framing and for
+    transcript readability.
 
     Requires:
-        - source is one of: "voice", "terminal-typed",
-          "hook-idle-prompt", "hook-permission-prompt"
+        - source is a string
 
     Ensures:
-        - Returns a non-empty string body (without wrapping <system-reminder>
-          tags — those are added by speakerphone_wrap)
-        - Always contains the _CONV_MODE_WRAP_SENTINEL substring
+        - Returns a single-sentence string for known sources
+        - Returns empty string for unknown sources (defensive)
 
     Args:
         source: Which injection point the text came from
 
     Returns:
+        str: Preamble sentence or empty string
+    """
+    if source == "voice":
+        return "The user spoke the above as a voice message from a distance."
+    if source == "terminal-typed":
+        return "The user typed the above at the terminal."
+    if source == "hook-idle-prompt":
+        return "The Stop hook fired the above as an idle-aware re-prompt."
+    if source == "hook-permission-prompt":
+        return "A permission-request hook synthesized the above prompt."
+    return ""
+
+
+def _brevity_rules():
+    """
+    The TTS brevity-rules block migrated from CLAUDE.md per Phase 5 of the
+    speakerphone refactor. Fires only when speakerphone_on=True (live TTS).
+
+    Ensures:
+        - Returns a non-empty paragraph describing how the closing `notify()`
+          spoken-text should differ from the terminal reply
+
+    Returns:
+        str: Brevity guidance text
+    """
+    return (
+        "Brevity for TTS: re-craft the spoken `message` for speech, do NOT pipe "
+        "terminal markdown through `notify()`. Strip headings, bullets, fenced "
+        "code blocks, inline backticks, file:line refs, JSON, hashes, and URLs "
+        "from the spoken text — those are TTS-hostile. Routine closings about "
+        "60 words; substantive turns 80-120 words. Speak the verdict, not the "
+        "inventory. Acknowledge receipt at turn-start in one sentence BEFORE "
+        "tool calls. Rich detail goes in the `abstract` parameter (rendered to "
+        "the UI card); the two channels are complementary, not duplicates."
+    )
+
+
+def _routing_reminder():
+    """
+    The cosa-voice routing-reminder block migrated from CLAUDE.md per Phase 5
+    of the speakerphone refactor. Fires when speakerphone_on=True so the model
+    uses voice tools rather than the terminal-only AskUserQuestion fallback.
+
+    Ensures:
+        - Returns a non-empty paragraph mapping interaction types to cosa-voice
+          MCP blocking tools
+
+    Returns:
+        str: Routing reminder text
+    """
+    return (
+        "Interactive tool routing: PREFER cosa-voice MCP blocking tools over "
+        "AskUserQuestion. Yes/no goes to `ask_yes_no`. Two to four options "
+        "goes to `ask_multiple_choice`. Open-ended goes to `converse`. Multiple "
+        "open-ended goes to `ask_open_ended_batch`. AskUserQuestion renders to "
+        "the terminal only — the user is listening, not watching."
+    )
+
+
+def _speakerphone_reminder_body( source, mode, speakerphone_on ):
+    """
+    Build the per-turn rider body for the given (source, mode, speakerphone_on)
+    triple. The body is plain text — no wrapping <system-reminder> tags
+    (those are added by the caller).
+
+    Per the Phase 5 design, the rider fires on every turn; content varies by
+    state, not whether it fires. Composition by variant:
+
+    - Source preamble (1 sentence) — always
+    - Speakerphone state notice — always (ON: notify-after; OFF: no notify)
+    - Brevity rules — speakerphone_on=True only
+    - Routing reminder — speakerphone_on=True only
+    - Mode-specific monopoly notice — mode="solo" only
+    - Multi-voice notice — mode="chorus" and speakerphone_on=True only
+
+    Requires:
+        - source is one of: "voice", "terminal-typed",
+          "hook-idle-prompt", "hook-permission-prompt"
+        - mode is "solo" or "chorus"
+        - speakerphone_on is a bool
+
+    Ensures:
+        - Returns a non-empty string body
+        - Always contains the _SPEAKERPHONE_WRAP_SENTINEL substring
+          (idempotency check rides on this invariant)
+
+    Args:
+        source:          Which injection point the text came from
+        mode:            Global TTS interaction mode
+        speakerphone_on: Per-session speakerphone state
+
+    Returns:
         str: System-reminder body text
     """
-    base = (
-        "Conversation mode is active. After your response, call "
-        "`notify(message=<full text of your reply>, suppress_ding=True, priority='high')`. "
-        "Strip fenced code blocks from the spoken text. The user is listening via TTS."
-    )
-    if source == "voice":
-        return "The user spoke the above as a voice message from a distance. " + base
-    if source == "terminal-typed":
-        return base
-    if source == "hook-idle-prompt":
-        return "(Idle-aware Stop hook synthesized the above prompt.) " + base
-    if source == "hook-permission-prompt":
-        return "(Permission-request hook synthesized the above prompt.) " + base
-    return base
+    parts = []
+
+    preamble = _source_preamble( source )
+    if preamble: parts.append( preamble )
+
+    if speakerphone_on:
+        parts.append(
+            "This session has speakerphone mode ON. After your response, call "
+            "`notify(message=<full text of your reply>, suppress_ding=True, "
+            "priority='high')` so the response is spoken aloud."
+        )
+        parts.append( _brevity_rules() )
+        parts.append( _routing_reminder() )
+    else:
+        parts.append(
+            "This session has speakerphone mode OFF (text-only render). No "
+            "closing `notify()` required. You may still call `notify()` for "
+            "milestones, errors, or blocking questions — those produce UI "
+            "notification cards regardless of TTS state. Blocking `ask_*` "
+            "tools also remain available."
+        )
+
+    if mode == "solo":
+        if speakerphone_on:
+            parts.append(
+                "Solo mode: speakerphone is currently held by THIS session. If "
+                "another session activates speakerphone, you will be displaced "
+                "(the bridge flips and the next assistant turn should NOT "
+                "auto-narrate)."
+            )
+        else:
+            parts.append(
+                "Solo mode: speakerphone is held by another session, or by "
+                "none. Activating speakerphone here will displace any current "
+                "holder. Do NOT call `enable_speakerphone` on your own "
+                "initiative — USER-ONLY initiation rule."
+            )
+    elif mode == "chorus" and speakerphone_on:
+        parts.append(
+            "Chorus mode: other sessions may also be in speakerphone mode "
+            "simultaneously. Persona voices disambiguate at the listener's "
+            "ear; the TTS queue serializes playback."
+        )
+
+    return "\n\n".join( parts )
 
 
 def speakerphone_wrap( text, *, source, session_id=None ):
     """
-    Wrap inbound text with the conv-mode XML envelope when the session is
-    in conversation mode. Pass-through unchanged when conv mode is off OR
-    when the session_id can't be resolved.
+    Wrap inbound text with the per-turn speakerphone rider. The rider fires
+    on every turn — content varies by (tts_interaction_mode, speakerphone_on)
+    per the Phase 5 4-variant matrix (solo+speaker / solo+phone /
+    chorus+speaker / chorus+phone).
 
-    Per Phase 1 of src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md.
+    For source="voice", the output also includes a <voice-message> envelope
+    describing voice INPUT properties (from-distance, priority, suppress-ding).
+    For non-voice sources, only the <system-reminder> rider is appended.
 
-    Sanitization runs FIRST (when active) to close the prompt-injection
-    escape vector documented as F2 in the adversarial-review pass.
+    Sanitization runs FIRST to close the prompt-injection escape vector
+    documented as F2 in the adversarial-review pass of the predecessor
+    three-layer-enforcement design.
 
     Idempotency: if the input already contains the wrapper sentinel, it is
     returned unchanged (safe to call multiple times on the same string).
+
+    Per src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md.
 
     Requires:
         - text is a string
@@ -1064,14 +1194,15 @@ def speakerphone_wrap( text, *, source, session_id=None ):
           (e.g. cc_notification_listener).
 
     Ensures:
-        - Returns text unchanged if speakerphone_on is False for
-          this session
-        - Returns text unchanged if session_id is None or empty
+        - Returns text unchanged if text is empty, OR session_id is None or
+          empty (can't resolve session state → fail-closed pass-through)
         - Returns text unchanged if input already contains the wrapper
           sentinel (idempotency)
-        - Returns text unchanged if any error occurs reading the bridge
-          (fail-closed — safer than wrapping on stale state)
-        - Otherwise returns wrapped output with sanitized user content
+        - Returns text unchanged if any error occurs reading the bridge or
+          the mode config (fail-closed — safer than wrapping on stale state)
+        - Otherwise returns wrapped output: <voice-message> envelope (voice
+          source only) + sanitized content + <system-reminder> rider body
+          appropriate to the current (mode, speakerphone_on) tuple
 
     Args:
         text:       Raw text being injected into Claude's input stream
@@ -1079,23 +1210,24 @@ def speakerphone_wrap( text, *, source, session_id=None ):
         session_id: Session ID to look up in the bridge (keyword-only)
 
     Returns:
-        str: Wrapped text or original text (when gate is closed)
+        str: Wrapped text or original text (when fail-closed)
     """
     if not text or not session_id: return text
 
     # Idempotency — don't re-wrap an already-wrapped string
-    if _CONV_MODE_WRAP_SENTINEL in text: return text
+    if _SPEAKERPHONE_WRAP_SENTINEL in text: return text
 
     try:
         from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
-        if not get_speakerphone( session_id ): return text
+        speakerphone_on = get_speakerphone( session_id )
+        mode            = cu.get_tts_interaction_mode()
     except Exception:
-        # Fail-closed — any error reading the bridge means we pass through
-        # unwrapped (safer than wrapping based on possibly-stale state).
+        # Fail-closed — any error reading bridge or mode config means pass
+        # through unwrapped (safer than wrapping based on possibly-stale state).
         return text
 
     clean         = sanitize_for_wrap( text )
-    reminder_body = _system_reminder_body( source )
+    reminder_body = _speakerphone_reminder_body( source, mode, speakerphone_on )
 
     if source == "voice":
         return (
@@ -1115,25 +1247,24 @@ def speakerphone_wrap( text, *, source, session_id=None ):
     )
 
 
-def speakerphone_exit_reminder():
+def speakerphone_exit_reminder( mode ):
     """
     Build the deactivation system-reminder injected when a session
-    transitions out of conversation mode.
+    transitions out of speakerphone mode. Body content varies by mode:
 
-    Two transition causes — both produce the same reminder body:
-      1. Displaced — another session activated conversation mode and the
-         router's mutex displaced this one. Pushed by the activate branch
-         per-displaced session.
-      2. Self-exit — this session deactivated itself (UI toggle button,
-         MCP disable_speakerphone(), voice phrase, slash command).
-         Pushed by the deactivate branch via symmetric self-targeted push.
+      - Solo mode: deactivation can be either displacement (another session
+        activated speakerphone, mutex flipped this one off) OR self-exit
+        (UI toggle / MCP disable_speakerphone() / voice phrase / slash
+        command). Body wording covers both.
+      - Chorus mode: no displacement — deactivation is user-initiated only.
+        Body wording omits the displacement framing.
 
-    Unlike speakerphone_wrap and speakerphone_reminder_block (which gate on the
-    bridge file's current state), this helper emits its body unconditionally.
-    The caller is responsible for invoking it only at the moment of a
-    transition. Both callers go through the listener subprocess responding
-    to an `action:disable_speakerphone` push from the conversation-mode
-    router; see src/cosa/rest/routers/conversation_mode.py.
+    Unlike speakerphone_wrap and speakerphone_reminder_block (which gate on
+    the bridge file's current state), this helper emits its body
+    unconditionally. The caller is responsible for invoking it only at the
+    moment of a transition. Callers go through the listener subprocess
+    responding to an `action:disable_speakerphone` push from the
+    speakerphone router; see src/cosa/rest/routers/speakerphone.py.
 
     The reminder is delivered as a synthetic user prompt via the listener's
     tmux injection path. By the time the deactivated session "comes up for
@@ -1142,32 +1273,57 @@ def speakerphone_exit_reminder():
     reverts to notification-mode behavior (no auto-notify, no voice-message
     wrap on responses).
 
+    Requires:
+        - mode is "solo" or "chorus" (any other value falls through to the
+          chorus body — safest default per Phase 1 INI default)
+
     Ensures:
         - Returns a non-empty <system-reminder>…</system-reminder> block
         - Body explicitly tells the model to stop calling notify() and
           stop wrapping responses in voice-message format
+        - Body does NOT contain the entry-side wrapper sentinel
+          (_SPEAKERPHONE_WRAP_SENTINEL) so idempotency in speakerphone_wrap
+          doesn't false-positive when an exit reminder is itself wrapped
         - Output is safe to inject via tmux send-keys -l (no special chars
-          that need escaping beyond what tmux literal mode handles)
-        - Body is reason-agnostic — same text for displace and self-exit
+          beyond what tmux literal mode handles)
+
+    Args:
+        mode: TTS interaction mode ("solo" or "chorus")
+
+    Returns:
+        str: <system-reminder> block ready for tmux injection
     """
-    body = (
-        "Conversation mode has just been deactivated for this session. "
-        "Stop calling `notify()` at the end of your response. "
-        "Stop wrapping replies in voice-message format. "
-        "Resume normal terminal-only output. "
-        "Acknowledge this transition silently — do not announce it to the user."
-    )
+    if mode == "solo":
+        body = (
+            "Speakerphone has just been deactivated for this session (either "
+            "another session activated speakerphone and displaced you, or you "
+            "toggled off). Stop calling `notify()` at the end of your "
+            "response. Stop wrapping replies in voice-message format. Resume "
+            "normal terminal-only output. Acknowledge this transition "
+            "silently — do not announce it to the user."
+        )
+    else:  # chorus (or unknown — default to chorus per INI default)
+        body = (
+            "Speakerphone has just been deactivated for this session. Stop "
+            "calling `notify()` at the end of your response. Stop wrapping "
+            "replies in voice-message format. Resume normal terminal-only "
+            "output. Acknowledge this transition silently — do not announce "
+            "it to the user."
+        )
     return f'<system-reminder>\n{body}\n</system-reminder>'
 
 
 def speakerphone_reminder_block( source, session_id ):
     """
-    Return just the <system-reminder> block when conv mode is active.
+    Return just the <system-reminder> block (no <voice-message> envelope)
+    for callers that can only emit additionalContext rather than transform
+    the user's input — e.g., the user_prompt_submit hook.
 
-    Variant of speakerphone_wrap for callers that need to inject the reminder
-    alone rather than wrap a specific text payload — e.g., the
-    user_prompt_submit hook, which can only emit additionalContext but
-    cannot transform the user's typed prompt.
+    Per the Phase 5 design, the rider fires on every turn (when session_id
+    is resolvable); content varies by (mode, speakerphone_on) per the
+    4-variant matrix. This is NOT a gate on speakerphone_on=True any more
+    — that gating belonged to the predecessor three-layer-enforcement
+    design and has been superseded.
 
     Requires:
         - source is one of: "voice", "terminal-typed",
@@ -1175,11 +1331,10 @@ def speakerphone_reminder_block( source, session_id ):
         - session_id is a non-empty string OR None
 
     Ensures:
-        - Returns empty string if conv mode is off, session_id missing,
-          or any error reading the bridge (fail-closed)
+        - Returns empty string if session_id missing or any error reading
+          bridge/mode config (fail-closed)
         - Returns formatted <system-reminder>…</system-reminder> block
-          otherwise (no wrapping <voice-message> tag, no leading
-          newline padding)
+          otherwise — body chosen per the (mode, speakerphone_on) tuple
 
     Args:
         source:     Which injection point's reminder body to use
@@ -1192,11 +1347,12 @@ def speakerphone_reminder_block( source, session_id ):
 
     try:
         from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
-        if not get_speakerphone( session_id ): return ""
+        speakerphone_on = get_speakerphone( session_id )
+        mode            = cu.get_tts_interaction_mode()
     except Exception:
         return ""
 
-    body = _system_reminder_body( source )
+    body = _speakerphone_reminder_body( source, mode, speakerphone_on )
     return f'<system-reminder>\n{body}\n</system-reminder>'
 
 

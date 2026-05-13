@@ -265,7 +265,7 @@ class TestWakeTimeGates:
         assert fired   == [ ], "reset detected → no ask fired"
         assert spawned == [ ], "reset → no successor"
 
-    def test_conversation_mode_active_exits_silently(
+    def test_speakerphone_on_exits_silently(
         self, fake_bridge, settings_5_10_20, alive_ppid, monkeypatch
     ):
         monkeypatch.setattr( idle_waiter, "get_speakerphone", lambda _sid: True )
@@ -275,7 +275,7 @@ class TestWakeTimeGates:
 
         idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
 
-        assert fired == [ ], "conv mode active at wake → no ask"
+        assert fired == [ ], "speakerphone on at wake → no ask"
 
     def test_dead_ppid_exits_silently_during_sleep( self, fake_bridge, settings_5_10_20, speakerphone_off, monkeypatch ):
         monkeypatch.setattr( idle_waiter, "_is_pid_alive", lambda _p: False )

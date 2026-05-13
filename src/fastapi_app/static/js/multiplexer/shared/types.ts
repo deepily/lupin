@@ -39,7 +39,7 @@ export type LupinEventType =
   | "notification_received"
   | "voice_persona_assigned"
   | "voice_persona_released"
-  | "conversation_mode_change"
+  | "speakerphone_change"
   // ConnectionStateMachine (Phase 3)
   | "connection_state_change"
   | "connection_reconnecting"
