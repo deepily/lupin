@@ -250,6 +250,56 @@ def test_bridge_last_activity_none_for_bad_type():
     assert _bridge_last_activity_epoch( { "last_activity_epoch": "not-a-number" } ) is None
 
 
+# 2026-05-13 fix per src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md —
+# fall back to `idle_detection.last_interaction_at` ISO string (the field the
+# real bridge writer populates) when no numeric epoch field is present.
+
+
+def test_bridge_last_activity_falls_back_to_idle_detection_iso():
+    """ISO string under `idle_detection.last_interaction_at` parses to epoch."""
+    bridge = { "idle_detection": { "last_interaction_at": "2026-05-13T10:00:00-04:00" } }
+    epoch = _bridge_last_activity_epoch( bridge )
+    assert epoch is not None
+    # 2026-05-13T10:00:00-04:00 == 2026-05-13T14:00:00 UTC == 1779711600.0
+    from datetime import datetime
+    expected = datetime.fromisoformat( "2026-05-13T10:00:00-04:00" ).timestamp()
+    assert abs( epoch - expected ) < 1.0
+
+
+def test_bridge_last_activity_numeric_wins_over_idle_detection():
+    """When BOTH numeric field and idle_detection ISO exist, numeric wins (back-compat)."""
+    bridge = {
+        "last_activity_epoch": 99999.0,
+        "idle_detection"     : { "last_interaction_at": "2026-05-13T10:00:00-04:00" },
+    }
+    assert _bridge_last_activity_epoch( bridge ) == 99999.0
+
+
+def test_bridge_last_activity_idle_detection_malformed_iso_returns_none():
+    """Malformed ISO string in idle_detection → None, no raise."""
+    bridge = { "idle_detection": { "last_interaction_at": "not an iso timestamp" } }
+    assert _bridge_last_activity_epoch( bridge ) is None
+
+
+def test_bridge_last_activity_idle_detection_missing_field_returns_none():
+    """idle_detection dict present but no last_interaction_at → None."""
+    bridge = { "idle_detection": { "backoff_index": 0 } }
+    assert _bridge_last_activity_epoch( bridge ) is None
+
+
+def test_bridge_last_activity_idle_detection_non_string_returns_none():
+    """idle_detection.last_interaction_at non-string → None (defensive)."""
+    bridge = { "idle_detection": { "last_interaction_at": 12345 } }
+    assert _bridge_last_activity_epoch( bridge ) is None
+
+
+def test_bridge_last_activity_idle_detection_non_dict_returns_none():
+    """`idle_detection` is not a dict (e.g. None, list, string) → None."""
+    assert _bridge_last_activity_epoch( { "idle_detection": None } )    is None
+    assert _bridge_last_activity_epoch( { "idle_detection": [ ] } )     is None
+    assert _bridge_last_activity_epoch( { "idle_detection": "oops" } )  is None
+
+
 # ─── project_session_response (AC2 + T8) ────────────────────────────────────
 
 
@@ -295,6 +345,44 @@ def test_project_session_response_fallback_iso_field():
 def test_project_session_response_missing_speakerphone_on_defaults_false():
     out = project_session_response( "sid", { }, { } )
     assert out[ "speakerphone_on" ] is False
+
+
+# 2026-05-13 fix — projection mirrors `_bridge_last_activity_epoch`'s fallback
+# so `last_seen_iso` actually populates when only `idle_detection.last_interaction_at`
+# is present (the field the real bridge writer uses).
+
+
+def test_project_session_response_falls_back_to_idle_detection_iso():
+    """When top-level iso fields are absent, fall back to idle_detection.last_interaction_at."""
+    out = project_session_response(
+        session_id = "sid-1",
+        persona    = { "name": "X", "icon": "?", "color": "#000" },
+        bridge     = { "idle_detection": { "last_interaction_at": "2026-05-13T10:00:00-04:00" } },
+    )
+    assert out[ "last_seen_iso" ] == "2026-05-13T10:00:00-04:00"
+
+
+def test_project_session_response_top_level_iso_wins_over_idle_detection():
+    """When BOTH exist, top-level wins (back-compat with hypothetical future writer)."""
+    out = project_session_response(
+        session_id = "sid-1",
+        persona    = { "name": "X", "icon": "?", "color": "#000" },
+        bridge     = {
+            "last_activity_iso": "2026-01-01T00:00:00",
+            "idle_detection"  : { "last_interaction_at": "2026-05-13T10:00:00-04:00" },
+        },
+    )
+    assert out[ "last_seen_iso" ] == "2026-01-01T00:00:00"
+
+
+def test_project_session_response_no_iso_anywhere_returns_none():
+    """No iso source anywhere → last_seen_iso is None (no crash)."""
+    out = project_session_response(
+        session_id = "sid-1",
+        persona    = { "name": "X", "icon": "?", "color": "#000" },
+        bridge     = { "user_id": "alice" },
+    )
+    assert out[ "last_seen_iso" ] is None
 
 
 # ─── filter_and_project_sessions (AC2 + T7 + T8) ────────────────────────────
@@ -371,6 +459,51 @@ def test_filter_graceful_includes_bridge_with_null_user_id():
         bridge_loader                    = loader,
     )
     assert len( out ) == 1
+
+
+def test_filter_excludes_session_stale_via_idle_detection_iso():
+    """
+    2026-05-13 fix — bridge with stale `idle_detection.last_interaction_at`
+    is excluded by the time-threshold filter (previously a no-op because the
+    filter looked at wrong field names). Per
+    `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`.
+    """
+    raw = [ _make_session_tuple( "/bridge/stale", "sid-stale", { "name": "MrRadio" } ) ]
+    from datetime import datetime, timedelta, timezone
+    # Last interaction 2 hours ago — well past the 600s (10min) threshold
+    stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=2 ) ).isoformat()
+    now_epoch = datetime.now( timezone.utc ).timestamp()
+    loader = lambda p: { "idle_detection": { "last_interaction_at": stale_iso } }
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "anyone",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = now_epoch,
+        bridge_loader                    = loader,
+    )
+    assert out == [ ], "stale bridge should have been pruned by the time-threshold filter"
+
+
+def test_filter_includes_session_recently_interactive_via_idle_detection_iso():
+    """
+    Counterpart: a bridge with RECENT `idle_detection.last_interaction_at`
+    passes the time-threshold filter.
+    """
+    raw = [ _make_session_tuple( "/bridge/recent", "sid-recent", { "name": "Maria" } ) ]
+    from datetime import datetime, timedelta, timezone
+    recent_iso = ( datetime.now( timezone.utc ) - timedelta( seconds=60 ) ).isoformat()
+    now_epoch  = datetime.now( timezone.utc ).timestamp()
+    loader = lambda p: { "idle_detection": { "last_interaction_at": recent_iso } }
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "anyone",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = now_epoch,
+        bridge_loader                    = loader,
+    )
+    assert len( out ) == 1
+    # Bonus: last_seen_iso projection now populates
+    assert out[ 0 ][ "last_seen_iso" ] == recent_iso
 
 
 def test_filter_strict_when_bridge_has_user_id():
