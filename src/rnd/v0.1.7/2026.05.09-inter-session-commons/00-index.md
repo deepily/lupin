@@ -19,8 +19,8 @@
 | [`92-phase1-closure.md`](92-phase1-closure.md) | 🟢 NEW — Phase 1 post-mortem | What landed, deferred items, Phase 2 unblock summary |
 | [`03-phase2-user-broadcast-design.md`](03-phase2-user-broadcast-design.md) | ✅ CLOSED 2026-05-12 — all 14 ACs verified | Phase 2 user→all broadcast surface. REUSE + Pass 1 + Pass 2 all closed: 10 prior-art mappings + 4 plan corrections + 20 fitness findings + 12 threats walked + 11 ACs hardened + sanitization ratified + 2 new threats surfaced and mitigated. Implementation closed 2026-05-12. |
 | [`92-phase2-closure.md`](92-phase2-closure.md) | ✅ CLOSED 2026-05-12 — Phase 2 post-mortem | What landed, deferred items (D1 polling→push, LLM-fallback), Phase 3 unblock summary |
-| [`04-phase3-push-mode-and-llm-fallback-design.md`](04-phase3-push-mode-and-llm-fallback-design.md) | 🟡 **Pass 1 IN FLIGHT 2026-05-12** — Pass 0 ✅ (8/8 Q's); REUSE ✅; Pass 1 mid-walk (F1-fit ratified, F2-fit paused mid-picker). Pass 2 Adversarial NOT YET RUN. | Phase 3 scope: D1 polling→push + LLM fallback. 13 ACs derived. |
-| [`91-resume-here-phase3-pass1-f2-fit.md`](91-resume-here-phase3-pass1-f2-fit.md) | 🟢 NEW 2026-05-12 — pre-context-clear resume pointer | Self-contained handoff. Pass 0 + REUSE + F1-fit summarized; F2-fit picker framing verbatim; 11 remaining findings tabulated; process reminders + file-location cheatsheet. **Start here on next session.** |
+| [`04-phase3-push-mode-and-llm-fallback-design.md`](04-phase3-push-mode-and-llm-fallback-design.md) | 🟢 **Pass 2 CLOSED 2026-05-12** — Pass 0 ✅ + REUSE ✅ + Pass 1 Fitness ✅ + Pydantic retrofit ✅ + Pass 2 Adversarial ✅ (8/8 T1-T8). Apply phase complete (all). Next gate: AI-executed test pyramid per §6 Testing Ownership Mandate before APPROVED FOR CODE-WRITE. | Phase 3 scope: D1 polling→push + LLM fallback. **20 ACs total** (AC1-AC15 Pass 1 + AC16-AC20 Pass 2 tests). 9 NEW + 8 MODIFIED files. **10 new INI keys**. NEW §8 PHI-4 prompt envelope. Pass 2 ratifications table in §3. |
+| ~~[`91-resume-here-phase3-pass1-f2-fit.md`](91-resume-here-phase3-pass1-f2-fit.md)~~ | ⚪ Superseded 2026-05-12 — Pass 1 closed | Pre-context-clear handoff that drove F2-fit → F13-fit walk. All 13 findings ratified; kept for audit trail. |
 | [`90-execution-log.md`](90-execution-log.md) | ✅ All 8 steps CLOSED | Phase 1 execution status; per-step AC closure tracking |
 | ~~[`91-resume-here-phase1-step4.md`](91-resume-here-phase1-step4.md)~~ | ⚪ Superseded 2026-05-11 | Step 4 closed; kept for history |
 | ~~[`91-resume-here-phase1-step5.md`](91-resume-here-phase1-step5.md)~~ | ⚪ Superseded 2026-05-11 | Step 5 closed; kept for history |
@@ -77,7 +77,7 @@
 | **0** | Design + ratification | ✅ CLOSED 2026-05-09 (15 Q-decisions) |
 | **1** | File-based commons MVP — 5 MCP tools, store, matcher, archival, tests | ✅ CLOSED 2026-05-11 — all 8 steps + 14 ACs complete; 88 tests / 100% coverage |
 | **2** | User → all broadcast — UI + 2 endpoints + persona-aware parse + ack aggregation + markdown rendering (Q15) | ✅ **CLOSED 2026-05-12** — all 13 steps + 14 ACs complete; 224 tests (216 unit/smoke + 8 Playwright); 100% coverage gate held across 8 commons modules (622 stmts, 170 branches) |
-| **3** | Push-mode `ask_async` (D1 closure) + LLM-fallback wiring for persona matcher | 🟡 **SKELETON 2026-05-12** — [`04-phase3-push-mode-and-llm-fallback-design.md`](04-phase3-push-mode-and-llm-fallback-design.md). Plan-review pipeline NOT YET RUN (Pass 0 / REUSE / Pass 1 / Pass 2 all pending). |
+| **3** | Push-mode `ask_async` (D1 closure) + LLM-fallback wiring for persona matcher | 🟢 **Pass 2 CLOSED 2026-05-12** — [`04-phase3-push-mode-and-llm-fallback-design.md`](04-phase3-push-mode-and-llm-fallback-design.md). All 4 review passes closed. Next gate: AI-executed test pyramid (`py_compile` → unit → smoke → integration → scheduled :8000 E2E) before APPROVED FOR CODE-WRITE. |
 | **4** | Postgres-backed commons + Multiplexer Commons tab | ⏳ Future (multiplexer Phase 6c prerequisite) |
 
 ---

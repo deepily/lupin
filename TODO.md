@@ -6,7 +6,75 @@
 
 ---
 
-## ☀️ FIRST THING NEXT SESSION — Multiplexer Phase 6c kickoff (session 56ee76d6 Rachel 🕊️, 2026-05-12 evening)
+## ☀️ FIRST THING NEXT SESSION (Tiberius 🌑) — Inter-Session Commons Phase 3 Steps 3-9 implementation barrel-through (paused 2026-05-12 PM, session 6a054460)
+
+**Primary doc**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md` (status: 🟢 APPROVED FOR CODE-WRITE)
+
+### Where we paused (Step 2 CLOSED, Step 3 about to begin)
+
+**Completed in 2026-05-12 PM session**:
+- ✅ All 4 plan-review passes (Pass 0 + REUSE + Pass 1 Fitness + Pass 2 Adversarial) — 20 ACs (AC1-AC15 Pass 1 + AC16-AC20 Pass 2 tests), 10 new INI keys, NEW §6 Testing Ownership Mandate, NEW §8 PHI-4 prompt envelope, Pydantic-native validation retrofit
+- ✅ Status flipped to **APPROVED FOR CODE-WRITE** by Rick
+- ✅ Step 1 — Q1 refactor pre-flight: `commons_topic_watcher.py` (base) + refactored `commons_ack_watcher.py` (subclass keeps Phase 2 public API). py_compile + import-chain clean. **26/26 ack-watcher tests GREEN** (AC8 gate satisfied).
+- ✅ Step 2 — 10 INI keys + 10 paired splainer entries land in `lupin-app.ini` + `lupin-app-splainer.ini`. ConfigurationManager.get() resolves 10/10 with correct types.
+
+### Required next-session sequence (resume here, in order)
+
+**Step 3** — `src/cosa/rest/commons_question_watcher.py` (NEW, ~150 LOC) — the load-bearing module:
+- `_InFlightQuestion` dataclass: `user_id`, `last_seen_ts`, `inject_fn`, `expires_at_monotonic`
+- `register_question(qid, uid, ttl, inject_fn, last_seen_ts=time.time())` — calls base `_register()` after T3 cap checks (per-user + global)
+- `_dispatched_set: Set[Tuple[str, str]]` for T1 idempotency (cleared on `_unregister`)
+- `_initialize_last_seen_ts()` — subclass impl (reads the registered topic's last entry)
+- `tick()` — for each registered question, polls topic since `question.last_seen_ts`; for each new entry validates `in_reply_to` per T1 (`isinstance` + `TOPIC_RE.match` + `len ≤ 64`); checks `(qid, entry_id) not in _dispatched_set` for T1 idempotency; T6 lookup-under-lock; **dispatch inject_fn OUTSIDE lock** with T8 try-except wrap
+- Custom `CapExceededError` exception for T3 429 translation
+- Plus unit tests in `src/tests/unit/commons/test_commons_question_watcher.py` covering AC16 (T1 idempotency), AC17 (T3 caps), AC18 (T4 cursor), AC19 (T6 concurrency), AC20 (T8 inject_fn failure)
+
+**Step 4** — `src/lupin_mcp/commons_xml_models.py` (NEW, ~80 LOC) — PersonaInfo + PersonaDisambiguationRequest (with `Field` + `@field_validator` for T2 sanitization) + PersonaDisambiguationResponse (with `Field(ge=0, le=1)` on confidence). Per §8 envelope. Plus unit tests.
+
+**Step 5** — `src/lupin_mcp/commons_llm_disambiguator.py` (NEW, ~120 LOC) — `disambiguate()` using `LlmClientFactory.get_client(spec_key)` + BaseXMLModel round-trip + confidence-floor thresholding + T2 whitelist + T7 decision audit log. Stubbed Haiku fallback raises `NotImplementedError`. Plus unit tests with mocked LlmClientFactory.
+
+**Step 6** — `src/cosa/rest/routers/commons.py` (+80 LOC) — `RegisterQuestionRequest(BaseModel)` with Pydantic Field constraints; `POST /api/commons/register-question` and `DELETE /api/commons/register-question/{question_id}` endpoints with auth dep, T3 cap checks (429), T5 uniform 404 body, lock-guard via watcher methods. AC14 router-registration smoke.
+
+**Step 7** — `src/lupin_mcp/commons_ask.py` (+30 LOC) — `ask_async()` reads `commons api base url` from INI; fires `POST /api/commons/register-question` when push-mode enabled; try-except + warning log + polling fallback on failure (F1-fit). `ask_sync()` untouched per F10-fit.
+
+**Step 8** — `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (+40 LOC) — 4th `elif action == "commons_answer_received"` branch + `_handle_commons_answer_received()` reading stamped `persona_name` from answer entry (F9-fit), building `COMMONS PEER REPLY` body, injecting via `_inject_via_tmux(wrap=False)`. Extend `valid_types` in `routers/notifications.py:359-362`.
+
+**Step 9** — Final pyramid + lifespan: AC13 TestClient smoke in `src/tests/smoke/test_ask_async_push_e2e.py`; extend `main.py:527+` lifespan to instantiate + start `CommonsQuestionWatcher`; AC15 integration E2E file `src/tests/integration/test_commons_ask_async_push_integration.py` (schedulable via `/api/test-suite/submit`). **Run full pyramid + report tabular pass/fail per tier** per §6 Testing Ownership Mandate.
+
+### Testing Ownership Mandate (mandatory at every step)
+
+Per CLAUDE.local.md §"USER IS NEVER A TESTER" + design doc §6:
+
+The AI runs every tier at each step appropriate to that step. Tabular pass/fail reporting before declaring any step "done". User is never asked to verify or run tests. Tier-1 (`py_compile` + import-chain + unit) and Tier-2 (`:7999` smoke + router-registration) are AI-discretionary. Tier-3 (`:8000` integration E2E, AC15) requires user slot-confirmation per `feedback_test_server_monopolize_mode` — the user-ask is slot availability, NOT budget approval, NOT tester-duty deferral.
+
+### Standing memories that apply (mandatory)
+
+- `feedback_approved_sequences_execute_end_to_end` — once Steps 3-9 barrel-through begins, do not re-ask between sub-steps
+- `feedback_pydantic_native_validation` — all body validation declared via Pydantic Field + field_validator, never hand-rolled if/raise
+- `feedback_recraft_speech_dont_pipe_terminal` — TTS message = headlines + verdict only; details in abstract
+- `feedback_lupin_only_never_cosa` — code edits in `src/cosa/` are fine; git ops there are forbidden from parent context
+- `feedback_never_auto_commit_push` — wait for explicit "commit" / "push" per change
+
+### File-location cheatsheet
+
+| Purpose | Path |
+|---|---|
+| Phase 3 design doc | `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md` |
+| Phase 3 doc-set index | `src/rnd/v0.1.7/2026.05.09-inter-session-commons/00-index.md` |
+| Base watcher (Step 1 ✅) | `src/cosa/rest/commons_topic_watcher.py` |
+| Ack subclass (Step 1 ✅) | `src/cosa/rest/commons_ack_watcher.py` |
+| INI keys (Step 2 ✅) | `src/conf/lupin-app.ini` + `lupin-app-splainer.ini` (search for "Phase 3 (push-mode") |
+| Question watcher (Step 3) | `src/cosa/rest/commons_question_watcher.py` (NEW) |
+| XML models (Step 4) | `src/lupin_mcp/commons_xml_models.py` (NEW) |
+| Disambiguator (Step 5) | `src/lupin_mcp/commons_llm_disambiguator.py` (NEW) |
+| Router endpoints (Step 6) | `src/cosa/rest/routers/commons.py` (MODIFY) |
+| MCP ask_async (Step 7) | `src/lupin_mcp/commons_ask.py` (MODIFY) |
+| Listener wiring (Step 8) | `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` (MODIFY) + `src/cosa/rest/routers/notifications.py:359-362` |
+| Lifespan (Step 9) | `src/fastapi_app/main.py:527+` (MODIFY) |
+| Smoke test (Step 9 / AC13) | `src/tests/smoke/test_ask_async_push_e2e.py` (NEW) |
+| Integration test (Step 9 / AC15) | `src/tests/integration/test_commons_ask_async_push_integration.py` (NEW) |
+
+---
 
 **Resume pointer**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md`
 

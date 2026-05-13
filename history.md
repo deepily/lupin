@@ -1,6 +1,55 @@
 # Lupin Project History
 
-> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: ⚠️ WARNING at 20281 tokens (81% of 25k) — archive deferred to next session per `TODO.md` entry.
+> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: ⚠️ WARNING at 21073 tokens (84% of 25k) — archive deferred to next session per `TODO.md` entry.
+
+### 2026.05.12 Late Evening - Session 6a054460 (Tiberius 🌑) | Inter-Session Commons Phase 3 — Pass 1 + Pydantic retrofit + Pass 2 closed + Steps 1-2 implementation
+
+**Persona**: Tiberius 🌑 (Deep male, #3F51B5)
+
+**Topic**: Inter-Session Commons Phase 3 (push-mode `ask_async` + LLM-fallback persona disambiguation). Picked up post-/clear from the F2-fit resume doc; drove Pass 1 to closure (F2-F13), absorbed Rick's Pydantic-native validation retrofit catch, walked Pass 2 Adversarial end-to-end (T1-T8), captured the Testing Ownership Mandate explicitly in §6, and landed Steps 1-2 of the implementation. Paused at Step 3 boundary for tomorrow's barrel-through.
+
+**Accomplishments**:
+
+- **Pass 1 Fitness CLOSED — 13/13 findings ratified** (one-at-a-time per sequential rule). F2-fit INI key + env-var override; F3-fit per-topic cursor on `_InFlightQuestion`; F4-fit user-scoping (Phase 2 T7 mirror, 404-on-mismatch); F5-fit XML envelope (match + confidence + INI floor); F6-fit `0 < ttl ≤ 604800`; F7-fit topic regex `^[A-Za-z0-9_-]+$`; F8-fit atomic-or-409; F9-fit stamped persona from answer entry (Phase 1 immutability); F10-fit `ask_sync` stays polling-only; F11-fit TestClient smoke + **Rick's AC15 amendment** (end-of-cycle Playwright/integration bookend); F12-fit explicit 4-module import-chain list; F13-fit template-method pattern (protected `_register`/`_unregister` on base; domain-named public methods on subclasses).
+
+- **Pydantic-native validation retrofit** — Rick caught that F6-fit/F7-fit/T2 were framed as hand-rolled `if/raise HTTPException` chains while the rest of `cosa/rest/routers/` uses Pydantic-native. Retrofitted AC1 (`RegisterQuestionRequest(BaseModel)` with `Field(min_length, max_length, pattern, gt, le)`), AC2 (path param `Path(..., pattern=...)`), AC6 (`PersonaDisambiguationRequest` with `@field_validator(mode="before")` for T2 sanitization). New memory `feedback_pydantic_native_validation` saved as project-wide standard.
+
+- **Pass 2 Adversarial CLOSED — 8/8 threats ratified.** T1 strict type+format validation + dispatch-once idempotency `_dispatched_set`; T2 Pydantic sanitization + output whitelist + range; T3 per-user cap (50) + global cap (1000) + reuse `commons_rate_limiter` (429 on cap-hit); T4 cursor = `time.time()` on re-register + Phase 1 polling fallback covers gap; T5 uniform 404 body for both not-found and user-mismatch (single internal path); T6 mirror Phase 2 lock pattern (lookup under lock, dispatch outside lock); T7 keep 0.7 floor + INI-toggleable decision audit log; T8 mirror Phase 2 try-except + log + continue around `inject_fn`.
+
+- **Testing Ownership Mandate landed in §6** — explicit "user is never a tester" preamble with tier execution responsibility table; AI executes every tier; tabular pass/fail reporting; 422 for Pydantic-validated body, 400 for app-level invariants, 404 for not-found/user-mismatch, 409 for atomic-conflict, 429 for cap-hit. New ACs AC16-AC20 specifically targeting T1 idempotency, T3 caps, T4 cursor, T6 concurrency, T8 inject_fn failures. Final AC count: **20 (AC1-AC15 Pass 1 + AC16-AC20 Pass 2 tests)**; final INI key count: **10**.
+
+- **Status flipped to APPROVED FOR CODE-WRITE** — all 4 plan-review passes closed; Rick authorized implementation start. 9-step sequence locked in §5.
+
+- **Step 1 — Q1 refactor pre-flight CLOSED.** NEW `src/cosa/rest/commons_topic_watcher.py` (~150 LOC abstract base): owns lifecycle scaffolding (`start`/`stop`/`_run_loop`), `threading.Lock`, `_in_flight` dict, protected `_register(record_id, record)` (atomic insert-or-raise) / `_unregister(record_id)` (silent pop), `_prune_expired_locked(now)` (records must expose `expires_at_monotonic`), abstract `_initialize_last_seen_ts()` + `tick()`. REFACTOR `src/cosa/rest/commons_ack_watcher.py`: subclasses `CommonsTopicWatcher`; preserves Phase 2 public API (`register_broadcast`/`unregister_broadcast`/`is_in_flight`); re-raises base `ValueError` with domain-specific `"broadcast_id collision"` message for Phase 2 26-test compat. **py_compile ✅ + import-chain ✅ + 26/26 ack-watcher tests GREEN in 0.56s** (AC8 satisfied).
+
+- **Step 2 — INI keys + splainer CLOSED.** 10 new keys land in `lupin-app.ini` under `[Lupin: Baseline]` + 10 paired splainer entries: `commons question tracker ttl seconds` (Q4), `llm spec key for commons persona disambiguator` (C2 + Q5), `commons llm disambiguator fallback model name` (Q5 stub), `commons llm disambiguator timeout seconds` (Q7), `commons ask async push mode enabled` (F1-fit), `commons api base url` (F2-fit), `commons llm disambiguator confidence floor` (F5-fit), `commons question tracker per user max` (T3), `commons question tracker global max` (T3), `commons llm disambiguator log decisions` (T7). **Smoke test 10/10 resolve** via `ConfigurationManager.get()` with correct types.
+
+- **TTS brevity-mandate strengthening** captured. Rick caught two violations where notify `message` was inventorying details (recap pattern) instead of speaking headlines + verdict. Memory `feedback_recraft_speech_dont_pipe_terminal` updated with the "headlines only, ~30-50 words, no recap" mandate.
+
+- **Resume pointer pinned for next session** — TODO.md FIRST THING NEXT SESSION block points at Steps 3-9 barrel-through with file-location cheatsheet, AC checklist, and standing-memory recap. Next session opens directly at Step 3 (`CommonsQuestionWatcher` + AC16-AC20 unit tests).
+
+**Files modified** (parent Lupin only — per `feedback_lupin_only_never_cosa`):
+
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md` — Pass 1 + Pydantic retrofit + Pass 2 applied; 20 ACs in §6; NEW Testing Ownership Mandate preamble; NEW §8 PHI-4 prompt envelope with Pydantic models; NEW §3 Pass 2 ratifications table
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/00-index.md` — Phase 3 row + phase table updated to Pass 2 CLOSED + resume doc marked superseded
+- `src/rnd/v0.1.7/2026.05.09-inter-session-commons/91-resume-here-phase3-pass1-f2-fit.md` — superseded banner at top (kept for audit trail)
+- `src/cosa/rest/commons_topic_watcher.py` (NEW) — abstract base class
+- `src/cosa/rest/commons_ack_watcher.py` — refactored to subclass; domain-specific error message preserved
+- `src/conf/lupin-app.ini` — 10 new Phase 3 keys
+- `src/conf/lupin-app-splainer.ini` — 10 paired splainer entries
+- `TODO.md` — FIRST THING NEXT SESSION block re-pointed to Steps 3-9 barrel-through with full resume context
+- `/home/rruiz/.claude/projects/.../memory/feedback_pydantic_native_validation.md` (NEW memory)
+- `/home/rruiz/.claude/projects/.../memory/feedback_recraft_speech_dont_pipe_terminal.md` — strengthened headlines-only mandate
+- `/home/rruiz/.claude/projects/.../memory/MEMORY.md` — index updated
+- `history.md` (this entry)
+
+#### Checkpoint | 2026.05.12 Late Evening | Phase 3 — Pass 1 + Retrofit + Pass 2 closed + Steps 1-2 landed
+
+**Files**: 12 (1 NEW base class + 1 NEW memory + 10 MOD across design doc, index, resume-doc, ack-watcher, INI, splainer, TODO, 2 memory files, manifest, history)
+
+**Commit**: [pending]
+
+---
 
 ### 2026.05.12 Evening - Session 83ba1e51 (Rio ⚡) | Speakerphone refactor — Phases 5b / 6 / 7 landed on disk
 

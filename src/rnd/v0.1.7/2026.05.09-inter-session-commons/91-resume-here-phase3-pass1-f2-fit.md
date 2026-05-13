@@ -1,5 +1,9 @@
 # Resume Pointer — Phase 3 Pass 1 Fitness, F2-fit picker (2026-05-12)
 
+> ⚪ **SUPERSEDED 2026-05-12** — this resume doc served its purpose. Pass 1 Fitness CLOSED with all 13 findings ratified + Rick's AC15 amendment + apply phase complete. **For the current Phase 3 state, see** [`04-phase3-push-mode-and-llm-fallback-design.md`](04-phase3-push-mode-and-llm-fallback-design.md) **(Pass 2 Adversarial is the next user gate).** Kept below for audit trail.
+>
+> ---
+>
 > **You are here**: Pass 1 Fitness walk of Phase 3 (push-mode `ask_async` + LLM fallback for persona matcher). F1-fit ratified; F2-fit picker was open when the session paused. After context clear, this doc is the single self-contained entry point.
 
 ---
