@@ -18,10 +18,11 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from lupin_mcp.commons_ask import _find_replies, ask_async, ask_sync
+from lupin_mcp.commons_ask import _find_replies, _register_push_mode, ask_async, ask_sync
 from lupin_mcp.commons_store import CommonsStore
 
 
@@ -217,3 +218,142 @@ def test_find_replies_filters_by_question_id( store ):
     matches = _find_replies( store, "coordination", posted[ "ts" ], "qid-A" )
     assert len( matches ) == 1
     assert matches[ 0 ][ "body" ] == "reply-to-A"
+
+
+# ─── Step 7: push-mode register ─────────────────────────────────────────────
+
+
+def _make_mock_response( status_code ):
+    m = MagicMock()
+    m.status_code = status_code
+    return m
+
+
+def test_push_mode_disabled_default_returns_false_active( store ):
+    """ask_async with push_mode_enabled=False (default) → push_mode_active=False."""
+    result = ask_async(
+        store, "coordination", "Q", "me",
+        persona_name="Me", persona_icon="?", persona_color="#000",
+    )
+    assert result[ "push_mode_active" ] is False
+    assert "question_id" in result and "posted_ts" in result
+
+
+def test_push_mode_enabled_missing_url_skips( store ):
+    """ask_async with push_mode_enabled=True but no api_base_url → silently skipped."""
+    result = ask_async(
+        store, "coordination", "Q", "me",
+        persona_name="Me", persona_icon="?", persona_color="#000",
+        push_mode_enabled=True,
+        api_base_url=None,
+        auth_header={ "X-API-Key": "abc" },
+    )
+    assert result[ "push_mode_active" ] is False
+
+
+def test_push_mode_enabled_missing_auth_skips( store ):
+    """ask_async with push_mode_enabled=True but no auth_header → silently skipped."""
+    result = ask_async(
+        store, "coordination", "Q", "me",
+        persona_name="Me", persona_icon="?", persona_color="#000",
+        push_mode_enabled=True,
+        api_base_url="http://localhost:7999",
+        auth_header=None,
+    )
+    assert result[ "push_mode_active" ] is False
+
+
+def test_push_mode_register_success( store ):
+    """Successful register HTTP 2xx → push_mode_active=True; correct POST shape."""
+    fake_resp = _make_mock_response( 201 )
+    with patch( "requests.post", return_value=fake_resp ) as mock_post:
+        result = ask_async(
+            store, "coordination", "Q", "me-sess",
+            persona_name="Me", persona_icon="?", persona_color="#000",
+            push_mode_enabled=True,
+            api_base_url="http://localhost:7999",
+            auth_header={ "X-API-Key": "key-123" },
+            ttl_seconds=300,
+        )
+
+    assert result[ "push_mode_active" ] is True
+    assert mock_post.call_count == 1
+    call_url    = mock_post.call_args[ 0 ][ 0 ]
+    call_kwargs = mock_post.call_args[ 1 ]
+    assert call_url == "http://localhost:7999/api/commons/register-question"
+    body = call_kwargs[ "json" ]
+    assert body[ "topic" ]            == "coordination"
+    assert body[ "asker_session_id" ] == "me-sess"
+    assert body[ "ttl_seconds" ]      == 300
+    assert "question_id" in body
+    assert call_kwargs[ "headers" ]   == { "X-API-Key": "key-123" }
+
+
+def test_push_mode_register_non_2xx_falls_back( store ):
+    """Non-2xx HTTP response → push_mode_active=False (silent fallback to polling)."""
+    fake_resp = _make_mock_response( 409 )
+    with patch( "requests.post", return_value=fake_resp ):
+        result = ask_async(
+            store, "coordination", "Q", "me",
+            persona_name="Me", persona_icon="?", persona_color="#000",
+            push_mode_enabled=True,
+            api_base_url="http://localhost:7999",
+            auth_header={ "X-API-Key": "k" },
+            debug=True,
+        )
+    assert result[ "push_mode_active" ] is False
+    # The question was still posted to the store (Phase 1 contract preserved)
+    entries = store.read( "coordination", limit=10 )
+    assert any( e[ "body" ] == "Q" for e in entries )
+
+
+def test_push_mode_register_network_error_falls_back( store ):
+    """requests.post raises → caught → False, polling fallback works."""
+    with patch( "requests.post", side_effect=ConnectionError( "no server" ) ):
+        result = ask_async(
+            store, "coordination", "Q", "me",
+            persona_name="Me", persona_icon="?", persona_color="#000",
+            push_mode_enabled=True,
+            api_base_url="http://localhost:7999",
+            auth_header={ "X-API-Key": "k" },
+            debug=True,
+        )
+    assert result[ "push_mode_active" ] is False
+
+
+def test_push_mode_register_strips_trailing_slash_on_base_url( store ):
+    """`api_base_url` with trailing slash is normalized before path append."""
+    fake_resp = _make_mock_response( 201 )
+    with patch( "requests.post", return_value=fake_resp ) as mock_post:
+        ask_async(
+            store, "coordination", "Q", "me-sess",
+            persona_name="Me", persona_icon="?", persona_color="#000",
+            push_mode_enabled=True,
+            api_base_url="http://localhost:7999/",   # ← trailing slash
+            auth_header={ "X-API-Key": "k" },
+        )
+    call_url = mock_post.call_args[ 0 ][ 0 ]
+    assert call_url == "http://localhost:7999/api/commons/register-question"
+
+
+def test_register_push_mode_missing_requests_returns_false():
+    """When `requests` cannot be imported, `_register_push_mode` returns False."""
+    import builtins
+    original_import = builtins.__import__
+
+    def _fake_import( name, *args, **kwargs ):
+        if name == "requests": raise ImportError( "no requests" )
+        return original_import( name, *args, **kwargs )
+
+    with patch( "builtins.__import__", side_effect=_fake_import ):
+        result = _register_push_mode(
+            api_base_url     = "http://localhost:7999",
+            auth_header      = { "X-API-Key": "k" },
+            topic            = "t",
+            question_id      = "q1",
+            asker_session_id = "s",
+            ttl_seconds      = 60,
+            timeout_seconds  = 1.0,
+            debug            = True,
+        )
+    assert result is False
