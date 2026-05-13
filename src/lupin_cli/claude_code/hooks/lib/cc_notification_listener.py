@@ -298,6 +298,8 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._inject_exit_conversation_reminder()
         elif action == "broadcast_received":
             self._handle_broadcast_received( notification )
+        elif action == "commons_answer_received":
+            self._handle_commons_answer_received( notification )
         else:
             self._log( f"{self.LOG_PREFIX} Unknown action: {action}" )
 
@@ -348,6 +350,41 @@ class CCNotificationListener( BaseWebSocketListener ):
             store             = store,
             sender_session_id = sender_session_id,
         )
+
+    def _handle_commons_answer_received( self, notification ):
+        """
+        Handle an `action:commons_answer_received` notification from the
+        server-side `CommonsQuestionWatcher` (Phase 3 step 8).
+
+        Per AC4 + Q3 of
+        src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md:
+        - Reads `persona_name` from the STAMPED notification payload (F9-fit
+          immutability — never a live lookup; the answerer's persona at
+          answer-write time is the authoritative attribution).
+        - Builds the `<system-reminder>` body using the Q3 framing:
+              "COMMONS PEER REPLY (question_id X, from @PersonaName):
+                  [body]"
+          PEER ≠ USER (intra-AI principle), REPLY ≠ BROADCAST.
+        - Injects via `_inject_via_tmux(text, wrap=False)` — the body
+          is already a complete <system-reminder> block.
+        """
+        payload      = notification.get( "payload" ) or { }
+        question_id  = payload.get( "question_id" )
+        body         = payload.get( "body", "" )
+        persona_name = payload.get( "persona_name" ) or "unknown"
+
+        if not question_id:
+            self._log( f"{self.LOG_PREFIX} commons_answer_received missing question_id; skipping" )
+            return
+
+        # Q3 framing — persona attribution preserves provenance; question_id
+        # lets the LLM correlate to the original ask_async call.
+        reminder_body = (
+            f"COMMONS PEER REPLY (question_id {question_id}, from @{persona_name}):\n\n"
+            f"{body}"
+        )
+        wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+        self._inject_via_tmux( wrapped, wrap=False )
 
     def _inject_exit_conversation_reminder( self ):
         """
