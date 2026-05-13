@@ -438,14 +438,14 @@ class TestConversationModeGate:
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge" )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
-    @patch( "lupin_cli.claude_code.hooks.stop.get_conversation_mode", return_value=True )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=True )
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_conversation_mode_skips_everything( self, mock_read, mock_log, mock_conv,
                                                   mock_session, mock_resolve, mock_drain,
                                                   mock_emit, mock_notify, mock_send_tts,
                                                   mock_try_auto_narrate ):
-        """conversation_mode_active=True → emit {}, run auto-narrate safety net,
+        """speakerphone_on=True → emit {}, run auto-narrate safety net,
         NO drain, NO notify, NO direct TTS via the prompt paths.
 
         `_try_auto_narrate` (Phase 4 Layer 3) is patched as a no-op here so the
@@ -480,13 +480,13 @@ class TestConversationModeGate:
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
-    @patch( "lupin_cli.claude_code.hooks.stop.get_conversation_mode", return_value=False )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False )
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_notification_mode_runs_normal_flow( self, mock_read, mock_log, mock_conv,
                                                   mock_session, mock_resolve, mock_emit,
                                                   mock_ask, mock_reset, mock_drain ):
-        """conversation_mode_active=False → falls through to standard flow (drain runs)."""
+        """speakerphone_on=False → falls through to standard flow (drain runs)."""
         mock_read.return_value = {
             "stop_hook_active" : False,
             "session_id"       : "abc12345"

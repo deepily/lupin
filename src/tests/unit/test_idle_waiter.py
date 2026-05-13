@@ -76,9 +76,9 @@ def alive_ppid( monkeypatch ):
 
 
 @pytest.fixture
-def conv_mode_off( monkeypatch ):
+def speakerphone_off( monkeypatch ):
     """Conversation mode reads return False unless overridden."""
-    monkeypatch.setattr( idle_waiter, "get_conversation_mode", lambda _sid: False )
+    monkeypatch.setattr( idle_waiter, "get_speakerphone", lambda _sid: False )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ def conv_mode_off( monkeypatch ):
 class TestYesPath:
 
     def test_yes_no_qualifier_exits_no_successor(
-        self, fake_bridge, settings_5_10_20, alive_ppid, conv_mode_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult( answer="yes", qualifier=None, raw_value="yes", error=None )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
@@ -116,7 +116,7 @@ class TestYesPath:
         assert injects     == [ ], "should not inject when no qualifier"
 
     def test_yes_with_qualifier_injects_then_exits(
-        self, fake_bridge, settings_5_10_20, alive_ppid, conv_mode_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult( answer="yes", qualifier="run the tests", raw_value="yes", error=None )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
@@ -147,7 +147,7 @@ class TestYesPath:
 class TestBackoffProgression:
 
     def test_no_response_spawns_successor_at_next_index(
-        self, fake_bridge, settings_5_10_20, alive_ppid, conv_mode_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult( answer="no", qualifier=None, raw_value="no", error=None )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
@@ -169,7 +169,7 @@ class TestBackoffProgression:
         assert block[ "backoff_index" ] == 1
 
     def test_timeout_treated_as_no(
-        self, fake_bridge, settings_5_10_20, alive_ppid, conv_mode_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult( answer="timeout", qualifier=None, raw_value="", error=None )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
@@ -184,7 +184,7 @@ class TestBackoffProgression:
         assert spawned == [ 2 ]
 
     def test_caps_at_last_schedule_index(
-        self, fake_bridge, settings_5_10_20, alive_ppid, conv_mode_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
     ):
         # Schedule has 3 entries (indices 0-2). At index 2, "no" should keep spawning at 2.
         result = AnythingElseResult( answer="no", qualifier=None, raw_value="no", error=None )
@@ -200,7 +200,7 @@ class TestBackoffProgression:
         assert spawned == [ 2 ], "cap at last index, not index 3"
 
     def test_no_with_qualifier_injects_and_spawns(
-        self, fake_bridge, settings_5_10_20, alive_ppid, conv_mode_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult(
             answer="no", qualifier="check the logs", raw_value="no [comment: check the logs]", error=None
@@ -258,7 +258,7 @@ class TestWakeTimeGates:
             idle_waiter, "_spawn_successor",
             lambda *a, **kw: spawned.append( ( a, kw ) ) or 1
         )
-        monkeypatch.setattr( idle_waiter, "get_conversation_mode", lambda _sid: False )
+        monkeypatch.setattr( idle_waiter, "get_speakerphone", lambda _sid: False )
 
         idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
 
@@ -268,7 +268,7 @@ class TestWakeTimeGates:
     def test_conversation_mode_active_exits_silently(
         self, fake_bridge, settings_5_10_20, alive_ppid, monkeypatch
     ):
-        monkeypatch.setattr( idle_waiter, "get_conversation_mode", lambda _sid: True )
+        monkeypatch.setattr( idle_waiter, "get_speakerphone", lambda _sid: True )
 
         fired = [ ]
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: fired.append( kw ) or None )
@@ -277,7 +277,7 @@ class TestWakeTimeGates:
 
         assert fired == [ ], "conv mode active at wake → no ask"
 
-    def test_dead_ppid_exits_silently_during_sleep( self, fake_bridge, settings_5_10_20, conv_mode_off, monkeypatch ):
+    def test_dead_ppid_exits_silently_during_sleep( self, fake_bridge, settings_5_10_20, speakerphone_off, monkeypatch ):
         monkeypatch.setattr( idle_waiter, "_is_pid_alive", lambda _p: False )
 
         fired = [ ]
@@ -288,7 +288,7 @@ class TestWakeTimeGates:
 
         assert fired == [ ], "dead PPID → exit before fire"
 
-    def test_bridge_gone_at_wake_exits_silently( self, settings_5_10_20, alive_ppid, conv_mode_off, monkeypatch ):
+    def test_bridge_gone_at_wake_exits_silently( self, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch ):
         # No fake_bridge fixture — find_session_path returns None unconditionally
         monkeypatch.setattr( sb,          "find_session_path_by_id", lambda _sid: None )
         monkeypatch.setattr( idle_waiter, "find_session_path_by_id", lambda _sid: None )
@@ -307,7 +307,7 @@ class TestWakeTimeGates:
 
 class TestErrorPath:
 
-    def test_error_response_no_successor( self, fake_bridge, settings_5_10_20, alive_ppid, conv_mode_off, monkeypatch ):
+    def test_error_response_no_successor( self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch ):
         result = AnythingElseResult( answer="error", qualifier=None, raw_value="", error="server down" )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
 
@@ -329,7 +329,7 @@ class TestErrorPath:
 class TestSlotManagement:
 
     def test_aborts_when_live_waiter_already_holds_slot(
-        self, fake_bridge, settings_5_10_20, conv_mode_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, speakerphone_off, monkeypatch
     ):
         # Pre-claim the slot with a "live" PID
         sb.set_idle_detection_field( "test-sid", waiter_pid=11111 )

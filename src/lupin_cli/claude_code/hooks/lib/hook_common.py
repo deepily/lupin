@@ -627,7 +627,7 @@ def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY ):
         # injected back into Claude's input — clear inbound path.
         # See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
         try:
-            text = conv_mode_wrap(
+            text = speakerphone_wrap(
                 text,
                 source     = "hook-idle-prompt",
                 session_id = session_id
@@ -957,7 +957,7 @@ def build_permission_decision( behavior, message=None, interrupt=False ):
 #
 # Per src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
 # Phase 1: helper to wrap inbound text with the conv-mode XML envelope when
-# the session bridge has conversation_mode_active=true. Sanitization at the
+# the session bridge has speakerphone_on=true. Sanitization at the
 # boundary closes the prompt-injection escape vector (§2.4a of design doc).
 
 # Markers stripped by sanitize_for_wrap to prevent user content from escaping
@@ -1015,7 +1015,7 @@ def _system_reminder_body( source ):
 
     Ensures:
         - Returns a non-empty string body (without wrapping <system-reminder>
-          tags — those are added by conv_mode_wrap)
+          tags — those are added by speakerphone_wrap)
         - Always contains the _CONV_MODE_WRAP_SENTINEL substring
 
     Args:
@@ -1040,7 +1040,7 @@ def _system_reminder_body( source ):
     return base
 
 
-def conv_mode_wrap( text, *, source, session_id=None ):
+def speakerphone_wrap( text, *, source, session_id=None ):
     """
     Wrap inbound text with the conv-mode XML envelope when the session is
     in conversation mode. Pass-through unchanged when conv mode is off OR
@@ -1064,7 +1064,7 @@ def conv_mode_wrap( text, *, source, session_id=None ):
           (e.g. cc_notification_listener).
 
     Ensures:
-        - Returns text unchanged if conversation_mode_active is False for
+        - Returns text unchanged if speakerphone_on is False for
           this session
         - Returns text unchanged if session_id is None or empty
         - Returns text unchanged if input already contains the wrapper
@@ -1087,8 +1087,8 @@ def conv_mode_wrap( text, *, source, session_id=None ):
     if _CONV_MODE_WRAP_SENTINEL in text: return text
 
     try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import get_conversation_mode
-        if not get_conversation_mode( session_id ): return text
+        from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
+        if not get_speakerphone( session_id ): return text
     except Exception:
         # Fail-closed — any error reading the bridge means we pass through
         # unwrapped (safer than wrapping based on possibly-stale state).
@@ -1115,7 +1115,7 @@ def conv_mode_wrap( text, *, source, session_id=None ):
     )
 
 
-def conv_mode_exit_reminder():
+def speakerphone_exit_reminder():
     """
     Build the deactivation system-reminder injected when a session
     transitions out of conversation mode.
@@ -1125,14 +1125,14 @@ def conv_mode_exit_reminder():
          router's mutex displaced this one. Pushed by the activate branch
          per-displaced session.
       2. Self-exit — this session deactivated itself (UI toggle button,
-         MCP exit_conversation_mode(), voice phrase, slash command).
+         MCP disable_speakerphone(), voice phrase, slash command).
          Pushed by the deactivate branch via symmetric self-targeted push.
 
-    Unlike conv_mode_wrap and conv_mode_reminder_block (which gate on the
+    Unlike speakerphone_wrap and speakerphone_reminder_block (which gate on the
     bridge file's current state), this helper emits its body unconditionally.
     The caller is responsible for invoking it only at the moment of a
     transition. Both callers go through the listener subprocess responding
-    to an `action:exit_conversation_mode` push from the conversation-mode
+    to an `action:disable_speakerphone` push from the conversation-mode
     router; see src/cosa/rest/routers/conversation_mode.py.
 
     The reminder is delivered as a synthetic user prompt via the listener's
@@ -1160,11 +1160,11 @@ def conv_mode_exit_reminder():
     return f'<system-reminder>\n{body}\n</system-reminder>'
 
 
-def conv_mode_reminder_block( source, session_id ):
+def speakerphone_reminder_block( source, session_id ):
     """
     Return just the <system-reminder> block when conv mode is active.
 
-    Variant of conv_mode_wrap for callers that need to inject the reminder
+    Variant of speakerphone_wrap for callers that need to inject the reminder
     alone rather than wrap a specific text payload — e.g., the
     user_prompt_submit hook, which can only emit additionalContext but
     cannot transform the user's typed prompt.
@@ -1191,8 +1191,8 @@ def conv_mode_reminder_block( source, session_id ):
     if not session_id: return ""
 
     try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import get_conversation_mode
-        if not get_conversation_mode( session_id ): return ""
+        from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
+        if not get_speakerphone( session_id ): return ""
     except Exception:
         return ""
 

@@ -35,7 +35,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id,
-    get_conversation_mode, get_session_metadata,
+    get_speakerphone, get_session_metadata,
     get_idle_detection, set_idle_detection_field, kill_idle_waiter,
     get_last_autonarrated_turn_id, set_last_autonarrated_turn_id,
 )
@@ -668,7 +668,7 @@ def main():
     # auto-narrate safety net — synthesize a notify() if Claude's last
     # turn ended without one (silent-console-only failure mode). Per
     # src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
-    if get_conversation_mode( session_id ):
+    if get_speakerphone( session_id ):
         try:
             _try_auto_narrate( session_id, payload )
         except Exception as e:
@@ -678,7 +678,7 @@ def main():
                 "error"      : str( e ),
             } )
         log_to_stream( "stop", {}, extra={
-            "phase"      : "conversation_mode_skip",
+            "phase"      : "speakerphone_skip",
             "session_id" : session_id
         } )
         emit_json( {} )

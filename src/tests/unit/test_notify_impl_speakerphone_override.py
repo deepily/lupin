@@ -36,6 +36,17 @@ def _mock_module_init( monkeypatch ):
     yield
 
 
+# Phase 4 made _notify_impl's cross-talk leak cue mode-conditional: SOLO
+# preserves today's inversion behavior, CHORUS passes through. The legacy
+# tests in this file assert the inversion behavior, so default the mode to
+# "solo" for every test. Chorus passthrough is verified by separate tests
+# at the bottom of the file.
+@pytest.fixture( autouse=True )
+def _default_solo_mode():
+    with patch( "cosa.utils.util.get_tts_interaction_mode", return_value="solo" ):
+        yield
+
+
 # ── strip_fenced_code_blocks ──────────────────────────────────────────────────
 
 class TestStripFencedCodeBlocks:
@@ -133,7 +144,7 @@ class TestNotifyImplGateInternalCallBypass:
     ):
         from lupin_mcp.cosa_voice_mcp import _notify_impl
 
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" ) as mock_get:
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" ) as mock_get:
             mock_get.return_value = True   # Conv mode ON
 
             _notify_impl(
@@ -159,7 +170,7 @@ class TestNotifyImplGateConvModeActive:
     ):
         from lupin_mcp.cosa_voice_mcp import _notify_impl
 
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" ) as mock_get:
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" ) as mock_get:
             mock_get.return_value = True
 
             _notify_impl(
@@ -177,7 +188,7 @@ class TestNotifyImplGateConvModeActive:
     ):
         from lupin_mcp.cosa_voice_mcp import _notify_impl
 
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" ) as mock_get:
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" ) as mock_get:
             mock_get.return_value = True
 
             _notify_impl(
@@ -194,7 +205,7 @@ class TestNotifyImplGateConvModeActive:
     ):
         from lupin_mcp.cosa_voice_mcp import _notify_impl
 
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" ) as mock_get:
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" ) as mock_get:
             mock_get.return_value = True
 
             _notify_impl( message="Critical alert", priority="urgent" )
@@ -216,7 +227,7 @@ class TestNotifyImplGateConvModeInactiveCrossTalkCue:
     ):
         from lupin_mcp.cosa_voice_mcp import _notify_impl
 
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" ) as mock_get:
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" ) as mock_get:
             mock_get.return_value = False   # Conv mode OFF
 
             _notify_impl(
@@ -236,7 +247,7 @@ class TestNotifyImplGateConvModeInactiveCrossTalkCue:
     ):
         from lupin_mcp.cosa_voice_mcp import _notify_impl
 
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" ) as mock_get:
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" ) as mock_get:
             mock_get.return_value = False
 
             _notify_impl(
@@ -258,7 +269,7 @@ class TestNotifyImplGateConvModeInactiveCrossTalkCue:
         # Override the sender mock to a non-CC sender
         mock_session_resolution[ "sender" ].return_value = "agentic.job@lupin.deepily.ai"
 
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" ) as mock_get:
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" ) as mock_get:
             mock_get.return_value = False
 
             _notify_impl(
@@ -280,7 +291,7 @@ class TestNotifyImplGateBridgeReadError:
     ):
         from lupin_mcp.cosa_voice_mcp import _notify_impl
 
-        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_conversation_mode" ) as mock_get:
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_speakerphone" ) as mock_get:
             mock_get.side_effect = RuntimeError( "bridge unreachable" )
 
             _notify_impl(

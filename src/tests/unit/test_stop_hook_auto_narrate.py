@@ -300,7 +300,7 @@ class TestLastAutonarratedTurnIdBridge:
         bridge_path = tmp_path / "cc-12345.json"
         bridge_path.write_text( json.dumps( {
             "session_id"                : "abc12345-uuid-here",
-            "conversation_mode_active" : True
+            "speakerphone_on" : True
         } ) )
 
         # Patch the SESSION_DIR to our tmp_path so find_session_path_by_id sees it.
@@ -320,7 +320,7 @@ class TestLastAutonarratedTurnIdBridge:
         # Other fields preserved
         with open( bridge_path ) as fp:
             data = json.load( fp )
-        assert data.get( "conversation_mode_active" ) is True
+        assert data.get( "speakerphone_on" ) is True
         assert data.get( "session_id" ) == "abc12345-uuid-here"
 
     def test_set_returns_false_on_missing_bridge( self, tmp_path, monkeypatch ):

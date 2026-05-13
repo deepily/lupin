@@ -804,9 +804,9 @@ def set_speakerphone( session_id, on ):
     evolution. Does NOT create a new bridge file if missing — bridge must
     already exist (created by SessionStart hook).
 
-    Upgrade-on-write semantics: a v1 bridge (with `conversation_mode_active`
+    Upgrade-on-write semantics: a v1 bridge (with `speakerphone_on`
     but no `speakerphone_on`) gets `speakerphone_on` + `format_version` added
-    on the first set_speakerphone call. The stale `conversation_mode_active`
+    on the first set_speakerphone call. The stale `speakerphone_on`
     key is removed in the same write to avoid two-source-of-truth confusion.
 
     Requires:
@@ -818,7 +818,7 @@ def set_speakerphone( session_id, on ):
         - Returns False if bridge not found or write failed
         - Never raises exceptions
         - Preserves all existing fields in the bridge JSON except the
-          legacy `conversation_mode_active` key, which is removed if present
+          legacy `speakerphone_on` key, which is removed if present
         - Stamps `format_version=2` (BRIDGE_FORMAT_VERSION)
 
     Args:
@@ -839,7 +839,7 @@ def set_speakerphone( session_id, on ):
         data[ "format_version" ] = BRIDGE_FORMAT_VERSION
         # Drop the v1 field if it lingers from a pre-Phase-2 bridge, to avoid
         # two-source-of-truth ambiguity. The v2 field is now authoritative.
-        data.pop( "conversation_mode_active", None )
+        data.pop( "speakerphone_on", None )
         with open( path, "w" ) as f:
             json.dump( data, f, indent=2 )
         return True
@@ -1320,13 +1320,13 @@ if __name__ == "__main__":
         _orig_dir = SESSION_DIR
         try:
             globals()[ "SESSION_DIR" ] = _tmp_dir
-            assert get_conversation_mode( _sid ) is False, "Default should be False"
-            assert set_conversation_mode( _sid, True ) is True, "Set True should succeed"
-            assert get_conversation_mode( _sid ) is True, "Read after set True should be True"
-            assert set_conversation_mode( _sid, False ) is True, "Set False should succeed"
-            assert get_conversation_mode( _sid ) is False, "Read after set False should be False"
-            assert get_conversation_mode( "nonexistent" ) is False, "Missing session_id returns False"
-            assert set_conversation_mode( "nonexistent", True ) is False, "Set on missing bridge returns False"
+            assert get_speakerphone( _sid ) is False, "Default should be False"
+            assert set_speakerphone( _sid, True ) is True, "Set True should succeed"
+            assert get_speakerphone( _sid ) is True, "Read after set True should be True"
+            assert set_speakerphone( _sid, False ) is True, "Set False should succeed"
+            assert get_speakerphone( _sid ) is False, "Read after set False should be False"
+            assert get_speakerphone( "nonexistent" ) is False, "Missing session_id returns False"
+            assert set_speakerphone( "nonexistent", True ) is False, "Set on missing bridge returns False"
             print( "Conversation mode smoke: ✓ all assertions passed" )
 
             # Voice persona smoke (round-trip + active-scan)

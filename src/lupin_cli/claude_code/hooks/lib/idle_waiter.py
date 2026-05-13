@@ -38,7 +38,7 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     find_session_path_by_id, get_idle_detection, set_idle_detection_field,
-    get_conversation_mode,
+    get_speakerphone,
 )
 from lupin_cli.claude_code.hooks.lib.idle_settings import load_idle_settings
 from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
@@ -248,7 +248,7 @@ def run_waiter(
             _log( session_id, "reset detected during sleep; exiting" )
             return
 
-        if get_conversation_mode( session_id ):
+        if get_speakerphone( session_id ):
             _log( session_id, "conversation mode active; exiting" )
             return
 
