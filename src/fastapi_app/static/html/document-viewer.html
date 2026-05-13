@@ -202,6 +202,22 @@
             color: #9ca3af;
             font-style: italic;
         }
+
+        /* Plain-text/code rendering — added 2026-05-12 per
+           src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3g */
+        .doc-code-content {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            border-radius: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.5;
+            margin: 16px 0;
+            tab-size: 4;
+        }
     </style>
 </head>
 <body>
@@ -216,14 +232,16 @@
         ( async function() {
             const target = document.getElementById( 'doc-viewer-target' );
             const params = new URLSearchParams( window.location.search );
-            // Use ?? not || — empty string is a VALID path for scope=io (root listing)
+            // Use ?? not || — empty string is a VALID path for scope=io or any
+            // external scope (root listing)
             const path   = params.get( 'path' ) ?? '';
             const scope  = params.get( 'scope' ) || 'io';
 
-            // Missing path is only an error for scope=docs (scope=io tolerates empty → io root listing)
+            // Missing path is only an error for scope=docs (every other scope
+            // tolerates empty → scope-root listing)
             if ( params.get( 'path' ) === null && scope === 'docs' ) {
                 target.className = 'doc-viewer-error';
-                target.textContent = 'No document path specified. Use ?path=<file>&scope=io|docs';
+                target.textContent = 'No document path specified. Use ?path=<file>&scope=<scope>';
                 return;
             }
 
@@ -231,22 +249,50 @@
             const filename = path.split( '/' ).pop();
             if ( filename ) document.title = filename + ' — Lupin';
 
-            // Dispatch by scope: io = io/-rooted artifacts, docs = whitelisted project docs
-            const apiPath = scope === 'docs' ? '/api/docs/file' : '/api/io/file';
+            // Dispatch by scope: 'io' uses /api/io/file (binary content); every
+            // other scope (built-in 'docs' AND external scopes) uses /api/docs/file
+            // with ?scope=<name> appended for non-default scopes.
+            const apiPath = scope === 'io' ? '/api/io/file' : '/api/docs/file';
+            let fetchUrl  = apiPath + '?path=' + encodeURIComponent( path );
+            if ( scope !== 'io' && scope !== 'docs' ) {
+                fetchUrl += '&scope=' + encodeURIComponent( scope );
+            }
+
+            // JWT auth — every /api/docs/file + /api/io/file request now requires
+            // an Authorization: Bearer header per multi-repo-doc-viewer §3f.
+            // Canonical localStorage key is `lupin_access_token` (auth.js, lupin-nav.js).
+            const token   = localStorage.getItem( 'lupin_access_token' );
+            const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
 
             try {
-                const response = await fetch( apiPath + '?path=' + encodeURIComponent( path ) );
+                const response = await fetch( fetchUrl, { headers } );
+
+                // 401 → redirect to login, preserving the current URL as the
+                // post-login return target. Skip the redirect when there's no
+                // current_url to bounce back to (defensive).
+                if ( response.status === 401 ) {
+                    const here = window.location.pathname + window.location.search;
+                    window.location.href = '/app/login?next=' + encodeURIComponent( here );
+                    return;
+                }
+
                 if ( !response.ok ) {
                     throw new Error( 'Failed to load document (HTTP ' + response.status + ')' );
                 }
 
                 // Polymorphic dispatch by Content-Type:
                 // - application/json → directory listing (renderDirectoryListing)
-                // - text/* → markdown / text rendering (existing path below)
+                // - text/markdown* → markdown rendering (existing path below)
+                // - text/* (everything else) → plain <pre> code rendering
                 const contentType = response.headers.get( 'content-type' ) || '';
                 if ( contentType.includes( 'application/json' ) ) {
                     const listing = await response.json();
                     renderDirectoryListing( listing, target );
+                    return;
+                }
+                if ( contentType.startsWith( 'text/' ) && !contentType.startsWith( 'text/markdown' ) ) {
+                    const code = await response.text();
+                    renderPlainText( code, target );
                     return;
                 }
 
@@ -348,6 +394,14 @@
                 if ( ext === '.mp3' || ext === '.wav' ) return '🔊';
                 if ( ext === '.pdf' ) return '📑';
                 if ( ext === '.pptx' ) return '📊';
+                // Source-code hints — added 2026-05-12 per multi-repo doc viewer
+                if ( ext === '.py' ) return '🐍';
+                if ( ext === '.js' || ext === '.jsx' || ext === '.ts' || ext === '.tsx' ) return '📜';
+                if ( ext === '.css' || ext === '.html' ) return '🎨';
+                if ( ext === '.sh' ) return '💻';
+                if ( ext === '.sql' ) return '🗄️';
+                if ( ext === '.json' || ext === '.yaml' || ext === '.yml' || ext === '.toml' ) return '⚙️';
+                if ( ext === '.ini' || ext === '.cfg' || ext === '.xml' ) return '⚙️';
                 return '📄';
             }
 
@@ -384,6 +438,18 @@
 
             target.className = 'doc-viewer-content';
             target.innerHTML = sanitized;
+        }
+
+        // Plain-text/source-code renderer — added 2026-05-12 per
+        // src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3g.
+        // Uses textContent to defang HTML/script content entirely; no innerHTML.
+        function renderPlainText( code, target ) {
+            target.className = '';
+            target.innerHTML = '';
+            const pre = document.createElement( 'pre' );
+            pre.className   = 'doc-code-content';
+            pre.textContent = code;
+            target.appendChild( pre );
         }
     </script>
 </body>

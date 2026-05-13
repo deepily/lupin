@@ -2,6 +2,71 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md).
 
+### 2026.05.12 Evening - Session 02e5cd9d (Arnold 🪨) | Multi-Repo Doc Viewer — N-scope INI registry + JWT gate + secrets blocklist + source-code rendering
+
+**Persona**: Arnold 🪨 (Gravelly male, #FFD600)
+
+**Topic**: Extended the doc viewer to browse files across N externally-mounted repos (lupin / planning-is-prompting / lupin-mobile / lookml / par-pacific / claude-plans + the optional cosa-voice) via a new INI-driven scope registry. Universal JWT gate on `/api/docs/file` and `/api/io/file` (was previously anonymous), pattern-based secrets blocklist applied to all scopes, MEDIA_TYPES expanded to source-code extensions rendered as plain `<pre>`.
+
+**Design doc**: [`src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md`](src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md) — approved Q&A walkthrough resolving 4+1 framing questions (scope registry shape, MEDIA_TYPES breadth, universal JWT gate, Docker mount layout).
+
+**Accomplishments**:
+
+- **CoSA backend (Rick commits separately)** — NEW `src/cosa/rest/routers/_scope_registry.py` (`ScopeConfig` frozen dataclass + `build_scope_registry()` + `_is_secrets_path()` + `_is_whitelisted_in_scope()` + `resolve_in_scope()`). `docs_files.py` extended with `?scope=` query, `Depends(get_current_user)`, lazy `_get_scope_registry()`, expanded MEDIA_TYPES, secrets-blocklist call. `io_files.py` got the JWT dep + secrets-blocklist call. `_dir_listing.py` now imports `_is_secrets_path` and filters blocklist-matching entries at scandir time.
+
+- **Parent Lupin** — `src/conf/lupin-app.ini` + paired splainer: `external repos` block under `[Lupin: Baseline]` registering 7 scopes (6 reachable, cosa-voice gracefully skipped because its host path doesn't exist on this machine — registry build logs warning, doesn't abort boot). `docker-compose.yml`: two new `:ro` bind-mount lines on BOTH `lupin-rest-dev` and `lupin-rest-test` (`/projects:/var/external-projects:ro` + `~/.claude/plans:/var/external-claude/plans:ro`). `document-viewer.html`: `Authorization: Bearer <lupin_access_token>` header on every fetch, 401 → `/app/login?next=<original>` redirect, content-type dispatch extended (text/markdown* → existing markdown render; text/* → new `renderPlainText` to `<pre class="doc-code-content">` via `textContent` not innerHTML), expanded icon table for source-code extensions.
+
+- **Containers recreated** — both `lupin-rest-dev` and `lupin-rest-test` got `docker compose up -d --force-recreate` so the new mount lines took effect (`docker restart` doesn't pick up new mounts). `:8000` preflight 6/7 green (gh auth skip is environment-dependent).
+
+- **Tests written + run** — NEW `src/tests/unit/test_scope_registry.py` (27 tests covering frozen dataclass, secrets blocklist with word-boundary discipline, whitelist semantics, traversal block, registry build edge cases — empty list, missing path, reserved-name collision, whitespace stripping, partial registration). NEW `src/tests/smoke/test_external_scopes.py` (14 :7999 tests covering auth gate, legacy scope=docs preservation, unknown scope, traversal block, secrets blocklist, per-scope routing, source-code serving). NEW `src/tests/e2e_ui/test_doc_viewer_multi_repo.py` (8 Playwright tests covering external-scope listing, file rendering, Python source as `<pre>`, no-auth login redirect). Existing `test_doc_viewer_directory.py` migrated from `page` → `logged_in_page` because the endpoint is no longer public.
+
+- **Self-caught smoke failure (good)** — first `_scope_registry.quick_smoke_test()` run flagged that the naive `secrets?` / `credentials?` substring patterns mis-blocked `secretive_methods.py` and `credentialism.txt`. Fixed in-loop by anchoring the patterns to word boundaries (`\bsecrets?\b` / `\bcredentials?\b`).
+
+- **Operational hiccup → recovery** — first E2E submission used `pytest_args="-k 'doc_viewer_multi_repo and not Visual' -v"` which the runner's naive `pytest_args_raw.split()` mangled (single-quoted boolean expression turned into separate positional args → `ERROR: file or directory not found: and`). Resubmitted with `--deselect src/tests/e2e_ui/test_doc_viewer_multi_repo.py::TestExternalScopeVisual` instead — every token whitespace-safe, no shell-quote nesting. Worth noting in memory but the existing `feedback_test_suite_submit_field_pytest_args.md` already covers the silent-drop family; this is a quoting-not-fielding variant.
+
+**Verification pyramid** (all I/me-owned, not Rick — per CLAUDE.md TEST OWNERSHIP MANDATE):
+
+| Tier             | Venue | Suite                                                         | Result      |
+|------------------|-------|---------------------------------------------------------------|-------------|
+| Unit             | :7999 | `pytest src/tests/unit/test_scope_registry.py`                | 27/27 pass  |
+| Module smoke     | :7999 | `_scope_registry.quick_smoke_test()` inline                   | 4/4 pass (caught + fixed regex false-positives in same loop) |
+| HTTP smoke       | :7999 | `pytest src/tests/smoke/test_external_scopes.py`              | 14/14 pass  |
+| Manual URL sweep | :7999 | 10 probes (design §6 + cross-scope traversal + secrets)       | 10/10 pass  |
+| Preflight        | :8000 | `pytest src/tests/smoke/test_container_preflight.py`          | 6/6 pass + 1 informational skip |
+| E2E functional   | :8000 | `pytest -k doc_viewer_multi_repo --deselect ...::TestExternalScopeVisual` | **6/0/0/0 all_passed=True** (20.6s) |
+
+**Visual baseline capture**: deferred to a follow-on `--update-snapshots` run (`auto_fix_on_failure: False`) per `feedback_baseline_capture_disable_tfe`. Visual class `TestExternalScopeVisual` was deselected from this run because no PNG baseline exists in `__snapshots__/` yet. Existing `test_doc_viewer_directory.py` visual tests (now using `logged_in_page`) likewise have no PNG baselines committed — this whole tree has been working with on-first-run capture.
+
+**Files modified** (parent Lupin — this checkpoint, included in the §9 step 13 commit):
+
+- NEW: `src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md` (design doc, serialized before impl per Phase 0 mandate)
+- NEW: `src/tests/unit/test_scope_registry.py`
+- NEW: `src/tests/smoke/test_external_scopes.py`
+- NEW: `src/tests/e2e_ui/test_doc_viewer_multi_repo.py`
+- MOD: `src/conf/lupin-app.ini` (external-repo block under `[Lupin: Baseline]`)
+- MOD: `src/conf/lupin-app-splainer.ini` (paired splainer entries)
+- MOD: `src/fastapi_app/static/html/document-viewer.html` (auth header + 401 redirect + content-type dispatch + `renderPlainText` + CSS)
+- MOD: `docker-compose.yml` (two `:ro` mount lines × two services)
+- MOD: `src/tests/e2e_ui/test_doc_viewer_directory.py` (page → logged_in_page migration)
+- MOD: `CLAUDE.md` (DOCUMENTATION TOUCHPOINTS row pointing to the design doc)
+- MOD: `history.md` (this entry)
+
+**Files modified in CoSA submodule** (Rick commits separately per `feedback_cosa_edit_vs_manage_git`):
+
+- NEW: `src/cosa/rest/routers/_scope_registry.py` (~310 lines including inline smoke test)
+- MOD: `src/cosa/rest/routers/docs_files.py` (`?scope=` + JWT dep + expanded MEDIA_TYPES + secrets blocklist + lazy registry build)
+- MOD: `src/cosa/rest/routers/io_files.py` (JWT dep + secrets blocklist)
+- MOD: `src/cosa/rest/routers/_dir_listing.py` (secrets-blocklist entry filter + extended view_url routing docstring)
+
+**Auto-memory updated**:
+
+- NEW: `feedback_multi_repo_doc_viewer.md` (4-step scope-addition checklist)
+- MOD: `MEMORY.md` (index entry)
+
+**Status**: ✅ Implementation complete, all six test tiers green. Parent Lupin commit + history/memory updates landed in this checkpoint; CoSA submodule edits staged for Rick's separate commit.
+
+---
+
 ### 2026.05.12 PM - Session 02e5cd9d (Arnold 🪨) | Doc Viewer Directory Listing Extension — backend polymorphic dispatch + scope=docs/io parity + inline image rendering
 
 **Persona**: Arnold 🪨 (Gravelly male, #FFD600)

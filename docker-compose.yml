@@ -57,6 +57,11 @@ services:
       # SessionStart hook. Container runs as rruiz (UID matches host) so file
       # ownership is preserved on writes.
       - ~/.claude/sessions:/home/rruiz/.claude/sessions
+      # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
+      # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
+      # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
+      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects:ro
+      - ~/.claude/plans:/var/external-claude/plans:ro
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
@@ -128,6 +133,11 @@ services:
       # files written by SessionStart hook; without this mount the endpoint
       # can't see them and tests that exercise conversation_mode_active fail.
       - ~/.claude/sessions:/home/rruiz/.claude/sessions
+      # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
+      # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
+      # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
+      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects:ro
+      - ~/.claude/plans:/var/external-claude/plans:ro
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
