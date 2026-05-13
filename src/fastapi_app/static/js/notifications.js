@@ -1914,6 +1914,18 @@ class NotificationsUI {
             });
         }
 
+        // Commons Broadcast STT button (voice input) — Phase 2 + Phase 3 voice-first.
+        // Transcription targets the multi-line #broadcast-textarea; the broadcast-panel.js
+        // IIFE listens to that textarea's `input` events for live preview + Send-button enablement.
+        // Routed through munge_text_broadcast server-side (preserves @-mentions, dots,
+        // underscores) — see src/rnd/v0.1.7/2026.05.13-broadcast-munger-mode-design.md.
+        const broadcastSttBtn = document.getElementById( 'broadcast-stt-button' );
+        if ( broadcastSttBtn ) {
+            broadcastSttBtn.addEventListener( 'click', () => {
+                this.handleSTTButtonClick( 'broadcast-textarea', broadcastSttBtn, { recordingMode: 'broadcast' } );
+            });
+        }
+
         // Enter key in Presentation source input
         const presentationSourceInput = document.getElementById( 'presentation-source' );
         if ( presentationSourceInput ) {
@@ -3366,8 +3378,11 @@ class NotificationsUI {
      * @param {string} inputId - ID of the input element to fill with transcription
      * @param {HTMLElement} button - The STT button element
      */
-    async handleSTTButtonClick( inputId, button ) {
-        // Delegate to the recording manager with appropriate context
+    async handleSTTButtonClick( inputId, button, options = {} ) {
+        // Delegate to the recording manager with appropriate context.
+        // `options` is forwarded to recordingManager.startRecording — see that
+        // function's JSDoc for the supported keys (e.g. `recordingMode` for
+        // broadcast-mode munger routing).
         const inputElement = document.getElementById( inputId );
         if ( !inputElement ) {
             this.error( `Input element not found: ${inputId}` );
@@ -3378,7 +3393,7 @@ class NotificationsUI {
         if ( this.recordingManager.isRecording() ) {
             await this.recordingManager.stopRecording();
         } else if ( !this.recordingManager.isProcessing() ) {
-            await this.recordingManager.startRecording( inputId, button, inputElement );
+            await this.recordingManager.startRecording( inputId, button, inputElement, options );
         }
     }
 
@@ -3424,6 +3439,11 @@ class NotificationsUI {
              * @param {object} options - Optional callbacks and settings
              *   - onTranscriptionComplete: Called after filling input (for context-specific logic)
              *   - autoSelectElement: Element to auto-select (e.g., "Other" radio button)
+             *   - recordingMode: STT post-processing mode. Default is "generic" (server applies
+             *     the default `munge_text_punctuation`). Pass "broadcast" to route to
+             *     `munge_text_broadcast` server-side, which preserves @-mentions, dots, and
+             *     underscores for the broadcast `@mention` syntax. See
+             *     src/rnd/v0.1.7/2026.05.13-broadcast-munger-mode-design.md for the design.
              */
             startRecording: async function( contextId, button, inputElement, options = {} ) {
                 const self = this;
@@ -3472,8 +3492,17 @@ class NotificationsUI {
                 this.activeRecording = { contextId, button, inputElement, options };
 
                 try {
+                    // Build upload endpoint with optional mode-routing prefix query param.
+                    // recordingMode "broadcast" routes to munge_text_broadcast server-side
+                    // (preserves @-mentions, dots, underscores). Default "generic" lets the
+                    // server-side default (munge_text_punctuation) handle it.
+                    let uploadEndpoint = '/api/upload-and-transcribe-mp3';
+                    if ( options.recordingMode === 'broadcast' ) {
+                        uploadEndpoint += '?prefix=' + encodeURIComponent( 'multimodal text broadcast' );
+                    }
+
                     this.audioRecorder = new AudioRecorder( {
-                        uploadEndpoint : '/api/upload-and-transcribe-mp3',
+                        uploadEndpoint : uploadEndpoint,
                         authToken      : token,
 
                         onRecordingStart: () => {
