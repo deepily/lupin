@@ -918,6 +918,58 @@ def set_last_autonarrated_turn_id( session_id, turn_id ):
         return False
 
 
+def set_user_id( session_id, user_id ):
+    """
+    Write `user_id` to the bridge file for a given session_id.
+
+    Phase 3 — Option 2 fix per
+    `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`. The
+    inter-session-commons broadcast surface filters active sessions by
+    `bridge["user_id"] == authenticated_user_id` (T7 + Q9 same-user scoping).
+    Without this stamp every bridge fails the filter and the broadcast UI
+    shows "no active sessions". Pairs with Option 1's graceful-degradation
+    fallback in `routers/commons.py`: once `set_user_id` lands, the fallback
+    branch becomes inactive for new bridges and full cross-user isolation
+    is enforced.
+
+    Called from `cc_notification_listener._stamp_user_id_on_bridge()` once
+    at listener startup, after the authenticated user_id has been resolved
+    via `/auth/login`.
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+        - user_id is a non-empty string (canonical user UUID from
+          `/auth/login` response at `user.id`)
+
+    Ensures:
+        - Returns True if bridge was found and successfully updated
+        - Returns False if bridge missing, parse-fail, or write-fail
+        - Never raises
+        - Preserves all other bridge fields (mirrors `set_last_autonarrated_turn_id`)
+
+    Args:
+        session_id: Session ID to look up (full UUID or 8-char prefix)
+        user_id:    Canonical user UUID to stamp on the bridge
+
+    Returns:
+        bool: True on successful write
+    """
+    if not session_id or not user_id:
+        return False
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        data[ "user_id" ] = str( user_id )
+        with open( path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        return True
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
 def get_voice_persona( session_id ):
     """
     Read voice_persona dict from the bridge file for a given session_id.

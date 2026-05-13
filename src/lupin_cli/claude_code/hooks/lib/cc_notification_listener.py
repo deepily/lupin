@@ -651,6 +651,57 @@ class CCNotificationListener( BaseWebSocketListener ):
         except Exception as e:
             self._log( f"{self.LOG_PREFIX} ERROR buffering message: {e}" )
 
+    def _stamp_user_id_on_bridge( self ):
+        """
+        Phase 3 Option 2 — resolve the authenticated user_id and stamp it on
+        this session's bridge file so the inter-session-commons broadcast
+        surface can same-user-scope active sessions correctly.
+
+        Per `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`:
+        - Posts to f"http://{host}:{port}/auth/login" with `email` + `password`
+        - Extracts `user.id` from the response (canonical user UUID)
+        - Calls `session_bridge.set_user_id(session_id_hash, user_id)` —
+          set_user_id accepts the 8-char prefix via find_session_path_by_id
+        - Best-effort: any failure (network, auth, parse, missing bridge) is
+          debug-logged and swallowed. Option 1's graceful-degradation filter
+          in `routers/commons.py::filter_and_project_sessions` covers the gap.
+
+        Fires once at `run()` startup, not on each reconnect cycle.
+
+        Ensures:
+            - Never raises publicly. All errors caught + logged.
+            - Bridge file is mutated only on full success.
+        """
+        try:
+            import urllib.request
+            import urllib.error
+            from lupin_cli.claude_code.hooks.lib.session_bridge import set_user_id
+
+            url = f"http://{self.host}:{self.port}/auth/login"
+            body = json.dumps( { "email": self.email, "password": self.password } ).encode( "utf-8" )
+            req  = urllib.request.Request(
+                url,
+                data    = body,
+                headers = { "Content-Type": "application/json" },
+                method  = "POST",
+            )
+            with urllib.request.urlopen( req, timeout=10.0 ) as resp:
+                payload = json.loads( resp.read().decode( "utf-8" ) )
+            user_id = payload.get( "user", { } ).get( "id" )
+            if not user_id:
+                self._log( f"{self.LOG_PREFIX} user_id stamp skipped — no user.id in /auth/login response" )
+                return
+            ok = set_user_id( self.session_id_hash, user_id )
+            if ok:
+                self._log( f"{self.LOG_PREFIX} user_id stamped on bridge: {user_id}" )
+            else:
+                self._log( f"{self.LOG_PREFIX} user_id stamp skipped — bridge not found for session {self.session_id_hash}" )
+        except ( urllib.error.URLError, json.JSONDecodeError, OSError, KeyError, ValueError ) as e:
+            self._log( f"{self.LOG_PREFIX} user_id stamp failed (silent fallback): {e!r}" )
+        except Exception as e:
+            # Defense-in-depth: never let stamping kill the listener startup
+            self._log( f"{self.LOG_PREFIX} user_id stamp unexpected error (silent fallback): {e!r}" )
+
     def _print_stats( self ):
         """Print session statistics on shutdown."""
         self._log( "" )
@@ -691,6 +742,13 @@ class CCNotificationListener( BaseWebSocketListener ):
         self._log( f"{self.LOG_PREFIX} Debug        : {self.debug}" )
         self._log( f"{self.LOG_PREFIX} Verbose      : {self.verbose}" )
         self._log_central( "=== LISTENER STARTED ===" )
+
+        # Phase 3 Option 2 — stamp user_id on the bridge so inter-session-commons
+        # active-sessions endpoint can same-user-scope correctly. Best-effort;
+        # silent fallback on failure since Option 1's graceful filter covers
+        # the gap. Fires once at startup, not on every reconnect cycle.
+        # Per src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md.
+        self._stamp_user_id_on_bridge()
 
         restart_cycle    = 0
         restart_cooldown = 60  # seconds

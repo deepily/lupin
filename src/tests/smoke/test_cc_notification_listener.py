@@ -588,6 +588,128 @@ class TestEventHandling:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Test: _stamp_user_id_on_bridge (Phase 3 Option 2 fix)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStampUserIdOnBridge:
+    """
+    Test the listener's `_stamp_user_id_on_bridge()` method per Option 2 of
+    `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`.
+
+    The method must:
+    - POST /auth/login with the listener's stored credentials
+    - Extract `user.id` from the response
+    - Call session_bridge.set_user_id(session_id_hash, user_id)
+    - Swallow all failures silently (best-effort; Option 1 covers the gap)
+    """
+
+    @pytest.fixture
+    def listener( self ):
+        return CCNotificationListener(
+            email           = "tester@example.com",
+            password        = "pw",
+            session_id_hash = "abc12345",
+            host            = "localhost",
+            port            = 7999,
+        )
+
+    def test_stamps_user_id_on_success( self, listener ):
+        """
+        Happy path: /auth/login returns 200 + `user.id`; set_user_id is called
+        with (session_id_hash, user_id) and returns True.
+        """
+        from unittest.mock import MagicMock
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock( return_value=mock_resp )
+        mock_resp.__exit__  = MagicMock( return_value=False )
+        mock_resp.read.return_value = json.dumps( {
+            "user"  : { "id": "user-uuid-abc" },
+            "tokens": { "access_token": "jwt..." }
+        } ).encode()
+
+        with patch( "urllib.request.urlopen", return_value=mock_resp ) as mock_urlopen, \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.set_user_id", return_value=True ) as mock_set:
+            listener._stamp_user_id_on_bridge()
+
+        assert mock_urlopen.call_count == 1
+        mock_set.assert_called_once_with( "abc12345", "user-uuid-abc" )
+
+    def test_silent_on_missing_user_id_in_response( self, listener ):
+        """
+        Response lacks user.id → log + return without calling set_user_id.
+        """
+        from unittest.mock import MagicMock
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock( return_value=mock_resp )
+        mock_resp.__exit__  = MagicMock( return_value=False )
+        mock_resp.read.return_value = json.dumps( {
+            "message": "Login successful",
+            "tokens" : { "access_token": "jwt..." }
+        } ).encode()
+
+        with patch( "urllib.request.urlopen", return_value=mock_resp ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.set_user_id" ) as mock_set:
+            listener._stamp_user_id_on_bridge()
+
+        mock_set.assert_not_called()
+
+    def test_silent_on_url_error( self, listener ):
+        """Network failure → caught + logged + no exception propagates."""
+        import urllib.error
+        with patch( "urllib.request.urlopen", side_effect=urllib.error.URLError( "server unreachable" ) ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.set_user_id" ) as mock_set:
+            listener._stamp_user_id_on_bridge()  # must NOT raise
+
+        mock_set.assert_not_called()
+
+    def test_silent_on_invalid_json_response( self, listener ):
+        """Garbage response → caught + logged + no exception propagates."""
+        from unittest.mock import MagicMock
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock( return_value=mock_resp )
+        mock_resp.__exit__  = MagicMock( return_value=False )
+        mock_resp.read.return_value = b"not valid json"
+
+        with patch( "urllib.request.urlopen", return_value=mock_resp ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.set_user_id" ) as mock_set:
+            listener._stamp_user_id_on_bridge()  # must NOT raise
+
+        mock_set.assert_not_called()
+
+    def test_silent_when_bridge_not_found( self, listener ):
+        """
+        Auth succeeds but set_user_id returns False (bridge missing) → log
+        but no exception.
+        """
+        from unittest.mock import MagicMock
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock( return_value=mock_resp )
+        mock_resp.__exit__  = MagicMock( return_value=False )
+        mock_resp.read.return_value = json.dumps( {
+            "user": { "id": "user-uuid-abc" }
+        } ).encode()
+
+        with patch( "urllib.request.urlopen", return_value=mock_resp ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.set_user_id", return_value=False ) as mock_set:
+            listener._stamp_user_id_on_bridge()  # must NOT raise
+
+        mock_set.assert_called_once()
+
+    def test_silent_on_unexpected_exception( self, listener ):
+        """
+        Defense-in-depth: any other exception class is caught by the broad
+        Exception handler. Listener startup must NEVER fail because of a
+        user_id stamping issue.
+        """
+        with patch( "urllib.request.urlopen", side_effect=RuntimeError( "wat" ) ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.set_user_id" ) as mock_set:
+            listener._stamp_user_id_on_bridge()  # must NOT raise
+
+        mock_set.assert_not_called()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Test: SessionEnd Hook Functions
 # ══════════════════════════════════════════════════════════════════════════════
 
