@@ -634,26 +634,23 @@
                                 <span id="broadcast-recipients-label">Sending to:</span>
                                 <button type="button" id="broadcast-recipients-refresh" data-testid="notifications-broadcast-refresh-btn" title="Refresh active session list">↻ refresh</button>
                             </div>
-                            <!-- Voice-input row — mic above textarea so multi-line entry stays clean.
-                                 Wired to handleSTTButtonClick in notifications.js init block.
-                                 Transcription text is appended to #broadcast-textarea, the same
-                                 contract every other STT button on this page uses. -->
-                            <div id="broadcast-voice-input-row" style="display: flex; gap: 8px; align-items: center; margin-bottom: 6px;">
+                            <!-- Single-row compose layout (2026-05-13 redesign per Rick):
+                                 [🎤] [textarea, half-height] [Send]
+                                 Markdown preview pane removed; the dictate-label removed.
+                                 broadcast-panel.js's `input` listener on the textarea still
+                                 fires for Send-button enablement; preview-DOM ops are no-ops
+                                 because the elements no longer exist. -->
+                            <div id="broadcast-compose-row">
                                 <button type="button"
                                         id="broadcast-stt-button"
                                         data-testid="notifications-broadcast-stt-btn"
                                         class="stt-button"
-                                        title="Click to record (30s max, ESC to cancel) — voice-first input for broadcast body">🎤</button>
-                                <span id="broadcast-voice-input-label" style="font-size: 12px; color: #666;">Tap mic to dictate, then edit if needed</span>
+                                        title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <textarea id="broadcast-textarea"
+                                          data-testid="notifications-broadcast-textarea"
+                                          placeholder="Message body — use @PersonaName: lines for persona-specific directives. Markdown supported."></textarea>
+                                <button id="broadcast-send-button" data-testid="notifications-broadcast-send-btn" type="button" disabled>Send</button>
                             </div>
-                            <textarea id="broadcast-textarea"
-                                      data-testid="notifications-broadcast-textarea"
-                                      placeholder="Message body — use @PersonaName: lines for persona-specific directives. Markdown supported."></textarea>
-                            <div id="broadcast-preview-label">live preview (markdown):</div>
-                            <div id="broadcast-preview" class="empty" data-testid="notifications-broadcast-preview">preview appears here…</div>
-                            <button id="broadcast-send-button" data-testid="notifications-broadcast-send-btn" type="button" disabled>
-                                📢 Send broadcast
-                            </button>
                             <div id="broadcast-submit-status" data-testid="notifications-broadcast-status"></div>
                             <div id="broadcast-aggregate-panel" data-testid="notifications-broadcast-aggregate"></div>
                         </div>
