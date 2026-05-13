@@ -6,6 +6,17 @@
 
 ---
 
+## 🐛 Multimodal munger — `munge_text_punctuation` strips periods + commas from prose (filed 2026-05-13 by Arnold)
+
+- [ ] **[LUPIN-COSA] Prose-mode period-stripping bug at `src/cosa/rest/multimodal_munger.py:757`** — the unconditional `re.sub(r'[,.]', '', prose)` inside `munge_text_punctuation` (the default mode) wrongly kills periods that came from the punctuation lookup ("dot" → ".") and commas that Whisper emitted. Surfaced during the 2026-05-13 broadcast-munger investigation (`src/rnd/v0.1.7/2026.05.13-broadcast-munger-mode-design.md` Q4). Examples that misbehave today:
+  - `"the URL is example dot com"` → `"the URL is examplecom"` (should be `"the URL is example.com"`)
+  - `"version 1 dot 0 dot 5"` → `"version 1 0 5"` (should be `"version 1.0.5"`)
+  - `"Sincerely, John"` → `"Sincerely John"` (should preserve the comma)
+
+  **NOT** addressed by the broadcast-mode work (which routes through `munge_text_broadcast` and intentionally omits line 757). This ticket is for the default prose path. Care required: line 757 may be load-bearing for some sentence-end cleanup behavior in voice-command flows — audit before deleting.
+
+---
+
 ## 🚧 UNDERWAY — Inter-Session Commons Phase 3 Steps 3-9 implementation barrel-through (paused 2026-05-12 PM, session 6a054460 → resumed)
 
 **Primary doc**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md` (status: 🟢 APPROVED FOR CODE-WRITE)

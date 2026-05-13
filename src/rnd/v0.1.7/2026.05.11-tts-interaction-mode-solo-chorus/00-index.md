@@ -1,9 +1,9 @@
 # TTS Interaction Mode (Solo & Chorus) — Documentation Index
 
-**Status**: 💭 **Thought exercise — NOT approved for implementation.** Phase 0 (R&D serialization) complete; no code written.
+**Status**: ✅ **Minimum-viable closed 2026-05-13.** Phases 1-7 committed (commits `c82ee04`, `8a8c31c`, `9ba4db5`, `e17d7d7`, `b6f1ac2`). Solo/chorus framework live; toggle widget continues to function in legacy `notifications.js`. Phase 7b (multiplexer toggle widget migration) and Phase 8 (chorus UX polish) filed as separate follow-on tickets in `TODO.md` — both intentionally out-of-scope for this close per `97-phase7-execution-log.md` §7.
 **Owner**: [LUPIN]
 **Started**: 2026.05.11 (think-out-loud session 77e1bb27, Mr. Radio 🦉)
-**Last updated**: 2026.05.12
+**Last updated**: 2026.05.13 (close-out push, session 6d663b6c Arnold 🪨)
 
 ---
 
