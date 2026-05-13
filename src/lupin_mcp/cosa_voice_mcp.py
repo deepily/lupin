@@ -72,7 +72,7 @@ from cosa.agents.utils.sender_id import detect_project as _detect_project_shared
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, wait_for_session_id, get_session_metadata as _get_cc_metadata,
     clear_cached_session_id, _find_session_file, _read_session_file,
-    get_conversation_mode, set_conversation_mode
+    get_speakerphone, set_speakerphone
 )
 from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
 
@@ -564,45 +564,56 @@ mcp = FastMCP(
     name="CoSA Voice Bridge",
     instructions=(
         f"Voice I/O for Claude Code [Session: {SENDER_ID}]\n\n"
-        f"## Conversation Mode\n\n"
-        f"This session has a 'conversation mode' toggle backed by the bridge file. "
-        f"At session start (and after any /clear), check `get_session_info()` once to read "
-        f"the `conversation_mode_active` flag and act accordingly:\n\n"
-        f"- **notification mode** (default, conversation_mode_active=false): respond normally; "
-        f"speaking via TTS only happens when YOU explicitly call notify(), converse(), or ask_*().\n"
-        f"- **conversation mode** (conversation_mode_active=true): the user is at a distance, "
+        f"## Speakerphone Mode\n\n"
+        f"This session has a per-session `speakerphone_on` flag backed by the bridge file, "
+        f"plus a global `tts_interaction_mode` (`solo` | `chorus`) that controls cross-session "
+        f"behavior. At session start (and after any /clear), check `get_session_info()` once to "
+        f"read both fields and act accordingly:\n\n"
+        f"- **phone mode** (`speakerphone_on=false`): respond normally; speaking via TTS only "
+        f"happens when YOU explicitly call notify(), converse(), or ask_*().\n"
+        f"- **speakerphone mode** (`speakerphone_on=true`): the user is at a distance, "
         f"listening via TTS rather than reading the terminal. Two per-turn obligations:\n"
         f"  1. **Acknowledge receipt BEFORE tool work begins.** Every user prompt must be greeted "
         f"with at minimum a brief receipt-acknowledgment `notify(message=<short ack>, "
         f"suppress_ding=True, priority='high')` BEFORE you fire any tool calls. A turn that "
         f"opens with tool calls and never speaks violates the contract — the user has no way to "
         f"know the prompt was received. The acknowledgment can be one short sentence ('Looking "
-        f"into the conversation-mode directives now.') — it does not need to be the full plan. "
+        f"into the speakerphone directives now.') — it does not need to be the full plan. "
         f"This rule applies even when the substantive response will arrive in a later turn.\n"
         f"  2. **Speak every closing turn in full.** After tool work completes (or on any turn "
         f"that produces user-facing text), call "
         f"`notify(message=<full text of your response>, suppress_ding=True, priority='high')` "
         f"so the response is spoken aloud. Strip fenced code blocks and tool-call narration from "
         f"the spoken text (those are TTS-hostile). No length cap — speak the full response.\n\n"
-        f"To toggle modes, call `enter_conversation_mode()` or `exit_conversation_mode()`. "
-        f"The user may say 'enter conversation mode' / 'exit conversation mode' (or close paraphrases) "
-        f"in voice — pattern-match those phrases and call the corresponding tool, then continue with "
-        f"the new mode in effect.\n\n"
-        f"**USER-ONLY INITIATION (HARD RULE)**: NEVER call `enter_conversation_mode()` or "
-        f"`exit_conversation_mode()` on your own initiative. You may only call them in DIRECT "
-        f"response to an explicit user instruction (voice phrase like 'enter conversation mode' / "
-        f"'exit conversation mode' or close paraphrases, typed request, slash command). Do NOT "
-        f"preemptively toggle on your own judgment (e.g. 'since this is a long task, let me enter "
-        f"conversation mode' is FORBIDDEN). The mic is the user's to direct, not yours to grab. If "
-        f"unsure whether the user actually asked, prefer NOT calling the tool and ask for clarification.\n\n"
-        f"**MUTUAL EXCLUSION**: At most one CC session at a time can hold conversation mode across "
-        f"all of the user's sessions. When the user activates conversation mode in this session "
-        f"while another session holds it, the other session is automatically displaced — its UI "
-        f"reverts to notification mode, any in-flight TTS pauses, and its sender card unpins. "
-        f"The displacement is broadcast via the `conversation_mode_changed` WebSocket event with "
-        f"`displaced=true, displaced_by=<this session's id>`.\n\n"
+        f"To toggle, call `enable_speakerphone()` or `disable_speakerphone()`. "
+        f"The user may say 'enable speakerphone' / 'disable speakerphone' / 'enter conversation "
+        f"mode' / 'exit conversation mode' / 'speakerphone on' / 'speakerphone off' (or close "
+        f"paraphrases) in voice — pattern-match those phrases and call the corresponding tool, "
+        f"then continue with the new state in effect.\n\n"
+        f"**USER-ONLY INITIATION (HARD RULE)**: NEVER call `enable_speakerphone()` or "
+        f"`disable_speakerphone()` on your own initiative. You may only call them in DIRECT "
+        f"response to an explicit user instruction (voice phrase like 'enable speakerphone' / "
+        f"'disable speakerphone' or close paraphrases, typed request, slash command). Do NOT "
+        f"preemptively toggle on your own judgment (e.g. 'since this is a long task, let me "
+        f"enable speakerphone' is FORBIDDEN). The mic is the user's to direct, not yours to "
+        f"grab. If unsure whether the user actually asked, prefer NOT calling the tool and ask "
+        f"for clarification.\n\n"
+        f"**MODE-DEPENDENT CROSS-SESSION BEHAVIOR**:\n"
+        f"- Under `tts_interaction_mode=solo` (today's monopoly behavior): at most one CC "
+        f"session at a time can hold speakerphone across all of the user's sessions. When the "
+        f"user enables speakerphone in this session while another session holds it, the other "
+        f"session is automatically displaced — its UI reverts to phone mode, any in-flight TTS "
+        f"pauses, and its sender card unpins. The displacement is broadcast via the "
+        f"`speakerphone_changed` WebSocket event with `displaced=true, displaced_by=<this "
+        f"session's id>`.\n"
+        f"- Under `tts_interaction_mode=chorus` (multi-voice default): N sessions can hold "
+        f"speakerphone simultaneously; persona voices disambiguate at the listener's ear. No "
+        f"displacement; activating in another session does NOT pull the mic away from this one. "
+        f"The `speakerphone_changed` event still fires for self-state-change broadcasts but "
+        f"never with `displaced=true`.\n\n"
         f"The toggle state survives /clear within this session (stored in the bridge file). "
-        f"A fresh Claude Code session starts in notification mode.\n\n"
+        f"A fresh Claude Code session's default `speakerphone_on` is mode-aware: false in solo, "
+        f"true in chorus (at-distance is the default in chorus).\n\n"
         f"## Voice Persona Self-Announcement (Phase A.5)\n\n"
         f"After `get_session_info()` returns, if the `voice_persona` field is non-null, "
         f"send a brief TTS greeting by your persona name. Phrasing recipe: time-of-day-"
@@ -780,7 +791,7 @@ def _notify_impl(
     # ── Phase 3 bidirectional conv-mode gate ────────────────────────────────
     # Per src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md §2.5
     if not _internal_call:
-        # Dynamic session_id resolution (matches _flip_conversation_mode pattern)
+        # Dynamic session_id resolution (matches _flip_speakerphone pattern)
         try:
             cc_meta = _get_cc_metadata()
             sid = cc_meta.get( "stable_session_id" ) or cc_meta.get( "session_id" ) or SESSION_ID
@@ -788,27 +799,39 @@ def _notify_impl(
             sid = SESSION_ID
 
         try:
-            from lupin_cli.claude_code.hooks.lib.session_bridge import get_conversation_mode
-            active = get_conversation_mode( sid ) if sid else False
+            from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
+            active = get_speakerphone( sid ) if sid else False
         except Exception:
             active = False
 
         sender = _wait_for_sender_id() or ""
 
         if active:
-            # Conv mode ON — enforce conv-mode params
+            # Speakerphone ON — enforce speakerphone-render params
             suppress_ding = True
             if priority not in ( "high", "urgent" ):
                 priority = "high"
             message = strip_fenced_code_blocks( message )
-            logger.debug( "_notify_impl conv-mode ON: forced priority=high, suppress_ding=True, stripped fenced code" )
+            logger.debug( "_notify_impl speakerphone ON: forced priority=high, suppress_ding=True, stripped fenced code" )
         elif sender.startswith( "claude.code@" ) and suppress_ding:
-            # Conv mode OFF + CC sender + caller asked for silent TTS = cross-talk leak.
-            # Audible-cue intervention: force ding ON so user knows this session leaked.
-            # Priority pass-through preserved so legitimate priority='high' alerts
-            # (notification_type='alert' for build-broke / urgent errors) still ding.
-            suppress_ding = False
-            logger.info( f"_notify_impl conv-mode cross-talk cue: suppress_ding inverted for {sender}" )
+            # Speakerphone OFF + CC sender + caller asked for silent TTS.
+            # Mode-conditional cross-talk leak cue (Phase 4 of solo/chorus refactor):
+            # - SOLO: inversion fires — only one session can hold speakerphone at a time,
+            #   so a "silent TTS from a phone-mode session" is a leak symptom worth flagging
+            #   audibly. Force ding ON so user knows this session leaked.
+            # - CHORUS: passthrough — multiple sessions legitimately call notify() with
+            #   suppress_ding=True (it's the normal pattern when a session is in phone mode
+            #   but a sibling session is in speakerphone). No leak; no inversion.
+            try:
+                import cosa.utils.util as _cu
+                _tts_mode = _cu.get_tts_interaction_mode()
+            except Exception:
+                _tts_mode = "chorus"
+            if _tts_mode == "solo":
+                suppress_ding = False
+                logger.info( f"_notify_impl solo cross-talk cue: suppress_ding inverted for {sender}" )
+            else:
+                logger.debug( f"_notify_impl chorus passthrough: suppress_ding preserved for {sender}" )
 
     try:
         request = AsyncNotificationRequest(
@@ -1286,19 +1309,28 @@ def get_session_info() -> dict:
 
     Returns:
         dict with project name, session_id, sender_id, server_url, version,
-        conversation_mode_active flag, claude_code metadata from the session bridge,
+        speakerphone_on flag, claude_code metadata from the session bridge,
         and voice_persona dict (None if allocation failed; otherwise
         {name, voice_id, icon, color, borrowed, display_name?})
     """
     resolved_sender = _wait_for_sender_id()
+    # Resolve the global TTS interaction mode (solo | chorus) so the consumer
+    # (e.g. Claude) knows which cross-session semantics apply. Fail-closed to
+    # "chorus" (the new operational default per the 2026-05-12 override).
+    try:
+        import cosa.utils.util as _cu
+        _tts_mode = _cu.get_tts_interaction_mode()
+    except Exception:
+        _tts_mode = "chorus"
     info = {
-        "project"                  : PROJECT,
-        "project_source"           : _PROJECT_SOURCE,
-        "session_id"               : SESSION_ID,
-        "sender_id"                : resolved_sender,
-        "server_url"               : SERVER_URL,
-        "version"                  : __version__,
-        "conversation_mode_active" : False
+        "project"              : PROJECT,
+        "project_source"       : _PROJECT_SOURCE,
+        "session_id"           : SESSION_ID,
+        "sender_id"            : resolved_sender,
+        "server_url"           : SERVER_URL,
+        "version"              : __version__,
+        "speakerphone_on"      : False,
+        "tts_interaction_mode" : _tts_mode
     }
 
     # Include CC session bridge metadata when available
@@ -1309,8 +1341,8 @@ def get_session_info() -> dict:
             "stable_session_id" : cc_meta.get( "stable_session_id", "" ),
             "source"            : cc_meta.get( "source", "unknown" )
         }
-        # Read conversation_mode_active from the same bridge metadata
-        info[ "conversation_mode_active" ] = bool( cc_meta.get( "conversation_mode_active", False ) )
+        # Read speakerphone_on from the same bridge metadata
+        info[ "speakerphone_on" ] = bool( cc_meta.get( "speakerphone_on", False ) )
         # voice_persona stamped into the bridge by register_session.py Phase 4.5;
         # None if allocation failed (server falls back to "Sam" for TTS, per design).
         # Shape per src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md:
@@ -1322,15 +1354,15 @@ def get_session_info() -> dict:
     return info
 
 
-def _flip_conversation_mode( active: bool ) -> dict:
+def _flip_speakerphone( active: bool ) -> dict:
     """
-    Internal helper: flip conversation_mode_active for this session.
+    Internal helper: flip speakerphone_on for this session.
 
     Routes through the canonical HTTP endpoint POST
-    /api/cosa-voice/conversation-mode/{session_id} when reachable, so:
+    /api/cosa-voice/speakerphone/{session_id} when reachable, so:
       - Mutual exclusion across the user's sessions is enforced (any other
         active session is displaced atomically).
-      - The conversation_mode_changed WebSocket event broadcasts to all of
+      - The speakerphone_changed WebSocket event broadcasts to all of
         the user's connected browser tabs for real-time UI sync.
       - Activate/deactivate flows behave identically whether triggered from
         the UI button, voice phrase, slash command, or this MCP tool.
@@ -1347,7 +1379,7 @@ def _flip_conversation_mode( active: bool ) -> dict:
         - active is a bool
 
     Ensures:
-        - Returns dict with status="ok", session_id, conversation_mode_active=<new state>
+        - Returns dict with status="ok", session_id, speakerphone_on=<new state>
           on success (whether via HTTP or fallback)
         - Returns dict with status="error" and reason on failure
         - Never raises exceptions
@@ -1383,7 +1415,7 @@ def _flip_conversation_mode( active: bool ) -> dict:
 
         # Call the canonical endpoint
         toggle_resp = requests.post(
-            f"{SERVER_URL}/api/cosa-voice/conversation-mode/{sid}",
+            f"{SERVER_URL}/api/cosa-voice/speakerphone/{sid}",
             json    = { "active": active },
             headers = { "Authorization": f"Bearer {access_token}" },
             timeout = 5
@@ -1395,14 +1427,14 @@ def _flip_conversation_mode( active: bool ) -> dict:
         return {
             "status"                   : "ok",
             "session_id"               : sid,
-            "conversation_mode_active" : bool( body.get( "active", active ) ),
+            "speakerphone_on" : bool( body.get( "active", active ) ),
             "displaced_sessions"       : body.get( "displaced_sessions", [] ),
             "ui_sync"                  : "broadcast"
         }
 
     except ( requests.ConnectionError, requests.Timeout, RuntimeError, KeyError, FileNotFoundError, ValueError ) as http_err:
         # ── Fallback: direct bridge write (degraded mode) ────────────────
-        ok = set_conversation_mode( sid, active )
+        ok = set_speakerphone( sid, active )
         if not ok:
             return {
                 "status"     : "error",
@@ -1412,13 +1444,13 @@ def _flip_conversation_mode( active: bool ) -> dict:
         return {
             "status"                   : "ok",
             "session_id"               : sid,
-            "conversation_mode_active" : active,
+            "speakerphone_on" : active,
             "ui_sync"                  : f"deferred (HTTP unreachable: {type( http_err ).__name__})"
         }
 
 
 @mcp.tool
-def enter_conversation_mode() -> dict:
+def enable_speakerphone() -> dict:
     """
     Enter conversation mode for this session.
 
@@ -1440,15 +1472,15 @@ def enter_conversation_mode() -> dict:
     State is stored in the bridge file and survives /clear within this session.
 
     Returns:
-        dict with status, session_id, conversation_mode_active=True on success;
+        dict with status, session_id, speakerphone_on=True on success;
         when HTTP path is reachable, also includes "displaced_sessions" list and
         "ui_sync"="broadcast" (other tabs sync via WebSocket immediately)
     """
-    return _flip_conversation_mode( True )
+    return _flip_speakerphone( True )
 
 
 @mcp.tool
-def exit_conversation_mode() -> dict:
+def disable_speakerphone() -> dict:
     """
     Exit conversation mode (revert to default notification mode) for this session.
 
@@ -1460,9 +1492,9 @@ def exit_conversation_mode() -> dict:
     In notification mode, TTS only fires when YOU explicitly call notify(), converse(), or ask_*().
 
     Returns:
-        dict with status, session_id, conversation_mode_active=False on success
+        dict with status, session_id, speakerphone_on=False on success
     """
-    return _flip_conversation_mode( False )
+    return _flip_speakerphone( False )
 
 
 # ============================================================================
