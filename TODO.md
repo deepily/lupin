@@ -29,6 +29,27 @@
 
 - [ ] **[LUPIN] Archive history.md FIRST THING NEXT SESSION** — was 81% (Rio, 05-12), grew to 84% (Tiberius AM, 05-13), now **22857 tokens / 91.4% of 25k = 🚨 CRITICAL** after Arnold's session entry. Run `/history-management mode=archive` BEFORE any other work next session. Three sessions of deferral; do not defer again.
 
+---
+
+## 🐛 Inter-Session Commons follow-on (filed 2026-05-13 PM by Maria 🌸)
+
+- [ ] **[LUPIN] Host-side stale-bridge sweeper daemon** (Option 2 from `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`) — once-per-hour scan of `~/.claude/sessions/cc-*.json` that deletes bridges whose host PID is dead. Tightens the activity-threshold-vs-phantom trade-off so the `commons broadcast active session threshold seconds` INI key could safely return to a shorter value. ~30-50 LOC + systemd timer or shell hook + tests.
+
+---
+
+## ✅ Inter-Session Commons broadcast-UI arc — FULLY CLOSED 2026-05-13 PM (Maria 🌸, session b28069a6)
+
+12 commits today across Phase 3 + broadcast-UI bug fixes + UI iteration + Playwright test repair. End-to-end working: 5 active sessions detected, voice-first mic input wired, compose-row layout matches CC-session button refs.
+
+- [x] **[LUPIN] Inter-Session Commons Phase 3 Steps 3-9 barrel-through** — 7 commits `27b82f1` → `ac5c4aa`. CommonsQuestionWatcher + commons_xml_models + LLM disambiguator (PHI-4 wired, Haiku stubbed per Q5) + register-question router endpoints + ask_async push-mode wiring + listener `commons_answer_received` branch + final test pyramid + lifespan wiring. **398/398 tests** green on :7999, **7/7 integration tests** green on :8000 (AC15).
+- [x] **[LUPIN] Broadcast UI "no active sessions" bug** — `4cb5fe1` Option 1 graceful filter + `93b302d` Option 2 listener stamps `user_id` on bridge at startup. Diagnosis at `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`.
+- [x] **[LUPIN] Broadcast UI phantom dead-bridge** — `2dff191`. `_bridge_last_activity_epoch` falls back to `idle_detection.last_interaction_at`; `commons broadcast active session threshold seconds` bumped 600 → 28800 for dev-workday idle. Diagnosis at `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`.
+- [x] **[LUPIN] Broadcast panel UX iteration** — 4 commits: `54c8e05` relocation above focus bar + mic, `26874fb` compose-row redesign, `300b3c0` button sizes match cc-session refs + status/aggregate artifact divs removed, `8771c33` Playwright tests repaired + 6 new compose-row tests.
+- [x] **[LUPIN] Playwright broadcast E2E coverage refresh** — `8771c33`. 5 retired (preview + aggregate DOM gone), 6 new (mic-sized, send-sized, compose-row order, retired-divs-gone, panel-in-accordion, confirm-modal-XSS). Live :8000 verified: **11/11 PASSED**.
+- [ ] **[LUPIN-COSA] CoSA-side commits pending** — `src/cosa/rest/routers/commons.py` (Option 1 graceful filter + stale-bridge filter), `src/cosa/rest/commons_question_watcher.py` (NEW), `src/cosa/rest/routers/notifications.py` (valid_types += "commons_answer_received"). Handle in a CoSA-context session per `feedback_lupin_only_never_cosa`.
+
+---
+
 ## ✅ TTS preview-and-pause — IMPLEMENTED 2026-05-13 PM (Arnold)
 
 - [x] **[LUPIN] Broadcast munger mode + JS wiring** — `multimodal text broadcast` + 20 smoke cases passing. Wired to broadcast accordion mic via `recordingMode="broadcast"`. CoSA-side commits (multimodal_munger.py) pending in a separate CoSA-context session.

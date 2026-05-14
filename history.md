@@ -2,6 +2,34 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: 🚨 **CRITICAL at 22857 tokens (91.4% of 25k)** — archive must run next session before adding new content.
 
+### 2026.05.13 PM - Session b28069a6 (Maria 🌸) | Commons Phase 3 + broadcast-UI arc — 12 commits
+
+Phase 3 barrel-through `27b82f1`→`ac5c4aa` (7 commits): question watcher + xml models + LLM disambiguator + register-question endpoints + push-mode + listener branch + lifespan. 398/398 tests :7999, 7/7 integration :8000. Backend bug arc: `4cb5fe1`/`93b302d` graceful-filter + listener user_id stamping (`[]` → 5 sessions); `2dff191` phantom filter via `idle_detection.last_interaction_at` + INI 600→28800s. UI iteration: `54c8e05`/`26874fb`/`300b3c0`/`8771c33` panel relocation + mic + compose-row redesign + Playwright refresh (11/11 PASSED :8000). Co-commit attribution to Arnold's `recordingMode='broadcast'` extension in `54c8e05`. CoSA-side commits pending separately. Full details in TODO.md closure section + 2 diagnosis docs at `src/rnd/v0.1.7/2026.05.13-broadcast-*`.
+
+---
+
+### 2026.05.13 PM - Session 9fae8c74 (Rio ⚡) | Multiplexer Phase 6c Q-decisions queue built — pull-mode handoff
+
+**Persona**: Rio ⚡ (Young & energetic female, #880E4F)
+
+**Topic**: Status briefing on multiplexer Phase 6b (CLOSED 2026-05-12) + Phase 6c (DRAFT, Cluster A 5/5 ratified). Rick requested pull-based Q-decisions walkthrough for Clusters B/C/D — he'll be working interstitially across other projects and wants to advance the queue on his cadence ("next" / "ready" trigger phrases) rather than at my pace. Queue built; awaiting Rick's first pull trigger.
+
+**Accomplishments**:
+
+- Read `97-phase6b-closure.md` + `10-phase6c-persona-focus-recorder-design.md`; surfaced 15-question queue (Cluster B × 5, Cluster C × 6, Cluster D × 4). Confirmed Cluster A already ratified 5/5 on 2026-05-12 by Rachel 🕊️ (chip-trigger + Popover API + × button + subtle persona color + `(borrowed)` label).
+- Built pull-mode protocol with explicit trigger phrases (next / ready / fire / skip / back up / pause / TOC) and committed to per-question format: proposed answer + alternatives walked + per-option pros/cons + recommendation with flip-condition, with TTS body carrying only headline + takeaway and rich detail in `abstract` (per `feedback_tts_body_headline_and_takeaway_only` + `feedback_always_include_pros_cons_recommendation`).
+- TODO.md updated with full queue contents + resume protocol so the queue position survives /clear and parallel-session interleaving.
+- No source files touched this session.
+
+**Files modified** (parent Lupin only):
+
+- `TODO.md` (Phase 6c queue position + resume protocol entry near top)
+- `history.md` (this entry)
+
+**Session-end note**: Rick is away (doctor's appointment broadcast 2026-05-13 PM) and explicitly requested "no push, no backup" on the session-end ritual. Commit prep stops at the approval gate per `feedback_never_auto_commit_push` — no auto-commit. Working tree contains other sessions' uncommitted changes (`notifications.js`, INI pair, new 2026.05.13 R&D docs) which are NOT mine to commit per parallel-session safety.
+
+---
+
 ### 2026.05.13 Late Morning - Session 66d534ab (Tiberius 🌑) | Bounded-CC Migration Audit & Plan (post-9d55ed1 continuation)
 
 **Persona**: Tiberius 🌑 (Deep male, #3F51B5)
