@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: 🚨 **CRITICAL at 22857 tokens (91.4% of 25k)** — archive must run next session before adding new content.
 
+### 2026.05.14 PM - Session a0eaaca1 (Mr. Radio 🦉) | TTS preview bug-fix: action-required opt-out + Mr.-split
+
+Two-bug fix to the 2026-05-13 TTS preview-and-pause feature. Bug A (URGENT cost burn): action-required notifications opted OUT of preview, so every long `ask_yes_no`/`ask_multiple_choice`/`converse` played in full TTS. Bug B (correctness): `_splitIntoSentences()` regex falsely split `Mr.` as a sentence, previewing only "Mr." (~16 chars of 580) for Rick's session-end message.
+
+**Fix** in `notifications.js`: (1) removed action-required from `_computeTTSPreview` opt-out, (2) swapped response handler at 15139 to `stopTTSAndAdvance()` to avoid auto-pause stall, (3) rewrote `_splitIntoSentences` with 25-abbreviation pre-mask + `match()`→`split()` lookbehind+lookahead (fixes "Mr." + latent "3.14"-prefix-drop), (4) `Math.floor`→`Math.ceil` for previewCount, (5) inline `_tts_quick_self_test()` with 9 cases gated on `this.debug`.
+
+**Files** (Lupin only): `src/fastapi_app/static/js/notifications.js`, new design+execution docs at `src/rnd/v0.1.7/2026.05.14-tts-preview-action-required-and-mr-split-*`, `.claude-session.md`, `bug-fix-queue.md`.
+
+**Tests**: `node -c` PASS. Live MCP verification — long `ask_yes_no` previewed+paused with mid-pause yes click advancing queue cleanly; verbatim replay of yesterday's "Mr. Radio..." message now previews 3 sentences ending at "...tracking branch" instead of just "Mr." Cost impact: ~75-80% TTS spend savings per long action-required ask.
+
+**Commit**: 47fa399
+
+---
+
 ### 2026.05.13 PM - Session b28069a6 (Maria 🌸) | Commons Phase 3 + broadcast-UI arc — 12 commits
 
 Phase 3 barrel-through `27b82f1`→`ac5c4aa` (7 commits): question watcher + xml models + LLM disambiguator + register-question endpoints + push-mode + listener branch + lifespan. 398/398 tests :7999, 7/7 integration :8000. Backend bug arc: `4cb5fe1`/`93b302d` graceful-filter + listener user_id stamping (`[]` → 5 sessions); `2dff191` phantom filter via `idle_detection.last_interaction_at` + INI 600→28800s. UI iteration: `54c8e05`/`26874fb`/`300b3c0`/`8771c33` panel relocation + mic + compose-row redesign + Playwright refresh (11/11 PASSED :8000). Co-commit attribution to Arnold's `recordingMode='broadcast'` extension in `54c8e05`. CoSA-side commits pending separately. Full details in TODO.md closure section + 2 diagnosis docs at `src/rnd/v0.1.7/2026.05.13-broadcast-*`.

@@ -61,6 +61,7 @@
 | d5e3cf21 | 2026-05-05T19:30:00 | 2026-05-06T01:50:00 | closed |
 | 45e6bf84 | 2026-05-05T21:03:44 | 2026-05-05T23:25:00 | closed |
 | 6825e6af | 2026-05-07T17:45:00 | 2026-05-07T20:11:00 | active |
+| a0eaaca1 | 2026-05-14T21:22:14 | 2026-05-14T22:40:00 | active |
 
 ---
 
@@ -277,6 +278,15 @@
 ---
 
 ### Completed
+
+- [x] **TTS preview-and-pause: action-required opt-out cost burn + `Mr.` false-split + `match()` prefix-drop** → commit: 47fa399 | By: a0eaaca1 | 2026-05-14
+  - **Bug A (urgent)**: Long action-required asks (`ask_yes_no`/`ask_multiple_choice`/`converse`) opted-OUT of preview-and-pause via `item.type === 'action-required'` in `_computeTTSPreview()` opt-out clause, burning the full text through TTS on every fire. Rick's 8-sentence ~700-char "Layered..." prompt ran verbatim.
+  - **Bug B (correctness)**: `_splitIntoSentences()` regex `[^.!?]+(?:[.!?]+(?=\s+[A-Z]|\s*$)|$)` treated `Mr.` as a sentence boundary (period+space+capital matches the lookahead). For Rick's session-end "Mr. Radio here. End of session ritual complete..." 9-sentence message, this produced a 10-entry sentence list, then `floor(10*0.25)=2` yielded a 16-char preview of just "Mr. Radio here." that sounded like "Mr." in playback.
+  - **Latent bug found in-flight**: `match()`-based splitter silently dropped prefix text when its lookahead failed — `"3.14 is pi. Foo."` produced `["14 is pi.", "Foo."]`, losing the `"3."` prefix entirely.
+  - **Fix**: Removed action-required from opt-out (line 13025); swapped response handler at line 15139 to `stopTTSAndAdvance()` (prevents stall when user answers mid-pause); rewrote `_splitIntoSentences()` with 25-abbreviation pre-mask (Mr/Mrs/Ms/Mx/Dr/Prof/Sr/Jr/Rev/St/Mt/Ft/Ave/Blvd/Rd/vs/e.g/i.e/etc/viz/cf/No/a.m/p.m) using U+0001 placeholder; switched `match()` → `split()` with lookbehind `(?<=[.!?])` + lookahead `(?=[A-Z])`; `Math.floor`→`Math.ceil` for previewCount (medium-N messages no longer undershoot 25%); added `_tts_quick_self_test()` with 9 cases including Rick's two real bug-report messages, gated on `this.debug`.
+  - **Files**: `src/fastapi_app/static/js/notifications.js`. Design doc: `src/rnd/v0.1.7/2026.05.14-tts-preview-action-required-and-mr-split-fix.md`. Execution log: `src/rnd/v0.1.7/2026.05.14-tts-preview-action-required-and-mr-split-execution-log.md`.
+  - **Tests**: `node -c` syntax check PASS. Live MCP verification on :7999 — fired long `ask_yes_no` via cosa-voice; Rick clicked yes mid-auto-pause and queue advanced cleanly (Phase 1d stall fix verified). Verbatim replay of yesterday's failing 9-sentence "Mr. Radio..." `notify()` produced correct 3-sentence preview ending at "...tracking branch."
+  - **Cost impact**: ~75-80% TTS spend reduction per long action-required ask going forward.
 
 - [x] **Voice persona switches on `/clear` — SessionEnd hook releases persona unconditionally** → commit: 82c098b (§0.4 fix + 8 unit tests) + f21b163 (Phase 1F cleanup + live verification + wrap) | By: d5e3cf21 | 2026-05-06
   - **Root cause**: `src/lupin_cli/claude_code/hooks/session_end.py:224-226` unconditionally called `_release_voice_persona( session_id )` on every SessionEnd hook fire. Claude Code fires SessionEnd on `/clear` (`reason="clear"`), not only on process exit, so the bridge `voice_persona` field was nulled BEFORE the post-/clear SessionStart could carry it forward.

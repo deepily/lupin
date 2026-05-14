@@ -348,7 +348,12 @@ class NotificationsUI {
     
     async init() {
         this.log( "NotificationsUI initializing..." );
-        
+
+        // Run TTS sentence-splitter self-test (no-op unless this.debug is truthy).
+        // Added 2026-05-14 to catch regressions in the abbreviation pre-mask
+        // + split() rewrite of _splitIntoSentences.
+        this._tts_quick_self_test();
+
         try {
             // Check and clear old cache if needed
             this.validateCache();
@@ -12964,30 +12969,63 @@ class NotificationsUI {
     /**
      * Split text into sentences for the TTS preview-and-pause feature.
      *
-     * Primary algorithm: regex `/[.!?]+\s+(?=[A-Z]|$)/`-style match for sentence
-     * boundaries (terminal punctuation followed by whitespace + capital letter
-     * or end-of-string). Handles "Mr. Smith", "3.14", URLs correctly.
+     * Primary algorithm: `String.split()` with a zero-width boundary anchored
+     * by lookbehind on terminal punctuation and lookahead on a capital letter.
+     * Common abbreviations (Mr., Mrs., e.g., a.m., etc.) are pre-masked so
+     * their periods don't trigger false sentence boundaries.
      *
-     * Fallback: when the primary algorithm produces a single chunk but the text
-     * is clearly long (>12 words), split at the rough midpoint by word count.
+     * Fallback: when the primary algorithm produces a single chunk but the
+     * text is clearly long (>12 words), split at the rough midpoint by word
+     * count.
      *
      * Semicolons (`;`) are included as boundaries iff `this.ttsPreviewIncludeSemicolons`
      * is true (INI key `tts preview include semicolons`).
      *
-     * See src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-design.md §4 (sentence-
-     * splitting algorithm).
+     * 2026-05-14 rewrite — replaced match()-based algorithm with split()+lookbehind.
+     * Old approach silently dropped text when its lookahead failed (e.g. "3.14"
+     * lost the "3." prefix). Old approach also lacked abbreviation handling
+     * despite the 2026-05-13 design doc claiming otherwise (line 87 of
+     * 2026.05.13-tts-preview-and-pause-design.md).
+     *
+     * See:
+     *   - src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-design.md (original)
+     *   - src/rnd/v0.1.7/2026.05.14-tts-preview-action-required-and-mr-split-fix.md (this fix)
      */
     _splitIntoSentences( text ) {
         if ( !text || typeof text !== 'string' ) return [];
 
-        // Build the sentence-boundary character class based on INI flag
-        const terminalChars = this.ttsPreviewIncludeSemicolons ? '.!?;' : '.!?';
-        const boundaryRegex = new RegExp(
-            `[^${terminalChars.replace( /[.!?;]/g, c => '\\' + c )}]+(?:[${terminalChars.replace( /[.!?;]/g, c => '\\' + c )}]+(?=\\s+[A-Z]|\\s*$)|$)`,
-            'g'
-        );
-        const parts = ( text.match( boundaryRegex ) || [] )
-            .map( p => p.trim() )
+        // Pre-mask common abbreviations so their periods don't trigger false
+        // sentence boundaries. The placeholder is U+0001 (SOH control char) —
+        // never appears in real TTS text.
+        const ABBREVIATIONS = [
+            // Personal titles
+            "Mr.", "Mrs.", "Ms.", "Mx.", "Dr.", "Prof.", "Sr.", "Jr.", "Rev.",
+            // Geographic
+            "St.", "Mt.", "Ft.", "Ave.", "Blvd.", "Rd.",
+            // Discourse
+            "vs.", "e.g.", "i.e.", "etc.", "viz.", "cf.", "No.",
+            // Time
+            "a.m.", "p.m.", "A.M.", "P.M."
+        ];
+        const ABBR_MASK = "";
+
+        let masked = text;
+        ABBREVIATIONS.forEach( abbr => {
+            const placeholder = abbr.replace( /\./g, ABBR_MASK );
+            masked = masked.split( abbr ).join( placeholder );
+        } );
+
+        // Split on zero-width sentence boundary: lookbehind on terminal punct,
+        // lookahead on a capital letter. split() preserves all inter-boundary
+        // content (unlike match() which can drop prefixes when its lookahead
+        // fails).
+        const terminalChars = this.ttsPreviewIncludeSemicolons ? ".!?;" : ".!?";
+        const escaped       = terminalChars.replace( /[.!?;]/g, c => "\\" + c );
+        const splitRegex    = new RegExp( `(?<=[${escaped}])\\s+(?=[A-Z])`, "g" );
+
+        const restoreMask = new RegExp( ABBR_MASK, "g" );
+        const parts = masked.split( splitRegex )
+            .map( p => p.replace( restoreMask, "." ).trim() )
             .filter( p => p.length > 0 );
 
         if ( parts.length > 1 ) return parts;
@@ -12996,10 +13034,99 @@ class NotificationsUI {
         const words = text.trim().split( /\s+/ );
         if ( words.length > 12 ) {
             const mid = Math.floor( words.length / 2 );
-            return [ words.slice( 0, mid ).join( ' ' ), words.slice( mid ).join( ' ' ) ];
+            return [ words.slice( 0, mid ).join( " " ), words.slice( mid ).join( " " ) ];
         }
 
         return [ text.trim() ];
+    }
+
+    /**
+     * Inline self-test for _splitIntoSentences. Runs only when this.debug is
+     * truthy. Logs `[TTS-SELFTEST] N/N passed` on success or fails loudly via
+     * console.assert with the offending case. Intended to fire once at init().
+     *
+     * Covers:
+     *   - Abbreviation false-positive (Mr., e.g., a.m., etc.)
+     *   - Decimal-number false-positive (3.14)
+     *   - Single-sentence pass-through
+     *   - Word-count fallback for long run-on text
+     *   - Rick's two real-world bug-report inputs (2026-05-13/14)
+     */
+    _tts_quick_self_test() {
+        if ( !this.debug ) return;
+
+        const cases = [
+            {
+                name     : "Mr. Smith two-sentence",
+                input    : "Mr. Smith said hi. Then he left.",
+                expected : [ "Mr. Smith said hi.", "Then he left." ]
+            },
+            {
+                name     : "Mr. Radio two-sentence",
+                input    : "Mr. Radio here. End of session ritual complete.",
+                expected : [ "Mr. Radio here.", "End of session ritual complete." ]
+            },
+            {
+                name     : "Decimal preserved",
+                input    : "3.14 is pi. Cool fact!",
+                expected : [ "3.14 is pi.", "Cool fact!" ]
+            },
+            {
+                name     : "e.g. abbreviation",
+                input    : "e.g. Foo. Bar baz.",
+                expected : [ "e.g. Foo.", "Bar baz." ]
+            },
+            {
+                name     : "a.m./p.m. abbreviations",
+                input    : "a.m. start. p.m. end.",
+                expected : [ "a.m. start.", "p.m. end." ]
+            },
+            {
+                name     : "Single sentence",
+                input    : "Hello.",
+                expected : [ "Hello." ]
+            },
+            {
+                name     : "Rick's 9-sentence session-end message",
+                input    : "Mr. Radio here. End of session ritual complete. Five CoSA commits landed and pushed to origin on the tracking branch. Body one is inter-session commons phase three steps three through nine plus Maria's broadcast UI bug fixes. Body two is Arnold's broadcast munger mode. Body three is Arnold's TTS preview config endpoint. Plus session-end docs and the manifest hash-backfill. Branch stats: seven hundred thirty net lines added across seven files. You're clear to step away.",
+                expectedLength : 9
+            },
+            {
+                name     : "Rick's 8-sentence Layered message",
+                input    : "Layered. The doctrine lives in your global Claude file plus a new workflow doc — every session reads it at startup. Then we embed tier markers right into the MCP tool descriptions themselves, so at the decision point the model sees attention-demanding flagged inline. And the reserved topic names themselves become signals to peers — a post to presence means self-disclosure, a post to help-wanted means I'm blocking on input. That neatly couples this with question two on topic vocabulary. Finally, whenever a session enters attention-demanding mode, it also fires a notify to you, so you see in your UI when one session is blocking on another. Visibility without you having to ask. Does any layer feel missing, or any one feel like overkill?",
+                expectedLength : 8
+            },
+            {
+                name     : "Long run-on falls back to word-midpoint split",
+                input    : "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty",
+                expectedLength : 2
+            }
+        ];
+
+        let passed = 0;
+        let failed = 0;
+        cases.forEach( ( c, idx ) => {
+            const got = this._splitIntoSentences( c.input );
+            let ok;
+            if ( c.expected ) {
+                ok = ( got.length === c.expected.length )
+                    && got.every( ( s, i ) => s === c.expected[ i ] );
+            } else {
+                ok = ( got.length === c.expectedLength );
+            }
+            if ( ok ) {
+                passed += 1;
+            } else {
+                failed += 1;
+                console.assert( false, `[TTS-SELFTEST] Case ${idx + 1} "${c.name}" FAILED. Got:`, got, "Expected:", c.expected || `length ${c.expectedLength}` );
+            }
+        } );
+
+        if ( failed === 0 ) {
+            this.log( `[TTS-SELFTEST] ${passed}/${cases.length} passed` );
+        } else {
+            this.log( `[TTS-SELFTEST] ${passed}/${cases.length} passed, ${failed} FAILED — see console.assert output above` );
+        }
     }
 
     /**
@@ -13012,17 +13139,22 @@ class NotificationsUI {
      *
      * Opt-out (item.stage = "full", remainderText = ""):
      *   - this.ttsPreviewEnabled is false
-     *   - item.type === 'action-required' (full context needed for response)
      *   - item.ttsText.length < this.ttsPreviewMinChars (too short to bother)
      *   - splitter produces a single sentence
+     *
+     * NOTE 2026-05-14: design-doc Q5(b) opt-out for action-required was REMOVED
+     * after production cost telemetry showed long action-required asks were
+     * burning the bulk of TTS spend. Action-required items now preview-and-pause
+     * like every other notification; UX trade-off is that the user may answer
+     * from the partial-context preview without resuming for the remainder.
      *
      * Logs cost-savings telemetry (per Q10) when a preview cut happens.
      */
     _computeTTSPreview( item ) {
         const text = item.ttsText || '';
 
-        // Opt-out paths
-        if ( !this.ttsPreviewEnabled || item.type === 'action-required' || text.length < this.ttsPreviewMinChars ) {
+        // Opt-out paths (action-required removed 2026-05-14 — see docstring)
+        if ( !this.ttsPreviewEnabled || text.length < this.ttsPreviewMinChars ) {
             item.previewText   = text;
             item.remainderText = '';
             item.stage         = 'full';
@@ -13032,7 +13164,10 @@ class NotificationsUI {
         // Sentence split + preview-count calc
         const sentences    = this._splitIntoSentences( text );
         const totalCount   = sentences.length;
-        const previewCount = Math.max( 1, Math.floor( totalCount * this.ttsPreviewFraction ) );
+        // 2026-05-14: floor → ceil so N*0.25 rounds UP. For a 9-sentence message
+        // floor yielded 2 sentences (~8% by chars); ceil yields 3 (~20% by chars).
+        // Ceil never undershoots the configured fraction; floor often did.
+        const previewCount = Math.max( 1, Math.ceil( totalCount * this.ttsPreviewFraction ) );
 
         if ( totalCount <= previewCount ) {
             // Entire utterance fits in preview — no remainder, no pause
@@ -13170,7 +13305,8 @@ class NotificationsUI {
         // Preview-and-pause routing (Q1, Q5): when stage === "preview" send only
         // the previewText slice; when stage === "remainder" send the held-back
         // remainderText. stage === "full" falls back to the original ttsText
-        // (opt-out path — action-required, short messages, or feature disabled).
+        // (opt-out path — short messages or feature disabled; action-required
+        // no longer opts out as of 2026-05-14 per cost-burn override of Q5(b)).
         let textToPlay;
         if ( item.stage === 'remainder' ) {
             textToPlay = item.remainderText || item.ttsText;
@@ -15133,11 +15269,15 @@ class NotificationsUI {
         state.isResponded = true;
 
         // Stop TTS immediately if this notification is currently playing
-        // User already answered — don't keep reading the question
+        // User already answered — don't keep reading the question.
+        // Use stopTTSAndAdvance() so that if we're auto-paused after preview
+        // (action-required items now preview-and-pause as of 2026-05-14),
+        // the remainder is dropped and the queue advances. Calling stopAudio +
+        // onTTSPlaybackComplete directly would short-circuit on the
+        // isTTSPaused guard and stall the queue.
         if ( this.activeTTSItem?.id === notificationId ) {
             this.log( `Stopping TTS — user responded to currently-playing notification ${notificationId}` );
-            this.stopAudio();
-            this.onTTSPlaybackComplete();
+            this.stopTTSAndAdvance();
         }
 
         // Disable buttons to prevent double-submit
