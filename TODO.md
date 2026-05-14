@@ -1,5 +1,21 @@
 # TODO
 
+## 📡 NEW — Writer-side follow-up: `owner_user_id` stamper (filed 2026-05-14 by María, session f6f865fb)
+
+**Primary doc**: `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md` (Option C ratified by Rick; CoSA-side filter migration landed; writer-side pending separate Lupin session).
+
+**Context**: Broadcast UI showed only 1 of 4 personas because the listener was stamping the SERVICE-ACCOUNT user_id (`claude.code@lupin.deepily.ai`) instead of the human owner's. CoSA filter now reads a new `owner_user_id` field with graceful-degradation fallback (all 4 personas visible immediately; isolation tightens once writer lands).
+
+- [ ] **[LUPIN] Decide owner-resolution mechanism** — recommended: env vars `LUPIN_OWNER_EMAIL` + `LUPIN_OWNER_PASSWORD` (mirrors existing listener-creds pattern). Alternatives: `~/.claude/lupin-owner.json` config file, or a `/auth/whoami-for-bridge` endpoint.
+- [ ] **[LUPIN] Add `set_owner_user_id`** in `src/lupin_cli/claude_code/hooks/lib/session_bridge.py` — mirrors existing `set_user_id` with read-modify-write field preservation.
+- [ ] **[LUPIN] Add `_stamp_owner_user_id_on_bridge`** in `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` — same pattern as the existing `_stamp_user_id_on_bridge` but uses HUMAN owner's credentials, called once at listener startup immediately after the existing stamp.
+- [ ] **[LUPIN] Investigate §6 secondary mystery** — Rachel's listener log says her `user_id` WAS stamped but the on-disk bridge has no key. Probably a post-stamp SessionStart/`/clear` hook overwriting without field-preservation. Could clobber `owner_user_id` too if not fixed.
+- [ ] **[LUPIN] Schedule `:8000` integration run** before merging both legs — verify `test_broadcast_two_session_e2e.py` passes and the live broadcast UI shows all 4 personas once writer lands.
+
+**Independence note**: The CoSA-side change is safe to merge independently because the graceful-degradation branch handles bridges without `owner_user_id`. No coordination required between the two repos' merges.
+
+---
+
 ## 💰 NEW — Bounded ClaudeCodeJob migration audit & plan (filed 2026-05-13 by Tiberius, session 66d534ab)
 
 **Primary doc**: `src/rnd/v0.1.7/2026.05.13-bounded-cc-migration-audit-and-plan.md` (status: awaiting Rick's ratification on D1-D9 decision matrix)

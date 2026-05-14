@@ -397,7 +397,7 @@ def test_filter_includes_same_user():
     raw = [
         _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria", "icon": "🌸", "color": "#A040A0" } ),
     ]
-    loader = lambda p: { "user_id": "alice", "last_activity_epoch": 1000.0 }
+    loader = lambda p: { "owner_user_id": "alice", "last_activity_epoch": 1000.0 }
     out = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
@@ -413,7 +413,7 @@ def test_filter_excludes_other_user():
     raw = [
         _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ),
     ]
-    loader = lambda p: { "user_id": "bob", "last_activity_epoch": 1000.0 }
+    loader = lambda p: { "owner_user_id": "bob", "last_activity_epoch": 1000.0 }
     out = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
@@ -424,14 +424,15 @@ def test_filter_excludes_other_user():
     assert out == [ ]
 
 
-def test_filter_graceful_includes_bridge_without_user_id():
+def test_filter_graceful_includes_bridge_without_owner_user_id():
     """
-    2026-05-13 fix — bridge lacking a `user_id` field passes through (graceful
-    degradation for legacy / un-stamped bridges per the broadcast-UI bug doc
-    `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`).
+    2026-05-14 carry-forward (was `user_id` pre-Option-C) — bridge lacking an
+    `owner_user_id` field passes through (graceful degradation for legacy /
+    un-stamped bridges per
+    `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md`).
     """
     raw = [ _make_session_tuple( "/bridge/legacy", "sid-legacy", { "name": "Maria" } ) ]
-    # Bridge has NO user_id key
+    # Bridge has NO owner_user_id key
     loader = lambda p: { "last_activity_epoch": 1000.0 }
     out = filter_and_project_sessions(
         raw_sessions                     = raw,
@@ -444,13 +445,13 @@ def test_filter_graceful_includes_bridge_without_user_id():
     assert out[ 0 ][ "session_id" ] == "sid-legacy"
 
 
-def test_filter_graceful_includes_bridge_with_null_user_id():
+def test_filter_graceful_includes_bridge_with_null_owner_user_id():
     """
-    2026-05-13 fix — bridge with explicit `user_id: null` is treated as
-    un-stamped (same as missing key) and passes through.
+    Bridge with explicit `owner_user_id: null` is treated as un-stamped
+    (same as missing key) and passes through.
     """
     raw = [ _make_session_tuple( "/bridge/null", "sid-null", { "name": "Maria" } ) ]
-    loader = lambda p: { "user_id": None, "last_activity_epoch": 1000.0 }
+    loader = lambda p: { "owner_user_id": None, "last_activity_epoch": 1000.0 }
     out = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
@@ -459,6 +460,40 @@ def test_filter_graceful_includes_bridge_with_null_user_id():
         bridge_loader                    = loader,
     )
     assert len( out ) == 1
+
+
+def test_filter_uses_owner_user_id_not_legacy_user_id():
+    """
+    Regression — 2026-05-14 bug per
+    `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md`.
+
+    Scoping MUST use `owner_user_id` (human owner), NOT the legacy `user_id`
+    (which carries the listener service-account identity).
+
+    Setup: bridge carries BOTH fields with DIFFERENT values —
+      `user_id`        = "listener-svc"   (service account that wrote the bridge)
+      `owner_user_id`  = "alice"           (human owner)
+
+    Caller authenticates as "alice". Bridge MUST be included.
+    Pre-Option-C: filter compared `user_id` ("listener-svc") to "alice" and
+    rejected. Post-Option-C: filter compares `owner_user_id` ("alice") and
+    includes. The legacy `user_id` field is now telemetry only.
+    """
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    loader = lambda p: {
+        "user_id"             : "listener-svc",   # listener identity — irrelevant to filter
+        "owner_user_id"       : "alice",           # human owner — the one that matters
+        "last_activity_epoch" : 1000.0,
+    }
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = loader,
+    )
+    assert len( out ) == 1, "filter must use owner_user_id, not legacy user_id"
+    assert out[ 0 ][ "session_id" ] == "sid-A"
 
 
 def test_filter_excludes_session_stale_via_idle_detection_iso():
@@ -506,19 +541,19 @@ def test_filter_includes_session_recently_interactive_via_idle_detection_iso():
     assert out[ 0 ][ "last_seen_iso" ] == recent_iso
 
 
-def test_filter_strict_when_bridge_has_user_id():
+def test_filter_strict_when_bridge_has_owner_user_id():
     """
-    Regression: bridges that DO carry user_id still enforce strict equality —
-    the graceful path only relaxes for missing/null user_id.
+    Regression: bridges that DO carry owner_user_id still enforce strict
+    equality — the graceful path only relaxes for missing/null owner_user_id.
     """
     raw = [
         _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ),
         _make_session_tuple( "/bridge/B", "sid-B", { "name": "Tiberius" } ),
     ]
     def loader( p ):
-        # A is owned by alice; B is owned by bob; bridge for path /unknown has no user_id
-        if str( p ) == "/bridge/A": return { "user_id": "alice", "last_activity_epoch": 1000.0 }
-        if str( p ) == "/bridge/B": return { "user_id": "bob",   "last_activity_epoch": 1000.0 }
+        # A is owned by alice; B is owned by bob; bridge for path /unknown has no owner_user_id
+        if str( p ) == "/bridge/A": return { "owner_user_id": "alice", "last_activity_epoch": 1000.0 }
+        if str( p ) == "/bridge/B": return { "owner_user_id": "bob",   "last_activity_epoch": 1000.0 }
         return None
     out = filter_and_project_sessions(
         raw_sessions                     = raw,
@@ -527,7 +562,7 @@ def test_filter_strict_when_bridge_has_user_id():
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
     )
-    # Only alice's bridge is included — bob's is rejected because his bridge HAS user_id and it doesn't match
+    # Only alice's bridge is included — bob's is rejected because his bridge HAS owner_user_id and it doesn't match
     assert len( out ) == 1
     assert out[ 0 ][ "session_id" ] == "sid-A"
 
@@ -548,7 +583,7 @@ def test_filter_skips_unloadable_bridge():
 def test_filter_excludes_stale_session():
     """Session past activity threshold is excluded."""
     raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
-    loader = lambda p: { "user_id": "alice", "last_activity_epoch": 100.0 }
+    loader = lambda p: { "owner_user_id": "alice", "last_activity_epoch": 100.0 }
     out = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",

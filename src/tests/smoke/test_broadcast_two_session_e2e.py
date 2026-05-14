@@ -101,11 +101,19 @@ def _mock_listener_worker(
 # ─── Test fixtures (parent-process helpers) ────────────────────────────────
 
 
-def _make_bridge_dict( user_id: str, age_seconds: float = 5.0 ) -> Dict[ str, Any ]:
-    """Build a bridge dict that `filter_and_project_sessions` accepts (recent + same-user)."""
+def _make_bridge_dict( owner_user_id: str, age_seconds: float = 5.0 ) -> Dict[ str, Any ]:
+    """
+    Build a bridge dict that `filter_and_project_sessions` accepts (recent + same-owner).
+
+    Per 2026-05-14 Option-C migration
+    (`src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md`),
+    scoping is now on `owner_user_id`, not the legacy `user_id` (which carries
+    the listener service-account identity). The fixture's parameter name is
+    `owner_user_id` to reflect what the filter actually reads.
+    """
     now = time.time()
     return {
-        "user_id"                  : user_id,
+        "owner_user_id"            : owner_user_id,
         "last_activity_epoch"      : now - age_seconds,
         "conversation_mode_active" : False,
     }
