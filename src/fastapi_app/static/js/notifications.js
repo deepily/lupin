@@ -416,6 +416,14 @@ class NotificationsUI {
             // Load conversation history (after auth is complete)
             await this.loadConversationHistory();
 
+            // Belt-and-suspenders restore of focus + hide-inactive state AFTER
+            // cards/icons are hydrated. Defends against any code path between
+            // constructor and here that wiped the in-memory state (e.g., an
+            // early `_exitFocusMode()` from a WS event-driven icon churn).
+            // Also discards stale `focused_sender_id` per the 2026-04-30
+            // design contract when the focused sender has no notifications.
+            this._restoreCcUiAfterLoad();
+
             // Restore action-required notifications from localStorage (refresh survival)
             this.restoreActionRequiredState();
 
@@ -9517,6 +9525,109 @@ class NotificationsUI {
             );
         } catch ( err ) {
             this.error( "Failed to persist cc focus state:", err );
+        }
+    }
+
+    /**
+     * Belt-and-suspenders restore of focus + hide-inactive state AFTER
+     * loadConversationHistory finishes hydrating sender cards/icons.
+     *
+     * The constructor reads localStorage and sets in-memory state +
+     * toggle-pill visuals, and `createSenderCard` / `_addStripIcon` apply
+     * per-card / per-icon attributes as cards arrive. In principle that's
+     * enough — but in practice users have reported "I refresh and focus
+     * is gone, all sessions render." Possible causes (any of which this
+     * function recovers from):
+     *
+     * - In-memory `ccFocusState` was reset by an `_exitFocusMode()` call
+     *   firing during init (e.g., a WS event handler that removed and
+     *   re-added the focused session's icon early in the lifecycle).
+     * - A render path other than `createSenderCard` produced the sender
+     *   cards (cached/server-rendered HTML) so `_applyFocusHiddenToCard`
+     *   never ran.
+     * - The toggle-pill visual restore in the constructor ran before
+     *   `#cc-strip-toggle` was painted (DOMContentLoaded race).
+     *
+     * Strategy: re-read localStorage directly (bypassing potentially-wiped
+     * in-memory state), and if focus is persisted, walk the now-hydrated
+     * DOM and apply the focus state in full. Discards stale state per the
+     * 2026-04-30 design doc ("if the persisted focused session does NOT
+     * exist on reload, state is discarded and default mode is shown").
+     */
+    _restoreCcUiAfterLoad() {
+        // ─── Focus mode ─────────────────────────────────────────────────
+        let persistedFocus = null;
+        try {
+            persistedFocus = JSON.parse( localStorage.getItem( this.CC_FOCUS_STATE_KEY ) );
+        } catch ( e ) {
+            this.error( "Failed to parse persisted focus state:", e );
+        }
+        if ( persistedFocus && persistedFocus.enabled && persistedFocus.focused_sender_id ) {
+            // Reconcile in-memory state with persisted state (in case something
+            // in init() reset it).
+            if ( !this.ccFocusState.enabled
+                 || this.ccFocusState.focused_sender_id !== persistedFocus.focused_sender_id ) {
+                this.log( `[FOCUS-RESTORE] reconciling wiped in-memory state from localStorage: ${persistedFocus.focused_sender_id}` );
+                this.ccFocusState = { ...persistedFocus };
+            }
+
+            const expectedId  = `sender-card-${this.ccFocusState.focused_sender_id.replace( /[@.#]/g, '-' )}`;
+            const focusedCard = document.getElementById( expectedId );
+
+            if ( !focusedCard ) {
+                // Persisted focused sender no longer has any visible cards
+                // — design contract says discard state and show default mode.
+                this.log( `[FOCUS-RESTORE] focused sender ${this.ccFocusState.focused_sender_id} not in current data set; discarding stale state per design contract` );
+                this._exitFocusMode();
+            } else {
+                // Walk all sender cards: hide all except the focused one.
+                document.querySelectorAll( '#notifications-list .sender-card' ).forEach( card => {
+                    if ( card.id === expectedId ) {
+                        card.removeAttribute( 'data-focus-hidden' );
+                    } else {
+                        card.setAttribute( 'data-focus-hidden', 'true' );
+                    }
+                } );
+
+                // Mark the focused strip icon.
+                document.querySelectorAll( '#cc-strip-icons .cc-strip-icon' ).forEach( icon => {
+                    if ( icon.getAttribute( 'data-sender-id' ) === this.ccFocusState.focused_sender_id ) {
+                        icon.setAttribute( 'data-focused', 'true' );
+                    } else {
+                        icon.removeAttribute( 'data-focused' );
+                    }
+                } );
+
+                // Restore toggle-pill visual (idempotent if constructor already set it).
+                const toggle = document.getElementById( 'cc-strip-toggle' );
+                if ( toggle ) {
+                    toggle.setAttribute( 'data-focus-active', 'true' );
+                    toggle.textContent = '👁 Focus: ON';
+                }
+
+                this.log( `[FOCUS-RESTORE] focus mode restored on ${this.ccFocusState.focused_sender_id}` );
+            }
+        }
+
+        // ─── Hide-inactive (Active) toggle ──────────────────────────────
+        const persistedHideInactive = localStorage.getItem( this.CC_HIDE_INACTIVE_KEY ) === 'true';
+        if ( persistedHideInactive !== this.ccHideInactiveStrip ) {
+            this.log( `[ACTIVE-TOGGLE-RESTORE] reconciling wiped in-memory state from localStorage: ${persistedHideInactive}` );
+            this.ccHideInactiveStrip = persistedHideInactive;
+        }
+        if ( this.ccHideInactiveStrip ) {
+            // Re-apply filter to all existing icons (per-icon filter in
+            // _addStripIcon depends on senderPersonaMap, which populates
+            // asynchronously — re-walking after load catches any icon
+            // that was added before its persona arrived).
+            this._applyHideInactiveStripFilter();
+
+            const toggle = document.getElementById( 'cc-hide-inactive-toggle' );
+            if ( toggle ) {
+                toggle.setAttribute( 'data-hide-inactive', 'true' );
+                toggle.textContent = '👁 Active';
+            }
+            this.log( '[ACTIVE-TOGGLE-RESTORE] hide-inactive filter reapplied' );
         }
     }
 
