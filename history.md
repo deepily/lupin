@@ -2,6 +2,18 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: 🚨 **CRITICAL at 22857 tokens (91.4% of 25k)** — archive must run next session before adding new content.
 
+### 2026.05.14 Evening - Session f6f865fb (María 🌸) | Broadcast filter `owner_user_id` migration + focus-bar persistence restore
+
+Two-bug session. **(1) Broadcast filter** — Rick saw 1 of 4 personas in the inter-session-commons broadcast UI (only Rachel). Root cause: the Phase 3 Option 2 listener-side stamper (2026-05-13) wrote the LISTENER's service-account UUID (`claude.code@lupin.deepily.ai` → `931e9dae-…`) to `bridge.user_id`, but the filter compares against the HUMAN owner's JWT UUID (`0cf47e2d-…`) — mismatched, every stamped bridge rejected; Rachel slipped through only because her `user_id` field is mysteriously missing on disk (secondary mystery flagged). Option C ratified by Rick: CoSA-side filter now reads a NEW `owner_user_id` field with graceful-degradation fallback (uncommitted on the CoSA side per nested-repo rule; Rick handles). Lupin-side fixture rename + new regression test `test_filter_uses_owner_user_id_not_legacy_user_id` (bridge with BOTH fields, deliberately different) committed in this session. Writer-side stamper queued to `TODO.md` for a future Lupin session. Design + remediation: `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md`.
+
+**(2) Focus-bar persistence** — Rick reported: refresh while in CC-session focus mode loses focus + re-renders every session. Persistence wiring already existed (constructor + per-card / per-icon application), yet the symptom reproduces deterministically. Belt-and-suspenders fix: new `_restoreCcUiAfterLoad()` method at notifications.js:9522, called from `init()` right after `loadConversationHistory()`. Re-reads localStorage directly, reconciles in-memory state, walks DOM to re-apply focus + active-toggle attributes, and enforces the 2026-04-30 design contract's stale-id discard. Covers three plausible root causes without requiring live instrumentation to pin which one. Design + test plan: `src/rnd/v0.1.7/2026.05.14-focus-bar-state-persistence-restore.md`.
+
+**Files** (Lupin only): `src/cosa/rest/routers/commons.py` (uncommitted, CoSA side), `src/tests/unit/commons/test_commons_router.py`, `src/tests/smoke/test_broadcast_two_session_e2e.py`, `src/fastapi_app/static/js/notifications.js`, `TODO.md`, plus two new R&D docs above.
+
+**Tests**: `pytest src/tests/unit/commons/test_commons_router.py` inside `lupin-rest-dev` → 87/87 PASS in 0.48s; `node --check` on notifications.js → SYNTAX OK; live browser verification of focus-bar fix pending Rick's refresh test.
+
+**Coordination**: Mr. Radio's TTS-rendering work (commit `efbcae3`) coincident on `notifications.js` — coordination handled via `coord-notifications-js` commons topic. Different regions (his lines 5610 + 13278, mine 9522 + 418). No conflict. Cross-topic coordination misfire (I posted on `notifications-ui-coord`, he on `coord-notifications-js`) is the "coordination bug" Rick flagged mid-session; both topics now archived.
+
 ### 2026.05.14 PM - Session a0eaaca1 (Mr. Radio 🦉) | Decouple notification-list render from TTS-queue advancement
 
 Follow-on bug from the morning's TTS preview-and-pause shipment. Symptom: 20+ high/urgent fire-and-forget notifications backed up invisibly while TTS was paused mid-preview — Rick couldn't see them in the list, only audio was paused.
