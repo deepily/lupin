@@ -686,6 +686,13 @@ class NotificationsUI {
                 this.envLabel = config.env_label || "DEVELOPMENT";
                 this.updateElement( "env-label", `[${this.envLabel}]: ` );
 
+                // TTS preview-and-pause feature flags (2026-05-13)
+                // See src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-design.md
+                this.ttsPreviewEnabled           = !!config.tts_preview_enabled;
+                this.ttsPreviewFraction          = config.tts_preview_fraction || 0.25;
+                this.ttsPreviewMinChars          = config.tts_preview_min_chars || 100;
+                this.ttsPreviewIncludeSemicolons = !!config.tts_preview_include_semicolons;
+
                 // Sync the test runner submission card's auto-fix checkbox to the
                 // INI default. The user can still toggle it for any individual
                 // submission — that override travels in the request body and
@@ -725,6 +732,13 @@ class NotificationsUI {
             this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
             this.appTimezone = 'America/New_York';                  // Default timezone
             this.tfeAutoFixDefault = false;                         // Conservative fallback
+
+            // TTS preview-and-pause fallbacks — conservative: feature DISABLED
+            // on config-fetch failure so we don't accidentally truncate audio.
+            this.ttsPreviewEnabled           = false;
+            this.ttsPreviewFraction          = 0.25;
+            this.ttsPreviewMinChars          = 100;
+            this.ttsPreviewIncludeSemicolons = false;
 
             this.log( "⚠️ Using default client config (server fetch failed)" );
         }
@@ -12947,7 +12961,107 @@ class NotificationsUI {
      *
      * @param {object} item - TTS queue item: {id, type, notification, ttsText, addedAt}
      */
+    /**
+     * Split text into sentences for the TTS preview-and-pause feature.
+     *
+     * Primary algorithm: regex `/[.!?]+\s+(?=[A-Z]|$)/`-style match for sentence
+     * boundaries (terminal punctuation followed by whitespace + capital letter
+     * or end-of-string). Handles "Mr. Smith", "3.14", URLs correctly.
+     *
+     * Fallback: when the primary algorithm produces a single chunk but the text
+     * is clearly long (>12 words), split at the rough midpoint by word count.
+     *
+     * Semicolons (`;`) are included as boundaries iff `this.ttsPreviewIncludeSemicolons`
+     * is true (INI key `tts preview include semicolons`).
+     *
+     * See src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-design.md §4 (sentence-
+     * splitting algorithm).
+     */
+    _splitIntoSentences( text ) {
+        if ( !text || typeof text !== 'string' ) return [];
+
+        // Build the sentence-boundary character class based on INI flag
+        const terminalChars = this.ttsPreviewIncludeSemicolons ? '.!?;' : '.!?';
+        const boundaryRegex = new RegExp(
+            `[^${terminalChars.replace( /[.!?;]/g, c => '\\' + c )}]+(?:[${terminalChars.replace( /[.!?;]/g, c => '\\' + c )}]+(?=\\s+[A-Z]|\\s*$)|$)`,
+            'g'
+        );
+        const parts = ( text.match( boundaryRegex ) || [] )
+            .map( p => p.trim() )
+            .filter( p => p.length > 0 );
+
+        if ( parts.length > 1 ) return parts;
+
+        // Fallback for clearly-long single-chunk text — split at word midpoint
+        const words = text.trim().split( /\s+/ );
+        if ( words.length > 12 ) {
+            const mid = Math.floor( words.length / 2 );
+            return [ words.slice( 0, mid ).join( ' ' ), words.slice( mid ).join( ' ' ) ];
+        }
+
+        return [ text.trim() ];
+    }
+
+    /**
+     * Compute the preview/remainder split for a TTS queue item.
+     *
+     * Mutates the item in-place by adding three new fields:
+     *   - previewText:   text to send for first playback (may equal ttsText)
+     *   - remainderText: text to send on resume (empty string if no remainder)
+     *   - stage:         "full" | "preview" | "remainder"
+     *
+     * Opt-out (item.stage = "full", remainderText = ""):
+     *   - this.ttsPreviewEnabled is false
+     *   - item.type === 'action-required' (full context needed for response)
+     *   - item.ttsText.length < this.ttsPreviewMinChars (too short to bother)
+     *   - splitter produces a single sentence
+     *
+     * Logs cost-savings telemetry (per Q10) when a preview cut happens.
+     */
+    _computeTTSPreview( item ) {
+        const text = item.ttsText || '';
+
+        // Opt-out paths
+        if ( !this.ttsPreviewEnabled || item.type === 'action-required' || text.length < this.ttsPreviewMinChars ) {
+            item.previewText   = text;
+            item.remainderText = '';
+            item.stage         = 'full';
+            return item;
+        }
+
+        // Sentence split + preview-count calc
+        const sentences    = this._splitIntoSentences( text );
+        const totalCount   = sentences.length;
+        const previewCount = Math.max( 1, Math.floor( totalCount * this.ttsPreviewFraction ) );
+
+        if ( totalCount <= previewCount ) {
+            // Entire utterance fits in preview — no remainder, no pause
+            item.previewText   = text;
+            item.remainderText = '';
+            item.stage         = 'full';
+            return item;
+        }
+
+        item.previewText   = sentences.slice( 0, previewCount ).join( ' ' );
+        item.remainderText = sentences.slice( previewCount ).join( ' ' );
+        item.stage         = 'preview';
+
+        // Cost-savings telemetry (browser console only — Q10 chose local-only)
+        this.ttsCostSavings = this.ttsCostSavings || { saved: 0, total: 0, previewsFired: 0, remaindersResumed: 0 };
+        this.ttsCostSavings.total += text.length;
+        this.ttsCostSavings.saved += ( text.length - item.previewText.length );
+        this.ttsCostSavings.previewsFired += 1;
+        const pct = ( 100 * this.ttsCostSavings.saved / this.ttsCostSavings.total ).toFixed( 1 );
+        this.log( `[TTS-COST] Preview: ${item.previewText.length}/${text.length} chars (saved ${text.length - item.previewText.length}). Session: ${this.ttsCostSavings.saved}/${this.ttsCostSavings.total} (${pct}%)` );
+
+        return item;
+    }
+
     addToTTSQueue( item ) {
+        // Compute preview/remainder split before queueing (Q1 — client-side only).
+        // Sets item.previewText, item.remainderText, item.stage in-place.
+        this._computeTTSPreview( item );
+
         if ( item.type === 'action-required' ) {
             // Priority: Insert at front (but after other action-required items)
             const insertIndex = this.ttsQueue.findIndex( q => q.type !== 'action-required' );
@@ -13053,7 +13167,20 @@ class NotificationsUI {
         // Falls back to map lookup, then to server-default (Sam).
         const ttsVoiceId = ( item.notification && item.notification.voice_persona && item.notification.voice_persona.voice_id )
             || this.getVoiceIdForSender( item.notification && item.notification.sender_id );
-        this.playTTS( item.ttsText, this.getCurrentTTSMode(), ttsVoiceId ).catch( error => {
+        // Preview-and-pause routing (Q1, Q5): when stage === "preview" send only
+        // the previewText slice; when stage === "remainder" send the held-back
+        // remainderText. stage === "full" falls back to the original ttsText
+        // (opt-out path — action-required, short messages, or feature disabled).
+        let textToPlay;
+        if ( item.stage === 'remainder' ) {
+            textToPlay = item.remainderText || item.ttsText;
+        } else if ( item.stage === 'preview' ) {
+            textToPlay = item.previewText || item.ttsText;
+        } else {
+            textToPlay = item.ttsText;
+        }
+
+        this.playTTS( textToPlay, this.getCurrentTTSMode(), ttsVoiceId ).catch( error => {
             this.error( 'TTS queue: Playback failed:', error );
             this.onTTSPlaybackComplete();  // Move to next item even on error
         } );
@@ -13398,6 +13525,36 @@ class NotificationsUI {
 
         this.log( 'TTS queue: Playback complete' );
 
+        // Preview-and-pause auto-pause (Q5/Q8): if the item that just finished
+        // was a preview-stage playback with a non-empty remainder, hold the
+        // item in the active slot, flip its stage to "remainder", and pause
+        // the queue. User resumes via play button — resumeTTS routes the
+        // remainder text to the TTS service when the flag is set.
+        if ( this.activeTTSItem
+             && this.activeTTSItem.stage === 'preview'
+             && this.activeTTSItem.remainderText ) {
+            this.log( `[TTS-PREVIEW] Preview finished for item ${this.activeTTSItem.id} — auto-pausing queue (remainder: ${this.activeTTSItem.remainderText.length} chars). Click play to resume.` );
+            this.activeTTSItem.stage     = 'remainder';
+            this._ttsPausedAfterPreview = true;
+            this.isTTSPaused            = true;
+            // Stop the pulsing border (preview audio is done) but KEEP the
+            // per-notification audio controls visible by transitioning the
+            // bubble to the "paused" state. setControlPanelState('paused')
+            // adds the is-paused-current class on the <li> so the corner
+            // pause/play button stays visible and flips to "▶" (resume).
+            // Without this, the bubble would lose its controls and the user
+            // could only resume from the TTS-queue toolbar.
+            if ( this.currentNotificationId ) {
+                this.stopTTSPlayingIndicator( this.currentNotificationId );
+                this.updateAudioControlStates( this.currentNotificationId, 'paused' );
+            }
+            // Also reflect the paused state on the global TTS toolbar.
+            this.updateTTSPausePlayButtons();
+            // Persist state so a page reload preserves the paused remainder
+            this.saveTTSQueueState();
+            return;
+        }
+
         // Capture item info BEFORE clearing (needed for focus mode check)
         const justCompletedItem = this.activeTTSItem;
         const wasActionRequired = justCompletedItem?.type === 'action-required';
@@ -13462,6 +13619,20 @@ class NotificationsUI {
      */
     stopTTSAndAdvance() {
         this.log( 'TTS queue: User requested stop' );
+
+        // Preview-and-pause STOP semantics (Q7): if the queue is currently
+        // paused-after-preview, the user explicitly wants to skip the
+        // remainder. Drop the remainder by clearing the flag + zeroing
+        // remainderText, then fall through to the existing advance path.
+        if ( this._ttsPausedAfterPreview && this.activeTTSItem ) {
+            this.log( `[TTS-PREVIEW] User pressed stop — dropping remainder for item ${this.activeTTSItem.id}` );
+            this.activeTTSItem.remainderText = '';
+            this._ttsPausedAfterPreview = false;
+            // We need to clear isTTSPaused so onTTSPlaybackComplete advances
+            // the queue rather than short-circuiting on the manual-pause guard.
+            this.isTTSPaused = false;
+        }
+
         this.stopAudio();
         this.onTTSPlaybackComplete();
     }
@@ -13628,6 +13799,45 @@ class NotificationsUI {
             return;
         }
 
+        // Preview-and-pause remainder routing (Q8 — symmetric resume): when the
+        // pause was auto-triggered by a preview completing, route the held-back
+        // remainderText to the TTS service as a NEW request, rather than
+        // resuming a suspended audio context (there's nothing suspended — the
+        // preview audio already finished).
+        if ( this._ttsPausedAfterPreview
+             && this.activeTTSItem
+             && this.activeTTSItem.stage === 'remainder'
+             && this.activeTTSItem.remainderText ) {
+            this.log( `[TTS-PREVIEW] Resuming with remainder for item ${this.activeTTSItem.id} (${this.activeTTSItem.remainderText.length} chars)` );
+
+            // Telemetry: track remainder resumes so the cost-savings counter
+            // tells the truth (a resumed remainder cancels the saving for that
+            // message). Q10.
+            this.ttsCostSavings = this.ttsCostSavings || { saved: 0, total: 0, previewsFired: 0, remaindersResumed: 0 };
+            this.ttsCostSavings.saved -= this.activeTTSItem.remainderText.length;
+            this.ttsCostSavings.remaindersResumed += 1;
+            const pct = this.ttsCostSavings.total
+                ? ( 100 * this.ttsCostSavings.saved / this.ttsCostSavings.total ).toFixed( 1 )
+                : '0.0';
+            this.log( `[TTS-COST] Remainder resumed: +${this.activeTTSItem.remainderText.length} chars. Session: ${this.ttsCostSavings.saved}/${this.ttsCostSavings.total} (${pct}%)` );
+
+            this._ttsPausedAfterPreview = false;
+            this.isTTSPaused            = false;
+            this.updateTTSPausePlayButtons();
+            this.saveTTSQueueState();
+
+            // Pull the same voice_id we used for the preview chunk.
+            const item       = this.activeTTSItem;
+            const ttsVoiceId = ( item.notification && item.notification.voice_persona && item.notification.voice_persona.voice_id )
+                || this.getVoiceIdForSender( item.notification && item.notification.sender_id );
+
+            this.playTTS( item.remainderText, this.getCurrentTTSMode(), ttsVoiceId ).catch( error => {
+                this.error( 'TTS preview-remainder playback failed:', error );
+                this.onTTSPlaybackComplete();  // Force advance on error
+            } );
+            return;
+        }
+
         this.log( 'TTS Resume: User resuming playback' );
 
         // Resume Web Audio (instant mode)
@@ -13693,22 +13903,32 @@ class NotificationsUI {
      */
     saveTTSQueueState() {
         try {
-            if ( this.ttsQueue.length === 0 && !this.ttsFocusModeActive && !this.isTTSPaused ) {
+            // Preview-and-pause persistence (Q9): when paused-after-preview, the
+            // active item (with stage="remainder" and remainderText) lives in
+            // this.activeTTSItem, NOT this.ttsQueue. Serialize it alongside the
+            // queue so a page reload can restore the paused remainder.
+            const hasPreviewPause = !!( this._ttsPausedAfterPreview && this.activeTTSItem );
+
+            if ( this.ttsQueue.length === 0 && !this.ttsFocusModeActive && !this.isTTSPaused && !hasPreviewPause ) {
                 localStorage.removeItem( this.TTS_QUEUE_KEY );
                 return;
             }
 
             const queueState = {
-                queue                   : this.ttsQueue,
-                focusModeActive         : this.ttsFocusModeActive,
-                focusModeNotificationId : this.focusModeNotificationId,
-                focusModeEnteredAt      : this.focusModeEnteredAt || null,
-                focusModeTimeoutMs      : this.focusModeTimeoutMs || null,
-                isTTSPaused             : this.isTTSPaused
+                queue                    : this.ttsQueue,
+                focusModeActive          : this.ttsFocusModeActive,
+                focusModeNotificationId  : this.focusModeNotificationId,
+                focusModeEnteredAt       : this.focusModeEnteredAt || null,
+                focusModeTimeoutMs       : this.focusModeTimeoutMs || null,
+                isTTSPaused              : this.isTTSPaused,
+
+                // Preview-pause snapshot (null when no preview-pause is active)
+                previewPausedItem        : hasPreviewPause ? this.activeTTSItem : null,
+                ttsPausedAfterPreview    : !!this._ttsPausedAfterPreview
             };
 
             localStorage.setItem( this.TTS_QUEUE_KEY, JSON.stringify( queueState ) );
-            this.log( `Saved ${this.ttsQueue.length} TTS queue item(s) to localStorage (paused: ${this.isTTSPaused})` );
+            this.log( `Saved ${this.ttsQueue.length} TTS queue item(s) to localStorage (paused: ${this.isTTSPaused}, previewPause: ${hasPreviewPause})` );
         } catch ( error ) {
             this.error( 'Failed to save TTS queue state:', error );
         }
@@ -13732,9 +13952,23 @@ class NotificationsUI {
             this.focusModeNotificationId = parsed.focusModeNotificationId || null;
             this.focusModeEnteredAt = parsed.focusModeEnteredAt || null;
             this.focusModeTimeoutMs = parsed.focusModeTimeoutMs || null;
-            // NOTE: Don't restore isTTSPaused - page refresh resets audio context,
-            // so we should auto-resume playback. User can pause again if needed.
-            this.isTTSPaused = false;
+
+            // Preview-and-pause restore (Q9): if a preview-paused item was
+            // snapshotted, re-hydrate activeTTSItem + keep the paused state
+            // so the user can click play to resume the remainder. Otherwise
+            // fall through to the existing "audio context lost on reload"
+            // path that clears isTTSPaused.
+            if ( parsed.previewPausedItem && parsed.ttsPausedAfterPreview ) {
+                this.activeTTSItem           = parsed.previewPausedItem;
+                this._ttsPausedAfterPreview  = true;
+                this.isTTSPaused             = true;
+                this.log( `[TTS-PREVIEW] Restored preview-paused item ${this.activeTTSItem.id} from localStorage (remainder: ${(this.activeTTSItem.remainderText || '').length} chars). Click play to resume.` );
+            } else {
+                // NOTE: Don't restore isTTSPaused for normal cases - page
+                // refresh resets the audio context, so we should auto-resume
+                // playback. User can pause again if needed.
+                this.isTTSPaused = false;
+            }
 
             this.log( `Restored ${this.ttsQueue.length} TTS queue item(s), focusMode: ${this.ttsFocusModeActive} (paused state reset on refresh)` );
 

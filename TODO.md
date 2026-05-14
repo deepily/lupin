@@ -1,19 +1,86 @@
 # TODO
 
-## 📦 history.md archive — deferred from session 83ba1e51 (Rio ⚡, 2026-05-12 evening)
+## 💰 NEW — Bounded ClaudeCodeJob migration audit & plan (filed 2026-05-13 by Tiberius, session 66d534ab)
 
-- [ ] **[LUPIN] Archive history.md** — currently ⚠️ WARNING at 20281 tokens (81% of 25k limit). Per session-end ritual, archive deferred to next session to respect wrap-up flow. Run `/history-management mode=archive` early next session before adding new content.
+**Primary doc**: `src/rnd/v0.1.7/2026.05.13-bounded-cc-migration-audit-and-plan.md` (status: awaiting Rick's ratification on D1-D9 decision matrix)
+
+- [ ] **[LUPIN] Ratify D1-D9 decision matrix** — 9 decisions with full pros/cons/flip-conditions/recommendations. Each migration phase (Podcast → Presentation → Deep Research per my recommendation) opens as a separate R&D doc once ratification lands.
+- [ ] **[LUPIN] Phase 1 — Podcast Generator migration to bounded CC** — gated on D1 ratification. ~1 session estimated. Open as `src/rnd/v0.1.7/2026.05.13-podcast-bounded-cc/` once authorized.
+- [ ] **[LUPIN] Phase 2 — Presentation Generator migration to bounded CC** — gated on Phase 1 closure + D6 (strict parser strategy).
+- [ ] **[LUPIN] Phase 3 — Deep Research migration to bounded CC** — gated on Phase 2 closure + D3 (preserve progress events) + max_turns cap tuning.
+- [ ] **[LUPIN] Optional 30-day Anthropic console pull** (10-min user task) — could flip D1 to Deep-Research-first if `spend_deep_research >> spend_podcast + spend_presentation`. Doc captures the model.
+
+**Decision matrix at a glance** (full body in the doc):
+- D1: Phase order (Podcast first vs Deep Research first) — recommend Podcast first
+- D2: `scheduled_at` default (post-midnight) — recommend YES
+- D3: Deep Research progress events (preserve via tool-use vs simplify) — recommend preserve
+- D4: OpenAI sites (defer or eliminate) — recommend defer (out of scope)
+- D5: Runtime Argument Expeditor (defer with trigger vs permanent stay) — recommend defer with revisit trigger
+- D6: Output parser (strict/lenient/hybrid) — recommend per-migration (lenient Podcast, strict Presentation+DR)
+- D7: Pool concurrency limit — recommend keep current values
+- D8: `cost_usd` telemetry — recommend keep with "telemetry only" UI disclaimer
+- D9: Migration marker convention — recommend `__init__.py` banner pattern
+
+**Awaiting**: Rick reads the doc, ratifies D1-D9 en masse OR flips specific decisions. No code touches until then.
 
 ---
 
-## 🐛 Multimodal munger — `munge_text_punctuation` strips periods + commas from prose (filed 2026-05-13 by Arnold)
+## 🚨 PRIORITY-1 NEXT SESSION — history.md archive (CRITICAL, now 91.4%)
 
-- [ ] **[LUPIN-COSA] Prose-mode period-stripping bug at `src/cosa/rest/multimodal_munger.py:757`** — the unconditional `re.sub(r'[,.]', '', prose)` inside `munge_text_punctuation` (the default mode) wrongly kills periods that came from the punctuation lookup ("dot" → ".") and commas that Whisper emitted. Surfaced during the 2026-05-13 broadcast-munger investigation (`src/rnd/v0.1.7/2026.05.13-broadcast-munger-mode-design.md` Q4). Examples that misbehave today:
-  - `"the URL is example dot com"` → `"the URL is examplecom"` (should be `"the URL is example.com"`)
-  - `"version 1 dot 0 dot 5"` → `"version 1 0 5"` (should be `"version 1.0.5"`)
-  - `"Sincerely, John"` → `"Sincerely John"` (should preserve the comma)
+- [ ] **[LUPIN] Archive history.md FIRST THING NEXT SESSION** — was 81% (Rio, 05-12), grew to 84% (Tiberius AM, 05-13), now **22857 tokens / 91.4% of 25k = 🚨 CRITICAL** after Arnold's session entry. Run `/history-management mode=archive` BEFORE any other work next session. Three sessions of deferral; do not defer again.
 
-  **NOT** addressed by the broadcast-mode work (which routes through `munge_text_broadcast` and intentionally omits line 757). This ticket is for the default prose path. Care required: line 757 may be load-bearing for some sentence-end cleanup behavior in voice-command flows — audit before deleting.
+## ✅ TTS preview-and-pause — IMPLEMENTED 2026-05-13 PM (Arnold)
+
+- [x] **[LUPIN] Broadcast munger mode + JS wiring** — `multimodal text broadcast` + 20 smoke cases passing. Wired to broadcast accordion mic via `recordingMode="broadcast"`. CoSA-side commits (multimodal_munger.py) pending in a separate CoSA-context session.
+- [x] **[LUPIN] TTS preview-and-pause feature** — sentence splitter + queue evolution + auto-pause + remainder resume + bubble-controls fix. INI plumbing through `/api/config/client`. Live-verified by Rick. CoSA-side commit (system.py) pending separately.
+- [ ] **[LUPIN-COSA] Commit CoSA-side TTS preview + broadcast munger edits** — 2 files in `src/cosa/`: `rest/multimodal_munger.py` (broadcast mode + smoke tests), `rest/routers/system.py` (config endpoint extension). Handle in a CoSA-context session per `feedback_lupin_only_never_cosa`.
+
+---
+
+## 🟡 Multiplexer Phase 6c Q-decisions queue — built, awaiting Rick's pull trigger (filed 2026-05-13 PM by Rio ⚡, session `9fae8c74`)
+
+**Status**: 15 questions queued across Clusters B, C, D. Cluster A already ratified 5/5 on 2026-05-12. Rick is working interstitially and wants to pull questions on his cadence — he'll say "next" / "ready" / "fire" and I deliver one at a time. No forced pace.
+
+**Primary doc**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md`
+
+### Queue contents
+
+**Cluster B — Focus tray + focus-mode toggle (5 Qs)**:
+- [ ] Q-B1 — Mount surface (`#focus-tray` placement in `multiplexer.html`)
+- [ ] Q-B2 — Focus-mode toggle UI (single button vs per-card vs keyboard shortcut)
+- [ ] Q-B3 — Focus-target selection (couple to conv-mode pin vs click-to-focus)
+- [ ] Q-B4 — Tray contents + click-to-refocus behavior
+- [ ] Q-B5 — Flash-on-focus-change animation
+
+**Cluster C — Sender-card audio recorder (6 Qs)**:
+- [ ] Q-C1 — Mount placement (`.cc-voice-input` in card footer)
+- [ ] Q-C2 — `MediaRecorder` MIME type (opus default vs feature-detect chain)
+- [ ] Q-C3 — Recording state machine (idle → recording → processing → ready → sent)
+- [ ] Q-C4 — STT pipeline target endpoint
+- [ ] Q-C5 — Send-button POST payload shape
+- [ ] Q-C6 — Per-sender concurrency (single active recorder guard)
+
+**Cluster D — Conversation-mode UI pin (4 Qs)**:
+- [ ] Q-D1 — Where pin state lives (`SenderRecord` field vs DOM-only)
+- [ ] Q-D2 — Top-of-list pinning mechanism (reducer sort vs `insertBefore`)
+- [ ] Q-D3 — Mic-monopoly indicator wiring
+- [ ] Q-D4 — Multi-sender conversation-mode race (single-pin invariant)
+
+### Resume protocol
+
+Trigger phrases (any of these advance the queue): "next", "next question", "ready", "fire", "give me the next". Other controls: "skip" (defer current, advance), "back up" (revisit last), "pause" (bookmark), "TOC" / "where are we" (position check).
+
+Each delivered question must include: proposed answer + alternatives walked + per-option pros/cons + recommendation with flip-condition (per `feedback_always_include_pros_cons_recommendation`). TTS body = headline + takeaway only; pros/cons + flip-condition go in `abstract` (per `feedback_tts_body_headline_and_takeaway_only`).
+
+### Phase 6c predecessor closure
+
+Phase 6b CLOSED 2026-05-12 (Rachel 🕊️, session `56ee76d6`). All 22 ACs green; c8 100% on 9 TS files; boot gz = 34,647 B (5,029 B headroom under AC7 ceiling). See `97-phase6b-closure.md`.
+
+---
+
+## ✅ Multimodal munger — `munge_text_punctuation` strips periods + commas from prose (filed 2026-05-13 by Arnold)
+
+- [x] ~~**[LUPIN-COSA] Prose-mode period-stripping bug at `src/cosa/rest/multimodal_munger.py:757`**~~ → **RESOLVED 2026-05-13 by Arnold** (collateral fix while resolving a related broadcast-munger issue). User-confirmed complete via voice 2026-05-13.
 
 ---
 

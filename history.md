@@ -1,6 +1,102 @@
 # Lupin Project History
 
-> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: ⚠️ WARNING at 21073 tokens (84% of 25k) — archive deferred to next session per `TODO.md` entry.
+> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: 🚨 **CRITICAL at 22857 tokens (91.4% of 25k)** — archive must run next session before adding new content.
+
+### 2026.05.13 Late Morning - Session 66d534ab (Tiberius 🌑) | Bounded-CC Migration Audit & Plan (post-9d55ed1 continuation)
+
+**Persona**: Tiberius 🌑 (Deep male, #3F51B5)
+
+**Topic**: After commit `9d55ed1` (notifications UI tweaks) landed, Rick asked for a deep codebase census of bounded-ClaudeCodeJob migration opportunities. Spawned an Explore agent to audit every LLM call site, classified each against the Q1-Q5 fit rubric from the cost-model doc, then ultrathunk a sequenced migration plan with full pros/cons/flip-conditions/recommendations per `feedback_always_include_pros_cons_recommendation`. Plan-only — no code touched.
+
+**Accomplishments**:
+
+- **Comprehensive LLM call-site census** — every `AsyncAnthropic` import + `LlmClientFactory` usage + non-Anthropic provider call mapped. Findings: 2 already on bounded CC (BFE, TFE), 3 clean candidates (Deep Research, Podcast, Presentation — all flagged in TODO.md), 1 borderline deferred (Runtime Argument Expeditor), 2 explicit-stays (notification_proxy high-QPS + decision_proxy latency-sensitive), 9 inline `LlmClientFactory` latency-violators, 4 OpenAI sites out-of-scope. Audit confirmed there are NO hidden migration opportunities beyond Rick's known set.
+
+- **Decision matrix authored** with 9 ratifiable decisions (Rick's original 5 + 4 surfaced during deeper analysis):
+  - D1 phase ordering (Podcast first vs Deep Research first vs parallel)
+  - D2 `scheduled_at` default (post-midnight off-peak)
+  - D3 Deep Research progress events (preserve via tool-use surfacing vs simplify to result-on-complete)
+  - D4 OpenAI sites (defer vs eliminate)
+  - D5 Runtime Argument Expeditor (defer with trigger vs permanent stay)
+  - D6 output parser strategy (strict / lenient / hybrid per-migration)
+  - D7 agentic-pool concurrency
+  - D8 `cost_usd` telemetry preservation
+  - D9 migration-marker convention (`__init__.py` banner vs INI key vs nothing)
+  - Each carries per-option pros + cons + flip-condition + my recommendation per memory rule
+
+- **Supporting sections in the audit doc**:
+  - Quantitative cost-impact model + ordering-by-impact qualitative analysis + time-to-savings curve
+  - Consolidated 9-risk register ranked by impact × probability × detection-difficulty
+  - Per-phase test strategy matrix mapping every tier (py_compile/unit/smoke/WS/integration/verification/parity-check)
+  - Per-phase rollback playbook (git revert is the only path; no feature flags per `feedback_feature_flag_preserves_old_path`)
+  - 14-item Definition-of-Done checklist per phase
+
+- **Session etiquette**:
+  - Updated session topic via `set_session_topic("Bounded-CC Migration Audit & Plan")` after the original "Bug Fix: Notifications UI" focus pivoted
+  - Saved new memory `feedback_doc_links_always_in_abstract.md` after Rick flagged that my handoff-to-Arnold notify buried the doc link past a header; resent with link as line 1 of abstract, naked syntax
+  - Acknowledged Rick's two "doctor's appointment" broadcasts cleanly (one to ack receipt, one to confirm I'd continue fleshing while he was out)
+  - Honored the "no code yet only thinking and planning" directive throughout
+
+- **Handoff doc to Arnold** (`src/rnd/v0.1.7/2026.05.13-handoff-to-arnold-notifications-ui-changes.md`) — summarized the 9d55ed1 notifications.js changes (focus-bar persona-initial, pause-on-record state machine, barge-in queue-gate fix) plus a semantic-changes table flagging symbols where Arnold's speakerphone work could overlap. Arnold picked up the doc in commit `0c4e565`.
+
+- **Top-5 TODO scan** delivered earlier in the session — voice-driven request to surface new work, with the multimodal-munger bug flagged at #1 (turned out Arnold had already fixed it as a collateral catch). Marked it ✅ in TODO.md mid-session.
+
+- **Bug-fix-queue summary** delivered — confirmed IMMEDIATE slot empty + 8 outstanding entries split between user-gated (PEFT training, design conversations) and cleanup tasks. Recommendation: stay on Inter-Session Commons Phase 3 trajectory; none preempt that work.
+
+**Files modified** (in this post-9d55ed1 arc):
+- `TODO.md` — bounded-CC migration tasks added at top + handoff to plan-review status; munger entry marked ✅
+- `src/rnd/v0.1.7/2026.05.13-bounded-cc-migration-audit-and-plan.md` (NEW)
+- `history.md` — this entry
+- `.claude-session.md` — session-section updated with touched files
+
+**NOT modified** (parallel-session work visible in `git status` — left alone per `feedback_verify_staging_before_commit`):
+- `src/fastapi_app/static/js/notifications.js` — Arnold's broadcast/STT work (already committed at `0c4e565`, additional uncommitted changes left for that session)
+- `src/conf/lupin-app.ini` + splainer — Arnold's INI additions for broadcast munger / TTS preview
+- `src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-{design,execution-log}.md` — Arnold's R&D docs
+
+**Awaiting**: Rick's voice directive on D1-D9 (ratify all, or flip specific decisions). Once ratification lands, Phase 1 execution plan gets serialized to `src/rnd/v0.1.7/2026.05.13-podcast-bounded-cc/` (or whichever ordering Rick picks) with full Pass 0 / REUSE / Pass 1 / Pass 2 plan-review machinery per `feedback_pip_plan_review_is_sequential`.
+
+### 2026.05.13 PM - Session 6d663b6c (Arnold 🪨) | Broadcast munger mode + TTS preview-and-pause cost-reduction feature
+
+**Persona**: Arnold 🪨 (Gravelly male, #FFD600)
+
+**Topic**: Two substantive features landed this session. (1) Broadcast `@mention` munger mode — a new `multimodal text broadcast` munger that preserves `@`, `_`, `.` for `@mention` syntax via phrase-preprocessing and identifier-joining tokenizer semantics. Wired to the broadcast accordion's mic via `recordingMode="broadcast"`. (2) TTS preview-and-pause cost-reduction feature — every long-form TTS message now plays only the first ~25% of its sentences (configurable via INI) and auto-pauses; user resumes via existing pause/play/stop controls, sending the remainder as a separate TTS request. Cost saving is real because both ElevenLabs and OpenAI charge at provider-request-time (not per-byte streamed) — splitting client-side before the API call is what saves dollars.
+
+**Accomplishments**:
+
+- **Broadcast munger mode** — new `munge_text_broadcast` method in `multimodal_munger.py`. Phrase-preprocesses `at sign`/`question mark`/`exclamation point` → `@`/`?`/`!` (multi-token map entries the per-token tokenizer can't match). Adds identifier-joining tokenizer loop where `.`/`_`/`#` collapse surrounding spaces (`file_name dot py` → `file_name.py`). OMITS the line-757 `[,.]` strip from default mode so periods and commas survive. Adds 3 ad-hoc cleanup rules (collapse comma runs, drop `,!` → `!`, drop `!.` → `!`) per Rick's voice request. 20 inline broadcast smoke cases all PASS. Full unit pyramid 4413 passed/0 failed.
+
+- **Broadcast wiring** — `notifications.js:1925` broadcast STT button now passes `{ recordingMode: 'broadcast' }`. `handleSTTButtonClick` evolved to accept + forward an `options` parameter. `startRecording` builds the upload endpoint with `?prefix=multimodal+text+broadcast` query param when `recordingMode === 'broadcast'`. All other STT buttons (research/podcast/presentation/SWE/CC session/Q&A/MC/yn-comment/batch/job-msg) unchanged on the default path.
+
+- **TTS preview-and-pause feature** — 12 implementation sub-tasks closed. Sentence splitter (`_splitIntoSentences`) with capital-letter lookahead regex + word-count fallback. Queue item shape evolved with `previewText`/`remainderText`/`stage` fields. `addToTTSQueue` computes preview/remainder up-front with opt-out for action-required + short messages (<100 chars). `activateNextTTS` routes by stage. `onTTSPlaybackComplete` auto-pauses after preview by transitioning to `stage='remainder'` + flipping `_ttsPausedAfterPreview` flag. `resumeTTS` detects preview-pause and sends remainder as a NEW TTS request. `stopTTSAndAdvance` drops remainder + advances. `saveTTSQueueState`/`restoreTTSQueueState` snapshot the preview-paused item so the state survives page reloads. Cost-savings telemetry (`[TTS-COST]` console logs) per Rick's Q10 recommendation. Live-verified by Rick: 4-sentence ramble correctly previewed first sentence + auto-paused.
+
+- **Bubble-controls fix** — after preview pause, the corner play/pause/stop buttons on the individual notification card initially disappeared. Root cause: `stopTTSPlayingIndicator` only removes the pulsing border; the per-bubble corner controls are CSS-gated by `is-playing-current`/`is-paused-current` classes set via `updateAudioControlStates`. Fixed by calling `updateAudioControlStates(currentNotificationId, 'paused')` in the preview-pause block so the corner ▶ button stays visible and routes to the existing `resumeTTS` handler which already has the preview-remainder branch.
+
+- **INI plumbing** — 4 new keys in `lupin-app.ini` under `[Lupin: Baseline]` + 4 paired splainer entries: `tts preview enabled` (master switch), `tts preview fraction` (default 0.25), `tts preview min chars` (default 100), `tts preview include semicolons` (default false). `/api/config/client` endpoint (`system.py`) extended with 4 new response fields. JS consumes them from the existing config-fetch path with conservative fallbacks if fetch fails.
+
+- **Plan-mode iterations** — Rick approved all 10 recommendations from the TTS preview design doc (client-side split, regex-with-lookahead splitter, exclude `;` by default, INI-driven fraction, opt-out for action-required + short, both modes, drop-on-stop, symmetric resume, persist preview state, console telemetry). Ratified via voice Q&A after pros/cons matrices were added per Rick's feedback. Iteration cadence was clean — Ultraplan handoff fired but timed out; Rick approved local plan directly.
+
+- **Earlier in session**: Tiberius's handoff doc (`2026.05.13-handoff-to-arnold-notifications-ui-changes.md`) captured into the repo. Mid-session checkpoint commit `0c4e565` landed the broadcast-munger design doc, execution log, handoff intake, TODO line-757 entry, and speakerphone subdir index status flip. María's broadcast-panel commits between Tiberius's work and mine already absorbed my notifications.js wiring edits.
+
+**Files modified** (parent Lupin only — per `feedback_lupin_only_never_cosa`):
+
+- `src/fastapi_app/static/js/notifications.js` — TTS preview helpers + queue evolution + auto-pause + resume routing + stop drop + persistence + bubble-controls fix + broadcast wiring (~250 lines added across many edit batches)
+- `src/conf/lupin-app.ini` — 4 new TTS preview keys
+- `src/conf/lupin-app-splainer.ini` — 4 paired splainer entries
+- `src/rnd/v0.1.7/2026.05.13-broadcast-munger-mode-design.md` (NEW, committed in `0c4e565`)
+- `src/rnd/v0.1.7/2026.05.13-broadcast-munger-mode-execution-log.md` (NEW, committed in `0c4e565`)
+- `src/rnd/v0.1.7/2026.05.13-handoff-to-arnold-notifications-ui-changes.md` (intake, committed in `0c4e565`)
+- `src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-design.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-execution-log.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/00-index.md` — status flip (committed in `0c4e565`)
+- `TODO.md` — line-757 prose bug entry, speakerphone status updates
+- `history.md` — this entry
+
+**CoSA side** (Rick handles in a CoSA-context session per `feedback_lupin_only_never_cosa`):
+- `src/cosa/rest/multimodal_munger.py` — broadcast munger mode + 20 smoke cases
+- `src/cosa/rest/routers/system.py` — `/api/config/client` extended with 4 TTS preview fields
+
+**Out of scope** (per Rick's voice directive at session-end): no push, no backup, history archive deferred to next session (now at 91.4% CRITICAL).
 
 ### 2026.05.13 Morning - Session 66d534ab (Tiberius 🌑) | Notifications UI — persona-initial focus bar + TTS pause-on-record + barge-in queue gate
 
