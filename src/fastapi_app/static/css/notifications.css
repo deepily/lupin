@@ -427,6 +427,36 @@
             background: rgba( 255, 193, 7, 0.35 );
         }
 
+        /* Pending TTS rendering — applied 2026-05-14 by the decouple fix so high/urgent
+         * notifications can appear in the visible list immediately on WebSocket arrival,
+         * BEFORE the TTS queue actually engages playback (which may be paused mid-queue
+         * due to the preview-and-pause feature). The pending state is cleared by
+         * activateNextTTS when the item reaches the active playback slot.
+         *
+         * Treatment: subtle desaturation + left border stripe (amber to match the paused
+         * palette but lighter) + small ⏳ glyph in the corner that flips to ⏸/▶ when audio
+         * engages. The corner-pause button stays hidden (gated by .is-playing-current). */
+        li.is-tts-pending {
+            opacity: 0.78;
+            border-left: 3px solid rgba( 255, 193, 7, 0.55 );
+            transition: opacity 0.2s ease, border-left-color 0.2s ease;
+        }
+
+        li.is-tts-pending::after {
+            content: "⏳";
+            position: absolute;
+            top: 6px;
+            right: 8px;
+            font-size: 14px;
+            line-height: 1;
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        /* When the queued item engages playback, .is-tts-pending is removed and
+         * .is-playing-current is added — the hourglass disappears and the pause
+         * button takes over the same corner via .notification-corner-pause-btn. */
+
         /* Corner STOP button — sibling to pause/resume. Sits to the LEFT
          * of the pause button (right: 32 = 4 + 24 + 4). Clicking stops
          * the active TTS playback and advances the queue (dismisses this

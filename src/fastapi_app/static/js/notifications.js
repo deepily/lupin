@@ -5605,8 +5605,15 @@ class NotificationsUI {
             await this.playNotificationSoundByPriority( notification.priority );
         }
 
-        // 2. High/urgent priority: Queue for TTS, add to project card when playback starts
+        // 2. High/urgent priority: Render to project card IMMEDIATELY on WS arrival + queue for TTS
         //    Low/medium priority: Add to project card immediately (no TTS)
+        //
+        // 2026-05-14: Decoupled high/urgent list-render from TTS playback advancement. Previous
+        // design deferred the addNotificationToSenderGroup call to activateNextTTS, which left
+        // notifications invisible when the TTS queue was paused (e.g., preview-and-pause feature
+        // shipped 2026-05-13 sets isTTSPaused=true between turns, stranding the deferred render).
+        // Now mirrors the low/medium branch's immediate-render pattern; TTS playback engages
+        // independently via the queue. Card carries `.is-tts-pending` until activateNextTTS clears it.
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
             // Phase 6 FIX: Check tts_raw flag - default to contextualized for backward compatibility
             const ttsMessage = notification.tts_raw === true
@@ -5614,9 +5621,23 @@ class NotificationsUI {
                 : this.formatNotificationTTSMessage( notification );
             const notificationId = notification.id || notification.id_hash;
 
-            this.log( `Queuing high priority notification for TTS (will add to project card on playback): "${ttsMessage}"` );
+            this.log( `Rendering high-priority notification to project card + queuing for TTS: "${ttsMessage}"` );
 
-            // Add slight delay to let notification sound finish
+            // Render to visible notification list IMMEDIATELY (decoupled from TTS queue)
+            this.addNotificationToSenderGroup( notification, false );
+            this.updateTotalNotificationsCount();
+
+            // Mark the rendered card with pending-TTS visual state. activateNextTTS clears it
+            // when this item engages for playback.
+            const newPanel = document.querySelector( `.audio-control-panel[data-notification-id="${notificationId}"]` );
+            if ( newPanel ) {
+                const listItem = newPanel.closest( 'li' );
+                if ( listItem ) {
+                    listItem.classList.add( 'is-tts-pending' );
+                }
+            }
+
+            // Add slight delay to let notification sound finish before TTS engages
             setTimeout( () => {
                 this.addToTTSQueue( {
                     id           : notificationId,
@@ -5626,7 +5647,6 @@ class NotificationsUI {
                     addedAt      : Date.now()
                 } );
             }, 300 );
-            // NOTE: addNotificationToSenderGroup() is called from activateNextTTS() when playback starts
         } else {
             // Low/medium priority: Add to project card immediately (no TTS)
             const senderId = this.resolveSenderId( notification );
@@ -13276,11 +13296,17 @@ class NotificationsUI {
             this.log( `TTS queue: Playing job notification (already in job card): ${item.id}` );
             this.currentNotificationId = item.id;
         } else {
-            // Fire-and-forget: NOW add to project card (was waiting in TTS queue)
-            this.log( `Moving fire-and-forget to project card: ${item.id}` );
-            this.addNotificationToSenderGroup( item.notification, false );
-            this.updateTotalNotificationsCount();
-            // No active card in TTS queue - message now visible in project card
+            // Fire-and-forget: card was already rendered to project card on WS arrival
+            // (2026-05-14 decouple — see handleNotificationUpdate). Just clear the
+            // pending-TTS visual state so the regular playing state can apply.
+            this.log( `TTS queue: Engaging fire-and-forget audio for ${item.id}` );
+            const panel = document.querySelector( `.audio-control-panel[data-notification-id="${item.id}"]` );
+            if ( panel ) {
+                const listItem = panel.closest( 'li' );
+                if ( listItem ) {
+                    listItem.classList.remove( 'is-tts-pending' );
+                }
+            }
             this.currentNotificationId = item.id;
         }
 

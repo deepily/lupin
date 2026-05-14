@@ -2,6 +2,24 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: 🚨 **CRITICAL at 22857 tokens (91.4% of 25k)** — archive must run next session before adding new content.
 
+### 2026.05.14 PM - Session a0eaaca1 (Mr. Radio 🦉) | Decouple notification-list render from TTS-queue advancement
+
+Follow-on bug from the morning's TTS preview-and-pause shipment. Symptom: 20+ high/urgent fire-and-forget notifications backed up invisibly while TTS was paused mid-preview — Rick couldn't see them in the list, only audio was paused.
+
+**Root cause** (Explore-verified): high/urgent fire-and-forget took a deferred render path. `addNotificationToSenderGroup` was called from inside `activateNextTTS` at `notifications.js:13281`, which is gated by `if ( this.isTTSPaused ) return;` at line 13244. My morning's preview-and-pause feature sets `isTTSPaused=true` after each preview, stranding the deferred render. Scope: high/urgent fire-and-forget only — low/medium already rendered immediately on WS arrival; action-required uses a separate render path.
+
+**Fix**: render immediately on WS arrival in `handleNotificationUpdate` (mirrors low/medium pattern); remove the now-duplicate deferred call from `activateNextTTS`. New `.is-tts-pending` CSS class marks cards queued-for-TTS-but-not-yet-playing with a subtle amber stripe + ⏳ corner glyph; cleared when the card engages playback.
+
+**Files** (Lupin only): `src/fastapi_app/static/js/notifications.js` (~25 lines net), `src/fastapi_app/static/css/notifications.css` (+30 lines), new design + execution docs at `src/rnd/v0.1.7/2026.05.14-notification-list-tts-decouple-*`.
+
+**Tests**: `node -c` PASS. Live MCP verification — fired 2 long fire-and-forget notifies from session `a0eaaca1`; second arrived while first was paused mid-preview; Rick visually confirmed second card appeared in the list immediately with the amber + ⏳ pending visual.
+
+**Coordination**: Maria (session `f6f865fb`) held focus-bar persistence work until this commit landed to avoid `notifications.js` collision. Post-commit DM posted to `coord-notifications-js` commons topic.
+
+**Commit**: 701a76f
+
+---
+
 ### 2026.05.14 PM - Session a0eaaca1 (Mr. Radio 🦉) | TTS preview bug-fix: action-required opt-out + Mr.-split
 
 Two-bug fix to the 2026-05-13 TTS preview-and-pause feature. Bug A (URGENT cost burn): action-required notifications opted OUT of preview, so every long `ask_yes_no`/`ask_multiple_choice`/`converse` played in full TTS. Bug B (correctness): `_splitIntoSentences()` regex falsely split `Mr.` as a sentence, previewing only "Mr." (~16 chars of 580) for Rick's session-end message.
