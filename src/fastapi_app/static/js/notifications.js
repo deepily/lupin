@@ -9242,9 +9242,12 @@ class NotificationsUI {
         if ( icon ) icon.remove();
 
         // If the deleted session was the focused one, exit focus mode.
+        // Auto-exit only — preserve persisted intent so a transient icon
+        // removal (e.g. WS dealloc + re-add) doesn't permanently clobber
+        // the user's focus choice.
         if ( this.ccFocusState.enabled
              && this.ccFocusState.focused_sender_id === senderId ) {
-            this._exitFocusMode();
+            this._exitFocusMode( false );
         }
 
         delete this.ccStripUnreadCounts[ senderId ];
@@ -9265,8 +9268,11 @@ class NotificationsUI {
      *   - Resets ccStripUnreadCounts.
      */
     _clearAllStripIcons() {
+        // Auto-exit only — preserve persisted intent so a bulk-clear
+        // (history-window change, init churn) doesn't permanently clobber
+        // the user's focus choice.
         if ( this.ccFocusState && this.ccFocusState.enabled ) {
-            this._exitFocusMode();
+            this._exitFocusMode( false );
         }
 
         const iconsContainer = document.getElementById( "cc-strip-icons" );
@@ -9443,10 +9449,18 @@ class NotificationsUI {
 
     /**
      * Exit focus mode — revert all cards to visible, clear focused state.
+     *
+     * @param {boolean} persist  When true (default), the wiped state is written
+     *   to localStorage — appropriate for user-initiated toggle-off. When false,
+     *   only in-memory state + UI revert; localStorage intent is preserved so
+     *   the user's focus choice survives transient init/WS churn (icon removal,
+     *   bulk clear, missing-card-at-restore-time). Per the L9647 design note,
+     *   auto-exits during init were a known failure mode for state preservation;
+     *   this parameter is the surgical mitigation.
      */
-    _exitFocusMode() {
+    _exitFocusMode( persist = true ) {
         this.ccFocusState = { enabled: false, focused_sender_id: null };
-        this._saveCcFocusState();
+        if ( persist ) this._saveCcFocusState();
 
         const toggle = document.getElementById( "cc-strip-toggle" );
         if ( toggle ) {
@@ -9680,10 +9694,15 @@ class NotificationsUI {
             const focusedCard = document.getElementById( expectedId );
 
             if ( !focusedCard ) {
-                // Persisted focused sender no longer has any visible cards
-                // — design contract says discard state and show default mode.
-                this.log( `[FOCUS-RESTORE] focused sender ${this.ccFocusState.focused_sender_id} not in current data set; discarding stale state per design contract` );
-                this._exitFocusMode();
+                // Persisted focused sender no longer has any visible cards.
+                // Revert UI to default mode but PRESERVE persisted intent — the
+                // focused session may simply not be hydrated yet (async WS
+                // arrival), and a next reload may find it. The original
+                // 2026-04-30 design said "discard stale state" but that
+                // produced "every reload drops focus" when icon-churn races
+                // the restore check.
+                this.log( `[FOCUS-RESTORE] focused sender ${this.ccFocusState.focused_sender_id} not in current data set; UI reverted to default, persisted intent preserved for next reload` );
+                this._exitFocusMode( false );
             } else {
                 // Walk all sender cards: hide all except the focused one.
                 document.querySelectorAll( '#notifications-list .sender-card' ).forEach( card => {
@@ -9770,6 +9789,7 @@ class NotificationsUI {
         if ( refreshBtn ) {
             refreshBtn.addEventListener( "click", ( ev ) => {
                 ev.stopPropagation();
+                console.log( "[COMMONS-ACTIVITY] refresh clicked" );
                 this._loadCommonsRecentActivity( this._currentCommonsWindow() );
             } );
         }
@@ -9787,6 +9807,7 @@ class NotificationsUI {
         const entriesEl = document.getElementById( "commons-recent-activity-entries" );
         const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
         if ( !entriesEl ) return;
+        console.log( `[COMMONS-ACTIVITY] load start, window=${windowValue}` );
 
         // Map window value → hours query param (mirrors getEffectiveHoursForQuery shape)
         const params = new URLSearchParams();
@@ -9821,6 +9842,7 @@ class NotificationsUI {
             for ( const e of entries ) {
                 entriesEl.appendChild( this._renderCommonsEntry( e ) );
             }
+            console.log( `[COMMONS-ACTIVITY] load complete, entries=${entries.length}` );
             if ( emptyEl ) emptyEl.hidden = entries.length > 0;
         } catch ( err ) {
             this.error( `[COMMONS-ACTIVITY] load exception: ${err}` );

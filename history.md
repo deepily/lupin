@@ -2,6 +2,36 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.15 - Session 3b6be6f9 (María 🌸) | Notifications UI: Recent-Activity refresh observability + focus-tray state preserved across page reloads
+
+Chorus session continuation. Rick's morning `@all` broadcast assigned María the Commons blackboard lead role; status read confirmed Phase 3 fully closed 2026-05-13 (398 unit/smoke + 7 integration green), with the open follow-on backlog being the 4× persona-completion dup bug + `owner_user_id` writer stamper + stale-bridge sweeper. Rick then voice-redirected to two notifications.js bugs ahead of the queue. Both fixed and live-confirmed in this session; no R&D doc per `feedback_skip_rnd_doc_for_trivial_fixes`.
+
+**Bug 1 — `#commons-recent-activity-refresh` silent on click**: handler was wired correctly (`_initCommonsRecentActivity` → `addEventListener("click", …)` → `_loadCommonsRecentActivity`) but produced zero console output because `this.log()` is debug-gated and the happy path had no logs — only `this.error()` (unconditional) fired on `!resp.ok` or thrown exceptions. Rick was correctly unable to tell whether the click was firing. **Fix**: 3 unconditional `console.log` lines on the success path (click registered, load start with window value, load complete with entries count) per the existing `wsDiag` + Firefox-hack precedent for diagnostic logging that bypasses the debug flag.
+
+**Bug 2 — focus-tray state dropped on every page reload**: persistence + restore were FULLY wired already (localStorage key `notifications_cc_focus_state`, constructor read, save-on-enter, save-on-exit, belt-and-suspenders `_restoreCcUiAfterLoad` after `loadConversationHistory()`). Root cause: **`_exitFocusMode()` always wrote the wiped state to localStorage**, and three call sites fired during init churn — `_removeStripIcon` on icon WS dealloc/re-add, `_clearAllStripIcons` on history-window change or bulk-clear, and `_restoreCcUiAfterLoad`'s stale-discard branch when the focused card hadn't hydrated yet at restore-check time. The design comment near `_restoreCcUiAfterLoad` had explicitly named WS-event icon churn as a known failure mode but the belt-and-suspenders restore couldn't recover from a localStorage that was already wiped.
+
+**Fix shape — Option B (intent-preserving exit)** ratified via `ask_multiple_choice`: added `persist = true` parameter to `_exitFocusMode( persist = true )`; `_saveCcFocusState()` now gated on `persist`. Three auto-exit sites pass `persist=false`; the explicit user-toggle path at `_handleStripToggleClick` stays default `true`. Net: explicit toggle-off persists OFF; transient auto-exits during init churn preserve user intent so the next reload can re-apply focus.
+
+**Verification table**:
+
+| Layer | Result |
+|---|---|
+| `node --check notifications.js` (after bug-1 edits) | ✅ SYNTAX OK |
+| `node --check notifications.js` (after bug-2 edits) | ✅ SYNTAX OK |
+| Re-grep `_exitFocusMode\b` post-edit — confirms 4 auto-sites pass `false`, 1 user-site stays default | ✅ |
+| Bug 1 — Rick live hard-refresh + click on `:7999` | ✅ all 3 log lines fire ("looks good") |
+| Bug 2 — Rick live hard-refresh + set focus + hard-refresh on `:7999` | ✅ "that fixed it" |
+
+**Files touched** (parent Lupin only — no CoSA edits, no other repos): `src/fastapi_app/static/js/notifications.js` (7 edits in one file: 3 for bug-1 observability + 4 for bug-2 persistence semantics).
+
+**Parallel-session safety note**: at checkpoint time `git status` showed `bug-fix-queue.md` + `src/conf/lupin-app.ini` + the Rio `2026.05.15-rio-top-5-todo-bug-triage.md` doc as pre-existing modifications from OTHER active sessions in the workspace — explicitly excluded from this session's stage set per v2.0 selective-staging mandate.
+
+**Memories**: none new — both fixes follow existing project precedents (`wsDiag` unconditional logging pattern; the design comment near `_restoreCcUiAfterLoad` had already named the failure mode for bug 2).
+
+**Commit**: pending (this session-end checkpoint)
+
+---
+
 ### 2026.05.15 AM - Session c4139ece (María 🌸) | Commons Blackboard summary + per-recipient broadcasts-topic dedupe fix for Recent Activity panel + new bug filed for persona-completion 4× rendering
 
 Chorus session triggered by Rick's morning `@all` broadcast. María's assignment was the state-of-the-commons-blackboard summary; delivered via `notify` with rich abstract carrying phase status, doc-viewer links, endpoint inventory, coverage posture. Course-corrected mid-turn when Rick flagged that the spoken `message` body had piped the inventory through TTS rather than keeping it to headline + one-sentence takeaway; rule re-internalized per existing `feedback_tts_body_headline_and_takeaway_only` memory.
