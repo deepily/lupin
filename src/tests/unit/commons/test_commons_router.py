@@ -26,6 +26,7 @@ from cosa.rest.routers.commons import (
     BroadcastRequestBody,
     RegisterQuestionRequest,
     _bridge_last_activity_epoch,
+    _dedupe_broadcasts_by_id,
     _entry_passes_same_user_scoping,
     _load_bridge_fields,
     _body_contains_reminder_framing,
@@ -1304,10 +1305,11 @@ class _FakeStore:
         return entries[ :limit ]
 
 
-def _make_entry( ts, topic_marker="x", sender_sid="sess-x", sender_user_id=None, target_sid=None, body="hello" ):
+def _make_entry( ts, topic_marker="x", sender_sid="sess-x", sender_user_id=None, target_sid=None, body="hello", broadcast_id=None ):
     md = { }
     if sender_user_id is not None: md[ "sender_user_id" ]    = sender_user_id
     if target_sid     is not None: md[ "target_session_id" ] = target_sid
+    if broadcast_id   is not None: md[ "broadcast_id" ]      = broadcast_id
     return {
         "ts"                : ts,
         "sender_session_id" : sender_sid,
@@ -1647,3 +1649,122 @@ def test_execute_broadcast_history_includes_target_session_attribution():
     )
     assert len( result[ "entries" ] ) == 1
     assert result[ "entries" ][ 0 ][ "body" ] == "addressed-to-me"
+
+
+# ─── _dedupe_broadcasts_by_id ──────────────────────────────────────────────
+# Per `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md` —
+# collapse Phase 2 per-recipient fanout rows to one admin-overview row.
+
+
+def test_dedupe_broadcasts_collapses_same_broadcast_id():
+    """Five fanout rows sharing one broadcast_id collapse to one row."""
+    bid     = "0a2b0b2e-2165-47d9-9f74-e969ca796ba4"
+    merged  = [
+        ( "broadcasts", _make_entry( "2026-05-15T14:00:00+00:00", target_sid=f"recip-{i}", broadcast_id=bid ) )
+        for i in range( 5 )
+    ]
+    out = _dedupe_broadcasts_by_id( merged )
+    assert len( out ) == 1
+    assert out[ 0 ][ 0 ] == "broadcasts"
+
+
+def test_dedupe_broadcasts_preserves_distinct_broadcast_ids():
+    """Two distinct broadcasts with their own fanout sets stay as two rows."""
+    bid_a   = "11111111-1111-4111-8111-111111111111"
+    bid_b   = "22222222-2222-4222-8222-222222222222"
+    merged  = [
+        ( "broadcasts", _make_entry( "2026-05-15T14:00:00+00:00", target_sid=f"a-{i}", broadcast_id=bid_a ) )
+        for i in range( 3 )
+    ] + [
+        ( "broadcasts", _make_entry( "2026-05-15T14:05:00+00:00", target_sid=f"b-{i}", broadcast_id=bid_b ) )
+        for i in range( 3 )
+    ]
+    out      = _dedupe_broadcasts_by_id( merged )
+    kept_ids = sorted( e[ "metadata" ][ "broadcast_id" ] for ( _t, e ) in out )
+    assert kept_ids == [ bid_a, bid_b ]
+
+
+def test_dedupe_broadcasts_strips_target_session_id_from_kept_row():
+    """The dedup'd row represents the broadcast, not any single recipient slice."""
+    bid    = "33333333-3333-4333-8333-333333333333"
+    merged = [
+        ( "broadcasts", _make_entry( "2026-05-15T14:00:00+00:00", target_sid="recip-A", broadcast_id=bid ) ),
+        ( "broadcasts", _make_entry( "2026-05-15T14:00:00+00:00", target_sid="recip-B", broadcast_id=bid ) ),
+    ]
+    out = _dedupe_broadcasts_by_id( merged )
+    assert len( out ) == 1
+    assert "target_session_id" not in out[ 0 ][ 1 ][ "metadata" ]
+    assert out[ 0 ][ 1 ][ "metadata" ][ "broadcast_id" ] == bid
+
+
+def test_dedupe_does_not_mutate_input():
+    """Input list and its entries must remain unchanged after dedupe."""
+    bid    = "44444444-4444-4444-8444-444444444444"
+    e1     = _make_entry( "2026-05-15T14:00:00+00:00", target_sid="recip-A", broadcast_id=bid )
+    e2     = _make_entry( "2026-05-15T14:00:00+00:00", target_sid="recip-B", broadcast_id=bid )
+    merged = [ ( "broadcasts", e1 ), ( "broadcasts", e2 ) ]
+    _dedupe_broadcasts_by_id( merged )
+    assert e1[ "metadata" ][ "target_session_id" ] == "recip-A"
+    assert e2[ "metadata" ][ "target_session_id" ] == "recip-B"
+    assert len( merged ) == 2
+
+
+def test_dedupe_passes_through_non_broadcasts_topics():
+    """`broadcast-acks` per-recipient rows are intentional and must NOT be collapsed."""
+    bid    = "55555555-5555-4555-8555-555555555555"
+    merged = [
+        ( "broadcast-acks", _make_entry( "2026-05-15T14:00:00+00:00", target_sid="recip-A", broadcast_id=bid ) ),
+        ( "broadcast-acks", _make_entry( "2026-05-15T14:00:00+00:00", target_sid="recip-B", broadcast_id=bid ) ),
+        ( "free-topic",     _make_entry( "2026-05-15T14:00:00+00:00", body="chatter" ) ),
+    ]
+    out = _dedupe_broadcasts_by_id( merged )
+    assert len( out ) == 3
+    assert [ t for ( t, _e ) in out ] == [ "broadcast-acks", "broadcast-acks", "free-topic" ]
+
+
+def test_dedupe_passes_through_broadcasts_entry_missing_broadcast_id():
+    """Defensive — malformed broadcasts entry (no broadcast_id) must not vanish."""
+    merged = [
+        ( "broadcasts", _make_entry( "2026-05-15T14:00:00+00:00", target_sid="recip-A", body="malformed-1" ) ),
+        ( "broadcasts", _make_entry( "2026-05-15T14:00:01+00:00", target_sid="recip-B", body="malformed-2" ) ),
+    ]
+    out = _dedupe_broadcasts_by_id( merged )
+    assert len( out ) == 2
+    assert [ e[ "body" ] for ( _t, e ) in out ] == [ "malformed-1", "malformed-2" ]
+
+
+def test_dedupe_passes_through_broadcasts_entry_with_non_string_broadcast_id():
+    """Defensive — non-string broadcast_id must not crash the type check."""
+    merged = [
+        ( "broadcasts", { "ts": "2026-05-15T14:00:00+00:00", "metadata": { "broadcast_id": 42 }, "body": "weird" } ),
+    ]
+    out = _dedupe_broadcasts_by_id( merged )
+    assert len( out ) == 1
+    assert out[ 0 ][ 1 ][ "body" ] == "weird"
+
+
+def test_execute_broadcast_history_dedupes_broadcast_fanout_end_to_end():
+    """End-to-end: 5-recipient broadcast through the aggregator yields one entry."""
+    bid   = "0a2b0b2e-2165-47d9-9f74-e969ca796ba4"
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [
+            _make_entry( f"2026-05-15T14:00:0{i}+00:00", sender_user_id="alice",
+                         target_sid=f"recip-{i}", broadcast_id=bid )
+            for i in range( 5 )
+        ],
+    } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 100,
+        excluded_topics       = [ ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: None,
+    )
+    assert len( result[ "entries" ] ) == 1
+    assert result[ "entries" ][ 0 ][ "metadata" ][ "broadcast_id" ] == bid
+    assert "target_session_id" not in result[ "entries" ][ 0 ][ "metadata" ]
+

@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-14T20:30:00-04:00
+**Last Updated**: 2026-05-15T10:30:00-04:00
 
 ---
 
@@ -103,6 +103,24 @@
 ### Queued
 
 (Available for any session to claim)
+
+- [ ] **Persona-completion notifications duplicate 4× on the broadcast / notifications card with near-identical timestamps** (filed 2026-05-15 by session `c4139ece` María 🌸, surfaced during user verification of the broadcasts-topic `_dedupe_broadcasts_by_id` fix that landed this same session.)
+  - **Symptom**: User reports seeing four cards rendered as `maria completed 10:14 🌸 maria completed 10:14 🌸 maria completed 10:14 🌸 maria completed 10:14` on the broadcast / Recent Activity surface. Bodies appear identical or near-identical; timestamps all collapse to the same minute.
+  - **Reporter quote (voice, 2026-05-15)**: *"The system broadcast was deduplicated but I see 4 different messages sent from you with approximately the same timestamp ... It only needs to appear once."*
+  - **NOT the same bug** as today's just-fixed per-recipient broadcast fanout dedupe (broadcasts-topic write produced N rows by design; fixed via `_dedupe_broadcasts_by_id` in `execute_broadcast_history`). User explicitly confirmed *"The system broadcast was deduplicated"* before reporting this fresh symptom — different surface, different root cause.
+  - **Ambiguity in repro that next session MUST resolve FIRST** — without this we don't know which fix shape to write:
+    1. **One persona-completion notify call → N rendered cards** (UI-side render duplication, or backend fan-out of one notification entry to multiple recipient inboxes). Diagnostic: count entries in the persona-completion topic file vs count of cards rendered for that broadcast.
+    2. **N persona-completion notify calls → N rendered cards** (backend or stop-hook firing N times per session-end / turn-end). Diagnostic: greptime the cosa-voice notify queue + stop-hook log for the relevant minute window.
+  - **Plausible causes ranked**:
+    - **(a)** Stop-hook fires a "session topic" / completion notification per turn-end; chorus mode + multiple closing-turn `notify()` calls during the same minute accumulate as N entries that all render with header `<persona> completed <HH:MM>` masking distinct bodies.
+    - **(b)** Notification rendering on the broadcast card collapses the body display when the persona-name + timestamp tuple matches, but DOES keep N DOM elements — visual collision creates the appearance of duplication where backend has N legitimate distinct entries.
+    - **(c)** Listener-side fanout: persona-completion event is being delivered to multiple Lupin notifications-UI client inboxes (Rick is logged in across multiple tabs / sessions), each rendering its own card — count would scale with active client count, not with notify-call count.
+    - **(d)** Per-recipient fanout pattern from Phase 2 broadcast write was reused for persona-completion events and lays down N rows in some `persona-events` or similar topic — analogous root cause to the bug fixed earlier this session but on a different topic.
+  - **First diagnostic step**: while Rick has the symptom visible on `/app/notifications`, query the live `:7999` notifications endpoint (or read the relevant topic store file under `io/commons/` or notification persistence store) to determine if four ENTRIES exist or one entry is rendering four times. Cross-check against `cosa-voice` notify queue log for minute `10:14 EDT 2026-05-15`. Session `c4139ece` made multiple closing-turn notify calls compressed into that minute; raw counts will disambiguate (a) vs (b) vs (c).
+  - **Acceptance**: a single María closing-turn notify (or persona-completion event) results in **at most one** card rendered on Rick's broadcast / Recent Activity surface. If chorus-mode legitimately emits N events because N sessions notified simultaneously, the card display must group/collapse them (analogous to today's `_dedupe_broadcasts_by_id` strategy applied to a different topic key — likely `(persona_name, minute_bucket)` or `(sender_session_id, body_hash)`).
+  - **Related**: today's broadcasts-topic dedupe fix at `src/cosa/rest/routers/commons.py` `_dedupe_broadcasts_by_id` + `execute_broadcast_history`. R&D post-ship-fix subsection in `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`. The same dedup-by-id pattern may apply on the consumer side here.
+
+---
 
 - [ ] **CC-session focus mode + active-toggle do NOT survive page refresh** (filed 2026-05-14 by session `f6f865fb` María 🌸. First-pass fix `0a7da69` did NOT resolve symptom — user verified post-commit with hard refresh. Parked while user pivots to commons implementation.)
   - **Symptom**: User enters CC-session focus mode by clicking a strip icon (e.g., focus on María's card). All other sender cards correctly hide. User hard-refreshes the browser (Ctrl-Shift-R). Expected: focus mode restored, only the originally-focused card visible. **Actual**: focus mode lost; ALL sender cards rendered; "👁 Focus" toggle pill in default (off) state. Same expected symptom for the "👁 All / 👁 Active" hide-inactive toggle.

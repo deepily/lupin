@@ -2,6 +2,56 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.15 AM - Session c4139ece (María 🌸) | Commons Blackboard summary + per-recipient broadcasts-topic dedupe fix for Recent Activity panel + new bug filed for persona-completion 4× rendering
+
+Chorus session triggered by Rick's morning `@all` broadcast. María's assignment was the state-of-the-commons-blackboard summary; delivered via `notify` with rich abstract carrying phase status, doc-viewer links, endpoint inventory, coverage posture. Course-corrected mid-turn when Rick flagged that the spoken `message` body had piped the inventory through TTS rather than keeping it to headline + one-sentence takeaway; rule re-internalized per existing `feedback_tts_body_headline_and_takeaway_only` memory.
+
+**Bug surfaced + fixed during the same session — broadcast-card Recent Activity duplication**:
+
+Rick reported his single morning `@all` broadcast appeared **five times** on the broadcast card's Recent Activity stream. Investigation confirmed the dupe was in the **WRITE path of Phase 2**, not the render path:
+
+- Phase 2's `perform_fanout` at `src/cosa/rest/routers/commons.py:329-380` writes one `broadcasts`-topic row per recipient by design (line 348: `# AC4: per-recipient broadcasts entry`) — supports the `target_session_id` branch of `_entry_passes_same_user_scoping` for normal session-receipt scoping. It became visible-as-noise once Traffic Visibility surfaced the raw topic.
+- The live store file `io/commons/broadcasts.md` confirmed: six distinct `broadcast_id` values from this morning, each with 2-5 fanout rows sharing the same body. The morning `@all` (broadcast_id `0a2b0b2e…`) had 5 rows differing only in `metadata.target_session_id`.
+
+Rick pressure-tested the proposed fix: *"How does your filter differentiate between one batch sent to @all at 10:35 and then the next batch sent to @all at 10:40?"* Verified safe via `commons.py:429` (`broadcast_id = body.broadcast_id or str(uuid.uuid4())`) — each broadcast call mints a fresh UUIDv4 server-side; dedupe collapses **within** a broadcast, never **across** broadcasts.
+
+**Fix shape** (1 helper + 1 wire-up + 8 unit tests + 2 wire-level smoke tests + design doc subsection):
+
+| Change | File |
+|---|---|
+| `_dedupe_broadcasts_by_id` helper added; wired between merge-sort and limit-cap in `execute_broadcast_history` | `src/cosa/rest/routers/commons.py` (CoSA submodule — NOT staged from parent context per nested-repo rule) |
+| +8 unit tests covering: same-id collapse, distinct-id preservation, `target_session_id` strip, input non-mutation, non-`broadcasts` topic passthrough, missing/non-string `broadcast_id` defensive passthrough, end-to-end through `execute_broadcast_history`. Extended `_make_entry` with `broadcast_id` param. Added import. | `src/tests/unit/commons/test_commons_router.py` |
+| +2 live-`:7999` smoke tests asserting wire-level invariants (no duplicate `broadcast_id` in response; `target_session_id` stripped from deduped rows) | `src/tests/smoke/test_commons_broadcast_history_endpoint.py` |
+| Post-ship-fix subsection added — root cause, fix mechanics, safety argument, test table | `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md` |
+
+**Verification table**:
+
+| Layer | Suite | Result |
+|---|---|---|
+| `py_compile` | `commons.py` + `test_commons_router.py` | ✅ clean |
+| Unit | `src/tests/unit/commons/` (407 tests) | ✅ 407/407 |
+| Unit (new) | dedupe + history (17 tests, 8 new) | ✅ 17/17 |
+| Smoke (`:7999`) | `test_commons_broadcast_history_endpoint.py` (9 tests, 2 new) | ✅ 9/9 |
+| Coverage gate | `cosa/rest/routers/commons.py` | **100%** (238/238 stmts, 0 missing) |
+| Phase 2 contract | 119 pre-existing tests in `test_commons_router.py` | ✅ preserved, all GREEN |
+
+**Behavior change**: 5 recipients × 1 broadcast → 1 admin-overview row (was 5 rows). Distinct broadcasts never collapse. The kept row strips `target_session_id` (represents the broadcast as a whole, not any single recipient slice). `broadcast-acks` per-recipient rows untouched — those are the intended chip-row UX.
+
+**New bug filed** (Queued, top): persona-completion notifications duplicating 4× on the broadcast / Recent Activity card with near-identical timestamps (Rick verified post-dedupe-fix, observed `maria completed 10:14 🌸` rendered four times). Filed to `bug-fix-queue.md` with full repro context, four ranked plausible causes, and the disambiguation diagnostic the next session must run first (entry count in topic store vs DOM cards). NOT the same bug as today's per-recipient fanout — separate surface, separate root cause.
+
+**Files touched** (parent Lupin only — CoSA-side edit to `src/cosa/rest/routers/commons.py` belongs to a CoSA-context commit):
+
+- `src/tests/unit/commons/test_commons_router.py` (+8 unit tests, import added, `_make_entry` extended)
+- `src/tests/smoke/test_commons_broadcast_history_endpoint.py` (+2 wire-level smoke tests)
+- `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md` (post-ship-fix subsection)
+- `bug-fix-queue.md` (new bug filed at top of Queued; Last Updated bumped)
+- `history.md` (this entry)
+- `.claude-session.md` (María's section appended for parallel-session safety)
+
+**Parallel-session safety note**: At checkpoint time, `git status` confirmed only María's tracked files appeared; no other active sessions had modified content overlapping with this commit's stage set.
+
+---
+
 ### 2026.05.15 AM - Session 23ff8512 (Mr. Radio 🦉) | PRIORITY-1 history.md archive (4x-deferred OVER-LIMIT condition resolved) + chorus broadcast response
 
 Two-task chorus session triggered by Rick's `@all` broadcast asking each persona to start a new session and report. Mr. Radio's assignment was the top-five Lupin TODO summary excluding the Commons blackboard project (Maria's territory). Surveyed `TODO.md` and surfaced the headline finding: history.md was **27,657 tokens / 110.6% of the 25k ceiling** — the four-times-deferred PRIORITY-1 archive task. Rick voice-replied "do this 1 thing for me right now: archive the history document."

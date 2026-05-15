@@ -173,6 +173,59 @@ def test_limit_caps_response_size( jwt_token ):
     assert len( resp.json()[ "entries" ] ) <= 3
 
 
+@pytest.mark.timeout( 15 )
+def test_broadcasts_topic_entries_are_deduped_by_broadcast_id( jwt_token ):
+    """
+    Each `broadcast_id` appears at most once in the response.
+
+    Phase 2's `perform_fanout` writes one `broadcasts` row per recipient
+    (intentional for `target_session_id` scoping). The Recent Activity
+    aggregator collapses them to one admin-overview row via
+    `_dedupe_broadcasts_by_id`. Asserts the wire-level invariant.
+    """
+    resp = requests.get(
+        ENDPOINT,
+        headers={ "Authorization": f"Bearer {jwt_token}" },
+        params={ "hours": 168, "limit": 1000 },
+        timeout=10,
+    )
+    assert resp.status_code == 200
+
+    seen_ids = [ ]
+    for entry in resp.json()[ "entries" ]:
+        if entry[ "topic" ] != "broadcasts":
+            continue
+        bid = ( entry.get( "metadata" ) or { } ).get( "broadcast_id" )
+        if bid:
+            seen_ids.append( bid )
+    assert len( seen_ids ) == len( set( seen_ids ) ), \
+        f"Duplicate broadcast_id in response — dedupe regression. Got: {seen_ids}"
+
+
+@pytest.mark.timeout( 15 )
+def test_deduped_broadcasts_row_omits_target_session_id( jwt_token ):
+    """
+    The dedup'd admin-overview row strips `target_session_id` from metadata
+    (the row represents the broadcast as a whole, not a single recipient slice).
+    """
+    resp = requests.get(
+        ENDPOINT,
+        headers={ "Authorization": f"Bearer {jwt_token}" },
+        params={ "hours": 168, "limit": 1000 },
+        timeout=10,
+    )
+    assert resp.status_code == 200
+
+    for entry in resp.json()[ "entries" ]:
+        if entry[ "topic" ] != "broadcasts":
+            continue
+        md = entry.get( "metadata" ) or { }
+        if "broadcast_id" not in md:
+            continue
+        assert "target_session_id" not in md, \
+            f"Deduped broadcasts row leaked target_session_id: {md}"
+
+
 # ── Standalone runner (per project quick_smoke_test convention) ────────────
 
 
