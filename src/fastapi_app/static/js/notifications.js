@@ -425,6 +425,11 @@ class NotificationsUI {
             // design contract when the focused sender has no notifications.
             this._restoreCcUiAfterLoad();
 
+            // Commons Traffic Visibility — Recent Activity stream init (Step 7 of
+            // src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md).
+            // Gated by INI flag fetched into this.commonsTrafficVisibilityEnabled.
+            this._initCommonsRecentActivity();
+
             // Restore action-required notifications from localStorage (refresh survival)
             this.restoreActionRequiredState();
 
@@ -709,6 +714,16 @@ class NotificationsUI {
                 this.ttsPreviewFraction          = config.tts_preview_fraction || 0.25;
                 this.ttsPreviewMinChars          = config.tts_preview_min_chars || 100;
                 this.ttsPreviewIncludeSemicolons = !!config.tts_preview_include_semicolons;
+
+                // tts_interaction_mode drives mode-conditional icon rendering for the
+                // per-session DND toggle on each sender card. Added 2026-05-14 evening
+                // per src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
+                this.ttsInteractionMode = config.tts_interaction_mode || 'chorus';
+
+                // Commons Traffic Visibility — broadcast-card Recent Activity feature flag (2026-05-14)
+                // Default True per Q9 of src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+                this.commonsTrafficVisibilityEnabled        = config.commons_traffic_visibility_enabled !== false;
+                this.commonsTrafficVisibilityDefaultWindow  = config.commons_traffic_visibility_default_hours_window || 'today';
 
                 // Layer the user's runtime slider override on top of the INI default
                 const userFractionOverride = localStorage.getItem( this.TTS_FRACTION_PREF_KEY );
@@ -5527,6 +5542,16 @@ class NotificationsUI {
                     window.broadcastPanel.handleAck( notification );
                 }
                 return;
+
+            case "commons_activity":
+                // Phase 2.5/3.5 — prepend the new commons entry to the broadcast-card
+                // Recent Activity stream. Per Q3 + Q7 ratification:
+                //   - Real-time WS push (no polling)
+                //   - Flat reverse-chronological (newest goes to the top)
+                // Source: CommonsActivityWatcher tick → push_notification_fn → here.
+                // See: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md AC3
+                this._handleCommonsActivityWS( notification );
+                return;
         }
 
         // Check for duplicates (same logic as old queue.js)
@@ -9664,6 +9689,168 @@ class NotificationsUI {
             }
             this.log( '[ACTIVE-TOGGLE-RESTORE] hide-inactive filter reapplied' );
         }
+    }
+
+    // ─── Commons Traffic Visibility — broadcast-card Recent Activity stream ───
+    // Step 7/11 of src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+    // Wires the visual scaffold from Step 6 (HTML + CSS) to the aggregator
+    // endpoint (Step 3) + the WS push (Step 4). Five methods:
+    //   _initCommonsRecentActivity()  — feature-flag gate + handler binding + initial load
+    //   _loadCommonsRecentActivity()  — GET /api/commons/broadcast-history + render
+    //   _renderCommonsEntry()         — build one entry row from a projected entry dict
+    //   _handleCommonsActivityWS()    — WS event → prepend new row at top
+    //   _setCommonsActivityWindow()   — dropdown change handler
+
+    _initCommonsRecentActivity() {
+        // Gate: if INI feature flag is off, hide the entire section and bail.
+        const section = document.getElementById( "commons-recent-activity-section" );
+        if ( !section ) return;
+        if ( !this.commonsTrafficVisibilityEnabled ) {
+            section.style.display = "none";
+            this.log( "[COMMONS-ACTIVITY] feature disabled via INI — section hidden" );
+            return;
+        }
+
+        // Initial dropdown value from INI default
+        const dropdown = document.getElementById( "commons-recent-activity-window" );
+        if ( dropdown ) {
+            dropdown.value = this.commonsTrafficVisibilityDefaultWindow;
+            dropdown.addEventListener( "change", ( ev ) => {
+                this._setCommonsActivityWindow( ev.target.value );
+            } );
+        }
+
+        // Refresh button
+        const refreshBtn = document.getElementById( "commons-recent-activity-refresh" );
+        if ( refreshBtn ) {
+            refreshBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                this._loadCommonsRecentActivity( this._currentCommonsWindow() );
+            } );
+        }
+
+        // Initial load
+        this._loadCommonsRecentActivity( this._currentCommonsWindow() );
+    }
+
+    _currentCommonsWindow() {
+        const dropdown = document.getElementById( "commons-recent-activity-window" );
+        return dropdown ? dropdown.value : ( this.commonsTrafficVisibilityDefaultWindow || "today" );
+    }
+
+    async _loadCommonsRecentActivity( windowValue ) {
+        const entriesEl = document.getElementById( "commons-recent-activity-entries" );
+        const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
+        if ( !entriesEl ) return;
+
+        // Map window value → hours query param (mirrors getEffectiveHoursForQuery shape)
+        const params = new URLSearchParams();
+        if ( windowValue === "all" ) {
+            // no hours param → no cutoff
+        } else if ( windowValue === "today" ) {
+            // Resolve client-side: hours since local-midnight
+            const now      = new Date();
+            const midnight = new Date( now.getFullYear(), now.getMonth(), now.getDate() );
+            const hours    = Math.max( 1, Math.ceil( ( now - midnight ) / 3600000 ) );
+            params.append( "hours", String( hours ) );
+        } else {
+            params.append( "hours", String( windowValue ) );
+        }
+        params.append( "limit", "200" );
+
+        try {
+            const resp = await this.authedFetch( `/api/commons/broadcast-history?${params}` );
+            if ( !resp.ok ) {
+                this.error( `[COMMONS-ACTIVITY] load failed: ${resp.status}` );
+                return;
+            }
+            const body = await resp.json();
+            if ( body.disabled ) {
+                // Server-side flag flipped to False mid-session — hide section
+                const section = document.getElementById( "commons-recent-activity-section" );
+                if ( section ) section.style.display = "none";
+                return;
+            }
+            const entries = body.entries || [ ];
+            entriesEl.innerHTML = "";
+            for ( const e of entries ) {
+                entriesEl.appendChild( this._renderCommonsEntry( e ) );
+            }
+            if ( emptyEl ) emptyEl.hidden = entries.length > 0;
+        } catch ( err ) {
+            this.error( `[COMMONS-ACTIVITY] load exception: ${err}` );
+        }
+    }
+
+    _renderCommonsEntry( entry ) {
+        const row = document.createElement( "div" );
+        row.className = "commons-activity-entry";
+        if ( entry.persona_color ) row.style.setProperty( "--persona-color", entry.persona_color );
+
+        const icon = document.createElement( "div" );
+        icon.className   = "commons-activity-entry-icon";
+        icon.textContent = entry.persona_icon || "·";
+        row.appendChild( icon );
+
+        const name = document.createElement( "div" );
+        name.className   = "commons-activity-entry-name";
+        name.textContent = entry.persona_name || "—";
+        row.appendChild( name );
+
+        // Topic chip only for free-form topics (Q2 ratified)
+        const chip = document.createElement( "span" );
+        chip.className   = "commons-activity-entry-topic-chip";
+        chip.textContent = entry.topic || "";
+        if ( entry.topic_kind === "reserved" ) chip.hidden = true;
+        row.appendChild( chip );
+
+        const body = document.createElement( "div" );
+        body.className   = "commons-activity-entry-body";
+        body.textContent = entry.body || "";
+        row.appendChild( body );
+
+        const time = document.createElement( "div" );
+        time.className = "commons-activity-entry-time";
+        if ( entry.ts ) {
+            try {
+                const d  = new Date( entry.ts );
+                const hh = String( d.getHours() ).padStart( 2, "0" );
+                const mm = String( d.getMinutes() ).padStart( 2, "0" );
+                time.textContent = `${hh}:${mm}`;
+            } catch ( _ ) {
+                time.textContent = "";
+            }
+        }
+        row.appendChild( time );
+
+        return row;
+    }
+
+    _handleCommonsActivityWS( notification ) {
+        if ( !this.commonsTrafficVisibilityEnabled ) return;
+
+        // The watcher pushes the projected entry as the notification's payload.
+        // (See cosa/rest/commons_activity_watcher.py::_dispatch_activity_event.)
+        const entry = notification && notification.payload;
+        if ( !entry ) return;
+
+        const entriesEl = document.getElementById( "commons-recent-activity-entries" );
+        const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
+        if ( !entriesEl ) return;
+
+        const row = this._renderCommonsEntry( entry );
+        // Prepend — keep newest-first ordering (Q7)
+        if ( entriesEl.firstChild ) {
+            entriesEl.insertBefore( row, entriesEl.firstChild );
+        } else {
+            entriesEl.appendChild( row );
+        }
+        if ( emptyEl ) emptyEl.hidden = true;
+    }
+
+    _setCommonsActivityWindow( value ) {
+        this.log( `[COMMONS-ACTIVITY] window changed → ${value}` );
+        this._loadCommonsRecentActivity( value );
     }
 
     /**
