@@ -4902,6 +4902,7 @@ class NotificationsUI {
         const notificationElement = document.getElementById( notificationId );
         if ( notificationElement ) {
             notificationElement.classList.add( 'tts-playing' );
+            this._mirrorTTSStateToStripIcons( notificationElement, true );
             if ( this.debug ) this.log( `Started TTS indicator for: ${notificationId}` );
         }
     }
@@ -4920,8 +4921,40 @@ class NotificationsUI {
         const notificationElement = document.getElementById( notificationId );
         if ( notificationElement ) {
             notificationElement.classList.remove( 'tts-playing' );
+            this._mirrorTTSStateToStripIcons( notificationElement, false );
             if ( this.debug ) this.log( `Stopped TTS indicator for: ${notificationId}` );
         }
+    }
+
+    /**
+     * Mirror TTS-active state from a notification element onto the matching focused-tray
+     * strip icons (`.cc-strip-icon[data-sender-id="..."]::before`) so Mr. Rick can see
+     * at-a-glance which persona is currently being read aloud.
+     *
+     * The CSS rule `.cc-strip-icon[data-conv-mode="speakerphone"][data-tts-active="true"]::before`
+     * re-asserts the darker green background AND applies the size-scaled `ttsPulseGlowSmall`
+     * keyframes; on `false` we delete the attribute and the 500ms background transition
+     * fades the badge back to the lighter idle green.
+     *
+     * Quiet-mode (🤭 amber) icons are exempt by CSS selector — only speakerphone personas
+     * signal TTS activity.
+     *
+     * @param {HTMLElement} notificationElement - The notification list item being TTS'd
+     * @param {boolean}     active              - true on TTS-start, false on TTS-end
+     */
+    _mirrorTTSStateToStripIcons( notificationElement, active ) {
+        const senderCard = notificationElement.closest( '.sender-card' );
+        const senderId   = senderCard?.getAttribute( 'data-sender-id' );
+        if ( !senderId ) return;
+
+        const stripIcons = document.querySelectorAll( `.cc-strip-icon[data-sender-id="${ senderId }"]` );
+        stripIcons.forEach( el => {
+            if ( active ) {
+                el.dataset.ttsActive = "true";
+            } else {
+                delete el.dataset.ttsActive;
+            }
+        } );
     }
 
     // ========================================

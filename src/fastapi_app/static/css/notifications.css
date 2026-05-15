@@ -1818,13 +1818,13 @@
         }
 
         .sender-conversation-mode-btn.is-active {
-            background: rgba( 25, 135, 84, 0.25 );
+            background: #d1e7dd;  /* solid pale mint — matches strip-icon idle badge (Bootstrap success-bg-subtle) */
             border-color: rgba( 25, 135, 84, 0.6 );
             opacity: 1;
         }
 
         .sender-conversation-mode-btn.is-active:hover {
-            background: rgba( 25, 135, 84, 0.35 );
+            background: #a3cfbb;  /* slightly-darker mint — preserves hover affordance (Bootstrap success-200) */
             border-color: rgba( 25, 135, 84, 0.85 );
         }
 
@@ -2184,16 +2184,37 @@
             border: 2px solid #ffffff;
             box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.30 );
             line-height: 1;
+            transition: background 500ms ease-in-out;  /* polished fade between idle/active TTS-speaker states */
         }
 
         .cc-strip-icon[data-conv-mode="speakerphone"]::before {
             content: "🔊";
-            background: rgba( 25, 135, 84, 0.95 );  /* green — full TTS — matches the 🔊 on the sender-card toggle button */
+            background: #d1e7dd;  /* solid pale mint — idle (Bootstrap success-bg-subtle, perceptual match for the toggle's rgba(25,135,84,0.25) over a light card; SOLID here because the badge sits on a persona-colored circle, so alpha-blending reads as washed-out instead of green) */
         }
 
         .cc-strip-icon[data-conv-mode="quiet"]::before {
             content: "🤭";
             background: rgba( 255, 193, 7, 0.95 );  /* amber — small ding only */
+        }
+
+        /* Active-speaker state: this persona's notification is currently being read aloud via TTS.
+         * Darker green background re-asserted; pulsing yellow glow uses size-scaled keyframes
+         * tuned for the 18px badge (full-size ttsPulseGlow would bleed into adjacent icons).
+         * Quiet-mode amber badges are intentionally exempt — only speakerphone personas signal TTS. */
+        .cc-strip-icon[data-conv-mode="speakerphone"][data-tts-active="true"]::before {
+            background: rgba( 25, 135, 84, 0.95 );
+            animation: ttsPulseGlowSmall 1s ease-in-out infinite;
+        }
+
+        @keyframes ttsPulseGlowSmall {
+            0%, 100% {
+                box-shadow: 0 0 2px 1px rgba( 255, 193, 7, 0.4 );
+                outline: 1px solid rgba( 255, 193, 7, 0.6 );
+            }
+            50% {
+                box-shadow: 0 0 6px 2px rgba( 255, 193, 7, 0.9 );
+                outline: 1px solid #ffc107;
+            }
         }
 
         /* Mic at bottom-right + count badge at top-right are on opposite

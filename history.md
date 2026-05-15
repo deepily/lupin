@@ -2,6 +2,49 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.15 - Session 06aba5f7 (Arnold 🪨) | Focused-tray strip-icon TTS-active glow mirror + conversation-mode toggle button mint recolor
+
+Chorus session. Rick's morning `@all` broadcast assigned Arnold to "sit tight" (María on Commons, Rachel on recent-work summary, Rio on top-5 TODO triage); Rick then voice-tasked Arnold with a UI tweak ahead of any other queued work. **Goal**: when a notification bubble is being read aloud via TTS, mirror the same pulsing-yellow glow onto the matching persona's `.cc-strip-icon::before` subscript speaker badge in the focused tray, with a darker-green / lighter-green palette indicating active-speaker vs idle, so Rick can see at-a-glance who's speaking without scrolling the feed.
+
+**CSS** (`src/fastapi_app/static/css/notifications.css`):
+- Lightened `.cc-strip-icon[data-conv-mode="speakerphone"]::before` idle background — first attempt copied `rgba(25,135,84,0.25)` verbatim from `.sender-conversation-mode-btn.is-active` and Rick caught it on first refresh: 25%-alpha works on the toggle's light sender-card parent but reads as washed-out on the badge's persona-colored circle parent. Fixed by switching to **solid `#d1e7dd`** (Bootstrap `success-bg-subtle`, perceptual equivalent). Lesson now in the R&D doc: when porting a "matching shade" between elements with different parent backgrounds, port the *perceptual* color (solid hex), not the *literal* `rgba()`.
+- Added `.cc-strip-icon[data-conv-mode="speakerphone"][data-tts-active="true"]::before` rule re-asserting darker `rgba(25,135,84,0.95)` + applying new `@keyframes ttsPulseGlowSmall` (peak `box-shadow: 0 0 6px 2px` + `outline: 1px`; rest `0 0 2px 1px` + `outline: 1px`) — sized for the 18px badge to avoid bleeding into adjacent strip icons.
+- Added `transition: background 500ms ease-in-out` on the shared base rule for a polished fade between idle/active states (Rick's preference over hard-switch).
+- Quiet-mode (🤭 amber) badges intentionally exempt by selector — Rick explicitly asked to leave them alone.
+
+**Follow-on toggle recolor**: Rick liked the mint and asked for the same on `.sender-conversation-mode-btn.is-active`. Two-line edit: idle bg `rgba(25,135,84,0.25)` → `#d1e7dd`; hover bg `rgba(25,135,84,0.35)` → `#a3cfbb` (Bootstrap success-200, preserves hover affordance). Borders left at original alpha green — single-pixel outlines read fine on any parent.
+
+**JS** (`src/fastapi_app/static/js/notifications.js`):
+- New `_mirrorTTSStateToStripIcons( notificationElement, active )` helper walks up to nearest `.sender-card` to resolve `data-sender-id`, then toggles `data-tts-active="true"` (or deletes the attribute) on every matching `.cc-strip-icon[data-sender-id="..."]` in the DOM. Multi-instance safe.
+- Hooked into `startTTSPlayingIndicator()` and `stopTTSPlayingIndicator()` (lines ~4895/4917) — same call sites where the existing `tts-playing` class is added/removed on the bubble itself, so the strip mirror state stays in lockstep with the bubble glow.
+- TTS-cancel / WS-disconnect cleanup paths NOT touched — pre-existing concern; if `stopTTSPlayingIndicator()` is bypassed by an abrupt cancel the strip would stay green-glowing until next start/stop cycle. Out of scope per minimum-blast-radius.
+
+**Verification**:
+
+| Layer | Result |
+|---|---|
+| `node --check notifications.js` | ✅ `JS_PARSE_OK` |
+| CSS sanity (balanced braces 764/764, all 4 new rules present) | ✅ |
+| Rick live hard-refresh on `:7999` after first attempt | ❌ "lighter green not transparent!!!" — fixed by switch to solid `#d1e7dd` |
+| Rick live hard-refresh on `:7999` after solid-mint fix | ✅ "I like the mint shade" |
+| Rick live hard-refresh on `:7999` after toggle recolor | ✅ "That's nice. Go ahead and document and commit your work." |
+
+**Files touched** (parent Lupin only — no CoSA edits, no other repos):
+
+| File | Change |
+|---|---|
+| `src/rnd/v0.1.7/2026.05.15-focused-tray-tts-glow-mirror.md` (new) | Plan + decisions + implementation log + mistake-and-fix audit + follow-on toggle-recolor section |
+| `src/fastapi_app/static/css/notifications.css` | Strip-badge idle/active rules + `ttsPulseGlowSmall` keyframes + 500ms fade transition + toggle-button mint recolor (idle + hover) |
+| `src/fastapi_app/static/js/notifications.js` | `_mirrorTTSStateToStripIcons()` helper + 2 hook insertions in TTS start/stop indicators |
+
+**Parallel-session safety**: `git status` at commit time also showed `bug-fix-queue.md`, `src/conf/lupin-app.ini`, `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`, `src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md`, and `src/rnd/v0.1.7/2026.05.15-rio-top-5-todo-bug-triage.md` from María / Rio / Mr. Radio sessions — all explicitly excluded from this session's stage set per v2.0 selective-staging mandate.
+
+**Pending follow-on**: visual-regression baseline refresh on `:8000` (`-k visual --update-snapshots`, `auto_fix_on_failure: False`, ~17min wall, `:8000` standing-permission-for-baseline-capture per `feedback_test_server_free_for_baseline_capture`). Asking Rick before scheduling so we don't collide with other in-flight `:8000` work.
+
+**Memories**: none new — the alpha-vs-solid lesson is captured in the R&D doc audit log for future readers.
+
+---
+
 ### 2026.05.15 - Session 3b6be6f9 (María 🌸) | Notifications UI three-fix arc: Recent-Activity refresh observability + focus-tray reload persistence + header-toggle children-wipe (with sweep of 2 latent same-pattern callers)
 
 Chorus session continuation. Rick's morning `@all` broadcast assigned María the Commons blackboard lead role; status read confirmed Phase 3 fully closed 2026-05-13 (398 unit/smoke + 7 integration green), with the open follow-on backlog being the 4× persona-completion dup bug + `owner_user_id` writer stamper + stale-bridge sweeper. Rick then voice-redirected to three notifications-UI bugs ahead of the queue, fixed sequentially across the session. All three fixed and live-confirmed; no R&D doc per `feedback_skip_rnd_doc_for_trivial_fixes`.
