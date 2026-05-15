@@ -392,16 +392,39 @@ class TestSpeakerphoneExitReminder:
         assert "displaced" not in result.lower()
         assert "another session activated" not in result.lower()
 
-    def test_both_bodies_instruct_stop_notify( self ):
+    def test_both_bodies_instruct_quiet_mode_keep_notify_with_demoted_priority( self ):
+        """
+        Updated 2026-05-15 PM (Rio, session c1cbcd11): the 2026-05-14 rewrite
+        deliberately replaced the old "stop calling notify(), resume terminal-
+        only output" framing with QUIET-mode (keep notify(), demote priority).
+        See `hook_common.speakerphone_exit_reminder` docstring §2026-05-14
+        evening rewrite for the rationale (old framing conflicted with the new
+        quiet-mode rider, producing contradictory instructions in the same
+        turn after deactivation).
+        """
         for mode in ( "solo", "chorus" ):
             result = speakerphone_exit_reminder( mode )
             assert "notify" in result
-            assert "Stop" in result or "stop" in result
+            assert "QUIET mode" in result
+            assert "priority='medium'" in result
+            assert "suppress_ding=False" in result
 
-    def test_both_bodies_instruct_stop_voice_message_wrap( self ):
+    def test_both_bodies_acknowledge_transition_silently( self ):
+        """
+        Updated 2026-05-15 PM (Rio, session c1cbcd11). The old test expected
+        the deactivation reminder to mention `<voice-message>` wrap directives.
+        The 2026-05-14 rewrite removed that framing — wrap directives now live
+        in the standard rider (speakerphone_wrap), not the transition reminder.
+        The transition reminder now only instructs silent acknowledgement.
+        """
         for mode in ( "solo", "chorus" ):
             result = speakerphone_exit_reminder( mode )
-            assert "voice-message" in result
+            # The post-2026-05-14 reminder explicitly says "acknowledge this
+            # transition silently — do not announce it to the user."
+            assert "silently" in result.lower() or "do not announce" in result.lower()
+            # And the reminder must NOT contain wrap-directive language — wrap
+            # rules belong to the entry-side rider, not the exit reminder.
+            assert "voice-message" not in result
 
     def test_both_bodies_announce_deactivation( self ):
         # Body must explicitly announce the deactivation transition so the

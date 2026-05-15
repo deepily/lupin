@@ -1135,16 +1135,25 @@ def _speakerphone_reminder_body( source, mode, speakerphone_on ):
         # quiet-mode (demoted priority). User wants the historical record
         # preserved with a small ding on arrival; TTS playback is suppressed.
         # See src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
+        #
+        # 2026-05-15 PM — restored the `_SPEAKERPHONE_WRAP_SENTINEL` invariant.
+        # The OFF-variant body now leads with "This session has speakerphone
+        # mode OFF" so the sentinel ("This session has speakerphone mode")
+        # appears in both ON and OFF variants. Without this, the idempotency
+        # check in `speakerphone_wrap` mis-fired on OFF-wrapped strings and
+        # could double-wrap. Per session c1cbcd11 (Rio ⚡) post-doc-viewer
+        # regression-fix sweep.
         parts.append(
-            "This session is in QUIET mode (per-session DND). The historical "
-            "record matters — keep calling `notify()` for milestones, errors, "
-            "action-required prompts, and the closing-turn summary — BUT use "
-            "`priority='medium'` and `suppress_ding=False` (NOT the standard "
-            "`priority='high', suppress_ding=True`). The user wants the small "
-            "arrival ding without full TTS playback. Detail still goes in the "
-            "`abstract` parameter (UI card rendering is unaffected by the "
-            "priority demotion). Blocking `ask_*` tools remain available — "
-            "use them with `priority='medium'` as well."
+            "This session has speakerphone mode OFF — operating in QUIET mode "
+            "(per-session DND). The historical record matters — keep calling "
+            "`notify()` for milestones, errors, action-required prompts, and "
+            "the closing-turn summary — BUT use `priority='medium'` and "
+            "`suppress_ding=False` (NOT the standard `priority='high', "
+            "suppress_ding=True`). The user wants the small arrival ding "
+            "without full TTS playback. Detail still goes in the `abstract` "
+            "parameter (UI card rendering is unaffected by the priority "
+            "demotion). Blocking `ask_*` tools remain available — use them "
+            "with `priority='medium'` as well."
         )
 
     if mode == "solo":
