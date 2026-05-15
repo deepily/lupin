@@ -86,6 +86,84 @@ Chorus session. Rick's morning `@all` broadcast assigned Arnold to "sit tight" (
 
 ---
 
+### 2026.05.15 PM - Session 3b6be6f9 (María 🌸) | Inter-Session DM Phase 0 implementation landed — 8 steps, 28 net-new tests, 514/514 :7999 regression green
+
+Same session 3b6be6f9 continued from the AM notifications-UI three-fix arc into Rick's "ultrathink" prompt about implementing inter-Claude-Code session communication that logs to Recent Activity and lets María DM Mr. Radio directly without Rick relaying. Outcome: full design doc serialized to `src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md`, four Q-decisions sequentially ratified, REUSE + Pass 1 Fitness folded into one pass yielding 11 ACs (then expanded to 20 after Rick correctly flagged AC9 undersold the testing layer per the Test Ownership Mandate), implementation through all 8 steps across 5 parent Lupin files + 2 CoSA files, 28 net-new tests (16 unit + 7 endpoint smoke + 5 listener smoke) plus 1 regression test updated, and full commons regression on `:7999` came back **514 PASSED / 0 FAILED**.
+
+**Architectural correction post-Rick feedback**: initial §2.2 over-stated the gap (treating DM as a parallel mechanism). Rick correctly pushed back: *"in section 2.2 you say there is no commons_send_to method when in fact you list 2 methods that accomplish just this: commons_ask_sync and commons_ask_async. Why can't you reuse them?"* Corrected to extend `commons_ask_async` with `recipient_session_id` / `recipient_persona` / `expect_reply` kwargs; extend `/api/commons/register-question` to dispatch `commons_question_received` to the recipient at register time when `recipient_*` set; mirror Phase 3's `commons_answer_received` listener handler. Scope shrunk from ~480 LOC + 4-6 sessions to ~210 LOC + 1 session. No new modules, no new endpoints, no new orchestrator class.
+
+**Phase 0 ratifications** (§14 of the design doc):
+- **Q1-rev**: extend `commons_ask_async` + thin `commons_send_to` wrapper (both surfaces public, one underlying code path)
+- **Q2-rev**: fire-and-forget dispatch via `notification_queue` (mirrors Phase 2 `failed_recipients` best-effort pattern)
+- **Q3-rev**: both `recipient_session_id` AND `recipient_persona` accepted; resolution chain exact → case-insensitive → punct-tolerant; **422 returns rich `RecipientResolutionError` Pydantic body** with `resolution_chain_attempted` + `candidate_alternatives` + `suggested_next_action` so AI caller can self-correct (Rick's amendment)
+- **Q4-rev**: same broadcasts topic + DM badge; `_renderCommonsEntry` conditionally appends `→ @<recipient>` pill for entries with `metadata.recipient_persona`
+
+**Implementation step inventory** (8 steps; Step 8 was no-op since existing Phase 3 INI keys cover what's needed):
+1. `RegisterQuestionRequest` Pydantic + new `RecipientResolutionError` model
+2. `_resolve_dm_recipient` + `_dispatch_commons_question_received` helpers + `execute_register_question` extension + route handler wiring with `find_active_voice_persona_sessions` / `_load_bridge_fields` / `_active_session_threshold_seconds` injected
+3. `_register_push_mode` rich-dict return; `ask_async` recipient kwargs + auto-enable push-mode on recipient set; `commons_send_to` thin `@mcp.tool` wrapper
+4. `commons_question_received` action branch + `_handle_commons_question_received` helper with `COMMONS PEER MESSAGE` framing + T7 isolation
+5. `valid_types` += `"commons_question_received"` in `notifications.py`
+6. DM badge in `_renderCommonsEntry`; `.commons-activity-dm-badge` CSS pill
+7. 28 net-new tests across unit + smoke
+8. INI keys — no-op for v1 (existing keys suffice)
+
+**Verification table** (per AC14 mandate):
+
+| Layer | Suite | Tests | Pass | Fail | Notes |
+|---|---|---|---|---|---|
+| `py_compile` | 5 Python files | 5 | 5 | 0 | ✅ |
+| `node --check` | notifications.js | 1 | 1 | 0 | ✅ |
+| Unit `:7999` | `test_inter_session_dm.py` (NEW) | 16 | 16 | 0 | ✅ AC9a |
+| Unit `:7999` | Full commons regression | 431 | 431 | 0 | ✅ no breakage |
+| Smoke `:7999` | `test_dm_endpoint_smoke.py` (NEW) | 7 | 7 | 0 | ✅ AC9b endpoint |
+| Smoke `:7999` | `test_cc_notification_listener.py` (5 new) | 53 | 53 | 0 | ✅ AC9b listener |
+| Smoke `:7999` | Adjacent (ask_async_push_e2e + broadcast_history + two_session_roundtrip) | 21 | 21 | 0 | ✅ |
+| **Combined `:7999`** | unit + smoke | **514** | **514** | **0** | **✅ 22.92s** |
+
+**WS smoke skipped because the activity watcher is already topic-agnostic** (`CommonsActivityWatcher` iterates `_all_topic_names()` minus excluded set per `commons_activity_watcher.py:92,115`). DMs in `dm-<recipient>` topics flow through unchanged. `execute_broadcast_history` likewise aggregates from `_all_topic_names()` per `commons.py:759-761` — DMs surface in Recent Activity automatically.
+
+**Reproducibility recipe** (post-:8000 ratification):
+1. Open two CC sessions (María + Mr. Radio).
+2. María calls `commons_send_to(recipient="radio", body="...")` via MCP.
+3. Mr. Radio's tmux receives `<system-reminder>` with `COMMONS PEER MESSAGE (question_id <uuid>, topic dm-radio, from session <8-char>)` framing pointing him to `commons_read('dm-radio')`.
+4. Mr. Radio reads body, replies via `commons_post('dm-radio', body=<reply>, metadata={'in_reply_to': <question_id>})`.
+5. María's Phase-3 watcher pushes the reply back via `commons_answer_received`.
+6. Rick watches both in Recent Activity with `→ @radio` and `→ @maria` DM badges.
+
+**Files touched (parent Lupin only — CoSA-side edits NOT staged from this context per `feedback_lupin_only_never_cosa`)**:
+
+| File | Change |
+|---|---|
+| `src/lupin_mcp/commons_ask.py` | `_register_push_mode` rich-dict return; `ask_async` recipient kwargs + metadata stamping |
+| `src/lupin_mcp/cosa_voice_mcp.py` | `commons_ask_async` extended; new `commons_send_to` `@mcp.tool` wrapper |
+| `src/lupin_cli/claude_code/hooks/lib/cc_notification_listener.py` | `commons_question_received` action branch + `_handle_commons_question_received` helper |
+| `src/fastapi_app/static/js/notifications.js` | DM badge in `_renderCommonsEntry` |
+| `src/fastapi_app/static/css/notifications.css` | `.commons-activity-dm-badge` pill |
+| `src/tests/unit/commons/test_inter_session_dm.py` | NEW (16 tests) |
+| `src/tests/unit/commons/test_commons_ask.py` | 1 regression test updated for new `_register_push_mode` dict return |
+| `src/tests/smoke/test_dm_endpoint_smoke.py` | NEW (7 tests) |
+| `src/tests/smoke/test_cc_notification_listener.py` | 5 new tests for `commons_question_received` handler |
+| `src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md` | NEW design doc |
+| `history.md` | this entry |
+| `.claude-session.md` | María section extended |
+
+**CoSA-side pending (separate commit in CoSA-context session)**: `src/cosa/rest/routers/commons.py` (Pydantic + 2 helpers + endpoint extension + route handler wiring) + `src/cosa/rest/routers/notifications.py` (`valid_types` += entry).
+
+**Parallel-session safety**: working tree at commit time also had pending modifications from session `ea85fd64` Mr. Radio 🦉 (`bug-fix-queue.md` + `lupin-app.ini` + `src/fastapi_app/main.py` cache-registry wiring) + untracked R&D docs (`2026.05.15-doc-viewer-scope-unification.md` Rachel, `2026.05.15-rio-top-5-todo-bug-triage.md` Rio, `2026.05.15-gpu-doom-loop-uvicorn-reload-cu124-mismatch.md` Mr. Radio) + untracked `src/tests/unit/test_cache_registry.py`. All EXPLICITLY EXCLUDED from this commit via `git stash push` of modified other-session files + selective `git add` of mine. Stash pop restores them post-commit.
+
+**:8000 work pending** (Phase 2 of two-phase E2E gate per AC13 — Rick authorized up to 5 retries):
+- AC9d — `test_dm_integration_live.py` (writing this session)
+- AC9e — `test_dm_recent_activity.spec.ts` Playwright (writing this session)
+- AC9f — visual baseline (`--update-snapshots`, `auto_fix_on_failure: False`)
+- `docker restart lupin-rest-dev` bounce permitted if needed
+
+**Memories**: none new — implementation follows existing project precedents already captured.
+
+**Commit**: pending (this session-end checkpoint)
+
+---
+
 ### 2026.05.15 - Session 3b6be6f9 (María 🌸) | Notifications UI three-fix arc: Recent-Activity refresh observability + focus-tray reload persistence + header-toggle children-wipe (with sweep of 2 latent same-pattern callers)
 
 Chorus session continuation. Rick's morning `@all` broadcast assigned María the Commons blackboard lead role; status read confirmed Phase 3 fully closed 2026-05-13 (398 unit/smoke + 7 integration green), with the open follow-on backlog being the 4× persona-completion dup bug + `owner_user_id` writer stamper + stale-bridge sweeper. Rick then voice-redirected to three notifications-UI bugs ahead of the queue, fixed sequentially across the session. All three fixed and live-confirmed; no R&D doc per `feedback_skip_rnd_doc_for_trivial_fixes`.

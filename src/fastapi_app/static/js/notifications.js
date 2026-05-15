@@ -9907,6 +9907,18 @@ class NotificationsUI {
         if ( entry.topic_kind === "reserved" ) chip.hidden = true;
         row.appendChild( chip );
 
+        // DM badge — entries stamped with metadata.recipient_persona are directed
+        // inter-session DMs (per 2026.05.15-inter-session-direct-messaging-design
+        // Phase 0 Q4-rev: same broadcasts topic + visual badge).
+        const recipientPersona = entry.metadata && entry.metadata.recipient_persona;
+        if ( recipientPersona ) {
+            const dmBadge = document.createElement( "span" );
+            dmBadge.className   = "commons-activity-dm-badge";
+            dmBadge.textContent = `→ @${recipientPersona}`;
+            dmBadge.title       = "Directed message — peer-to-peer between CC sessions";
+            row.appendChild( dmBadge );
+        }
+
         const body = document.createElement( "div" );
         body.className   = "commons-activity-entry-body";
         body.textContent = entry.body || "";

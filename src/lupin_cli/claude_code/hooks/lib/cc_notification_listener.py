@@ -300,6 +300,8 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._handle_broadcast_received( notification )
         elif action == "commons_answer_received":
             self._handle_commons_answer_received( notification )
+        elif action == "commons_question_received":
+            self._handle_commons_question_received( notification )
         else:
             self._log( f"{self.LOG_PREFIX} Unknown action: {action}" )
 
@@ -385,6 +387,59 @@ class CCNotificationListener( BaseWebSocketListener ):
         )
         wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
         self._inject_via_tmux( wrapped, wrap=False )
+
+    def _handle_commons_question_received( self, notification ):
+        """
+        Handle an `action:commons_question_received` notification — an inter-
+        session directed DM addressed to this CC session.
+
+        Per AC6 + Phase 0 Q5-rev framing of
+        src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md:
+        - Reads payload fields stamped at register-question dispatch time by
+          the endpoint's `_dispatch_commons_question_received` helper (the
+          sender's persona is NOT stamped here today — the listener can read
+          it from the topic entry if needed). For v1, the sender is identified
+          via the asker_session_id field; future enhancement adds the sender's
+          persona to the dispatch payload.
+        - Builds the `<system-reminder>` body using the Q5-rev framing
+          (parallel to Phase 3's COMMONS PEER REPLY):
+              "COMMONS PEER MESSAGE (question_id X, topic Y, from session Z):
+                  <body to be read from the commons topic>"
+          For v1, the body is not in the dispatch payload (the entry sits in
+          the commons topic) — the listener injects the framing with a
+          pointer to the topic + question_id so the recipient AI can call
+          commons_read() to retrieve the actual body and any subsequent
+          context. v1.1 enhancement: include body in dispatch payload to
+          avoid the read round-trip.
+        - Injects via `_inject_via_tmux(text, wrap=False)` — body is a
+          complete <system-reminder> block.
+        """
+        payload          = notification.get( "payload" ) or { }
+        question_id      = payload.get( "question_id" )
+        topic            = payload.get( "topic" )
+        asker_session    = payload.get( "asker_session" ) or "unknown"
+
+        if not question_id:
+            self._log( f"{self.LOG_PREFIX} commons_question_received missing question_id; skipping" )
+            return
+        if not topic:
+            self._log( f"{self.LOG_PREFIX} commons_question_received missing topic; skipping" )
+            return
+
+        reminder_body = (
+            f"COMMONS PEER MESSAGE (question_id {question_id}, topic {topic}, from session {asker_session[:8]}):\n\n"
+            f"A peer CC session has addressed a directed DM to you on topic '{topic}' with question_id '{question_id}'.\n"
+            f"Read the message body via commons_read(topic='{topic}', limit=10) and look for the entry whose "
+            f"metadata.question_id == '{question_id}'. To reply, call commons_post(topic='{topic}', body='<your reply>', "
+            f"metadata={{'in_reply_to': '{question_id}'}}) — the original asker's watcher will push your reply back "
+            f"to their tmux session via Phase 3 commons_answer_received."
+        )
+        wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+        try:
+            self._inject_via_tmux( wrapped, wrap=False )
+        except Exception as e:
+            # T7 listener-injection isolation: failure logs + skips, doesn't crash listener
+            self._log( f"{self.LOG_PREFIX} commons_question_received inject failed: {e}" )
 
     def _inject_exit_conversation_reminder( self ):
         """

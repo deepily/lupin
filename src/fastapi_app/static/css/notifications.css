@@ -4799,6 +4799,21 @@
     display: none;
 }
 
+/* DM badge — appended next to the topic chip when entry.metadata.recipient_persona
+   is set (inter-session directed message per
+   src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md Q4-rev). */
+.commons-activity-dm-badge {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    margin-left: 4px;
+    border-radius: 8px;
+    background-color: rgba( 100, 149, 237, 0.15 );
+    color: #1c4587;
+    border: 1px solid rgba( 100, 149, 237, 0.5 );
+    white-space: nowrap;
+}
+
 .commons-activity-entry-body {
     grid-area: body;
     font-size: 12px;

@@ -337,7 +337,12 @@ def test_push_mode_register_strips_trailing_slash_on_base_url( store ):
 
 
 def test_register_push_mode_missing_requests_returns_false():
-    """When `requests` cannot be imported, `_register_push_mode` returns False."""
+    """When `requests` cannot be imported, `_register_push_mode` returns failure dict.
+
+    Updated 2026-05-15 (Inter-Session DM extension): return shape went from
+    bool to {success, http_status, detail, dm_dispatched} dict to surface
+    RecipientResolutionError on 422. Failure case → {success: False, http_status: None}.
+    """
     import builtins
     original_import = builtins.__import__
 
@@ -356,4 +361,7 @@ def test_register_push_mode_missing_requests_returns_false():
             timeout_seconds  = 1.0,
             debug            = True,
         )
-    assert result is False
+    assert isinstance( result, dict )
+    assert result[ "success" ] is False
+    assert result[ "http_status" ] is None
+    assert "detail" in result

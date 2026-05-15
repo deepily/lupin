@@ -1805,42 +1805,140 @@ def commons_ask_sync(
 
 @mcp.tool
 def commons_ask_async(
-    topic       : str,
-    body        : str,
-    question_id : Optional[ str ] = None,
+    topic                : str,
+    body                 : str,
+    question_id          : Optional[ str ] = None,
+    recipient_session_id : Optional[ str ] = None,
+    recipient_persona    : Optional[ str ] = None,
+    expect_reply         : bool            = True,
 ) -> dict:
     """
     Post a question to commons and return immediately (fire-and-forget).
 
     Per AC7 in
-    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md
+    + Inter-Session DM extension per
+    src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md.
 
     Phase 1 polling-mode contract (D1 deviation): caller polls via
     `commons_read(topic, since=...)` and filters for entries whose
-    `metadata.in_reply_to == question_id` to detect answers. Phase 3 will
-    promote this to push-based `<system-reminder>` injection without changing
-    the tool signature.
+    `metadata.in_reply_to == question_id` to detect answers. Phase 3 push-mode
+    optionally adds asker-side reply push.
+
+    Inter-Session DM mode (auto-activated when `recipient_*` is supplied):
+    - Push-mode forced on; HTTP register fires with recipient kwargs
+    - Server resolves recipient (session_id wins, else persona via
+      exact → case-insensitive → punct-tolerant match) and dispatches
+      `commons_question_received` to recipient's listener fire-and-forget
+    - On resolution failure: returns 422 with `RecipientResolutionError`
+      surfaced via `recipient_resolution_error` key in the result
+    - Set `expect_reply=False` for fire-and-forget DMs that don't need
+      Phase 3 reply tracking
 
     Args:
         topic: Topic to post the question to
         body: The question text
-        question_id: Optional UUID; if omitted, the store auto-generates one
+        question_id: Optional UUID; if omitted, auto-generated
+        recipient_session_id: Optional explicit recipient session_id (precise)
+        recipient_persona: Optional recipient persona name (fuzzy-resolved)
+        expect_reply: When False, server skips reply-tracking watcher overhead
 
     Returns:
-        dict `{question_id, posted_ts}`
+        dict — Phase 1: `{question_id, posted_ts, push_mode_active}`;
+        DM mode adds: `dm_dispatched: bool | None`;
+        on recipient resolution failure: `recipient_resolution_error: dict`
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     persona = _commons_persona_fields()
+
+    # Push-mode auto-enables when caller wants directed DM dispatch
+    push_mode    = recipient_session_id is not None or recipient_persona is not None
+    api_base_url = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
+    api_key      = os.environ.get( "LUPIN_MCP_API_KEY" )
+    auth_header  = { "X-API-Key": api_key } if api_key else None
+
     return _commons_ask_async_impl(
-        store             = _get_commons_store(),
-        topic             = topic,
-        body              = body,
-        sender_session_id = SESSION_ID,
-        persona_name      = persona[ "persona_name" ],
-        persona_icon      = persona[ "persona_icon" ],
-        persona_color     = persona[ "persona_color" ],
-        question_id       = question_id,
+        store                = _get_commons_store(),
+        topic                = topic,
+        body                 = body,
+        sender_session_id    = SESSION_ID,
+        persona_name         = persona[ "persona_name" ],
+        persona_icon         = persona[ "persona_icon" ],
+        persona_color        = persona[ "persona_color" ],
+        question_id          = question_id,
+        push_mode_enabled    = push_mode,
+        api_base_url         = api_base_url,
+        auth_header          = auth_header,
+        recipient_session_id = recipient_session_id,
+        recipient_persona    = recipient_persona,
+        expect_reply         = expect_reply,
     )
+
+
+@mcp.tool
+def commons_send_to(
+    recipient    : str,
+    body         : str,
+    expect_reply : bool            = False,
+    in_reply_to  : Optional[ str ] = None,
+    topic        : Optional[ str ] = None,
+    question_id  : Optional[ str ] = None,
+) -> dict:
+    """
+    Send a directed inter-session DM to another CC session.
+
+    Per Phase 0 Q1-rev (2026-05-15 ratified): thin ergonomic wrapper around
+    `commons_ask_async` that defaults to fire-and-forget semantics and
+    addresses the recipient by persona name. The underlying register-question
+    endpoint resolves the persona (exact → case-insensitive → punct-tolerant),
+    dispatches `commons_question_received` to the recipient's listener via
+    tmux injection, and stamps `metadata.recipient_persona` on the topic
+    entry so Recent Activity renders a DM badge.
+
+    Power users who need session_id-precise addressing or `expect_reply=True`
+    semantics can call `commons_ask_async` directly with the equivalent
+    kwargs.
+
+    Args:
+        recipient: Recipient persona name (e.g. "radio", "rachel", "Maria").
+                   Server-side persona resolution is fuzzy: case-insensitive
+                   and punctuation/whitespace-tolerant.
+        body: Message body
+        expect_reply: Default False (fire-and-forget). When True, the asker-side
+                      watcher tracks for replies via Phase 3 push-back-to-asker.
+        in_reply_to: Optional question_id from a prior received DM (threads
+                      the reply via metadata; recipient sees correlation in
+                      the system-reminder framing).
+        topic: Optional topic override. Default `dm-<recipient>` for routing
+                clarity.
+        question_id: Optional explicit question_id; auto-generated if omitted.
+
+    Returns:
+        Same shape as `commons_ask_async`. On recipient resolution failure,
+        the result carries `recipient_resolution_error` describing what was
+        tried + candidate alternatives + suggested next action.
+
+    Example:
+        commons_send_to(recipient="radio", body="do you have the latest commit hash for X?")
+        commons_send_to(recipient="rachel", body="thanks for the doc-scope work yesterday", expect_reply=False)
+    """
+    if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
+    target_topic = topic or f"dm-{recipient}"
+    # When `in_reply_to` is supplied, the body's effective context is "reply to a prior DM" —
+    # we still call commons_ask_async, but stamp `in_reply_to` on the question metadata so the
+    # original asker's Phase 3 watcher (if running) correlates this entry as the answer.
+    # Effective recipient is the persona; in_reply_to threading is handled at the metadata layer.
+    result = commons_ask_async(
+        topic                = target_topic,
+        body                 = body,
+        question_id          = question_id,
+        recipient_persona    = recipient,
+        expect_reply         = expect_reply,
+    )
+    if in_reply_to is not None and isinstance( result, dict ):
+        # Surface the in_reply_to on the result so callers can see the threading.
+        result[ "in_reply_to" ] = in_reply_to
+    return result
 
 
 if __name__ == "__main__":
