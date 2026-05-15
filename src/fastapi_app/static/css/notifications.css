@@ -4607,6 +4607,182 @@
 }
 
 /* ========================================
+   COMMONS RECENT ACTIVITY — admin-oversight stream inside the broadcast card.
+   Design: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+   Q1 — AI replies route here (not to session cards)
+   Q2 — free-form topics get a topic chip prefix
+   Q3 — real-time WS push via `commons_activity` notification
+   Q5 — `presence` + `system-events` excluded by default
+   Q6 — Today + history-window dropdown
+   Q7 — flat reverse-chronological
+   Q8 — default-EXPANDED, no localStorage persistence
+   Q9 — feature ships on, broadcast card parent also default-expanded
+   ======================================== */
+
+.commons-recent-activity {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #dee2e6;
+}
+
+.commons-recent-activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 0;
+}
+
+.commons-recent-activity-header h5 {
+    margin: 0;
+    font-size: 13px;
+    color: #495057;
+    font-weight: 600;
+}
+
+.commons-recent-activity-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.commons-recent-activity-controls select {
+    font-size: 11px;
+    padding: 2px 6px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+}
+
+.commons-recent-activity-controls button {
+    background: transparent;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 11px;
+    color: #495057;
+    transition: background-color 0.15s;
+}
+
+.commons-recent-activity-controls button:hover {
+    background-color: rgba( 0, 0, 0, 0.04 );
+}
+
+/* Toggle pill mirrors the existing .toggle-button pattern */
+.commons-recent-activity-controls .toggle-button {
+    border: none;
+    padding: 2px 6px;
+    background: transparent;
+}
+
+#commons-recent-activity-body {
+    margin-top: 10px;
+    max-height: 480px;
+    overflow-y: auto;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    background: #fafbfc;
+    padding: 8px;
+}
+
+#commons-recent-activity-body.collapsed {
+    display: none;
+}
+
+#commons-recent-activity-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#commons-recent-activity-empty {
+    text-align: center;
+    color: #868e96;
+    font-size: 12px;
+    padding: 24px 12px;
+}
+
+#commons-recent-activity-empty[hidden] {
+    display: none;
+}
+
+/* Individual entry row — populated by notifications.js Step 7. */
+.commons-activity-entry {
+    display: grid;
+    grid-template-columns: 24px auto auto 1fr auto;
+    grid-template-areas: "icon name chip body time";
+    gap: 8px;
+    align-items: start;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: white;
+    border-left: 3px solid var( --persona-color, #6c757d );
+    transition: background-color 0.15s;
+}
+
+.commons-activity-entry:hover {
+    background-color: rgba( 0, 0, 0, 0.02 );
+}
+
+.commons-activity-entry-icon {
+    grid-area: icon;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var( --persona-color, #6c757d );
+    color: white;
+    font-size: 13px;
+}
+
+.commons-activity-entry-name {
+    grid-area: name;
+    font-weight: 600;
+    font-size: 12px;
+    color: #495057;
+    white-space: nowrap;
+}
+
+.commons-activity-entry-topic-chip {
+    grid-area: chip;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    border: 1px solid var( --persona-color, #ced4da );
+    color: #495057;
+    background-color: rgba( 0, 0, 0, 0.02 );
+    white-space: nowrap;
+}
+
+.commons-activity-entry-topic-chip[hidden] {
+    display: none;
+}
+
+.commons-activity-entry-body {
+    grid-area: body;
+    font-size: 12px;
+    color: #212529;
+    line-height: 1.4;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.commons-activity-entry-time {
+    grid-area: time;
+    font-size: 10px;
+    color: #868e96;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    align-self: start;
+}
+
+/* ========================================
    JOB SEND MESSAGE — User-to-Job Communication (Approach D)
    Appears on todo + running job cards to allow users to send
    messages to the SWE Team orchestrator.

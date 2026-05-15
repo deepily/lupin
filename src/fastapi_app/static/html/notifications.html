@@ -628,7 +628,10 @@
                         <h4>📢 Broadcast to all CC sessions</h4>
                         <button class="toggle-button" id="broadcast-submit-toggle">▶</button>
                     </div>
-                    <div class="section-content collapsed" id="broadcast-submit-section">
+                    <!-- Broadcast card parent default-expanded per Q9 of
+                         src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+                         — Recent Activity admin-oversight surface is visible on page load. -->
+                    <div class="section-content" id="broadcast-submit-section">
                         <div id="broadcast-panel-body">
                             <div id="broadcast-recipients-row">
                                 <span id="broadcast-recipients-label">Sending to:</span>
@@ -660,6 +663,46 @@
                                  broadcast-panel.js `setStatus()` + `renderAggregate()` already null-guard
                                  against missing DOM — both become silent no-ops. Post-send feedback now arrives
                                  via the standard notification stream below (`commons_broadcast_ack` cards). -->
+                        </div>
+
+                        <!-- Recent Activity — admin-oversight surface for inter-session commons traffic.
+                             Design: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+                             Gated by INI key `commons traffic visibility enabled` (read via /api/config/client
+                             on page load). When disabled, notifications.js hides the section via display:none.
+                             Default-expanded per Q9; toggle pill hides the body within the session only
+                             (no localStorage persistence — defers the parked focus-bar persistence lesson). -->
+                        <div class="commons-recent-activity" id="commons-recent-activity-section" data-testid="notifications-broadcast-recent-activity">
+                            <div class="commons-recent-activity-header" onclick="toggleSection('commons-recent-activity-body')">
+                                <h5>🕒 Recent Activity</h5>
+                                <div class="commons-recent-activity-controls">
+                                    <select id="commons-recent-activity-window"
+                                            data-testid="notifications-commons-window-dropdown"
+                                            title="Time window for the activity stream"
+                                            onclick="event.stopPropagation();">
+                                        <option value="today">Today</option>
+                                        <option value="24">Last 24 hours</option>
+                                        <option value="48">Last 2 days</option>
+                                        <option value="168">Last week</option>
+                                        <option value="720">Last month</option>
+                                        <option value="all">All time</option>
+                                    </select>
+                                    <button type="button"
+                                            id="commons-recent-activity-refresh"
+                                            data-testid="notifications-commons-refresh-btn"
+                                            title="Reload activity stream"
+                                            onclick="event.stopPropagation();">↻</button>
+                                    <button class="toggle-button" id="commons-recent-activity-toggle">▼</button>
+                                </div>
+                            </div>
+                            <div class="section-content" id="commons-recent-activity-body">
+                                <div id="commons-recent-activity-entries" data-testid="notifications-commons-entries-list">
+                                    <!-- Entries populated by notifications.js (Step 7); newest at top.
+                                         Each entry: persona icon | name | optional topic chip | HH:MM | body. -->
+                                </div>
+                                <div id="commons-recent-activity-empty" data-testid="notifications-commons-empty">
+                                    <em>No activity in window.</em>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
