@@ -26,6 +26,7 @@ from cosa.rest.routers.commons import (
     BroadcastRequestBody,
     RegisterQuestionRequest,
     _bridge_last_activity_epoch,
+    _dedupe_broadcast_acks_by_recipient,
     _dedupe_broadcasts_by_id,
     _entry_passes_same_user_scoping,
     _load_bridge_fields,
@@ -1739,6 +1740,152 @@ def test_dedupe_passes_through_broadcasts_entry_with_non_string_broadcast_id():
         ( "broadcasts", { "ts": "2026-05-15T14:00:00+00:00", "metadata": { "broadcast_id": 42 }, "body": "weird" } ),
     ]
     out = _dedupe_broadcasts_by_id( merged )
+    assert len( out ) == 1
+    assert out[ 0 ][ 1 ][ "body" ] == "weird"
+
+
+# ─── _dedupe_broadcast_acks_by_recipient ───────────────────────────────────
+# Filed via bug-fix-queue.md (2026-05-15 by María 🌸 session c4139ece) and
+# fixed in this session 06aba5f7 (Arnold 🪨) per Rick's voice direction:
+# "reapply her duplication filtering algorithm. it's just a matter of
+# testing for what kind of message needs to be filtered." Forensic data:
+# `io/commons/broadcast-acks.md` 15:16:43.852328/.852596/.854790Z showed
+# three identical `(broadcast_id=adedc24b…, sender_session_id=3b6be6f9…,
+# status="completed")` rows from one recipient.
+
+
+def _make_ack_entry( ts, sender_sid="sess-x", broadcast_id="bid-x", status="completed", body_summary="x" ):
+    """Helper for ack-shaped entries (status + broadcast_id in metadata)."""
+    return {
+        "ts"                : ts,
+        "sender_session_id" : sender_sid,
+        "persona_name"      : "maria",
+        "persona_icon"      : "🌸",
+        "persona_color"     : "#F06292",
+        "body"              : status,
+        "metadata"          : {
+            "kind"         : "ack",
+            "broadcast_id" : broadcast_id,
+            "status"       : status,
+            "body_summary" : body_summary,
+        },
+    }
+
+
+def test_dedupe_acks_collapses_repeated_completed_for_same_recipient():
+    """3 identical ack rows from one recipient (the 2026-05-15 production repro) collapse to 1."""
+    bid    = "adedc24b-973b-4b47-b73b-5de98503ebde"
+    sid    = "3b6be6f9-e3e5-46e3-ac5b-098facd4ca82"
+    merged = [
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T15:16:43.852328+00:00", sender_sid=sid, broadcast_id=bid ) ),
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T15:16:43.852596+00:00", sender_sid=sid, broadcast_id=bid ) ),
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T15:16:43.854790+00:00", sender_sid=sid, broadcast_id=bid ) ),
+    ]
+    out = _dedupe_broadcast_acks_by_recipient( merged )
+    assert len( out ) == 1
+    assert out[ 0 ][ 0 ] == "broadcast-acks"
+    # Newest-first sort happens upstream of dedupe; helper keeps first occurrence.
+    assert out[ 0 ][ 1 ][ "ts" ] == "2026-05-15T15:16:43.852328+00:00"
+
+
+def test_dedupe_acks_preserves_distinct_recipients_for_same_broadcast():
+    """Two recipients each acking one broadcast → two rows kept (different sender_session_ids)."""
+    bid    = "11111111-1111-4111-8111-111111111111"
+    merged = [
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T14:00:00+00:00", sender_sid="recip-A", broadcast_id=bid ) ),
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T14:00:00+00:00", sender_sid="recip-B", broadcast_id=bid ) ),
+    ]
+    out = _dedupe_broadcast_acks_by_recipient( merged )
+    assert len( out ) == 2
+    assert sorted( e[ "sender_session_id" ] for ( _t, e ) in out ) == [ "recip-A", "recip-B" ]
+
+
+def test_dedupe_acks_preserves_distinct_status_values_for_same_recipient():
+    """Same recipient acking same broadcast with different statuses (e.g. skipped THEN completed) → both kept."""
+    bid    = "22222222-2222-4222-8222-222222222222"
+    sid    = "recip-mixed"
+    merged = [
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T14:00:00+00:00", sender_sid=sid, broadcast_id=bid, status="skipped" ) ),
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T14:00:01+00:00", sender_sid=sid, broadcast_id=bid, status="completed" ) ),
+    ]
+    out = _dedupe_broadcast_acks_by_recipient( merged )
+    assert len( out ) == 2
+    assert sorted( e[ "metadata" ][ "status" ] for ( _t, e ) in out ) == [ "completed", "skipped" ]
+
+
+def test_dedupe_acks_preserves_distinct_broadcasts_for_same_recipient():
+    """Same recipient acking two distinct broadcasts → both kept."""
+    sid    = "recip-busy"
+    merged = [
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T14:00:00+00:00", sender_sid=sid, broadcast_id="bid-A" ) ),
+        ( "broadcast-acks", _make_ack_entry( "2026-05-15T14:05:00+00:00", sender_sid=sid, broadcast_id="bid-B" ) ),
+    ]
+    out = _dedupe_broadcast_acks_by_recipient( merged )
+    assert len( out ) == 2
+    assert sorted( e[ "metadata" ][ "broadcast_id" ] for ( _t, e ) in out ) == [ "bid-A", "bid-B" ]
+
+
+def test_dedupe_acks_does_not_mutate_input():
+    """Input list and entries must remain unchanged after dedupe."""
+    bid    = "33333333-3333-4333-8333-333333333333"
+    sid    = "recip-mut"
+    e1     = _make_ack_entry( "2026-05-15T14:00:00+00:00", sender_sid=sid, broadcast_id=bid )
+    e2     = _make_ack_entry( "2026-05-15T14:00:01+00:00", sender_sid=sid, broadcast_id=bid )
+    merged = [ ( "broadcast-acks", e1 ), ( "broadcast-acks", e2 ) ]
+    _dedupe_broadcast_acks_by_recipient( merged )
+    assert len( merged ) == 2
+    assert e1[ "metadata" ][ "broadcast_id" ] == bid
+    assert e2[ "metadata" ][ "broadcast_id" ] == bid
+
+
+def test_dedupe_acks_passes_through_non_broadcast_acks_topics():
+    """`broadcasts` per-recipient rows + free-form topics must NOT be touched by the ack-dedupe."""
+    bid    = "44444444-4444-4444-8444-444444444444"
+    sid    = "recip-X"
+    merged = [
+        ( "broadcasts",      _make_entry( "2026-05-15T14:00:00+00:00", target_sid="r-A", broadcast_id=bid ) ),
+        ( "broadcasts",      _make_entry( "2026-05-15T14:00:00+00:00", target_sid="r-B", broadcast_id=bid ) ),
+        ( "broadcast-acks",  _make_ack_entry( "2026-05-15T14:00:00+00:00", sender_sid=sid, broadcast_id=bid ) ),
+        ( "broadcast-acks",  _make_ack_entry( "2026-05-15T14:00:01+00:00", sender_sid=sid, broadcast_id=bid ) ),
+        ( "free-topic",      _make_entry( "2026-05-15T14:00:00+00:00", body="chatter" ) ),
+    ]
+    out = _dedupe_broadcast_acks_by_recipient( merged )
+    # broadcasts (2) untouched; broadcast-acks collapsed (2 → 1); free-topic (1) untouched
+    assert len( out ) == 4
+    topics = [ t for ( t, _e ) in out ]
+    assert topics.count( "broadcasts"     ) == 2
+    assert topics.count( "broadcast-acks" ) == 1
+    assert topics.count( "free-topic"     ) == 1
+
+
+def test_dedupe_acks_passes_through_entry_missing_status():
+    """Defensive — broadcast-acks entry without metadata.status (malformed) must not vanish."""
+    bid    = "55555555-5555-4555-8555-555555555555"
+    bad    = {
+        "ts"                : "2026-05-15T14:00:00+00:00",
+        "sender_session_id" : "recip-mal",
+        "persona_name"      : "maria",
+        "persona_icon"      : "🌸",
+        "persona_color"     : "#F06292",
+        "body"              : "no-status",
+        "metadata"          : { "kind": "ack", "broadcast_id": bid },  # status missing
+    }
+    merged = [ ( "broadcast-acks", bad ) ]
+    out = _dedupe_broadcast_acks_by_recipient( merged )
+    assert len( out ) == 1
+    assert out[ 0 ][ 1 ][ "body" ] == "no-status"
+
+
+def test_dedupe_acks_passes_through_entry_with_non_string_broadcast_id():
+    """Defensive — non-string broadcast_id must not crash the type check."""
+    bad = {
+        "ts"                : "2026-05-15T14:00:00+00:00",
+        "sender_session_id" : "recip-weird",
+        "metadata"          : { "kind": "ack", "broadcast_id": 42, "status": "completed" },
+        "body"              : "weird",
+    }
+    merged = [ ( "broadcast-acks", bad ) ]
+    out = _dedupe_broadcast_acks_by_recipient( merged )
     assert len( out ) == 1
     assert out[ 0 ][ 1 ][ "body" ] == "weird"
 

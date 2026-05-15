@@ -2,6 +2,47 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.15 - Session 06aba5f7 (Arnold 🪨) | Broadcast-acks consumer-side dedupe — sister to María's `_dedupe_broadcasts_by_id`, fixes the persona-completion 4× bug she filed earlier today
+
+After the focused-tray TTS-glow ship + visual-regression baseline submission, Rick voice-tasked Arnold with the persona-completion duplication bug Maria had filed at `bug-fix-queue.md:148` earlier this morning (rendering "🌸 maria completed 11:16" three times in a row on the broadcast / Recent Activity panel). Rick's directive: "reapply her duplication filtering algorithm. it's just a matter of testing for what kind of message needs to be filtered" — explicit consumer-side filter, mirror the pattern, not a deep root-cause hunt for the write-side multiplicity.
+
+**Diagnostic confirmation** (resolved Maria's "Ambiguity in repro that next session MUST resolve FIRST"): inspected `io/commons/broadcast-acks.md` directly and found three bit-identical rows for the same `(broadcast_id="adedc24b…", sender_session_id="3b6be6f9…", status="completed")` tuple at UTC 15:16:43.852328 / .852596 / .854790 — same persona-color, same body_summary, ms apart. That rules out causes (b) "1 entry rendering N times" and (c) "listener fanout to multiple clients" — it's cause (d): backend writing N entries when it should write 1, fully analogous to the per-recipient broadcasts fanout that Maria's earlier dedupe collapsed (different topic, same shape).
+
+**Fix shape** (mirrored from `_dedupe_broadcasts_by_id`):
+- New `_dedupe_broadcast_acks_by_recipient()` helper at `src/cosa/rest/routers/commons.py` (sister function adjacent to Maria's). Collapses `broadcast-acks`-topic rows by `(broadcast_id, sender_session_id, metadata.status)`, keeping first occurrence (newest after upstream DESC sort), defensive passthrough on any missing/non-string key. Non-`broadcast-acks` topics pass through unchanged.
+- Wired into `execute_broadcast_history()` immediately after the existing `_dedupe_broadcasts_by_id()` call and before the limit cap (so a small limit doesn't truncate within a single recipient's dup set).
+- Write-side multiplicity (the `_post_ack` call in `src/lupin_mcp/broadcast_handler.py` is single-call by inspection — the 3× firing must come from upstream `_handle_broadcast_received` being invoked 3× per inbound notification) is documented in the helper's docstring as a SEPARATE follow-on investigation. Consumer-side filter is the agreed shipping fix per Rick's voice direction.
+
+**Tests**: +7 new unit tests in `src/tests/unit/commons/test_commons_router.py` mirroring Maria's pattern — same-recipient repeated-completed collapse (the production repro), distinct-recipients preservation, distinct-status preservation, distinct-broadcasts preservation, input-non-mutation, non-`broadcast-acks` passthrough (including `broadcasts` rows untouched), missing-status defensive passthrough, non-string-broadcast-id defensive passthrough. Plus `_make_ack_entry` helper. All 127 commons-router unit tests preserved GREEN.
+
+**Verification**:
+
+| Layer | Result |
+|---|---|
+| `py_compile` on `commons.py` | ✅ PY_COMPILE_OK |
+| `py_compile` on `test_commons_router.py` | ✅ PY_COMPILE_OK |
+| `pytest -k "dedupe_acks or dedupe_broadcasts or dedupe_does_not_mutate or dedupe_passes_through"` | ✅ 15/15 green (7 mine + 8 Maria's) |
+| Full commons-router unit suite (`pytest src/tests/unit/commons/test_commons_router.py`) | ✅ 127/127 green |
+| Live `:7999` `GET /api/commons/broadcast-history?hours=24` against the production 3-row repro | ✅ collapsed `(adedc24b…, 3b6be6f9…, completed)` triple → 1 row, other recipient's row preserved untouched |
+| Rick live observation in `/app/notifications` | ✅ "Arnold it looks like you fixed the duplication issue" |
+
+**Server bounce note**: `:7999` auto-reload hung after the cosa-router edit (TCP up, HTTP timing out) — bounced via `docker restart lupin-rest-dev` per `feedback_dev_server_bounce_via_docker`; came back clean in <30s. Not a fix-introduced bug per se — the auto-reload pattern occasionally wedges on substantive cosa/ edits and the bounce is the standard recovery.
+
+**Files touched**:
+
+| File | Repo | Change | Staged from parent? |
+|---|---|---|---|
+| `src/cosa/rest/routers/commons.py` | CoSA submodule | New `_dedupe_broadcast_acks_by_recipient()` + wire-in at `execute_broadcast_history()` | ❌ NO — nested-repo rule |
+| `src/tests/unit/commons/test_commons_router.py` | parent Lupin | +7 unit tests + `_make_ack_entry` helper + import line | ✅ YES |
+| `history.md` | parent Lupin | this entry | ✅ YES |
+| `.claude-session.md` | parent Lupin | session section update | ✅ YES |
+
+**Bug-fix-queue handling**: `bug-fix-queue.md` shows uncommitted modifications from another session in `git status`, so per `feedback_verify_staging_before_commit` + parallel-session safety rules, Arnold is NOT touching it. The bug entry at line 148 should be marked RESOLVED in a future session that owns that file. The fix is documented HERE in history.md so the queue update can be linked back.
+
+**Memory consideration**: deferring net-new feedback memory. The "mirror Maria's dedupe pattern" directive is captured in the helper's docstring + here, and the cause-(d) pattern (write-side multiplicity → consumer-side dedupe at aggregator) is now established as the project precedent. If a third instance of this pattern appears, that's the moment to consider promoting it to a general feedback memory.
+
+---
+
 ### 2026.05.15 - Session 06aba5f7 (Arnold 🪨) | Focused-tray strip-icon TTS-active glow mirror + conversation-mode toggle button mint recolor
 
 Chorus session. Rick's morning `@all` broadcast assigned Arnold to "sit tight" (María on Commons, Rachel on recent-work summary, Rio on top-5 TODO triage); Rick then voice-tasked Arnold with a UI tweak ahead of any other queued work. **Goal**: when a notification bubble is being read aloud via TTS, mirror the same pulsing-yellow glow onto the matching persona's `.cc-strip-icon::before` subscript speaker badge in the focused tray, with a darker-green / lighter-green palette indicating active-speaker vs idle, so Rick can see at-a-glance who's speaking without scrolling the feed.
