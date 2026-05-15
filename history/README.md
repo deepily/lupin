@@ -12,6 +12,8 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-05-07-to-11](2026-05-07-to-11-history.md) | May 7-12 AM, 2026 | 12 sessions | Inter-Session Commons Phase 1 wrap + Phase 2 backend, Multiplexer Phase 6b Pass 1 Fitness ratification, CC Card Normalization Phases 1-5a, ask_yes_no "Neither" affordance, Voice Persona Rename Domi→Rio, CC notifications-card normalization plan-review, Multiplexer Phase 6a final closure on :8000 + Phase 6b planning launch, Bug Fix Mode notification 503 cascade reconciliation |
+| [2026-05-03-to-06](2026-05-03-to-06-history.md) | May 3-6, 2026 | 13 sessions | (See archive header for topic summary) |
 | [2026-04-30-to-05-02](2026-04-30-to-05-02-history.md) | Apr 30 - May 2, 2026 | ~13 sessions | cc-strip-icons hover clipping, Conversation-Mode Three-Layer Mic-Monopoly Enforcement, CC Notification Session Panel + exclusive focus mode, postmortem remediation, WS reconnect outage root cause, persona rename + display_name helper, history archival, Today filter + focus-mode flash, focus-tray icon stranding cleanup, TODO size-management skill, WS reconnect circuit breaker, focus-tray inactive-session toggle + bubble differentiation, voice persona desync investigation + /clear preservation fix |
 | [2026-04-29](2026-04-29-history.md) | Apr 29, 2026 | 3 sessions | Persona Theming Round 1 + WS-event cleanup, passlib/bcrypt 4.3.0 pin diagnosis, Test-Suite Anomaly Remediation Phases 1+2+3 + Idle-Aware Stop Hook |
 | [2026-04-25-to-28](2026-04-25-to-28-history.md) | Apr 25-28, 2026 | 11 sessions | Per-session voice personas, conversation-mode v1.1, test-suite anomaly remediation, conversation-mode-for-CC, docker image hygiene 130→31.6 GB, notification dispatch unification, cosa-voice MCP fix, podcast completion URLs |
@@ -63,10 +65,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 20 files
+- **Total Archives**: 22 files
 - **Date Range**: May 2025 - May 2026
-- **Total Sessions Documented**: 359+
+- **Total Sessions Documented**: 384+
 
 ---
 
-*Last updated: 2026-05-04*
+*Last updated: 2026-05-15*

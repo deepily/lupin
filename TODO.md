@@ -64,9 +64,9 @@
 
 ---
 
-## 🚨 PRIORITY-1 NEXT SESSION — history.md archive (CRITICAL, now 91.4%)
+## ✅ DONE 2026-05-15 — history.md archive (Mr. Radio, session 23ff8512)
 
-- [ ] **[LUPIN] Archive history.md FIRST THING NEXT SESSION** — was 81% (Rio, 05-12), 84% (Tiberius AM, 05-13), 91.4% (Mr. Radio late 05-14), now **27657 tokens / 110.6% of 25k = 🚨 OVER LIMIT** after Mr. Radio's full DND-toggle entry + LoC summary table landed. Run `/history-management mode=archive` BEFORE any other work next session. **Fourth deferral; absolute non-negotiable next session.**
+- [x] **[LUPIN] Archived history.md** — was 27,657 tokens / 110.6% of 25k (🚨 OVER LIMIT, 4x deferred). Cut at clean date boundary line 619/620: kept 2026.05.12-2026.05.14 in main file (13,151 tokens / 52.6% / ✅ HEALTHY); archived 2026.05.07-2026.05.12-AM as `history/2026-05-07-to-11-history.md` (14,506 tokens, 12 sessions). Banner + README index + quick stats all refreshed.
 
 ---
 
