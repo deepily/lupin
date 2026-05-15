@@ -23,6 +23,7 @@ The system defines **22 events** in `lupin-app.ini`. Clients subscribe to specif
 | `notification_play_sound` | Notifications | Server → Client | Yes |
 | `notification_expired` | Notifications | Server → Client | Yes |
 | `notification_responded` | Notifications | Server → Client | Yes |
+| `commons_activity` | Notifications (notification_queue_update wrapper, `type="commons_activity"`) | Server → Client | Yes |
 | `proxy_decision_new` | Proxy / Ratification | Server → Client | Yes |
 | `sys_time_update` | System | Server → Client | No (broadcast) |
 | `status` | System | Server → Client | Varies |
@@ -213,6 +214,37 @@ Broadcast when a user submits a response to a response-required notification. Al
   "timestamp": "2026-03-23T16:34:00Z"
 }
 ```
+
+---
+
+### `commons_activity`
+
+**NEW 2026-05-14** — Real-time push of new commons-topic entries to the broadcast-card Recent Activity stream. Powers the admin-oversight surface described in [`../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`](../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md).
+
+Wrapped in the canonical `notification_queue_update` envelope with `notification.type == "commons_activity"`. Fired by `CommonsActivityWatcher` (FastAPI-side daemon in `src/cosa/rest/commons_activity_watcher.py`) on each ~1s tick when new entries land in the commons store on any non-excluded topic. Recipient is resolved best-effort from `metadata.sender_user_id` first, then a bridge-owner lookup keyed by `sender_session_id`; falls back to broadcast-to-all-authenticated-WS in single-user dev.
+
+Gated by two INI keys (both default True per Q9):
+- `commons traffic visibility enabled` — master flag (hot-reloadable via the config re-init endpoint)
+- `commons traffic visibility ws push enabled` — emergency-throttle to disable the WS push while keeping the section visible
+
+**Payload** (under `notification.payload`):
+```json
+{
+  "ts": "2026-05-14T20:00:00+00:00",
+  "topic": "coord-notifications-js",
+  "topic_kind": "free-form",
+  "sender_session_id": "...",
+  "persona_name": "Maria",
+  "persona_icon": "🌸",
+  "persona_color": "#F06292",
+  "body": "...",
+  "metadata": { ... }
+}
+```
+
+`topic_kind` is `"reserved"` for `broadcasts` + `broadcast-acks`; `"free-form"` otherwise. The client uses this to decide whether to render a topic-chip prefix (Q2 ratification — free-form gets a chip; reserved doesn't). Excluded topics (`presence` + `system-events` by default per `commons traffic visibility exclude topics`) never appear in this stream.
+
+Client handling: `notifications.js::_handleCommonsActivityWS()` prepends the new entry to `#commons-recent-activity-entries`, preserving newest-first ordering (Q7 ratification).
 
 ---
 
