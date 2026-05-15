@@ -2,6 +2,42 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.15 - Session fa2de0ff (unallocated persona) | GPU doom loop diagnosis — uvicorn `--reload` + cu124/driver-535 forward-compat fragility
+
+Rick surfaced a dev-container failure log: `:7999` was caught in a doom loop after a code edit triggered uvicorn reload — every new worker process hit `Can't initialize NVML` + `RuntimeError: No CUDA GPUs are available` at the `lifespan` GPU pre-warm (`main.py:621`), `Application startup failed`, then uvicorn re-detected stale state and looped. Rick had to kill the process to break out.
+
+**Diagnosis (three-layer interaction)**:
+1. **cu124 wheel on driver 535 forward-compat fragility** — `lupin:1.0.0` ships `torch 2.6.0+cu124` on a host driver of `535.104.05` (CUDA 12.2 native). On RTX 4090s (consumer cards), NVIDIA's Forward-Compat shim is officially unsupported (Tesla-only). Empirically it limps along for the **first** CUDA-touching process per container lifetime, which is why the initial boot succeeds.
+2. **uvicorn `--reload` spawns the new worker in the same container** — `nvidia-container-runtime` hooks only re-run on container creation. A reloaded worker inherits the container's GPU state without re-running the injection, and the cu124 shim cannot reinitialize NVML for a second process.
+3. **Eager GPU pre-warming in `lifespan`** (`main.py:619-657`) — makes the new-worker CUDA failure fatal at startup instead of recoverable. Lazy-load on first request would survive the same hiccup.
+
+Removing any one of the three layers stops the doom loop.
+
+**Recovery (right now)**: `docker restart lupin-rest-dev` — full container restart re-runs the NVIDIA hooks, gives the cu124 shim a fresh first-process slot. `docker compose restart` and process-level kills do NOT recover.
+
+**Fix recommendation**: (1) wrap pre-warm in non-fatal try/except today (defangs the loop in ~30 LOC); (3) host driver upgrade to 550.x next reboot window (per the 2026-04-27 expert handoff — proper native cu124 support). Skip option 2 (narrow `reload_dirs`) and option 4 (repin to cu121 wheel).
+
+**Files touched**:
+
+| File | Repo | Change | Staged from parent? |
+|---|---|---|---|
+| `src/rnd/v0.1.7/2026.05.15-gpu-doom-loop-uvicorn-reload-cu124-mismatch.md` | parent Lupin | NEW — full three-layer diagnosis + fix ranking, cross-refs 2026-04-27 expert handoff and adds the first-process-success insight | ✅ YES |
+| `history.md` | parent Lupin | this entry | ✅ YES |
+| `.claude-session.md` | parent Lupin | new section for fa2de0ff with Checkpoint 1 | ✅ YES |
+
+Other files modified in working tree (`src/lupin_cli/claude_code/hooks/lib/hook_common.py`, `src/tests/unit/test_speakerphone_wrap.py`) belong to parallel sessions and are NOT staged from this session.
+
+**Cross-refs**:
+- `src/rnd/v0.1.7/2026.04.27-cuda-driver-vs-image-torch-cu124-mismatch.md` — original cu124/driver-535 expert handoff (recommended driver upgrade; did not yet observe the reload-loop manifestation)
+- `~/.claude/skills/server-lifecycle/` — `docker restart lupin-rest-dev` is the standard recovery (not `docker compose restart`, not process kill)
+
+#### Checkpoint | 2026.05.15 18:44 | GPU doom loop R&D writeup landed
+
+**Files**: src/rnd/v0.1.7/2026.05.15-gpu-doom-loop-uvicorn-reload-cu124-mismatch.md, history.md, .claude-session.md
+**Commit**: 9419f18
+
+---
+
 ### 2026.05.15 - Session 06aba5f7 (Arnold 🪨) | Broadcast-acks consumer-side dedupe — sister to María's `_dedupe_broadcasts_by_id`, fixes the persona-completion 4× bug she filed earlier today
 
 After the focused-tray TTS-glow ship + visual-regression baseline submission, Rick voice-tasked Arnold with the persona-completion duplication bug Maria had filed at `bug-fix-queue.md:148` earlier this morning (rendering "🌸 maria completed 11:16" three times in a row on the broadcast / Recent Activity panel). Rick's directive: "reapply her duplication filtering algorithm. it's just a matter of testing for what kind of message needs to be filtered" — explicit consumer-side filter, mirror the pattern, not a deep root-cause hunt for the write-side multiplicity.
