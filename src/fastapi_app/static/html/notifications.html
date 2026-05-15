@@ -670,6 +670,24 @@
                      card is rendered). Hidden until ≥1 CC sender card exists. -->
                 <div id="cc-session-strip" class="cc-session-strip" hidden>
                     <div class="cc-strip-icons" id="cc-strip-icons"></div>
+                    <div class="cc-tts-fraction-control" title="Percentage of high-priority notification text rendered as TTS audio. 0% = silent; 100% = full message.">
+                        <label for="cc-tts-fraction-slider" class="cc-tts-fraction-label">TTS:</label>
+                        <input type="range"
+                               id="cc-tts-fraction-slider"
+                               class="cc-tts-fraction-slider"
+                               min="0" max="100" step="25"
+                               value="25"
+                               list="cc-tts-fraction-ticks"
+                               aria-label="TTS preview percentage" />
+                        <span class="cc-tts-fraction-value" id="cc-tts-fraction-value">25%</span>
+                        <datalist id="cc-tts-fraction-ticks">
+                            <option value="0"></option>
+                            <option value="25"></option>
+                            <option value="50"></option>
+                            <option value="75"></option>
+                            <option value="100"></option>
+                        </datalist>
+                    </div>
                     <button type="button"
                             class="cc-strip-toggle"
                             id="cc-strip-toggle"

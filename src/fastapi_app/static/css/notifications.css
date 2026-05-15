@@ -2250,6 +2250,50 @@
             border-color: #212529;
         }
 
+        /* TTS preview-fraction slider — added 2026-05-14 evening alongside the
+         * preview-and-pause → preview-and-advance refactor. Runtime control
+         * over the fraction of each high-priority notification that gets
+         * synthesized as TTS audio. Five stops: 0 / 25 / 50 / 75 / 100. State
+         * persists in localStorage under `notifications_tts_preview_fraction_runtime`.
+         * Lives inside #cc-session-strip between the persona-icon tray and the
+         * Focus/All toggles, sharing the strip's flex layout. */
+        .cc-tts-fraction-control {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 12px;
+            background: #f8f9fa;
+            color: #495057;
+            font-size: 11px;
+            line-height: 1;
+        }
+
+        .cc-tts-fraction-label {
+            font-weight: 600;
+            opacity: 0.7;
+        }
+
+        .cc-tts-fraction-slider {
+            width: 80px;
+            cursor: pointer;
+            accent-color: rgba( 25, 135, 84, 0.85 );  /* matches existing is-active green */
+        }
+
+        .cc-tts-fraction-slider:focus-visible {
+            outline: 2px solid rgba( 25, 135, 84, 0.6 );
+            outline-offset: 2px;
+        }
+
+        .cc-tts-fraction-value {
+            min-width: 32px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+            color: #198754;  /* green to match the slider accent */
+        }
+
         /* Strip filter: icons whose senderId has no allocated voice persona
          * disappear from the tray. Independent of [data-focus-hidden] —
          * either rule can fire display: none, no interaction needed. */

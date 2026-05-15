@@ -294,6 +294,14 @@
 
 ### Completed
 
+- [x] **TTS preview-and-pause: stop-instead-of-pause + runtime percentage slider + strict FIFO** → commit: ea7f90f | By: a0eaaca1 | 2026-05-14 evening
+  - **Symptom**: the morning's preview-and-pause shipment auto-paused the queue after every preview slice, forcing the user to click resume per message. Wrong default for a multi-session listener — Rick wanted "bite-sized announcement, not prefix-with-stall." Also: action-required notifications splice-jumped fire-and-forget in the queue, breaking the "hear them in arrival order" mental model.
+  - **Fix shape**: Stop instead of pause — the queue advances immediately after the preview slice plays. Drop the remainder, drop `_ttsPausedAfterPreview` flag, drop `resumeTTS` preview-remainder branch, drop `stopTTSAndAdvance` special case. New runtime slider widget in `#cc-session-strip` with 5 stops (0/25/50/75/100). 0% adds a new `stage='skip'` that bypasses audio dispatch while keeping the notification in the visible list. Strict FIFO — `addToTTSQueue` push-to-back for every type.
+  - **Files**: `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/css/notifications.css`, `src/fastapi_app/static/html/notifications.html`. Design doc: `src/rnd/v0.1.7/2026.05.14-tts-preview-stop-and-slider.md`. Execution log: `src/rnd/v0.1.7/2026.05.14-tts-preview-stop-and-slider-execution-log.md`. Override note appended to parent design `2026.05.13-tts-preview-and-pause-design.md`.
+  - **Tests**: `node -c` syntax check PASS. Live MCP verification at 3 slider positions: 25% default (Rick confirmed FIFO + preview-and-advance), 0% (Rick confirmed silent), 50% (Rick: "this is the UX I was looking for — basically a global verbosity filter").
+  - **User feedback**: "they render quite nicely! I think this is the UX I was looking for this is basically a global verbosity filter."
+  - **Next bug queued**: per-session/per-persona mute toggle (unparking `src/rnd/v0.1.7/2026.05.14-speakerphone-toggle-on-sender-card.md` from this afternoon).
+
 - [x] **TTS preview-and-pause: notification-list render coupled to TTS-queue advance — invisible backlog when paused** → commit: 701a76f | By: a0eaaca1 | 2026-05-14
   - **Symptom**: 20+ high/urgent fire-and-forget notifications invisible in the list while TTS was paused mid-preview. Rick reported the bug after a backlog accumulated during a long session — including a doc-link notify he was waiting for.
   - **Root cause**: high/urgent fire-and-forget took a deferred render path. `addNotificationToSenderGroup()` was called from inside `activateNextTTS()` at `notifications.js:13281`, gated by `if ( this.isTTSPaused ) return;` at line 13244. The morning's preview-and-pause feature (shipped commit `d87e0d7`) sets `isTTSPaused=true` after every preview, stranding the deferred render.

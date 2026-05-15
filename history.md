@@ -2,6 +2,27 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: 🚨 **CRITICAL at 22857 tokens (91.4% of 25k)** — archive must run next session before adding new content.
 
+### 2026.05.14 Evening - Session a0eaaca1 (Mr. Radio 🦉) | TTS preview-and-advance + runtime percentage slider + strict FIFO
+
+Third bug-fix arc of the day for the TTS preview-and-pause feature. After the morning's action-required + Mr.-split fix (`d87e0d7`) and the afternoon's notification-list decouple (`efbcae3`), Rick asked for two more shape changes: (1) stop instead of pause — the auto-pause-after-preview was the wrong default for a multi-session listener; (2) add a runtime percentage slider in the Claude Code session strip with five stops (0/25/50/75/100) acting as a "global verbosity filter."
+
+**Implementation (7 phases, all landed):**
+
+- **Phase 1 — Stop instead of pause + strict FIFO**: Removed `onTTSPlaybackComplete` preview-pause early-return, `resumeTTS` preview-remainder branch, `stopTTSAndAdvance` special case, `_ttsPausedAfterPreview` field, `remainderText` from item shape, and simplified playback dispatch routing. Strict FIFO in `addToTTSQueue` — every item pushes to back regardless of type (action-required no longer jumps the queue). Phase 1g added per Rick's "oldest at top" directive.
+- **Phase 2 — `stage='skip'` for 0% slider**: `_computeTTSPreview` early-returns on fraction=0; `activateNextTTS` skip branch clears `.is-tts-pending`, advances queue immediately with 50ms timeout to prevent infinite-loop.
+- **Phase 3 — Slider HTML + CSS**: `.cc-tts-fraction-control` inserted into `#cc-session-strip` between persona-icon tray and Focus/All buttons. New `.cc-tts-fraction-*` rule block (~50 lines).
+- **Phase 4 — JS slider state wiring**: `TTS_FRACTION_PREF_KEY` localStorage key; layer user override on top of INI seed default after `/api/config/client` fetch; `input` event listener.
+- **Phase 5 — Parent design doc override**: appended `## 2026-05-14 Override` to `2026.05.13-tts-preview-and-pause-design.md` tabulating superseded Q-decisions.
+- **Phase 6 — Live verification**: 4 long notifies at 25% (default) — Rick confirmed FIFO order + preview-and-advance. 3 long notifies at 0% — Rick confirmed silent. 4 long notifies at 50% — Rick confirmed verbosity filter shape ("UX I was looking for").
+
+**Files** (Lupin only): `notifications.js`, `notifications.css`, `notifications.html`, parent design doc override, new design + execution log at `src/rnd/v0.1.7/2026.05.14-tts-preview-stop-and-slider-*`.
+
+**Tests**: `node -c` PASS. Live MCP verification at 3 slider positions confirmed by Rick.
+
+**Commit**: ea7f90f
+
+---
+
 ### 2026.05.14 Evening - Session f6f865fb (María 🌸) | Broadcast filter `owner_user_id` migration + focus-bar persistence restore
 
 Two-bug session. **(1) Broadcast filter** — Rick saw 1 of 4 personas in the inter-session-commons broadcast UI (only Rachel). Root cause: the Phase 3 Option 2 listener-side stamper (2026-05-13) wrote the LISTENER's service-account UUID (`claude.code@lupin.deepily.ai` → `931e9dae-…`) to `bridge.user_id`, but the filter compares against the HUMAN owner's JWT UUID (`0cf47e2d-…`) — mismatched, every stamped bridge rejected; Rachel slipped through only because her `user_id` field is mysteriously missing on disk (secondary mystery flagged). Option C ratified by Rick: CoSA-side filter now reads a NEW `owner_user_id` field with graceful-degradation fallback (uncommitted on the CoSA side per nested-repo rule; Rick handles). Lupin-side fixture rename + new regression test `test_filter_uses_owner_user_id_not_legacy_user_id` (bridge with BOTH fields, deliberately different) committed in this session. Writer-side stamper queued to `TODO.md` for a future Lupin session. Design + remediation: `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md`.
