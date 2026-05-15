@@ -1,5 +1,28 @@
 # TODO
 
+## 🔗 NEW — `doc_scope` registry exposure for cosa-voice consumption (filed 2026-05-14 by Rachel, session 4926c582)
+
+**Primary doc**: `planning-is-prompting/src/rnd/2026.05.14-doc-link-scope-cross-repo.md` (status: design approved by Rick; Phases 2 & 3 already landed on the planning-is-prompting side).
+
+**Context**: The doc viewer's `scope` query parameter selects which registered repo a `path` is relative to. The eight scopes (`docs`, `io` built-ins + `lupin`, `cosa-voice`, `planning-is-prompting`, `lupin-mobile`, `lookml`, `par-pacific`, `claude-plans` external) are already built at Lupin startup via `src/cosa/rest/routers/_scope_registry.py::build_scope_registry()`. Today, cross-repo sessions have no programmatic way to discover the right scope — they rely on doctrine + per-repo pins. The R&D doc adds a `doc_scope` dict to cosa-voice's `get_session_info()` payload (mirroring the existing `voice_persona` shape) so Claude gets the right scope automatically at session start.
+
+**Lupin-side ownership** (this TODO captures what Lupin owes to the integration):
+
+- [ ] **[LUPIN] Decide registry exposure mechanism** — three options:
+  1. New HTTP endpoint `GET /api/docs/scopes` (and optionally `/api/docs/scopes/<project_name>`) that returns the registry dict. Cleanest contract; cosa-voice consumes via HTTP. **Recommended.**
+  2. Expose `build_scope_registry()` as a public import from `cosa.rest.routers._scope_registry`. Tighter coupling; no HTTP overhead. Falls down if cosa-voice runs in a different process/host than Lupin.
+  3. Read INI directly from cosa-voice (the original sketch). Bypasses Lupin entirely; doesn't honor `_RESERVED_SCOPE_NAMES` or skip-on-missing-path logic without duplicating it.
+- [ ] **[LUPIN] Implement chosen mechanism** — add the endpoint or public accessor with tests. Endpoint payload shape per R&D doc §4.3: `{scope, base_url, allowed_prefixes, source}`.
+- [ ] **[LUPIN] Update `_scope_registry.py`** if needed to also include built-ins (`docs`, `io`) in the exposed map — the design doc treats them uniformly from a consumer's perspective.
+- [ ] **[LUPIN] Coordinate with cosa-voice** — the cosa-voice MCP `get_session_info()` extension lands AFTER this Lupin work; it's the consumer half.
+- [ ] **[LUPIN] Add smoke test** — verify `/api/docs/scopes` (or equivalent) returns all 9 entries (2 built-ins + 7 externals) and `doc_scope` for a known project key resolves correctly.
+
+**Independence note**: Phase 2 (doctrine update) and Phase 3 (per-repo CLAUDE.md pins) on the planning-is-prompting side are already landed and document the *intended* behavior. The runtime discovery (the `doc_scope` field) gracefully degrades until this Lupin work + the cosa-voice extension both ship — sessions fall back to per-repo pin guidance per the doctrine's 4-step priority list.
+
+**Cross-reference**: see R&D doc §4.3 for the full return-shape spec and resolution order, §6 R1-R3 for risks the Lupin-side implementation must address.
+
+---
+
 ## 📡 NEW — Writer-side follow-up: `owner_user_id` stamper (filed 2026-05-14 by María, session f6f865fb)
 
 **Primary doc**: `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md` (Option C ratified by Rick; CoSA-side filter migration landed; writer-side pending separate Lupin session).
@@ -43,7 +66,7 @@
 
 ## 🚨 PRIORITY-1 NEXT SESSION — history.md archive (CRITICAL, now 91.4%)
 
-- [ ] **[LUPIN] Archive history.md FIRST THING NEXT SESSION** — was 81% (Rio, 05-12), grew to 84% (Tiberius AM, 05-13), now **22857 tokens / 91.4% of 25k = 🚨 CRITICAL** after Arnold's session entry. Run `/history-management mode=archive` BEFORE any other work next session. Three sessions of deferral; do not defer again.
+- [ ] **[LUPIN] Archive history.md FIRST THING NEXT SESSION** — was 81% (Rio, 05-12), 84% (Tiberius AM, 05-13), 91.4% (Mr. Radio late 05-14), now **27657 tokens / 110.6% of 25k = 🚨 OVER LIMIT** after Mr. Radio's full DND-toggle entry + LoC summary table landed. Run `/history-management mode=archive` BEFORE any other work next session. **Fourth deferral; absolute non-negotiable next session.**
 
 ---
 

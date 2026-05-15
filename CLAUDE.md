@@ -623,3 +623,15 @@ When modifying code in these areas, update the corresponding documentation:
   - 2025.08: Unit testing framework, Fresh Queue UI, audio debugging
 - **Current Implementation Docs**: Referenced in history.md header
 - **Archive Location**: `history/` directory with monthly organization
+
+## Doc Viewer Scope
+
+When sending document viewer links from this repo, prefer Lupin's **built-in scopes** over the external `lupin` scope:
+
+- **`scope=docs`** — Lupin project files: root `*.md` + `src/docs/`, `src/rnd/`, `src/workflow/`
+- **`scope=io`** — Lupin agent artifacts under `io/`
+- **`scope=lupin`** — broader external-registry view of `src/` (use only when the `docs` built-in whitelist is too narrow)
+- **Source of truth**: `src/conf/lupin-app.ini` § `external repos`
+- **Runtime discovery**: inspect the `doc_scope` field returned by `mcp__cosa-voice__get_session_info()`
+
+Example: `/app/docs?path=src/rnd/foo.md&scope=docs`
