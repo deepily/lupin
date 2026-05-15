@@ -1,25 +1,16 @@
 # TODO
 
-## 🔗 NEW — `doc_scope` registry exposure for cosa-voice consumption (filed 2026-05-14 by Rachel, session 4926c582)
+## ✅ DONE 2026-05-15 PM — `doc_scope` registry exposure for cosa-voice consumption (Rio ⚡, session `c1cbcd11`)
 
-**Primary doc**: `planning-is-prompting/src/rnd/2026.05.14-doc-link-scope-cross-repo.md` (status: design approved by Rick; Phases 2 & 3 already landed on the planning-is-prompting side).
+**Lupin-side work delivered via doc-viewer scope unification** (`src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`). The original ask was a 4-field `doc_scope` dict on `get_session_info()`; Q-R2 ratification collapsed it to a single `project_name: str` field. Lupin's deliverable shrank accordingly:
 
-**Context**: The doc viewer's `scope` query parameter selects which registered repo a `path` is relative to. The eight scopes (`docs`, `io` built-ins + `lupin`, `cosa-voice`, `planning-is-prompting`, `lupin-mobile`, `lookml`, `par-pacific`, `claude-plans` external) are already built at Lupin startup via `src/cosa/rest/routers/_scope_registry.py::build_scope_registry()`. Today, cross-repo sessions have no programmatic way to discover the right scope — they rely on doctrine + per-repo pins. The R&D doc adds a `doc_scope` dict to cosa-voice's `get_session_info()` payload (mirroring the existing `voice_persona` shape) so Claude gets the right scope automatically at session start.
+- [x] **[LUPIN] Decide registry exposure mechanism** — chose Option 1 (HTTP endpoint) per Q-R1-A. Ratified during interactive Pass 1 review on 2026-05-15.
+- [x] **[LUPIN] Implement `GET /api/docs/scopes`** — admin endpoint shipped in Phase 3 of doc-viewer scope unification. JWT-auth via `get_current_user`. Payload shape: `{scopes: List[{name, root, allowed_prefixes, allowed_root_files, extra_blocklist, source}]}` where `source` is `"manifest"` (when `.docview.yml` present) or `"ini-only"`. Live-verified on `:7999`.
+- [x] **[LUPIN] Update `_scope_registry.py`** — registered scopes now uniform; built-in `docs`/`io` retired by Phase 4a (per Q1-D). Every scope is a regular registry entry.
+- [ ] **[external — Rachel's cosa-voice session]** Wire `project_name: str` into cosa-voice's `get_session_info()` response. Out of scope for this plan; Rachel owns. Coordination handoff: cross-link `planning-is-prompting/src/rnd/2026.05.14-doc-link-scope-cross-repo.md` with the unification design.
+- [x] **[LUPIN] Add smoke test** — `GET /api/docs/scopes` live-tested during Phase 3; returns all currently-registered repos including `lupin` (now manifest-sourced).
 
-**Lupin-side ownership** (this TODO captures what Lupin owes to the integration):
-
-- [ ] **[LUPIN] Decide registry exposure mechanism** — three options:
-  1. New HTTP endpoint `GET /api/docs/scopes` (and optionally `/api/docs/scopes/<project_name>`) that returns the registry dict. Cleanest contract; cosa-voice consumes via HTTP. **Recommended.**
-  2. Expose `build_scope_registry()` as a public import from `cosa.rest.routers._scope_registry`. Tighter coupling; no HTTP overhead. Falls down if cosa-voice runs in a different process/host than Lupin.
-  3. Read INI directly from cosa-voice (the original sketch). Bypasses Lupin entirely; doesn't honor `_RESERVED_SCOPE_NAMES` or skip-on-missing-path logic without duplicating it.
-- [ ] **[LUPIN] Implement chosen mechanism** — add the endpoint or public accessor with tests. Endpoint payload shape per R&D doc §4.3: `{scope, base_url, allowed_prefixes, source}`.
-- [ ] **[LUPIN] Update `_scope_registry.py`** if needed to also include built-ins (`docs`, `io`) in the exposed map — the design doc treats them uniformly from a consumer's perspective.
-- [ ] **[LUPIN] Coordinate with cosa-voice** — the cosa-voice MCP `get_session_info()` extension lands AFTER this Lupin work; it's the consumer half.
-- [ ] **[LUPIN] Add smoke test** — verify `/api/docs/scopes` (or equivalent) returns all 9 entries (2 built-ins + 7 externals) and `doc_scope` for a known project key resolves correctly.
-
-**Independence note**: Phase 2 (doctrine update) and Phase 3 (per-repo CLAUDE.md pins) on the planning-is-prompting side are already landed and document the *intended* behavior. The runtime discovery (the `doc_scope` field) gracefully degrades until this Lupin work + the cosa-voice extension both ship — sessions fall back to per-repo pin guidance per the doctrine's 4-step priority list.
-
-**Cross-reference**: see R&D doc §4.3 for the full return-shape spec and resolution order, §6 R1-R3 for risks the Lupin-side implementation must address.
+**URL shape post-migration**: `/app/docs?path=<project>/<rel>` — `scope=` query param retired (Q-R2). Rachel's MCP exposes `project_name`, not a 4-field dict.
 
 ---
 

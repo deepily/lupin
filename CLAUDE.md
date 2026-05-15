@@ -624,14 +624,21 @@ When modifying code in these areas, update the corresponding documentation:
 - **Current Implementation Docs**: Referenced in history.md header
 - **Archive Location**: `history/` directory with monthly organization
 
-## Doc Viewer Scope
+## Doc Viewer Scope (unified path-prefix routing — 2026-05-15)
 
-When sending document viewer links from this repo, prefer Lupin's **built-in scopes** over the external `lupin` scope:
+**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is IGNORED.
 
-- **`scope=docs`** — Lupin project files: root `*.md` + `src/docs/`, `src/rnd/`, `src/workflow/`
-- **`scope=io`** — Lupin agent artifacts under `io/`
-- **`scope=lupin`** — broader external-registry view of `src/` (use only when the `docs` built-in whitelist is too narrow)
-- **Source of truth**: `src/conf/lupin-app.ini` § `external repos`
-- **Runtime discovery**: inspect the `doc_scope` field returned by `mcp__cosa-voice__get_session_info()`
+- **Lupin files**: `/app/docs?path=lupin/<rel>` — e.g. `/app/docs?path=lupin/bug-fix-queue.md`, `/app/docs?path=lupin/src/rnd/foo.md`. Whitelist authority is `lupin/.docview.yml` at repo root.
+- **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile` — same URL shape, scope name is the project name.
+- **Source of truth**: `src/conf/lupin-app.ini` § `external repos` plus each repo's `.docview.yml` (when present).
+- **Runtime discovery**: `GET /api/docs/scopes` (admin endpoint, JWT-auth) returns the full registry; cosa-voice MCP `get_session_info()` exposes a single `project_name` string for the current session.
+- **Floor blocklist**: ~46 universal regex patterns block `.env`, `.venv`, `node_modules`, `__pycache__`, `CLAUDE.local.md`, `.ssh/`, etc. across EVERY scope — defense-in-depth; cannot be weakened by any repo's manifest.
 
-Example: `/app/docs?path=src/rnd/foo.md&scope=docs`
+**Examples**:
+- `/app/docs?path=lupin/src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` ✅
+- `/app/docs?path=lupin/bug-fix-queue.md` ✅ (formerly 404 — fixed in this milestone)
+- `/app/docs?path=lupin/CLAUDE.local.md` → 400 (floor blocks)
+- `/app/docs?path=bug-fix-queue.md` → 400 (missing project prefix)
+- `/app/docs?path=docs/anything` → 400 (unknown project — `docs` retired)
+
+**For sessions emitting links**: ALWAYS prefix with the project name. `scope=` is dead — do not include it.

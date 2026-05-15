@@ -63,6 +63,7 @@
 | 6825e6af | 2026-05-07T17:45:00 | 2026-05-07T20:11:00 | active |
 | a0eaaca1 | 2026-05-14T21:22:14 | 2026-05-14T22:40:00 | active |
 | f6f865fb | 2026-05-14T17:34:00 | 2026-05-14T20:30:00 | parked-focus-bug-incomplete |
+| ea85fd64 | 2026-05-15T11:30:00 | 2026-05-15T11:45:00 | filed-from-external-project |
 
 ---
 
@@ -110,6 +111,46 @@
 ### Queued
 
 (Available for any session to claim)
+
+- [x] ~~**`/api/init` hot-reload does NOT invalidate `_SCOPE_REGISTRY` — new `external repos` added to `lupin-app.ini` are invisible to `/api/docs/file` until process restart**~~ → **RESOLVED 2026-05-15 PM by session `c1cbcd11` (Rio ⚡)** as a side-effect of doc-viewer scope unification (`src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` Phase 1). New `cosa/config/cache_registry.py` module provides a generic `register_invalidator()` / `invalidate_all()` API; `_SCOPE_REGISTRY` (along with `snapshot_mgr` and `prediction_engine`) self-registers an invalidator at import time. `/api/init` now calls `invalidate_all()` and returns `caches_invalidated: List[str]` in the payload. Live-verified on `:7999`: `GET /api/init` returns `caches_invalidated: ["scope_registry","snapshot_mgr","prediction_engine"]` and a subsequent `?path=<newly-added>/...` resolves without container restart. Original bug entry preserved below for context.
+
+<details>
+<summary>Original bug entry preserved for context</summary>
+
+- [x] ~~**`/api/init` hot-reload does NOT invalidate `_SCOPE_REGISTRY` — new `external repos` added to `lupin-app.ini` are invisible to `/api/docs/file` until process restart, defeating the purpose of the hot-reload endpoint** (filed 2026-05-15 by session `ea85fd64` Mr. Radio 🦉, from external project `retail-ai-location-strategy`. Reporter is working in `/mnt/DATA01/include/www.deepily.ai/projects/google/retail-ai-location-strategy`, NOT in Lupin — bug discovered while attempting to register that project as a new doc-viewer scope using the documented hot-reload path.)~~
+  - **Symptom**: User added a new external repo to `lupin-app.ini` (line 574 `external repos = …, retail-ai-location-strategy` + the corresponding `external repo retail-ai-location-strategy path` / `allowed prefixes` block). Called `GET /api/init` → response `{"status":"success","config_block_id":"Lupin: Development","timestamp":…}`. Subsequent `GET /api/docs/file?path=src/rnd/2026.05.11-architecture-summary.md&scope=retail-ai-location-strategy` returns **HTTP 400 with `"Unknown scope: 'retail-ai-location-strategy'"`** rather than serving the file. Confirmed via reading the relevant config files inside the running container's view (the host path is bind-mounted at `/mnt/DATA01/include/www.deepily.ai/projects -> /var/external-projects` per `docker inspect lupin-rest-dev`, so the new path `/var/external-projects/google/retail-ai-location-strategy` exists from the container's vantage). The shell page `GET /app/docs?…` returns 200 because that route only serves the viewer HTML; the 400 surfaces from the client-side fetch to `/api/docs/file`.
+  - **Reporter quote (voice, 2026-05-15)**: *"Both of those links are returning 400 errors. Test yourself to see what kind of response you get …"* and earlier *"Register the project but it does NOT require a looping service restart. The configuration manager exposes a configuration refresh in the FastAPI endpoint. Look it up!"* — the reporter's mental model is that `/api/init` is the single hot-reload entry point; that contract is broken for any derived registry built outside of `ConfigurationManager.init()`.
+  - **Root cause** (located by reading the running source — both files mounted from host into the container):
+    - `src/cosa/rest/routers/docs_files.py:92` declares `_SCOPE_REGISTRY: dict = None  # sentinel — None means "not built yet"`. The lazy initializer at lines 95–107 builds the registry on first request and then returns the cached dict on every subsequent request **for the lifetime of the process**. There is no invalidation function, no reset hook, no observer of `ConfigurationManager` change events.
+    - `src/cosa/rest/routers/system.py:158–230` (`/api/init` handler) reloads `config_mgr.init()`, optionally calls `swap_database()`, reloads `main_module.snapshot_mgr.reload()`, and resets `PredictionEngine` via `PredictionEngine.reset() + get_prediction_engine(config_mgr=config_mgr)`. It does NOT touch `_SCOPE_REGISTRY`. The handler is therefore not actually a hot-reload of "the full effective configuration the routers see" — it is a hot-reload of `config_mgr` plus a manually-curated allowlist of derived caches, and that allowlist is missing the scope registry.
+    - Cross-check: `grep -rn "_SCOPE_REGISTRY\|invalidate.*scope" src/ --include="*.py"` returns only the three internal references in `docs_files.py:92,103-104,106` plus `_scope_registry.py` build code. No public reset hook exists anywhere in the codebase.
+  - **Impact**:
+    - Any new external repo registration without a Lupin process restart will silently fail with 400 on file fetch, even though `/api/init` returned success. This is a UX trap: the documented "no restart needed" path is in fact "no restart needed for `config_mgr` consumers, but a restart IS needed for scope-registry consumers." A user following the documented path will not learn this — they will see a green `/api/init` and a red `/api/docs/file` and be unable to reconcile the two without reading the source.
+    - The same hazard applies to **any future module-level cache** built from `config_mgr` at first-touch and never invalidated. The scope registry is the first one we've hit; it will not be the last unless `/api/init` grows a discovery mechanism (e.g., a registered-callback list, or an explicit catalogue at the handler).
+    - Tangentially: the `feedback/feedback_neither_means_reframe`-class lesson applies — `/api/init` returning `"status":"success"` while leaving derived caches stale is a "lying success" response. The status code is honest about what it did; it is dishonest about what the caller likely thinks it did.
+  - **Suggested fix shape** (preferred fix at top):
+    1. **Add `reset()` to the scope registry module and call it from `/api/init`**. In `src/cosa/rest/routers/docs_files.py`, expose a module-level `def invalidate_scope_registry() -> None: global _SCOPE_REGISTRY; _SCOPE_REGISTRY = None` (preserves the lazy-rebuild pattern — next request rebuilds with current `config_mgr` state). In `src/cosa/rest/routers/system.py`'s `/api/init` handler, after `config_mgr.init()` succeeds and before the return, call `from cosa.rest.routers.docs_files import invalidate_scope_registry; invalidate_scope_registry()`. Mirror the existing `PredictionEngine.reset()` block at `system.py:217-222` for the try/except hygiene.
+    2. **Discovery mechanism** (longer-term, lower priority — only if more module-level caches accrete): introduce a `cosa.config.cache_registry` module with `register_invalidator(callable)` + `invalidate_all()`. Each cache that depends on `config_mgr` self-registers on import; `/api/init` calls `invalidate_all()` instead of maintaining a hand-curated allowlist. This is the right shape if/when the third cache of this kind appears; for one cache (scope registry), the direct call in fix (1) is cleaner.
+    3. **Defensive: scope registry checks `config_mgr.last_modified` on every lookup** (rejected — adds per-request work, and the lazy-rebuild-on-invalidation pattern already used elsewhere in the codebase is the established idiom).
+  - **Acceptance**:
+    - After editing `lupin-app.ini` `external repos` and calling `GET /api/init`, a subsequent `GET /api/docs/file?path=<valid-rel>&scope=<newly-added>` (with valid JWT) returns 200 with the file contents — without restarting the Lupin process.
+    - A regression test (place under `src/tests/integration/` or `src/tests/smoke/` consistent with neighbors) reproduces the workflow: write a temp INI augmenting `external repos`, swap it in (or augment in place), call `/api/init`, hit `/api/docs/file` with the new scope, assert 200.
+    - `/api/init` JSON response payload optionally surfaces what was invalidated (e.g., `"caches_invalidated": ["snapshot_mgr", "prediction_engine", "scope_registry"]`) — nice-to-have, not blocking.
+  - **Evidence files (read inside this session)**:
+    - `src/cosa/rest/routers/docs_files.py:92,95-107,133-230` — lazy-init scope registry + `/api/docs/file` consumer.
+    - `src/cosa/rest/routers/_scope_registry.py:175-236` — `build_scope_registry(config_mgr)` (skips repos whose path is not on disk; useful detail because the host-side `ls` of `/var/external-projects` fails from outside the container — the function operates from inside the container's mount view, which is what matters).
+    - `src/cosa/rest/routers/system.py:152-232` — `/api/init` handler, with the existing `PredictionEngine.reset()` mirror at 217-222 as the model for the proposed fix.
+    - `src/fastapi_app/static/html/document-viewer.html:253-268` — confirms the client-side fetch path to `/api/docs/file` (so the 400 surfaces there, not on the viewer-shell GET to `/app/docs`).
+  - **Repro recipe**:
+    1. Edit `src/conf/lupin-app.ini`: append a name to line 574 `external repos` (e.g., `…, retail-ai-location-strategy`) and add a matching `external repo <name> path` / `allowed prefixes` block.
+    2. `curl http://localhost:7999/api/init` → returns 200 success.
+    3. `curl -H "Authorization: Bearer <jwt>" "http://localhost:7999/api/docs/file?path=<valid-rel>&scope=<new-name>"` → returns 400 "Unknown scope" instead of the file.
+    4. Restart `lupin-rest-dev` container → same `curl` now returns 200 with file contents. Confirms the process-lifetime cache is the only thing in the way.
+  - **Workaround for the reporter, until fix lands**: the host project is bind-mounted at `/var/external-projects/google/retail-ai-location-strategy` inside the container; copying the two target R&D docs into a scope already in the registry at boot (e.g., `claude-plans` whose path is `/var/external-claude/plans` ↔ host `/home/rruiz/.claude/plans`) makes them viewable via `scope=claude-plans` immediately. The reporter has been informed and is opting to wait for the proper fix rather than duplicate the files.
+
+</details>
+
+---
 
 - [ ] **Persona-completion notifications duplicate 4× on the broadcast / notifications card with near-identical timestamps** (filed 2026-05-15 by session `c4139ece` María 🌸, surfaced during user verification of the broadcasts-topic `_dedupe_broadcasts_by_id` fix that landed this same session.)
   - **Symptom**: User reports seeing four cards rendered as `maria completed 10:14 🌸 maria completed 10:14 🌸 maria completed 10:14 🌸 maria completed 10:14` on the broadcast / Recent Activity surface. Bodies appear identical or near-identical; timestamps all collapse to the same minute.

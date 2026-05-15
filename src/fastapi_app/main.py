@@ -486,7 +486,17 @@ async def lifespan( app: FastAPI ):
     
     # Initialize the manager (required for both backends)
     snapshot_mgr.initialize()
-    
+
+    # Register a cache invalidator so /api/init reloads snapshots uniformly
+    # with the rest of the cache_registry. Mirrors the per-instance .reload()
+    # call previously inlined in routers/system.py:/api/init.
+    from cosa.config.cache_registry import register_invalidator
+    def _invalidate_snapshot_mgr():
+        if snapshot_mgr is not None:
+            print( "Reloading solution snapshots..." )
+            snapshot_mgr.reload()
+    register_invalidator( "snapshot_mgr", _invalidate_snapshot_mgr )
+
     # Initialize queues with websocket manager
     # NOTE (Session 97): emit_speech_callback is deprecated - queues now use notification service via _notify()
     jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_speech_callback=None, debug=app_debug, verbose=app_verbose, silent=app_silent )

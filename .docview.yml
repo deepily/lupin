@@ -1,0 +1,28 @@
+# Doc-viewer manifest for the Lupin repo.
+#
+# Per Q1-D of 2026-05-15 doc-viewer-scope-unification, Lupin is a regular
+# entry in the unified scope registry. Per Q2-C, the presence of this file
+# overrides any `allowed_prefixes` INI keys for this scope: the manifest is
+# the authority.
+#
+# Anchor: src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md §7 Phase 5
+version: 1
+
+# Mirror the historical scope=lupin breadth — anything under src/.
+# The universal floor blocklist (cosa/rest/routers/_scope_registry.py)
+# blocks .venv, node_modules, __pycache__, etc., so the wildcard is safe.
+allowed_prefixes:
+  - src/
+
+# Root-level *.md files that ARE part of the public surface.
+allowed_root_files:
+  - README.md
+  - CHANGELOG.md
+  - bug-fix-queue.md
+  - TODO.md
+  - CLAUDE.md
+  - history.md
+  - AUTH_REQUIREMENTS.md
+
+# No repo-specific blocklist additions; floor is sufficient.
+extra_blocklist: []
