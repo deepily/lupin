@@ -98,6 +98,7 @@ id_generator = None
 commons_store            = None
 commons_rate_limiter     = None
 commons_ack_watcher      = None
+commons_activity_watcher = None
 commons_question_watcher = None  # Phase 3 step 9
 
 # WebSocket connection management
@@ -525,14 +526,16 @@ async def lifespan( app: FastAPI ):
     # AC14 (router) + AC7 (CommonsAckWatcher daemon). Gated by `commons enabled`
     # INI key — when False, the subsystem is fully absent and the router
     # endpoints will 503 per `_require_initialized()`.
-    global commons_store, commons_rate_limiter, commons_ack_watcher, commons_question_watcher
+    global commons_store, commons_rate_limiter, commons_ack_watcher, commons_question_watcher, commons_activity_watcher
     if config_mgr.get( "commons enabled", default=True, return_type="boolean" ):
         try:
             import os
             from cosa.rest.commons_ack_watcher import CommonsAckWatcher
+            from cosa.rest.commons_activity_watcher import CommonsActivityWatcher
             from cosa.rest.commons_question_watcher import CommonsQuestionWatcher
             from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
-            from cosa.rest.routers.commons import init_commons_state
+            from cosa.rest.routers.commons import init_commons_state, _load_bridge_fields
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
             from lupin_mcp.commons_llm_disambiguator import CommonsLlmDisambiguator
             from lupin_mcp.commons_persona_matcher import configure_llm_disambiguator
             from lupin_mcp.commons_store import CommonsStore
@@ -564,6 +567,36 @@ async def lifespan( app: FastAPI ):
             )
             commons_ack_watcher.start()
             commons_question_watcher.start()
+
+            # Phase 2.5/3.5 — CommonsActivityWatcher for broadcast-card Recent Activity WS push.
+            # Per src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (AC3).
+            # Gated by `commons traffic visibility enabled` AND `commons traffic visibility ws push enabled`.
+            if (
+                config_mgr.get( "commons traffic visibility enabled", default=True, return_type="boolean" )
+                and config_mgr.get( "commons traffic visibility ws push enabled", default=True, return_type="boolean" )
+            ):
+                excluded_raw     = config_mgr.get( "commons traffic visibility exclude topics", default="presence, system-events" )
+                excluded_topics  = [ t.strip() for t in excluded_raw.split( "," ) if t.strip() ]
+
+                def _commons_activity_bridge_owner_resolver():
+                    """Build a fresh {session_id: owner_user_id|None} map for each tick."""
+                    out = { }
+                    for path, sid, _persona in find_active_voice_persona_sessions():
+                        bridge = _load_bridge_fields( path )
+                        if bridge is not None:
+                            out[ sid ] = bridge.get( "owner_user_id" )
+                    return out
+
+                commons_activity_watcher = CommonsActivityWatcher(
+                    store                    = commons_store,
+                    push_notification_fn     = jobs_notification_queue.push_notification,
+                    excluded_topics          = excluded_topics,
+                    bridge_owner_resolver_fn = _commons_activity_bridge_owner_resolver,
+                    poll_interval_seconds    = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
+                )
+                commons_activity_watcher.start()
+                print( f"[COMMONS] Phase 2.5/3.5 CommonsActivityWatcher started (excluded={excluded_topics})" )
+
             # Phase 3 — wire the LLM disambiguator singleton for commons_persona_matcher
             try:
                 configure_llm_disambiguator( CommonsLlmDisambiguator( config_mgr ) )
@@ -782,6 +815,14 @@ async def lifespan( app: FastAPI ):
         print( f"[PEER-WATCH] Error cancelling watchers: {e}" )
 
     # Stop the commons ack watcher daemon (Phase 2)
+    if commons_activity_watcher is not None:
+        try:
+            print( "[COMMONS] Stopping CommonsActivityWatcher daemon..." )
+            commons_activity_watcher.stop( join_timeout=3.0 )
+            print( "[COMMONS] CommonsActivityWatcher stopped" )
+        except Exception as e:
+            print( f"[COMMONS] WARN — CommonsActivityWatcher shutdown failed: {e}" )
+
     if commons_ack_watcher is not None:
         try:
             print( "[COMMONS] Stopping CommonsAckWatcher daemon..." )
