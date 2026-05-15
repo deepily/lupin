@@ -2,6 +2,46 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-03 to 05-06](history/2026-05-03-to-06-history.md). History health: 🚨 **CRITICAL at 22857 tokens (91.4% of 25k)** — archive must run next session before adding new content.
 
+### 2026.05.14 Late Evening - Session a0eaaca1 (Mr. Radio 🦉) | Per-session DND toggle + slider relocation + universal strip-icon badges
+
+Fourth bug-fix arc of the day continuing the TTS preview-and-pause evolution. After the morning's preview/Mr.-split fix (`d87e0d7`), afternoon's decouple (`efbcae3`), and evening's stop-and-slider (`5836a6f`), Rick asked for a per-session DND toggle reframed from the afternoon's parked speakerphone-toggle plan. Key reframe: **muted ≠ silent.** Notifications still arrive for historical record, just demoted from `priority='high', suppress_ding=True` to `priority='medium', suppress_ding=False`. Small ding on arrival, no full TTS.
+
+**Implementation:**
+- **Slider relocated** from `#cc-session-strip` to the Claude Code notifications `.section-header` (always-visible accordion row). Centered between filter badge and history dropdown via dual `margin-left: auto`. "History:" label removed from the history-window widget per Rick's tweak.
+- **Per-session toggle** replaces legacy `sender-conversation-mode-btn`. POST hits canonical `/api/cosa-voice/speakerphone/{session_id}` with body `{on: bool}` (NOT `{active}` — caught via 422 mid-session, field-name memory saved).
+- **Universal strip-icon badges**: every persona icon in `#cc-strip-icons` shows EITHER 🔊 (speakerphone, default) or 🤭 (quiet) in its bottom-right corner via `data-conv-mode="speakerphone"|"quiet"` attribute. Per Rick: "Everybody gets state rendered."
+- **"Loud" → "speakerphone" rename** in all tooltips + comments (Rick: "no pejorative connotation").
+- **Hook rider quiet-mode body** rewritten at `_speakerphone_reminder_body` — when speakerphone is off, rider tells Claude to call notify with `priority='medium', suppress_ding=False` instead of the legacy "stop calling notify; terminal-only" body.
+- **Exit-reminder body** unified — `speakerphone_exit_reminder` now matches the steady-state quiet-mode directive (no more contradiction on transition).
+- **Client-side belt-and-suspenders priority rewrite** at top of `handleNotificationUpdate` — catches the case where Claude doesn't honor the rider.
+- `tts_interaction_mode` exposed via `/api/config/client` for mode-conditional icon rendering (chorus → 🔊/🤭, solo → 📞/🔔).
+
+**Files** (Lupin only): `notifications.js`, `notifications.css`, `notifications.html`, `system.py`, `hook_common.py`, plus 4 new R&D docs at `src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move-*` + the session-wrap pickup-tomorrow doc + a SUPERSEDED banner on the afternoon's parked speakerphone-toggle doc.
+
+**Tests**: `node -c` PASS on notifications.js, `py_compile` PASS on `hook_common.py` and `system.py`. Live MCP verification at speakerphone-on (full TTS played for both test slots) + speakerphone-off (medium-priority dings + no TTS). Universal-badge rendering verified visually.
+
+**Known pickup for tomorrow**: cc_notification_listener daemon (PID 24166) holds stale `speakerphone_exit_reminder` in `sys.modules`; restart needed to load the new body. Captured in `2026.05.14-session-wrap-pickup-tomorrow.md`.
+
+**Memories saved this session (4 new)**: `feedback_walk_through_plan_before_asking_proceed`, `feedback_commons_post_is_blackboard_not_push`, `feedback_always_serialize_plan_to_rd_scope_post_exit`, `feedback_verify_pydantic_field_names_against_server_schema`.
+
+**Commit**: 60697e2
+
+---
+
+## Session-end LoC summary (a0eaaca1 / Mr. Radio — 2026-05-14)
+
+| Commit | Description | Files | Insertions | Deletions |
+|---|---|---|---:|---:|
+| `d87e0d7` | TTS preview action-required + Mr.-split + match() prefix-drop | 6 | +624 | -27 |
+| `efbcae3` | Notification-list / TTS-queue decouple | 7 | +220 | -12 |
+| `ea7f90f` | TTS preview-and-advance + slider + strict FIFO | 9 | +655 | -165 |
+| `60697e2` | Per-session DND toggle + slider relocation + universal badges | 12 | +925 | -76 |
+| **Totals** | **4 commits** | **34 file-touches** | **+2424** | **-280** |
+
+Net delta: **+2144 lines** across the day. All Lupin parent repo; CoSA submodule untouched per nested-repo rule.
+
+---
+
 ### 2026.05.14 Evening - Session a0eaaca1 (Mr. Radio 🦉) | TTS preview-and-advance + runtime percentage slider + strict FIFO
 
 Third bug-fix arc of the day for the TTS preview-and-pause feature. After the morning's action-required + Mr.-split fix (`d87e0d7`) and the afternoon's notification-list decouple (`efbcae3`), Rick asked for two more shape changes: (1) stop instead of pause — the auto-pause-after-preview was the wrong default for a multi-session listener; (2) add a runtime percentage slider in the Claude Code session strip with five stops (0/25/50/75/100) acting as a "global verbosity filter."
@@ -23,15 +63,25 @@ Third bug-fix arc of the day for the TTS preview-and-pause feature. After the mo
 
 ---
 
-### 2026.05.14 Evening - Session f6f865fb (María 🌸) | Broadcast filter `owner_user_id` migration + focus-bar persistence restore
+### 2026.05.14 Evening - Session f6f865fb (María 🌸) | Two bug fixes + Commons Traffic Visibility 11-step feature
 
-Two-bug session. **(1) Broadcast filter** — Rick saw 1 of 4 personas in the inter-session-commons broadcast UI (only Rachel). Root cause: the Phase 3 Option 2 listener-side stamper (2026-05-13) wrote the LISTENER's service-account UUID (`claude.code@lupin.deepily.ai` → `931e9dae-…`) to `bridge.user_id`, but the filter compares against the HUMAN owner's JWT UUID (`0cf47e2d-…`) — mismatched, every stamped bridge rejected; Rachel slipped through only because her `user_id` field is mysteriously missing on disk (secondary mystery flagged). Option C ratified by Rick: CoSA-side filter now reads a NEW `owner_user_id` field with graceful-degradation fallback (uncommitted on the CoSA side per nested-repo rule; Rick handles). Lupin-side fixture rename + new regression test `test_filter_uses_owner_user_id_not_legacy_user_id` (bridge with BOTH fields, deliberately different) committed in this session. Writer-side stamper queued to `TODO.md` for a future Lupin session. Design + remediation: `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md`.
+Three-phase evening. **(1) Broadcast filter bug** — Rick saw 1 of 4 personas in the inter-session-commons broadcast UI. Root cause: Phase 3 Option 2 stamper wrote the LISTENER's service-account UUID, but the filter compares against the HUMAN owner's JWT UUID — every stamped bridge rejected. Option C ratified: NEW `owner_user_id` field with graceful-degradation fallback. Diagnosis: `src/rnd/v0.1.7/2026.05.14-broadcast-listener-stamps-wrong-user-id.md`.
 
-**(2) Focus-bar persistence** — Rick reported: refresh while in CC-session focus mode loses focus + re-renders every session. Persistence wiring already existed (constructor + per-card / per-icon application), yet the symptom reproduces deterministically. Belt-and-suspenders fix: new `_restoreCcUiAfterLoad()` method at notifications.js:9522, called from `init()` right after `loadConversationHistory()`. Re-reads localStorage directly, reconciles in-memory state, walks DOM to re-apply focus + active-toggle attributes, and enforces the 2026-04-30 design contract's stale-id discard. Covers three plausible root causes without requiring live instrumentation to pin which one. Design + test plan: `src/rnd/v0.1.7/2026.05.14-focus-bar-state-persistence-restore.md`.
+**(2) Focus-bar persistence bug** — Rick reported refresh in CC-session focus mode loses focus. Belt-and-suspenders fix `_restoreCcUiAfterLoad()` shipped — but Rick's post-commit live test showed the symptom PERSISTS (`[FOCUS-RESTORE]` log not firing per his report). Bug parked to `bug-fix-queue.md` with a 3-way diagnostic decision tree for next session. Design: `src/rnd/v0.1.7/2026.05.14-focus-bar-state-persistence-restore.md`.
 
-**Files** (Lupin only): `src/cosa/rest/routers/commons.py` (uncommitted, CoSA side), `src/tests/unit/commons/test_commons_router.py`, `src/tests/smoke/test_broadcast_two_session_e2e.py`, `src/fastapi_app/static/js/notifications.js`, `TODO.md`, plus two new R&D docs above.
+**(3) Commons Traffic Visibility 11-step feature** — Rick surfaced a new UX gap: zero admin visibility into broadcasts + AI-to-AI commons traffic (tonight's `notifications-ui-coord` vs `coord-notifications-js` topic mismatch demonstrated the blind spot). Design ratified via 9 Q-decisions captured one-at-a-time via `ask_multiple_choice` MCP. Built end-to-end: Recent Activity section inside the broadcast card with real-time WS push, INI-flag-gated default-on, exclude-noisy-topics filter, history-window dropdown mirroring the existing UX pattern, flat reverse-chronological, AI-replies routed broadcast-card-only. 13 ACs / 11 steps / one commit per step. Design + step plan: `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`.
 
-**Tests**: `pytest src/tests/unit/commons/test_commons_router.py` inside `lupin-rest-dev` → 87/87 PASS in 0.48s; `node --check` on notifications.js → SYNTAX OK; live browser verification of focus-bar fix pending Rick's refresh test.
+**Lupin commits (16 total this session, in order)**: `cd62304` (broadcast filter Lupin tests + writer-stamper TODO), `0a7da69` (focus-bar first-pass — superseded by parking), `c940f72` (mid-session history+manifest), `284c9fe` (mid-session manifest backfill), `1538bbe` (focus-bar parked + diag tree to queue), `c06a2ea` (CTV Step 0 design doc), `7de7020` (CTV Step 1 INI), `ab40388` (CTV Step 2 helper tests), `5ca6662` (CTV Step 3 :7999 smoke), `30cfae7` (CTV Step 4 watcher + tests), `15599db` (CTV Step 6 HTML+CSS), `6136a88` (CTV Step 7 JS), `fe352b8` (CTV Step 8 suppression), `e28d89f` (CTV Step 9 integration scaffold), `c1496ee` (CTV Step 10 E2E scaffold), `87dbae4` (CTV Step 11 docs).
+
+**CoSA-side uncommitted** (per `feedback_never_commit_cosa`, Rick handles): `rest/routers/commons.py` + NEW `rest/commons_activity_watcher.py` + `rest/routers/notifications.py` valid_types + `rest/routers/system.py` config-client extension. +552 / -17 across 5 files.
+
+**LoC summary (Lupin commits only)**: **25 file changes, +2881 / -28 (net +2853)** across 16 commits. CoSA uncommitted adds another **+552 / -17 across 5 files**.
+
+**Tests**: 87/87 commons-router unit + 15/15 activity-watcher unit + 24 new aggregator unit + 7/7 :7999 broadcast-history smoke = **133+ tests added, all green on `:7999`**. `:8000` integration + E2E UI scaffolded (Steps 9-10), user-scheduled run pending.
+
+**Coordination**: Mr. Radio (a0eaaca1) had three coincident bug-fix arcs landing on the same `notifications.js` + `notifications.html` files (`efbcae3`, `5836a6f`, etc.). Used a Python-script-driven surgical hunk-extraction at commits `15599db` + `6136a88` + `fe352b8` to extract just my hunks from the unstaged diff, reset the file to HEAD, apply my patch, commit, then restore Arnold's working-tree state — kept the Maria-only commits clean while preserving Arnold's uncommitted work for his own context. Parallel-session-safety v2.0 mandate honored.
+
+**Bring-live checklist**: (a) Rick commits CoSA-side in a CoSA-context session, (b) `:7999` bounce so the new `CommonsActivityWatcher` lifespan code starts the daemon. Then visit `/app/notifications` — broadcast card opens default-expanded, Recent Activity section shows all four personas' coordination chatter in real-time.
 
 **Coordination**: Mr. Radio's TTS-rendering work (commit `efbcae3`) coincident on `notifications.js` — coordination handled via `coord-notifications-js` commons topic. Different regions (his lines 5610 + 13278, mine 9522 + 418). No conflict. Cross-topic coordination misfire (I posted on `notifications-ui-coord`, he on `coord-notifications-js`) is the "coordination bug" Rick flagged mid-session; both topics now archived.
 

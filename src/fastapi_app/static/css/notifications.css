@@ -2159,19 +2159,23 @@
             line-height: 1;
         }
 
-        /* Conversation-mode overlay: mic glyph at bottom-right. The
-         * indicator's center sits on the persona-circle perimeter
+        /* Speakerphone/quiet-state overlay on each strip persona icon.
+         * The indicator's center sits on the persona-circle perimeter
          * (45° below horizontal); offsets pulled outward from -3 to
          * -6 per design feedback so the visible glyph reads as docked
-         * to the persona's edge rather than overlapping its interior. */
-        .cc-strip-icon[data-conv-mode="true"]::before {
-            content: "🎤";
+         * to the persona's edge rather than overlapping its interior.
+         *
+         * 2026-05-14 evening: extended from binary (on/off — was 🎤 only) to
+         * three-state. When user has actuated the toggle EITHER WAY, show the
+         * corresponding badge: 🎤 (green) for speakerphone, 🤭 (amber) for
+         * quiet. Default state (user has never toggled) shows no badge. */
+        .cc-strip-icon[data-conv-mode="speakerphone"]::before,
+        .cc-strip-icon[data-conv-mode="quiet"]::before {
             position: absolute;
             bottom: -6px;
             right: -6px;
             width: 18px;
             height: 18px;
-            background: rgba( 25, 135, 84, 0.95 );
             border-radius: 50%;
             font-size: 11px;
             display: inline-flex;
@@ -2180,6 +2184,16 @@
             border: 2px solid #ffffff;
             box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.30 );
             line-height: 1;
+        }
+
+        .cc-strip-icon[data-conv-mode="speakerphone"]::before {
+            content: "🔊";
+            background: rgba( 25, 135, 84, 0.95 );  /* green — full TTS — matches the 🔊 on the sender-card toggle button */
+        }
+
+        .cc-strip-icon[data-conv-mode="quiet"]::before {
+            content: "🤭";
+            background: rgba( 255, 193, 7, 0.95 );  /* amber — small ding only */
         }
 
         /* Mic at bottom-right + count badge at top-right are on opposite

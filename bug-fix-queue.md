@@ -294,6 +294,20 @@
 
 ### Completed
 
+- [x] **Per-session DND toggle + TTS slider relocation + universal strip-icon badges + "loud"→"speakerphone" rename** → commit: 60697e2 | By: a0eaaca1 | 2026-05-14 late evening
+  - **Goal**: refine the parked speakerphone-toggle plan. OFF state ≠ silent. Notifications still arrive for historical record; demoted from `priority='high', suppress_ding=True` to `priority='medium', suppress_ding=False`. Small ding on arrival, no full TTS playback.
+  - **Slider relocated** from `#cc-session-strip` to `#section-notifications` `.section-header` (always-visible accordion row). Centered between filter badge and history dropdown. "History:" label removed.
+  - **Per-session toggle** on each sender card: chorus → 🔊 (speakerphone) / 🤭 (quiet); solo → 📞/🔔 (legacy preserved). Click hits `/api/cosa-voice/speakerphone/{sessionId}` with `{on: bool}`. WS broadcast syncs other tabs.
+  - **Universal strip-icon badges**: every persona icon shows EITHER 🔊 or 🤭. Default state (no map entry) renders as speakerphone. Per Rick: "Everybody gets state rendered."
+  - **Hook rider quiet-mode body** rewritten — when speakerphone is off, rider directs Claude to call notify with `priority='medium', suppress_ding=False`. Replaces the legacy "stop calling notify; terminal-only" body that contradicted the new directive.
+  - **Exit-reminder body** unified with the steady-state quiet-mode rider — no more contradiction on transition.
+  - **Client-side belt-and-suspenders** priority rewrite at `handleNotificationUpdate` — catches Claude not honoring the rider.
+  - **Field-name fix**: POST body to `/speakerphone/` is `{on: bool}`, NOT `{active: bool}` (legacy conversation-mode endpoint). Caught via 422 error mid-implementation; memory saved.
+  - **Files**: `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/css/notifications.css`, `src/fastapi_app/static/html/notifications.html`, `src/cosa/rest/routers/system.py` (added `tts_interaction_mode` to `/api/config/client`), `src/lupin_cli/claude_code/hooks/lib/hook_common.py`.
+  - **R&D**: `src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move{.md,-execution-log.md}` (NEW). Afternoon's parked `2026.05.14-speakerphone-toggle-on-sender-card.md` updated with SUPERSEDED banner. Tonight's shipped `2026.05.14-tts-preview-stop-and-slider.md` updated with slider-relocation note. Session wrap at `2026.05.14-session-wrap-pickup-tomorrow.md`.
+  - **Tests**: `node -c` PASS. `py_compile` PASS on hook_common.py + system.py. Live MCP verification at speakerphone-on (full TTS) + speakerphone-off (medium-priority dings + no TTS).
+  - **Known pickup for tomorrow**: cc_notification_listener daemon PID 24166 holds stale `speakerphone_exit_reminder` in `sys.modules` — restart pickup for tomorrow per `2026.05.14-session-wrap-pickup-tomorrow.md`.
+
 - [x] **TTS preview-and-pause: stop-instead-of-pause + runtime percentage slider + strict FIFO** → commit: ea7f90f | By: a0eaaca1 | 2026-05-14 evening
   - **Symptom**: the morning's preview-and-pause shipment auto-paused the queue after every preview slice, forcing the user to click resume per message. Wrong default for a multi-session listener — Rick wanted "bite-sized announcement, not prefix-with-stall." Also: action-required notifications splice-jumped fire-and-forget in the queue, breaking the "hear them in arrival order" mental model.
   - **Fix shape**: Stop instead of pause — the queue advances immediately after the preview slice plays. Drop the remainder, drop `_ttsPausedAfterPreview` flag, drop `resumeTTS` preview-remainder branch, drop `stopTTSAndAdvance` special case. New runtime slider widget in `#cc-session-strip` with 5 stops (0/25/50/75/100). 0% adds a new `stage='skip'` that bypasses audio dispatch while keeping the notification in the visible list. Strict FIFO — `addToTTSQueue` push-to-back for every type.

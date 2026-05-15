@@ -1131,12 +1131,20 @@ def _speakerphone_reminder_body( source, mode, speakerphone_on ):
         parts.append( _brevity_rules() )
         parts.append( _routing_reminder() )
     else:
+        # 2026-05-14 evening — reframed from "no notify required" (silent) to
+        # quiet-mode (demoted priority). User wants the historical record
+        # preserved with a small ding on arrival; TTS playback is suppressed.
+        # See src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
         parts.append(
-            "This session has speakerphone mode OFF (text-only render). No "
-            "closing `notify()` required. You may still call `notify()` for "
-            "milestones, errors, or blocking questions — those produce UI "
-            "notification cards regardless of TTS state. Blocking `ask_*` "
-            "tools also remain available."
+            "This session is in QUIET mode (per-session DND). The historical "
+            "record matters — keep calling `notify()` for milestones, errors, "
+            "action-required prompts, and the closing-turn summary — BUT use "
+            "`priority='medium'` and `suppress_ding=False` (NOT the standard "
+            "`priority='high', suppress_ding=True`). The user wants the small "
+            "arrival ding without full TTS playback. Detail still goes in the "
+            "`abstract` parameter (UI card rendering is unaffected by the "
+            "priority demotion). Blocking `ask_*` tools remain available — "
+            "use them with `priority='medium'` as well."
         )
 
     if mode == "solo":
@@ -1279,13 +1287,22 @@ def speakerphone_exit_reminder( mode ):
 
     Ensures:
         - Returns a non-empty <system-reminder>…</system-reminder> block
-        - Body explicitly tells the model to stop calling notify() and
-          stop wrapping responses in voice-message format
+        - Body matches the quiet-mode rider's semantic (keep calling notify()
+          for milestones / errors / closing-turn summary, BUT demote priority
+          from 'high' to 'medium' and flip suppress_ding from True to False)
         - Body does NOT contain the entry-side wrapper sentinel
           (_SPEAKERPHONE_WRAP_SENTINEL) so idempotency in speakerphone_wrap
           doesn't false-positive when an exit reminder is itself wrapped
         - Output is safe to inject via tmux send-keys -l (no special chars
           beyond what tmux literal mode handles)
+
+    2026-05-14 evening rewrite: the previous exit reminder said "stop calling
+    notify(), resume terminal-only output" — that contradicted the new
+    quiet-mode rider which says "keep calling notify() with demoted priority
+    to preserve the historical record." The two rider sources were firing in
+    the same turn on a fresh deactivation, producing conflicting instructions.
+    The exit reminder now matches the quiet-mode body: same demotion
+    directive, plus the one-time framing that the transition just happened.
 
     Args:
         mode: TTS interaction mode ("solo" or "chorus")
@@ -1293,22 +1310,26 @@ def speakerphone_exit_reminder( mode ):
     Returns:
         str: <system-reminder> block ready for tmux injection
     """
+    common_quiet_directive = (
+        "This session has just transitioned to QUIET mode (per-session DND). "
+        "The historical record matters — keep calling `notify()` for "
+        "milestones, errors, action-required prompts, and the closing-turn "
+        "summary — BUT use `priority='medium'` and `suppress_ding=False` (NOT "
+        "the standard `priority='high', suppress_ding=True`). The user wants "
+        "the small arrival ding without full TTS playback. Detail still goes "
+        "in the `abstract` parameter. Acknowledge this transition silently — "
+        "do not announce it to the user."
+    )
     if mode == "solo":
         body = (
-            "Speakerphone has just been deactivated for this session (either "
+            "Speakerphone has just been deactivated for this session — either "
             "another session activated speakerphone and displaced you, or you "
-            "toggled off). Stop calling `notify()` at the end of your "
-            "response. Stop wrapping replies in voice-message format. Resume "
-            "normal terminal-only output. Acknowledge this transition "
-            "silently — do not announce it to the user."
+            "toggled off. " + common_quiet_directive
         )
     else:  # chorus (or unknown — default to chorus per INI default)
         body = (
-            "Speakerphone has just been deactivated for this session. Stop "
-            "calling `notify()` at the end of your response. Stop wrapping "
-            "replies in voice-message format. Resume normal terminal-only "
-            "output. Acknowledge this transition silently — do not announce "
-            "it to the user."
+            "Speakerphone has just been deactivated for this session. "
+            + common_quiet_directive
         )
     return f'<system-reminder>\n{body}\n</system-reminder>'
 

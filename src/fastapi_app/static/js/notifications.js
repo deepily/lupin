@@ -5684,7 +5684,29 @@ class NotificationsUI {
             return;  // Don't add to sender cards
         }
 
-        // Regular fire-and-forget notification handling
+        // Regular fire-and-forget notification handling.
+        //
+        // 2026-05-14 evening — belt-and-suspenders per-session DND. If the sender
+        // session is in quiet-mode (this.conversationModes[sessionId] === false)
+        // AND the notification arrived with priority='high' or 'urgent', rewrite
+        // it to medium + suppress_ding=false BEFORE the ding fires and BEFORE the
+        // priority branch dispatches. This catches the case where Claude didn't
+        // honor the hook-rider quiet-mode directive and still sent priority=high.
+        // The rewrite ensures the notification still arrives in the list with a
+        // small ding (historical record preserved) but doesn't engage full TTS.
+        // See src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
+        if ( notification.sender_id ) {
+            const parsed    = this.parseSenderId( notification.sender_id );
+            const sessionId = parsed && parsed.sessionId;
+            if ( sessionId && this.conversationModes[ sessionId ] === false ) {
+                if ( notification.priority === "high" || notification.priority === "urgent" ) {
+                    this.log( `[QUIET-MODE] Rewriting priority for muted session ${sessionId}: ${notification.priority} → medium` );
+                    notification.priority      = "medium";
+                    notification.suppress_ding = false;
+                }
+            }
+        }
+
         // 1. Play notification sound based on priority unless suppress_ding is set
         if ( notification.suppress_ding !== true ) {
             await this.playNotificationSoundByPriority( notification.priority );
@@ -9166,10 +9188,15 @@ class NotificationsUI {
             icon.setAttribute( "data-focused", "true" );
         }
 
-        // Mirror conv-mode state if the bridge already says this session
-        // is in conv-mode (handled separately for live changes).
-        if ( sessionId && this.conversationModes && this.conversationModes[ sessionId ] ) {
-            icon.setAttribute( "data-conv-mode", "true" );
+        // Mirror conv-mode state at icon creation. Every persona icon gets a
+        // state badge — sessions never explicitly toggled default to
+        // "speakerphone" (the default state). Rick's directive 2026-05-14
+        // evening: "Everybody gets state rendered."
+        if ( sessionId ) {
+            const explicit = this.conversationModes && ( sessionId in this.conversationModes )
+                ? !!this.conversationModes[ sessionId ]
+                : true;  // no entry → default speakerphone
+            icon.setAttribute( "data-conv-mode", explicit ? "speakerphone" : "quiet" );
         }
 
         // Click dispatch — scroll-to-card in default mode, switch-focus in focus mode.
@@ -9331,11 +9358,12 @@ class NotificationsUI {
         );
         if ( !icon ) return;
 
-        if ( isOn ) {
-            icon.setAttribute( "data-conv-mode", "true" );
-        } else {
-            icon.removeAttribute( "data-conv-mode" );
-        }
+        // 2026-05-14 evening: extended the badge semantics from binary
+        // (on/off) to three-state (speakerphone/quiet/undefined). When the
+        // user has actuated the toggle EITHER WAY, show the corresponding
+        // badge: 🎤 for speakerphone, 🤭 for quiet. Default state (user has
+        // never toggled this session) shows no badge.
+        icon.setAttribute( "data-conv-mode", isOn ? "speakerphone" : "quiet" );
     }
 
     /**
@@ -10036,15 +10064,29 @@ class NotificationsUI {
      */
     async toggleConversationMode( sessionId ) {
         if ( !sessionId ) return;
-        const current = !!this.conversationModes[ sessionId ];
+        // Default missing entries to LOUD (true) — matches createSenderCard default.
+        // No entry = LOUD; click flips to QUIET (false). Entry=false = QUIET; click flips to LOUD (true).
+        const current = ( sessionId in this.conversationModes )
+            ? !!this.conversationModes[ sessionId ]
+            : true;
         const next    = !current;
         try {
+            // 2026-05-14 evening: rewired from dead `/api/cosa-voice/conversation-mode/`
+            // (404'd silently) to the canonical `/api/cosa-voice/speakerphone/` endpoint
+            // used by cosa-voice MCP's enable_speakerphone() / disable_speakerphone() tools.
+            // The endpoint writes the bridge `speakerphone_on` flag and broadcasts a
+            // `speakerphone_changed` WS event (mapped to `conversation_mode_active` in the
+            // routing case at line ~5504 for backwards-compat with handleConversationModeChanged).
+            //
+            // 2026-05-14 fix: body field is `on` (NOT `active` — the legacy
+            // conversation-mode endpoint used `active`, but the canonical
+            // /speakerphone/ endpoint's Pydantic model requires `on`).
             const response = await this.authedFetch(
-                `/api/cosa-voice/conversation-mode/${encodeURIComponent( sessionId )}`,
+                `/api/cosa-voice/speakerphone/${encodeURIComponent( sessionId )}`,
                 {
                     method  : 'POST',
                     headers : { 'Content-Type': 'application/json' },
-                    body    : JSON.stringify( { active: next } )
+                    body    : JSON.stringify( { on: next } )
                 }
             );
             if ( !response.ok ) {
@@ -10205,14 +10247,25 @@ class NotificationsUI {
 
         // Redraw any matching toggle button(s). data-session-id selector matches both
         // the sender-card itself and the per-session toggle button.
+        //
+        // 2026-05-14 evening: icon set is mode-aware (chorus vs solo). Per-session
+        // DND semantic — speakerphone (active=true) plays full TTS; quiet (active=false)
+        // demotes to medium priority with small ding only.
+        const isSolo = this.ttsInteractionMode === 'solo';
         const buttons = document.querySelectorAll(
             `.sender-conversation-mode-btn[data-session-id="${sessionId}"]`
         );
         buttons.forEach( btn => {
-            btn.textContent = active ? '📞' : '🔔';
-            btn.title       = active
-                ? 'Conversation mode ON — every Claude response is spoken (click to switch to notification mode)'
-                : 'Notification mode (default) — only explicit notify() calls speak (click to switch to conversation mode)';
+            btn.textContent = isSolo
+                ? ( active ? '📞' : '🔔' )
+                : ( active ? '🔊' : '🤭' );
+            btn.title = isSolo
+                ? ( active
+                    ? 'Conversation mode ON — this session monopolizes TTS (click to release)'
+                    : 'Notification mode — no monopoly (click to claim TTS)' )
+                : ( active
+                    ? "Speakerphone — this session's notifications play full TTS at the slider fraction (click to switch to quiet ding-only mode)"
+                    : "Quiet — notifications still arrive in the list with a small ding, no TTS playback (click to switch back to speakerphone)" );
             btn.classList.toggle( 'is-active', active );
         } );
     }
@@ -10694,11 +10747,30 @@ class NotificationsUI {
 
         // Build session display string (only if session_id present)
         // Session name is clickable for inline editing, gist button triggers LLM summary
-        const conversationModeActive = sessionId ? !!this.conversationModes[ sessionId ] : false;
-        const conversationModeIcon   = conversationModeActive ? '📞' : '🔔';
-        const conversationModeTitle  = conversationModeActive
-            ? 'Conversation mode ON — every Claude response is spoken (click to switch to notification mode)'
-            : 'Notification mode (default) — only explicit notify() calls speak (click to switch to conversation mode)';
+        //
+        // Per-session DND toggle (2026-05-14 evening):
+        // - `this.conversationModes` map tracks per-session speakerphone state
+        // - Entry value `true`  = LOUD  (full TTS playback at slider fraction)
+        // - Entry value `false` = QUIET (medium priority, small ding only, no TTS)
+        // - No entry            = LOUD  (default — Rick's chosen default-state)
+        // Icon set depends on `this.ttsInteractionMode`:
+        // - chorus: 🔊 (speakerphone) / 🤭 (quiet — hand-over-mouth = "shh")
+        // - solo:   📞 (conversation) / 🔔 (notification) — legacy iconography preserved
+        const speakerphoneOn = sessionId
+            ? ( sessionId in this.conversationModes ? !!this.conversationModes[ sessionId ] : true )
+            : true;
+        const isSolo = this.ttsInteractionMode === 'solo';
+        const conversationModeActive = speakerphoneOn;  // kept name for CSS class compatibility
+        const conversationModeIcon   = isSolo
+            ? ( speakerphoneOn ? '📞' : '🔔' )
+            : ( speakerphoneOn ? '🔊' : '🤭' );
+        const conversationModeTitle  = isSolo
+            ? ( speakerphoneOn
+                ? 'Conversation mode ON — this session monopolizes TTS (click to release)'
+                : 'Notification mode — no monopoly (click to claim TTS)' )
+            : ( speakerphoneOn
+                ? "Speakerphone — this session's notifications play full TTS at the slider fraction (click to switch to quiet ding-only mode)"
+                : "Quiet — notifications still arrive in the list with a small ding, no TTS playback (click to switch back to speakerphone)" );
         const sessionDisplay = sessionId
             ? `<span class="sender-session-id"
                      onclick="event.stopPropagation();">#${sessionId}</span><span class="sender-session-copy copy-btn"
@@ -11681,7 +11753,6 @@ class NotificationsUI {
             || this.WINDOW_OPTIONS[0];
 
         dropdown.innerHTML = `
-            <span class="dropdown-label">History:</span>
             <button class="dropdown-display" onclick="event.stopPropagation(); window.notificationsUI.toggleHistoryDropdown()">
                 ${currentOption.label}
                 <span class="dropdown-arrow">▼</span>
