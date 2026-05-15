@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-07T17:45:00-04:00
+**Last Updated**: 2026-05-14T20:30:00-04:00
 
 ---
 
@@ -62,6 +62,7 @@
 | 45e6bf84 | 2026-05-05T21:03:44 | 2026-05-05T23:25:00 | closed |
 | 6825e6af | 2026-05-07T17:45:00 | 2026-05-07T20:11:00 | active |
 | a0eaaca1 | 2026-05-14T21:22:14 | 2026-05-14T22:40:00 | active |
+| f6f865fb | 2026-05-14T17:34:00 | 2026-05-14T20:30:00 | parked-focus-bug-incomplete |
 
 ---
 
@@ -102,6 +103,20 @@
 ### Queued
 
 (Available for any session to claim)
+
+- [ ] **CC-session focus mode + active-toggle do NOT survive page refresh** (filed 2026-05-14 by session `f6f865fb` María 🌸. First-pass fix `0a7da69` did NOT resolve symptom — user verified post-commit with hard refresh. Parked while user pivots to commons implementation.)
+  - **Symptom**: User enters CC-session focus mode by clicking a strip icon (e.g., focus on María's card). All other sender cards correctly hide. User hard-refreshes the browser (Ctrl-Shift-R). Expected: focus mode restored, only the originally-focused card visible. **Actual**: focus mode lost; ALL sender cards rendered; "👁 Focus" toggle pill in default (off) state. Same expected symptom for the "👁 All / 👁 Active" hide-inactive toggle.
+  - **First-pass fix that didn't work** (commit `0a7da69`): NEW `_restoreCcUiAfterLoad()` method at `src/fastapi_app/static/js/notifications.js:9522`, called from `init()` immediately after `await this.loadConversationHistory()`. Method re-reads localStorage directly, reconciles `ccFocusState` / `ccHideInactiveStrip` with persisted state, walks DOM applying `data-focus-hidden` / `data-focused` / `data-inactive-hidden`, restores toggle-pill visuals, and discards stale `focused_sender_id` per the 2026-04-30 design contract. `node --check` passed, but user-verified hard-refresh still loses focus.
+  - **Critical diagnostic the next session MUST capture first**: open DevTools console BEFORE refreshing, then refresh. Look for log lines tagged `[FOCUS-RESTORE]` or `[ACTIVE-TOGGLE-RESTORE]`. The presence/absence + content tells us which path failed:
+    - **NO `[FOCUS-RESTORE]` log appears** → my new method never ran. Possible causes: (a) `init()` exited early before reaching the call site (e.g., auth redirect, exception in `loadConversationHistory` swallowed silently); (b) JS file was browser-cache-hit and the new method isn't actually deployed in the client's runtime (verify by typing `notificationsUI._restoreCcUiAfterLoad` in console — undefined = stale cache); (c) the file was edited but `init()` reached the call site as part of a code path that I missed.
+    - **`[FOCUS-RESTORE] focus mode restored on <sender_id>` log appears, but focus is still lost visually** → my DOM manipulation was undone by a LATER step in `init()` (e.g., `restoreActionRequiredState` or `restoreTTSQueueState` triggers a re-render that wipes `data-focus-hidden`). Need to instrument those.
+    - **`[FOCUS-RESTORE] focused sender <X> not in current data set; discarding stale state` log appears** → my code mis-classified the focused sender as missing. Possible senderId-format mismatch (8-char vs full UUID) — the `expectedId` selector at `notifications.js:9559` ish is `sender-card-${focused_sender_id.replace( /[@.#]/g, '-' )}` and may need to match what `createSenderCard` actually uses for `card.id`.
+  - **Concrete repro steps**: (1) Open `/app/notifications` while a CC session has rendered a card. (2) Click that session's strip icon — confirm "👁 Focus: ON" + only that card visible. (3) Check DevTools Application → Local Storage → `notifications_cc_focus_state` — confirm `{"enabled":true,"focused_sender_id":"<id>"}` is persisted. (4) Hard-refresh (Ctrl-Shift-R). (5) Observe symptom + capture `[FOCUS-RESTORE]` console output.
+  - **Acceptance**: refresh while in focus mode → focus survives (focused card visible, other cards hidden, "👁 Focus: ON" pill lit). Same for hide-inactive toggle ("👁 Active" pill survives refresh).
+  - **Related**: original feature design at `src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md` (especially §134 stale-id discard contract); active-toggle design at `src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md`; first-pass remediation doc at `src/rnd/v0.1.7/2026.05.14-focus-bar-state-persistence-restore.md` (root-cause analysis section enumerates 3 plausible causes still in play); commit `0a7da69` for the first-pass diff.
+  - **Coordination note**: Mr. Radio's coincident TTS-rendering commit `efbcae3` touched `notifications.js` at lines ~5610 (`handleNotificationUpdate`) and ~13278 (`activateNextTTS`), then again at `.is-tts-pending` CSS. My first-pass fix touched lines 192-198 + 9522 + 418. Different regions; not the source of the residual bug.
+
+---
 
 - [ ] **Voice-routing classifier mis-routes "research something and present it" → `deep_research` instead of `research_to_presentation`** (filed 2026-05-07 by session 6825e6af, surfaced during Phase 4b cascade-elimination run on `:8000`)
   - **Symptom**: `test_proxy_integration::test_proxy_integration` Scenario 15 `EXP_RTPRES_MISSING` failed in job `ts-e6bb533b`. Voice command "research something and present it" was expected to route to "agent router go to research to presentation" but the classifier emitted "agent router go to deep research" instead. 14 of 15 scenarios passed; this is the only failure.
