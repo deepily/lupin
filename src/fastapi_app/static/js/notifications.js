@@ -5554,6 +5554,23 @@ class NotificationsUI {
                 return;
         }
 
+        // ─── Commons Traffic Visibility — Q1 ratification (Step 8/11) ───────
+        // When `commons_traffic_visibility_enabled` is True, AI replies to
+        // broadcasts and AI-to-AI commons answers are routed exclusively to
+        // the broadcast-card Recent Activity stream (via the `commons_activity`
+        // WS event handler above). Suppress the duplicate session-card render
+        // of those notifications here so the user doesn't see the same content
+        // twice. Toggling the INI flag to False (kill-switch per Q4 + Q9)
+        // restores legacy session-card rendering on next page load.
+        // See: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (Q1)
+        if ( this.commonsTrafficVisibilityEnabled
+             && notification.type === "user_initiated_message"
+             && ( notification.title === "action:broadcast_received"
+                  || notification.title === "action:commons_answer_received" ) ) {
+            this.log( `[COMMONS-ACTIVITY] suppressing session-card render of ${notification.title} (broadcast-card-only per Q1)` );
+            return;
+        }
+
         // Check for duplicates (same logic as old queue.js)
         const exists = this.notificationState.notifications.find( n => n.id_hash === notification.id_hash );
         if ( exists ) {
