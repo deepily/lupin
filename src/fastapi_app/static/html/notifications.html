@@ -1056,14 +1056,27 @@
     <script>
         function toggleSection(sectionId) {
             const content = document.getElementById(sectionId);
-            const toggle = document.getElementById(sectionId.replace('-section', '-toggle'));
-            
+            if (!content) return;
+            // Find the toggle button. The original convention is sectionId
+            // ends in -section and the button is the same prefix + -toggle.
+            // Several callers in this file pass ids that DON'T end in
+            // -section (commons-recent-activity-body, action-required-content,
+            // tts-queue-content). For those, the replace returns the input
+            // unchanged, `toggle === content`, and the textContent assignment
+            // below WIPES the content div's children. Fall back to finding
+            // the toggle button inside the previous-sibling header element.
+            let toggle = document.getElementById(sectionId.replace('-section', '-toggle'));
+            if (!toggle || toggle === content) {
+                const header = content.previousElementSibling;
+                if (header) toggle = header.querySelector('.toggle-button');
+            }
+
             if (content.classList.contains('collapsed')) {
                 content.classList.remove('collapsed');
-                toggle.textContent = '▼';
+                if (toggle) toggle.textContent = '▼';
             } else {
                 content.classList.add('collapsed');
-                toggle.textContent = '▶';
+                if (toggle) toggle.textContent = '▶';
             }
         }
     </script>

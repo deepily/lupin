@@ -2,9 +2,9 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
-### 2026.05.15 - Session 3b6be6f9 (María 🌸) | Notifications UI: Recent-Activity refresh observability + focus-tray state preserved across page reloads
+### 2026.05.15 - Session 3b6be6f9 (María 🌸) | Notifications UI three-fix arc: Recent-Activity refresh observability + focus-tray reload persistence + header-toggle children-wipe (with sweep of 2 latent same-pattern callers)
 
-Chorus session continuation. Rick's morning `@all` broadcast assigned María the Commons blackboard lead role; status read confirmed Phase 3 fully closed 2026-05-13 (398 unit/smoke + 7 integration green), with the open follow-on backlog being the 4× persona-completion dup bug + `owner_user_id` writer stamper + stale-bridge sweeper. Rick then voice-redirected to two notifications.js bugs ahead of the queue. Both fixed and live-confirmed in this session; no R&D doc per `feedback_skip_rnd_doc_for_trivial_fixes`.
+Chorus session continuation. Rick's morning `@all` broadcast assigned María the Commons blackboard lead role; status read confirmed Phase 3 fully closed 2026-05-13 (398 unit/smoke + 7 integration green), with the open follow-on backlog being the 4× persona-completion dup bug + `owner_user_id` writer stamper + stale-bridge sweeper. Rick then voice-redirected to three notifications-UI bugs ahead of the queue, fixed sequentially across the session. All three fixed and live-confirmed; no R&D doc per `feedback_skip_rnd_doc_for_trivial_fixes`.
 
 **Bug 1 — `#commons-recent-activity-refresh` silent on click**: handler was wired correctly (`_initCommonsRecentActivity` → `addEventListener("click", …)` → `_loadCommonsRecentActivity`) but produced zero console output because `this.log()` is debug-gated and the happy path had no logs — only `this.error()` (unconditional) fired on `!resp.ok` or thrown exceptions. Rick was correctly unable to tell whether the click was firing. **Fix**: 3 unconditional `console.log` lines on the success path (click registered, load start with window value, load complete with entries count) per the existing `wsDiag` + Firefox-hack precedent for diagnostic logging that bypasses the debug flag.
 
@@ -12,23 +12,41 @@ Chorus session continuation. Rick's morning `@all` broadcast assigned María the
 
 **Fix shape — Option B (intent-preserving exit)** ratified via `ask_multiple_choice`: added `persist = true` parameter to `_exitFocusMode( persist = true )`; `_saveCcFocusState()` now gated on `persist`. Three auto-exit sites pass `persist=false`; the explicit user-toggle path at `_handleStripToggleClick` stays default `true`. Net: explicit toggle-off persists OFF; transient auto-exits during init churn preserve user intent so the next reload can re-apply focus.
 
+**Bug 3 — Recent Activity header toggle nuked all entry contents (with sweep of 2 latent same-pattern callers)**:
+
+After landing Bug 1 + Bug 2 and Rick voice-confirming, he reported a third bug: toggling the `#commons-recent-activity-header` accordion wiped the entire entries list, and subsequent refresh-button clicks logged only `[COMMONS-ACTIVITY] refresh clicked` — no `load start`, no `load complete`. Root-cause traced to `toggleSection()` at `notifications.html:1057-1068`: function does `sectionId.replace('-section', '-toggle')` to find the toggle-button id. The inline `onclick="toggleSection('commons-recent-activity-body')"` at L701 passes a body id that has no `-section` substring, so `replace` returns the input unchanged, `toggle === content`, and `toggle.textContent = '▶'` wipes the body div's children (including `#commons-recent-activity-entries`). Refresh's `if ( !entriesEl ) return;` then early-exits silently.
+
+**Sweep finding via grep**: of 19 `toggleSection(...)` callers in `notifications.html`, three pass non-`-section` ids — today's `commons-recent-activity-body` (L701) PLUS two latent same-pattern bugs at `action-required-content` (L528) and `tts-queue-content` (L552). All three are sibling-header-above-content layout, so the same fallback applies cleanly to all of them.
+
+**Fix shape — Option B+ (harden + sweep latents)** ratified via `ask_multiple_choice`: hardened `toggleSection` with a defensive fallback — if `toggle === content` (replace did nothing) or not found, look up `.toggle-button` inside `content.previousElementSibling` (the header div). Also guarded both `toggle.textContent = '▼'/'▶'` writes with `if (toggle)` so a missing toggle button no longer wipes the content div. Folded in a corresponding fix in `notifications.js`: moved the `[COMMONS-ACTIVITY] load start` log to BEFORE the early-exit guard (was misplaced in Bug 1's edit), and added a `console.warn` when the entries element is missing so future bail-out cases are observable instead of silent. Net effect: today's bug fixed at its root cause; two latent bugs at L528/L552 closed in the same commit without explicit caller-side changes; refresh-button observability gains a missing-element diagnostic.
+
 **Verification table**:
 
 | Layer | Result |
 |---|---|
 | `node --check notifications.js` (after bug-1 edits) | ✅ SYNTAX OK |
 | `node --check notifications.js` (after bug-2 edits) | ✅ SYNTAX OK |
+| `node --check notifications.js` (after bug-3 log-placement fix) | ✅ SYNTAX OK |
 | Re-grep `_exitFocusMode\b` post-edit — confirms 4 auto-sites pass `false`, 1 user-site stays default | ✅ |
 | Bug 1 — Rick live hard-refresh + click on `:7999` | ✅ all 3 log lines fire ("looks good") |
 | Bug 2 — Rick live hard-refresh + set focus + hard-refresh on `:7999` | ✅ "that fixed it" |
+| Bug 3 — `toggleSection` inline-script extracted from HTML + visually inspected post-edit | ✅ matches intent |
+| Bug 3 + sweep — pending Rick's live hard-refresh + toggle-header probe (live confirmation expected this turn) | ⏳ |
 
-**Files touched** (parent Lupin only — no CoSA edits, no other repos): `src/fastapi_app/static/js/notifications.js` (7 edits in one file: 3 for bug-1 observability + 4 for bug-2 persistence semantics).
+**Files touched** (parent Lupin only — no CoSA edits, no other repos):
 
-**Parallel-session safety note**: at checkpoint time `git status` showed `bug-fix-queue.md` + `src/conf/lupin-app.ini` + the Rio `2026.05.15-rio-top-5-todo-bug-triage.md` doc as pre-existing modifications from OTHER active sessions in the workspace — explicitly excluded from this session's stage set per v2.0 selective-staging mandate.
+| File | Change |
+|---|---|
+| `src/fastapi_app/static/js/notifications.js` | 9 edits across two commits: Bug 1 = +3 unconditional `console.log` lines on Recent-Activity success path; Bug 2 = `_exitFocusMode( persist = true )` + 3 auto-exit sites pass `false`; Bug 3 = moved Bug-1's load-start log to BEFORE early-exit + added `console.warn` for missing-element case |
+| `src/fastapi_app/static/html/notifications.html` | Bug 3 = hardened `toggleSection` with previous-sibling-header fallback + `if (toggle)` guards on both `textContent` writes; same fix closes latents at L528 (`action-required-content`) and L552 (`tts-queue-content`) |
 
-**Memories**: none new — both fixes follow existing project precedents (`wsDiag` unconditional logging pattern; the design comment near `_restoreCcUiAfterLoad` had already named the failure mode for bug 2).
+**Parallel-session safety note**: at the first checkpoint (commit `7e27779`) AND at this second checkpoint, `git status` showed `bug-fix-queue.md` + `src/conf/lupin-app.ini` as pre-existing modifications from session `ea85fd64` (Mr. Radio 🦉) — both registering `retail-ai-location-strategy` as a new external doc-viewer scope + filing a related `/api/init` scope-registry hot-reload bug. Plus the untracked `src/rnd/v0.1.7/2026.05.15-rio-top-5-todo-bug-triage.md` from Rio ⚡'s morning chorus turn. All three explicitly excluded from this session's stage set per v2.0 selective-staging mandate. As a result, the "Recently Completed" section of `bug-fix-queue.md` was NOT updated to record these three fixes — Rick was notified that the queue update would require a stash-and-pop sequence to avoid bundling Mr. Radio's uncommitted work, and the queue-side documentation hand-off is deferred to whoever next has clear ownership of that file.
 
-**Commit**: pending (this session-end checkpoint)
+**Memories**: none new — all three fixes follow existing project precedents already captured in memory (`wsDiag` unconditional logging pattern; the design comment near `_restoreCcUiAfterLoad` had already named the failure mode for bug 2; `toggleSection`'s sibling-header pattern is the standard layout for `.collapsible-section` callers and the previousElementSibling fallback follows that established structural convention).
+
+**Commit history this session**:
+- `7e27779` — Bug 1 + Bug 2 (notifications.js + history.md + .claude-session.md)
+- [next commit] — Bug 3 + sweep (notifications.html + notifications.js + history.md + .claude-session.md)
 
 ---
 

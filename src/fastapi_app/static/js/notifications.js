@@ -9804,10 +9804,13 @@ class NotificationsUI {
     }
 
     async _loadCommonsRecentActivity( windowValue ) {
+        console.log( `[COMMONS-ACTIVITY] load start, window=${windowValue}` );
         const entriesEl = document.getElementById( "commons-recent-activity-entries" );
         const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
-        if ( !entriesEl ) return;
-        console.log( `[COMMONS-ACTIVITY] load start, window=${windowValue}` );
+        if ( !entriesEl ) {
+            console.warn( "[COMMONS-ACTIVITY] entries element missing from DOM — bailing out" );
+            return;
+        }
 
         // Map window value → hours query param (mirrors getEffectiveHoursForQuery shape)
         const params = new URLSearchParams();
