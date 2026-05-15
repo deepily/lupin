@@ -26,10 +26,14 @@ from cosa.rest.routers.commons import (
     BroadcastRequestBody,
     RegisterQuestionRequest,
     _bridge_last_activity_epoch,
+    _entry_passes_same_user_scoping,
     _load_bridge_fields,
     _body_contains_reminder_framing,
+    _project_history_entry,
+    _resolve_since_cutoff,
     build_pseudo_sender_id,
     execute_broadcast,
+    execute_broadcast_history,
     execute_register_question,
     execute_unregister_question,
     filter_and_project_sessions,
@@ -1277,3 +1281,369 @@ def test_init_commons_state_question_watcher_optional( store, rate_limiter, ack_
         active_session_threshold_seconds = 600.0,
     )
     assert commons_module._commons_question_watcher is None
+
+
+# ─── Phase 2.5/3.5 Step 2 — broadcast-history aggregator (AC1 + AC4-AC6 + AC9) ─
+
+
+# Mock store with the same `_all_topic_names()` + `read()` surface as CommonsStore.
+class _FakeStore:
+    def __init__( self, topics_to_entries, raise_for_topics=None ):
+        self._topics_to_entries = topics_to_entries
+        self._raise_for_topics  = set( raise_for_topics or [ ] )
+
+    def _all_topic_names( self ):
+        return sorted( self._topics_to_entries.keys() )
+
+    def read( self, topic, since=None, limit=50 ):
+        if topic in self._raise_for_topics:
+            raise FileNotFoundError( f"Synthetic: {topic}" )
+        entries = self._topics_to_entries.get( topic, [ ] )
+        if since is not None:
+            entries = [ e for e in entries if e[ "ts" ] > since ]
+        return entries[ :limit ]
+
+
+def _make_entry( ts, topic_marker="x", sender_sid="sess-x", sender_user_id=None, target_sid=None, body="hello" ):
+    md = { }
+    if sender_user_id is not None: md[ "sender_user_id" ]    = sender_user_id
+    if target_sid     is not None: md[ "target_session_id" ] = target_sid
+    return {
+        "ts"                : ts,
+        "sender_session_id" : sender_sid,
+        "persona_name"      : f"persona-{topic_marker}",
+        "persona_icon"      : "🌸",
+        "persona_color"     : "#F06292",
+        "body"              : body,
+        "metadata"          : md,
+    }
+
+
+# ─── _resolve_since_cutoff ──────────────────────────────────────────────────
+
+
+def test_resolve_since_cutoff_explicit_since_wins():
+    """Caller-supplied `since_iso` is returned verbatim regardless of `hours` or now_fn."""
+    got = _resolve_since_cutoff(
+        since_iso  = "2026-05-14T00:00:00+00:00",
+        hours      = 99,
+        now_iso_fn = lambda: "2030-01-01T00:00:00+00:00",
+    )
+    assert got == "2026-05-14T00:00:00+00:00"
+
+
+def test_resolve_since_cutoff_hours_window_computed_from_now():
+    """When only `hours` supplied, return (now - hours) as ISO."""
+    got = _resolve_since_cutoff(
+        since_iso  = None,
+        hours      = 24,
+        now_iso_fn = lambda: "2026-05-14T20:00:00+00:00",
+    )
+    # 24h before 20:00 of 2026-05-14 → 2026-05-13T20:00:00+00:00
+    assert got == "2026-05-13T20:00:00+00:00"
+
+
+def test_resolve_since_cutoff_neither_returns_none():
+    """When neither parameter supplied → no cutoff (return all retained)."""
+    got = _resolve_since_cutoff(
+        since_iso  = None,
+        hours      = None,
+        now_iso_fn = lambda: "2026-05-14T20:00:00+00:00",
+    )
+    assert got is None
+
+
+def test_resolve_since_cutoff_handles_z_suffix_utc():
+    """ISO `Z` suffix from JS `Date.toISOString()` is normalized to `+00:00` before parsing."""
+    got = _resolve_since_cutoff(
+        since_iso  = None,
+        hours      = 1,
+        now_iso_fn = lambda: "2026-05-14T20:00:00Z",
+    )
+    assert got == "2026-05-14T19:00:00+00:00"
+
+
+# ─── _entry_passes_same_user_scoping ────────────────────────────────────────
+
+
+def test_scoping_passes_via_sender_user_id():
+    entry = _make_entry( "2026-05-14T19:00:00+00:00", sender_user_id="alice" )
+    assert _entry_passes_same_user_scoping(
+        entry, "alice", set(), lambda sid: None
+    ) is True
+
+
+def test_scoping_passes_via_target_session_id():
+    entry = _make_entry( "2026-05-14T19:00:00+00:00", target_sid="my-sess" )
+    assert _entry_passes_same_user_scoping(
+        entry, "alice", { "my-sess" }, lambda sid: None
+    ) is True
+
+
+def test_scoping_passes_via_bridge_owner_match():
+    entry = _make_entry( "2026-05-14T19:00:00+00:00", sender_sid="some-sess" )
+    assert _entry_passes_same_user_scoping(
+        entry, "alice", set(), lambda sid: "alice" if sid == "some-sess" else None
+    ) is True
+
+
+def test_scoping_passes_via_bridge_owner_graceful_none():
+    """Bridge has no owner_user_id → graceful fallback, entry passes."""
+    entry = _make_entry( "2026-05-14T19:00:00+00:00", sender_sid="some-sess" )
+    assert _entry_passes_same_user_scoping(
+        entry, "alice", set(), lambda sid: None
+    ) is True
+
+
+def test_scoping_rejects_when_bridge_owner_mismatch():
+    """Bridge owner is non-None and doesn't match caller → reject."""
+    entry = _make_entry( "2026-05-14T19:00:00+00:00", sender_sid="some-sess" )
+    assert _entry_passes_same_user_scoping(
+        entry, "alice", set(), lambda sid: "bob"
+    ) is False
+
+
+def test_scoping_rejects_when_no_sender_session_id():
+    """No sender_session_id AND no metadata attribution → reject."""
+    entry = _make_entry( "2026-05-14T19:00:00+00:00", sender_sid=None )
+    assert _entry_passes_same_user_scoping(
+        entry, "alice", set(), lambda sid: pytest.fail( "lookup should not run" )
+    ) is False
+
+
+def test_scoping_rejects_when_metadata_missing_entirely():
+    """Entry with no metadata at all + sender bridge belongs to someone else → reject."""
+    entry = { "ts": "2026-05-14T19:00:00+00:00", "sender_session_id": "other-sess" }
+    assert _entry_passes_same_user_scoping(
+        entry, "alice", set(), lambda sid: "bob"
+    ) is False
+
+
+def test_scoping_target_session_id_must_be_in_user_set():
+    """target_session_id present but not in user_session_ids → branch fails, falls through to bridge check."""
+    entry = _make_entry( "2026-05-14T19:00:00+00:00", target_sid="not-mine" )
+    # Bridge owner mismatches → overall reject
+    assert _entry_passes_same_user_scoping(
+        entry, "alice", { "my-sess" }, lambda sid: "bob"
+    ) is False
+
+
+# ─── _project_history_entry ─────────────────────────────────────────────────
+
+
+def test_project_history_entry_reserved_topic_kind():
+    """Reserved topics get `topic_kind: reserved`."""
+    e = _make_entry( "2026-05-14T19:00:00+00:00" )
+    out = _project_history_entry( e, "broadcasts" )
+    assert out[ "topic" ]      == "broadcasts"
+    assert out[ "topic_kind" ] == "reserved"
+    assert out[ "body" ]       == "hello"
+
+
+def test_project_history_entry_free_form_topic_kind():
+    """Non-reserved topics get `topic_kind: free-form`."""
+    e = _make_entry( "2026-05-14T19:00:00+00:00" )
+    out = _project_history_entry( e, "coord-notifications-js" )
+    assert out[ "topic_kind" ] == "free-form"
+
+
+def test_project_history_entry_handles_missing_metadata():
+    """Entry without metadata still projects to a dict with metadata={}."""
+    e = { "ts": "2026-05-14T19:00:00+00:00", "sender_session_id": "s", "body": "x" }
+    out = _project_history_entry( e, "broadcasts" )
+    assert out[ "metadata" ] == { }
+    assert out[ "persona_name" ] is None
+
+
+# ─── execute_broadcast_history ──────────────────────────────────────────────
+
+
+def test_execute_broadcast_history_empty_store_returns_empty():
+    """No topics in the store → empty entries list."""
+    store  = _FakeStore( topics_to_entries={ } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 100,
+        excluded_topics       = [ "presence", "system-events" ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: None,
+    )
+    assert result[ "entries" ]     == [ ]
+    assert result[ "since_used" ]  is None
+    assert result[ "next_cursor" ] is None
+
+
+def test_execute_broadcast_history_excludes_topics():
+    """Entries from excluded topics never appear in output."""
+    store = _FakeStore( topics_to_entries={
+        "presence"       : [ _make_entry( "2026-05-14T19:00:00+00:00", "p", sender_user_id="alice" ) ],
+        "system-events"  : [ _make_entry( "2026-05-14T19:00:01+00:00", "s", sender_user_id="alice" ) ],
+        "broadcasts"     : [ _make_entry( "2026-05-14T19:00:02+00:00", "b", sender_user_id="alice" ) ],
+    } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 100,
+        excluded_topics       = [ "presence", "system-events" ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: None,
+    )
+    assert len( result[ "entries" ] ) == 1
+    assert result[ "entries" ][ 0 ][ "topic" ] == "broadcasts"
+
+
+def test_execute_broadcast_history_merges_topics_newest_first():
+    """Entries from multiple topics are merged and sorted by ts DESC."""
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [ _make_entry( "2026-05-14T19:00:00+00:00", "b", sender_user_id="alice", body="oldest" ) ],
+        "free-topic" : [
+            _make_entry( "2026-05-14T19:30:00+00:00", "f", sender_user_id="alice", body="middle" ),
+            _make_entry( "2026-05-14T20:00:00+00:00", "f", sender_user_id="alice", body="newest" ),
+        ],
+    } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 100,
+        excluded_topics       = [ ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: None,
+    )
+    bodies = [ e[ "body" ] for e in result[ "entries" ] ]
+    assert bodies == [ "newest", "middle", "oldest" ]
+
+
+def test_execute_broadcast_history_respects_caller_limit():
+    """Caller's `limit` (when below max ceiling) caps the response."""
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [ _make_entry( f"2026-05-14T19:{i:02d}:00+00:00", "b", sender_user_id="alice" ) for i in range( 10 ) ],
+    } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 3,
+        excluded_topics       = [ ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: None,
+    )
+    assert len( result[ "entries" ] ) == 3
+
+
+def test_execute_broadcast_history_caps_at_max_ceiling():
+    """Even if caller asks for `limit > max_entries_ceiling`, response is capped at ceiling."""
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [ _make_entry( f"2026-05-14T19:{i:02d}:00+00:00", "b", sender_user_id="alice" ) for i in range( 50 ) ],
+    } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 10000,    # absurdly high
+        excluded_topics       = [ ],
+        max_entries_ceiling   = 5,         # ceiling wins
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: None,
+    )
+    assert len( result[ "entries" ] ) == 5
+
+
+def test_execute_broadcast_history_skips_missing_topic_file():
+    """FileNotFoundError from `store.read()` on one topic must not crash the aggregator."""
+    store = _FakeStore(
+        topics_to_entries = {
+            "broadcasts"      : [ _make_entry( "2026-05-14T19:00:00+00:00", "b", sender_user_id="alice" ) ],
+            "missing-on-disk" : [ ],     # store reports it via _all_topic_names but read() will raise
+        },
+        raise_for_topics = [ "missing-on-disk" ],
+    )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 100,
+        excluded_topics       = [ ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: None,
+    )
+    assert len( result[ "entries" ] ) == 1
+    assert result[ "entries" ][ 0 ][ "topic" ] == "broadcasts"
+
+
+def test_execute_broadcast_history_resolves_hours_to_cutoff():
+    """`hours` parameter computes a `since_used` cutoff in the response."""
+    store = _FakeStore( topics_to_entries={ "broadcasts": [ ] } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = 24,
+        limit                 = 100,
+        excluded_topics       = [ ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: None,
+        now_iso_fn            = lambda: "2026-05-14T20:00:00+00:00",
+    )
+    assert result[ "since_used" ] == "2026-05-13T20:00:00+00:00"
+
+
+def test_execute_broadcast_history_filters_other_users_entries():
+    """Entries that fail same-user scoping are dropped."""
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [
+            _make_entry( "2026-05-14T19:00:00+00:00", "alice-b", sender_user_id="alice", body="mine" ),
+            _make_entry( "2026-05-14T19:30:00+00:00", "bob-b",   sender_user_id="bob",   body="theirs" ),
+        ],
+    } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 100,
+        excluded_topics       = [ ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: set(),
+        bridge_owner_lookup   = lambda sid: "bob",   # bridges all belong to bob
+    )
+    bodies = [ e[ "body" ] for e in result[ "entries" ] ]
+    assert bodies == [ "mine" ]
+
+
+def test_execute_broadcast_history_includes_target_session_attribution():
+    """Entries whose `target_session_id` matches a user-owned session pass scoping."""
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [
+            _make_entry( "2026-05-14T19:00:00+00:00", "incoming", sender_user_id="bob",
+                         target_sid="alice-sess-1", body="addressed-to-me" ),
+        ],
+    } )
+    result = execute_broadcast_history(
+        authenticated_user_id = "alice",
+        store                 = store,
+        since_iso             = None,
+        hours                 = None,
+        limit                 = 100,
+        excluded_topics       = [ ],
+        max_entries_ceiling   = 1000,
+        user_session_ids_fn   = lambda: { "alice-sess-1" },
+        bridge_owner_lookup   = lambda sid: "bob",
+    )
+    assert len( result[ "entries" ] ) == 1
+    assert result[ "entries" ][ 0 ][ "body" ] == "addressed-to-me"
