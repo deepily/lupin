@@ -1246,7 +1246,78 @@ def kill_idle_waiter( session_id, signal=None ):
         return False
 
 
-def find_active_voice_persona_sessions():
+def prune_dead_persona_bridges():
+    """
+    Null the voice_persona field on any bridge file whose host PID is dead.
+
+    Runs from the SessionStart hook on the host side, where host PIDs are
+    visible and _is_pid_alive() returns a meaningful answer. The function
+    short-circuits to no-op when called from a context where host PIDs are
+    NOT trustworthy (i.e., inside a container) — pruning under that
+    condition would mark every bridge dead and is the opposite of what we
+    want.
+
+    Why this exists: the in-container scan in find_active_voice_persona_sessions
+    intentionally skips the dead-PID filter (host PIDs are invisible inside
+    the container), so leftover personas from prior days accumulate as
+    "occupied" and exhaust the allocation pool at day-start. A host-side
+    prune at every SessionStart hook scrubs those leftovers before /allocate
+    runs.
+
+    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+
+    Ensures:
+        - Returns 0 when SESSION_DIR doesn't exist, when called from a
+          non-host context (_can_trust_host_pids() is False), or when no
+          bridges need pruning
+        - Bridges with isinstance(voice_persona, dict) == False are left
+          untouched (no spurious writes)
+        - Buffer/listener files (cc-*-buffer.json, cc-*-listener.json) are
+          skipped (same convention as find_active_voice_persona_sessions)
+        - Returns the count of bridges actually pruned (voice_persona set
+          to None)
+        - Never raises — per-file errors are swallowed and the next file
+          is processed
+
+    Returns:
+        int: Number of bridges pruned
+    """
+    if not SESSION_DIR.exists():
+        return 0
+    if not _can_trust_host_pids():
+        return 0
+
+    pruned = 0
+    for path in SESSION_DIR.glob( "cc-*.json" ):
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+
+        file_pid = _extract_pid_from_filename( path.name )
+        if file_pid is None or _is_pid_alive( file_pid ):
+            continue
+
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+        except ( json.JSONDecodeError, OSError ):
+            continue
+
+        persona = data.get( "voice_persona" )
+        if not isinstance( persona, dict ) or not persona:
+            continue
+
+        data[ "voice_persona" ] = None
+        try:
+            with open( path, "w" ) as f:
+                json.dump( data, f, indent=2 )
+            pruned += 1
+        except OSError:
+            continue
+
+    return pruned
+
+
+def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
     """
     Scan all bridge files for sessions whose voice_persona is non-null.
 
@@ -1254,19 +1325,38 @@ def find_active_voice_persona_sessions():
     `/allocate` excludes occupied persona names so each session gets a
     unique voice; `/pool` returns a snapshot for diagnostics.
 
-    Honors the same staleness filtering as find_active_speakerphone_sessions:
-    skips buffer/listener files, skips bridges whose host PID is dead
-    (when host PIDs are trustworthy — see _can_trust_host_pids). A dead-PID
-    bridge with a non-null voice_persona is treated as "free" — its slot
-    is implicitly reclaimed by being filtered out here.
+    Two staleness filters apply, in order:
+
+    1. **PID liveness** (host-side only) — when `_can_trust_host_pids()` is
+       True (host context), bridges whose extracted host PID is dead are
+       skipped. Inside a container this check is bypassed because host PIDs
+       are invisible from the container's PID namespace.
+
+    2. **mtime TTL** (both host and container) — bridges whose file mtime
+       is older than `stale_threshold_seconds` are skipped regardless of
+       context. Belt-and-suspenders against the residual case where the
+       host-side prune at SessionStart didn't fire (e.g., server bounced
+       mid-day with no new sessions). The cc-notification-listener
+       heartbeat updates bridge mtime periodically, so an actively-used
+       session keeps its mtime fresh within this window.
+
+    A dead-PID OR stale-mtime bridge with a non-null voice_persona is
+    treated as "free" — its slot is implicitly reclaimed by being
+    filtered out here.
+
+    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+
+    Requires:
+        - stale_threshold_seconds is a positive integer (default 12 hours)
 
     Ensures:
         - Returns a list of (Path, session_id, persona) tuples for every
-          bridge with a non-null voice_persona dict
+          bridge with a non-null voice_persona dict whose liveness checks pass
         - session_id is the canonical id (stable_session_id preferred)
         - persona is the dict as stored in the bridge
         - Never raises exceptions
         - Skips bridge files that fail to parse or open
+        - Skips bridge files whose stat() fails
 
     Returns:
         list[ tuple[ Path, str, dict ] ]: (bridge_path, session_id, persona)
@@ -1275,6 +1365,7 @@ def find_active_voice_persona_sessions():
         return []
 
     trust_host_pids = _can_trust_host_pids()
+    now             = time.time()
     results         = []
 
     for path in SESSION_DIR.glob( "cc-*.json" ):
@@ -1285,6 +1376,13 @@ def find_active_voice_persona_sessions():
             file_pid = _extract_pid_from_filename( path.name )
             if file_pid is not None and not _is_pid_alive( file_pid ):
                 continue
+
+        try:
+            mtime_age = now - path.stat().st_mtime
+            if mtime_age > stale_threshold_seconds:
+                continue
+        except OSError:
+            continue
 
         try:
             with open( path ) as f:

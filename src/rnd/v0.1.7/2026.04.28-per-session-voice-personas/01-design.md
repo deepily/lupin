@@ -347,3 +347,19 @@ required. **No :8000 scheduling.**
 11. `CLAUDE.md` touchpoint row
 12. Run full :7999 verification matrix
 13. End-to-end manual UX validation
+
+---
+
+## Update — 2026-05-16: Stale-bridge pool exhaustion + Sam-as-overflow
+
+**Triggered by**: live bug on 2026-05-16 — 5 fresh CC sessions returned 3 × Rio + 2 × Mr. Radio, 4 of 5 `borrowed=true`. Root cause investigation captured in companion doc [`2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`](../2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md).
+
+**Three changes layered on top of this design**:
+
+1. **Host-side prune at SessionStart** — new `prune_dead_persona_bridges()` in `session_bridge.py`, called from `register_session.py` Phase 4.4 (before Phase 4.5 allocation). Runs only when `_can_trust_host_pids()` returns True (host-side context). Scrubs the `voice_persona` field on any bridge whose host PID is dead, so the next day's first allocation sees a clean pool.
+
+2. **mtime-based TTL guard inside the container** — `find_active_voice_persona_sessions(stale_threshold_seconds=43200)` now rejects bridges whose file mtime is older than the threshold (default 12 hours), even when the dead-PID filter is bypassed (`trust_host_pids=False`, container context). The cc-notification-listener heartbeat keeps active sessions' bridge mtime fresh within the window. New INI key: `cc session voice persona stale threshold seconds`.
+
+3. **Sam-as-overflow** — replaces the deterministic hash-borrow path from §3 when overflow_persona is configured. New `load_overflow_persona_from_config()` reads `cc session voice persona sam {icon,color,profile,display name}` plus the existing `elevenlabs tts default voice id` (single source of truth for Sam's `voice_id`). `pick_unallocated_persona` now returns Sam with `overflow=True` (not `borrowed=True`) when the pool is fully occupied. Multiple Sams permitted; multiples of other personas are not. `borrowed_persona_for_sid` remains as legacy fallback only when Sam is unconfigured. UI renders the new state via `.persona-badge.overflow` (dotted border + ✱) distinct from the legacy `.persona-badge.borrowed` (dashed + ↻). Mobile dart model gained a parallel `final bool overflow` field.
+
+**§3 borrow path is now legacy**: the "Pool exhaustion (>6 active sessions)" risk in §11.3 is superseded — see Layer 3 in the companion doc. Determinism is no longer required because the overflow persona is always Sam (one-and-only).

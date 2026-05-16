@@ -845,6 +845,26 @@ def main():
     except Exception:
         pass  # Best-effort cleanup
 
+    # ── Phase 4.4: Prune stale persona allocations (host-side only) ──────
+    # Strike dead-PID bridges' voice_persona fields BEFORE allocation runs
+    # so the in-container occupancy scan (which intentionally bypasses the
+    # dead-PID filter — see find_active_voice_persona_sessions) sees a clean
+    # pool. Without this prune, leftovers from prior days accumulate as
+    # "occupied", exhausting the pool at day-start and forcing every new
+    # session into the borrow/overflow path.
+    #
+    # Host-side only: prune_dead_persona_bridges() short-circuits to no-op
+    # when called from inside a container (host PIDs invisible there).
+    #
+    # See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import prune_dead_persona_bridges
+        pruned_count = prune_dead_persona_bridges()
+        if pruned_count > 0:
+            print( f"[register_session] Pruned voice_persona on {pruned_count} dead-PID bridge(s)", file=sys.stderr )
+    except Exception as e:
+        print( f"[register_session] WARNING: prune phase failed ({type( e ).__name__}: {e})", file=sys.stderr )
+
     # ── Phase 4.5: Allocate voice persona (synchronous, fail-soft) ───────
     # New CC session → assign a uniformly random voice from the 6-voice pool
     # so the user can audibly distinguish parallel sessions in the

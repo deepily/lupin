@@ -238,6 +238,86 @@ class TestVoicePersonaAllocateAndRelease:
 
 class TestVoicePersonaUniqueness:
 
+    def test_pool_exhaustion_returns_sam_overflow( self, auth_token ):
+        """
+        Allocate 6+ synthetic bridges, saturating the pool. The first 6
+        unique allocations should be from the pool with borrowed=False; any
+        additional allocation should be Sam with overflow=True (NOT a
+        hash-borrowed pool persona).
+
+        Skipped when the live server already has occupied personas — in that
+        case the 6-allocation budget can't be guaranteed to fill the pool
+        from scratch. Use 8 synthetic bridges to push past any baseline
+        occupancy and assert the LAST allocation lands on Sam.
+
+        See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+        """
+        SESSION_DIR.mkdir( parents=True, exist_ok=True )
+        test_pid = os.getpid()
+
+        # 8 synthetic bridges — guaranteed to exhaust the 6-voice pool even if
+        # 1-2 personas are already occupied by ambient live sessions
+        sids    = [ str( uuid.uuid4() ) for _ in range( 8 ) ]
+        bridges = [ SESSION_DIR / f"cc-{test_pid + 93000 + i}.json" for i in range( 8 ) ]
+        try:
+            for sid, path in zip( sids, bridges ):
+                with open( path, "w" ) as f:
+                    json.dump(
+                        {
+                            "session_id"        : sid,
+                            "stable_session_id" : sid,
+                            "session_ids"       : [ sid ],
+                            "cwd"               : "/tmp",
+                            "ppid"              : test_pid,  # alive
+                            "hook_ppid"         : 1
+                        },
+                        f
+                    )
+
+            personas = []
+            for sid in sids:
+                resp = requests.post(
+                    f"{BASE_URL}/api/cosa-voice/voice-persona/{sid}/allocate",
+                    headers = { "Authorization": f"Bearer {auth_token}" },
+                    timeout = 5
+                )
+                assert resp.status_code == 200, f"/allocate failed: {resp.status_code} {resp.text}"
+                personas.append( resp.json()[ "voice_persona" ] )
+
+            # At least one of the 8 must be Sam (overflow) — the pool only
+            # holds 6 voices, so allocations 7-8 (or earlier if the live pool
+            # was already partially occupied) must spill to overflow.
+            sam_allocations = [ p for p in personas if p.get( "name" ) == "sam" ]
+            assert sam_allocations, (
+                "Expected at least one Sam-overflow allocation when "
+                f"saturating the pool with 8 synthetic bridges; got: "
+                f"{[ p.get( 'name' ) for p in personas ]}"
+            )
+            # Every Sam allocation must carry overflow=True
+            assert all( p[ "overflow" ] is True for p in sam_allocations ), (
+                f"Sam allocations must have overflow=True; got: {sam_allocations}"
+            )
+            # Sam allocations must NOT also be borrowed (mutually exclusive)
+            assert all( p.get( "borrowed", False ) is False for p in sam_allocations ), (
+                "Sam allocations should have borrowed=False (overflow supplants borrow)"
+            )
+
+        finally:
+            # Best-effort: release + delete bridges
+            for sid, path in zip( sids, bridges ):
+                try:
+                    requests.post(
+                        f"{BASE_URL}/api/cosa-voice/voice-persona/{sid}/release",
+                        headers = { "Authorization": f"Bearer {auth_token}" },
+                        timeout = 2
+                    )
+                except Exception:
+                    pass
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+
     def test_two_concurrent_sessions_get_distinct_voices( self, auth_token ):
         """
         Allocate personas for TWO synthetic bridges. They must be distinct.

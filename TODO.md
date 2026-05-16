@@ -10,6 +10,26 @@
 
 ---
 
+## 📡 NEW — Duplicate notification fan-out (filed 2026-05-16 by Rio ⚡, session `0025f917`)
+
+**Primary doc**: [`src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`](src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md) — "Log-only — Bug #2" section.
+
+**Symptoms observed 2026-05-16 ~12:16 EDT** during a multi-session voice-persona bug investigation:
+
+1. **Broadcast multiplication** — Rick sent a single `📢 System Broadcast` and the notifications panel rendered the same broadcast card **5×** in succession (one per active CC session).
+2. **"completed" status multiplication** — A single session-end / completion status produced **4 × Mr. Radio "completed"** entries plus **1 × Rio "completed"**, all stamped with the same 12:16 timestamp.
+
+**Hypothesis (not yet investigated)**: WS emit is fanning out per-session-with-persona instead of per-user. Likely the broadcast or session-end notification iterates over occupied-persona bridge entries and emits one envelope per persona, when it should emit once per user (and let the per-session dispatch happen client-side).
+
+**Out of scope for this session** — the primary voice-persona stale-bridge bug was the focus today; bug #2 was logged for a follow-up session.
+
+- [ ] **[LUPIN] Identify the emitter** — likely in `routers/websocket.py` or `notifications.py`. Grep for `emit_to_user` or `broadcast` calls that iterate over sessions/personas.
+- [ ] **[LUPIN] Reproduce in isolation** — spawn 5 CC sessions, fire a system broadcast, count rendered cards.
+- [ ] **[LUPIN] Fix at the emitter** — should be one envelope per user, not per persona.
+- [ ] **[LUPIN] Add E2E test** — Playwright check that a single broadcast renders exactly one card per user, regardless of session count.
+
+---
+
 ## ✅ DONE 2026-05-15 PM — Inter-Session DM Phase 0 implementation (María 🌸, session `3b6be6f9`)
 
 **Primary doc**: [`src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md`](src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md) — 18 sections covering Phase 0 design, gap analysis (corrected post-Rick-feedback), REUSE pass with file:line citations, Pass 1 Fitness with 20 ACs, threats considered, Phase 0 ratification log, Testing Ownership Mandate compliance.

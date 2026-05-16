@@ -2,6 +2,46 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.16 - Session 0025f917 (Rio ⚡) | Voice persona stale-bridge pool exhaustion fix + Sam-as-overflow
+
+Same-day root-cause + fix for a live bug Rick reported voice-first: 5 fresh CC sessions returned 3 × Rio + 2 × Mr. Radio with 4 of 5 marked `borrowed=true`, at day-start when the pool should have been wide open. Root cause was sharper than just stale state — the in-container bypass of the dead-PID filter (`session_bridge.py:1284-1287`, intentional because host PIDs are invisible from inside `lupin-rest-dev`) counted every leftover bridge with a non-null persona as occupied. Five May-15 bridges (maría, Rachel, Tiberius, Arnold, Mr. Radio) made the pool read 5/6 occupied the moment my session took Rio; every subsequent session fell into the deterministic sha256-mod-pool borrow path, which happened to hash to Rio×2 + Mr. Radio×2.
+
+**Primary doc**: [`src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`](src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md) — diagnostic evidence table (10 bridge files audited), four-layer solution, phase order, verification matrix, risks/gotchas.
+
+**Four-layer solution shipped**:
+
+1. **Host-side prune at SessionStart** — new `prune_dead_persona_bridges()` in `session_bridge.py`, called from `register_session.py` Phase 4.4 (before Phase 4.5 allocation). Runs only when `_can_trust_host_pids()` returns True. Scrubs the `voice_persona` field on any bridge whose host PID is dead. Fixes the morning-of-day case completely.
+2. **mtime-based TTL guard inside container** — `find_active_voice_persona_sessions(stale_threshold_seconds=43200)` now rejects bridges whose file mtime exceeds the threshold (default 12h, INI-tunable via `cc session voice persona stale threshold seconds`). Belt-and-suspenders for the residual case where the host-side prune didn't fire. The cc-notification-listener heartbeat keeps active bridges fresh.
+3. **Sam-as-overflow allocation** — replaces the legacy hash-borrow. New `load_overflow_persona_from_config()` reads `cc session voice persona sam {icon, color, profile, display name}` + the existing `elevenlabs tts default voice id` (single source of truth for Sam's `voice_id`). `pick_unallocated_persona` now returns Sam with `overflow=True` when the pool is fully occupied; multiple Sams permitted, multiples of other personas not. `borrowed_persona_for_sid` survives as legacy fallback only when Sam is unconfigured.
+4. **UI / mobile overflow badge** — new `.persona-badge.overflow` (dotted border + ✱) in `notifications.css`, distinct from legacy `.persona-badge.borrowed` (dashed + ↻); `notifications.js` composes the state class with overflow-precedence-over-borrowed; mobile dart `VoicePersona` gained `final bool overflow` with liberal `fromJson`.
+
+**Bug #2 logged for follow-up** (separate session): duplicate notification fan-out — single system broadcast rendered 5× and single "completed" status produced 4 × Mr. Radio + 1 × Rio. Filed in `TODO.md` under "📡 NEW — Duplicate notification fan-out (filed 2026-05-16 by Rio ⚡, session `0025f917`)" with a four-step investigation checklist.
+
+**Verification (all on :7999, AI-discretionary)**:
+
+| Layer | Result |
+|---|---|
+| py_compile sweep across 6 Python files | ✅ all compile |
+| `pytest src/tests/unit/test_voice_persona_helpers.py -v` | ✅ **52/52 pass** (34 pre-existing + 18 new) |
+| Sam overflow logic inline smoke (3 scenarios) | ✅ free→pool, exhausted→Sam, exhausted-no-Sam→legacy-borrow |
+| TTL guard inline smoke (2 scenarios) | ✅ fresh mtime returned, stale mtime filtered |
+| New smoke test for pool exhaustion → Sam | authored at `src/tests/smoke/test_voice_persona_allocation.py::test_pool_exhaustion_returns_sam_overflow` (8 synthetic bridges; not auto-run against live state — saved for Rick to run when convenient) |
+
+**New unit-test classes** (18 tests): `TestLoadOverflowPersonaFromConfig` (3), `TestPickUnallocatedPersonaOverflow` (5), `TestFindActiveVoicePersonaSessionsTTL` (4), `TestPruneDeadPersonaBridges` (6).
+
+**Documentation touchpoints updated**: `CLAUDE.md` DOCUMENTATION TOUCHPOINTS row for voice-persona now references both 2026.04.28 (original design) and 2026.05.16 (this milestone); new row for `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard. Companion 2026-05-16 Update section appended to the original 2026.04.28 design doc.
+
+**Sub-repo follow-ups pending separate sessions** (per `feedback_lupin_only_never_cosa`):
+- `src/cosa/rest/voice_persona_helpers.py` — `load_overflow_persona_from_config` + `pick_unallocated_persona` overflow path + threading through `allocate_persona_for_session` (CoSA submodule — commit in CoSA-context session)
+- `src/cosa/rest/routers/voice_persona.py` — pass overflow persona to allocator + extend `voice-persona/sample` voice_id whitelist (CoSA submodule)
+- `src/lupin-mobile/lib/features/notifications/data/voice_persona.dart` — `final bool overflow` field + toString update (mobile sub-repo — commit in mobile-context session)
+
+**Files committed this session** (parent Lupin repo): 12 modified + 1 new R&D doc + this `history.md` entry.
+
+**Workflow notes**: User-initiated voice-first bug report → ultrathink + plan-mode → 4-layer plan in single ExitPlanMode → user verbal approval after 10-min review window → 8 phases executed silently with milestone notify at completion. Memory rules engaged: `feedback_walk_through_plan_before_asking_proceed` (substantive findings via notify before any code), `feedback_doc_links_always_in_abstract` (R&D viewer-link as abstract line 1), `feedback_exit_plan_mode_is_not_user_approval` (explicit verbal go-ahead via `ask_yes_no` after harness auto-approval), `feedback_lupin_only_never_cosa` (no git ops on src/cosa/ from parent), `feedback_verify_staging_before_commit` (`git diff --cached --stat` before commit), `feedback_never_auto_commit_push` (no push without explicit ask).
+
+---
+
 ### 2026.05.15 - Session c1cbcd11 (Rio ⚡) | Doc-viewer scope unification (Phases 1-6) + speakerphone rider sentinel regression fix
 
 Top-to-bottom architectural cleanup of the doc-viewer scope mechanism. Started from Rick's 404 on `/app/docs?path=bug-fix-queue.md&scope=docs` and surfaced the underlying dual-track architecture (built-in `docs`/`io` scopes vs config-driven registry). Six implementation phases delivered behind three plan-review gates, all ratified by Rick via interactive `ask_multiple_choice`.

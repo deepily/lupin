@@ -13,6 +13,7 @@ import os
 import random
 import sys
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -28,11 +29,12 @@ from cosa.rest.voice_persona_helpers import (
     pick_unallocated_persona,
     borrowed_persona_for_sid,
     allocate_persona_for_session,
+    load_overflow_persona_from_config,
     display_name_for
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_voice_persona, set_voice_persona, find_active_voice_persona_sessions,
-    find_session_path_by_id
+    find_session_path_by_id, prune_dead_persona_bridges
 )
 
 
@@ -438,3 +440,263 @@ class TestBridgeRoundTrip:
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 assert get_voice_persona( "doesnotexist" ) is None
                 assert set_voice_persona( "doesnotexist", { "name": "X" } ) is False
+
+
+# ── load_overflow_persona_from_config (Sam) ──────────────────────────────────
+
+class TestLoadOverflowPersonaFromConfig:
+    """
+    Sam is the system-default voice AND the pool-exhaustion overflow persona.
+    Voice_id is read from `elevenlabs tts default voice id` (single source of
+    truth); icon/color/profile/display_name read from `cc session voice persona
+    sam *` keys with documented defaults.
+    """
+
+    def test_returns_none_when_voice_id_missing( self ):
+        mgr = MagicMock()
+        mgr.get = lambda key, default=None, silent=False, return_type="string": (
+            "" if key == "elevenlabs tts default voice id" else default
+        )
+        assert load_overflow_persona_from_config( mgr ) is None
+
+    def test_returns_sam_with_overflow_flag( self ):
+        mgr = MagicMock()
+        config_values = {
+            "elevenlabs tts default voice id"            : "G7ILShrCNLfmS0A37SXS",
+            "cc session voice persona sam icon"          : "🎙️",
+            "cc session voice persona sam color"         : "#00BCD4",
+            "cc session voice persona sam profile"       : "System default voice (overflow)",
+            "cc session voice persona sam display name"  : "Sam"
+        }
+        mgr.get = lambda key, default=None, silent=False, return_type="string": (
+            config_values.get( key, default )
+        )
+        sam = load_overflow_persona_from_config( mgr )
+        assert sam is not None
+        assert sam[ "name" ]         == "sam"
+        assert sam[ "display_name" ] == "Sam"
+        assert sam[ "voice_id" ]     == "G7ILShrCNLfmS0A37SXS"
+        assert sam[ "overflow" ]     is True
+
+    def test_falls_back_to_defaults_when_optional_keys_missing( self ):
+        # Only voice_id is required — others default to documented values
+        mgr = MagicMock()
+        mgr.get = lambda key, default=None, silent=False, return_type="string": (
+            "v_sam" if key == "elevenlabs tts default voice id" else default
+        )
+        sam = load_overflow_persona_from_config( mgr )
+        assert sam is not None
+        assert sam[ "voice_id" ]     == "v_sam"
+        assert sam[ "display_name" ] == "Sam"
+        assert sam[ "icon" ]         == "🎙️"
+        assert sam[ "color" ]        == "#00BCD4"
+        assert sam[ "overflow" ]     is True
+
+
+# ── pick_unallocated_persona with overflow=Sam ───────────────────────────────
+
+class TestPickUnallocatedPersonaOverflow:
+    """
+    With the Sam-overflow feature, pool-exhausted allocations should return Sam
+    (overflow=True, borrowed=False) instead of the legacy hash-borrow path. The
+    legacy borrow remains as a defensive fallback only when overflow_persona is
+    None (e.g., Sam misconfigured).
+    """
+
+    SAM = {
+        "name"         : "sam",
+        "display_name" : "Sam",
+        "voice_id"     : "v_sam",
+        "icon"         : "🎙️",
+        "color"        : "#00BCD4",
+        "profile"      : "System default voice (overflow)",
+        "overflow"     : True
+    }
+
+    def test_overflow_returns_sam_when_pool_exhausted( self ):
+        all_names = { p[ "name" ] for p in POOL_6 }
+        chosen    = pick_unallocated_persona( POOL_6, all_names, "sid", overflow_persona=self.SAM )
+        assert chosen is not None
+        assert chosen[ "name" ]     == "sam"
+        assert chosen[ "overflow" ] is True
+        assert chosen[ "borrowed" ] is False  # always set when allocating
+
+    def test_overflow_not_used_when_pool_has_free_slots( self ):
+        chosen = pick_unallocated_persona( POOL_6, { "maria" }, "sid", overflow_persona=self.SAM )
+        assert chosen is not None
+        assert chosen[ "name" ] != "sam", "Pool has 5 free slots — Sam must NOT be picked"
+        assert chosen[ "borrowed" ] is False
+        # overflow flag is False or absent on regular pool picks
+        assert chosen.get( "overflow", False ) is False
+
+    def test_multiple_sams_allowed_on_repeated_exhaustion( self ):
+        # Five sessions all draw with pool fully occupied → all five get Sam
+        all_names = { p[ "name" ] for p in POOL_6 }
+        for i in range( 5 ):
+            chosen = pick_unallocated_persona( POOL_6, all_names, f"sid-{i}", overflow_persona=self.SAM )
+            assert chosen[ "name" ]     == "sam"
+            assert chosen[ "overflow" ] is True
+
+    def test_overflow_none_falls_back_to_legacy_borrow( self ):
+        # When Sam is unconfigured, the legacy hash-borrow path still works.
+        all_names = { p[ "name" ] for p in POOL_6 }
+        chosen    = pick_unallocated_persona( POOL_6, all_names, "sid", overflow_persona=None )
+        assert chosen is not None
+        assert chosen[ "borrowed" ] is True
+        assert chosen.get( "overflow", False ) is False
+        assert chosen[ "name" ] in all_names
+
+    def test_overflow_copy_is_independent( self ):
+        # Mutating the returned persona must not poison the source overflow dict
+        original_overflow = dict( self.SAM )
+        all_names         = { p[ "name" ] for p in POOL_6 }
+        chosen            = pick_unallocated_persona( POOL_6, all_names, "sid", overflow_persona=self.SAM )
+        chosen[ "polluted" ] = True
+        assert "polluted" not in self.SAM, "Overflow source dict was mutated by caller"
+        assert self.SAM == original_overflow
+
+
+# ── find_active_voice_persona_sessions — mtime TTL guard ─────────────────────
+
+class TestFindActiveVoicePersonaSessionsTTL:
+    """
+    The mtime TTL guard fires regardless of host-vs-container context. Bridges
+    whose file mtime is older than stale_threshold_seconds are treated as free,
+    even when the dead-PID filter is bypassed inside a container.
+
+    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+    """
+
+    def test_fresh_bridge_returned_under_default_ttl( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            _write_bridge( sessions_dir, os.getpid(),
+                           _bridge_with_persona( "fresh111-aaaa-bbbb-cccc-dddddddddddd", "Rio" ) )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_voice_persona_sessions()
+            assert len( results ) == 1
+
+    def test_stale_mtime_bridge_filtered_under_default_ttl( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            path = _write_bridge( sessions_dir, os.getpid(),
+                                  _bridge_with_persona( "stale111-aaaa-bbbb-cccc-dddddddddddd", "Rio" ) )
+            # Push mtime back 50000 seconds (~14h, > 12h default)
+            old_time = time.time() - 50000
+            os.utime( path, ( old_time, old_time ) )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_voice_persona_sessions()
+            assert results == [], "Stale-mtime bridge must be filtered"
+
+    def test_caller_can_widen_ttl( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            path = _write_bridge( sessions_dir, os.getpid(),
+                                  _bridge_with_persona( "stale222-aaaa-bbbb-cccc-dddddddddddd", "Rio" ) )
+            old_time = time.time() - 50000
+            os.utime( path, ( old_time, old_time ) )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_voice_persona_sessions( stale_threshold_seconds=10**9 )
+            assert len( results ) == 1, "Massive TTL must keep mtime-old bridge"
+
+    def test_caller_can_tighten_ttl( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            path = _write_bridge( sessions_dir, os.getpid(),
+                                  _bridge_with_persona( "fresh222-aaaa-bbbb-cccc-dddddddddddd", "Rio" ) )
+            # Push 60s into the past (older than tight 30s TTL)
+            old_time = time.time() - 60
+            os.utime( path, ( old_time, old_time ) )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_voice_persona_sessions( stale_threshold_seconds=30 )
+            assert results == [], "Tight TTL must filter the 60s-old bridge"
+
+
+# ── prune_dead_persona_bridges (host-side housekeeper) ───────────────────────
+
+class TestPruneDeadPersonaBridges:
+    """
+    Host-side prune helper runs at SessionStart. Nullifies voice_persona on
+    bridges whose host PID is dead. Short-circuits to no-op inside a container.
+
+    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+    """
+
+    def test_no_op_in_container_context( self ):
+        # Inside a container, _can_trust_host_pids() is False → every PID
+        # would naively read as dead, so prune correctly does nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            _write_bridge( sessions_dir, 999999,
+                           _bridge_with_persona( "dead-pid-aaaa-bbbb-cccc-dddddddddddd", "Rio" ) )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=False ):
+                pruned = prune_dead_persona_bridges()
+            assert pruned == 0
+            # Bridge data untouched — voice_persona still attached
+            data = json.loads( ( sessions_dir / "cc-999999.json" ).read_text() )
+            assert isinstance( data[ "voice_persona" ], dict )
+
+    def test_nullifies_dead_pid_bridge_persona( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            _write_bridge( sessions_dir, 999999,
+                           _bridge_with_persona( "dead-pid-aaaa-bbbb-cccc-dddddddddddd", "Rio" ) )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=True ):
+                pruned = prune_dead_persona_bridges()
+            assert pruned == 1
+            data = json.loads( ( sessions_dir / "cc-999999.json" ).read_text() )
+            assert data[ "voice_persona" ] is None, "Dead-PID bridge's persona should be nulled"
+
+    def test_preserves_alive_pid_bridge_persona( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            # os.getpid() is alive (this test process)
+            _write_bridge( sessions_dir, os.getpid(),
+                           _bridge_with_persona( "alive-pid-aaaa-bbbb-cccc-dddddddddddd", "Rio" ) )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=True ):
+                pruned = prune_dead_persona_bridges()
+            assert pruned == 0
+            data = json.loads( ( sessions_dir / f"cc-{os.getpid()}.json" ).read_text() )
+            assert isinstance( data[ "voice_persona" ], dict )
+            assert data[ "voice_persona" ][ "name" ] == "Rio"
+
+    def test_skips_bridges_with_no_persona( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            # Bridge with persona=None on a dead PID
+            data_no_persona = {
+                "session_id"        : "xyz98765-aaaa-bbbb-cccc-dddddddddddd",
+                "stable_session_id" : "xyz98765-aaaa-bbbb-cccc-dddddddddddd",
+                "cwd"               : "/tmp",
+                "voice_persona"     : None
+            }
+            _write_bridge( sessions_dir, 999999, data_no_persona )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=True ):
+                pruned = prune_dead_persona_bridges()
+            assert pruned == 0, "Bridges without persona shouldn't be counted"
+
+    def test_returns_zero_when_session_dir_missing( self ):
+        nonexistent = Path( "/tmp/__nonexistent_session_dir_for_test__" )
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", nonexistent ):
+            assert prune_dead_persona_bridges() == 0
+
+    def test_skips_buffer_and_listener_files( self ):
+        # Same convention as find_active_voice_persona_sessions — skip
+        # auxiliary cc-*-buffer.json and cc-*-listener.json files
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            ( sessions_dir / "cc-999999-buffer.json"   ).write_text( "{}" )
+            ( sessions_dir / "cc-999999-listener.json" ).write_text( "{}" )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=True ):
+                pruned = prune_dead_persona_bridges()
+            assert pruned == 0

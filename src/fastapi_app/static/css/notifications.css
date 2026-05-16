@@ -1879,6 +1879,24 @@
             opacity     : 0.8;
         }
 
+        /* Overflow badge: every pool persona is occupied, this session is
+         * speaking with Sam (system-default voice). Dotted border + ✱ signals
+         * "pool spilled to default" — semantically distinct from .borrowed
+         * (which meant "using someone else's pool voice"). See:
+         * src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md */
+        .persona-badge.overflow {
+            border-style    : dotted;
+            border-color    : rgba( 255, 255, 255, 0.6 );
+            opacity         : 0.9;
+        }
+
+        .persona-badge.overflow::after {
+            content     : "✱";
+            margin-left : 2px;
+            font-size   : 0.85em;
+            opacity     : 0.8;
+        }
+
         /* ========================================
            SESSION NAME EDIT MODAL (Voice-First)
            ======================================== */

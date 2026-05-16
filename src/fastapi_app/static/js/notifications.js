@@ -9056,23 +9056,35 @@ class NotificationsUI {
      * path (handleNotificationUpdate dispatch for voice_persona_assigned)
      * produce identical badges.
      *
-     * @param {object|null} persona — { name, display_name, color, icon, profile, borrowed }
+     * @param {object|null} persona — { name, display_name, color, icon, profile, borrowed, overflow }
      * @returns {string} badge HTML, or '' when persona is null
      */
     _renderPersonaBadgeHTML( persona ) {
         if ( !persona ) return '';
-        const borrowedClass = persona.borrowed ? ' borrowed' : '';
-        const borrowedTitle = persona.borrowed ? ' (borrowed — pool exhausted)' : '';
-        const profile       = persona.profile ? ` — ${persona.profile}` : '';
+        // Overflow (Sam-as-default-spillover) takes precedence over the legacy
+        // borrowed state — both shouldn't fire on the same persona, but if a
+        // misconfigured envelope ever flips both flags, the overflow semantic
+        // ("pool spilled to default voice") is the more accurate label.
+        // See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+        let stateClass = '';
+        let stateTitle = '';
+        if ( persona.overflow ) {
+            stateClass = ' overflow';
+            stateTitle = ' (overflow — pool exhausted, using system default voice)';
+        } else if ( persona.borrowed ) {
+            stateClass = ' borrowed';
+            stateTitle = ' (borrowed — pool exhausted)';
+        }
+        const profile = persona.profile ? ` — ${persona.profile}` : '';
         // Pool names are stored lowercase, no-punctuation per project key
         // convention (e.g. "mr radio"). The server stamps `display_name`
         // (e.g. "Mr. Radio") via voice_persona_helpers.display_name_for for
         // UI surfaces. Fall back to `name` only if `display_name` is absent
         // (legacy envelope or hand-built persona dict).
         const label = persona.display_name || persona.name || '';
-        return `<span class="persona-badge${borrowedClass}"
+        return `<span class="persona-badge${stateClass}"
                   style="background-color: ${persona.color || '#888'};"
-                  title="${label}${borrowedTitle}${profile}">
+                  title="${label}${stateTitle}${profile}">
                 <span class="persona-badge-icon">${persona.icon || '🎙️'}</span>
                 <span class="persona-badge-name">${label}</span>
             </span>`;
