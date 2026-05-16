@@ -9931,9 +9931,53 @@ class NotificationsUI {
             row.appendChild( dmBadge );
         }
 
+        // Body — collapsible + markdown rendered (2026-05-16 feature ship).
+        // Wraps content in a `.commons-activity-entry-body-content` inner div so
+        // the line-clamp targets that div and not the body wrapper (which also
+        // holds the Show-more toggle button). Markdown rendered via the same
+        // marked.parse + DOMPurify.sanitize pattern broadcast-panel.js uses
+        // (page-loaded globals window.marked + window.DOMPurify); graceful
+        // fallback to plain textContent if either library is unavailable.
         const body = document.createElement( "div" );
-        body.className   = "commons-activity-entry-body";
-        body.textContent = entry.body || "";
+        body.className = "commons-activity-entry-body";
+
+        const content = document.createElement( "div" );
+        content.className = "commons-activity-entry-body-content";
+        const rawBody = entry.body || "";
+        if ( typeof marked !== "undefined" && typeof DOMPurify !== "undefined" ) {
+            try {
+                content.innerHTML = DOMPurify.sanitize( marked.parse( rawBody ) );
+            } catch ( err ) {
+                this.log( `[COMMONS-ACTIVITY] markdown render failed, falling back to text: ${err}` );
+                content.textContent = rawBody;
+            }
+        } else {
+            content.textContent = rawBody;
+        }
+        body.appendChild( content );
+
+        // Show-more toggle — appears only when the rendered content actually
+        // overflows the 2-line clamp. Measurement deferred to next layout pass
+        // via requestAnimationFrame so scrollHeight/clientHeight are reliable.
+        const toggle = document.createElement( "button" );
+        toggle.className   = "commons-activity-entry-body-toggle";
+        toggle.type        = "button";
+        toggle.textContent = "Show more ▾";
+        toggle.hidden      = true;   // measured + revealed below
+        toggle.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            const isExpanded = content.classList.toggle( "expanded" );
+            toggle.textContent = isExpanded ? "Show less ▴" : "Show more ▾";
+        } );
+        body.appendChild( toggle );
+
+        // Measure overflow after layout; show toggle only when content actually
+        // exceeds the clamp. Empty / very-short bodies stay clean (no toggle).
+        requestAnimationFrame( () => {
+            const overflows = content.scrollHeight > content.clientHeight + 1;
+            if ( overflows ) toggle.hidden = false;
+        } );
+
         row.appendChild( body );
 
         const time = document.createElement( "div" );

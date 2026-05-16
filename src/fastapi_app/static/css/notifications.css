@@ -4841,6 +4841,98 @@
     overflow-wrap: break-word;
 }
 
+/* ========================================
+   COMMONS ACTIVITY BODY — collapsible + markdown (2026-05-16 ship)
+   The inner .commons-activity-entry-body-content is the line-clamp target;
+   the .commons-activity-entry-body-toggle button below it toggles the
+   .expanded class on the content to show full text. Markdown content is
+   rendered via marked.parse + DOMPurify.sanitize (page globals; same
+   pattern as broadcast-panel.js).
+   ======================================== */
+
+.commons-activity-entry-body-content {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    max-height: 3em;   /* belt + suspenders for browsers that ignore -webkit-line-clamp */
+}
+
+.commons-activity-entry-body-content.expanded {
+    display: block;
+    -webkit-line-clamp: unset;
+    max-height: none;
+    overflow: visible;
+}
+
+/* Compact markdown rendering inside entries — prevents tall paragraphs +
+   list spacing from blowing up the Recent Activity panel. */
+.commons-activity-entry-body-content p,
+.commons-activity-entry-body-content ul,
+.commons-activity-entry-body-content ol {
+    margin: 0.25em 0;
+}
+.commons-activity-entry-body-content ul,
+.commons-activity-entry-body-content ol {
+    padding-left: 1.4em;
+}
+.commons-activity-entry-body-content h1,
+.commons-activity-entry-body-content h2,
+.commons-activity-entry-body-content h3,
+.commons-activity-entry-body-content h4 {
+    font-size: 1em;
+    font-weight: 600;
+    margin: 0.3em 0 0.15em;
+}
+.commons-activity-entry-body-content code {
+    font-size: 90%;
+    background: rgba( 0, 0, 0, 0.05 );
+    padding: 0 3px;
+    border-radius: 3px;
+}
+.commons-activity-entry-body-content pre {
+    font-size: 90%;
+    background: rgba( 0, 0, 0, 0.04 );
+    padding: 6px 8px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    margin: 0.3em 0;
+}
+.commons-activity-entry-body-content pre code {
+    background: none;
+    padding: 0;
+}
+.commons-activity-entry-body-content blockquote {
+    margin: 0.3em 0;
+    padding-left: 0.8em;
+    border-left: 3px solid rgba( 0, 0, 0, 0.15 );
+    color: #495057;
+}
+.commons-activity-entry-body-content a {
+    color: #1c4587;
+    text-decoration: underline;
+}
+
+.commons-activity-entry-body-toggle {
+    display: inline-block;
+    margin-top: 2px;
+    padding: 1px 0;
+    background: none;
+    border: none;
+    color: var( --persona-color, #1c4587 );
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+}
+.commons-activity-entry-body-toggle:hover {
+    text-decoration: underline;
+}
+.commons-activity-entry-body-toggle[hidden] {
+    display: none;
+}
+
 .commons-activity-entry-time {
     grid-area: time;
     font-size: 10px;

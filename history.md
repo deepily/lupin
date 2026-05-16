@@ -57,6 +57,36 @@ Verified post-flip: Lupin run produced `lupin-wip-v0.1.7-2026.04.22-spit-and-pol
 **Commit**: 2e0e7e5
 **CoSA-side pending**: 10 files awaiting CoSA-context session (Rick claimed EOD ownership)
 
+#### Checkpoint 4 | 2026.05.16 21:18 UTC | Commons-activity entries: collapsible body + markdown rendering
+
+User-requested UI ship after the María↔Tiberius DM thread filled the Recent Activity panel with multi-paragraph content. Two coordinated features in one change:
+
+1. **Two-line clamp by default** — body content wraps in new `.commons-activity-entry-body-content` div with `-webkit-line-clamp: 2`. "Show more ▾" / "Show less ▴" button toggles `.expanded` class on click. Button auto-hides via `requestAnimationFrame` measurement when content doesn't actually overflow the clamp — short DMs stay clean, no redundant affordance.
+2. **Markdown rendering** — reuses the established `marked.parse() → DOMPurify.sanitize()` pattern from `broadcast-panel.js:127-139`. Page-loaded `window.marked` + `window.DOMPurify` globals, graceful fallback to plain `textContent` if either lib unavailable. Compact markdown-CSS-reset prevents tall paragraphs / list spacing from blowing up the panel.
+
+**Test pyramid**:
+
+| Tier | Spec | Result |
+|---|---|---|
+| node --check | `notifications.js` after edits | ✅ syntax clean |
+| Existing watcher unit tests | `test_commons_activity_watcher.py` | ✅ **22/22 PASS** (no regressions) |
+| New Playwright E2E (Phase 1 — code written) | 10 tests in `test_commons_activity_toggle.py`: clamp, toggle cycle, markdown rendering, XSS sanitization | ⏳ Code shipped; :8000 scheduled run pending Rick's slot confirmation |
+| Visual regression baselines | clamped state + expanded state + short-no-toggle state | ⏳ same — needs :8000 slot |
+
+**XSS sanitization tests** specifically:
+- `<script>window.__commons_xss_marker = true;</script>` body → asserts marker variable never set
+- `<img src='x' onerror='...'>` body → asserts onerror handler never fires + asserts `onerror=` stripped from innerHTML
+- Lockes the DOMPurify-via-broadcast-panel-pattern contract for this surface
+
+**Files in commit (Lupin parent — all served by FastAPI :7999 which auto-reloads static files immediately)**:
+- `src/fastapi_app/static/js/notifications.js` (MOD — body-section rewrite, ~45 LOC)
+- `src/fastapi_app/static/css/notifications.css` (MOD — new clamp/toggle/markdown rules, ~95 LOC)
+- `src/tests/e2e_ui/test_commons_activity_toggle.py` (NEW — 10 Playwright E2E tests, ~230 LOC)
+- `history.md` (this sub-entry)
+- `.claude-session.md` (Checkpoint 4 + touched-files update)
+
+**Commit**: <pending>
+
 #### Checkpoint 3 | 2026.05.16 21:05 UTC | Commons DM push-mode + Git LoC Delta cross-target fix arc (5 fixes, F1-F5)
 
 Live debugging triggered by Rick's challenge of an earlier "awaiting commit" framing exposed 3 latent bugs + 1 deployment gap + 1 test-pyramid gap from the prior two ship arcs (Inter-Session DM Phase 0 yesterday, Daily LoC Delta this morning). Five fixes (F1-F5) landed in one arc with full regression coverage.
