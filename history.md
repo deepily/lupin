@@ -2,6 +2,57 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.15 - Session c1cbcd11 (Rio ⚡) | Doc-viewer scope unification (Phases 1-6) + speakerphone rider sentinel regression fix
+
+Top-to-bottom architectural cleanup of the doc-viewer scope mechanism. Started from Rick's 404 on `/app/docs?path=bug-fix-queue.md&scope=docs` and surfaced the underlying dual-track architecture (built-in `docs`/`io` scopes vs config-driven registry). Six implementation phases delivered behind three plan-review gates, all ratified by Rick via interactive `ask_multiple_choice`.
+
+**Plan-review trail** (`src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`):
+- Q1-Q6 + Q-R1 + Q-R2 ratified during REUSE pre-pass; URL backward-compat EXPLICITLY dropped (Rick "I'm so bored with BC")
+- Pass 1 Fitness: 18 fitness findings + 2 design concerns → 6 choice ratifications + 11 mechanical fixes + 1 side-effect-resolved
+- Pass 2 Ownership-Language Audit: 10 findings; 58 `EXECUTOR: AI` tags applied; bulk-approved
+- After Rick's mid-session correction, retired my confused "adversarial security" Pass-2 framing; canonical PIP Pass-2 is Ownership-Language Audit (memory `feedback_pass2_is_ownership_audit_not_security` saved)
+
+**Implementation highlights**:
+- **Phase 1** — `cosa/config/cache_registry.py` (NEW) — `register_invalidator()` + `invalidate_all()` with `threading.RLock`; scope_registry, snapshot_mgr, prediction_engine self-register at import; `/api/init` returns `caches_invalidated: List[str]`. Resolves Mr. Radio's bug (`bug-fix-queue.md:108-137`) as side-effect.
+- **Phase 2** — Universal floor blocklist extended ~16 → ~46 regex patterns (credentials, CLAUDE.local.md, .venv/, node_modules/, .ssh/, .aws/, etc.)
+- **Phase 3** — `cosa/config/docview_manifest.py` (NEW) — Pydantic `DocviewManifest` with `ConfigDict(extra="forbid")`, 64 KB file-size cap, malformed-regex rejection at parse. `ScopeConfig` extended with `manifest` field. NEW `GET /api/docs/scopes` admin endpoint.
+- **Phase 4a + 4b** — Legacy `ALLOWED_FILES` / `_is_whitelisted_legacy_docs()` / `if scope == "docs":` branch DELETED; URL parser rewritten to path-prefix (`?path=<project>/<rel>`); `scope=` query param retired (Q-R2).
+- **Phase 5** — `external repo lupin path` flipped `/var/lupin` → `/var/external-projects/lupin`; NEW `.docview.yml` at repo root declares public surface explicitly. **THE bug from 2026-05-15 fixed: `?path=lupin/bug-fix-queue.md` returns 200.**
+- **Phase 6** — `lupin/CLAUDE.md` § Doc Viewer Scope rewritten for path-prefix shape; bug-fix-queue Mr. Radio entry retired; TODO Rachel `doc_scope` entry marked DONE.
+
+**Speakerphone regression fix** (commit `4502d3f`): broader unit-suite sweep surfaced 6 pre-existing failures in `test_speakerphone_wrap.py`. Two distinct bugs:
+1. Real code regression — `_SPEAKERPHONE_WRAP_SENTINEL` invariant violated by 2026-05-14 QUIET-mode rewrite (OFF-variant body dropped the sentinel substring). Restored.
+2. Two stale tests asserting obsolete "Stop calling notify()" / "voice-message" exit-reminder behavior from before the 2026-05-14 intentional QUIET-mode rewrite. Tests updated to match new behavior.
+
+**Verification matrix**:
+
+| Tier | Result |
+|---|---|
+| Unit | 4605 passed / 1 xfailed / **0 failed** (was 4599 / 1 / 6) |
+| Coverage | 100% lines + branches on both NEW modules (`cache_registry.py`, `docview_manifest.py`) |
+| Floor blocklist | 80 parametrized tests (all 46 patterns reject; case-insensitivity verified) |
+| Live `:7999` AC sweep | **15/15 pass** (AC1.3 caches_invalidated, AC4b.1-7 URL parser, AC5.1-6 Lupin manifest, scopes endpoint auth+payload) |
+
+**Commits** (this session):
+
+| Hash | Scope | Summary |
+|---|---|---|
+| `192dad6` | Lupin half | Doc-viewer scope unification Phases 1-6 — 12 files, 1662 insertions |
+| `4502d3f` | Lupin only | Speakerphone wrap sentinel invariant + 2 stale exit-reminder tests |
+
+**CoSA-tree handoff** (6 files staged on disk awaiting CoSA-context session per `feedback_lupin_only_never_cosa`):
+- NEW: `src/cosa/config/cache_registry.py`, `src/cosa/config/docview_manifest.py`
+- MOD: `src/cosa/rest/routers/{docs_files.py, _scope_registry.py, system.py}`, `src/cosa/agents/prediction_engine/prediction_engine.py`
+
+**Memories saved**: `feedback_pass2_is_ownership_audit_not_security` (PIP Pass-2 framing correction after Rick caught me drifting into OWASP semantics mid-session).
+
+**Cross-refs**:
+- Design doc: `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`
+- Top-5 triage doc (earlier in session): `src/rnd/v0.1.7/2026.05.15-rio-top-5-todo-bug-triage.md`
+- Bug-fix-queue retirement: `bug-fix-queue.md` (Mr. Radio `/api/init` entry now ✅ DONE)
+
+---
+
 ### 2026.05.15 - Session fa2de0ff (unallocated persona) | GPU doom loop diagnosis — uvicorn `--reload` + cu124/driver-535 forward-compat fragility
 
 Rick surfaced a dev-container failure log: `:7999` was caught in a doom loop after a code edit triggered uvicorn reload — every new worker process hit `Can't initialize NVML` + `RuntimeError: No CUDA GPUs are available` at the `lifespan` GPU pre-warm (`main.py:621`), `Application startup failed`, then uvicorn re-detected stale state and looped. Rick had to kill the process to break out.
