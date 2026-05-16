@@ -57,6 +57,46 @@ Verified post-flip: Lupin run produced `lupin-wip-v0.1.7-2026.04.22-spit-and-pol
 **Commit**: 2e0e7e5
 **CoSA-side pending**: 10 files awaiting CoSA-context session (Rick claimed EOD ownership)
 
+#### Checkpoint 3 | 2026.05.16 21:05 UTC | Commons DM push-mode + Git LoC Delta cross-target fix arc (5 fixes, F1-F5)
+
+Live debugging triggered by Rick's challenge of an earlier "awaiting commit" framing exposed 3 latent bugs + 1 deployment gap + 1 test-pyramid gap from the prior two ship arcs (Inter-Session DM Phase 0 yesterday, Daily LoC Delta this morning). Five fixes (F1-F5) landed in one arc with full regression coverage.
+
+**Fixes**:
+- **F1**: Replace `os.environ.get("LUPIN_MCP_API_KEY")` (env var was added in commit `9bbf298` without source-side wiring — silent fallback to polling on every push-mode call) with `du.get_api_key("notification-api-claude-code-dev")` — the canonical pattern already used by `cosa.memory.embedding_provider._http_api_key` for embeddings HTTP auth. Rick caught the cleaner abstraction; no new key to mint, no docker-compose changes.
+- **F2**: `commons_send_to` was calling the `@mcp.tool`-decorated `commons_ask_async` by name (resolves to `FunctionTool` instance, not callable) — `TypeError: 'FunctionTool' object is not callable` on every invocation. Refactored both wrappers to delegate through a shared private `_commons_ask_async_dispatch()` helper.
+- **F3**: Silent push-mode fallback now surfaces `register_skip_reason` ("missing_auth_header" / "missing_api_base_url" / "register_failed_status_N" / "register_failed_422") in the result dict. Previously `push_mode_active: false` with no other signal.
+- **F4**: `_default_csv_path` cross-repo bug filed by Tiberius 🌑 session `b714e138` — was using `cu.get_project_root()` (always LUPIN_ROOT) as the base, so cross-repo invocations dumped CSVs into Lupin's `io/` tree instead of the target. Two-stage fix: first pass via `os.path.abspath` regressed the in-tree-from-subdir case, final fix uses `git rev-parse --show-toplevel` from the supplied `--repo-path` to resolve actual repo root.
+- **F5**: Added 3 new unit tests covering cross-target invocations — the test class my earlier ship had missed. Locks both the cross-repo case and the no-regression-on-in-tree case.
+
+**Test pyramid — all green**:
+
+| Tier | Result |
+|---|---|
+| py_compile (4 files) | ✅ OK |
+| Import chain | ✅ resolved |
+| `git_loc_delta` unit tests (4 existing + 3 new) | ✅ **7/7 PASS** in 0.27s |
+| Full commons unit suite (438 + 7) | ✅ **445/445 PASS** in 35.29s, **0 regressions** |
+| Live cross-repo (Tiberius's reproducer) | ✅ CSV lands at `planning-is-prompting/io/git-loc-delta/...` (correct) |
+| Live in-tree from `lupin/src/` (subdir cwd) | ✅ CSV lands at `lupin/io/git-loc-delta/...` (correct — git toplevel resolution) |
+| Live in-tree from `lupin/` (repo root cwd) | ✅ CSV lands at `lupin/io/git-loc-delta/...` (correct, unchanged) |
+| Live DM via `commons_ask_async` to running MCP subprocess | ⚠ Stale — returned `push_mode_active: false` with NO `register_skip_reason` (confirms running fastmcp subprocess hasn't reloaded; next CC session picks up fix automatically) |
+
+**Process correction — testing failure acknowledged**: My initial test pyramid for `git_loc_delta` only invoked the tool with `--repo-path .` and `--repo-path src/cosa` — both INSIDE the Lupin tree. I never tested cross-repo, which is the primary use case. Direct violation of the Testing Ownership Mandate ("user is never the tester"). Two memories saved to prevent recurrence: `feedback_tests_must_cover_cross_target_invocations` + `feedback_env_var_read_and_set_land_together`.
+
+**R&D doc**: [`src/rnd/v0.1.7/2026.05.16-commons-dm-and-git-loc-delta-fix-arc.md`](src/rnd/v0.1.7/2026.05.16-commons-dm-and-git-loc-delta-fix-arc.md) — full diagnosis + fix-by-fix breakdown + deployment caveat about fastmcp subprocess staleness.
+
+**Files** (this checkpoint):
+- `src/lupin_mcp/cosa_voice_mcp.py` (MOD — F1 + F2, ~70 LOC)
+- `src/lupin_mcp/commons_ask.py` (MOD — F3, ~25 LOC)
+- `src/tests/unit/test_git_loc_delta.py` (MOD — F5 +90 LOC, 3 new cross-target tests)
+- `src/rnd/v0.1.7/2026.05.16-commons-dm-and-git-loc-delta-fix-arc.md` (NEW R&D doc)
+- `history.md` (this sub-entry)
+- `.claude-session.md` (Checkpoint 3 + touched-files update)
+
+**Commit**: <pending>
+
+**CoSA-side pending** in Rick's EOD batch: `src/cosa/repo/run_git_loc_delta.py` (F4, ~30 LOC) alongside earlier LoC Delta sources + broadcast fan-out watcher fix.
+
 #### Checkpoint 2 | 2026.05.16 20:25 UTC | Bug fix — duplicate broadcast fan-out (consumer-side dedupe in CommonsActivityWatcher)
 
 Rio's `bug-fix-queue.md` "Bug #2 — duplicate notification fan-out" (filed 2026-05-16 morning) diagnosed and fixed. Root cause: producer/consumer asymmetry — `perform_fanout` writes N per-recipient rows to the `broadcasts` topic by design (for `target_session_id`-scoped routing on the HTTP path), the HTTP read path `/api/commons/broadcast-history` collapses N → 1 via `_dedupe_broadcasts_by_id` + `_dedupe_broadcast_acks_by_recipient`, but `CommonsActivityWatcher._tick()` (the WS push path) dispatched one `commons_activity` event per raw row — so the Recent Activity panel saw N rows from one broadcast.

@@ -1512,6 +1512,36 @@ from lupin_mcp.commons_store import CommonsStore, DEFAULT_PERSONA_NAME, DEFAULT_
 from lupin_mcp.commons_ask import ask_sync as _commons_ask_sync_impl, ask_async as _commons_ask_async_impl
 from lupin_mcp.commons_archival import CommonsArchiver
 
+
+def _mcp_outbound_api_key() -> Optional[ str ]:
+    """
+    Load the X-API-Key value used for MCP-server outbound HTTP calls
+    to the Lupin REST API (e.g. `/api/commons/register-question`).
+
+    Mirrors the canonical pattern in
+    `cosa/memory/embedding_provider.py:177` `_http_api_key()` — reads
+    `src/conf/keys/notification-api-claude-code-dev` via the
+    project-wide `du.get_api_key()` helper. This is the same long-lived
+    `ck_live_*` API key used by the embedding HTTP endpoints and the
+    notification authentication infrastructure (Phase 2.5).
+
+    Replaces the prior `os.environ.get("LUPIN_MCP_API_KEY")` lookup —
+    that env var was added in commit `9bbf298` (Inter-Session DM Phase 0)
+    without matching set-side wiring, so it was always None and push-mode
+    silently fell through to polling. Switching to the canonical helper
+    eliminates the wire-up gap entirely.
+
+    Ensures:
+        - Returns the key string if `src/conf/keys/notification-api-claude-code-dev` is readable
+        - Returns None on any error (silent fallback to polling)
+        - Never raises
+    """
+    try:
+        import cosa.utils.util as du
+        return du.get_api_key( "notification-api-claude-code-dev" )
+    except Exception:
+        return None
+
 _commons_store_singleton:    Optional[ CommonsStore ]     = None
 _commons_archiver_singleton: Optional[ CommonsArchiver ]  = None
 
@@ -1848,13 +1878,51 @@ def commons_ask_async(
         DM mode adds: `dm_dispatched: bool | None`;
         on recipient resolution failure: `recipient_resolution_error: dict`
     """
+    return _commons_ask_async_dispatch(
+        topic                = topic,
+        body                 = body,
+        question_id          = question_id,
+        recipient_session_id = recipient_session_id,
+        recipient_persona    = recipient_persona,
+        expect_reply         = expect_reply,
+    )
+
+
+def _commons_ask_async_dispatch(
+    topic                : str,
+    body                 : str,
+    question_id          : Optional[ str ]  = None,
+    recipient_session_id : Optional[ str ]  = None,
+    recipient_persona    : Optional[ str ]  = None,
+    expect_reply         : bool             = True,
+) -> dict:
+    """
+    Shared dispatch helper for `commons_ask_async` and `commons_send_to`.
+
+    Necessary because `@mcp.tool`-decorated functions are wrapped into
+    `FunctionTool` instances which are NOT directly callable as Python
+    functions. Without this private helper, `commons_send_to` calling
+    `commons_ask_async` by name raises
+    `TypeError: 'FunctionTool' object is not callable` at runtime.
+
+    Both MCP tools delegate here so they share the persona / auth /
+    base-URL construction and the push-mode auto-enable rule.
+
+    Requires:
+        - `topic` and `body` are non-empty strings
+        - `recipient_session_id` XOR `recipient_persona` may be supplied (or neither)
+
+    Ensures:
+        - Returns the `_commons_ask_async_impl` result dict verbatim
+        - On `_commons_enabled() is False`, returns `{"status": "error", "reason": "commons disabled"}`
+    """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     persona = _commons_persona_fields()
 
     # Push-mode auto-enables when caller wants directed DM dispatch
     push_mode    = recipient_session_id is not None or recipient_persona is not None
     api_base_url = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
-    api_key      = os.environ.get( "LUPIN_MCP_API_KEY" )
+    api_key      = _mcp_outbound_api_key()
     auth_header  = { "X-API-Key": api_key } if api_key else None
 
     return _commons_ask_async_impl(
@@ -1925,10 +1993,15 @@ def commons_send_to(
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     target_topic = topic or f"dm-{recipient}"
     # When `in_reply_to` is supplied, the body's effective context is "reply to a prior DM" —
-    # we still call commons_ask_async, but stamp `in_reply_to` on the question metadata so the
-    # original asker's Phase 3 watcher (if running) correlates this entry as the answer.
+    # we still go through _commons_ask_async_dispatch, but stamp `in_reply_to` on the result
+    # so the original asker's Phase 3 watcher (if running) correlates this entry as the answer.
     # Effective recipient is the persona; in_reply_to threading is handled at the metadata layer.
-    result = commons_ask_async(
+    #
+    # Bug-fix 2026-05-16: this used to call the `commons_ask_async` name directly, but that name
+    # resolves to the `@mcp.tool`-decorated `FunctionTool` instance (not a Python callable),
+    # producing `TypeError: 'FunctionTool' object is not callable` on every invocation. Route
+    # through the shared private `_commons_ask_async_dispatch` helper instead.
+    result = _commons_ask_async_dispatch(
         topic                = target_topic,
         body                 = body,
         question_id          = question_id,

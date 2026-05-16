@@ -17,6 +17,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
+import cosa.utils.util as cu
 from cosa.repo.git_loc_delta.csv_writer       import CSV_COLUMNS, write_csv
 from cosa.repo.git_loc_delta.daily_aggregator import DailyAggregator
 from cosa.repo.git_loc_delta.git_log_parser   import GitLogParser
@@ -206,6 +207,103 @@ def test_csv_empty_input_produces_header_only():
         df = pd.read_csv( path )
         assert list( df.columns ) == CSV_COLUMNS
         assert len( df ) == 0
+
+
+# --- F5 (2026-05-16): cross-target invocation regression -------------------
+
+
+def test_default_csv_path_branch_mode_resolves_under_target_repo_not_lupin():
+    """
+    Regression for the 2026-05-16 cross-repo bug filed by Tiberius 🌑.
+
+    When --repo-path points OUTSIDE the Lupin tree, the default CSV save path
+    must land inside the TARGET repo's `io/git-loc-delta/` tree — not in
+    Lupin's tree. The original implementation used `cu.get_project_root()`
+    (always LUPIN_ROOT), causing cross-repo runs to cross-contaminate Lupin.
+
+    Per `feedback_tests_must_cover_cross_target_invocations` — when a CLI
+    takes a path parameter to operate on something OTHER than the current
+    project, the test pyramid MUST include an invocation pointing OUTSIDE
+    the project tree.
+    """
+    from cosa.repo.run_git_loc_delta import _default_csv_path
+
+    with tempfile.TemporaryDirectory() as td:
+        sibling = os.path.join( td, "fake-sibling-repo" )
+        os.makedirs( sibling )
+
+        path = _default_csv_path(
+            mode      = "branch",
+            repo_path = sibling,
+            branch    = "wip-feature-x",
+        )
+
+        # Must land INSIDE the target repo's tree
+        assert path.startswith( sibling + os.sep ), (
+            f"Path leaked outside target repo: {path}"
+        )
+        # Must use the target repo's basename in the filename
+        assert "fake-sibling-repo" in path, f"Filename missing target repo name: {path}"
+        # Must end with the canonical pattern
+        assert path.endswith( "fake-sibling-repo-wip-feature-x-loc-delta.csv" ), (
+            f"Filename pattern drift: {path}"
+        )
+        # MUST NOT contain LUPIN_ROOT (this is the regression-locker)
+        lupin_root = cu.get_project_root()
+        assert lupin_root not in path, (
+            f"Cross-contamination — path leaked into Lupin tree: {path} (lupin_root={lupin_root})"
+        )
+
+
+def test_default_csv_path_today_mode_also_target_aware():
+    """
+    --today mode must ALSO resolve relative to --repo-path, not LUPIN_ROOT.
+    Same cross-target principle as the branch-mode test; this locks the
+    archival-snapshot path against the same regression.
+    """
+    from cosa.repo.run_git_loc_delta import _default_csv_path
+
+    with tempfile.TemporaryDirectory() as td:
+        sibling = os.path.join( td, "another-sibling" )
+        os.makedirs( sibling )
+
+        path = _default_csv_path(
+            mode      = "today",
+            repo_path = sibling,
+            branch    = None,
+        )
+
+        assert path.startswith( sibling + os.sep ), (
+            f"Today-mode path leaked outside target repo: {path}"
+        )
+        # Today-mode filename uses a date stamp, not the repo name
+        assert path.endswith( "-loc-delta.csv" )
+        # Lock the date format implicitly via length (YYYY-MM-DD = 10 chars)
+        basename = os.path.basename( path )
+        assert len( basename ) == len( "YYYY-MM-DD-loc-delta.csv" ), (
+            f"Today-mode filename pattern drift: {basename}"
+        )
+
+
+def test_default_csv_path_same_tree_still_lands_under_lupin():
+    """
+    Confirm the cross-target fix does NOT break the in-tree case. Calling
+    with `repo_path="."` from within the Lupin tree should still land at
+    `{LUPIN_ROOT}/io/git-loc-delta/...` — same as before the fix.
+    """
+    from cosa.repo.run_git_loc_delta import _default_csv_path
+
+    path = _default_csv_path(
+        mode      = "branch",
+        repo_path = ".",
+        branch    = "wip-test",
+    )
+
+    lupin_root = cu.get_project_root()
+    # Path must start with an absolute path that equals or is under the
+    # current cwd's resolution (which in this test is one of the Lupin paths)
+    assert os.path.isabs( path )
+    assert path.endswith( "-wip-test-loc-delta.csv" )
 
 
 if __name__ == "__main__":

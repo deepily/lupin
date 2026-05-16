@@ -243,33 +243,54 @@ def ask_async(
     )
 
     # Phase 3 push-mode register (best-effort, silent fallback on failure per F1-fit)
-    push_mode_active : bool = False
-    dm_dispatched    : Optional[ bool ] = None
-    register_error   : Optional[ Dict[ str, Any ] ] = None
+    # 2026-05-16 observability fix: surface `register_skip_reason` whenever push-mode
+    # was REQUESTED but the dispatch was skipped or failed. Previously the caller
+    # got `push_mode_active=False` with no signal distinguishing "missing auth header"
+    # from "I didn't request push-mode" from "register returned non-2xx". The 422
+    # RecipientResolutionError was the only error path that surfaced anything.
+    push_mode_active     : bool                          = False
+    dm_dispatched        : Optional[ bool ]              = None
+    register_error       : Optional[ Dict[ str, Any ] ]  = None
+    register_skip_reason : Optional[ str ]               = None
 
-    if push_mode_enabled and api_base_url and auth_header:
-        register_result = _register_push_mode(
-            api_base_url         = api_base_url,
-            auth_header          = auth_header,
-            topic                = topic,
-            question_id          = question_id,
-            asker_session_id     = sender_session_id,
-            ttl_seconds          = int( ttl_seconds ),
-            timeout_seconds      = register_timeout_s,
-            debug                = debug,
-            recipient_session_id = recipient_session_id,
-            recipient_persona    = recipient_persona,
-            expect_reply         = expect_reply,
-        )
-        if register_result.get( "success" ):
-            push_mode_active = True
-            dm_dispatched    = register_result.get( "dm_dispatched" )
+    if push_mode_enabled:
+        if not api_base_url:
+            register_skip_reason = "missing_api_base_url"
+            if debug: print( "[commons_ask] push-mode skipped — api_base_url is empty" )
+        elif not auth_header:
+            register_skip_reason = "missing_auth_header"
+            if debug: print( "[commons_ask] push-mode skipped — auth_header is None (LUPIN_MCP_API_KEY or notification-api-claude-code-dev key unavailable)" )
         else:
-            # Surface 422 RecipientResolutionError to caller so the AI agent
-            # can self-correct (Phase 0 Q3-rev amendment). All other errors
-            # fall through to polling-mode silently per F1-fit.
-            if register_result.get( "http_status" ) == 422:
-                register_error = register_result.get( "detail" )
+            register_result = _register_push_mode(
+                api_base_url         = api_base_url,
+                auth_header          = auth_header,
+                topic                = topic,
+                question_id          = question_id,
+                asker_session_id     = sender_session_id,
+                ttl_seconds          = int( ttl_seconds ),
+                timeout_seconds      = register_timeout_s,
+                debug                = debug,
+                recipient_session_id = recipient_session_id,
+                recipient_persona    = recipient_persona,
+                expect_reply         = expect_reply,
+            )
+            if register_result.get( "success" ):
+                push_mode_active = True
+                dm_dispatched    = register_result.get( "dm_dispatched" )
+            else:
+                # Surface 422 RecipientResolutionError to caller so the AI agent
+                # can self-correct (Phase 0 Q3-rev amendment). All other failures
+                # surface a `register_skip_reason` so the caller has a debugging signal
+                # without parsing the detail body.
+                http_status = register_result.get( "http_status" )
+                if http_status == 422:
+                    register_error       = register_result.get( "detail" )
+                    register_skip_reason = "register_failed_422"
+                elif http_status is None:
+                    # Network / library failure (see _register_push_mode contract)
+                    register_skip_reason = "register_network_error"
+                else:
+                    register_skip_reason = f"register_failed_status_{http_status}"
 
     result : Dict[ str, Any ] = {
         "question_id"      : question_id,
@@ -280,4 +301,6 @@ def ask_async(
         result[ "dm_dispatched" ] = dm_dispatched
     if register_error is not None:
         result[ "recipient_resolution_error" ] = register_error
+    if register_skip_reason is not None:
+        result[ "register_skip_reason" ] = register_skip_reason
     return result
