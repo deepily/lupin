@@ -51,11 +51,40 @@ Verified post-flip: Lupin run produced `lupin-wip-v0.1.7-2026.04.22-spit-and-pol
 
 **Memory rules engaged**: `feedback_walk_through_plan_before_asking_proceed` (substantive findings via notify before every gate), `feedback_pip_plan_review_is_sequential` (REUSE → gate → apply → Pass 1 → gate → apply), `feedback_always_include_pros_cons_recommendation` (per-option pros/cons in `ask_multiple_choice` abstracts), `feedback_tts_body_headline_and_takeaway_only` (spoken `message` carried headlines only; details in `abstract`), `feedback_doc_links_always_in_abstract` (viewer link as line 1 of abstract), `feedback_lupin_only_never_cosa` (CoSA submodule edits OK, git ops forbidden from parent), `feedback_verify_staging_before_commit` (`git diff --cached --stat` before this checkpoint commit), `feedback_never_auto_commit_push` (explicit voice authorization for this commit), `feedback_documentation_step_stops_at_doc` (filename-flip surfaced as separate decision after doc work).
 
-#### Checkpoint | 2026.05.16 19:35 UTC | Daily LoC Delta — Lupin-side artifacts
+#### Checkpoint 1 | 2026.05.16 19:35 UTC | Daily LoC Delta — Lupin-side artifacts
 
 **Files** (parent Lupin only): src/tests/unit/test_git_loc_delta.py (NEW), TODO.md (MOD), history.md (this entry), .claude-session.md (session section)
+**Commit**: 2e0e7e5
+**CoSA-side pending**: 10 files awaiting CoSA-context session (Rick claimed EOD ownership)
+
+#### Checkpoint 2 | 2026.05.16 20:25 UTC | Bug fix — duplicate broadcast fan-out (consumer-side dedupe in CommonsActivityWatcher)
+
+Rio's `bug-fix-queue.md` "Bug #2 — duplicate notification fan-out" (filed 2026-05-16 morning) diagnosed and fixed. Root cause: producer/consumer asymmetry — `perform_fanout` writes N per-recipient rows to the `broadcasts` topic by design (for `target_session_id`-scoped routing on the HTTP path), the HTTP read path `/api/commons/broadcast-history` collapses N → 1 via `_dedupe_broadcasts_by_id` + `_dedupe_broadcast_acks_by_recipient`, but `CommonsActivityWatcher._tick()` (the WS push path) dispatched one `commons_activity` event per raw row — so the Recent Activity panel saw N rows from one broadcast.
+
+**Fix**: Mirror the HTTP-path dedupe inside the watcher. New `_dedupe_for_dispatch` method in `CommonsActivityWatcher` (~80 LOC), called from `tick()` between sort and dispatch. Cursor advancement uses pre-dedupe max ts so dropped duplicates don't re-surface next tick. Zero changes to write side (per-recipient rows still needed for HTTP-path same-user scoping).
+
+**Test pyramid**:
+
+| Tier | Result |
+|---|---|
+| py_compile (2 files) | ✅ OK |
+| import chain | ✅ resolved |
+| Targeted unit (22 watcher tests: 15 pre-existing + 7 new) | ✅ **22/22 PASS** in 0.07s |
+| Full commons regression (438 tests) | ✅ **438/438 PASS** in 14.80s, **0 regressions** |
+| Live :7999 broadcast smoke | ⏳ Pending Rick's hands-on confirmation |
+
+**R&D doc**: [`src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md`](src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md) — full diagnosis, fix shape, test coverage, 2 pending follow-ups (write-side `broadcast-acks` multiplicity per Arnold's investigation note; persona-stamping asymmetry 4×Mr-Radio + 1×Rio).
+
+**Files** (this checkpoint):
+- `src/tests/unit/commons/test_commons_activity_watcher.py` (MOD — +170 LOC, 7 new tests)
+- `src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md` (NEW R&D doc)
+- `TODO.md` (MOD — fan-out entry flipped NEW → ✅ FIX SHIPPED)
+- `history.md` (this sub-entry)
+- `.claude-session.md` (Checkpoint 2 added to session 3c9fce51 section)
+
 **Commit**: <pending>
-**CoSA-side pending**: 10 files awaiting CoSA-context session
+
+**CoSA-side pending** (per `feedback_lupin_only_never_cosa`): `src/cosa/rest/commons_activity_watcher.py` awaits Rick's EOD batch commit alongside the DM Phase 0 CoSA pieces + LoC Delta CoSA pieces.
 
 ---
 

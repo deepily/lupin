@@ -44,23 +44,36 @@ All test tiers green:
 
 ---
 
-## 📡 NEW — Duplicate notification fan-out (filed 2026-05-16 by Rio ⚡, session `0025f917`)
+## ✅ 🟢 FIX SHIPPED 2026-05-16 — Duplicate notification fan-out (filed by Rio ⚡ session `0025f917`; fixed by María 🌸 session `3c9fce51`)
 
-**Primary doc**: [`src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`](src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md) — "Log-only — Bug #2" section.
+**Fix R&D**: [`src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md`](src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md) — full diagnosis, fix shape, test coverage, and remaining write-side investigation flagged.
 
-**Symptoms observed 2026-05-16 ~12:16 EDT** during a multi-session voice-persona bug investigation:
+**Original filing context**: [`src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`](src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md) — "Log-only — Bug #2" section.
 
-1. **Broadcast multiplication** — Rick sent a single `📢 System Broadcast` and the notifications panel rendered the same broadcast card **5×** in succession (one per active CC session).
-2. **"completed" status multiplication** — A single session-end / completion status produced **4 × Mr. Radio "completed"** entries plus **1 × Rio "completed"**, all stamped with the same 12:16 timestamp.
+**Root cause**: `CommonsActivityWatcher._tick()` was dispatching one `commons_activity` WS event per row read from the `broadcasts` / `broadcast-acks` topics. `perform_fanout` writes N per-recipient rows by design (for `target_session_id`-scoped routing). The HTTP read path `/api/commons/broadcast-history` already dedupes via `_dedupe_broadcasts_by_id` + `_dedupe_broadcast_acks_by_recipient`. The WS push path bypassed both — producer/consumer asymmetry.
 
-**Hypothesis (not yet investigated)**: WS emit is fanning out per-session-with-persona instead of per-user. Likely the broadcast or session-end notification iterates over occupied-persona bridge entries and emits one envelope per persona, when it should emit once per user (and let the per-session dispatch happen client-side).
+**Fix**: Mirror the HTTP-path dedupes inside `CommonsActivityWatcher._tick()` between sort and dispatch. New `_dedupe_for_dispatch` helper. Cursor advancement fixed to use pre-dedupe max ts so dropped duplicates don't re-surface next tick.
 
-**Out of scope for this session** — the primary voice-persona stale-bridge bug was the focus today; bug #2 was logged for a follow-up session.
+**Verification (Tier T1–T4 green; T5 pending Rick's live confirmation)**:
 
-- [ ] **[LUPIN] Identify the emitter** — likely in `routers/websocket.py` or `notifications.py`. Grep for `emit_to_user` or `broadcast` calls that iterate over sessions/personas.
-- [ ] **[LUPIN] Reproduce in isolation** — spawn 5 CC sessions, fire a system broadcast, count rendered cards.
-- [ ] **[LUPIN] Fix at the emitter** — should be one envelope per user, not per persona.
-- [ ] **[LUPIN] Add E2E test** — Playwright check that a single broadcast renders exactly one card per user, regardless of session count.
+| Tier | Result |
+|---|---|
+| py_compile (2 files) | ✅ OK |
+| import chain | ✅ resolved |
+| Targeted unit (22 watcher tests: 15 pre-existing + 7 new) | ✅ **22/22 PASS** in 0.07s |
+| Full commons regression (438 tests) | ✅ **438/438 PASS** in 14.80s, **0 regressions** |
+| Live :7999 broadcast smoke test | ⏳ Pending Rick's hands-on confirmation when back from snack |
+
+**Pending Rick's EOD batch commit** (per `feedback_lupin_only_never_cosa`, the CoSA-side edit can't commit from this Lupin-context session):
+
+- [ ] **[LUPIN-COSA]** Commit `src/cosa/rest/commons_activity_watcher.py` (added `_dedupe_for_dispatch` method ~80 LOC + tick() integration ~15 LOC). **Rick claimed EOD ownership 2026-05-16 for CoSA commits.** Suggested commit message in the R&D doc.
+- [x] **[LUPIN]** `src/tests/unit/commons/test_commons_activity_watcher.py` (+170 LOC for 7 new tests) — parent Lupin, commits from a Lupin-context session.
+- [x] **[LUPIN]** `src/rnd/v0.1.7/2026.05.16-broadcast-fanout-watcher-dedupe.md` (new R&D doc) — parent Lupin.
+
+**Not-fixed-yet follow-ups** (logged in R&D §"Not-fixed-yet"):
+
+- [ ] **[LUPIN-COSA]** Investigate the underlying write-side broadcast-acks multiplicity (Arnold's note at `_dedupe_broadcast_acks_by_recipient` docstring) — N `_post_ack` calls per single user-action. Consumer-side dedupe masks the symptom; producer-side root cause remains.
+- [ ] **[LUPIN]** Investigate the completion-cards persona stamping asymmetry (4×Mr-Radio + 1×Rio for a single completion). Suggests something about recipient-side persona resolution in multi-session-same-user scenarios.
 
 ---
 
@@ -79,7 +92,7 @@ All test tiers green:
 - [x] **[LUPIN] Step 7** — Test pyramid: 16 unit + 7 endpoint smoke + 5 listener smoke + 5 `:8000` integration + 3 Playwright E2E + 1 visual regression baseline (`io/test-suite/visual-baselines/test_dm_recent_activity/`). Final tally: **488/488 PASS across :7999 and :8000**.
 - [x] **[LUPIN] Step 8** — INI keys — no-op for v1 (existing Phase 3 keys `commons api base url` + `commons ask async push mode enabled` cover what's needed).
 - [x] **[LUPIN] Commits** — `9bbf298` (Phase 0 main implementation, 12 files, +1840/-53), `98ab544` (:8000 integration test, AC9d), `8e9e144` (Playwright E2E + visual baseline, AC9e + AC9f).
-- [ ] **[LUPIN-COSA] CoSA-side commit still pending** — `src/cosa/rest/routers/commons.py` + `src/cosa/rest/routers/notifications.py` (~250 LOC) including the T7-isolation `match_persona` try/except bug fix discovered during `:8000` integration retry-3. Handle in a CoSA-context session per `feedback_lupin_only_never_cosa`. **This is the ONLY remaining work before the feature can merge to main.**
+- [x] **[LUPIN-COSA] CoSA-side commit** — `src/cosa/rest/routers/commons.py` + `src/cosa/rest/routers/notifications.py` (~250 LOC) including the T7-isolation `match_persona` try/except bug fix discovered during `:8000` integration retry-3. **Rick voice-claimed ownership 2026-05-16: "I'll do that at the end of the day today."** Removed from María's priority queue per Rick's request 2026-05-16 (María session `3c9fce51`).
 - [ ] **[LUPIN] PHI-4 LLM disambiguator wiring** (v1.1 follow-on) — currently the T7 try/except routes any LLM failure to 422 RecipientResolutionError. v1.1 enhancement: actually USE PHI-4 when reachable so fuzzy persona match works (e.g. "the bug-fix one" → "tiberius"). Phase 3 Q5 precedent (Haiku stubbed) suggests acceptable scope deferral.
 
 **Reproducibility recipe** (post-CoSA-commit): María calls `commons_send_to(recipient="radio", body="...")` → Radio's tmux receives `COMMONS PEER MESSAGE` system-reminder → Radio replies via `commons_post('dm-radio', body=<reply>, metadata={'in_reply_to': <question_id>})` → María's Phase-3 watcher pushes back via `commons_answer_received`. Rick watches both in Recent Activity with `→ @radio` and `→ @maria` DM badges.

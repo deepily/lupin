@@ -356,3 +356,221 @@ def test_tick_handles_per_topic_read_failure_gracefully():
     dispatched = w.tick()
     assert dispatched == 1
     assert push.calls[ 0 ][ "payload" ][ "body" ] == "good"
+
+
+# ─── Pre-dispatch dedupe (2026-05-16 bug fix) ───────────────────────────────
+
+
+def _broadcast_entry( ts, broadcast_id, target_session_id, body="hello" ):
+    """Helper: per-recipient broadcasts-topic row as written by perform_fanout."""
+    return {
+        "ts"                : ts,
+        "sender_session_id" : "pseudo-sender",
+        "persona_name"      : "System Broadcast",
+        "persona_icon"      : "📢",
+        "persona_color"     : "#FFC107",
+        "body"              : body,
+        "metadata"          : {
+            "broadcast_id"     : broadcast_id,
+            "target_session_id": target_session_id,
+            "sender_user_id"   : "alice",
+        },
+    }
+
+
+def _ack_entry( ts, broadcast_id, sender_sid, status ):
+    """Helper: broadcast-acks-topic row as written by the listener's ack path."""
+    return {
+        "ts"                : ts,
+        "sender_session_id" : sender_sid,
+        "persona_name"      : "María",
+        "persona_icon"      : "🌸",
+        "persona_color"     : "#F06292",
+        "body"              : "",
+        "metadata"          : {
+            "broadcast_id" : broadcast_id,
+            "status"       : status,
+        },
+    }
+
+
+def test_tick_dedupes_broadcasts_by_broadcast_id():
+    """
+    Regression for 2026-05-16 fan-out bug: a single system broadcast against
+    N active sessions caused perform_fanout to write N per-recipient rows to
+    the broadcasts topic. The watcher used to dispatch N commons_activity WS
+    events → N rows in the Recent Activity panel. After fix: 1 dispatch.
+    """
+    bid = "broadcast-abc"
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [
+            _broadcast_entry( "2026-05-16T15:00:00+00:00", bid, "sess-aaa", body="hi all" ),
+            _broadcast_entry( "2026-05-16T15:00:00+00:00", bid, "sess-bbb", body="hi all" ),
+            _broadcast_entry( "2026-05-16T15:00:00+00:00", bid, "sess-ccc", body="hi all" ),
+            _broadcast_entry( "2026-05-16T15:00:00+00:00", bid, "sess-ddd", body="hi all" ),
+            _broadcast_entry( "2026-05-16T15:00:00+00:00", bid, "sess-eee", body="hi all" ),
+        ],
+    } )
+    push = _CapturingPush()
+    w = CommonsActivityWatcher(
+        store                    = store,
+        push_notification_fn     = push,
+        excluded_topics          = [ ],
+        bridge_owner_resolver_fn = lambda: { },
+    )
+    dispatched = w.tick()
+    assert dispatched == 1, f"Expected 1 dispatched event for the broadcast, got {dispatched}"
+    assert len( push.calls ) == 1
+    # target_session_id MUST be stripped from the dispatched broadcast representation
+    md = push.calls[ 0 ][ "payload" ][ "metadata" ]
+    assert "target_session_id" not in md, f"target_session_id leaked through dedupe: {md}"
+    assert md[ "broadcast_id" ] == bid
+
+
+def test_tick_dedupes_broadcasts_keeps_distinct_broadcast_ids():
+    """Two distinct broadcasts in the same tick → 2 dispatched (not collapsed)."""
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [
+            _broadcast_entry( "2026-05-16T15:00:00+00:00", "bid-1", "sess-a" ),
+            _broadcast_entry( "2026-05-16T15:00:01+00:00", "bid-2", "sess-a" ),
+            _broadcast_entry( "2026-05-16T15:00:00+00:00", "bid-1", "sess-b" ),  # dup of bid-1
+        ],
+    } )
+    push = _CapturingPush()
+    w = CommonsActivityWatcher(
+        store                    = store,
+        push_notification_fn     = push,
+        excluded_topics          = [ ],
+        bridge_owner_resolver_fn = lambda: { },
+    )
+    dispatched = w.tick()
+    assert dispatched == 2, f"Expected 2 dispatched (one per distinct broadcast_id), got {dispatched}"
+    bids = { c[ "payload" ][ "metadata" ][ "broadcast_id" ] for c in push.calls }
+    assert bids == { "bid-1", "bid-2" }
+
+
+def test_tick_dedupes_broadcast_acks_by_recipient_triple():
+    """
+    Regression for the write-side ack multiplicity bug (Arnold's investigation):
+    one recipient writes the same ack 3-4× within milliseconds. The HTTP
+    broadcast-history path already collapses these (_dedupe_broadcast_acks_by_recipient).
+    The WS push path now matches.
+    """
+    bid = "broadcast-xyz"
+    store = _FakeStore( topics_to_entries={
+        "broadcast-acks" : [
+            _ack_entry( "2026-05-16T15:16:43.852+00:00", bid, "sess-recv", "completed" ),
+            _ack_entry( "2026-05-16T15:16:43.852+00:00", bid, "sess-recv", "completed" ),
+            _ack_entry( "2026-05-16T15:16:43.854+00:00", bid, "sess-recv", "completed" ),
+        ],
+    } )
+    push = _CapturingPush()
+    w = CommonsActivityWatcher(
+        store                    = store,
+        push_notification_fn     = push,
+        excluded_topics          = [ ],
+        bridge_owner_resolver_fn = lambda: { },
+    )
+    dispatched = w.tick()
+    assert dispatched == 1, f"Expected 1 dispatched (same triple collapsed), got {dispatched}"
+
+
+def test_tick_keeps_acks_with_distinct_sender_sessions():
+    """Multiple recipients each writing one ack → kept distinct (different sender_session_ids)."""
+    bid = "broadcast-multi"
+    store = _FakeStore( topics_to_entries={
+        "broadcast-acks" : [
+            _ack_entry( "2026-05-16T15:00:00+00:00", bid, "sess-a", "completed" ),
+            _ack_entry( "2026-05-16T15:00:00+00:00", bid, "sess-b", "completed" ),
+            _ack_entry( "2026-05-16T15:00:00+00:00", bid, "sess-c", "completed" ),
+        ],
+    } )
+    push = _CapturingPush()
+    w = CommonsActivityWatcher(
+        store                    = store,
+        push_notification_fn     = push,
+        excluded_topics          = [ ],
+        bridge_owner_resolver_fn = lambda: { },
+    )
+    dispatched = w.tick()
+    assert dispatched == 3, f"Distinct senders must not collapse, got {dispatched}"
+
+
+def test_tick_dedupe_defensive_passthrough_on_malformed_entries():
+    """Entries missing required keys must pass through unchanged (no silent disappear)."""
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [
+            # missing metadata.broadcast_id → passthrough
+            { "ts": "2026-05-16T15:00:00+00:00", "sender_session_id": "x",
+              "persona_name": "p", "persona_icon": "i", "persona_color": "#000", "body": "b",
+              "metadata": { } },
+        ],
+        "broadcast-acks" : [
+            # non-string sender_session_id → passthrough
+            { "ts": "2026-05-16T15:00:01+00:00", "sender_session_id": 12345,
+              "persona_name": "p", "persona_icon": "i", "persona_color": "#000", "body": "",
+              "metadata": { "broadcast_id": "bid", "status": "completed" } },
+        ],
+    } )
+    push = _CapturingPush()
+    w = CommonsActivityWatcher(
+        store                    = store,
+        push_notification_fn     = push,
+        excluded_topics          = [ ],
+        bridge_owner_resolver_fn = lambda: { },
+    )
+    dispatched = w.tick()
+    assert dispatched == 2, f"Malformed entries must pass through, got {dispatched}"
+
+
+def test_tick_dedupe_unaffected_topics_pass_through():
+    """Non-broadcasts / non-broadcast-acks topics see no dedupe."""
+    store = _FakeStore( topics_to_entries={
+        "free-topic" : [
+            _entry( "2026-05-16T15:00:00+00:00", body="one"   , sender_user_id="alice" ),
+            _entry( "2026-05-16T15:00:01+00:00", body="two"   , sender_user_id="alice" ),
+            _entry( "2026-05-16T15:00:02+00:00", body="three" , sender_user_id="alice" ),
+        ],
+    } )
+    push = _CapturingPush()
+    w = CommonsActivityWatcher(
+        store                    = store,
+        push_notification_fn     = push,
+        excluded_topics          = [ ],
+        bridge_owner_resolver_fn = lambda: { },
+    )
+    dispatched = w.tick()
+    assert dispatched == 3, f"Free-form topics must not be dedupe-touched, got {dispatched}"
+
+
+def test_tick_cursor_advances_past_dropped_duplicates():
+    """
+    Cursor must advance to the max ts of the ORIGINAL entry set, not just the
+    dispatched subset — otherwise dropped duplicates would re-surface on the
+    next tick and trigger another (now-empty) dispatch loop.
+    """
+    bid = "broadcast-cursor"
+    store = _FakeStore( topics_to_entries={
+        "broadcasts" : [
+            _broadcast_entry( "2026-05-16T15:00:00+00:00", bid, "sess-a" ),
+            _broadcast_entry( "2026-05-16T15:00:01+00:00", bid, "sess-b" ),
+            _broadcast_entry( "2026-05-16T15:00:02+00:00", bid, "sess-c" ),
+        ],
+    } )
+    push = _CapturingPush()
+    w = CommonsActivityWatcher(
+        store                    = store,
+        push_notification_fn     = push,
+        excluded_topics          = [ ],
+        bridge_owner_resolver_fn = lambda: { },
+    )
+    w.tick()
+    # Cursor advanced past ALL three rows even though 2 were dropped as duplicates
+    assert w._last_seen_ts == "2026-05-16T15:00:02+00:00", (
+        f"Cursor must reach the original max ts; got {w._last_seen_ts}"
+    )
+    # Second tick must dispatch nothing (no new entries past the cursor)
+    push.calls.clear()
+    dispatched = w.tick()
+    assert dispatched == 0
+    assert push.calls == [ ]
