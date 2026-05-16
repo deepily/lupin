@@ -1,5 +1,37 @@
 # TODO
 
+## 🚨 PRIORITY-1 NEXT SESSION — history.md archive (deferred from 2026-05-15 PM session-end)
+
+**Health at session-end**: 19,831 tokens / 79.3% of 25k / ⚠️ WARNING band (≥17k threshold per session-end Step 0.5). Today's session added ~6,500 tokens (Inter-Session DM Phase 0 + AM three-fix arc both entered) so velocity is high.
+
+**Next session's first action**: invoke `/history-management mode=archive` per the canonical workflow at planning-is-prompting → workflow/history-management.md. Cut at clean date boundary; target post-archive ≤13k tokens.
+
+**Filed by**: María 🌸 session `3b6be6f9` at session-end 2026-05-15 ~18:50 EDT. Rick approved deferral via `ask_multiple_choice` voice gate ("Defer archive to next session").
+
+---
+
+## ✅ DONE 2026-05-15 PM — Inter-Session DM Phase 0 implementation (María 🌸, session `3b6be6f9`)
+
+**Primary doc**: [`src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md`](src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md) — 18 sections covering Phase 0 design, gap analysis (corrected post-Rick-feedback), REUSE pass with file:line citations, Pass 1 Fitness with 20 ACs, threats considered, Phase 0 ratification log, Testing Ownership Mandate compliance.
+
+**Delivered**: All 8 implementation steps + 28 net-new tests + 3 retries on `:8000`. After Rick's "ultrathink" challenge corrected the parallel-mechanism scope to a Phase 3 extension, scope shrunk from ~480 LOC + 4-6 sessions to ~210 LOC + 1 session.
+
+- [x] **[LUPIN] Phase 0 design + 4 Q-decisions ratified** — sequential walk via `ask_multiple_choice`: Q1-rev (extend `commons_ask_async` + thin `commons_send_to` wrapper), Q2-rev (fire-and-forget dispatch), Q3-rev (both addressing modes + rich `RecipientResolutionError` 422 contract per Rick's amendment), Q4-rev (same broadcasts topic + DM badge).
+- [x] **[LUPIN] REUSE + Pass 1 Fitness folded** — 12 F-findings verified with file:line; 20 ACs derived (AC9 expanded to AC9a-g + AC10-AC14 after Rick flagged testing under-spec); 10 threats walked, 8 inherit Phase 3 mitigations, 2 new have explicit paths.
+- [x] **[LUPIN] Steps 1+2+5** — `RegisterQuestionRequest` + new `RecipientResolutionError` Pydantic; `_resolve_dm_recipient` + `_dispatch_commons_question_received` helpers; `execute_register_question` extension + route handler wiring; `valid_types` += `"commons_question_received"`. (CoSA submodule — separate commit pending in CoSA-context session.)
+- [x] **[LUPIN] Step 3** — `_register_push_mode` rich-dict return; `ask_async` recipient kwargs + metadata stamping; MCP `commons_ask_async` extended; new `commons_send_to` `@mcp.tool` wrapper. (`src/lupin_mcp/commons_ask.py` + `src/lupin_mcp/cosa_voice_mcp.py`.)
+- [x] **[LUPIN] Step 4** — `commons_question_received` action branch + `_handle_commons_question_received` helper with `COMMONS PEER MESSAGE` framing + T7 isolation try/except.
+- [x] **[LUPIN] Step 6** — DM badge in `_renderCommonsEntry`; `.commons-activity-dm-badge` CSS pill.
+- [x] **[LUPIN] Step 7** — Test pyramid: 16 unit + 7 endpoint smoke + 5 listener smoke + 5 `:8000` integration + 3 Playwright E2E + 1 visual regression baseline (`io/test-suite/visual-baselines/test_dm_recent_activity/`). Final tally: **488/488 PASS across :7999 and :8000**.
+- [x] **[LUPIN] Step 8** — INI keys — no-op for v1 (existing Phase 3 keys `commons api base url` + `commons ask async push mode enabled` cover what's needed).
+- [x] **[LUPIN] Commits** — `9bbf298` (Phase 0 main implementation, 12 files, +1840/-53), `98ab544` (:8000 integration test, AC9d), `8e9e144` (Playwright E2E + visual baseline, AC9e + AC9f).
+- [ ] **[LUPIN-COSA] CoSA-side commit still pending** — `src/cosa/rest/routers/commons.py` + `src/cosa/rest/routers/notifications.py` (~250 LOC) including the T7-isolation `match_persona` try/except bug fix discovered during `:8000` integration retry-3. Handle in a CoSA-context session per `feedback_lupin_only_never_cosa`. **This is the ONLY remaining work before the feature can merge to main.**
+- [ ] **[LUPIN] PHI-4 LLM disambiguator wiring** (v1.1 follow-on) — currently the T7 try/except routes any LLM failure to 422 RecipientResolutionError. v1.1 enhancement: actually USE PHI-4 when reachable so fuzzy persona match works (e.g. "the bug-fix one" → "tiberius"). Phase 3 Q5 precedent (Haiku stubbed) suggests acceptable scope deferral.
+
+**Reproducibility recipe** (post-CoSA-commit): María calls `commons_send_to(recipient="radio", body="...")` → Radio's tmux receives `COMMONS PEER MESSAGE` system-reminder → Radio replies via `commons_post('dm-radio', body=<reply>, metadata={'in_reply_to': <question_id>})` → María's Phase-3 watcher pushes back via `commons_answer_received`. Rick watches both in Recent Activity with `→ @radio` and `→ @maria` DM badges.
+
+---
+
 ## ✅ DONE 2026-05-15 PM — `doc_scope` registry exposure for cosa-voice consumption (Rio ⚡, session `c1cbcd11`)
 
 **Lupin-side work delivered via doc-viewer scope unification** (`src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`). The original ask was a 4-field `doc_scope` dict on `get_session_info()`; Q-R2 ratification collapsed it to a single `project_name: str` field. Lupin's deliverable shrank accordingly:
