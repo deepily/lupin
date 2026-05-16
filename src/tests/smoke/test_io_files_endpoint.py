@@ -5,18 +5,20 @@ Venue: :7999 (AI-discretionary) — read-only, no state mutation, ~seconds.
 
 Covers the scope=io case of the directory-listing extension:
 - Directory listing returns JSON with scope="io"
-- view_url routes per §3.4a:
-  * .mp3 / .wav → /app/audio?path=...
-  * .pdf → /api/io/file?path=... (no &download)
-  * .pptx → /api/io/file?path=...&download=true
-  * .md / .txt / .json / .yaml / .yml → /app/docs?path=...&scope=io
+- view_url routes per §3.4a (updated 2026-05-16 for path-prefix routing):
+  * .mp3 / .wav → /app/audio?path=<io-relative>
+  * .pdf → /api/io/file?path=<io-relative> (no &download)
+  * .pptx → /api/io/file?path=<io-relative>&download=true
+  * .md / .txt / .json / .yaml / .yml → /app/docs?path=io/<rel> (project-prefixed)
 - Hidden files excluded; non-whitelisted extensions excluded
 - Existing file-serving behavior unchanged
 
 Run:
     pytest src/tests/smoke/test_io_files_endpoint.py -v
 
-Design doc: src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md
+Design docs:
+- src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md (original)
+- src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md (path-prefix routing)
 """
 
 import os
@@ -29,9 +31,35 @@ BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 IO_URL = f"{BASE_URL}/api/io/file"
 
 
+def _login():
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+    if not email or not password:
+        pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_{EMAIL,PASSWORD} not set" )
+    resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        json    = { "email": email, "password": password },
+        timeout = 10,
+    )
+    resp.raise_for_status()
+    return resp.json()[ "tokens" ][ "access_token" ]
+
+
+# Module-scoped token cached on first use — avoids 14 logins per test session.
+_TOKEN: str = None
+
+
+def _token():
+    global _TOKEN
+    if _TOKEN is None:
+        _TOKEN = _login()
+    return _TOKEN
+
+
 def _get( path, **params ):
-    query = { "path": path, **params }
-    return requests.get( IO_URL, params=query, timeout=5 )
+    query   = { "path": path, **params }
+    headers = { "Authorization": f"Bearer {_token()}" }
+    return requests.get( IO_URL, params=query, headers=headers, timeout=5 )
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +137,8 @@ def test_io_pdf_entries_route_inline_no_download():
         assert "download=true" not in entry[ "view_url" ]
 
 
-def test_io_text_entries_route_to_doc_viewer_with_io_scope():
-    """.md/.txt/.json/.yaml/.yml route to /app/docs?...&scope=io."""
+def test_io_text_entries_route_to_doc_viewer_with_io_prefix():
+    """.md/.txt/.json/.yaml/.yml route to /app/docs?path=io/<rel> (path-prefix routing)."""
     response = _get( "" )
     assert response.status_code == 200
     body = response.json()
@@ -121,8 +149,12 @@ def test_io_text_entries_route_to_doc_viewer_with_io_scope():
     if not text_entries:
         pytest.skip( "no renderable text files at io root in this environment" )
     for entry in text_entries:
-        assert entry[ "view_url" ].startswith( "/app/docs?path=" )
-        assert "scope=io" in entry[ "view_url" ]
+        view = entry[ "view_url" ]
+        # New path-prefix form: /app/docs?path=io%2F<rel>
+        assert view.startswith( "/app/docs?path=io%2F" ), \
+            f"expected io-prefixed view_url, got: {view}"
+        # Legacy ?scope= retired
+        assert "scope=" not in view
 
 
 def test_io_listing_excludes_unwhitelisted_extensions():

@@ -2,7 +2,10 @@
 Unit tests for cosa.rest.routers._dir_listing.
 
 Covers the per-extension routing table in §3.4a of
-src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md.
+src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md, updated 2026-05-16
+for path-prefix routing per the 2026-05-15 unification (Q-R2): the legacy
+`?scope=` query param is retired; project name is now the first segment of
+the URL's `path` param. Scope param to `_build_view_url` IS the project name.
 
 Venue: :7999 (AI-discretionary) — no server contact, pure in-process.
 
@@ -19,33 +22,34 @@ from cosa.rest.routers._dir_listing import _build_view_url, list_directory
 
 
 # ---------------------------------------------------------------------------
-# _build_view_url — routing table (§3.4a)
+# _build_view_url — routing table (§3.4a; updated 2026-05-16)
 # ---------------------------------------------------------------------------
 
 class TestBuildViewUrlRoutingTable:
-    """One assertion per row of the §3.4a table."""
+    """One assertion per row of the §3.4a table (post-unification shapes)."""
 
-    def test_directory_docs_scope( self ):
-        url = _build_view_url( "src/rnd/v0.1.7", "docs", "directory", "" )
-        assert url == "/app/docs?path=src%2Frnd%2Fv0.1.7&scope=docs"
+    def test_directory_project_scope( self ):
+        url = _build_view_url( "src/rnd/v0.1.7", "lupin", "directory", "" )
+        assert url == "/app/docs?path=lupin%2Fsrc%2Frnd%2Fv0.1.7"
 
     def test_directory_io_scope( self ):
         url = _build_view_url( "podcasts/my-show", "io", "directory", "" )
-        assert url == "/app/docs?path=podcasts%2Fmy-show&scope=io"
+        assert url == "/app/docs?path=io%2Fpodcasts%2Fmy-show"
 
-    def test_md_file_docs_scope( self ):
-        url = _build_view_url( "src/rnd/v0.1.7/foo.md", "docs", "file", ".md" )
-        assert url == "/app/docs?path=src%2Frnd%2Fv0.1.7%2Ffoo.md&scope=docs"
+    def test_md_file_project_scope( self ):
+        url = _build_view_url( "src/rnd/v0.1.7/foo.md", "lupin", "file", ".md" )
+        assert url == "/app/docs?path=lupin%2Fsrc%2Frnd%2Fv0.1.7%2Ffoo.md"
 
     def test_md_file_io_scope( self ):
         url = _build_view_url( "deep-research/report.md", "io", "file", ".md" )
-        assert url == "/app/docs?path=deep-research%2Freport.md&scope=io"
+        assert url == "/app/docs?path=io%2Fdeep-research%2Freport.md"
 
     @pytest.mark.parametrize( "ext", [ ".txt", ".json", ".yaml", ".yml" ] )
     def test_other_text_extensions_use_doc_viewer( self, ext ):
-        url = _build_view_url( f"src/docs/sample{ext}", "docs", "file", ext )
-        assert url.startswith( "/app/docs?path=src%2Fdocs%2Fsample" )
-        assert url.endswith( "&scope=docs" )
+        url = _build_view_url( f"src/docs/sample{ext}", "lupin", "file", ext )
+        assert url.startswith( "/app/docs?path=lupin%2Fsrc%2Fdocs%2Fsample" )
+        # Legacy ?scope= retired
+        assert "scope=" not in url
 
     def test_mp3_io_routes_to_audio_player( self ):
         url = _build_view_url( "podcasts/ep1.mp3", "io", "file", ".mp3" )
@@ -74,12 +78,14 @@ class TestBuildViewUrlRoutingTable:
         assert "download" not in url
 
     def test_path_with_special_characters_is_encoded( self ):
-        url = _build_view_url( "src/rnd/v0.1.7/foo bar+baz.md", "docs", "file", ".md" )
+        url = _build_view_url( "src/rnd/v0.1.7/foo bar+baz.md", "lupin", "file", ".md" )
         # Spaces and + must be percent-encoded; quote(safe="") encodes everything
         # except unreserved chars
         assert " " not in url
         assert "%20" in url
-        assert "+" not in url.split( "?" )[ 1 ].split( "&" )[ 0 ].split( "=" )[ 1 ]
+        # The path-portion of the URL should not contain a raw '+'
+        path_value = url.split( "?path=", 1 )[ 1 ]
+        assert "+" not in path_value
 
 
 # ---------------------------------------------------------------------------
@@ -263,7 +269,14 @@ class TestListDirectory:
         )
         assert listing[ "scope" ] == "io"
         for entry in listing[ "entries" ]:
-            assert "scope=io" in entry[ "view_url" ] or entry[ "view_url" ].startswith( "/app/audio" ) or entry[ "view_url" ].startswith( "/api/io/file" )
+            view = entry[ "view_url" ]
+            # Path-prefix routing: /app/docs URLs include io/ as the first segment.
+            # Direct binary routes (/app/audio, /api/io/file) keep io-relative paths.
+            assert (
+                view.startswith( "/app/docs?path=io%2F" )
+                or view.startswith( "/app/audio" )
+                or view.startswith( "/api/io/file" )
+            ), f"unexpected view_url shape: {view}"
 
 
 if __name__ == "__main__":

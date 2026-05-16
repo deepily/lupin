@@ -2,6 +2,52 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.16 - Session dfd7b2d8 (Mr. Radio 🦉) | Doc viewer SPA dispatcher 404 fix + /api/docs/health regression
+
+Rick reported a 404 on `/app/docs?path=lupin/src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` — a doc-link emitted by the path-prefix routing model the 2026-05-15 scope unification put on the wire. Backend served the file fine when called directly (HTTP 200, 16,159 bytes via JWT-authed `/api/docs/file?path=lupin/...`); the bug was entirely in the frontend SPA. The May-15 unification updated `/api/docs/file` to accept `path=<project>/<rel>` form and retired the `?scope=` query param, but it never touched `src/fastapi_app/static/html/document-viewer.html`. The SPA's dispatcher still defaulted `scope` to `'io'` when absent and routed everything to `/api/io/file` — which has no Lupin source paths under it.
+
+**Primary doc**: [`src/rnd/v0.1.7/2026.05.16-doc-viewer-spa-dispatcher-fix.md`](src/rnd/v0.1.7/2026.05.16-doc-viewer-spa-dispatcher-fix.md) — full bug analysis, fix sweep, verification matrix, parked follow-ups.
+
+**Fix shipped (3 production files, 5 test files)**:
+
+1. **SPA dispatcher rewrite** — `document-viewer.html` lines 235-258 replaced with first-segment path-prefix routing. New rules: `io/<rel>` → `/api/io/file?path=<rel>`; `<known-project>/<rel>` → `/api/docs/file?path=<full>`; bare paths fall through to `/api/io/file` (backwards-compat for `notifications.js` job-card links and persisted job metadata). Updated directory-listing breadcrumb generator to emit the new URL form.
+2. **`_dir_listing.py::_build_view_url`** (CoSA submodule) — emits path-prefix URLs (`/app/docs?path=<scope>/<rel>`), retiring legacy `?scope=` form. IO binary routes (audio/pdf/image/pptx) unchanged.
+3. **`docs_files_health` rewrite** (CoSA submodule) — was crashing with `NameError: ALLOWED_FILES` on every call (legacy whitelist constants were removed in unification but health handler missed). New response shape iterates the scope registry: `{status, project_root, io: {root, exists}, scopes: {name: {root, exists, allowed_prefixes, manifest}}, media_types}`. `/api/docs/health` back to HTTP 200.
+
+**Tests**:
+
+| File | Status |
+|---|---|
+| `src/tests/smoke/test_doc_viewer_path_prefix_routing.py` | **NEW** — 7 targeted regression tests |
+| `src/tests/smoke/test_docs_files_endpoint.py` | Full rewrite (15 tests) — JWT auth + path-prefix form (file was silently failing since May 12 multi-repo auth landed) |
+| `src/tests/smoke/test_io_files_endpoint.py` | Added JWT auth + path-prefix view_url assertion |
+| `src/tests/smoke/test_external_scopes.py` | Full rewrite (17 tests) for unified routing model |
+| `src/tests/unit/test_dir_listing.py` | Updated 9 routing-table assertions to new view_url shape |
+
+**Verification (all on :7999, AI-discretionary)**:
+
+| Layer | Result |
+|---|---|
+| User's exact URL via `/api/docs/file` | ✅ HTTP 200, 16,159 bytes |
+| SPA shell at `/app/docs?path=lupin/...` | ✅ HTTP 200, 20,411 bytes |
+| `/api/docs/health` | ✅ HTTP 200 (was 500) |
+| Doc-viewer smoke (4 files combined) | ✅ 52 passed, 1 skipped |
+| Doc-viewer unit (`test_dir_listing.py`) | ✅ 30 passed |
+| Full unit suite | ✅ **4,623 passed, 1 xfail, 0 regressions** |
+
+**Follow-up parked** (NOT done this session):
+- `src/tests/e2e_ui/test_doc_viewer_multi_repo.py` + `test_doc_viewer_directory.py` still use legacy `?path=…&scope=…` URLs (10+ call sites). These run on :8000 monopolize-mode — needs a user-scheduled slot with `--update-snapshots` to refresh visual baselines.
+- `notifications.js` lines 7110, 7112, 7374, 7379, 7387 + `podcast_generator/job.py` line 335 + `presentation_generator/job.py` similar pattern still emit bare-io-relative `/app/docs?path=…` URLs. Works today via the dispatcher's legacy fallback branch; harmonization to `?path=io/…` is cosmetic.
+
+**Sub-repo edits pending separate sessions** (per `feedback_cosa_edit_vs_manage_git`): `src/cosa/rest/routers/docs_files.py` + `src/cosa/rest/routers/_dir_listing.py` — uncommitted in CoSA working tree; commit from a CoSA-context session.
+
+#### Checkpoint | 2026.05.16 13:44 | Doc viewer SPA dispatcher + health endpoint regression fix
+
+**Files**: document-viewer.html, 5 test files, 1 new R&D doc (+2 CoSA submodule edits pending separate commit)
+**Commit**: 656ec0c
+
+---
+
 ### 2026.05.16 - Session 0025f917 (Rio ⚡) | Voice persona stale-bridge pool exhaustion fix + Sam-as-overflow
 
 Same-day root-cause + fix for a live bug Rick reported voice-first: 5 fresh CC sessions returned 3 × Rio + 2 × Mr. Radio with 4 of 5 marked `borrowed=true`, at day-start when the pool should have been wide open. Root cause was sharper than just stale state — the in-container bypass of the dead-PID filter (`session_bridge.py:1284-1287`, intentional because host PIDs are invisible from inside `lupin-rest-dev`) counted every leftover bridge with a non-null persona as occupied. Five May-15 bridges (maría, Rachel, Tiberius, Arnold, Mr. Radio) made the pool read 5/6 occupied the moment my session took Rio; every subsequent session fell into the deterministic sha256-mod-pool borrow path, which happened to hash to Rio×2 + Mr. Radio×2.

@@ -228,35 +228,59 @@
     <script src="/static/js/lupin-nav.js" defer></script>
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
+    <!--
+        Path-prefix dispatch table — keep KNOWN_PROJECTS in sync with the
+        `external repos` key in src/conf/lupin-app.ini and the unified
+        scope registry built by cosa/rest/routers/_scope_registry.py.
+        Per the 2026-05-15 unification (Q-R2), the `?scope=` query param
+        is RETIRED on the server side; the first segment of `path` is now
+        the routing key. Legacy bare io-relative URLs emitted by
+        notifications.js renderReportLinkSection and persisted in old job
+        metadata still resolve via the legacy-fallback branch below.
+    -->
     <script>
         ( async function() {
             const target = document.getElementById( 'doc-viewer-target' );
             const params = new URLSearchParams( window.location.search );
-            // Use ?? not || — empty string is a VALID path for scope=io or any
-            // external scope (root listing)
-            const path   = params.get( 'path' ) ?? '';
-            const scope  = params.get( 'scope' ) || 'io';
+            const rawPath = params.get( 'path' ) ?? '';
 
-            // Missing path is only an error for scope=docs (every other scope
-            // tolerates empty → scope-root listing)
-            if ( params.get( 'path' ) === null && scope === 'docs' ) {
-                target.className = 'doc-viewer-error';
-                target.textContent = 'No document path specified. Use ?path=<file>&scope=<scope>';
+            // Missing-path early-fail (preserves the prior UX message for
+            // bare /app/docs visits with no query string at all).
+            if ( params.get( 'path' ) === null ) {
+                target.className   = 'doc-viewer-error';
+                target.textContent = 'No document path specified. Use ?path=<project>/<file>';
                 return;
             }
 
+            // First-segment routing per 2026-05-15 unification. See _scope_registry.py.
+            const KNOWN_PROJECTS = new Set( [
+                'lupin', 'cosa-voice', 'planning-is-prompting',
+                'lookml', 'par-pacific', 'claude-plans',
+                'lupin-mobile', 'retail-ai-location-strategy'
+            ] );
+            const firstSeg = rawPath.split( '/' )[ 0 ];
+
+            let apiPath, fetchPath;
+            if ( firstSeg === 'io' ) {
+                // New form: ?path=io/<rel> → /api/io/file?path=<rel>
+                apiPath   = '/api/io/file';
+                fetchPath = rawPath.slice( 3 );
+            } else if ( KNOWN_PROJECTS.has( firstSeg ) ) {
+                // New form: ?path=<project>/<rel> → /api/docs/file?path=<full>
+                apiPath   = '/api/docs/file';
+                fetchPath = rawPath;
+            } else {
+                // Legacy bare io-relative path (pre-unification notification
+                // URLs, persisted job artifacts). Route to IO endpoint as-is.
+                apiPath   = '/api/io/file';
+                fetchPath = rawPath;
+            }
+
             // Set page title from filename
-            const filename = path.split( '/' ).pop();
+            const filename = rawPath.split( '/' ).pop();
             if ( filename ) document.title = filename + ' — Lupin';
 
-            // Dispatch by scope: 'io' uses /api/io/file (binary content); every
-            // other scope (built-in 'docs' AND external scopes) uses /api/docs/file
-            // with ?scope=<name> appended for non-default scopes.
-            const apiPath = scope === 'io' ? '/api/io/file' : '/api/docs/file';
-            let fetchUrl  = apiPath + '?path=' + encodeURIComponent( path );
-            if ( scope !== 'io' && scope !== 'docs' ) {
-                fetchUrl += '&scope=' + encodeURIComponent( scope );
-            }
+            const fetchUrl = apiPath + '?path=' + encodeURIComponent( fetchPath );
 
             // JWT auth — every /api/docs/file + /api/io/file request now requires
             // an Authorization: Bearer header per multi-repo-doc-viewer §3f.
@@ -358,24 +382,33 @@
 
         // Directory-listing renderer — added 2026-05-12 per
         // src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md
+        // Updated 2026-05-16 for path-prefix routing per 2026-05-15 unification.
         function renderDirectoryListing( listing, target ) {
-            const scope = listing.scope || 'docs';
+            const scope = listing.scope || 'lupin';
             const segments = listing.path ? listing.path.split( '/' ) : [];
 
             // Page title
             const last = segments.length > 0 ? segments[ segments.length - 1 ] : ( scope === 'io' ? 'Lupin IO' : 'Lupin Docs' );
             document.title = last + ' — Lupin';
 
+            // Helper: build a /app/docs URL for a scope-relative path. Under
+            // unified path-prefix routing the project name is the first
+            // segment of `path`; legacy `?scope=` is retired (Q-R2).
+            function viewerUrl( rel ) {
+                const composed = rel ? scope + '/' + rel : scope + '/';
+                return '/app/docs?path=' + encodeURIComponent( composed );
+            }
+
             // Breadcrumb
             let breadcrumbHtml = '<div class="doc-dir-breadcrumb">';
-            const rootLabel = scope === 'io' ? 'IO' : 'Docs';
+            const rootLabel = scope === 'io' ? 'IO' : ( scope.charAt( 0 ).toUpperCase() + scope.slice( 1 ) );
             if ( segments.length > 0 ) {
                 let accumulated = '';
-                const parts = [ '<a href="/app/docs?scope=' + scope + '">' + rootLabel + '</a>' ];
+                const parts = [ '<a href="' + viewerUrl( '' ) + '">' + rootLabel + '</a>' ];
                 for ( let i = 0; i < segments.length; i++ ) {
                     accumulated = accumulated ? accumulated + '/' + segments[ i ] : segments[ i ];
                     if ( i < segments.length - 1 ) {
-                        parts.push( '<a href="/app/docs?path=' + encodeURIComponent( accumulated ) + '&scope=' + scope + '">' + segments[ i ] + '</a>' );
+                        parts.push( '<a href="' + viewerUrl( accumulated ) + '">' + segments[ i ] + '</a>' );
                     } else {
                         parts.push( '<span class="current">' + segments[ i ] + '</span>' );
                     }

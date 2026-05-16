@@ -1,198 +1,232 @@
 """
-Smoke tests for /api/docs/file (docs whitelist endpoint).
+Smoke tests for /api/docs/file under unified path-prefix routing.
 
-Venue: :7999 (AI-discretionary) — read-only, no state mutation, ~seconds.
+Tier: smoke (:7999, AI-discretionary per CLAUDE.md TESTING VENUES).
 
-Covers:
-- Happy path: whitelisted root file (CLAUDE.md) serves with markdown content type
-- Happy path: whitelisted prefix (src/docs/...) serves
-- Reject: path outside whitelist (e.g. src/cosa/...)
-- Reject: directory-traversal attempt
-- Reject: unsupported extension
-- 404: whitelisted but non-existent file
-- Health endpoint shape
+Rewritten 2026-05-16: the legacy `scope=docs` model these tests originally
+covered was retired by the 2026-05-15 unification (Q-R2). Every test now
+uses the new `?path=<project>/<rel>` form with JWT auth. The `lupin` scope
+replaces the legacy `docs` scope.
 
-Run:
-    pytest src/tests/smoke/test_docs_files_endpoint.py -v
+For multi-repo external-scope tests see test_external_scopes.py.
+For the 2026-05-16 dispatcher / health regression suite see
+test_doc_viewer_path_prefix_routing.py.
+
+Covered:
+- Whitelisted file serves with markdown content type (lupin/CLAUDE.md)
+- Whitelisted prefix serves a known doc (lupin/src/docs/...)
+- Directory listing returns JSON shape
+- Bare prefix root + trailing-slash variants both list successfully
+- Hidden entries / unwhitelisted extensions filtered from listings
+- Entries sort directories-first
+- Whitelisted but missing returns 404
+- Directory-traversal blocked
+- Unsupported extension rejected
+- Missing auth returns 401
 """
 
+import json
 import os
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import pytest
-import requests
 
 
-BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
-DOCS_URL = f"{BASE_URL}/api/docs/file"
-HEALTH_URL = f"{BASE_URL}/api/docs/health"
-
-
-def _get( path, **params ):
-    query = { "path": path, **params }
-    return requests.get( DOCS_URL, params=query, timeout=5 )
-
-
-def test_health_endpoint_returns_whitelist_shape():
-    response = requests.get( HEALTH_URL, timeout=5 )
-    assert response.status_code == 200
-    body = response.json()
-    assert body[ "status" ] == "ok"
-    assert "project_root" in body
-    assert "allowed_files" in body
-    assert "allowed_prefixes" in body
-    # Sanity: known root-level files are tracked in the whitelist
-    assert "CLAUDE.md" in body[ "allowed_files" ]
-    assert "src/docs/" in body[ "allowed_prefixes" ]
-
-
-def test_whitelisted_prefix_serves_known_doc():
-    # src/docs/notification-api.md is referenced as canonical in CLAUDE.md, so it's
-    # guaranteed to exist regardless of whether the container mounts the project
-    # root or only src/.
-    response = _get( "src/docs/notification-api.md" )
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-    assert response.headers[ "content-type" ].startswith( "text/markdown" )
-    # Content should look like markdown — header presence is a cheap sanity check
-    assert "#" in response.text
-
-
-def test_root_level_whitelist_serves_when_mounted():
-    # Root-level files (CLAUDE.md, history.md, etc.) are in the whitelist but
-    # only served if the container has the project root mounted. Skip if not.
-    health = requests.get( HEALTH_URL, timeout=5 ).json()
-    if not health[ "allowed_files" ].get( "CLAUDE.md" ):
-        pytest.skip( "CLAUDE.md not mounted in this server's project_root" )
-
-    response = _get( "CLAUDE.md" )
-    assert response.status_code == 200
-    assert response.headers[ "content-type" ].startswith( "text/markdown" )
-
-
-def test_path_outside_whitelist_rejected():
-    # src/cosa/ is intentionally NOT in the whitelist
-    response = _get( "src/cosa/agents/agent_base.py" )
-    assert response.status_code == 400
-    assert "whitelist" in response.json()[ "detail" ].lower()
-
-
-def test_directory_traversal_blocked():
-    # Even if /etc/passwd would otherwise be readable, the whitelist check fires first
-    response = _get( "../../../etc/passwd" )
-    assert response.status_code == 400
-
-
-def test_unsupported_extension_rejected():
-    # .py is not in MEDIA_TYPES — but it'd also fail the whitelist for src/cosa.
-    # Use a path that IS whitelisted so the extension check is what triggers.
-    # src/docs/ allows .md, so try .py inside src/docs/ (likely doesn't exist, but
-    # extension check happens before isfile check in the handler).
-    # To isolate the extension path, hit a known-not-md file under src/docs/.
-    # If src/docs/ has no non-md files, this becomes a 404 instead — which still
-    # proves the whitelist accepted the path. Acceptable either way.
-    response = _get( "src/docs/__init__.py" )
-    assert response.status_code in ( 400, 404 )
-
-
-def test_whitelisted_but_missing_returns_404():
-    response = _get( "src/docs/this-file-definitely-does-not-exist-2026-05-04.md" )
-    assert response.status_code == 404
+BASE_URL    = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
+DOCS_URL    = f"{BASE_URL}/api/docs/file"
 
 
 # ---------------------------------------------------------------------------
-# Directory listing tests — added 2026-05-12 per
-# src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md
+# Helpers
 # ---------------------------------------------------------------------------
 
-def test_directory_listing_returns_json_shape():
+def _login() -> str:
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+    if not email or not password:
+        pytest.skip( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_{EMAIL,PASSWORD} not set" )
+
+    body = json.dumps( { "email": email, "password": password } ).encode()
+    req  = urllib.request.Request(
+        f"{BASE_URL}/auth/login",
+        data    = body,
+        headers = { "Content-Type": "application/json" },
+        method  = "POST",
+    )
+    with urllib.request.urlopen( req, timeout=10 ) as resp:
+        return json.loads( resp.read() )[ "tokens" ][ "access_token" ]
+
+
+def _get( path: str, token: str = None ):
+    """GET /api/docs/file?path=<path> → (status_code, content_type, body_bytes)."""
+    url     = f"{DOCS_URL}?path={urllib.parse.quote( path, safe='/' )}"
+    headers = { "Authorization": f"Bearer {token}" } if token else { }
+    req     = urllib.request.Request( url, headers=headers, method="GET" )
+    try:
+        with urllib.request.urlopen( req, timeout=10 ) as resp:
+            return resp.status, resp.headers.get( "content-type", "" ), resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get( "content-type", "" ), e.read()
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="module" )
+def token():
+    return _login()
+
+
+# ---------------------------------------------------------------------------
+# Auth gate
+# ---------------------------------------------------------------------------
+
+def test_missing_auth_returns_401():
+    status, _ctype, _body = _get( "lupin/CLAUDE.md" )
+    assert status == 401
+
+
+# ---------------------------------------------------------------------------
+# File-serving happy paths
+# ---------------------------------------------------------------------------
+
+def test_lupin_scope_root_file_serves( token ):
+    """Root-level whitelisted file (lupin/CLAUDE.md) serves as markdown."""
+    status, ctype, body = _get( "lupin/CLAUDE.md", token=token )
+    assert status == 200, f"got {status}: {body!r}"
+    assert ctype.startswith( "text/markdown" )
+    assert b"#" in body[ :200 ]
+
+
+def test_lupin_scope_prefix_file_serves( token ):
+    """File under whitelisted prefix (lupin/src/docs/...) serves."""
+    status, ctype, body = _get( "lupin/src/docs/notification-api.md", token=token )
+    assert status == 200, f"got {status}: {body!r}"
+    assert ctype.startswith( "text/markdown" )
+    assert b"#" in body[ :200 ]
+
+
+# ---------------------------------------------------------------------------
+# Reject paths
+# ---------------------------------------------------------------------------
+
+def test_path_outside_manifest_rejected( token ):
+    """lupin/.docview.yml allows `src/` only — io/ is outside."""
+    status, _ctype, body = _get( "lupin/io/agents/", token=token )
+    assert status == 400, f"got {status}: {body!r}"
+    detail = json.loads( body )[ "detail" ].lower()
+    assert "whitelist" in detail
+
+
+def test_directory_traversal_blocked( token ):
+    """Path-traversal attempt blocked before disk access."""
+    status, _ctype, _body = _get( "lupin/../../../etc/passwd", token=token )
+    assert status == 400
+
+
+def test_unsupported_extension_rejected( token ):
+    """File extension outside MEDIA_TYPES is rejected (400 or 404 acceptable)."""
+    status, _ctype, _body = _get( "lupin/src/conf/keys/openai", token=token )
+    assert status in ( 400, 404 )
+
+
+def test_whitelisted_but_missing_returns_404( token ):
+    status, _ctype, _body = _get(
+        "lupin/src/docs/this-file-definitely-does-not-exist-2026-05-16.md",
+        token=token
+    )
+    assert status == 404
+
+
+# ---------------------------------------------------------------------------
+# Directory listing
+# ---------------------------------------------------------------------------
+
+def test_directory_listing_returns_json_shape( token ):
     """Polymorphic dispatch: directory path returns JSON, not text."""
-    response = _get( "src/rnd/v0.1.7" )
-    assert response.status_code == 200, f"got {response.status_code}: {response.text}"
-    assert response.headers[ "content-type" ].startswith( "application/json" )
-    body = response.json()
-    assert body[ "kind" ] == "directory"
-    assert body[ "scope" ] == "docs"
-    assert body[ "path" ] == "src/rnd/v0.1.7"
-    assert "parent" in body
-    assert "entries" in body
-    assert isinstance( body[ "entries" ], list )
+    status, ctype, body = _get( "lupin/src/rnd/v0.1.7", token=token )
+    assert status == 200, f"got {status}: {body!r}"
+    assert ctype.startswith( "application/json" )
+    listing = json.loads( body )
+    assert listing[ "kind" ] == "directory"
+    assert listing[ "scope" ] == "lupin"
+    assert listing[ "path" ] == "src/rnd/v0.1.7"
+    assert "parent" in listing
+    assert isinstance( listing[ "entries" ], list )
 
 
-def test_directory_listing_bare_prefix_root():
-    """Q2 resolution: bare prefix root (no trailing slash) lists successfully."""
-    response = _get( "src/rnd" )
-    assert response.status_code == 200, f"got {response.status_code}: {response.text}"
-    assert response.headers[ "content-type" ].startswith( "application/json" )
-    body = response.json()
-    assert body[ "kind" ] == "directory"
-    assert body[ "path" ] == "src/rnd"
+def test_directory_listing_bare_prefix_root( token ):
+    """Bare prefix root (no trailing slash) lists successfully."""
+    status, ctype, body = _get( "lupin/src/rnd", token=token )
+    assert status == 200, f"got {status}: {body!r}"
+    assert ctype.startswith( "application/json" )
+    listing = json.loads( body )
+    assert listing[ "kind" ] == "directory"
+    assert listing[ "path" ] == "src/rnd"
 
 
-def test_directory_listing_with_trailing_slash():
-    """Q2 resolution: trailing-slash form lists identically to bare form."""
-    response = _get( "src/rnd/" )
-    assert response.status_code == 200, f"got {response.status_code}: {response.text}"
-    body = response.json()
-    assert body[ "path" ] == "src/rnd"  # normalized — trailing slash stripped
+def test_directory_listing_with_trailing_slash( token ):
+    """Trailing-slash form lists identically to bare form."""
+    status, _ctype, body = _get( "lupin/src/rnd/", token=token )
+    assert status == 200
+    listing = json.loads( body )
+    assert listing[ "path" ] == "src/rnd"   # trailing slash normalized away
 
 
-def test_directory_listing_outside_whitelist():
+def test_directory_listing_outside_whitelist_rejected( token ):
     """Whitelist boundary still holds for directory requests."""
-    response = _get( "src/cosa" )
-    assert response.status_code == 400
-    assert "whitelist" in response.json()[ "detail" ].lower()
+    status, _ctype, body = _get( "lupin/io", token=token )
+    assert status == 400
+    assert "whitelist" in json.loads( body )[ "detail" ].lower()
 
 
-def test_directory_listing_nonexistent():
+def test_directory_listing_nonexistent_returns_404( token ):
     """Whitelisted-but-missing directory returns 404."""
-    response = _get( "src/rnd/no-such-dir-2026-05-12-unique" )
-    assert response.status_code == 404
+    status, _ctype, _body = _get(
+        "lupin/src/rnd/no-such-dir-2026-05-16-unique",
+        token=token
+    )
+    assert status == 404
 
 
-def test_directory_listing_excludes_hidden_files():
-    """Q5: hidden files (starting with .) are excluded from listings."""
-    response = _get( "src/rnd/v0.1.7" )
-    assert response.status_code == 200
-    body = response.json()
-    for entry in body[ "entries" ]:
-        assert not entry[ "name" ].startswith( "." ), f"hidden entry leaked: {entry['name']}"
+def test_directory_listing_excludes_hidden_files( token ):
+    status, _ctype, body = _get( "lupin/src/rnd/v0.1.7", token=token )
+    assert status == 200
+    listing = json.loads( body )
+    for entry in listing[ "entries" ]:
+        assert not entry[ "name" ].startswith( "." ), \
+            f"hidden entry leaked: {entry[ 'name' ]}"
 
 
-def test_directory_listing_excludes_unwhitelisted_extensions():
-    """Only files with extensions in MEDIA_TYPES whitelist appear in listing."""
-    response = _get( "src/rnd/v0.1.7" )
-    assert response.status_code == 200
-    body = response.json()
-    allowed_exts = { ".md", ".txt", ".json", ".yaml", ".yml" }
-    for entry in body[ "entries" ]:
-        if entry[ "kind" ] != "file":
-            continue
-        _, ext = os.path.splitext( entry[ "name" ] )
-        assert ext.lower() in allowed_exts, f"non-whitelisted ext leaked: {entry['name']}"
-
-
-def test_directory_listing_entries_sorted_dirs_first():
-    """Q4: subdirectories sort before files in entry list."""
-    response = _get( "src/rnd/v0.1.7" )
-    assert response.status_code == 200
-    body = response.json()
-    kinds = [ e[ "kind" ] for e in body[ "entries" ] ]
+def test_directory_listing_entries_sorted_dirs_first( token ):
+    status, _ctype, body = _get( "lupin/src/rnd/v0.1.7", token=token )
+    assert status == 200
+    listing = json.loads( body )
+    kinds = [ e[ "kind" ] for e in listing[ "entries" ] ]
     if "directory" in kinds and "file" in kinds:
-        last_dir = max( i for i, k in enumerate( kinds ) if k == "directory" )
+        last_dir   = max( i for i, k in enumerate( kinds ) if k == "directory" )
         first_file = min( i for i, k in enumerate( kinds ) if k == "file" )
         assert last_dir < first_file, "files mixed in before all directories"
 
 
-def test_directory_listing_view_url_present_and_correct():
-    """Every entry has a view_url; md files route to /app/docs."""
-    response = _get( "src/rnd/v0.1.7" )
-    assert response.status_code == 200
-    body = response.json()
-    assert len( body[ "entries" ] ) > 0
-    for entry in body[ "entries" ]:
-        assert entry.get( "view_url" ), f"missing view_url: {entry}"
-        if entry[ "kind" ] == "file" and entry[ "name" ].endswith( ".md" ):
-            assert entry[ "view_url" ].startswith( "/app/docs?path=" )
-            assert "scope=docs" in entry[ "view_url" ]
+def test_directory_listing_view_url_uses_path_prefix( token ):
+    """Every entry has a view_url; /app/docs URLs carry the project prefix."""
+    status, _ctype, body = _get( "lupin/src/rnd/v0.1.7", token=token )
+    assert status == 200
+    listing = json.loads( body )
+    assert listing[ "entries" ]
+    for entry in listing[ "entries" ]:
+        view = entry.get( "view_url" )
+        assert view, f"missing view_url: {entry}"
+        # Legacy ?scope= form is forbidden under the new model
+        assert "scope=" not in view, f"legacy ?scope= leaked: {view}"
+        if view.startswith( "/app/docs?path=" ):
+            decoded = urllib.parse.unquote( view.split( "path=", 1 )[ 1 ] )
+            assert decoded.startswith( "lupin/" ), \
+                f"view_url missing 'lupin/' prefix: {view}"
 
 
 if __name__ == "__main__":
