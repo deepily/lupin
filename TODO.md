@@ -1,5 +1,39 @@
 # TODO
 
+## 📦 NEW — CoSA-side commit pending: Daily LoC Delta tool (filed 2026-05-16 by María 🌸, session `3c9fce51`)
+
+**Primary doc**: [`src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md`](src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md) — status 🟢 **SHIPPED** — Reduced PIP review + post-ship docs iteration both ratified.
+
+**User-facing README**: [`src/cosa/repo/git_loc_delta/README.md`](src/cosa/repo/git_loc_delta/README.md) — comprehensive scenarios (Use Case A: daily end-of-session ritual; Use Case B: pre-PR summary) + CLI reference + architecture + reuse map + edge cases + future enhancements.
+
+**What's done**:
+- 8 new source files under `src/cosa/repo/git_loc_delta/` (analyzer, parser, aggregator, csv_writer, formatter, exceptions, init, README)
+- `src/cosa/repo/run_git_loc_delta.py` CLI entry
+- 4 unit tests in `src/tests/unit/test_git_loc_delta.py` (parent Lupin)
+- Post-ship: filename default flipped to mode-aware — `--branch` mode → `{repo}-{branch-slug}-loc-delta.csv` (stable per-branch, daily-overwrite-friendly); `--today` / explicit → date-stamped (archival)
+
+All test tiers green:
+
+| Tier | Result |
+|---|---|
+| T1 py_compile (9 files) | ✅ 9/9 OK |
+| T2 import chain | ✅ resolved |
+| T3 unit tests | ✅ 4/4 passed |
+| T4 quick_smoke_test | ✅ 7/7 ✓ |
+| T5 live CLI (today / --branch / --output csv) | ✅ all 3 modes verified on both Lupin + CoSA repos |
+
+**Pending CoSA-context commit** — per `feedback_lupin_only_never_cosa`, the CoSA submodule pieces wait for a CoSA-context session:
+
+- [ ] **[LUPIN-COSA]** Commit in a CoSA-context session: `src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md` + `src/cosa/repo/git_loc_delta/` (8 files including README.md) + `src/cosa/repo/run_git_loc_delta.py`. Suggested commit message: `[COSA] Add git_loc_delta sibling — per-day LoC analysis via git log --numstat`
+- [ ] **[LUPIN]** Commit `src/tests/unit/test_git_loc_delta.py` (4 tests) + `TODO.md` (this entry) from a Lupin-context session — these live in the parent repo.
+
+**Live verification artifacts** (current branch outputs):
+- `io/git-loc-delta/lupin-wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe-loc-delta.csv` — 118 rows, 21 days, 216 commits, +147,999 / −13,171 net +134,828
+- `io/git-loc-delta/cosa-wip-v0.1.7-2026.04.23-tracking-lupin-work-loc-delta.csv` — 34 rows, 17 days, 69 commits, +12,561 / −3,272 net +9,289
+- `io/git-loc-delta/2026-05-16-loc-delta.csv` — earlier date-stamped run (pre-filename-flip); can be deleted
+
+---
+
 ## 🚨 PRIORITY-1 NEXT SESSION — history.md archive (deferred from 2026-05-15 PM session-end)
 
 **Health at session-end**: 19,831 tokens / 79.3% of 25k / ⚠️ WARNING band (≥17k threshold per session-end Step 0.5). Today's session added ~6,500 tokens (Inter-Session DM Phase 0 + AM three-fix arc both entered) so velocity is high.

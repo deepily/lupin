@@ -2,6 +2,63 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.16 - Session 3c9fce51 (María 🌸) | Daily LoC Delta tool — new `cosa.repo.git_loc_delta` sibling of `branch_analyzer`
+
+User-initiated voice-first ask to view an unserialized Claude Code plan via the doc viewer (`/app/docs?path=cosa/...&scope=cosa`) surfaced two adjacent issues: (1) the URL itself referenced a retired `?scope=` param and a non-registered `cosa` project, and (2) the plan `resilient-soaring-turtle.md` at `~/.claude/plans/` was not yet serialized into any repo. Per the plan-serialization mandate, the fix was serialize-first then implement. User chose CoSA-submodule R&D destination (Option B in `ask_multiple_choice` voice gate).
+
+**Plan doc serialized**: [`src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md`](src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md) — Status flipped from "🟢 APPROVED FOR CODE-WRITE" → "🟢 SHIPPED" through a Reduced PIP review:
+
+- **REUSE pre-pass** — all 7 reuse-map citations verified against current code (`file_classifier`, `exceptions`, `git_diff_parser:115-150`, `run_branch_analyzer:69-156`, `quick_smoke_test` template, `to_csv` pattern, `get_project_root()`). 2 minor line-range drifts fixed (R4 `63-155` → `69-156`; R6 usage-clarification note). Sweep check confirmed no existing per-day git-log LoC tool. User-ratified via `ask_yes_no`.
+- **Pass 1 Fitness** — 18 ACs derived (8 correctness + 5 coverage + 3 style + 2 edge case), 8 fitness findings filed (F1 `reports/` → `io/` convention alignment, F2 unit-tests-required-not-optional per Testing Ownership Mandate, F3 testing-tier table consolidation, F4 explicit Sweep Check section, F5 formal AC section, F6 edge-case section, F7 exit-code documentation, F8 smoke-test scope decision). All 8 amendments folded in. User-ratified via `ask_yes_no`.
+
+**Implementation shipped** (10 files):
+- `src/cosa/repo/git_loc_delta/__init__.py` — package exports
+- `src/cosa/repo/git_loc_delta/exceptions.py` — `GitLocDeltaError`, `DateRangeError`; re-exports `GitCommandError`
+- `src/cosa/repo/git_loc_delta/git_log_parser.py` — `GitLogParser.iter_changes()` over `git log --numstat`, binary-row skip, malformed-row defense
+- `src/cosa/repo/git_loc_delta/daily_aggregator.py` — `DailyAggregator` with `(date, file_type)` bucketing + per-date rollup + summary view; loads `branch_analyzer.FileTypeClassifier` via `ConfigLoader().load()`
+- `src/cosa/repo/git_loc_delta/csv_writer.py` — `write_csv()` tidy-long, 6-column stable schema, sorted by `(date asc, added desc)`
+- `src/cosa/repo/git_loc_delta/report_formatter.py` — `format_console()` two-table layout + `format_json()` nested dict
+- `src/cosa/repo/git_loc_delta/analyzer.py` — `GitLogLocDeltaAnalyzer` orchestrator + `quick_smoke_test()` with 7 ✓/✗ checks
+- `src/cosa/repo/run_git_loc_delta.py` — CLI entry with mutually-exclusive date-range group, exit codes 0/1/2, mode-aware default CSV path
+- `src/cosa/repo/git_loc_delta/README.md` — comprehensive user docs covering Use Case A (end-of-day daily ritual) + Use Case B (pre-PR summary) + CLI reference + architecture + reuse map + edge cases + future enhancements
+- `src/tests/unit/test_git_loc_delta.py` (parent Lupin) — 4 unit tests: parser binary skip, aggregator bucketing, CSV schema stability, empty-input header-only
+
+**Test pyramid — all 5 tiers green**:
+
+| Tier | Result |
+|---|---|
+| T1 py_compile (9 source + 1 test) | ✅ 9/9 OK |
+| T2 import chain | ✅ all resolved |
+| T3 unit tests | ✅ 4/4 PASSED in 0.31s |
+| T4 quick_smoke_test() | ✅ 7/7 ✓ |
+| T5 live CLI on Lupin (today / --branch / --output csv) | ✅ all 3 modes verified |
+| T5 live CLI on CoSA submodule (--repo-path src/cosa --branch) | ✅ working |
+
+**Real-world outputs** (current branch state):
+- Lupin: 21 days, 216 commits, 532 files, +147,999 / −13,171 (net +134,828). Heaviest day 2026-05-04 (+18,599). File types: markdown (docs work), python (CoSA/agents), typescript (multiplexer refactor).
+- CoSA: 17 days, 69 commits, 73 files, +12,561 / −3,272 (net +9,289). 2026-05-05 the only net-negative day (−459 net) due to 625 python deletions.
+
+**Post-ship docs + filename-flip iteration** — after live spin-up on both repos, user voice-requested comprehensive docs + flagged a workflow concern: the original date-stamped default filename (`{YYYY-MM-DD}-loc-delta.csv`) didn't fit a daily-overwrite-per-branch workflow. Two `ask_multiple_choice` decisions ratified:
+- **Q1 doc location**: package README at `src/cosa/repo/git_loc_delta/README.md` (CoSA convention, co-located with code)
+- **Q2 filename mode**: flip default to mode-aware — `--branch` mode → `{repo}-{branch-slug}-loc-delta.csv` (stable per-branch, daily-overwrite-friendly); `--today` / `--since`/`--until` mode → date-stamped (archival)
+
+Verified post-flip: Lupin run produced `lupin-wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe-loc-delta.csv` (118 rows); CoSA run produced `cosa-wip-v0.1.7-2026.04.23-tracking-lupin-work-loc-delta.csv` (34 rows).
+
+**Pending CoSA-context commit** (per `feedback_lupin_only_never_cosa`):
+- [ ] **[LUPIN-COSA]** Commit in a CoSA-context session: 8 source files under `src/cosa/repo/git_loc_delta/` + `src/cosa/repo/run_git_loc_delta.py` + `src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md`. Suggested commit message: `[COSA] Add git_loc_delta sibling — per-day LoC analysis via git log --numstat`
+
+**Workflow notes**: Plan-serialization mandate triggered by user's doc-viewer 404 (file at `~/.claude/plans/` not yet serialized). Reduced PIP review (REUSE + Pass 1 Fitness, both with explicit user gates via `ask_yes_no`) chosen over Full PIP via `ask_multiple_choice` — appropriate for a single-session internal CLI with no API/UI/handoff surface. Documentation-first protocol observed: R&D plan + package README both drafted before final filename-flip code change. Tested everything end-to-end across both Lupin parent + CoSA submodule before declaring shipped.
+
+**Memory rules engaged**: `feedback_walk_through_plan_before_asking_proceed` (substantive findings via notify before every gate), `feedback_pip_plan_review_is_sequential` (REUSE → gate → apply → Pass 1 → gate → apply), `feedback_always_include_pros_cons_recommendation` (per-option pros/cons in `ask_multiple_choice` abstracts), `feedback_tts_body_headline_and_takeaway_only` (spoken `message` carried headlines only; details in `abstract`), `feedback_doc_links_always_in_abstract` (viewer link as line 1 of abstract), `feedback_lupin_only_never_cosa` (CoSA submodule edits OK, git ops forbidden from parent), `feedback_verify_staging_before_commit` (`git diff --cached --stat` before this checkpoint commit), `feedback_never_auto_commit_push` (explicit voice authorization for this commit), `feedback_documentation_step_stops_at_doc` (filename-flip surfaced as separate decision after doc work).
+
+#### Checkpoint | 2026.05.16 19:35 UTC | Daily LoC Delta — Lupin-side artifacts
+
+**Files** (parent Lupin only): src/tests/unit/test_git_loc_delta.py (NEW), TODO.md (MOD), history.md (this entry), .claude-session.md (session section)
+**Commit**: <pending>
+**CoSA-side pending**: 10 files awaiting CoSA-context session
+
+---
+
 ### 2026.05.16 - Session dfd7b2d8 (Mr. Radio 🦉) | Doc viewer SPA dispatcher 404 fix + /api/docs/health regression
 
 Rick reported a 404 on `/app/docs?path=lupin/src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` — a doc-link emitted by the path-prefix routing model the 2026-05-15 scope unification put on the wire. Backend served the file fine when called directly (HTTP 200, 16,159 bytes via JWT-authed `/api/docs/file?path=lupin/...`); the bug was entirely in the frontend SPA. The May-15 unification updated `/api/docs/file` to accept `path=<project>/<rel>` form and retired the `?scope=` query param, but it never touched `src/fastapi_app/static/html/document-viewer.html`. The SPA's dispatcher still defaulted `scope` to `'io'` when absent and routed everything to `/api/io/file` — which has no Lupin source paths under it.
