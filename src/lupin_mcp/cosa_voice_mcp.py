@@ -2151,6 +2151,33 @@ def commons_ask_async(
     )
 
 
+def _derive_dm_topic( recipient: str ) -> str:
+    """
+    Derive a server-pattern-safe DM topic from a recipient persona name.
+
+    Per Rick's Q8 architectural directive (2026-05-17 coordinator walkthrough):
+    unicode all the way down. Topic file names preserve the persona's exact
+    unicode spelling (e.g. `María` → `dm-maría`, `José Ruiz` → `dm-josé_ruiz`).
+    The `re.UNICODE` flag treats letters in any script as word characters;
+    only path-dangerous chars and whitespace collapse to `_`.
+
+    Pairs with the unicode-broadened server-side topic pattern at
+    `src/cosa/rest/routers/commons.py:100` (`_TOPIC_OR_QID_PATTERN`).
+
+    Requires:
+        - recipient is a non-empty string
+
+    Ensures:
+        - return value matches the server-side `[\\w-]+` (re.UNICODE) pattern
+        - return value starts with `"dm-"`
+        - input is lowercased before sanitization (case-insensitive topic-file
+          collision per Sub-bug A fix)
+        - whitespace and other non-word chars collapse to `_` (Sub-bug C fix)
+    """
+    sanitized = re.sub( r"[^\w-]+", "_", recipient.lower(), flags=re.UNICODE )
+    return f"dm-{sanitized}"
+
+
 def _commons_ask_async_dispatch(
     topic                : str,
     body                 : str,
@@ -2288,7 +2315,7 @@ def commons_send_to(
           §6.5.1 cross-session bug-filing pattern with mermaid flow)
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
-    target_topic = topic or f"dm-{recipient}"
+    target_topic = topic or _derive_dm_topic( recipient )
     # When `in_reply_to` is supplied, the body's effective context is "reply to a prior DM" —
     # we still go through _commons_ask_async_dispatch, but stamp `in_reply_to` on the result
     # so the original asker's Phase 3 watcher (if running) correlates this entry as the answer.
