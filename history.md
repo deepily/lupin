@@ -2,6 +2,69 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.16 - Session 0025f917 (Rio ⚡) | Model-server carve-out: Whisper + 2 encoders moved to lupin-model-server:7998, doom-loop structurally killed
+
+Day-long sequenced design + implementation arc. Rick voice-driven the whole way; I owned execution. Phases 0-5 of the carve-out shipped, INI flipped, dev + test bounced into remote-mode, model-server brought up into freed VRAM, all 9 smoke-test cases green.
+
+**Primary doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md) — full design with REUSE pass, Pass 1 Fitness (25 ACs, blast-radius matrix), Pass 2 Ownership Audit (37 actions executor-tagged, 5 USER gates), auth refinement override section, and Part 2 bounce actuals.
+
+**Companion**: [`90-baseline-metrics.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/90-baseline-metrics.md) — pre-carve-out measurements (host GPU, per-container VRAM, image size, cold-start time 29.52 s).
+
+**What landed (parent Lupin repo)**:
+
+- **New**: `src/lupin_model_server/{__init__.py, main.py}` (~440 LOC) — minimal frozen FastAPI app on `:7998` exposing `/health` (503 until 3 models in VRAM), `/transcribe`, `/embeddings/{generate,batch,info}`, `/admin/metrics` (Prometheus). Auth via boot-time bcrypt hash of the existing `notification-api-claude-code-dev` key.
+- **New**: `docker/lupin-model-server/Dockerfile` (140 LOC) — mirrors `docker/lupin/`'s nvidia/cuda:12.4.1 base + cuda-compat-12-4 purge (RTX 4090 fix), Python 3.11, pinned torch 2.6.0+cu124 + transformers + sentence-transformers + prometheus-client + bcrypt, models baked at build time.
+- **New**: `src/tests/smoke/test_model_server_smoke.py` (~250 LOC, 9 test cases) — exercises every endpoint + 3 auth-rejection cases + end-to-end via compute. All passing in 3.02 s.
+- **New**: `src/rnd/v0.1.7/2026.05.16-model-server-carveout/{01-design.md, 90-baseline-metrics.md}` — design doc subdirectory.
+- **Modified**: `docker-compose.yml` — added `lupin-model-server` service entry (port 7998, GPU 0 pinned via CUDA_VISIBLE_DEVICES=0 per `feedback_lupin_models_always_gpu_0`, healthcheck, ck_live_* key bind-mount); added `LUPIN_MODEL_SERVER_URL` + `LUPIN_MODEL_SERVER_API_KEY_FILE` env vars to compute services.
+- **Modified**: `src/conf/lupin-app.ini` — new keys `speech to text provider = local` (defaults preserve behavior) + `model server url`.
+- **Modified**: `src/conf/lupin-app-splainer.ini` — matching explanations.
+- **Modified**: `src/fastapi_app/main.py` — Phase 3.6 lifespan switch reads provider mode; if `model-server`, SKIP all 3 eager GPU loads + call `SpeechToTextProvider.declare_remote_only()` + run 60-s readiness probe against `:7998/health`. Otherwise unchanged.
+- **Deleted**: `docker/whisper/Dockerfile` — legacy Flask-based proto from Jan 2025, dead since the FastAPI migration.
+
+**CoSA-submodule changes (NOT committed from parent context per `feedback_lupin_only_never_cosa`)** — held for separate CoSA-context commit:
+- `src/cosa/memory/embedding_provider.py` — extended URL resolver to honor `LUPIN_MODEL_SERVER_URL` env → INI → None; consolidated `_model_server_api_key` into existing `_http_api_key` (single namespace).
+- `src/cosa/memory/speech_to_text_provider.py` (new) — mirrors `EmbeddingProvider` architecture: singleton, class-level `_is_in_process_owner` flag, INI-driven `speech to text provider` switch, local + HTTP paths, exp-backoff retry wrapper.
+- `src/cosa/rest/routers/speech.py` — `Depends(get_whisper_pipeline)` → `Depends(get_speech_provider)`; legacy `_run_whisper_with_retry` marked deprecated but kept; new `save_upload_to_temp` helper.
+
+**Cross-session collaboration** (cosa-voice MCP `commons_send_to` DMs):
+- Rick voice-routed an API-key design question to María (session `3c9fce51`) after I'd overbuilt a parallel `ck_internal_*` namespace.
+- María's brief: existing validator is DB-backed bcrypt; frozen container can't reuse it directly; recommended Option (b) — file-based allowlist validator in model-server reusing the `ck_live_*` namespace.
+- Rick ratified Option (b). I rolled back my `ck_internal_*` invention (deleted generator script + key file + bcrypt-hash env var), rewired model-server to read the existing `notification-api-claude-code-dev` plaintext, hash at boot, validate via `bcrypt.checkpw`.
+
+**The bounce (Part 2)** — ~32 seconds wall-clock total (faster than 45-60 s predicted because models were baked into the image, no HF downloads at boot):
+1. INI flip `local` → `model-server`
+2. `docker restart lupin-rest-dev` (10.9 s — old process dies + frees 3.2 GB)
+3. `docker restart lupin-rest-test` (11.1 s — another 3.2 GB freed)
+4. `docker compose up -d lupin-model-server` (<1 s init + 9.4 s model loads)
+5. Compute readiness probes succeed → `:7999` + `:8000` bind, serve via HTTP-proxy
+
+**Three mid-flight bugs caught + fixed in-session**:
+1. **HF cache bind-mount PermissionError** — initial compose pointed at a non-existent host dir that overwrote the baked-in image cache. Fix: removed the bind-mount; image is self-sufficient.
+2. **Embedding endpoint self-recursion** — `docker restart` doesn't re-read compose, so `LUPIN_MODEL_SERVER_URL` env var never injected. `_resolve_model_server_url()` only checked env, fell back to compute's own URL → infinite recursion → 10-s timeout. Fix: resolver now checks env → INI → None (mirrors speech-provider); `docker compose up -d --force-recreate` to inject the env var.
+3. **`/transcribe` 422** — leftover `_authenticated: str = ...` in endpoint signature → FastAPI required-body-field rejection. Fix: deleted the unused parameter; rebuild + recreate.
+
+**Final state**:
+- GPU 0 used: **19,889 MiB** (was 23,131 MiB → saved 3,250 MiB, matches Rick's net-savings math)
+- GPU 0 free: **4,335 MiB** (was 1,086 MiB → headroom 4× pre-carve-out)
+- `:7998/health` 200, 3 models loaded (whisper + code_rank_embed + nomic_embed_text_v1_5), 2,505 MiB VRAM
+- `:7999/health` + `:8000/health` 200
+- 9/9 smoke tests passing in 3.02 s
+- Native browser ASR confirmed working post-fix
+- Doom-loop: Layers 1 + 3 structurally GONE from compute containers; Layer 2 (`--reload`) harmless because no GPU dependency to break
+
+**Remaining work for next session** (see TODO.md):
+- Phase 4 cleanup: strip `--gpus all` from compute compose entries; drop the 3 model pre-downloads from `docker/lupin/Dockerfile:208-210`; rebuild `lupin:1.0.0-noasr` candidate.
+- Phase 5.2-5.5: unit tests for `SpeechToTextProvider`; `mock_model_server_client` pytest fixture; push to 100% coverage on all new/modified files per the Lupin-wide coverage mandate (per `feedback_100pct_coverage_multiplexer` — scope-expanded 2026-05-16).
+- Phase 7: CLAUDE.md DOCUMENTATION TOUCHPOINTS row + `~/.claude/skills/server-lifecycle/SKILL.md` update for the new `lupin-model-server` bounce semantics.
+- Push (deferred per Rick's no-push instruction at session-end).
+
+**Memory updates this session**:
+- New `feedback_lupin_models_always_gpu_0.md` — hard rule from Rick: Lupin models ALWAYS pin to GPU 0, never auto-pick.
+- Updated `feedback_100pct_coverage_multiplexer.md` — scope expanded from multiplexer TS to ALL Lupin code per Rick's "Coverage floors are bullshit. Everything has to pass at 100%. Full stop. Everything!" directive mid-Pass-1.
+
+---
+
 ### 2026.05.16 - Session 3c9fce51 (María 🌸) | Daily LoC Delta tool — new `cosa.repo.git_loc_delta` sibling of `branch_analyzer`
 
 User-initiated voice-first ask to view an unserialized Claude Code plan via the doc viewer (`/app/docs?path=cosa/...&scope=cosa`) surfaced two adjacent issues: (1) the URL itself referenced a retired `?scope=` param and a non-registered `cosa` project, and (2) the plan `resilient-soaring-turtle.md` at `~/.claude/plans/` was not yet serialized into any repo. Per the plan-serialization mandate, the fix was serialize-first then implement. User chose CoSA-submodule R&D destination (Option B in `ask_multiple_choice` voice gate).

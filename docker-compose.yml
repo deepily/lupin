@@ -30,6 +30,91 @@ services:
     networks:
       - lupin-dev-network
 
+  # Lupin Model Server — frozen GPU model host (port 7998)
+  # Hosts Whisper + 2 text encoders. Compute containers (lupin-rest-dev,
+  # lupin-rest-test) call out over HTTP for inference. Code in this container
+  # does NOT evolve (freeze property) — that's what makes uvicorn --reload
+  # safe in the compute containers (they no longer touch CUDA).
+  #
+  # GPU pinning: CUDA_VISIBLE_DEVICES=0 — Lupin models ALWAYS load on GPU 0
+  # per the hard rule (see memory: feedback_lupin_models_always_gpu_0). The
+  # `count: all` reservation gives docker access to both devices; the env var
+  # constrains torch to GPU 0 specifically.
+  #
+  # Phase 4 of the carve-out will:
+  #   - Strip `deploy.resources.reservations.devices` from lupin-rest-{dev,test}
+  #   - Add `depends_on: lupin-model-server: condition: service_healthy` to both
+  #   - Drop the 3 model pre-downloads from docker/lupin/Dockerfile:208-210
+  # Until Phase 4 lands, compute containers keep loading their own models
+  # in-process (Phase 1-3 are safe checkpoints — see blast-radius analysis).
+  #
+  # Design doc: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+  lupin-model-server:
+    image: lupin-model-server:0.1.0   # candidate tag; per feedback_no_auto_promote_tags, never auto-promote to :latest or :1.0.0 without user confirmation
+    container_name: lupin-model-server
+    restart: unless-stopped
+    user: "1001:1001"
+    ports:
+      - "7998:7998"
+    volumes:
+      # NOTE 2026-05-16: HF cache bind-mount intentionally OMITTED. The image
+      # bakes all 3 models at build time into /home/rruiz/.cache/huggingface
+      # so the container is self-sufficient. An earlier bind-mount of a host
+      # path overwrote the baked cache with an empty (and wrong-permissions)
+      # directory → all 3 loads failed with PermissionError. Removed in favor
+      # of the baked-cache freeze property; rebuild the image to refresh the
+      # baked models if HuggingFace publishes a new version.
+      #
+      # Optional warmup audio so Whisper's first inference latency is paid
+      # at boot, not at first request.
+      - ./src/conf/warmup:/var/lupin/src/conf/warmup:ro
+      # API key file — model-server reads plaintext from this dir at lifespan
+      # boot and bcrypt-hashes once. Read-only mount; key file is the same
+      # `notification-api-claude-code-dev` the compute containers send as
+      # X-API-Key (per María's 2026-05-16 brief — single namespace).
+      - ./src/conf/keys:/var/lupin/src/conf/keys:ro
+    environment:
+      LUPIN_MODEL_SERVER_DEVICE: cuda:0
+      LUPIN_MODEL_SERVER_PORT: "7998"
+      LUPIN_MODEL_SERVER_WHISPER_ID: distil-whisper/distil-large-v3
+      LUPIN_MODEL_SERVER_CODE_EMBED: nomic-ai/CodeRankEmbed
+      LUPIN_MODEL_SERVER_PROSE_EMBED: nomic-ai/nomic-embed-text-v1.5
+      LUPIN_MODEL_SERVER_WARMUP_MP3: /var/lupin/src/conf/warmup/whisper-warmup-85s.mp3
+      # API key contract (post-2026-05-16 María-brief simplification):
+      # Model-server reuses the existing `notification-api-claude-code-dev`
+      # ck_live_* key via the volume-mounted src/conf/keys/ dir. At boot it
+      # reads the plaintext via du.get_api_key() and computes a bcrypt hash
+      # once; each incoming request is validated via bcrypt.checkpw() against
+      # that in-memory hash. No env-var ceremony, no parallel ck_internal_*
+      # namespace, no DB coupling.
+      LUPIN_MODEL_SERVER_API_KEY_NAME: notification-api-claude-code-dev
+      # GPU 0 pin (per memory rule feedback_lupin_models_always_gpu_0) — torch
+      # sees only the device at index 0; the underlying device may be physical
+      # GPU 0 or 1 depending on docker's enumeration, but we always present
+      # a single device to the container as `cuda:0`.
+      CUDA_VISIBLE_DEVICES: "0"
+      PYTHONUNBUFFERED: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          memory: 8G
+    healthcheck:
+      # Python urllib (matches compute container convention; curl is not in
+      # the lean model-server image). start_period: 60s accounts for the
+      # 25-30s model-load window before /health switches from 503 → 200.
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:7998/health', timeout=3).getcode() == 200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - lupin-dev-network
+
   # Lupin REST API — Development (port 7999)
   # Always runs [Lupin: Development] config with lupin_db_dev.
   # uvicorn --reload enabled for live code changes during development.
@@ -69,6 +154,12 @@ services:
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      # Model-server carve-out env vars (2026-05-16). Until Phase 3.6 lifespan
+      # switch lands and `speech to text provider = model-server` in INI, these
+      # are dormant — code reads them but doesn't act. See:
+      #   src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+      LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:-http://lupin-model-server:7998}
+      LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}
       # Mirrors the test container — enables proxy-integration tests when
@@ -145,6 +236,10 @@ services:
       DB_HOST: lupin-postgres
       LUPIN_API_URL: http://localhost:7999
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      # Model-server carve-out env vars (2026-05-16). Dormant until Phase 3.6
+      # lifespan switch + INI flip to `speech to text provider = model-server`.
+      LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:-http://lupin-model-server:7998}
+      LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
       LUPIN_DEV_EMAIL: ricardo.felipe.ruiz@gmail.com
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL:?must be set in shell env}
       LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD: ${LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD:?must be set in shell env}

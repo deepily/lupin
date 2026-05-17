@@ -1,5 +1,75 @@
 # TODO
 
+## 🚀 NEW — Model-server carve-out follow-ups (filed 2026-05-16 by Rio ⚡, session `0025f917`)
+
+**Primary doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md). Phases 0-3 + 3.6 + Part 2 bounce + Phase 5.1 smoke test all shipped this session. Verified end-to-end (9/9 smoke green; native browser ASR working). Doom-loop layers 1 + 3 structurally killed.
+
+### Phase 4 — Compute-side cleanup (next session)
+
+- [ ] **[LUPIN]** Strip `deploy.resources.reservations.devices` blocks from `lupin-rest-dev` + `lupin-rest-test` in `docker-compose.yml` — compute no longer needs GPU now that all 3 models live on `:7998`.
+- [ ] **[LUPIN]** Add `depends_on: lupin-model-server: condition: service_healthy` to both compute services so compose-up enforces the dependency order.
+- [ ] **[LUPIN]** Drop the 3 model pre-download `RUN python -c "snapshot_download..."` lines at `docker/lupin/Dockerfile:208-210` — they're no longer used (compute doesn't load models).
+- [ ] **[LUPIN]** Rebuild compute image as candidate `lupin:1.0.0-noasr` (per `feedback_no_auto_promote_tags` — never auto-promote). Expected size drop ~4 GB (31.7 GB → ~27.7 GB).
+- [ ] **[LUPIN]** Smoke-test the candidate; only Rick promotes `1.0.0-noasr` → `1.0.0` after verification.
+
+### Phase 5 — Test coverage + unit tests (next session)
+
+- [ ] **[LUPIN]** Write `src/tests/unit/test_speech_to_text_provider.py` — mock-based unit tests for the new provider class (mirrors `test_voice_persona_helpers.py` pattern). Covers `_resolve_model_server_url` env→INI→None chain, `_should_use_local` ownership-flag logic, `_call_with_retry` exp-backoff, `_transcribe_via_http` happy + error paths.
+- [ ] **[LUPIN]** Add `mock_model_server_client` pytest fixture to `src/tests/conftest.py` — returns a `FakeSpeechToTextProvider` / `FakeEmbeddingProvider`-compatible object with canned responses; allows unit tests of routers + embedding_provider without a live `:7998`.
+- [ ] **[LUPIN]** Push to **100% line + branch + function coverage** on every new or modified file in this carve-out per `feedback_100pct_coverage_multiplexer.md` (scope-expanded 2026-05-16 to all Lupin code). Files: `src/lupin_model_server/main.py`, `src/cosa/memory/speech_to_text_provider.py`, modified sections of `src/cosa/memory/embedding_provider.py`, `src/cosa/rest/routers/speech.py`, `src/fastapi_app/main.py` lifespan switch branch. `pragma: no cover` allowed only for genuinely-unreachable defensive branches with same-line reason comment.
+- [ ] **[LUPIN]** Audit existing `src/tests/smoke/test_embedding_api_smoke.py` + any speech smoke tests — confirm they pass via the new HTTP-proxy path now that `LUPIN_MODEL_SERVER_URL` is injected.
+
+### Phase 6 — Container preflight extension (next session)
+
+- [ ] **[LUPIN]** Extend `src/tests/smoke/test_container_preflight.py` to assert `lupin-model-server` is in `docker ps` + healthy + bind-mounts present.
+- [ ] **[LUPIN]** Extend `src/scripts/preflight-test-container.sh` to curl-probe `:7998/health` via the docker network.
+
+### Phase 7 — Documentation touchpoints (next session)
+
+- [ ] **[LUPIN]** Add a row to `CLAUDE.md` DOCUMENTATION TOUCHPOINTS for `src/lupin_model_server/` → links to `01-design.md` + `90-baseline-metrics.md`.
+- [ ] **[LUPIN]** Add `docker restart lupin-model-server` recovery command to `CLAUDE.md` COMMANDS section (rare; full reload triggers ~10 s model re-load).
+- [ ] **[LUPIN]** Update `~/.claude/skills/server-lifecycle/SKILL.md` — new subsection on bouncing `lupin-model-server` (shared between dev + test, transcribe/embeddings 503 during ~10-second reload window, NOT auto-bounced by AI).
+
+### Phase 8 — Push (next session)
+
+- [ ] **[LUPIN]** Push the checkpoint commit from this session to remote when Rick says go. Currently committed but NOT pushed per Rick's instruction.
+
+### Cross-refs
+
+- Auth design refinement section in `01-design.md` overrides the original R2 ratification (`ck_internal_*` retired in favor of reusing `notification-api-claude-code-dev`'s `ck_live_*` per María's brief + Rick's call).
+- Two memory updates this session: new `feedback_lupin_models_always_gpu_0`; expanded scope on `feedback_100pct_coverage_multiplexer` from multiplexer-only to Lupin-wide.
+
+---
+
+## 🐛 NEW — Commons DM thread fragmentation via topic-case mismatch (filed 2026-05-16 by María 🌸, session `3c9fce51`)
+
+**Filed by**: María 🌸 (Lupin session `3c9fce51`), surfaced during cross-session DM coordination with Tiberius 🌑 on 2026-05-16. Rick voice-confirmed worth filing.
+
+**Severity**: Not lethal — DMs still deliver via push-mode persona resolution (server-side, case-insensitive). But the topic-FILE name is case-sensitive, so the asker and recipient end up reading two different topic files for what's logically one thread. Looks "quieter" than it is in the broadcast UI.
+
+**Reproducer**: From session A, call `commons_send_to(recipient="Tiberius", body="...")`. The wrapper at `src/lupin_mcp/cosa_voice_mcp.py:2194` constructs `target_topic = f"dm-{recipient}"` literally — yielding `dm-Tiberius` (capital T). Tiberius's outbound DMs to María land on `dm-maria` (lowercase, his choice). Result: outbound traffic from María lives on `dm-Tiberius`, inbound from Tiberius lives on `dm-maria`. Two case-variant topics, not one canonical thread.
+
+**Proposed fix** (5 LOC at `src/lupin_mcp/cosa_voice_mcp.py:2194`):
+
+```python
+# BEFORE
+target_topic = topic or f"dm-{recipient}"
+
+# AFTER (normalize to lowercase for topic-file consistency)
+target_topic = topic or f"dm-{recipient.lower()}"
+```
+
+Doesn't change the recipient-resolution path — server-side persona match is already case-insensitive. Only normalizes the topic-file name.
+
+- [ ] **[LUPIN]** Apply the lowercase normalization fix in `commons_send_to` wrapper
+- [ ] **[LUPIN]** Add a unit test asserting `commons_send_to(recipient="Tiberius", ...)` and `commons_send_to(recipient="tiberius", ...)` write to the same topic
+- [ ] **[LUPIN]** Consider migration: rename any existing `dm-{Capitalized}` topic files to lowercase, OR add a backward-compat read that union-merges case variants on `commons_read`
+- [ ] **[Sub-bug CONFIRMED 2026-05-17T00:22Z]** Write-level message truncation observed on `commons_post` to `dm-maria` at 2026-05-17T00:18:31Z. Tiberius authored a ~4000-char reply with 5 Q&A sections; the entry on disk (`io/commons/dm-maria.md`, 34,542 bytes total) genuinely ends at "Substantive answers to your 5 questions, ranked by impact:" with NO body below — confirmed via direct `cat` inspection, not just via `commons_read`. Three hypotheses ranked: (a) bounce mid-write killed the MCP subprocess between header flush and body write — most likely given timing coincides with architecture switchover broadcast; (b) fastmcp transport-layer truncation at write time; (c) silent `CommonsStore.post()` body-length cap. Distinct from the system-reminder push-injection truncation Tiberius hypothesized (which is a SEPARATE failure mode worth documenting in MCP instructions as a "#7" — see his suggestion in his 00:20:55Z follow-up). **Investigation needed**: instrument `CommonsStore.post()` for body-length warnings; add a write-side size-limit test; possibly add a retry-on-partial-write to the wrapper. File as standalone TODO entry once Tiberius re-sends his feedback and we recover the lost content.
+
+**Cross-refs**: 2026-05-16 fix-arc commit `f4e0370` (F1-F5) didn't touch the topic-name construction. R&D doc at `src/rnd/v0.1.7/2026.05.16-commons-dm-and-git-loc-delta-fix-arc.md` covers adjacent commons_* infrastructure.
+
+---
+
 ## 📦 NEW — CoSA-side commit pending: Daily LoC Delta tool (filed 2026-05-16 by María 🌸, session `3c9fce51`)
 
 **Primary doc**: [`src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md`](src/cosa/rnd/2026.05.16-daily-loc-delta-tool.md) — status 🟢 **SHIPPED** — Reduced PIP review + post-ship docs iteration both ratified.

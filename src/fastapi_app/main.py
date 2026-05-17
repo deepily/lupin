@@ -622,55 +622,127 @@ async def lifespan( app: FastAPI ):
     # ===================================================================
     # GPU Model Loading (smallest → largest to minimize CUDA fragmentation)
     # ===================================================================
+    #
+    # Phase 3.6 of the model-server carve-out: read the INI provider switch.
+    # When `speech to text provider = model-server`, SKIP all 3 eager GPU loads
+    # and route embeddings + transcription via HTTP to lupin-model-server:7998.
+    # Defaults to `local` (today's behavior) so a compute container without
+    # `LUPIN_MODEL_SERVER_URL` injected continues to eager-load identically.
+    # See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+    provider_mode = config_mgr.get(
+        "speech to text provider", default="local", silent=True
+    ).lower().strip()
+    remote_mode = ( provider_mode == "model-server" )
 
-    # 1. CodeRankEmbed — Load + multi-batch warmup
-    from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
-
-    print( "Loading CodeRankEmbed embedding engine... ", end="" )
-    code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
-    code_engine.encode_code( [ "def hello(): return 'world'" ] )
-    code_engine.encode_query( [ "How do I sort a list in Python?" ] )
-    code_engine.encode_code( [ "import os\nimport sys\n\ndef main():\n    path = os.getcwd()\n    print( path )\n    return 0" ] )
-    print( "Done!" )
-    _log_vram( "CodeRankEmbed" )
-
-    # 2. Prose Embedding — Load + multi-batch warmup
-    print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
-    prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
-    prose_engine.encode_query( [ "What is the meaning of life?" ] )
-    prose_engine.encode_document( [ "The quick brown fox jumps over the lazy dog. This is a longer document to exercise memory allocation patterns." ] )
-    prose_engine.encode_query( [ "Explain quantum computing in simple terms" ] )
-    print( "Done!" )
-    _log_vram( "Prose Embedding" )
-
-    # Mark this process as the in-process owner of the GPU embedding singletons.
-    # After this point, EmbeddingProvider.generate_embedding() in THIS process
-    # routes directly to the loaded engines. Every other process (scripts,
-    # tests, MCP, CC subagents) keeps the default flag=False and routes via
-    # HTTP to /api/embeddings/{generate,batch} — so no second process ever
-    # lazy-loads a duplicate GPU model.
-    from cosa.memory.embedding_provider import EmbeddingProvider
-    EmbeddingProvider.declare_in_process_engine_owner()
-    print( "[EmbeddingProvider] Declared in-process engine owner — local routing enabled for this FastAPI process" )
-
-    # 3. Whisper STT — Load + warmup transcription (LAST, largest GPU footprint)
     global whisper_pipeline
-    print( "Loading distill whisper engine... ", end="" )
-    try:
-        whisper_pipeline = await load_stt_model()
-        # Warmup: transcribe audio to establish stable CUDA footprint
-        warmup_path = du.get_project_root() + "/src/conf/warmup/whisper-warmup-85s.mp3"
-        if os.path.exists( warmup_path ):
-            whisper_pipeline( warmup_path, chunk_length_s=30, stride_length_s=5, return_timestamps=False )
-            print( "Done! (with warmup)" )
-        else:
-            print( "Done! (no warmup file)" )
-    except Exception as e:
+
+    if remote_mode:
+        print( "[REMOTE-MODE] Skipping eager GPU loads — routing via HTTP to lupin-model-server" )
+
+        # Set process-ownership flags appropriately for remote mode:
+        # - Skip `EmbeddingProvider.declare_in_process_engine_owner()` →
+        #   HTTP fallback engages on every embedding call (per R1=C, the
+        #   `_resolve_http_target()` resolver returns the model-server URL
+        #   when `LUPIN_MODEL_SERVER_URL` is set in env).
+        # - Explicit `SpeechToTextProvider.declare_remote_only()` so the
+        #   speech provider's `_should_use_local()` returns False even if
+        #   some earlier path accidentally flipped the owner flag.
+        from cosa.memory.speech_to_text_provider import SpeechToTextProvider
+        SpeechToTextProvider.declare_remote_only()
         whisper_pipeline = None
-        print( "FAILED!" )
-        print( f"[WARN] Whisper STT model failed to load: {e}" )
-        print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
-    _log_vram( "Whisper" )
+
+        # Readiness probe — wait up to `model server startup probe timeout
+        # seconds` (default 60 s) for the model-server's `/health` endpoint
+        # to return 200. Best-effort: on timeout, log a warning and continue
+        # so the rest of FastAPI (queue, notifications, doc viewer, auth)
+        # comes up cleanly. Model endpoints will 503 (via the provider's
+        # HTTP-fallback error path) until lupin-model-server becomes reachable.
+        model_server_url = os.environ.get(
+            "LUPIN_MODEL_SERVER_URL",
+            config_mgr.get( "model server url", default="http://lupin-model-server:7998", silent=True )
+        )
+        probe_timeout = config_mgr.get(
+            "model server startup probe timeout seconds",
+            default=60, return_type="int", silent=True
+        )
+        probe_url = f"{model_server_url}/health"
+        print( f"[REMOTE-MODE] Probing model-server readiness at {probe_url} (budget={probe_timeout}s)... ", end="" )
+        import requests as _requests
+        probe_start    = time.time()
+        probe_deadline = probe_start + probe_timeout
+        probe_ok       = False
+        while time.time() < probe_deadline:
+            try:
+                _r = _requests.get( probe_url, timeout=2 )
+                if _r.status_code == 200:
+                    probe_ok = True
+                    break
+            except _requests.RequestException:
+                pass
+            await asyncio.sleep( 1.0 )
+        elapsed = int( time.time() - probe_start )
+        if probe_ok:
+            print( f"OK ({elapsed}s)" )
+        else:
+            print( f"TIMEOUT after {elapsed}s — continuing; model endpoints will 503 until reachable" )
+
+    else:
+        # Local-mode (today's behavior): eager-load all 3 models on cuda:0,
+        # declare in-process ownership so the provider classes route locally.
+
+        # 1. CodeRankEmbed — Load + multi-batch warmup
+        from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
+
+        print( "Loading CodeRankEmbed embedding engine... ", end="" )
+        code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
+        code_engine.encode_code( [ "def hello(): return 'world'" ] )
+        code_engine.encode_query( [ "How do I sort a list in Python?" ] )
+        code_engine.encode_code( [ "import os\nimport sys\n\ndef main():\n    path = os.getcwd()\n    print( path )\n    return 0" ] )
+        print( "Done!" )
+        _log_vram( "CodeRankEmbed" )
+
+        # 2. Prose Embedding — Load + multi-batch warmup
+        print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
+        prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
+        prose_engine.encode_query( [ "What is the meaning of life?" ] )
+        prose_engine.encode_document( [ "The quick brown fox jumps over the lazy dog. This is a longer document to exercise memory allocation patterns." ] )
+        prose_engine.encode_query( [ "Explain quantum computing in simple terms" ] )
+        print( "Done!" )
+        _log_vram( "Prose Embedding" )
+
+        # Mark this process as the in-process owner of the GPU embedding singletons.
+        # After this point, EmbeddingProvider.generate_embedding() in THIS process
+        # routes directly to the loaded engines. Every other process (scripts,
+        # tests, MCP, CC subagents) keeps the default flag=False and routes via
+        # HTTP to /api/embeddings/{generate,batch} — so no second process ever
+        # lazy-loads a duplicate GPU model.
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        EmbeddingProvider.declare_in_process_engine_owner()
+        print( "[EmbeddingProvider] Declared in-process engine owner — local routing enabled for this FastAPI process" )
+
+        # 3. Whisper STT — Load + warmup transcription (LAST, largest GPU footprint)
+        print( "Loading distill whisper engine... ", end="" )
+        try:
+            whisper_pipeline = await load_stt_model()
+            # Warmup: transcribe audio to establish stable CUDA footprint
+            warmup_path = du.get_project_root() + "/src/conf/warmup/whisper-warmup-85s.mp3"
+            if os.path.exists( warmup_path ):
+                whisper_pipeline( warmup_path, chunk_length_s=30, stride_length_s=5, return_timestamps=False )
+                print( "Done! (with warmup)" )
+            else:
+                print( "Done! (no warmup file)" )
+            # Phase 3.3 of the model-server carve-out: tell the SpeechToTextProvider
+            # singleton that THIS process owns the in-process Whisper pipeline.
+            # Mirrors EmbeddingProvider.declare_in_process_engine_owner() above.
+            # See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+            from cosa.memory.speech_to_text_provider import SpeechToTextProvider
+            SpeechToTextProvider.declare_in_process_owner()
+        except Exception as e:
+            whisper_pipeline = None
+            print( "FAILED!" )
+            print( f"[WARN] Whisper STT model failed to load: {e}" )
+            print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
+        _log_vram( "Whisper" )
 
     # 4. Prediction Engine — no GPU model, just initialization
     from cosa.agents.prediction_engine import get_prediction_engine
