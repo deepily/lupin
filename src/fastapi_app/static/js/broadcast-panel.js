@@ -74,6 +74,14 @@
         row.innerHTML = "";
         if ( label   ) row.appendChild( label );
 
+        // @all text-injector chip leads the row whenever recipients are showable
+        // (loading / sessions). It just inserts the literal `@all ` token; the
+        // broadcast handler's `_parse_body` already treats `@all` as default scope.
+        const showAllInjector = sessions === null || ( !errorMsg && sessions && sessions.length > 0 );
+        if ( showAllInjector ) {
+            row.appendChild( buildAtAllChip() );
+        }
+
         if ( sessions === null ) {
             const loading = document.createElement( "span" );
             loading.className   = "broadcast-chip";
@@ -96,9 +104,50 @@
         if ( refresh ) row.appendChild( refresh );
     }
 
-    function buildChip( session ) {
-        const chip = document.createElement( "span" );
+    // Insert `@<persona> ` text into the broadcast textarea at the current
+    // cursor position, then refocus. Trailing space matches natural typing
+    // flow; no colon so the handler's default-scope fallback (line 64 of
+    // broadcast_handler.py) lets every session see the line ("carpet bomb"
+    // semantics ratified 2026-05-17).
+    function injectMentionAtCursor( token ) {
+        const ta = document.getElementById( "broadcast-textarea" );
+        if ( !ta ) return;
+        const insertText = "@" + token + " ";
+        const start = ta.selectionStart;
+        const end   = ta.selectionEnd;
+        const before = ta.value.slice( 0, start );
+        const after  = ta.value.slice( end );
+        ta.value = before + insertText + after;
+        const newPos = start + insertText.length;
+        ta.setSelectionRange( newPos, newPos );
+        ta.focus();
+        // Fire input event so preview + send-button state update via the existing wiring.
+        ta.dispatchEvent( new Event( "input", { bubbles: true } ) );
+    }
+
+    function buildAtAllChip() {
+        const chip = document.createElement( "button" );
+        chip.type      = "button";
+        chip.className = "broadcast-chip broadcast-chip-all";
+        chip.title     = "Insert @all into the message";
+        const icon = document.createElement( "span" );
+        icon.className   = "broadcast-chip-icon";
+        icon.textContent = "📣";
+        const name = document.createElement( "span" );
+        name.textContent = "@all";
+        chip.appendChild( icon );
+        chip.appendChild( name );
+        chip.addEventListener( "click", () => injectMentionAtCursor( "all" ) );
+        return chip;
+    }
+
+    function buildChip( session, clickable ) {
+        const personaName = session.persona_name || session.session_id || "session";
+        const isClickable = clickable !== false;
+        const chip = document.createElement( isClickable ? "button" : "span" );
+        if ( isClickable ) chip.type = "button";
         chip.className = "broadcast-chip";
+        if ( isClickable ) chip.title = "Insert @" + personaName + " into the message";
         if ( session.persona_color ) {
             chip.style.borderColor = session.persona_color;
         }
@@ -106,9 +155,12 @@
         icon.className   = "broadcast-chip-icon";
         icon.textContent = session.persona_icon || "👤";
         const name = document.createElement( "span" );
-        name.textContent = session.persona_name || session.session_id || "session";
+        name.textContent = personaName;
         chip.appendChild( icon );
         chip.appendChild( name );
+        if ( isClickable ) {
+            chip.addEventListener( "click", () => injectMentionAtCursor( personaName ) );
+        }
         return chip;
     }
 
@@ -170,7 +222,7 @@
 
         const recipientsDiv = document.createElement( "div" );
         recipientsDiv.className = "modal-recipients";
-        recipientCache.forEach( s => recipientsDiv.appendChild( buildChip( s ) ) );
+        recipientCache.forEach( s => recipientsDiv.appendChild( buildChip( s, false ) ) );
         modal.appendChild( recipientsDiv );
 
         const previewDiv = document.createElement( "div" );

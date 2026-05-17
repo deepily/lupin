@@ -375,3 +375,181 @@ class TestBroadcastSendFlow:
         # now flows through the standard notification stream (`commons_broadcast_ack`
         # cards) which is covered by Phase 2's two-session E2E smoke. The POST + modal
         # close + body shape above are the surface this test owns.
+
+
+# ─── 2026-05-17: recipient-chip text-injection (Rick voice direction) ──
+
+
+class TestRecipientChipTextInjection:
+    """
+    Chip buttons in the recipient row are text-injectors: clicking them
+    inserts `@<persona> ` at the cursor position of the broadcast textarea.
+    `@all` is a leading control with the same injector behavior, no special
+    routing — the existing `broadcast_handler._parse_body` already treats
+    `@all:` / `@everyone:` as default-scope, and bare `@persona` (no colon)
+    falls through to the default-line branch ("carpet bomb" semantics
+    Rick ratified 2026-05-17).
+    """
+
+    @staticmethod
+    def _mock_sessions( page ):
+        """Mock the active-sessions endpoint with a deterministic 3-persona set."""
+        def _route_sessions( route ):
+            route.fulfill(
+                status       = 200,
+                content_type = "application/json",
+                body         = json.dumps( {
+                    "sessions": [
+                        { "session_id": "sid-maria",    "persona_name": "maria",    "persona_icon": "🌸", "persona_color": "#F06292" },
+                        { "session_id": "sid-rio",      "persona_name": "rio",      "persona_icon": "⚡", "persona_color": "#1c4587" },
+                        { "session_id": "sid-tiberius", "persona_name": "tiberius", "persona_icon": "🌑", "persona_color": "#495057" },
+                    ]
+                } ),
+            )
+        page.route( "**/api/commons/active-sessions", _route_sessions )
+
+    def _open_panel_and_load( self, page ):
+        self._mock_sessions( page )
+        page.evaluate(
+            "() => { const s = document.getElementById( 'broadcast-submit-section' );"
+            " if ( s.classList.contains( 'collapsed' ) ) toggleSection( 'broadcast-submit-section' ); }"
+        )
+        page.evaluate( "() => window.broadcastPanel.refreshSessions()" )
+        page.wait_for_timeout( 300 )
+
+    def test_at_all_chip_renders_as_leading_control( self, notifications_page ):
+        """The @all chip is the FIRST chip in the recipient row, ahead of personas."""
+        self._open_panel_and_load( notifications_page )
+
+        first_chip_text = notifications_page.evaluate(
+            """() => {
+                const row = document.getElementById( 'broadcast-recipients-row' );
+                if ( !row ) return null;
+                const chips = row.querySelectorAll( '.broadcast-chip' );
+                if ( !chips.length ) return null;
+                return chips[ 0 ].innerText.trim();
+            }"""
+        )
+        assert first_chip_text is not None
+        assert "@all" in first_chip_text, (
+            f"First chip should be @all, got {first_chip_text!r}"
+        )
+
+    def test_at_all_chip_click_inserts_literal_at_all_token( self, notifications_page ):
+        """Click @all → textarea contains the literal text `@all ` with trailing space."""
+        self._open_panel_and_load( notifications_page )
+
+        ta = notifications_page.get_by_test_id( "notifications-broadcast-textarea" )
+        ta.fill( "" )
+
+        notifications_page.locator( ".broadcast-chip-all" ).first.click()
+        notifications_page.wait_for_timeout( 100 )
+
+        value = ta.input_value()
+        assert value == "@all ", f"@all click should insert literal '@all ', got {value!r}"
+
+    def test_persona_chip_click_inserts_at_persona_token( self, notifications_page ):
+        """Click each persona chip → textarea contains `@<persona> `."""
+        self._open_panel_and_load( notifications_page )
+
+        ta = notifications_page.get_by_test_id( "notifications-broadcast-textarea" )
+
+        for persona in ( "maria", "rio", "tiberius" ):
+            ta.fill( "" )
+            # Click the persona button (skip the @all leading chip)
+            notifications_page.evaluate(
+                """( name ) => {
+                    const chips = document.querySelectorAll(
+                        '#broadcast-recipients-row .broadcast-chip:not(.broadcast-chip-all)'
+                    );
+                    for ( const c of chips ) {
+                        if ( c.innerText.trim().endsWith( name ) ) { c.click(); return; }
+                    }
+                }""",
+                persona,
+            )
+            notifications_page.wait_for_timeout( 80 )
+            value = ta.input_value()
+            assert value == f"@{persona} ", (
+                f"Persona chip click should insert '@{persona} ', got {value!r}"
+            )
+
+    def test_chip_click_inserts_at_cursor_position_mid_text( self, notifications_page ):
+        """
+        Insertion respects cursor position, not just append-to-end. Place
+        cursor between two existing tokens and assert the new token lands
+        between them.
+        """
+        self._open_panel_and_load( notifications_page )
+
+        notifications_page.evaluate(
+            """() => {
+                const ta = document.getElementById( 'broadcast-textarea' );
+                ta.value = 'hello  world';
+                ta.focus();
+                // Position cursor between 'hello ' and ' world' (index 6, between the two spaces)
+                ta.setSelectionRange( 6, 6 );
+            }"""
+        )
+
+        notifications_page.locator( ".broadcast-chip-all" ).first.click()
+        notifications_page.wait_for_timeout( 80 )
+
+        value = notifications_page.get_by_test_id( "notifications-broadcast-textarea" ).input_value()
+        assert value == "hello @all  world", (
+            f"Cursor-position insertion mid-text failed: {value!r}"
+        )
+
+    def test_chip_is_a_button_element_not_a_span( self, notifications_page ):
+        """
+        Chips in the recipient row are <button> elements (clickable +
+        keyboard-accessible). The confirm-modal chips stay as <span>
+        (display-only). This locks in the buildChip(s, clickable) split
+        landed 2026-05-17.
+        """
+        self._open_panel_and_load( notifications_page )
+
+        tag = notifications_page.evaluate(
+            """() => {
+                const chip = document.querySelector( '#broadcast-recipients-row .broadcast-chip' );
+                return chip ? chip.tagName : null;
+            }"""
+        )
+        assert tag == "BUTTON", f"Recipient-row chips should be <button>, got <{tag}>"
+
+    def test_confirm_modal_chips_remain_non_clickable_spans( self, notifications_page ):
+        """
+        Open the confirm modal and assert the chips inside it are <span>
+        (display-only), not buttons.
+        """
+        self._open_panel_and_load( notifications_page )
+
+        # Mock the broadcast POST so the modal can be opened safely
+        def _route_broadcast( route ):
+            route.fulfill(
+                status       = 200,
+                content_type = "application/json",
+                body         = json.dumps( {
+                    "broadcast_id"      : "bc-test",
+                    "recipients"        : 3,
+                    "failed_recipients" : [ ],
+                    "status"            : "queued",
+                } ),
+            )
+        notifications_page.route( "**/api/commons/broadcast-to-cc-sessions", _route_broadcast )
+
+        ta = notifications_page.get_by_test_id( "notifications-broadcast-textarea" )
+        ta.fill( "hello team" )
+        notifications_page.wait_for_timeout( 60 )
+        notifications_page.get_by_test_id( "notifications-broadcast-send-btn" ).click()
+        notifications_page.wait_for_timeout( 150 )
+
+        modal_chip_tag = notifications_page.evaluate(
+            """() => {
+                const chip = document.querySelector( '#broadcast-confirm-modal .modal-recipients .broadcast-chip' );
+                return chip ? chip.tagName : null;
+            }"""
+        )
+        assert modal_chip_tag == "SPAN", (
+            f"Modal recipient chips should remain <span>, got <{modal_chip_tag}>"
+        )

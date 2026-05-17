@@ -9912,24 +9912,15 @@ class NotificationsUI {
         name.textContent = entry.persona_name || "—";
         row.appendChild( name );
 
-        // Topic chip only for free-form topics (Q2 ratified)
+        // Topic chip only for free-form topics (Q2 ratified). DM topics
+        // (`dm-<persona>`) are rendered as `@<persona>` to collapse the older
+        // two-element `dm-tiberius → @Tiberius` form into a single chip.
         const chip = document.createElement( "span" );
-        chip.className   = "commons-activity-entry-topic-chip";
-        chip.textContent = entry.topic || "";
+        chip.className = "commons-activity-entry-topic-chip";
+        const rawTopic = entry.topic || "";
+        chip.textContent = rawTopic.startsWith( "dm-" ) ? `@${rawTopic.slice( 3 )}` : rawTopic;
         if ( entry.topic_kind === "reserved" ) chip.hidden = true;
         row.appendChild( chip );
-
-        // DM badge — entries stamped with metadata.recipient_persona are directed
-        // inter-session DMs (per 2026.05.15-inter-session-direct-messaging-design
-        // Phase 0 Q4-rev: same broadcasts topic + visual badge).
-        const recipientPersona = entry.metadata && entry.metadata.recipient_persona;
-        if ( recipientPersona ) {
-            const dmBadge = document.createElement( "span" );
-            dmBadge.className   = "commons-activity-dm-badge";
-            dmBadge.textContent = `→ @${recipientPersona}`;
-            dmBadge.title       = "Directed message — peer-to-peer between CC sessions";
-            row.appendChild( dmBadge );
-        }
 
         // Body — collapsible + markdown rendered (2026-05-16 feature ship).
         // Wraps content in a `.commons-activity-entry-body-content` inner div so
@@ -9943,7 +9934,18 @@ class NotificationsUI {
 
         const content = document.createElement( "div" );
         content.className = "commons-activity-entry-body-content";
-        const rawBody = entry.body || "";
+        // broadcast-acks bodies are bare status words ("completed" / "skipped" /
+        // "rejected-malformed") per `_post_ack` in broadcast_handler.py. Reshape
+        // to descriptive phrasing so the row reads as a real event, not a status code.
+        let rawBody = entry.body || "";
+        if ( entry.topic === "broadcast-acks" ) {
+            const ackPhrasing = {
+                "completed"          : "received broadcast",
+                "skipped"            : "skipped broadcast",
+                "rejected-malformed" : "rejected broadcast (malformed)"
+            };
+            rawBody = ackPhrasing[ rawBody ] || rawBody;
+        }
         if ( typeof marked !== "undefined" && typeof DOMPurify !== "undefined" ) {
             try {
                 content.innerHTML = DOMPurify.sanitize( marked.parse( rawBody ) );

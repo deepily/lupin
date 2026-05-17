@@ -87,6 +87,36 @@
     border: 1px solid #dee2e6;
     font-size: 12px;
     line-height: 1.2;
+    color: inherit;
+    font-family: inherit;
+}
+
+button.broadcast-chip {
+    cursor: pointer;
+    transition: background 0.12s ease, transform 0.06s ease;
+}
+
+button.broadcast-chip:hover {
+    background: #e9ecef;
+}
+
+button.broadcast-chip:active {
+    transform: translateY( 1px );
+}
+
+button.broadcast-chip:focus-visible {
+    outline: 2px solid #4dabf7;
+    outline-offset: 1px;
+}
+
+.broadcast-chip-all {
+    background: #fff3bf;
+    border-color: #f59f00;
+    font-weight: 600;
+}
+
+button.broadcast-chip-all:hover {
+    background: #ffe066;
 }
 
 .broadcast-chip-icon {

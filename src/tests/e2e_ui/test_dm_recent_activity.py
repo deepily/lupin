@@ -1,7 +1,10 @@
 """
-AC9e + AC9f Playwright E2E for Inter-Session DM badge render + visual baseline.
+Playwright E2E for Inter-Session DM topic-chip render + visual baseline.
 
-Per `src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md` AC9e + AC9f.
+Updated 2026-05-17 (Rick voice request): collapsed the older
+`dm-tiberius → @Tiberius` two-element render into a single
+`@tiberius` topic chip. The `.commons-activity-dm-badge` pill is gone;
+the chip itself now carries the `@<persona>` form for `dm-*` topics.
 
 **Venue: :8000 (monopolize)**. Submit via:
 
@@ -22,21 +25,22 @@ exit and try to "fix" a non-bug).
 `_renderCommonsEntry` directly with a synthetic DM entry. No backend
 round-trip — that's covered by the integration test in
 `src/tests/integration/test_dm_integration_live.py`. The E2E UI test
-verifies ONLY the render path: given an entry with
-`metadata.recipient_persona` set, the `.commons-activity-dm-badge` pill
-appears in the DOM with the right text content.
+verifies ONLY the render path: a `dm-<persona>` topic renders as a
+single `@<persona>` chip, and no `.commons-activity-dm-badge` element
+exists anywhere on the page.
 """
 
 import pytest
 
 
 @pytest.mark.e2e
-class TestDmRecentActivityBadge:
+class TestDmRecentActivityChip:
 
-    def test_dm_badge_renders_for_entries_with_recipient_persona( self, notifications_page ):
+    def test_dm_topic_renders_as_at_persona_chip( self, notifications_page ):
         """
-        Given an entry with metadata.recipient_persona, _renderCommonsEntry
-        appends a `.commons-activity-dm-badge` pill containing "→ @<persona>".
+        Given an entry whose topic is `dm-<persona>`, _renderCommonsEntry
+        emits a single `.commons-activity-entry-topic-chip` whose text is
+        `@<persona>` — and NO `.commons-activity-dm-badge` (retired).
         """
         page = notifications_page
 
@@ -57,6 +61,7 @@ class TestDmRecentActivityBadge:
                     metadata          : { recipient_persona: "radio", kind: "question" },
                 };
                 const row = window.notificationsUI._renderCommonsEntry( entry );
+                row.setAttribute( "data-testid", "dm-chip-row" );
                 const entriesEl = document.getElementById( "commons-recent-activity-entries" );
                 if ( !entriesEl ) return { ok: false, reason: "entries container missing" };
                 // Prepend so it's visible at top
@@ -75,30 +80,40 @@ class TestDmRecentActivityBadge:
         )
         assert result[ "ok" ], result.get( "reason" )
 
-        # The DM badge must be present + carry the expected text
-        badge = page.locator( ".commons-activity-dm-badge" ).first
-        badge.wait_for( state="attached", timeout=5000 )
-        assert badge.is_visible(), "DM badge element exists but is not visible"
-        assert "→ @radio" in badge.inner_text(), f"Badge text mismatch: {badge.inner_text()!r}"
+        dm_row = page.locator( '[data-testid="dm-chip-row"]' )
+        dm_row.wait_for( state="attached", timeout=5000 )
 
-    def test_dm_badge_omitted_when_no_recipient_persona( self, notifications_page ):
+        # The topic chip must render as `@radio` (NOT `dm-radio`)
+        chip = dm_row.locator( ".commons-activity-entry-topic-chip" ).first
+        chip.wait_for( state="attached", timeout=5000 )
+        assert chip.is_visible(), "Topic chip element exists but is not visible"
+        chip_text = chip.inner_text().strip()
+        assert chip_text == "@radio", f"Topic chip text mismatch: {chip_text!r} (expected '@radio')"
+
+        # The legacy DM badge must NOT exist anywhere on the page
+        badge_count = page.locator( ".commons-activity-dm-badge" ).count()
+        assert badge_count == 0, f".commons-activity-dm-badge should be retired, found {badge_count}"
+
+    def test_non_dm_topic_keeps_literal_chip( self, notifications_page ):
         """
-        Non-DM entries (no metadata.recipient_persona) do NOT get a DM badge.
-        Preserves the Phase 2 broadcast rendering contract.
+        Free-form non-DM topics (e.g., `coordination`, `help-wanted`) render
+        the topic name verbatim — no `@` prefix transform. Reserved topics
+        (`broadcasts`, `presence`, `system-events`) stay hidden via
+        `topic_kind === "reserved"`.
         """
         page = notifications_page
 
-        # Inject a non-DM entry
+        # Inject a non-DM free-form entry
         page.evaluate(
             """() => {
                 const entry = {
-                    body              : "Plain broadcast body — no recipient metadata.",
+                    body              : "Plain coordination post — no DM transform expected.",
                     persona_name      : "plain-broadcast",
                     persona_icon      : "📣",
                     persona_color     : "#6c757d",
-                    topic             : "broadcasts",
+                    topic             : "coordination",
                     ts                : new Date().toISOString(),
-                    metadata          : { kind: "broadcast" },  // no recipient_persona
+                    metadata          : { kind: "broadcast" },
                 };
                 const row = window.notificationsUI._renderCommonsEntry( entry );
                 row.setAttribute( "data-testid", "plain-non-dm-row" );
@@ -109,9 +124,11 @@ class TestDmRecentActivityBadge:
 
         plain_row = page.locator( '[data-testid="plain-non-dm-row"]' )
         plain_row.wait_for( state="attached", timeout=5000 )
-        # The plain row should NOT contain a DM badge
-        badge_count = plain_row.locator( ".commons-activity-dm-badge" ).count()
-        assert badge_count == 0, f"Non-DM entry should not have DM badge, found {badge_count}"
+
+        chip = plain_row.locator( ".commons-activity-entry-topic-chip" ).first
+        chip_text = chip.inner_text().strip()
+        assert chip_text == "coordination", f"Non-DM chip should render verbatim, got {chip_text!r}"
+        assert not chip_text.startswith( "@" ), f"Non-DM chip should NOT carry @ prefix, got {chip_text!r}"
 
 
 @pytest.mark.e2e
