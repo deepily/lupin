@@ -243,3 +243,78 @@ class TestReleaseAndReAssignWiring:
         assert alloc_mock.call_count == 1
         kwargs = alloc_mock.call_args.kwargs
         assert kwargs.get( "previous_persona_name" ) is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestCarryForwardReadModifyWrite — Fix B for the 2026-05-17 §6 mystery
+# ═════════════════════════════════════════════════════════════════════════════
+# Per src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
+# §D4 Fix B: the bridge write at register_session.main() is now read-modify-
+# write so listener-stamped fields (user_id, owner_user_id) survive /clear.
+# Without this fix, every /clear would clobber both fields and re-introduce
+# the broadcast-UI "only 1 of N personas visible" bug class.
+
+class TestCarryForwardReadModifyWrite:
+    """Phase 2 (Fix B) — listener-stamped fields survive /clear via merge."""
+
+    def test_user_id_carries_forward_across_clear( self, isolated_session_dir, patched_main ):
+        """Old bridge has user_id (listener-stamped) → /clear → user_id preserved on merged bridge."""
+        _write_lockfile( isolated_session_dir, TEST_OLD_SESSION_ID )
+        _write_bridge( isolated_session_dir, {
+            "session_id"        : TEST_OLD_SESSION_ID,
+            "stable_session_id" : TEST_OLD_SESSION_ID,
+            "session_ids"       : [ TEST_OLD_SESSION_ID ],
+            "user_id"           : "service-account-uuid-aaa111",
+        } )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge is not None
+        # Fresh session_data wins for keys it provides
+        assert bridge[ "session_id" ] == TEST_NEW_SESSION_ID
+        # Listener-stamped user_id MUST survive (Fix B carry-forward)
+        assert bridge[ "user_id" ] == "service-account-uuid-aaa111"
+
+    def test_owner_user_id_carries_forward_across_clear( self, isolated_session_dir, patched_main ):
+        """Old bridge has owner_user_id (writer-side stamped) → /clear → preserved."""
+        _write_lockfile( isolated_session_dir, TEST_OLD_SESSION_ID )
+        _write_bridge( isolated_session_dir, {
+            "session_id"        : TEST_OLD_SESSION_ID,
+            "stable_session_id" : TEST_OLD_SESSION_ID,
+            "session_ids"       : [ TEST_OLD_SESSION_ID ],
+            "user_id"           : "service-account-uuid-aaa111",
+            "owner_user_id"     : "human-owner-uuid-0cf47e2d",
+        } )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge is not None
+        assert bridge[ "session_id" ]     == TEST_NEW_SESSION_ID
+        assert bridge[ "user_id" ]        == "service-account-uuid-aaa111"
+        # owner_user_id is the field this whole change set is designed to preserve
+        assert bridge[ "owner_user_id" ] == "human-owner-uuid-0cf47e2d"
+
+    def test_unknown_future_fields_carry_forward( self, isolated_session_dir, patched_main ):
+        """Unknown future fields on old bridge → preserved (structural fix is future-proof)."""
+        _write_lockfile( isolated_session_dir, TEST_OLD_SESSION_ID )
+        _write_bridge( isolated_session_dir, {
+            "session_id"            : TEST_OLD_SESSION_ID,
+            "stable_session_id"     : TEST_OLD_SESSION_ID,
+            "session_ids"           : [ TEST_OLD_SESSION_ID ],
+            "future_field_xyz"      : "some_value",
+            "another_future_field"  : { "nested" : True },
+        } )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge is not None
+        # Fix B is structural: ANY field on old bridge that isn't overwritten by
+        # session_data survives. Future bridge fields don't need to be added to
+        # an explicit carry-forward list — they're preserved by default.
+        assert bridge[ "future_field_xyz" ]     == "some_value"
+        assert bridge[ "another_future_field" ] == { "nested" : True }
+        # Fresh session_data still wins for its own keys
+        assert bridge[ "session_id" ] == TEST_NEW_SESSION_ID

@@ -757,6 +757,68 @@ class CCNotificationListener( BaseWebSocketListener ):
             # Defense-in-depth: never let stamping kill the listener startup
             self._log( f"{self.LOG_PREFIX} user_id stamp unexpected error (silent fallback): {e!r}" )
 
+    def _stamp_owner_user_id_on_bridge( self ):
+        """
+        Writer-side follow-up to the 2026-05-14 Option C design. Resolves
+        the HUMAN OWNER's user_id via /auth/login using owner credentials
+        from ~/.lupin/config[owner], then stamps it on the bridge via
+        session_bridge.set_owner_user_id.
+
+        Per `src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md`.
+
+        Distinct from `_stamp_user_id_on_bridge`: that stamps the listener's
+        OWN service-account identity (`claude.code@lupin.deepily.ai`); this
+        stamps the HUMAN owner's identity, which is what the broadcast UI's
+        same-user filter (`filter_and_project_sessions` in CoSA's
+        `routers/commons.py`) actually compares against.
+
+        Best-effort: any failure (creds missing, network, auth, parse,
+        missing bridge) is logged and swallowed. CoSA-side graceful-
+        degradation filter covers the gap until the stamp succeeds.
+
+        Fires once at run() startup, immediately after _stamp_user_id_on_bridge.
+
+        Ensures:
+            - Never raises publicly. All errors caught + logged.
+            - Bridge file is mutated only on full success.
+        """
+        try:
+            import urllib.request
+            import urllib.error
+            from lupin_cli.claude_code.hooks.lib.hook_credentials import get_owner_credentials
+            from lupin_cli.claude_code.hooks.lib.session_bridge import set_owner_user_id
+
+            try:
+                owner_email, owner_password = get_owner_credentials()
+            except ( FileNotFoundError, ValueError ) as e:
+                self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — no owner credentials: {e}" )
+                return
+
+            url  = f"http://{self.host}:{self.port}/auth/login"
+            body = json.dumps( { "email": owner_email, "password": owner_password } ).encode( "utf-8" )
+            req  = urllib.request.Request(
+                url,
+                data    = body,
+                headers = { "Content-Type": "application/json" },
+                method  = "POST",
+            )
+            with urllib.request.urlopen( req, timeout=10.0 ) as resp:
+                payload = json.loads( resp.read().decode( "utf-8" ) )
+            owner_user_id = payload.get( "user", { } ).get( "id" )
+            if not owner_user_id:
+                self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — no user.id in /auth/login response" )
+                return
+            ok = set_owner_user_id( self.session_id_hash, owner_user_id )
+            if ok:
+                self._log( f"{self.LOG_PREFIX} owner_user_id stamped on bridge: {owner_user_id}" )
+            else:
+                self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — bridge not found for session {self.session_id_hash}" )
+        except ( urllib.error.URLError, json.JSONDecodeError, OSError, KeyError, ValueError ) as e:
+            self._log( f"{self.LOG_PREFIX} owner_user_id stamp failed (silent fallback): {e!r}" )
+        except Exception as e:
+            # Defense-in-depth: never let stamping kill the listener startup
+            self._log( f"{self.LOG_PREFIX} owner_user_id stamp unexpected error (silent fallback): {e!r}" )
+
     def _print_stats( self ):
         """Print session statistics on shutdown."""
         self._log( "" )
@@ -804,6 +866,13 @@ class CCNotificationListener( BaseWebSocketListener ):
         # the gap. Fires once at startup, not on every reconnect cycle.
         # Per src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md.
         self._stamp_user_id_on_bridge()
+
+        # Writer-side follow-up — stamp the HUMAN OWNER's user_id on the
+        # bridge. The broadcast UI's filter compares against the human
+        # owner, not the listener's service account. Best-effort with
+        # silent fallback; CoSA-side graceful-degradation covers the gap.
+        # Per src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
+        self._stamp_owner_user_id_on_bridge()
 
         restart_cycle    = 0
         restart_cooldown = 60  # seconds

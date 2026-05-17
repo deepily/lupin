@@ -807,9 +807,27 @@ def main():
                 idle_block[ "backoff_index" ] = old_idle[ "backoff_index" ]
         session_data[ "idle_detection" ] = idle_block
 
+        # Carry-forward read-modify-write — preserves any bridge fields not in
+        # session_data (e.g., user_id, owner_user_id stamped by the listener
+        # post-SessionStart). Without this merge, a /clear would clobber every
+        # listener-stamped field because session_data is rebuilt from scratch
+        # above and only voice_persona + idle_detection.backoff_index appear in
+        # the explicit carry-forward list. session_data wins for keys it
+        # provides; existing fills in everything else.
+        # See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md §D4 Fix B
         try:
+            existing = { }
+            if os.path.exists( session_file ):
+                try:
+                    with open( session_file ) as f:
+                        existing = json.load( f )
+                    if not isinstance( existing, dict ):
+                        existing = { }
+                except ( json.JSONDecodeError, OSError ):
+                    existing = { }
+            merged = { **existing, **session_data }
             with open( session_file, "w" ) as f:
-                json.dump( session_data, f, indent=2 )
+                json.dump( merged, f, indent=2 )
         except OSError:
             pass  # Best-effort
 

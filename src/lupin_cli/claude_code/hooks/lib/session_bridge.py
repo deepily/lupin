@@ -918,6 +918,57 @@ def set_last_autonarrated_turn_id( session_id, turn_id ):
         return False
 
 
+def set_owner_user_id( session_id, owner_user_id ):
+    """
+    Write `owner_user_id` to the bridge file for a given session_id.
+
+    Writer-side follow-up to the 2026-05-14 Option C design. The
+    inter-session-commons broadcast surface filters active sessions by
+    `bridge["owner_user_id"] == authenticated_user_id` after CoSA-side
+    migration shipped 2026-05-14. This setter is called once at listener
+    startup from `_stamp_owner_user_id_on_bridge()` in cc_notification_listener.
+
+    Distinct from `set_user_id`: that stamps the SERVICE-account identity
+    of the listener (`claude.code@lupin.deepily.ai`); this stamps the
+    HUMAN owner's identity (`ricardo.felipe.ruiz@gmail.com`), which is
+    what the broadcast UI's same-user filter actually compares against.
+
+    See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
+
+    Requires:
+        - session_id is a non-empty string (full UUID or 8-char prefix)
+        - owner_user_id is a non-empty string (canonical user UUID from
+          /auth/login response at user.id for the HUMAN owner)
+
+    Ensures:
+        - Returns True if bridge was found and successfully updated
+        - Returns False if bridge missing, parse-fail, or write-fail
+        - Never raises
+        - Preserves all other bridge fields (read-modify-write)
+
+    Args:
+        session_id:    Session ID to look up (full UUID or 8-char prefix)
+        owner_user_id: Canonical HUMAN owner UUID to stamp on the bridge
+
+    Returns:
+        bool: True on successful write
+    """
+    if not session_id or not owner_user_id:
+        return False
+    path = find_session_path_by_id( session_id )
+    if not path:
+        return False
+    try:
+        with open( path ) as f:
+            data = json.load( f )
+        data[ "owner_user_id" ] = str( owner_user_id )
+        with open( path, "w" ) as f:
+            json.dump( data, f, indent=2 )
+        return True
+    except ( json.JSONDecodeError, OSError ):
+        return False
+
+
 def set_user_id( session_id, user_id ):
     """
     Write `user_id` to the bridge file for a given session_id.
@@ -1470,7 +1521,14 @@ if __name__ == "__main__":
         _orig_dir = SESSION_DIR
         try:
             globals()[ "SESSION_DIR" ] = _tmp_dir
-            assert get_speakerphone( _sid ) is False, "Default should be False"
+            # Default is mode-aware (solo→False, chorus→True). Round-trip via
+            # _get_default_speakerphone rather than hardcoding False so the
+            # smoke works regardless of the host's current TTS interaction mode.
+            _expected_default = _get_default_speakerphone()
+            assert get_speakerphone( _sid ) is _expected_default, (
+                f"Default should match _get_default_speakerphone() (got "
+                f"{get_speakerphone( _sid )!r}, expected {_expected_default!r})"
+            )
             assert set_speakerphone( _sid, True ) is True, "Set True should succeed"
             assert get_speakerphone( _sid ) is True, "Read after set True should be True"
             assert set_speakerphone( _sid, False ) is True, "Set False should succeed"
@@ -1499,5 +1557,20 @@ if __name__ == "__main__":
             assert get_voice_persona( "nonexistent" ) is None, "Missing session returns None"
             assert set_voice_persona( "nonexistent", _persona ) is False, "Set on missing bridge returns False"
             print( "Voice persona smoke: ✓ all assertions passed" )
+
+            # owner_user_id round-trip smoke (Phase 3 of writer-side stamper plan)
+            _owner_uuid = "0cf47e2d-d5a1-4cd4-addf-79810fd32b15"  # example human owner UUID
+            assert set_owner_user_id( _sid, _owner_uuid ) is True, "Set owner_user_id should succeed"
+            with open( _bridge ) as _f:
+                _data = json.load( _f )
+            assert _data.get( "owner_user_id" ) == _owner_uuid, "Round-trip owner_user_id equals original"
+            assert set_owner_user_id( _sid, "0cf47e2d-DIFFERENT" ) is True, "Overwrite should succeed"
+            with open( _bridge ) as _f:
+                _data = json.load( _f )
+            assert _data.get( "owner_user_id" ) == "0cf47e2d-DIFFERENT", "Overwrite reads back new value"
+            assert set_owner_user_id( "nonexistent", _owner_uuid ) is False, "Missing bridge returns False"
+            assert set_owner_user_id( _sid, "" ) is False, "Empty owner_user_id returns False"
+            assert set_owner_user_id( "", _owner_uuid ) is False, "Empty session_id returns False"
+            print( "Owner user_id smoke: ✓ all assertions passed" )
         finally:
             globals()[ "SESSION_DIR" ] = _orig_dir
