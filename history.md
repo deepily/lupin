@@ -2,6 +2,38 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-07 to 05-11](history/2026-05-07-to-11-history.md). History health: ✅ **HEALTHY at 13,151 tokens (52.6% of 25k)** — archived 2026-05-15 by Mr. Radio (session 23ff8512), 14,506 tokens moved to archive.
 
+### 2026.05.16 - Session 3c9fce51 (María 🌸) | Checkpoint 5: cosa-voice MCP discovery-surface expansion (instructions field 65→~300 lines + 6 commons_* docstring upgrades)
+
+Cross-session pair-collab with Tiberius 🌑 (planning-is-prompting `b714e138`) on documenting cosa-voice for fresh CC sessions. Rick triggered the work after observing today's María↔Tiberius DM thread surface multiple inline-discoverability gaps. Tiberius took the boot-time-doctrine side (`planning-is-prompting/workflow/cross-session-communication.md` refresh + thin pointer in `~/.claude/CLAUDE.md`); I took the MCP-server-bound side. Five framework iterations between us before convergence on the 5-surface model (CLAUDE.md / MCP `instructions` / planning-is-prompting workflow / per-tool docstrings / per-turn rider — split by reading timing, not content type).
+
+**Implementation delivered**:
+- `src/lupin_mcp/cosa_voice_mcp.py` (+~313 LOC) — instructions field grew from ~3k chars to **21,316 chars** (~5,329 tokens) across **10 sections**: Instructions vs Per-Turn Rider framing, Your Toolkit at a Glance (6-group nav map), Speakerphone Mode (existing + forward-pointer to Startup Protocol), Voice Persona Self-Announcement (existing + forward-pointer), MCP Startup Protocol (Phase A + Phase B), Inter-Session Commons Protocol (3-tier autonomy + reserved topics), Phase 0 DM Workflow (push-vs-poll + receipt etiquette with loop-avoidance step 4 + sender-mailbox convention + cross-session bug-filing pattern + DM-vs-broadcast), Interactive Tool Routing, Failure Modes + Debugging Signals (7 patterns), Deep Doctrine Reference (cross-pointer footer with §-by-§ pointers to Tiberius's refresh)
+- 6 commons_* docstrings (`commons_who` / `commons_read` / `commons_post` / `commons_ask_sync` / `commons_ask_async` / `commons_send_to`) upgraded with Tiberius's 7 priorities: tier markers on line 1 (D1 BLOCKING), one example per tool (D2 HIGH), inline failure-mode hints incl. new `register_skip_reason` (D3 HIGH), threading callout in `commons_post` (D4), receipt mechanism in sender docstrings (D5), `expect_reply` side-effect promotion (D6), cross-ref footer (D7)
+- `src/rnd/v0.1.7/2026.05.16-mcp-discovery-surface-expansion.md` — NEW R&D doc, status APPROVED FOR CODE-WRITE post-Rick-ratification
+
+**Tiberius review walkthrough** (5 Q-points): section flow + pacing (one real dependency identified, fixed via forward-pointers), tier-marker formulation (landed cleanly), failure-mode hints precision (5 patterns accurate; added #6 persona-cache staleness + #7 topic-file case sensitivity), cross-reference footer accuracy (all 6 pointers correct + added §1.5.3 Threading), receipt etiquette alignment (added step 4 loop-avoidance + sender-mailbox `topic='dm-<sender>'` convention). Verdict: ship as-is. ~30 LOC of polish applied after review.
+
+**Memory saved**: `feedback_mcp_doc_layering_decision_point_vs_doctrine` (now `mcp-doc-layering-five-surfaces-by-reading-timing`) — the 5-surface framework attributed to joint discovery.
+
+**Surfaced 2 bugs during the cross-session DM thread**:
+1. Topic-file case sensitivity in `commons_send_to` wrapper — DMs fragment across `dm-Tiberius` (capital T from recipient arg) and `dm-tiberius` (lowercase). Push-mode persona resolution works case-insensitively so DMs still deliver, but topic-files fragment. Filed at TODO.md top with 5-LOC fix proposal.
+2. System-reminder body truncation on push-injection — when push fires, the recipient's `<system-reminder>` body may be clipped; canonical body lives in the topic file. Mitigation documented in instructions §"Failure Modes" item #7 + receipt-etiquette step 2 ("always re-fetch via `commons_read` for canonical body").
+
+**Process artifact worth noting** (per Rick's broadcast asking for follow-up summary doc with Tiberius): today's collaboration shape — iterative correction loop (María proposes 5-layer → Tiberius corrects to 3-layer → Tiberius re-corrects back to 5-layer + adds Q2 enrichments → joint memory saved) + DM-thread-as-mini-design-doc + paired-by-DM-paired-by-commit pattern — produced sharper output than either of us would have produced alone. Tiberius and I will draft a follow-up summary R&D doc tomorrow covering this workflow as a replicable template, with a pointer from the project README.
+
+**Files** (this checkpoint — Lupin parent only; CoSA submodule untouched per `feedback_lupin_only_never_cosa`):
+- `src/lupin_mcp/cosa_voice_mcp.py` (MOD ~+313 LOC)
+- `src/rnd/v0.1.7/2026.05.16-mcp-discovery-surface-expansion.md` (NEW R&D doc)
+- `TODO.md` (PRIORITY-1 history-archive deferral entry added at top; case-fragmentation + truncation sub-bugs filed earlier)
+- `history.md` (this entry)
+- `.claude-session.md` (Checkpoint 5 update — pending)
+
+**Commit**: <pending>
+
+**Health note**: history.md is at 26,032 tokens (104% of 25k limit) at session-end. Rick approved deferring the archive to first-thing next session via `ask_multiple_choice` gate. Tracking in TODO.md PRIORITY-1.
+
+---
+
 ### 2026.05.16 - Session 0025f917 (Rio ⚡) | Model-server carve-out: Whisper + 2 encoders moved to lupin-model-server:7998, doom-loop structurally killed
 
 Day-long sequenced design + implementation arc. Rick voice-driven the whole way; I owned execution. Phases 0-5 of the carve-out shipped, INI flipped, dev + test bounced into remote-mode, model-server brought up into freed VRAM, all 9 smoke-test cases green.

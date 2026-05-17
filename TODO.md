@@ -1,5 +1,15 @@
 # TODO
 
+## 🚨 PRIORITY-1 NEXT SESSION — history.md archive (deferred from 2026-05-16 PM session-end)
+
+**Health at session-end**: 26,032 tokens / 104.1% of 25k / 🚨 CRITICAL band. Today's session added ~6,000 tokens via Checkpoints 1-4 + Rio's model-server-carveout commit, pushing over the limit.
+
+**Next session's first action**: invoke `/history-management mode=archive` per canonical workflow. Cut at clean date boundary (2026-05-15 or earlier). Target post-archive ≤13k tokens.
+
+**Filed by**: María 🌸 session `3c9fce51` at session-end 2026-05-16 ~20:30 EDT. Rick approved deferral via `ask_multiple_choice` voice gate ("Defer this to the next session. We'll do it first thing when we start up in the morning.").
+
+---
+
 ## 🚀 NEW — Model-server carve-out follow-ups (filed 2026-05-16 by Rio ⚡, session `0025f917`)
 
 **Primary doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md). Phases 0-3 + 3.6 + Part 2 bounce + Phase 5.1 smoke test all shipped this session. Verified end-to-end (9/9 smoke green; native browser ASR working). Doom-loop layers 1 + 3 structurally killed.

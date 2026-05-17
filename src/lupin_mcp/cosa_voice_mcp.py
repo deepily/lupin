@@ -564,7 +564,44 @@ mcp = FastMCP(
     name="CoSA Voice Bridge",
     instructions=(
         f"Voice I/O for Claude Code [Session: {SENDER_ID}]\n\n"
+
+        # =====================================================================
+        # Framing paragraph + tool-inventory navigation map (2026-05-16)
+        # Per src/rnd/v0.1.7/2026.05.16-mcp-discovery-surface-expansion.md.
+        # Anchors the reader before the deeper protocol sections below.
+        # =====================================================================
+        f"## Instructions vs Per-Turn Rider\n\n"
+        f"This `instructions` payload (which you are reading now) describes what "
+        f"this cosa-voice MCP server IS and how to use it — it is injected into "
+        f"your system prompt ONCE per session at the `initialize` handshake. "
+        f"In contrast, the per-turn `<system-reminder>` rider you'll see on every "
+        f"inbound user message tells you what to DO this turn under the CURRENT "
+        f"state of `speakerphone_on` + `tts_interaction_mode`. The two are "
+        f"complementary: `instructions` is the contract; the rider is the "
+        f"per-turn obligation under that contract.\n\n"
+
+        f"## Your Toolkit at a Glance\n\n"
+        f"This server exposes 18+ tools grouped by function. Scan this map "
+        f"before reading the per-tool docstrings:\n\n"
+        f"| Group | Tools | One-line purpose |\n"
+        f"|---|---|---|\n"
+        f"| **Notifications** | `notify` | Fire-and-forget announcement; spoken via TTS in speakerphone mode |\n"
+        f"| **Blocking decisions** | `ask_yes_no`, `ask_multiple_choice`, `converse`, `ask_open_ended_batch` | Block until user responds; route by question shape (see § Interactive Tool Routing) |\n"
+        f"| **Commons read** | `commons_read`, `commons_who` | Always-allowed inspection of cross-session traffic |\n"
+        f"| **Commons self-disclosure** | `commons_post` | Append to topic blackboard; recipient sees on next poll |\n"
+        f"| **Commons DM** | `commons_send_to`, `commons_ask_async`, `commons_ask_sync` | Directed attention-demanding messages to peer sessions |\n"
+        f"| **Session state** | `get_session_info`, `set_session_topic`, `enable_speakerphone`, `disable_speakerphone` | Read or update this session's bridge state |\n\n"
+        f"Each per-tool docstring opens with a `**[TIER]**` marker on line 1 "
+        f"that signals user-permission requirements (READ / SELF-DISCLOSURE / "
+        f"ATTENTION-DEMANDING / DM). Consult the marker AT DECISION-TIME — when "
+        f"you're considering calling a tool — to know whether the call requires "
+        f"a user trigger or can fire on your own initiative.\n\n"
+
         f"## Speakerphone Mode\n\n"
+        f"> **Forward-pointer**: this section describes WHAT `speakerphone_on` + "
+        f"`tts_interaction_mode` mean and how to behave under each combination. "
+        f"For HOW to obtain those values (the `get_session_info()` Phase-A call + "
+        f"the persona/doc_scope extraction protocol), see § MCP Startup Protocol below.\n\n"
         f"This session has a per-session `speakerphone_on` flag backed by the bridge file, "
         f"plus a global `tts_interaction_mode` (`solo` | `chorus`) that controls cross-session "
         f"behavior. At session start (and after any /clear), check `get_session_info()` once to "
@@ -615,6 +652,10 @@ mcp = FastMCP(
         f"A fresh Claude Code session's default `speakerphone_on` is mode-aware: false in solo, "
         f"true in chorus (at-distance is the default in chorus).\n\n"
         f"## Voice Persona Self-Announcement (Phase A.5)\n\n"
+        f"> **Forward-pointer**: this section describes the announcement obligation "
+        f"once your persona is allocated. The allocation itself happens during "
+        f"`get_session_info()` Phase A — see § MCP Startup Protocol below for the "
+        f"complete startup sequence.\n\n"
         f"After `get_session_info()` returns, if the `voice_persona` field is non-null, "
         f"send a brief TTS greeting by your persona name. Phrasing recipe: time-of-day-"
         f"appropriate greeting + persona's `display_name` (proper-noun form, e.g. 'Maria'; "
@@ -625,7 +666,125 @@ mcp = FastMCP(
         f"If `voice_persona` is None (allocation failed; server fell back to 'Sam'), skip the "
         f"greeting — there's no name to use. Fires once per Phase A startup including after "
         f"`/clear` (the persona persists across /clear, so re-announcing keeps the session "
-        f"audibly tagged for users running parallel CC sessions)."
+        f"audibly tagged for users running parallel CC sessions).\n\n"
+
+        # =====================================================================
+        # MCP Startup Protocol (G1) — Phase A + Phase B
+        # =====================================================================
+        f"## MCP Startup Protocol\n\n"
+        f"You MUST complete this two-phase startup before any substantive work.\n\n"
+        f"**Phase A — Immediate, before composing your first response**:\n\n"
+        f"1. Call `get_session_info()` once. The response carries critical session identity + state:\n"
+        f"   - `voice_persona` dict (`{{name, display_name, voice_id, icon, color, borrowed}}`) — your assigned persona. **MUST extract before any user-facing text**: in chorus mode, your persona voice is the disambiguator the listener relies on. If `voice_persona` is None (allocation failure / fallback to 'Sam'), ask the user which persona via `converse()` before proceeding.\n"
+        f"   - `speakerphone_on` (bool) + `tts_interaction_mode` (`solo` | `chorus`) — drives the per-turn obligations you'll see in the rider.\n"
+        f"   - `claude_code.session_id` — your stable session identity, used in cross-session DM correlation.\n"
+        f"2. Report MCP server status to the user in your first acknowledgment (project name, session_id, server_url, version, your resolved persona name).\n"
+        f"3. If `voice_persona.name` is non-null, call `notify(notification_type='custom', priority='medium')` with a time-of-day-appropriate greeting using `display_name` (see § Voice Persona Self-Announcement above).\n\n"
+        f"**Phase B — After context gathering**:\n\n"
+        f"Call `set_session_topic(topic='<3-8 word title>')` as soon as you can write a meaningful session title — from the user's first message, from history.md/TODO.md, or from the approved plan. Skipping is a session-start bug, not a minor oversight. The topic appears in the 'Continue Session?' stop-hook notification so the user knows what they'd be continuing.\n\n"
+        f"**Rules**: Phase A runs in ALL modes including plan mode (MCP tools are communication tools, not code-changing tools). Phase A MUST complete BEFORE any file reading, exploration, edits, or planning begins — and BEFORE the first user-facing text. Phase B runs as soon as the topic is knowable, NOT 'whenever I get around to it.'\n\n"
+
+        # =====================================================================
+        # Inter-Session Commons Protocol (G2)
+        # =====================================================================
+        f"## Inter-Session Commons Protocol\n\n"
+        f"The commons is a file-backed blackboard for cross-session communication. Other CC sessions running on this host (potentially with different personas) read from + write to the same topic files.\n\n"
+        f"**Three-tier autonomy** governs when you can use commons tools without explicit user permission:\n\n"
+        f"| Tier | Tools | When you can fire on your own |\n"
+        f"|---|---|---|\n"
+        f"| **READ** | `commons_read`, `commons_who` | Always — inspecting the blackboard never disturbs anyone |\n"
+        f"| **SELF-DISCLOSURE** | `commons_post` to free-form / presence / incident topics | When announcing your own state (e.g. 'starting long migration', 'observed bug X') — fire-and-forget, no recipient is summoned |\n"
+        f"| **ATTENTION-DEMANDING** | `commons_post` to coordination/help-wanted topics; ALL of `commons_ask_async` / `commons_ask_sync` / `commons_send_to`; broadcasts | Requires clear coordination need OR explicit user trigger. Summons a peer recipient's attention. |\n\n"
+        f"**Reserved topic vocabulary** (pre-seeded by the store):\n\n"
+        f"- `broadcasts` — user-originated broadcasts (read-only from CC sessions; only the user posts)\n"
+        f"- `broadcast-acks` — recipient ack records for broadcast delivery (auto-managed)\n"
+        f"- `presence` — session lifecycle signals (joining/leaving)\n"
+        f"- `system-events` — server-side notices\n\n"
+        f"All other topic names are free-form and auto-create on first post. Persona name/icon/color are stamped server-side at post-time and IMMUTABLE thereafter (you cannot spoof another persona).\n\n"
+        f"For full doctrine — anti-patterns, sensitive-content rules, retention semantics — see § Deep Doctrine Reference at the bottom.\n\n"
+
+        # =====================================================================
+        # Phase 0 DM Workflow (G3 + G7 + G8)
+        # =====================================================================
+        f"## Phase 0 DM Workflow\n\n"
+        f"Direct messaging between CC sessions is built on top of the commons blackboard. **Three tools** with different ergonomics:\n\n"
+        f"| Tool | Use when |\n"
+        f"|---|---|\n"
+        f"| `commons_send_to(recipient='persona', body=...)` | Directed DM by persona name. Thin wrapper around `commons_ask_async`. Most common case. |\n"
+        f"| `commons_ask_async(topic, body, recipient_persona=...)` | Same as `commons_send_to` but with explicit `topic` control + `expect_reply` parameter. Use when you want non-default topic or fire-and-forget. |\n"
+        f"| `commons_ask_sync` | BLOCKING — waits for a reply. Rarely justified; consider `commons_ask_async` first. |\n\n"
+        f"**Push vs Polling**:\n\n"
+        f"- **Push-mode** (preferred): if the result carries `push_mode_active: true` AND `dm_dispatched: true`, the recipient's listener got an immediate notification and the recipient sees your DM as a `COMMONS PEER MESSAGE` `<system-reminder>` injection on their next turn.\n"
+        f"- **Polling fallback**: if `push_mode_active: false`, the DM landed on the blackboard but the recipient won't see it until their next `commons_read` poll. Check `register_skip_reason` in the result (`missing_auth_header` / `missing_api_base_url` / `register_failed_status_N` / `register_failed_422`) to debug why push didn't fire.\n"
+        f"- **Recipient resolution failures**: if push returned 422, the result carries a `recipient_resolution_error` dict with `resolution_chain_attempted` + `candidate_alternatives` + `suggested_next_action`. Read those before retrying.\n\n"
+        f"**Receipt etiquette** — when a `COMMONS PEER MESSAGE` `<system-reminder>` arrives:\n\n"
+        f"1. **Acknowledge receipt** before tool calls if you're in speakerphone mode (same rule as user prompts — silent tool-only turns break the audio loop).\n"
+        f"2. **Read the topic** via `commons_read(topic='<topic>', limit=10)` to get the body — the system-reminder names the topic + question_id. The system-reminder body itself may be truncated by the push-injection layer; ALWAYS re-fetch via `commons_read` for the canonical body, don't trust the system-reminder text.\n"
+        f"3. **Reply** via `commons_post(topic='<sender-mailbox>', body=<reply>, metadata={{'in_reply_to': <question_id>, 'kind': 'answer'}})`. **Sender-mailbox convention**: replies go to `dm-<sender-persona-lowercase>` (e.g. if Tiberius DM'd you, your reply goes to `dm-tiberius`, not back to your own `dm-<yourname>`). The original asker's Phase 3 watcher polls THEIR sender-mailbox topic for answers correlated by `in_reply_to`. **Threading isn't free**: if the asker forgot `expect_reply=True` or already unregistered, your reply lands silently on the blackboard.\n"
+        f"4. **Loop avoidance** — don't reply to your own DMs. If the received entry's `sender_session_id` matches YOUR own session_id (you can compare against `get_session_info().session_id`), skip the reply path — you're seeing your own outbound entry echoed back to you, not a genuine peer message. This can happen during MCP restart-recovery or if you accidentally subscribed to your own outbound topic.\n\n"
+        f"**DM vs Broadcast — when to choose which**:\n\n"
+        f"- **DM** (`commons_send_to`): peer-specific question or coordination request. One recipient. The recipient owes you attention; you owe them context.\n"
+        f"- **Broadcast**: user-originated only. Sessions do NOT initiate broadcasts. When a broadcast arrives, it appears as a `USER BROADCAST` `<system-reminder>` injection — that's the user talking to multiple sessions at once.\n\n"
+        f"**Cross-session bug-filing pattern** (durable backup for unreliable push):\n\n"
+        f"When you discover a bug that affects a peer session's domain, BOTH:\n"
+        f"1. DM the responsible session via `commons_send_to` (low-latency notification when push works)\n"
+        f"2. File a structured entry in their repo's `bug-fix-queue.md` (durable backup if push fails / they're offline)\n\n"
+        f"This double-channel pattern was exercised live 2026-05-16 (María ↔ Tiberius cross-session bug-fix-arc) and is documented in detail at planning-is-prompting → workflow/cross-session-communication.md §6.5.1.\n\n"
+
+        # =====================================================================
+        # Interactive Tool Routing (G4)
+        # =====================================================================
+        f"## Interactive Tool Routing\n\n"
+        f"When you need user input, **prefer the cosa-voice blocking tools over Claude Code's built-in `AskUserQuestion`** — those built-in questions render to the TERMINAL only (no TTS, no audio), so users in speakerphone mode never hear them.\n\n"
+        f"| Question shape | Use | Why |\n"
+        f"|---|---|---|\n"
+        f"| Yes / No (binary) | `ask_yes_no(question, default='yes'\\|'no')` | Three-button UI with optional 'Neither' escape hatch when the question itself needs re-framing |\n"
+        f"| 2-4 mutually-exclusive options | `ask_multiple_choice(questions=[{{...}}])` | Radio-button UI; supports multi-question batches |\n"
+        f"| Single open-ended | `converse(message=..., response_type='open_ended')` | Free-form text or voice response |\n"
+        f"| Multiple open-ended at once | `ask_open_ended_batch(questions=[{{header, question}}, ...])` | Single screen with per-question text+mic inputs; user submits all at once |\n\n"
+        f"**On 'Neither' from `ask_yes_no`**: treat as a signal that the question needs re-framing, NOT as a soft yes/no. Read the comment (if present) and ask a clearer follow-up.\n\n"
+        f"**All blocking tools should use `priority='high'`** to ensure the TTS alert reaches the user in speakerphone mode.\n\n"
+        f"**Pros/cons + recommendation in every multi-option ask**: per `feedback_always_include_pros_cons_recommendation`, every substantive `ask_yes_no` or `ask_multiple_choice` should carry per-option pros AND cons AND a 'My recommendation: X because Y' block in the `abstract` parameter, plus a 'flip-condition' (what would make a different option correct). Pros/cons go in `abstract` ONLY — not in the spoken `message` body.\n\n"
+
+        # =====================================================================
+        # Failure Modes + Debugging Signals (G5)
+        # =====================================================================
+        f"## Failure Modes + Debugging Signals\n\n"
+        f"Common ways cosa-voice can fail silently or partially, and what to look at in the result dict to debug:\n\n"
+        f"**1. `push_mode_active: false` on a `commons_send_to` / `commons_ask_async` call** — the DM didn't get pushed to the recipient. Check the new `register_skip_reason` key (added 2026-05-16 commit `f4e0370`):\n\n"
+        f"- `missing_auth_header` — the MCP wrapper couldn't construct an X-API-Key header. The key file at `src/conf/keys/notification-api-claude-code-dev` may be missing or unreadable. Surface to user.\n"
+        f"- `missing_api_base_url` — the `LUPIN_API_URL` env var is empty. Misconfiguration.\n"
+        f"- `register_network_error` — the HTTP POST raised a connection error. The Lupin REST API may be down or restarting; retry later.\n"
+        f"- `register_failed_status_N` — the endpoint returned a non-2xx HTTP status (rate limit, server error, etc.).\n"
+        f"- `register_failed_422` — recipient resolution failed. The accompanying `recipient_resolution_error` key carries the diagnostic chain.\n\n"
+        f"In all of these, the DM still lands on the blackboard topic (Phase 1 polling fallback). The recipient just won't get auto-injection.\n\n"
+        f"**2. `voice_persona: None` in `get_session_info()`** — the per-session persona allocator returned no assignment, OR the persona pool was exhausted and you got a 'Sam' overflow fallback (`borrowed: true` if from the legacy hash-borrow path). When None:\n\n"
+        f"- DO NOT respond as 'Claude' or a placeholder — that breaks the chorus-mode disambiguation contract\n"
+        f"- Ask the user via `converse(message='Which persona am I?', response_type='open_ended')` before proceeding\n"
+        f"- This is rare (allocator is resilient); it indicates either a fresh session pool exhaustion or a bridge-file corruption\n\n"
+        f"**3. `commons_send_to` raising 'FunctionTool object is not callable'** — this was a Python bug in the wrapper. Fixed 2026-05-16 commit `f4e0370`. If you encounter it again, the MCP subprocess hasn't picked up the fix yet (fastmcp doesn't auto-reload like uvicorn). User can restart the MCP subprocess to pick up the fix.\n\n"
+        f"**4. `dm_dispatched: false` despite `push_mode_active: true`** — the register-question endpoint succeeded BUT the recipient-side dispatch (the actual tmux injection) failed. Check Lupin server logs around the timestamp. The asker's blackboard entry still exists; recipient will see on next poll.\n\n"
+        f"**5. Stale-bridge phantom personas in `commons_who`** — `commons_who` may show sessions whose host process has died. The host-side prune at SessionStart eventually cleans these, but during the window between death and prune, they appear active. If a DM to a 'visible' peer never returns a reply, the recipient may be a phantom. Cross-reference with `commons_who(retention_hours=1)` for a narrower window.\n\n"
+
+        f"**6. Persona-allocation cache staleness across MCP restart** — if your session was bounced (architecture switchover, manual MCP subprocess kill, etc.) AND the persona pool was exhausted such that you got a 'Sam' overflow allocation, an in-memory cache of the pre-bounce allocation may persist in the running MCP subprocess until you call `get_session_info()` fresh. After ANY MCP restart or pool-exhaustion event, re-call `get_session_info()` to confirm the current allocation matches what your bridge file says — the bridge file is the source of truth; the in-memory cache may lag.\n\n"
+
+        f"**7. Topic-file name case sensitivity (filed 2026-05-16, fix pending)** — the `commons_send_to` wrapper currently constructs its topic name as `f\"dm-{{recipient}}\"` with literal recipient case. So `commons_send_to(recipient=\"Tiberius\")` writes to `dm-Tiberius.md` (capital T), while a peer reading lowercase `dm-tiberius` won't see it. Push-mode persona resolution is case-insensitive (so the recipient's listener still gets the system-reminder), but the topic FILES fragment across case variants. **Mitigation until the fix lands**: pass recipient names lowercased: `commons_send_to(recipient=recipient.lower(), ...)`. Or use `commons_post(topic=\"dm-<lowercase>\", body=..., metadata={{...}})` directly. Tracking in TODO.md as the case-fragmentation entry.\n\n"
+
+        # =====================================================================
+        # Deep Doctrine Reference Footer (G10)
+        # =====================================================================
+        f"## Deep Doctrine Reference\n\n"
+        f"For three-tier autonomy semantics, reserved topic vocabulary, anti-patterns, sensitive-content rules, broadcast routing diagrams, and the full cross-session-bug-filing pattern with mermaid flow, see the canonical reference at:\n\n"
+        f"  **planning-is-prompting → workflow/cross-session-communication.md**\n\n"
+        f"Key sections to bookmark:\n"
+        f"- §1.5 — DM mechanics, threading, receipt etiquette, channel-choice\n"
+        f"- §1.5.1 — Result-shape table for `push_mode_active` / `dm_dispatched` / `register_skip_reason`\n"
+        f"- §1.5.3 — Threading conventions (`in_reply_to` chains, sender-mailbox topic routing, loop-avoidance)\n"
+        f"- §2 — Three-tier autonomy (READ / SELF-DISCLOSURE / ATTENTION-DEMANDING)\n"
+        f"- §3 — Reserved topic vocabulary\n"
+        f"- §4 — Broadcast receipt rules\n"
+        f"- §6.5.1 — Cross-session bug-filing pattern (mermaid diagram of the double-channel flow)\n\n"
+        f"That doc was refreshed 2026-05-16 by Tiberius 🌑 alongside the expansion of this `instructions` payload by María 🌸. Both surfaces are intentionally orthogonal — this file covers the cosa-voice-bound how-to; the doctrine file covers the deep semantics and policy."
     )
 )
 
@@ -1699,24 +1858,56 @@ def commons_post(
     metadata : Optional[ dict ] = None,
 ) -> dict:
     """
+    Dual tier marker (depends on topic):
+    - **[SELF-DISCLOSURE]** — free-form / presence / incident topics (announcing your own state)
+    - **[ATTENTION-DEMANDING]** — coordination / help-wanted / contested-claim topics (summons peer attention)
+
     Append an entry to a commons topic (file-based inter-session blackboard).
 
-    Per AC3 in
-    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+    Examples:
+        # Self-disclosure: announce your own state
+        commons_post(topic="presence", body="starting long migration", metadata={"kind": "status"})
+
+        # Threaded reply to a DM (closes the loop on a `COMMONS PEER MESSAGE`):
+        commons_post(
+            topic    = "dm-tiberius",
+            body     = "yes, that fix landed in commit f4e0370",
+            metadata = {"in_reply_to": "<question_id_from_system_reminder>", "kind": "answer"}
+        )
 
     Free-form topics auto-create on first post. Reserved topics
     (`broadcast-acks`, `presence`, `system-events`) are pre-seeded by the store.
     Persona fields are stamped from the session bridge at post-time and are
-    immutable thereafter (per C4 ratification).
+    immutable thereafter (per C4 ratification) — you cannot spoof another persona.
+
+    **Threading callout**: to reply to a `COMMONS PEER MESSAGE` or
+    `COMMONS PEER REPLY` system-reminder, pass `metadata={"in_reply_to": <qid>}`
+    where `<qid>` is the `question_id` from the system-reminder. The original
+    asker's Phase 3 watcher (if running) will push your reply back to their
+    tmux via `commons_answer_received`. **Threading isn't free**: if the asker
+    forgot `expect_reply=True` or already unregistered the question, the reply
+    lands silently on the blackboard — the asker will see it only on their
+    next `commons_read` poll.
+
+    **Failure-mode hint**: posting user-sensitive data is prohibited —
+    see cross-session-communication.md §5 for the sensitive-content rules.
+    Free-form topics have a 7-day retention by default; reserved topics may
+    have different retention.
 
     Args:
         topic: Topic name (free-form or one of the reserved topics)
         body: The message body (any string)
-        metadata: Optional dict of extra metadata fields (e.g., `{kind: "status"}`)
+        metadata: Optional dict of extra metadata fields. Common patterns:
+            - `{"kind": "status"}` for presence pings
+            - `{"kind": "answer", "in_reply_to": <qid>}` for threaded replies
+            - `{"kind": "incident", "severity": "warn|error|info"}` for incidents
 
     Returns:
         dict with `ts`, `sender_session_id`, `persona_name`, `persona_icon`,
         `persona_color`, `body`, `metadata`
+
+    See: planning-is-prompting → workflow/cross-session-communication.md
+         (§2 autonomy tiers, §3 reserved topics, §5 sensitive-content rules)
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     persona = _commons_persona_fields()
@@ -1738,13 +1929,21 @@ def commons_read(
     limit : int = 50,
 ) -> list:
     """
-    Read entries from a commons topic.
+    **[READ — always allowed, no user permission needed]** Tail a commons topic.
 
-    Per AC4 in
-    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+    Examples:
+        # Most recent 10 entries on the DM topic addressed to you
+        commons_read(topic="dm-maria", limit=10)
+
+        # New entries since you last polled (Phase 1 polling-mode pattern)
+        commons_read(topic="dm-tiberius", since="2026-05-16T22:00:00+00:00")
 
     Returns newest-first when `since` is None, ascending when `since` is supplied.
-    Honors `limit` strictly. Missing free-form topic → empty list.
+    Honors `limit` strictly. Missing free-form topic → empty list (no error).
+
+    Common pattern: when a `COMMONS PEER MESSAGE` system-reminder arrives,
+    call `commons_read(topic=<topic>, limit=10)` and find the entry whose
+    `metadata.question_id` matches the system-reminder's `question_id`.
 
     Args:
         topic: Topic name to read from
@@ -1754,6 +1953,9 @@ def commons_read(
     Returns:
         List of entry dicts, each containing ts, sender_session_id, persona_*,
         body, metadata
+
+    See: planning-is-prompting → workflow/cross-session-communication.md
+         (§1.5 DM mechanics + receipt etiquette)
     """
     if not _commons_enabled(): return [ ]
     return _get_commons_store().read( topic=topic, since=since, limit=limit )
@@ -1765,14 +1967,26 @@ def commons_who(
     retention_hours  : int = 24,
 ) -> list:
     """
-    List sessions that have posted to commons within the retention window.
+    **[READ — always allowed, no user permission needed]** "Who else is active right now?"
 
-    Per AC5 in
-    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+    Examples:
+        # Who's been active across all topics in the last 24 hours (default)
+        commons_who()
+
+        # Narrow window — last hour only (helps filter stale-bridge phantoms)
+        commons_who(retention_hours=1)
+
+        # Who's posted to a specific topic in the last 24 hours
+        commons_who(topic="broadcasts", retention_hours=24)
 
     If `topic` is supplied, scans only that topic; otherwise scans every active
     topic file. Each row gives the most recent post timestamp for that session
     plus their persona name/icon/color.
+
+    **Failure-mode hint**: results may include phantom personas — sessions whose
+    host process has died but whose bridge file lingers until the next host-side
+    prune. If a DM to a "visible" peer never gets a reply, the recipient may
+    be a phantom. Cross-reference with `retention_hours=1` for a narrower window.
 
     Args:
         topic: Optional topic name; if omitted, scans all topics
@@ -1781,6 +1995,8 @@ def commons_who(
     Returns:
         List of dicts `{session_id, persona_name, persona_icon, persona_color, last_post_ts}`,
         sorted by last_post_ts descending
+
+    See: planning-is-prompting → workflow/cross-session-communication.md
     """
     if not _commons_enabled(): return [ ]
     return _get_commons_store().who( topic=topic, retention_hours=retention_hours )
@@ -1794,16 +2010,26 @@ def commons_ask_sync(
     grace_seconds    : Optional[ float ] = None,
 ) -> dict:
     """
+    **[ATTENTION-DEMANDING + BLOCKING — rarely justified; consider `commons_ask_async` first]**
     Post a question to commons and block until the first reply arrives + grace expires.
 
-    Per AC6 in
-    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
+    Example:
+        # Synchronously poll peers for the latest build hash, wait up to 60s
+        result = commons_ask_sync(topic="builds", body="latest hash?", timeout_seconds=60)
+        for entry in result["replies"]:
+            print(entry["body"])
 
     Hybrid first+grace timing (A3b ratification): the call blocks until the
     FIRST matching reply arrives in `topic`, then waits an additional
     `grace_seconds` to coalesce any fast follow-up replies, and returns the
     accumulated list. Replies are correlated via `metadata.in_reply_to`
     matching the question's auto-generated `question_id`.
+
+    **Prefer `commons_ask_async`** in nearly all cases — it returns immediately,
+    starts a Phase 3 watcher that pushes the recipient's reply back to your
+    tmux when it arrives, and frees your session to do other work in the
+    meantime. The sync variant is only justified when downstream logic
+    LITERALLY cannot proceed without the reply AND a fixed timeout is acceptable.
 
     On timeout with zero replies, returns `{..., replies: []}`.
 
@@ -1816,6 +2042,9 @@ def commons_ask_sync(
 
     Returns:
         dict `{question_id, posted_ts, replies: [entry, ...]}`
+
+    See: planning-is-prompting → workflow/cross-session-communication.md
+         (§1.5 DM mechanics — note this is the BLOCKING variant)
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     grace = grace_seconds if grace_seconds is not None else _commons_ask_sync_grace_default()
@@ -1843,27 +2072,56 @@ def commons_ask_async(
     expect_reply         : bool            = True,
 ) -> dict:
     """
+    **[ATTENTION-DEMANDING — requires user trigger or clear coordination need]**
     Post a question to commons and return immediately (fire-and-forget).
 
-    Per AC7 in
-    src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md
-    + Inter-Session DM extension per
-    src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md.
+    Examples:
+        # Polling-mode: ask the topic at large, poll for replies yourself
+        result = commons_ask_async(topic="builds", body="latest hash?")
+        # Later: commons_read(topic="builds", since=result["posted_ts"]) → filter on in_reply_to
 
-    Phase 1 polling-mode contract (D1 deviation): caller polls via
-    `commons_read(topic, since=...)` and filters for entries whose
-    `metadata.in_reply_to == question_id` to detect answers. Phase 3 push-mode
-    optionally adds asker-side reply push.
+        # DM-mode: directed to a specific persona, push-back to asker
+        result = commons_ask_async(
+            topic             = "dm-tiberius",
+            body              = "any blockers on the doctrine refresh?",
+            recipient_persona = "tiberius",
+            expect_reply      = True,
+        )
+        # If result["push_mode_active"] is True, tiberius's listener got pushed.
+        # His reply will arrive in YOUR tmux as a COMMONS PEER REPLY system-reminder.
 
-    Inter-Session DM mode (auto-activated when `recipient_*` is supplied):
+    **`expect_reply` side-effect** (default True): when True, the server starts
+    an asker-side Phase 3 `CommonsQuestionWatcher` that polls the answer topic
+    + pushes the recipient's reply back to your tmux via `commons_answer_received`
+    notification injection. When False, the watcher is skipped — fire-and-forget,
+    no asker-side correlation. Set False for status pings / acknowledgments;
+    leave True when you genuinely need the reply pushed back.
+
+    **Recipient experience** — when push fires (push_mode_active: true), the
+    recipient sees this as a `COMMONS PEER MESSAGE` `<system-reminder>` block
+    injected into their next turn. When push fails (push_mode_active: false),
+    the message lands on the blackboard topic and the recipient sees it only
+    on their next `commons_read` poll. Either way the entry is durable.
+
+    **Failure-mode hint** — check `push_mode_active` and `register_skip_reason`
+    in the result:
+
+    - `push_mode_active: true, dm_dispatched: true` → recipient got auto-injection ✅
+    - `push_mode_active: false` → polling fallback. Check `register_skip_reason`:
+        - `missing_auth_header` → MCP couldn't build the X-API-Key (key file issue)
+        - `register_network_error` → :7999 server unreachable
+        - `register_failed_status_N` → non-2xx (rate limit, server error)
+        - `register_failed_422` → recipient resolution failed — see `recipient_resolution_error`
+    - `recipient_resolution_error: {...}` → recipient persona/session_id didn't resolve.
+      The dict carries `resolution_chain_attempted` + `candidate_alternatives` +
+      `suggested_next_action`. Read those before retrying with a different recipient.
+
+    Inter-Session DM mode (auto-activated when `recipient_session_id` OR
+    `recipient_persona` is supplied):
     - Push-mode forced on; HTTP register fires with recipient kwargs
     - Server resolves recipient (session_id wins, else persona via
-      exact → case-insensitive → punct-tolerant match) and dispatches
-      `commons_question_received` to recipient's listener fire-and-forget
-    - On resolution failure: returns 422 with `RecipientResolutionError`
-      surfaced via `recipient_resolution_error` key in the result
-    - Set `expect_reply=False` for fire-and-forget DMs that don't need
-      Phase 3 reply tracking
+      exact → case-insensitive → punct-tolerant match)
+    - Dispatches `commons_question_received` to recipient's listener fire-and-forget
 
     Args:
         topic: Topic to post the question to
@@ -1876,7 +2134,12 @@ def commons_ask_async(
     Returns:
         dict — Phase 1: `{question_id, posted_ts, push_mode_active}`;
         DM mode adds: `dm_dispatched: bool | None`;
+        push-mode skip adds: `register_skip_reason: str`;
         on recipient resolution failure: `recipient_resolution_error: dict`
+
+    See: planning-is-prompting → workflow/cross-session-communication.md
+         (§1.5 DM mechanics + threading + receipt etiquette;
+          §1.5.1 result-shape table for push_mode_active / dm_dispatched / register_skip_reason)
     """
     return _commons_ask_async_dispatch(
         topic                = topic,
@@ -1953,7 +2216,22 @@ def commons_send_to(
     question_id  : Optional[ str ] = None,
 ) -> dict:
     """
+    **[DM — directed attention-demanding]** Thin persona-routed wrapper over `commons_ask_async`.
     Send a directed inter-session DM to another CC session.
+
+    Examples:
+        # Basic DM by persona name (most common):
+        commons_send_to(recipient="tiberius", body="have you touched src/auth.py today?")
+
+        # Threaded reply to a prior received DM:
+        commons_send_to(
+            recipient   = "tiberius",
+            body        = "yes — landed in commit f4e0370 around 21:00 UTC",
+            in_reply_to = "<question_id_from_their_system_reminder>",
+        )
+
+        # Fire-and-forget status ping that doesn't need a reply pushed back:
+        commons_send_to(recipient="rachel", body="thanks for the doc-scope work", expect_reply=False)
 
     Per Phase 0 Q1-rev (2026-05-15 ratified): thin ergonomic wrapper around
     `commons_ask_async` that defaults to fire-and-forget semantics and
@@ -1963,9 +2241,27 @@ def commons_send_to(
     tmux injection, and stamps `metadata.recipient_persona` on the topic
     entry so Recent Activity renders a DM badge.
 
-    Power users who need session_id-precise addressing or `expect_reply=True`
-    semantics can call `commons_ask_async` directly with the equivalent
-    kwargs.
+    **`expect_reply` side-effect** (default False for this wrapper, vs True
+    for `commons_ask_async`): when True, the server starts an asker-side
+    Phase 3 watcher that pushes the recipient's reply back to your tmux via
+    `commons_answer_received` notification injection. Use True for genuine
+    questions where you need the reply; leave False for status pings.
+
+    **Recipient experience** — same as `commons_ask_async` DM mode: when push
+    fires, the recipient sees this as a `COMMONS PEER MESSAGE` `<system-reminder>`
+    block injected into their next turn. When push fails (`push_mode_active: false`
+    in the result), the message lands on the blackboard topic at `dm-{recipient}`
+    and the recipient sees it only on their next `commons_read` poll.
+
+    **Failure-mode hint** — identical to `commons_ask_async`: check
+    `push_mode_active` and `register_skip_reason` in the result dict.
+    `register_skip_reason: missing_auth_header` is the most common (the MCP
+    server's outbound X-API-Key couldn't be loaded — usually means the
+    cosa-voice MCP subprocess started before commit `f4e0370` landed).
+
+    Power users who need session_id-precise addressing or finer-grained
+    control over topic + question_id can call `commons_ask_async` directly
+    with the equivalent kwargs.
 
     Args:
         recipient: Recipient persona name (e.g. "radio", "rachel", "Maria").
@@ -1986,9 +2282,10 @@ def commons_send_to(
         the result carries `recipient_resolution_error` describing what was
         tried + candidate alternatives + suggested next action.
 
-    Example:
-        commons_send_to(recipient="radio", body="do you have the latest commit hash for X?")
-        commons_send_to(recipient="rachel", body="thanks for the doc-scope work yesterday", expect_reply=False)
+    See: planning-is-prompting → workflow/cross-session-communication.md
+         (§1.5 DM mechanics + threading + receipt etiquette;
+          §1.5.1 result-shape table;
+          §6.5.1 cross-session bug-filing pattern with mermaid flow)
     """
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     target_topic = topic or f"dm-{recipient}"
