@@ -126,31 +126,116 @@ Per Rick's "let's go ahead and document and check point your work" direction. Do
 
 **Findings to be appended below as each step completes.**
 
-### Step 1 — Docker container lifecycle log
+### Step 2 — mtime + size correlation (ran FIRST, on-disk evidence is fastest)
 
-*(pending)*
+- **Live file**: `io/commons/dm-maria.md` — Size: 19,733 bytes, mtime: 2026-05-17 19:04:35 EDT
+- **Archive bucket**: `io/commons/archive/2026-05-17/dm-maria.md` — Size: 24,169 bytes, mtime: 2026-05-17 19:04 EDT (archived TODAY at ~21:04 UTC)
+- Archive entries cover **2026-05-16T20:25→22:20 UTC**; the truncated entry at 2026-05-17T00:18:31Z is NOT in the archive bucket — it lives in the live file
+- **Truncated entry IS in the live file** at line 9: `## 2026-05-17T00:18:31.994221+00:00 | Tiberius 🌑 #b714e138` — exact timestamp Tiberius cited
 
-### Step 2 — mtime correlation
+### Step 3 — Trailing-bytes signature (ran SECOND, the decisive evidence)
 
-*(pending)*
+Extracted the truncated entry's body via `awk` between its header and the next `---` separator. Body content (verbatim):
 
-### Step 3 — Trailing-bytes signature
+```
+María 🌸 — Tiberius 🌑. Read your prose end-to-end (the 18,630-char `instructions` block + the 6 commons_* docstring updates). Substantive answers to your 5 questions, ranked by impact:
+```
 
-*(pending)*
+**Body length: 195 characters** (Tiberius reported original ~4000 chars → **~3800+ characters lost**).
 
-### Step 4 — fastmcp logs
+**Critical signature observation**:
+- Header: well-formed `## <ts> | Tiberius 🌑 #b714e138`
+- Metadata: well-formed JSON `{"kind": "question", "question_id": "a9ca3290-...", "recipient_persona": "maria", "expect_reply": false, ...}`
+- Blank line: present
+- Body: 195 chars, ends at `:` with NO trailing newline anomaly
+- Entry separator: **clean `\n---\n`** immediately after the body
+- Next entry (00:20:55Z): starts normally on the line after the separator
 
-*(pending)*
+The entry has the EXPECTED on-disk structure of a SUCCESSFULLY WRITTEN entry. There's no partial separator, no header-without-body, no truncation in the middle of a metadata line. The body string was already short WHEN it reached `_format_entry`.
+
+### Step 1 — Docker bounce log (ran THIRD, for completeness)
+
+The architecture-switchover broadcast that Tiberius's hypothesis (a) tied the truncation timing to actually fired around **2026-05-16T22:25 EDT (= 2026-05-17T02:25 UTC)** — based on Docker logs around the time. The truncation incident was at **2026-05-17T00:18:31Z UTC = 2026-05-16 20:18 EDT** — almost **2 hours BEFORE the bounce**.
+
+So the timing correlation Tiberius hypothesized was off — there was no MCP-subprocess kill at the truncation moment.
+
+### Step 4 — fastmcp subprocess logs
+
+Not directly queryable (fastmcp logs go to stdout of the host Claude Code process; not centralized). Skipped; structural evidence from Step 3 is already decisive.
 
 ### Decision tree outcome
 
-*(pending — pick Candidate I / II / III per §3.3 selection criteria once root-cause is in hand)*
+**Hypothesis ranking AFTER investigation**:
+
+| Hypothesis | Pre-investigation | Post-investigation | Evidence |
+|---|---|---|---|
+| (a) bounce-mid-write | "most likely" | **RULED OUT** | Clean entry separator, no bounce in the relevant time window |
+| (b) fastmcp transport truncation | "hypothetical" | **STRONGLY SUSPECTED** | Body 195 chars vs. claimed ~4000; header + metadata + separator all well-formed; truncation upstream of `_format_entry` |
+| (c) silent `CommonsStore.post()` body cap | "hypothetical" | **RULED OUT** (already by code review) | No length-capping logic in the store; sequential append-under-flock |
+
+**Where this leaves the §3.3 fix-shape candidates**:
+
+| Candidate | Addresses transport truncation? |
+|---|---|
+| I — full atomic temp+rename | **No** — protects against kill-mid-write, but body is already short by the time we write |
+| II — fsync after write | **No** — same reason, write completes successfully; problem is upstream |
+| III — defer fix entirely | Acceptable ONLY if recurrence is rare enough to live with |
+
+**The design's Candidate set doesn't squarely address the actual root cause**. New candidates needed:
+
+| New Candidate | Description | Pros | Cons |
+|---|---|---|---|
+| **IV — wrapper-side body-length telemetry** | Log every body length entering `_commons_ask_async_dispatch`. Add a warn-level log if body < some threshold. Doesn't fix anything but gives forensic data for the NEXT occurrence. | Cheap, low-risk, fast to land | Doesn't actually fix the bug; relies on next-occurrence to gather more data |
+| **V — fastmcp transport probe** | Write a controlled test: post bodies of escalating length (1k / 4k / 16k / 64k bytes) via `commons_send_to`, inspect what survives on disk. If a clear cap surfaces, file upstream OR patch locally. | Pins the root cause definitively | Time-consuming; requires live MCP subprocess; may not reproduce if transport state-dependent |
+| **VI — wrapper-side checksum + size header** | Wrapper computes sha256(body) + `len(body)` and stamps both into the metadata. Receiver-side post-write check: if `len(stored_body) != metadata.body_len`, log a CRITICAL. | Catches future truncation as it happens, attributable | Adds metadata bloat; defensive engineering for a transport-layer bug |
+
+**My recommendation**: ship Candidate IV NOW (cheap, low-risk, immediate value) as instrumentation. Schedule Candidate V as a follow-up investigation when an MCP subprocess can be safely held open for the probe. Defer Candidate VI unless V doesn't find the root cause.
+
+**Awaiting Rick's go-or-no on**:
+1. The hypothesis (a) → (b) conclusion (does my evidence convince him?)
+2. The Candidate IV+V combined approach (or push back to a different fix shape?)
+3. Timing: do these new candidates land in this assignment's scope, or split to a new task?
 
 ---
 
-## Phase 4 — Sub-bug B fix (gated on Phase 3 outcome + Rick's go)
+## Phase 4 — Sub-bug B fix-shape decision (RATIFIED — Candidate V first)
 
-*(not yet scoped; depends on which Candidate Phase 3 selects)*
+### Rick's verdict (2026-05-17 evening, post-investigation):
+
+- **Sub-bug B path**: **Candidate V — fastmcp transport probe first**. Pin root cause definitively before writing any production code. Skip the IV+V combination I recommended in favor of certainty over speed.
+- **CoSA commit**: **Rick handles manually** — he commits `src/cosa/rest/routers/commons.py:100` from a CoSA-context shell. I leave the working-tree edit in place.
+
+### Probe design (Candidate V)
+
+**Goal**: send `commons_post` calls with bodies of escalating length, observe what survives on disk, identify any cutoff.
+
+**Why `commons_post` not `commons_send_to`**:
+- `commons_send_to` goes through the wrapper, which currently is the OLD code in the running MCP subprocess (the helper I just landed hasn't been picked up — restart pending Rick).
+- `commons_post` is a fastmcp tool that accepts arbitrary topic + body. SAME transport pipeline as `commons_send_to`, but no wrapper involvement.
+- If the cap is at the transport layer (JSON-RPC over stdio in fastmcp), both routes hit it identically.
+
+**Probe lengths** (bytes):
+| # | Length | Rationale |
+|---|---|---|
+| 1 | 100 | Baseline — Tiberius's truncated body was 195 chars; anything ≤200 should survive cleanly |
+| 2 | 500 | Sanity floor |
+| 3 | 1,000 | First "meaningful" length |
+| 4 | 4,000 | Tiberius's original target size |
+| 5 | 8,000 | 2× target |
+| 6 | 16,000 | Coarse upper sweep |
+
+**Test topic**: `probe-fastmcp-body-length` (free-form; auto-creates on first post; small file, cleanly removable post-test).
+
+**Per-call procedure**:
+1. Generate a body of exact length N (deterministic content, e.g., `f"PROBE-LEN-{N}-" + "x" * (N - len(prefix))`)
+2. `commons_post(topic="probe-fastmcp-body-length", body=<generated>, metadata={"probe_len": N})`
+3. `commons_read(topic="probe-fastmcp-body-length", limit=1)` to fetch what landed
+4. Compare `len(returned_body)` against N
+5. Record: (sent_len, received_len, ratio, "survived"/"truncated")
+
+### Live probe execution
+
+*(running now via the live MCP — results appended below)*
 
 ---
 

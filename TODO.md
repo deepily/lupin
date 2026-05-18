@@ -1,12 +1,16 @@
 # TODO
 
-## 🚨 PRIORITY-1 NEXT SESSION — history.md archive (deferred from 2026-05-16 PM session-end)
+## ✅ DONE 2026-05-17 AM — history.md archive (resolved both deferred priority-1 entries from 2026-05-15 and 2026-05-16)
 
-**Health at session-end**: 26,032 tokens / 104.1% of 25k / 🚨 CRITICAL band. Today's session added ~6,000 tokens via Checkpoints 1-4 + Rio's model-server-carveout commit, pushing over the limit.
+**Executed by**: Tiberius 🌑 (session `2d916480`) at 2026-05-17 ~17:10 EDT, per Rick's voice approval ("affirmative Tiberius let's go ahead and archive the history before anything else") after reviewing the top-5 queues.
 
-**Next session's first action**: invoke `/history-management mode=archive` per canonical workflow. Cut at clean date boundary (2026-05-15 or earlier). Target post-archive ≤13k tokens.
-
-**Filed by**: María 🌸 session `3c9fce51` at session-end 2026-05-16 ~20:30 EDT. Rick approved deferral via `ask_multiple_choice` voice gate ("Defer this to the next session. We'll do it first thing when we start up in the morning.").
+**Pre-archive health**: 41,266 tokens / 165.1% of 25k / 🚨 CRITICAL (4x deferred archive over two sessions — María's 2026-05-15 PM deferral + 2026-05-16 PM deferral).
+**Post-archive health**: 9,854 tokens / 39.4% / ✅ HEALTHY.
+**Reduction**: 31,413 tokens moved to archive (76% reduction).
+**Archive file**: `history/2026-05-12-to-15-history.md` (4 days, 25 sessions).
+**Retention**: 2026-05-16 only (1 day, 5 sessions — Checkpoint 5 MCP discovery / Model-server carve-out / Daily LoC Delta / doc-viewer 404 fix / voice persona stale-bridge fix).
+**Boundary rationale**: token-based fallback (canonical workflow Priority 4) — 5-day retention minimum infeasible at this density.
+**Index updated**: `history/README.md` row added; counts bumped 22→23 archives, 384→409 sessions; last-updated date flipped to 2026-05-17.
 
 ---
 
@@ -22,12 +26,16 @@
 - [ ] **[LUPIN]** Rebuild compute image as candidate `lupin:1.0.0-noasr` (per `feedback_no_auto_promote_tags` — never auto-promote). Expected size drop ~4 GB (31.7 GB → ~27.7 GB).
 - [ ] **[LUPIN]** Smoke-test the candidate; only Rick promotes `1.0.0-noasr` → `1.0.0` after verification.
 
-### Phase 5 — Test coverage + unit tests (next session)
+### Phase 5 — Test coverage + unit tests — ✅ DONE 2026-05-17 (Tiberius 🌑, session `225e5b2d`)
 
-- [ ] **[LUPIN]** Write `src/tests/unit/test_speech_to_text_provider.py` — mock-based unit tests for the new provider class (mirrors `test_voice_persona_helpers.py` pattern). Covers `_resolve_model_server_url` env→INI→None chain, `_should_use_local` ownership-flag logic, `_call_with_retry` exp-backoff, `_transcribe_via_http` happy + error paths.
-- [ ] **[LUPIN]** Add `mock_model_server_client` pytest fixture to `src/tests/conftest.py` — returns a `FakeSpeechToTextProvider` / `FakeEmbeddingProvider`-compatible object with canned responses; allows unit tests of routers + embedding_provider without a live `:7998`.
-- [ ] **[LUPIN]** Push to **100% line + branch + function coverage** on every new or modified file in this carve-out per `feedback_100pct_coverage_multiplexer.md` (scope-expanded 2026-05-16 to all Lupin code). Files: `src/lupin_model_server/main.py`, `src/cosa/memory/speech_to_text_provider.py`, modified sections of `src/cosa/memory/embedding_provider.py`, `src/cosa/rest/routers/speech.py`, `src/fastapi_app/main.py` lifespan switch branch. `pragma: no cover` allowed only for genuinely-unreachable defensive branches with same-line reason comment.
-- [ ] **[LUPIN]** Audit existing `src/tests/smoke/test_embedding_api_smoke.py` + any speech smoke tests — confirm they pass via the new HTTP-proxy path now that `LUPIN_MODEL_SERVER_URL` is injected.
+**Closure doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/92-phase5-closure.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/92-phase5-closure.md)
+**Plan doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/02-phase5-unit-tests-and-coverage-design.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/02-phase5-unit-tests-and-coverage-design.md)
+**Audit doc**: [`src/rnd/v0.1.7/2026.05.16-model-server-carveout/91-phase5-smoke-audit.md`](src/rnd/v0.1.7/2026.05.16-model-server-carveout/91-phase5-smoke-audit.md)
+
+- [x] **[LUPIN]** `src/tests/unit/test_speech_to_text_provider.py` — 47 tests, 100% line+branch on `speech_to_text_provider.py`
+- [x] **[LUPIN]** `fake_model_server_client` fixture in `src/tests/conftest.py` (named Fake* per parent design; opt-in not autouse so existing tests unaffected) + paired singleton-reset fixtures
+- [x] **[LUPIN]** 100% on 2 new files (`speech_to_text_provider.py`, `lupin_model_server/main.py`); carveout-scoped on 3 modified files (`embedding_provider.py`, `routers/speech.py`, `fastapi_app/main.py`) per Q9 hybrid ratification
+- [x] **[LUPIN]** Smoke-test audit — both existing tests (`test_embedding_api_smoke.py`, `test_model_server_smoke.py`) carveout-compatible already, no retrofit needed
 
 ### Phase 6 — Container preflight extension (next session)
 
@@ -111,16 +119,6 @@ All test tiers green:
 - `io/git-loc-delta/lupin-wip-v0.1.7-2026.04.22-spit-and-polish-for-cjflow-tfe-and-bfe-loc-delta.csv` — 118 rows, 21 days, 216 commits, +147,999 / −13,171 net +134,828
 - `io/git-loc-delta/cosa-wip-v0.1.7-2026.04.23-tracking-lupin-work-loc-delta.csv` — 34 rows, 17 days, 69 commits, +12,561 / −3,272 net +9,289
 - `io/git-loc-delta/2026-05-16-loc-delta.csv` — earlier date-stamped run (pre-filename-flip); can be deleted
-
----
-
-## 🚨 PRIORITY-1 NEXT SESSION — history.md archive (deferred from 2026-05-15 PM session-end)
-
-**Health at session-end**: 19,831 tokens / 79.3% of 25k / ⚠️ WARNING band (≥17k threshold per session-end Step 0.5). Today's session added ~6,500 tokens (Inter-Session DM Phase 0 + AM three-fix arc both entered) so velocity is high.
-
-**Next session's first action**: invoke `/history-management mode=archive` per the canonical workflow at planning-is-prompting → workflow/history-management.md. Cut at clean date boundary; target post-archive ≤13k tokens.
-
-**Filed by**: María 🌸 session `3b6be6f9` at session-end 2026-05-15 ~18:50 EDT. Rick approved deferral via `ask_multiple_choice` voice gate ("Defer archive to next session").
 
 ---
 

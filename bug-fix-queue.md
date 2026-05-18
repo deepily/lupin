@@ -1,7 +1,7 @@
 # Bug Fix Queue
 
 **Format Version**: 2.0
-**Last Updated**: 2026-05-15T10:30:00-04:00
+**Last Updated**: 2026-05-16T20:30:00-04:00
 
 ---
 
@@ -111,6 +111,142 @@
 ### Queued
 
 (Available for any session to claim)
+
+- [ ] **`commons_send_to` MCP tool fails with `'FunctionTool' object is not callable` — the wrapper calls `commons_ask_async(...)` directly, but FastMCP's `@mcp.tool` decorator wraps the function as a non-callable `FunctionTool` instance** (filed 2026-05-16 by session `b714e138` Tiberius 🌑, surfaced while attempting to DM session `3c9fce51` María 🌸 with the `git_loc_delta` cross-repo CSV path bug from `planning-is-prompting`.)
+  - **Symptom**: Any call to `mcp__cosa-voice__commons_send_to(recipient=..., body=...)` from a Claude Code session returns an MCP error:
+    ```
+    Error calling tool 'commons_send_to': 'FunctionTool' object is not callable
+    ```
+    Both fire-and-forget (`expect_reply=False`, default) and reply-tracked (`expect_reply=True`) modes fail identically. The exception originates inside the wrapper, not from the MCP server transport.
+  - **Reproducer** (verified 2026-05-16T20:25Z by Tiberius):
+    ```
+    mcp__cosa-voice__commons_send_to(
+        recipient    = "maria",
+        body         = "test ping",
+        expect_reply = True
+    )
+    # → Error: 'FunctionTool' object is not callable
+    ```
+    Direct call to `commons_ask_async` with the equivalent kwargs **succeeds** (returns `{question_id, posted_ts, push_mode_active}`), confirming the bug is isolated to the `commons_send_to` wrapper, not the underlying ask/dispatch machinery.
+  - **Root cause** (located by reading source):
+    - `src/lupin_mcp/cosa_voice_mcp.py:1878` — `commons_send_to` is decorated `@mcp.tool`.
+    - `src/lupin_mcp/cosa_voice_mcp.py:1806` — `commons_ask_async` is ALSO decorated `@mcp.tool`.
+    - `src/lupin_mcp/cosa_voice_mcp.py:1931-1937` — inside `commons_send_to`, the wrapper does:
+      ```python
+      result = commons_ask_async(
+          topic                = target_topic,
+          body                 = body,
+          question_id          = question_id,
+          recipient_persona    = recipient,
+          expect_reply         = expect_reply,
+      )
+      ```
+      This tries to invoke `commons_ask_async` as a bare callable. But because `@mcp.tool` (FastMCP) wraps the function as a `FunctionTool` instance, the symbol `commons_ask_async` in module scope is **the FunctionTool wrapper, not the underlying function** — and `FunctionTool` does not implement `__call__` for Python-level invocation. Hence `'FunctionTool' object is not callable`.
+    - This is the canonical "MCP tool calls another MCP tool" footgun — FastMCP exposes tool functions to the MCP transport but does not preserve direct-call ergonomics on the decorated symbol.
+  - **Impact**:
+    - The advertised ergonomic DM-by-persona path is completely non-functional. Any session attempting `commons_send_to(...)` gets a hard error; no DM is sent.
+    - Sessions that know the workaround can use `commons_ask_async(topic="dm-<recipient>", recipient_persona="<recipient>", expect_reply=True, body=...)` — this is what Tiberius fell back to today, and the message did post (question_id `87d20f5d-e2d7-4ac0-8242-5f161cededca` to topic `dm-maria`). However, the result returned `push_mode_active: false` and lacked a `dm_dispatched` field, so it's unclear whether the recipient's listener actually received a push. This is a SEPARATE concern from the FunctionTool bug — the wrapper is broken regardless of whether the underlying dispatch works.
+    - The SKILL.md / global CLAUDE.md prose pointing sessions at `commons_send_to` as the preferred DM tool is currently misleading — every such instruction sends Claude into a guaranteed-error tool call. Until this lands, doc should either flag the bug or steer toward `commons_ask_async` direct.
+  - **Suggested fix shape** (preferred fix at top):
+    1. **Extract an inner implementation function and call it from both decorated wrappers**. This is the canonical FastMCP idiom for "tool calls tool":
+       ```python
+       def _commons_ask_async_impl(
+           topic                : str,
+           body                 : str,
+           question_id          : Optional[ str ] = None,
+           recipient_session_id : Optional[ str ] = None,
+           recipient_persona    : Optional[ str ] = None,
+           expect_reply         : bool            = True,
+       ) -> dict:
+           # ... existing commons_ask_async body moves here ...
+
+       @mcp.tool
+       def commons_ask_async( ...args... ) -> dict:
+           return _commons_ask_async_impl( ...args... )
+
+       @mcp.tool
+       def commons_send_to( ...args... ) -> dict:
+           if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
+           target_topic = topic or f"dm-{recipient}"
+           result = _commons_ask_async_impl(
+               topic             = target_topic,
+               body              = body,
+               question_id       = question_id,
+               recipient_persona = recipient,
+               expect_reply      = expect_reply,
+           )
+           if in_reply_to is not None and isinstance( result, dict ):
+               result[ "in_reply_to" ] = in_reply_to
+           return result
+       ```
+       Both decorated wrappers stay thin; the actual logic lives in `_commons_ask_async_impl` and is callable from anywhere. Apply the same pattern to any other place where `@mcp.tool` functions call each other (grep `src/lupin_mcp/cosa_voice_mcp.py` for further offenders).
+    2. **Use `.fn` (or equivalent FastMCP accessor) to invoke the underlying callable**: `result = commons_ask_async.fn( topic=..., body=..., ... )`. Tighter diff, but it leaks FastMCP implementation details into the wrapper code and is fragile across FastMCP version bumps.
+    3. **Reject the wrapper approach entirely** — delete `commons_send_to` and update docs to instruct callers to use `commons_ask_async` directly with `topic="dm-<recipient>"` and `recipient_persona=...`. Tracks the ergonomic regression but eliminates the bug surface.
+  - **Acceptance**:
+    - From any Claude Code session, `commons_send_to(recipient="maria", body="ping")` returns a valid dict shape (matching `commons_ask_async`'s return contract) without raising `'FunctionTool' object is not callable`.
+    - The DM is observable in the recipient's listener (system-reminder injection) OR a `recipient_resolution_error` is surfaced when the persona can't be resolved.
+    - A regression smoke test exercises `commons_send_to` against a known live session (place under `src/tests/smoke/` consistent with other commons-tier smoke tests).
+    - Grep audit: `grep -n "^@mcp.tool$" src/lupin_mcp/cosa_voice_mcp.py | wc -l` cross-referenced against in-module function-call usage of those same names — zero call sites should invoke a `@mcp.tool`-decorated symbol directly. (Future-proofing audit, can be a separate item.)
+  - **Workaround for callers until fix lands**: use `commons_ask_async` directly with the equivalent kwargs:
+    ```python
+    commons_ask_async(
+        topic             = f"dm-{recipient}",
+        recipient_persona = recipient,
+        expect_reply      = True,    # or False for fire-and-forget
+        body              = "...",
+    )
+    ```
+    This is what Tiberius did in this session and the post succeeded; the only loss vs `commons_send_to` is the auto-defaulted `topic=dm-<recipient>` (now provided explicitly).
+  - **Cross-reference**: This bug was filed in tandem with the `git_loc_delta --save-output` cross-repo path bug above. Tiberius hit this `FunctionTool` error while attempting to file THAT bug via `commons_send_to`, then fell back to `commons_ask_async` for the actual filing, then filed the queue entry as a durable backup. Both bugs reported in the same notification to the user.
+  - **Evidence files**:
+    - `src/lupin_mcp/cosa_voice_mcp.py:1878-1941` — `commons_send_to` definition + the failing call at 1931
+    - `src/lupin_mcp/cosa_voice_mcp.py:1806` — `commons_ask_async` `@mcp.tool` decoration confirming the root cause
+    - `src/lupin_mcp/cosa_voice_mcp.py:1759-1760` — `commons_ask_sync` same decoration pattern (potential same-shape bug if it ever calls another `@mcp.tool` function — worth auditing)
+
+---
+
+- [ ] **`cosa.repo.run_git_loc_delta` default `--save-output` path is rooted at `LUPIN_ROOT` instead of `--repo-path` — cross-repo invocations dump CSVs into Lupin's `io/` tree** (filed 2026-05-16 by session `b714e138` Tiberius 🌑, surfaced while wiring `git_loc_delta` into the canonical `workflow/session-end.md` Step 6 ritual at `planning-is-prompting`. **Heads-up to María 🌸 (session `3c9fce51`)** — also sent as a DM via `commons_ask_async` topic `dm-maria` question_id `87d20f5d-e2d7-4ac0-8242-5f161cededca`, but `push_mode_active: false` was returned so this queue entry is the durable record.)
+  - **Symptom**: When `run_git_loc_delta` is invoked from `$LUPIN_ROOT/src` with `--repo-path <other-repo> --branch --output csv` and **no** `--save-output`, the resulting CSV is written to `$LUPIN_ROOT/io/git-loc-delta/{external-repo-name}-{branch-slug}-loc-delta.csv` rather than `<other-repo>/io/git-loc-delta/{repo}-{branch-slug}-loc-delta.csv`. Filename correctly reflects the external repo + branch; only the parent directory is wrong.
+  - **Reproducer** (verified 2026-05-16):
+    ```bash
+    cd /mnt/DATA01/include/www.deepily.ai/projects/lupin/src
+    /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/.venv/bin/python \
+      -m cosa.repo.run_git_loc_delta \
+      --repo-path /mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting \
+      --branch --output csv
+    # → "Wrote 19 rows to /mnt/DATA01/.../lupin/io/git-loc-delta/planning-is-prompting-wip-v0.1.3-2026.02.16-continued-development-loc-delta.csv"
+    # Expected:                /mnt/DATA01/.../planning-is-prompting/io/git-loc-delta/planning-is-prompting-wip-v0.1.3-2026.02.16-continued-development-loc-delta.csv
+    ```
+  - **Root-cause hypothesis** (not confirmed by reading the module source — Tiberius worked exclusively from the README and CLI behavior): the default `--save-output` path in `run_git_loc_delta.py` resolves via `cu.get_project_root()` (i.e. reads `LUPIN_ROOT` env var), which is independent of `--repo-path`. So cross-repo invocations always dump CSVs into Lupin's tree.
+  - **Impact**:
+    - The session-end ritual's stated goal (per Tiberius's voice prompt from the user, *"run at the end of every session on every repo so we can get an accurate and standardized readout"*) means every consuming repo needs its CSV co-located with the repo it documents. Default behavior dumps all CSVs into Lupin's `io/` — wrong filesystem location, gitignored under Lupin's `.gitignore`, and cross-contaminates Lupin's working tree with artifacts about unrelated projects.
+    - Lupin's `io/` is gitignored, so this doesn't pollute Lupin's commits — but artifacts about OTHER repos accumulate under Lupin's tree silently. Anyone running `du -sh` on Lupin's `io/` will see growth from artifacts unrelated to Lupin.
+    - The README's "Quick Start" example uses `python -m cosa.repo.run_git_loc_delta --branch` against the current repo (where `--repo-path` defaults to `.` and matches `LUPIN_ROOT`), so the bug doesn't surface in the documented happy path. It only appears when `--repo-path` points outside `LUPIN_ROOT`.
+  - **Suggested fix shape** (preferred fix at top):
+    1. **Make the default save path follow `--repo-path` when they diverge**. In `run_git_loc_delta.py` (default-path resolution code, location unread by Tiberius — likely in `create_parser()` or `main()`): when `args.save_output is None` AND `args.output == "csv"` AND `args.branch` is set, compute the default save path relative to `--repo-path` instead of `cu.get_project_root()`:
+       ```python
+       if args.save_output is None and args.output == "csv":
+           base = Path( args.repo_path ).resolve()
+           repo_name = base.name
+           branch_slug = <existing branch-slug computation>
+           args.save_output = base / "io" / "git-loc-delta" / f"{repo_name}-{branch_slug}-loc-delta.csv"
+       ```
+       This preserves the existing in-repo Quick Start behavior (where `--repo-path` defaults to `.` and resolves to `LUPIN_ROOT` anyway) while fixing the cross-repo case.
+    2. **Add a `--out-root` flag** as an explicit override for the io/ root, with the default still being `cu.get_project_root()`. Less ergonomic — callers in other repos would always need to pass it.
+    3. **Defensive: emit a warning when the resolved save path's repo doesn't match `--repo-path`**. Useful regardless of which fix lands; "Note: writing CSV to <path> which is NOT under --repo-path <repo>; pass --save-output to override."
+  - **Acceptance**:
+    - Running `python -m cosa.repo.run_git_loc_delta --repo-path /path/to/other-repo --branch --output csv` from `$LUPIN_ROOT/src` (with no `--save-output`) writes the CSV to `/path/to/other-repo/io/git-loc-delta/{repo-name}-{branch-slug}-loc-delta.csv`.
+    - Running `python -m cosa.repo.run_git_loc_delta --branch --output csv` from `$LUPIN_ROOT/src` (no `--repo-path`, no `--save-output`) STILL writes to `$LUPIN_ROOT/io/git-loc-delta/lupin-{branch-slug}-loc-delta.csv` (no regression to the documented Quick Start path).
+    - The existing 4 unit tests + smoke test in `src/tests/unit/test_git_loc_delta.py` + `cosa.repo.git_loc_delta.analyzer` all still pass.
+    - Add one new unit test covering the cross-repo case: `--repo-path` points to a path that is NOT `cu.get_project_root()` AND `--output csv` AND `--save-output` is None → assert the resolved save path is under `--repo-path`, not under `cu.get_project_root()`.
+  - **Workaround already in flight** (Tiberius applied this 2026-05-16): `planning-is-prompting/workflow/session-end.md` §6.2 now passes explicit `--save-output` computed from `git rev-parse --show-toplevel`. Re-smoke confirmed CSV lands at the correct path. **The workflow workaround does not need to be removed after the upstream fix lands** — `--save-output` is still the explicit/portable form; the upstream fix just makes the default behavior correct so future callers don't need to know about this.
+  - **Full write-up with reproducer + impact analysis**: `planning-is-prompting/src/rnd/2026.05.16-git-loc-delta-session-end-integration.md` § 9
+  - **Files Tiberius read** (for transparency — he did NOT read the module source, so the root-cause hypothesis above is from CLI behavior alone):
+    - `/mnt/DATA01/.../lupin/src/cosa/repo/git_loc_delta/README.md` (the canonical reference)
+    - `/mnt/DATA01/.../lupin/src/cosa/repo/git_loc_delta/` directory listing
+    - `/mnt/DATA01/.../lupin/.gitignore` (confirmed `io/` is gitignored at line 68)
+
+---
 
 - [x] ~~**`/api/init` hot-reload does NOT invalidate `_SCOPE_REGISTRY` — new `external repos` added to `lupin-app.ini` are invisible to `/api/docs/file` until process restart**~~ → **RESOLVED 2026-05-15 PM by session `c1cbcd11` (Rio ⚡)** as a side-effect of doc-viewer scope unification (`src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` Phase 1). New `cosa/config/cache_registry.py` module provides a generic `register_invalidator()` / `invalidate_all()` API; `_SCOPE_REGISTRY` (along with `snapshot_mgr` and `prediction_engine`) self-registers an invalidator at import time. `/api/init` now calls `invalidate_all()` and returns `caches_invalidated: List[str]` in the payload. Live-verified on `:7999`: `GET /api/init` returns `caches_invalidated: ["scope_registry","snapshot_mgr","prediction_engine"]` and a subsequent `?path=<newly-added>/...` resolves without container restart. Original bug entry preserved below for context.
 

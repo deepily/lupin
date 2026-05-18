@@ -12,6 +12,7 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-05-12-to-15](2026-05-12-to-15-history.md) | May 12-15, 2026 | 25 sessions | Inter-Session Commons Phase 2-3 + Phase 0 DM landing, Multi-Repo Doc Viewer + Doc-Viewer Scope Unification, Speakerphone refactor Phases 5b/6/7 + solo/chorus design, Multiplexer Phase 6b CLOSED + 6c launch, Notifications UI three-fix arc (Recent-Activity refresh / focus-tray persistence / header-toggle children-wipe), Broadcast-acks consumer-side dedupe, Commons Blackboard summary, Bounded-CC migration audit, TTS preview-and-advance + runtime percentage slider, Mr. Radio prior-archive meta-session |
 | [2026-05-07-to-11](2026-05-07-to-11-history.md) | May 7-12 AM, 2026 | 12 sessions | Inter-Session Commons Phase 1 wrap + Phase 2 backend, Multiplexer Phase 6b Pass 1 Fitness ratification, CC Card Normalization Phases 1-5a, ask_yes_no "Neither" affordance, Voice Persona Rename Domi→Rio, CC notifications-card normalization plan-review, Multiplexer Phase 6a final closure on :8000 + Phase 6b planning launch, Bug Fix Mode notification 503 cascade reconciliation |
 | [2026-05-03-to-06](2026-05-03-to-06-history.md) | May 3-6, 2026 | 13 sessions | (See archive header for topic summary) |
 | [2026-04-30-to-05-02](2026-04-30-to-05-02-history.md) | Apr 30 - May 2, 2026 | ~13 sessions | cc-strip-icons hover clipping, Conversation-Mode Three-Layer Mic-Monopoly Enforcement, CC Notification Session Panel + exclusive focus mode, postmortem remediation, WS reconnect outage root cause, persona rename + display_name helper, history archival, Today filter + focus-mode flash, focus-tray icon stranding cleanup, TODO size-management skill, WS reconnect circuit breaker, focus-tray inactive-session toggle + bubble differentiation, voice persona desync investigation + /clear preservation fix |
@@ -65,10 +66,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 22 files
+- **Total Archives**: 23 files
 - **Date Range**: May 2025 - May 2026
-- **Total Sessions Documented**: 384+
+- **Total Sessions Documented**: 409+
 
 ---
 
-*Last updated: 2026-05-15*
+*Last updated: 2026-05-17*
