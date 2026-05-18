@@ -2,6 +2,79 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.18 - Session 4e724860 (Tiberius 🌑) | Cascade Run 2 manager + V2 polish bundle (Items #1 + #3 Lupin-side)
+
+End-to-end manager of Run 2 of the `/plan-review-cascaded` prototype on the toy email-verification fixture, then coordinator of the v2 polish-bundle implementation cycle that followed. Same 5-persona cast as Run 1 (María 🌸 doctrine consultant, Mr. Radio 🦉 Author, Rachel 🕊️ Usability/Reuse, Arnold 🪨 Viability/Gap, Rio ⚡ Ownership-Language Audit, me Manager).
+
+**Run 2 cascade results**: all 4 stages cleared on both sections (Section A 19:53:20 UTC, Section B 20:03:30 UTC); 21 findings total (12 cosmetic / 8 inconsistency / 1 foundational); 5 single-round verbatim re-litigation rounds (100% lowest-friction close); 0 votes; 1 escalation to Rick (Section B Arnold F1 plan-decomposition gap, user-ratified `documented_for_telemetry`); 100% `severity_proposed` → manager-final match rate (21/21); 4 cross-section findings caught + closed consistently; wall-clock ~49 min (vs Run 1 ~55 min). Heartbeat daemon ran 21 ticks on 180s cadence, exited cleanly on `cascade_complete` signal. End-of-pipeline §8 summary posted to `pipeline-summary-20260518` commons topic for archival.
+
+**V2 polish bundle** (5 improvements identified during Run 2 §8 summary, ratified by Rick 2026-05-18T21:10 UTC via bundled manager-funnel ask):
+- **Item #1** (Rio): `ask_multiple_choice` MCP tool gained `default: Optional[dict]` keyed by question header. On timeout returns `{"answers": default}` instead of error. Closes the AFK-graceful-escalation gap (Run 2 lost ~10 min to a timed-out `ask_multiple_choice` with no default — the cascade was unrecoverable until I re-fired as `ask_yes_no` which DOES support `default`). Backward-compatible (default=None preserves legacy error-path byte-identically). Pre-call validation rejects invalid defaults at call time, not at timeout.
+- **Item #3** (Rachel): cascade-heartbeat daemon extended with per-section message-count budget tracker. Filename-glob section discovery (`cascaded-prototype-section-*.md`), boundary-marker `str.count()` on disk for cheap entry counting, idempotent warn-once-per-section via in-memory dict, DM-to-manager via `CommonsStore.post()` + Phase 3 push (matches `fire_heartbeat()` shape). New CLI args `--budget-threshold` (default 25) + `--section-glob`. Existing launch invocations work unchanged.
+- **Items #2 + #4 + #5** (Arnold + Mr Radio in PIP — committed by María separately at SHA `6c8b7b1`): recommendation-as-spoken-headline doctrine for §7 escalation templates, Convention 3 × Convention 4 author Stage-0 self-check in Persona 2 rubric, cluster-bundled re-litigation as playbook default in §6.2 + §DM-Subset Heuristics.
+
+**Coordination wins**: bundled manager-funnel ratification ask saved ~4 user-attention round-trips vs per-item ratification (3 interactions for 5 ratifications). Lesson 12 captured to PIP §10 memo (manager-funnel applies to both findings-up AND proposals-up; bundled > per-item). Meta-validation: my recommendation-led second ratification ask (informally applying Item #2's not-yet-codified doctrine) landed unconditional yes immediately — direct evidence the doctrine fix works even before its formal implementation. Arnold independently dogfooded the same spoken-headline contract during his own classifier-vs-funnel detour around 21:55-22:00 UTC.
+
+**Critical-path Rachel hold/resume episode** (telemetry capture for §10 memo): Rachel correctly held Item #3 post Rick's broadcast `312d4397` (files-touched check-in request) but sent her status-ping to me via `commons_post` (blackboard-only, no push in Phase 1) — I never saw it. Voice-redirect from Rick caused a 2-line argparse revert (byte-clean undo, no real work lost). Diagnosed in one round-trip; re-greened Rachel using Rick's "straighten this out" authority. **Doctrine lesson logged**: status-pings to sleeping recipients MUST use `commons_send_to` or `in_reply_to` on an open question; plain `commons_post` is blackboard-only in Phase 1 and only delivers when the recipient next polls.
+
+**Documentation + commit pattern with María**: mutual independent convergence on the per-repo split (Tiberius=Lupin code-side, María=PIP doctrine-side) at 22:38:07 vs 22:38:19 UTC — both arrived at the same answer from the same playbook within 12 seconds. Prep-don't-commit pattern initially planned (we prepare commit messages + history entries; user fires `git commit`); Rick's broadcast `69cffa07` ("you have a go to document and commit") replaced the consolidated ratification ask with pre-authorization. Worker sign-offs still gathered for intra-team attribution discipline. Commits fire per-repo independently; `git push` stays per-repo user-fire per CLAUDE.md `feedback_never_auto_commit_push.md`.
+
+**Operational note** (also in commit body): Rio's Item #1 `default` param fix requires MCP subprocess restart to take effect in active CC sessions. Python imports cache the OLD code in long-running MCP processes — same pattern as the 2026-05-18 commons_store truncation-fix episode. For Run 3 of the cascade-review prototype, all participating sessions should have MCP subprocesses restarted post-merge so the timeout-default benefit is available to the Manager's escalation calls.
+
+**Followup tracked (NOT in this commit, future session)**: `src/docs/notification-api.md` and related Lupin docs need an update to advertise the new `ask_multiple_choice` `default` param to internal callers per the CLAUDE.md DOCUMENTATION TOUCHPOINTS table mapping (MCP notification-tool surface changes → `src/docs/notification-api.md`). TODO seed for next documentation-refresh session.
+
+**Files (parent Lupin only — CoSA + PIP untouched per nested-repo rules)**:
+- `src/lupin_mcp/cosa_voice_mcp.py` (MOD — Rio's V2 Item #1: `default` param signature + validation helper + timeout branch + line-742 instructions block update)
+- `src/tests/unit/test_cosa_voice_mcp_default.py` (NEW — Rio's 13 unit tests: 7 validation-helper + 6 integration scenarios; full MCP regression 42/42 green in 1.96s, zero regressions)
+- `src/scripts/cascade_heartbeat_scheduler.py` (NEW — heartbeat daemon scaffold from earlier Run-2-prep + Rachel's V2 Item #3 budget-tracker extension; daemon ran 21 ticks of Run 2 cleanly before this commit)
+- `src/scripts/start-cascade-heartbeat.sh` (NEW — executable wrapper)
+- `src/tests/unit/test_cascade_budget_tracker.py` (NEW — Rachel's 5 unit scenarios: 3 required + 2 defensive bonus; 5/5 green in 0.05s)
+- `history.md` (this entry)
+
+**PIP repo touches** (separate repo, María's parallel commit at SHA `6c8b7b1`):
+- `workflow/plan-review-cascaded.md` (MOD — Arnold's #2 + #5 + version-history bump)
+- `workflow/plan-review-cascaded-personas.md` (MOD — Mr Radio's #4 + version-history bump)
+- `src/rnd/2026.05.17-cascaded-plan-review-pipeline.md` (MOD — §10.13 Lesson 12 added)
+- `history.md` (MOD — Session 92 continuation entry)
+
+**Audit trail anchor**: commons topic `v2-improvements-complete-2026-05-18` holds all 5 V2 proposal entries + 4 completion entries + my Lupin commit-prep draft. Cross-repo trail discoverable from either repo's commit body via this topic name (no SHA cross-reference per agreement with María — async SHA exchange not worth the complexity).
+
+**Run 3 readiness**: pending (a) MCP subprocess restart on all participating sessions to pick up Item #1; (b) Rick's Run-3 window selection. Heartbeat daemon will need a fresh launch (the Run 2 daemon exited cleanly on cascade-complete); doctrine doc updates from the parallel PIP commit are in-effect immediately on next session-start read (no restart needed for doctrine reads).
+
+---
+
+### 2026.05.18 - Session 4e724860 (Tiberius 🌑) | Cascade Run 1 manager + body-display truncation fix verification + heartbeat daemon for Run 2
+
+End-to-end manager of the inaugural `/plan-review-cascaded` prototype run with María 🌸 as doctrine consultant + 4 reviewer roles (Mr. Radio 🦉 Author, Rachel 🕊️ Usability/Reuse, Arnold 🪨 Viability/Gap, Rio ⚡ Ownership-Language Audit). Cascade surfaced 12 findings across both sections of the toy email-verification plan; manager-absorbed 9; escalated 3 cross-section foundational findings via combined Trigger 1+2 → Rick picked Option 1 (Convention 4 markers). Author closed cluster Round 1. Cascade declared complete at the 2-section ratification gate; Stages 3 on A + 2-3 on B intentionally skipped per Rick's wrap directive once primary value-prop was proven.
+
+**Body-display truncation arc** (the dominant Run-1 dead-air contributor): Rio diagnosed root cause as `ENTRY_SEPARATOR = "\n---\n"` collision with markdown thematic-break syntax at `commons_store.py:46`. Fix: new separator `\n<<<__lupin_commons_entry_boundary__>>>\n` + legacy fallback in `read()` + `_warn_orphan_blocks` defense-in-depth + 200-line migration script with header-lookahead regex + 14+29 unit tests + 100% coverage. Migration ran clean (48 files scanned, 42 mutated, 432 entry-boundaries swapped). Verified post-MCP-restart via probe: 2200-char `---`-laden body round-trips byte-equivalent. Sub-bug B (write-side disk truncation, María 2026-05-17) is DEFINITIVELY SEPARATE per Rio's awk re-verify on `dm-maria.md`; Mr. Radio's fastmcp atomic-write track remains relevant for a future session.
+
+**Heartbeat daemon for Run 2**: Python daemon at `src/scripts/cascade_heartbeat_scheduler.py` + wrapper `start-cascade-heartbeat.sh`. Implements postmortem §6.B + PIP playbook §6.4 spec — manager-only scope, 2-3 min active cadence, 3-strikes dead-man's-switch → priority=high notify, cascade-complete signal-driven termination. Caught + fixed one bug mid-smoke-test (`cascade_is_complete` was matching Run-1's historical wrap-up post; fix scopes detection to content added after `initial_size` captured at daemon start). Smoke test PASSED: `register_status=201`, `dm_dispatched=true`, system-reminder push-wake verified end-to-end.
+
+**Postmortem collaboration** (María authored, I reviewed): `planning-is-prompting/src/rnd/2026.05.18-cascaded-prototype-postmortem.md` + my companion input `2026.05.18-cascaded-prototype-postmortem-tiberius-input.md` answering Q1-Q5 + six additional manager-seat lessons (universal-step-zero, preemptive worker probes, single-escalation-for-clusters, manager-classification audit trail, workarounds-become-doctrine, self-audit discipline). María's 5-item doctrine track also complete: playbook §6.4 rewrite + §Manager System Prompt updates + §6.1 classification audit trail + §Step 4 ack-format clarification + severity-tag schema expansion. PIP playbook now references my heartbeat daemon as the canonical reference implementation.
+
+**Three failure modes catalogued for §10 findings memo**:
+1. Body-display truncation (read-side) — REPRODUCED Run-1, FIXED by Rio, VERIFIED 2026-05-18 by me
+2. Turn-based-CC limitation (no autonomous ticks) — REPRODUCED throughout, ADDRESSED by my heartbeat daemon
+3. Sub-bug B (write-side disk truncation) — STILL OPEN; Mr. Radio's atomic-write investigation track remains relevant
+
+**Files (parent Lupin only — CoSA + PIP untouched per nested-repo rules)**:
+- `src/lupin_mcp/commons_store.py` (MOD — Rio's separator fix; 100% coverage)
+- `src/scripts/migrate-commons-entry-separator.py` (NEW — Rio's migration script, 100% coverage)
+- `src/scripts/cascade_heartbeat_scheduler.py` (NEW — heartbeat daemon, py_compile clean, smoke-tested)
+- `src/scripts/start-cascade-heartbeat.sh` (NEW — executable wrapper)
+- `src/tests/unit/commons/test_commons_store_separator_collision.py` (NEW — 14 tests)
+- `src/tests/unit/commons/test_migrate_commons_entry_separator.py` (NEW — 29 tests)
+- 48 commons topic files mutated by migration (entry-boundary separator swap; body content untouched)
+
+**PIP repo touches** (separate repo, not committed by me — María handles):
+- `src/rnd/2026.05.18-toy-input-plan-email-verification.md`, `2026.05.18-cascaded-prototype-postmortem.md`, `2026.05.18-cascaded-prototype-postmortem-tiberius-input.md` (NEW)
+- `workflow/plan-review-cascaded.md`, `plan-review-cascaded-defaults.md`, `plan-review-cascaded-personas.md` (MOD — postmortem-driven doctrine bundle)
+
+**Run 2 status**: PREP COMPLETE on both fronts. María signaled consolidated ready to Rick. Heartbeat daemon ready to launch. Run-2 window selection is Rick's call. All 6 participating sessions (me + María + 4 reviewers) heading into `/clear` to start Run 2 from fresh contexts.
+
+---
+
 ### 2026.05.17 - Session 225e5b2d (Tiberius 🌑) | Coordinator dispatch + Phase 5 unit tests + 100% coverage on model-server carve-out
 
 Day-long session driven by Rick's @all broadcast (`21bb12cd`) authorizing planning-only coordinator work across Tiberius / Mr Radio / Arnold. Three deliverables landed: ratified-plan walkthrough, Phase 5 implementation, end-of-day ritual.

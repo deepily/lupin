@@ -739,7 +739,7 @@ mcp = FastMCP(
         f"| Question shape | Use | Why |\n"
         f"|---|---|---|\n"
         f"| Yes / No (binary) | `ask_yes_no(question, default='yes'\\|'no')` | Three-button UI with optional 'Neither' escape hatch when the question itself needs re-framing |\n"
-        f"| 2-4 mutually-exclusive options | `ask_multiple_choice(questions=[{{...}}])` | Radio-button UI; supports multi-question batches |\n"
+        f"| 2-4 mutually-exclusive options | `ask_multiple_choice(questions=[{{...}}], default={{header: label}})` | Radio-button UI; supports multi-question batches; optional `default` dict keyed by question header returns `{{\"answers\": default}}` on timeout instead of an error |\n"
         f"| Single open-ended | `converse(message=..., response_type='open_ended')` | Free-form text or voice response |\n"
         f"| Multiple open-ended at once | `ask_open_ended_batch(questions=[{{header, question}}, ...])` | Single screen with per-question text+mic inputs; user submits all at once |\n\n"
         f"**On 'Neither' from `ask_yes_no`**: treat as a signal that the question needs re-framing, NOT as a soft yes/no. Read the comment (if present) and ask a clearer follow-up.\n\n"
@@ -1158,7 +1158,8 @@ def ask_multiple_choice(
     priority: str = "medium",
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    default: Optional[ dict ] = None
 ) -> dict:
     """
     Ask multiple-choice questions and get user's selection(s).
@@ -1185,6 +1186,14 @@ def ask_multiple_choice(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
+        default: Optional dict keyed by question header. When provided, a timeout
+            returns ``{"answers": <default>}`` instead of the error dict — same
+            shape as a successful response. Keys must match question headers;
+            values must be option labels (string for single-select, list of
+            strings for multi-select). Validated at call time; mismatches
+            return an error dict before the notification fires.
+            Backward-compat: ``default=None`` preserves the legacy timeout
+            return ``{"error": "timeout - no response received", "timeout": True}``.
 
     Returns:
         dict with answers keyed by header:
@@ -1215,6 +1224,18 @@ def ask_multiple_choice(
             {"question": "Which features?", "header": "Features", "multiSelect": True,
              "options": [{"label": "Auth"}, {"label": "Caching"}]}
         ])
+
+        # With timeout default — useful for unattended / AFK contexts
+        result = ask_multiple_choice(
+            questions=[{
+                "question":    "Which database should we use?",
+                "header":      "Database",
+                "multiSelect": False,
+                "options":     [{"label": "PostgreSQL"}, {"label": "MongoDB"}]
+            }],
+            default={"Database": "PostgreSQL"}
+        )
+        # On timeout returns: {"answers": {"Database": "PostgreSQL"}}
     """
     logger.debug( f"ask_multiple_choice() called with {len( questions )} questions" )
 
@@ -1226,6 +1247,16 @@ def ask_multiple_choice(
 
     # Convert questions to response_options format (camelCase -> snake_case)
     response_options = convert_questions_for_api( questions )
+
+    # Pre-call validation: if default provided, ensure it's structurally valid
+    # against the questions schema so we fail loudly at call time, not at timeout.
+    if default is not None:
+        if not isinstance( default, dict ):
+            return { "error": f"default must be a dict, got {type( default ).__name__}" }
+        try:
+            _validate_multiple_choice_default( default, questions )
+        except ValueError as e:
+            return { "error": f"default validation error: {e}" }
 
     try:
         request = NotificationRequest(
@@ -1249,9 +1280,72 @@ def ask_multiple_choice(
     if response.exit_code == 0:
         return _parse_multiple_choice_response( response.response_value )
     elif response.exit_code == 2:
+        if default is not None:
+            return { "answers": default }
         return { "error": "timeout - no response received", "timeout": True }
     else:
         return { "error": f"error: {response.status}" }
+
+
+def _validate_multiple_choice_default( default: dict, questions: list ) -> None:
+    """
+    Validate a ``default`` dict against the ``questions`` schema for
+    ``ask_multiple_choice``. Raises ``ValueError`` on any mismatch so the
+    caller fails loudly at call time rather than at timeout.
+
+    Requires:
+        - default is a dict (caller has type-checked)
+        - questions is a non-empty list of question dicts, each with "header"
+          and "options" keys
+
+    Ensures:
+        - returns None if default is structurally valid against questions
+        - raises ValueError with a precise message on first mismatch:
+          * default key does not match any question header
+          * default value type-wrong for the question's ``multiSelect`` flag
+            (list required when multiSelect, string required when not)
+          * default label does not match any option label in the question
+
+    Args:
+        default: dict keyed by question header; values are strings (single-select)
+            or list of strings (multi-select), each matching an option label
+        questions: the ``ask_multiple_choice`` questions list against which the
+            default is being validated
+    """
+    headers_to_questions = { q[ "header" ]: q for q in questions }
+    for header, value in default.items():
+        if header not in headers_to_questions:
+            raise ValueError(
+                f"default header '{header}' does not match any question header "
+                f"in questions list (available: {list( headers_to_questions.keys() )})"
+            )
+        question      = headers_to_questions[ header ]
+        option_labels = { opt[ "label" ] for opt in question.get( "options", [] ) }
+        multi_select  = question.get( "multiSelect", False )
+
+        if multi_select:
+            if not isinstance( value, list ):
+                raise ValueError(
+                    f"default for multi-select question '{header}' must be a list, "
+                    f"got {type( value ).__name__}"
+                )
+            for label in value:
+                if label not in option_labels:
+                    raise ValueError(
+                        f"default label '{label}' for question '{header}' does not "
+                        f"match any option (available: {sorted( option_labels )})"
+                    )
+        else:
+            if not isinstance( value, str ):
+                raise ValueError(
+                    f"default for single-select question '{header}' must be a string, "
+                    f"got {type( value ).__name__}"
+                )
+            if value not in option_labels:
+                raise ValueError(
+                    f"default label '{value}' for question '{header}' does not match "
+                    f"any option (available: {sorted( option_labels )})"
+                )
 
 
 def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
