@@ -2,6 +2,44 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | websocket-events.md doc fix — `speakerphone_changed` documented + `conversation_mode_changed` deprecation noted
+
+Closed a documentation gap surfaced during Roscoe 🤠's Phase 6c Node D pre-flight investigation. Rick asked "who listens for `conversation_mode_changed`, where does it originate, is it in the INI website-events list?" — answered with the cascade-design-gap context: the event was renamed to `speakerphone_changed` during the Speakerphone solo/chorus refactor (Phase 3 of `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`, landed 2026-05-13), but `src/docs/websocket-events.md` was never updated.
+
+**Three edits** (all targeted, no scope creep):
+1. **Summary table** (L27): added `speakerphone_changed` row in the Notifications category, mirroring the `commons_activity` row shape (notification_queue_update wrapper).
+2. **Per-event detail section** under Notifications (L252+): full entry covering rename history (2026-05-13 Speakerphone refactor Phase 3), payload shape (`{session_id, on, displaced?, displaced_by?}`), both client handlers (legacy `notifications.js::handleConversationModeChanged()` line 5552 + multiplexer `SenderStore.ts` STATE_UPDATE_TYPES Set), the Path III forward-compat bridge (accepts both wire names), INI subscription cross-ref (`lupin-app.ini:741`), server-side `valid_types` whitelist cross-ref (`notifications.py:359-364`).
+3. **Deprecated Events section** (L466+): added a new "renamed during Speakerphone solo/chorus refactor" table mapping `conversation_mode_changed` → `speakerphone_changed` with the 2026-05-13 rename date. Notes that the deprecated name returns HTTP 400 if pushed.
+
+**Empirical anchor**: Roscoe surfaced this gap during Node D pre-flight (DM `d2419eae`). The cascade design plan referenced the old name; the server only emits the new name. Path III bridge was ratified unilaterally by me (DM `eb826676`) — accept both names client-side as forward-compat. This doc edit captures that bridge contract for future readers.
+
+**Files**:
+- `src/docs/websocket-events.md` (MOD — 3 edits, ~30 LOC added net)
+- `history.md` (this entry)
+
+**Cross-refs**:
+- Origin design: `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/16-phase7-multiplexer-ui-design.md` §"WebSocket `speakerphone_changed` handler"
+- Phase 3 rename closure: `src/cosa/history/2026-04-25-to-05-13-history.md:89` (CoSA-side `valid_types` rename log)
+- Forward-compat bridge ratification: today's DM `eb826676` to Roscoe + the Phase 6c synthesis doc `11-phase6c-cascade-synthesis.md` §3.D
+- Documentation TOUCHPOINTS in CLAUDE.md: this doc is listed under `routers/websocket.py` + `lupin-app.ini websocket available events` row — both touchpoints honored this edit.
+
+---
+
+### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Phase 6c cascade synthesis + execution plan + design-doc amendments + mic-monopoly follow-on TODO
+
+Three-artifact handoff bundle from Run 3 cascade — translating the 43 ratified findings across 4 sections (A/B/C/D) into an implementation contract Roscoe 🤠 can ship from cold. The synthesis doc (476 LOC) is the canonical why-anchor with per-section ratified AC tables, cross-section dependency map, and §10.14 doctrine candidates brief index. The execution plan (749 LOC) is DAG-first per Roscoe's framing preference with per-node deliverables, function signatures, step ordering, test pyramid, and done-defined. The amended parent design doc flips status to CASCADE-RATIFIED with per-cluster markers and inline cascade-closure narratives for Q-C2 (port-verbatim user escalation) and Q-D1 (manager-unilateral by-concurrence). Mic-monopoly indicator deferred via Path δ ratification (Rick) — filed as Phase 6c follow-on in TODO.md with the system-wide-semantic question to resolve before designing.
+
+**Files**:
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/11-phase6c-cascade-synthesis.md` (NEW, 476 lines)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/12-phase6c-execution-plan.md` (NEW, 749 lines)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md` (MOD, cascade-amended status + per-cluster markers + Q-C2/Q-D1 cascade-closure notes)
+- `TODO.md` (MOD, mic-monopoly follow-on entry filed under Path δ ratification)
+- `history.md` (entry above)
+
+**Commit**: `3c870fb` (2026-05-19, Rick ratified via María's `ask_yes_no` 22:21 UTC).
+
+---
+
 ### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Voice persona pool expansion — +2 personas, Sam→pool / Arnold→overflow swap, generalized overflow loader
 
 Pool expansion driven by Rick's voice directive following the 6-persona-experiment validation in Run 3 cascade. Pool grew from 6 to 8 personas; the overflow slot rotated from Sam to Arnold via a config-only mechanism enabled by a small loader generalization. Color iterations + gender + profile corrections per Rick's voice walkthrough at ElevenLabs.

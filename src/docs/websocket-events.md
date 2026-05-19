@@ -24,6 +24,7 @@ The system defines **22 events** in `lupin-app.ini`. Clients subscribe to specif
 | `notification_expired` | Notifications | Server → Client | Yes |
 | `notification_responded` | Notifications | Server → Client | Yes |
 | `commons_activity` | Notifications (notification_queue_update wrapper, `type="commons_activity"`) | Server → Client | Yes |
+| `speakerphone_changed` | Notifications (notification_queue_update wrapper, `type="speakerphone_changed"`) | Server → Client | Yes |
 | `proxy_decision_new` | Proxy / Ratification | Server → Client | Yes |
 | `sys_time_update` | System | Server → Client | No (broadcast) |
 | `status` | System | Server → Client | Varies |
@@ -248,6 +249,37 @@ Client handling: `notifications.js::_handleCommonsActivityWS()` prepends the new
 
 ---
 
+### `speakerphone_changed`
+
+**Renamed 2026-05-13** from `conversation_mode_changed` during the Speakerphone solo/chorus refactor (see [`../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`](../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/) Phase 3). Broadcast on every speakerphone-mode toggle so all connected UI tabs sync. In solo mode, activating one session displaces any other active session; in chorus mode, multiple sessions can be simultaneously active.
+
+Wrapped in the canonical `notification_queue_update` envelope with `notification.type == "speakerphone_changed"`. Origin: `src/cosa/rest/routers/speakerphone.py` — emits at two sites: (a) the displaced-other-session push (when a different session previously held the slot in solo mode) and (b) the self-state-change push (always fires on POST `/api/cosa-voice/speakerphone/{sid}`). User-scoped — only sent to the authenticated owner's sessions.
+
+**Payload** (under `notification.payload`):
+```json
+{
+  "session_id": "abc123-uuid",
+  "on": true,
+  "displaced": false,
+  "displaced_by": null
+}
+```
+
+- `session_id` — the session whose speakerphone state just changed
+- `on` — `true` if speakerphone is now active, `false` if deactivated
+- `displaced` (optional) — `true` when this session was forcibly deactivated because another session activated in solo mode
+- `displaced_by` (optional) — the session_id that displaced this one (only present when `displaced: true`)
+
+Client handling:
+- Legacy UI: `notifications.js::handleConversationModeChanged()` (line ~5552) — client-side maps `payload.on → conversation_mode_active` for the legacy in-memory state model; the legacy handler kept its original method name for callsite stability.
+- Multiplexer UI: `src/fastapi_app/static/js/multiplexer/stores/SenderStore.ts` — `STATE_UPDATE_TYPES` Set includes BOTH `"speakerphone_changed"` (current wire) AND `"conversation_mode_changed"` (post-rename target, in case the type is ever re-renamed back). Reducer reads `payload.active ?? payload.on` to accept either field name. **Forward-compat bridge** — implementer can rename either direction without breaking the client. See `2026-05-19 Run 3 cascade Section D` for the Path III bridge ratification rationale.
+
+**INI subscription**: included in `lupin-app.ini` `websocket available events` (line 741). Subscribed by both legacy and multiplexer clients via the WS auth handshake.
+
+**Server-side whitelist**: `src/cosa/rest/routers/notifications.py:359-364` `valid_types` list. The deprecated `conversation_mode_changed` is NOT in the list — pushing that type would return HTTP 400.
+
+---
+
 ## Proxy / Ratification Events
 
 ### `proxy_decision_new`
@@ -431,6 +463,14 @@ The following events were removed in July 2025 and replaced by `job_state_transi
 | `queue_running_update` | `job_state_transition` (with `to_queue: "run"`) |
 | `queue_done_update` | `job_state_transition` (with `to_queue: "done"`) |
 | `queue_dead_update` | `job_state_transition` (with `to_queue: "dead"`) |
+
+The following event was renamed during the 2026-05-13 Speakerphone solo/chorus refactor (Phase 3 of `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`):
+
+| Deprecated Event | Replacement | Rename Date |
+|-----------------|-------------|-------------|
+| `conversation_mode_changed` | `speakerphone_changed` (semantic payload identical; `payload.on` carries the boolean state) | 2026-05-13 |
+
+The deprecated name is NOT in the `valid_types` whitelist; pushing it returns HTTP 400. The multiplexer `SenderStore` accepts both names client-side as a **forward-compat bridge** in case the event is ever re-renamed back — see `speakerphone_changed` entry above for details.
 
 ---
 
