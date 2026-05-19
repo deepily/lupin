@@ -149,9 +149,19 @@
 
 /* ============================================================================
    Persona badge (sender-card chrome)
+
+   Phase 6c Node A Step A1 (2026-05-19): renamed from `.persona-badge` to
+   `.sender-persona-badge` per F-Arnold-3 (rule-rename-in-place). The
+   element was also promoted from <span> to <button> with `popovertarget`
+   pointing at the persona-popover modal — clicking opens a popover with
+   full persona details (name, voice id, borrowed status). The badge is
+   now glyph-only (icon shown; name surfaced via popover on demand).
+   Button-default styling (border, background) is overridden below; the
+   pill shape + persona-color flow is preserved verbatim from the legacy
+   span styling.
    ============================================================================ */
 
-.persona-badge {
+.sender-persona-badge {
     display: inline-flex;
     align-items: center;
     gap: 3px;
@@ -163,9 +173,13 @@
     font-weight: 600;
     text-shadow: 0 1px 1px rgb( 0, 0, 0, 0.15 );
     white-space: nowrap;
+    /* Reset native <button> defaults so the visual matches the legacy span. */
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
 }
 
-.persona-badge.borrowed {
+.sender-persona-badge.borrowed {
     border: 1px dashed #fff;
     opacity: 0.8;
 }

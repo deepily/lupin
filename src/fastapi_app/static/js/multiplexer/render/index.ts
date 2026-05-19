@@ -37,6 +37,21 @@ export {
   type TtsChromeRendererStores,
   type AudioStoreLike,
 } from "./TtsChromeRenderer";
+export {
+  createConversationModePinRenderer,
+  type ConversationModePinRenderer,
+  type ConversationModePinRendererOptions,
+} from "./ConversationModePinRenderer";
+export {
+  createFocusTrayRenderer,
+  type FocusTrayRenderer,
+  type FocusTrayRendererOptions,
+} from "./FocusTrayRenderer";
+export {
+  createPersonaModalRenderer,
+  type PersonaModalRenderer,
+  type PersonaModalRendererOptions,
+} from "./PersonaModalRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";

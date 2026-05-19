@@ -34,9 +34,22 @@ import {
   createJobsPaneRenderer,
   createActionRequiredRenderer,
   createTtsChromeRenderer,
+  createConversationModePinRenderer,
+  createFocusTrayRenderer,
+  createPersonaModalRenderer,
   configureMetaDisplayCap,
 } from "./render";
-import type { BootCompletePayload, LifecyclePayload } from "./shared/types";
+import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
+
+// Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
+// sender whose `conversation_mode_active === true` above the default
+// most-recent-activity-first ordering; ties within the same conversation-mode
+// state fall back to activity-based sort. Per F-Arnold-D3: sender-level
+// signature (NOT entry-level). The default sort (no opts override) preserves
+// Phase 5 behavior; this override only activates when wired here at boot.
+const phase6cSenderSort: SenderSortComparator = (a, b) =>
+  (Number(b.conversation_mode_active) - Number(a.conversation_mode_active))
+  || (b.last_active_ts - a.last_active_ts);
 
 // Session-ID generator mirroring `notifications.js:2134`. 10 × 10 = 100
 // distinct combinations; the fallback if the server hasn't issued a session
@@ -188,6 +201,9 @@ function bootMultiplexer(): void {
       senders        : stores.senders,
       actionRequired : stores.actionRequired,
     },
+    // Phase 6c Node D Step D5 — inject the conversation-mode-aware sort
+    // BEFORE first render so the initial paint already respects pin priority.
+    senderSortComparator : phase6cSenderSort,
   });
   const mountEl = document.getElementById("notifications-pane");
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
@@ -240,6 +256,43 @@ function bootMultiplexer(): void {
   ttsMountEl.removeAttribute("hidden");
   ttsMountEl.removeAttribute("data-phase6-pending");
 
+  // Phase 6c Node D Step D5 — conversation-mode pin renderer mounts AFTER
+  // ttsChromeRenderer per canonical boot order (notifications → jobs →
+  // actionRequired → ttsChrome → conversationModePin). Subscribes to
+  // store_senders_changed and writes data-pinned-conv-mode / data-focus-flash
+  // attributes on sender cards. Reuses #notifications-pane as the mount root
+  // because sender cards are descendants of that subtree (rendered by
+  // NotificationsListRenderer into #sender-cards-container).
+  const conversationModePinRenderer = createConversationModePinRenderer({
+    eventBus,
+    stores : { senders: stores.senders },
+  });
+  conversationModePinRenderer.mount(mountEl);
+
+  // Phase 6c Node B Step B5 — focus-tray renderer mounts AFTER
+  // conversationModePinRenderer per canonical boot order. Mount root must
+  // contain BOTH `#focus-mode-toggle` (inside `#notifications-pane`) and
+  // `#focus-tray` (sibling of `#notifications-pane`); `<main.container>`
+  // is the natural parent of both. Subscribes to store_senders_changed
+  // and writes data-focus-hidden on non-pinned sender cards when focus
+  // mode is ON.
+  const focusTrayRenderer = createFocusTrayRenderer({
+    eventBus,
+    stores : { senders: stores.senders },
+  });
+  const focusTrayMountEl = document.querySelector<HTMLElement>("main.container");
+  if (focusTrayMountEl === null) throw new Error("multiplexer: <main.container> not found");
+  focusTrayRenderer.mount(focusTrayMountEl);
+
+  // Phase 6c Node A Step A5 — persona-modal renderer mounts AFTER
+  // focusTrayRenderer per canonical boot order. Uses the same
+  // <main.container> root because #persona-modal-portal lives at main level.
+  const personaModalRenderer = createPersonaModalRenderer({
+    eventBus,
+    stores : { senders: stores.senders },
+  });
+  personaModalRenderer.mount(focusTrayMountEl);
+
   attachLifecycleListeners();
 
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
@@ -259,11 +312,14 @@ function bootMultiplexer(): void {
   // surface for AC9 Playwright equality check).
   const bootCompletePayload: BootCompletePayload = {
     handlers : {
-      audioBinary             : stores.audio.binaryHandler.name,
-      notificationsRenderer   : "mounted",
-      jobsRenderer            : "mounted",
-      actionRequiredRenderer  : "mounted",
-      ttsChromeRenderer       : "mounted",
+      audioBinary                 : stores.audio.binaryHandler.name,
+      notificationsRenderer       : "mounted",
+      jobsRenderer                : "mounted",
+      actionRequiredRenderer      : "mounted",
+      ttsChromeRenderer           : "mounted",
+      conversationModePinRenderer : "mounted",
+      focusTrayRenderer           : "mounted",
+      personaModalRenderer        : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -280,6 +336,9 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] jobsRenderer:mounted");
   console.log("[multiplexer] actionRequiredRenderer:mounted");
   console.log("[multiplexer] ttsChromeRenderer:mounted");
+  console.log("[multiplexer] conversationModePinRenderer:mounted");
+  console.log("[multiplexer] focusTrayRenderer:mounted");
+  console.log("[multiplexer] personaModalRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

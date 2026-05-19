@@ -2,6 +2,39 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.19 - Session b4623e3d (Roscoe 🤠) | Phase 6c implementation — Nodes D + B + A fully shipped + Node C partial (Steps C1+C2)
+
+#### Checkpoint | 2026.05.19 23:30 | Phase 6c Nodes D + B + A shipped end-to-end; Node C partial through Step C2
+
+Implementer-pass on Tiberius's Phase 6c execution plan (`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/12-phase6c-execution-plan.md`, 749 LOC). Three of the four cascade nodes (D, B, A) are fully shipped end-to-end across the full test pyramid; Node C's chip-port runway (footer mount + AudioRecorder TS port) is landed and ready for Step C3 (recordingManager) to follow.
+
+**Highlights**:
+- **93 new Phase 6c unit cases** across 8 new test files (D 37 + B 31 + A 25). All multiplexer unit tests still pass.
+- **c8 100% gate GREEN** on every multiplexer-wide pass: 8450 statements / 1787 branches / 642 functions / 8450 lines. Same-line `c8 ignore` comments cite specific defensive paths (polyfill fallbacks, FileReader error path, MediaRecorder error path under happy-dom) per the project's 100% mandate exception clause.
+- **23/23 Phase 6c smoke tests pass on `:7999`** in ~24s end-to-end (5 D + AC-D9 canary + AC-D11 boot handshake + AC-D12 perf gate + 8 B + AC-B15 grep-gate + 6 A).
+- **3 visual regression files** authored (Section D 3 snapshots, Section B 3 snapshots, Section A 3 snapshots).
+- **3 `:8000` baseline submissions** queued via `POST /api/test-suite/submit` with `auto_fix_on_failure: False` per `feedback_baseline_capture_disable_tfe`: D `ts-0acbd8ef`, B `ts-db9d94ab`, A `ts-9fca0827`.
+- **AC-B15 hard-verification grep-gate** holds across the whole session: D-CSS (`conversation-mode-pin.css`) has zero `@keyframes focus-flash` declarations; B-CSS (`focus-tray.css`) owns the SSOT keyframe. Smoke includes a runtime regression check.
+- **Cross-renderer DOM-wipe bug found + fixed during Node B smoke** — NotificationsListRenderer's `replaceWith` re-render wiped `data-focus-hidden` on every store_senders_changed; FocusTrayRenderer now tracks `lastPinnedId` and re-stamps the attribute on every reconcile while focusModeActive=true (works because FocusTrayRenderer subscribes LAST in boot order, firing after the upstream wipe). Flagged to Tiberius as empirical anchor for the Step 9 "cross-renderer DOM-interaction matrix" doctrine candidate now being co-authored with María 🌸.
+
+**Synthesis-doc gaps surfaced + resolved during pre-flight**:
+- **Recon-D2 mic_monopoly wire-field**: server has no such field, no emitter. Escalated to Rick via Tiberius's `ask_multiple_choice`. Path δ defer ratified — mic-monopoly indicator becomes a Phase 6c follow-on (TODO entry filed by Tiberius in commit `3c870fb`). AC-D3 drops to 8 cases, AC-D10 drops to 5; AC-D4 unchanged.
+- **Recon-D2-bis conversation_mode_changed type rename**: server emits `speakerphone_changed` with `payload.on`; smoke tests + plan reference `conversation_mode_changed` with `payload.active`. Path III bridge ratified by Tiberius unilaterally (wire-compat decision, not scope decision) — SenderStore.handleConversationModeUpdate listens for both type strings and reads `payload.active ?? payload.on`. AC-D3 covers both type strings × both field names (14 cases shipped).
+- **Recon-A5 slugify**: new helper at `render/templates/slugify.ts` — single source of truth shared by `senderCard.ts` (Step A1) + `personaModal.ts` (Step A2). Regex `[^a-zA-Z0-9_-]/g → -` for HTML id-safe slugs.
+
+**Outstanding before merge** (next-session todos):
+- Node C Steps C3-C7 (recordingManager port + SenderCardRecorderRenderer + sender-card-recorder.css + boot wiring with AuthManager order + ≥24 unit tests + smoke + visual + `:8000` baseline)
+- AC-D14, AC-B14, AC-A13 regression runs on `:8000` — pending Rick slot-coordination (NOT standing permission for non-baseline runs); will batch as one slot-ask when Rick returns
+
+**Coordination notes**:
+- Tiberius 🌑 (session `387b9201`) shipped 3 handoff docs + mic-monopoly TODO in commit `3c870fb`; my implementation work is the runtime side of that bundle.
+- María 🌸 + Tiberius are co-authoring "Step 9 synthesis-and-handoff doctrine" as a meta-process improvement; the cross-renderer DOM-wipe bug-find from Section B smoke is their empirical anchor for a "cross-renderer DOM-interaction matrix" Step 9 check.
+
+**Files**: 31 (10 new source TS, 3 new CSS, 9 new test files, 7 modified source/HTML, 2 modified tests, 1 stylelintrc, history.md).
+**Commit**: c7df5d5
+
+---
+
 ### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | websocket-events.md doc fix — `speakerphone_changed` documented + `conversation_mode_changed` deprecation noted
 
 Closed a documentation gap surfaced during Roscoe 🤠's Phase 6c Node D pre-flight investigation. Rick asked "who listens for `conversation_mode_changed`, where does it originate, is it in the INI website-events list?" — answered with the cascade-design-gap context: the event was renamed to `speakerphone_changed` during the Speakerphone solo/chorus refactor (Phase 3 of `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`, landed 2026-05-13), but `src/docs/websocket-events.md` was never updated.

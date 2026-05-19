@@ -91,10 +91,11 @@ function makeNotification(over: Partial<Notification> = {}): Notification {
 
 function makeSender(over: Partial<SenderRecord> = {}): SenderRecord {
   return {
-    sender_id      : "sess_42",
-    display_name   : "Sender",
-    last_active_ts : Date.UTC(2026, 4, 5, 14, 7),
-    unread_count   : 1,
+    sender_id                : "sess_42",
+    display_name             : "Sender",
+    last_active_ts           : Date.UTC(2026, 4, 5, 14, 7),
+    unread_count             : 1,
+    conversation_mode_active : false,
     ...over,
   };
 }
@@ -723,5 +724,145 @@ test("ownership flag absent: renderActionRequiredSection() runs normally (Phase 
   });
   // Both widgets present — the Phase 5 read-only path ran (no early return).
   assert.equal(arSection.querySelectorAll(".action-required-widget").length, 2);
+  renderer.unmount();
+});
+
+// ===========================================================================
+// AC-D5 : Phase 6c sender-sort comparator hook (+ backward-compat guard
+//   per F-Arnold-D4). Floor: ≥4 new cases.
+// ===========================================================================
+
+import type { SenderSortComparator } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+
+interface SortTestSetup extends TestSetup {
+  sCardsRoot : HTMLElement;
+}
+
+function setupRendererForSort(comparator?: SenderSortComparator): SortTestSetup {
+  const bus = createEventBusForTesting();
+  const notifList : Notification[]       = [];
+  const senderList: SenderRecord[]       = [];
+  const arList    : ActionRequiredItem[] = [];
+
+  const renderer = createNotificationsListRenderer({
+    eventBus: bus,
+    stores  : {
+      notifications  : { list: () => notifList },
+      senders        : { list: () => senderList },
+      actionRequired : { list: () => arList },
+    },
+    appTimezone          : "UTC",
+    senderSortComparator : comparator,
+  });
+
+  const root = document.createElement("section");
+  root.id = "notifications-pane";
+  const arSection = document.createElement("div");
+  arSection.id = "action-required-section";
+  const sCards = document.createElement("div");
+  sCards.id = "sender-cards-container";
+  root.appendChild(arSection);
+  root.appendChild(sCards);
+
+  return { bus, notifList, senderList, arList, renderer, root, sCardsRoot: sCards };
+}
+
+function senderIdsInOrder(sCardsRoot: HTMLElement): string[] {
+  return Array.from(sCardsRoot.querySelectorAll<HTMLElement>(".sender-card"))
+    .map(c => c.getAttribute("data-sender-id") ?? "");
+}
+
+test("AC-D5 #1: default sort (no comparator opts override) — most-recent-activity-first (Phase 5 behavior preserved)", () => {
+  // No `senderSortComparator` argument — implementation must apply
+  // DEFAULT_SENDER_SORT = (a, b) => b.last_active_ts - a.last_active_ts.
+  const { renderer, root, notifList, senderList, sCardsRoot } = setupRendererForSort();
+  senderList.push(makeSender({ sender_id: "old",  last_active_ts: 1_000_000 }));
+  senderList.push(makeSender({ sender_id: "mid",  last_active_ts: 2_000_000 }));
+  senderList.push(makeSender({ sender_id: "new",  last_active_ts: 3_000_000 }));
+  notifList.push(makeNotification({ id_hash: "n_old", sender_id: "old", ts: 1_000_000 }));
+  notifList.push(makeNotification({ id_hash: "n_mid", sender_id: "mid", ts: 2_000_000 }));
+  notifList.push(makeNotification({ id_hash: "n_new", sender_id: "new", ts: 3_000_000 }));
+
+  renderer.mount(root);
+  assert.deepEqual(senderIdsInOrder(sCardsRoot), ["new", "mid", "old"],
+    "default sort is most-recent first");
+  renderer.unmount();
+});
+
+test("AC-D5 #2: custom comparator — alphabetical sort overrides default activity-based ordering", () => {
+  const alphabetical: SenderSortComparator = (a, b) => a.sender_id.localeCompare(b.sender_id);
+  const { renderer, root, notifList, senderList, sCardsRoot } = setupRendererForSort(alphabetical);
+  // Bob has the most-recent activity but alphabetical wins.
+  senderList.push(makeSender({ sender_id: "alice",   last_active_ts: 1_000_000 }));
+  senderList.push(makeSender({ sender_id: "bob",     last_active_ts: 9_000_000 }));
+  senderList.push(makeSender({ sender_id: "charlie", last_active_ts: 5_000_000 }));
+  notifList.push(makeNotification({ id_hash: "na", sender_id: "alice",   ts: 1_000_000 }));
+  notifList.push(makeNotification({ id_hash: "nb", sender_id: "bob",     ts: 9_000_000 }));
+  notifList.push(makeNotification({ id_hash: "nc", sender_id: "charlie", ts: 5_000_000 }));
+
+  renderer.mount(root);
+  assert.deepEqual(senderIdsInOrder(sCardsRoot), ["alice", "bob", "charlie"],
+    "custom comparator wins over activity-based default");
+  renderer.unmount();
+});
+
+test("AC-D5 #3: Phase 6c override — conversation-mode-pinned sender hoists above MORE-recently-active unpinned senders", () => {
+  // The Phase 6c boot-injected comparator:
+  //   (a, b) => Number(b.conversation_mode_active) - Number(a.conversation_mode_active)
+  //         || (b.last_active_ts - a.last_active_ts)
+  const phase6cSort: SenderSortComparator = (a, b) =>
+    (Number(b.conversation_mode_active) - Number(a.conversation_mode_active))
+    || (b.last_active_ts - a.last_active_ts);
+
+  const { renderer, root, notifList, senderList, sCardsRoot } = setupRendererForSort(phase6cSort);
+  // pinned sender has OLDEST activity yet must render FIRST.
+  senderList.push(makeSender({ sender_id: "pinned",       last_active_ts: 1_000_000, conversation_mode_active: true }));
+  senderList.push(makeSender({ sender_id: "recent",       last_active_ts: 9_000_000, conversation_mode_active: false }));
+  senderList.push(makeSender({ sender_id: "less_recent",  last_active_ts: 5_000_000, conversation_mode_active: false }));
+  notifList.push(makeNotification({ id_hash: "np", sender_id: "pinned",      ts: 1_000_000 }));
+  notifList.push(makeNotification({ id_hash: "nr", sender_id: "recent",      ts: 9_000_000 }));
+  notifList.push(makeNotification({ id_hash: "nl", sender_id: "less_recent", ts: 5_000_000 }));
+
+  renderer.mount(root);
+  assert.deepEqual(senderIdsInOrder(sCardsRoot), ["pinned", "recent", "less_recent"],
+    "pinned hoists above activity-based ordering; non-pinned senders fall back to activity sort");
+  renderer.unmount();
+});
+
+test("AC-D5 #4: Phase 6c override — tied conversation_mode_active values fall back to last_active_ts", () => {
+  // All three senders share the same conversation_mode_active=false; the
+  // activity-based fallback determines order.
+  const phase6cSort: SenderSortComparator = (a, b) =>
+    (Number(b.conversation_mode_active) - Number(a.conversation_mode_active))
+    || (b.last_active_ts - a.last_active_ts);
+
+  const { renderer, root, notifList, senderList, sCardsRoot } = setupRendererForSort(phase6cSort);
+  senderList.push(makeSender({ sender_id: "first",  last_active_ts: 3_000_000, conversation_mode_active: false }));
+  senderList.push(makeSender({ sender_id: "second", last_active_ts: 5_000_000, conversation_mode_active: false }));
+  senderList.push(makeSender({ sender_id: "third",  last_active_ts: 1_000_000, conversation_mode_active: false }));
+  notifList.push(makeNotification({ id_hash: "n1", sender_id: "first",  ts: 3_000_000 }));
+  notifList.push(makeNotification({ id_hash: "n2", sender_id: "second", ts: 5_000_000 }));
+  notifList.push(makeNotification({ id_hash: "n3", sender_id: "third",  ts: 1_000_000 }));
+
+  renderer.mount(root);
+  assert.deepEqual(senderIdsInOrder(sCardsRoot), ["second", "first", "third"],
+    "all unpinned ⇒ activity-based fallback applies");
+  renderer.unmount();
+});
+
+test("AC-D5 #5: backward-compat (F-Arnold-D4) — pre-existing comparator-less callers still see Phase 5 behavior", () => {
+  // Identical setup to #1 but explicitly omitting senderSortComparator
+  // via undefined coercion in the helper. Guards against accidental
+  // signature breakage that would force every Phase 5 caller to adopt the
+  // Phase 6c comparator.
+  const { renderer, root, notifList, senderList, sCardsRoot } = setupRendererForSort(undefined);
+  senderList.push(makeSender({ sender_id: "a", last_active_ts: 1_000_000 }));
+  senderList.push(makeSender({ sender_id: "b", last_active_ts: 2_000_000 }));
+  notifList.push(makeNotification({ id_hash: "na", sender_id: "a", ts: 1_000_000 }));
+  notifList.push(makeNotification({ id_hash: "nb", sender_id: "b", ts: 2_000_000 }));
+
+  renderer.mount(root);
+  assert.deepEqual(senderIdsInOrder(sCardsRoot), ["b", "a"],
+    "undefined comparator opt → default most-recent-first behavior preserved");
   renderer.unmount();
 });

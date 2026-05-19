@@ -311,14 +311,23 @@ export interface StoreJobsChangedPayload {
 // ---------------------------------------------------------------------------
 // Phase 4 — SenderRecord (per design § SenderStore + D-E ratification full
 // 5-field voice_persona shape).
+//
+// Phase 6c Node D (Step D1 — 2026-05-19): added `conversation_mode_active`
+// (boolean) per Q-D1 Path A ratification. Drives the conversation-mode pin
+// renderer's `data-pinned-conv-mode` attribute on the sender card. The
+// `mic_monopoly` field originally proposed alongside this one was DEFERRED
+// per Path δ ratification (Rick, 2026-05-19) — see TODO.md "Phase 6c
+// follow-on: mic-monopoly indicator" for the system-wide-semantic question
+// that resolves before re-scoping.
 // ---------------------------------------------------------------------------
 
 export interface SenderRecord {
-  sender_id      : string;
-  display_name   : string;
-  last_active_ts : number;
-  unread_count   : number;
-  voice_persona? : VoicePersona;
+  sender_id                : string;
+  display_name             : string;
+  last_active_ts           : number;
+  unread_count             : number;
+  conversation_mode_active : boolean;
+  voice_persona?           : VoicePersona;
 }
 
 export type SenderChangeKind = "added" | "updated" | "removed";
@@ -327,6 +336,22 @@ export interface StoreSendersChangedPayload {
   changeKind : SenderChangeKind;
   sender_id  : string;
 }
+
+// Phase 6c Node D Step D3 (per F-Arnold-D3 — sender-level signature, NOT
+// entry-level): NotificationsListRenderer accepts an optional sort comparator
+// at construction so consumers (boot.ts wires Phase 6c override here) can
+// hoist conversation-mode-pinned senders above the activity-based default.
+// Default behavior (no opts override): `(a, b) => b.last_active_ts -
+// a.last_active_ts` — preserves Phase 5 sort order.
+//
+// Phase 6c override (injected at boot per Step D5):
+//   `(a, b) => Number(b.conversation_mode_active) -
+//              Number(a.conversation_mode_active)
+//          || b.last_active_ts - a.last_active_ts`
+//
+// The signature is `(a, b) => number` exactly like `Array.prototype.sort`;
+// callers don't need to know about entry-wrapping.
+export type SenderSortComparator = ( a: SenderRecord, b: SenderRecord ) => number;
 
 // ---------------------------------------------------------------------------
 // Phase 4 — ActionRequiredItem (per design § ActionRequiredStore + Pass 1 F17
@@ -437,6 +462,25 @@ export interface BootCompletePayload {
     // AC9 grep guard asserts the canonical 4-line console-mount order.
     actionRequiredRenderer? : string;
     ttsChromeRenderer?      : string;
+    // Phase 6c Node D Step D5 (2026-05-19): literal string "mounted" emitted
+    // after `conversationModePinRenderer.mount(root)` completes. Optional per
+    // the Phase 6a F12 forward/backward-compat pattern + runtime-unconditional
+    // per Phase 6a F11 — boot.ts populates unconditionally once Node D's
+    // renderer mount lands in the boot sequence. AC-D11 boot handshake smoke
+    // asserts the canonical 5-line console-mount order (with this 5th line
+    // appended after ttsChromeRenderer).
+    conversationModePinRenderer? : string;
+    // Phase 6c Node B Step B5 (2026-05-19): literal string "mounted" emitted
+    // after `focusTrayRenderer.mount(root)` completes. Sixth line in the
+    // canonical boot handshake (notifications → jobs → actionRequired →
+    // ttsChrome → conversationModePin → focusTray); AC-B11 boot handshake
+    // smoke asserts this position.
+    focusTrayRenderer?           : string;
+    // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
+    // after `personaModalRenderer.mount(root)` completes. Seventh line in
+    // the canonical boot handshake (...conversationModePin → focusTray →
+    // personaModal); AC-A11 boot handshake smoke asserts this position.
+    personaModalRenderer?        : string;
   };
 }
 

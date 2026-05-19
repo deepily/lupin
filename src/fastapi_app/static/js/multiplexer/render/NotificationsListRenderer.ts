@@ -27,6 +27,7 @@ import type {
   SenderRecord,
   ActionRequiredItem,
   LupinEvent,
+  SenderSortComparator,
   StoreNotificationsChangedPayload,
   StoreActionRequiredChangedPayload,
 } from "../shared/types";
@@ -62,16 +63,27 @@ export interface NotificationsListRenderer {
 }
 
 export interface NotificationsListRendererOptions {
-  eventBus     : EventBus;
-  stores       : NotificationsListRendererStores;
-  appTimezone? : string;
+  eventBus              : EventBus;
+  stores                : NotificationsListRendererStores;
+  appTimezone?          : string;
+  // Phase 6c Node D Step D3 — sender-level sort comparator. Defaults to
+  // most-recent-activity-first (preserves Phase 5 behavior). Boot wiring
+  // injects the Phase 6c override that hoists conversation-mode-pinned
+  // senders above activity-based ordering. Per F-Arnold-D3: signature is
+  // sender-level, NOT entry-level.
+  senderSortComparator? : SenderSortComparator;
 }
 
+// Default sender sort: most-recent-activity-first. Preserves the Phase 5
+// behavior when no `senderSortComparator` is supplied via options.
+const DEFAULT_SENDER_SORT: SenderSortComparator = (a, b) => b.last_active_ts - a.last_active_ts;
+
 class NotificationsListRendererImpl implements NotificationsListRenderer {
-  private readonly bus            : EventBus;
-  private readonly stores         : NotificationsListRendererStores;
-  private readonly appTimezone    : string | undefined;
-  private readonly unsubscribers  : Array<() => void> = [];
+  private readonly bus                  : EventBus;
+  private readonly stores               : NotificationsListRendererStores;
+  private readonly appTimezone          : string | undefined;
+  private readonly senderSortComparator : SenderSortComparator;
+  private readonly unsubscribers        : Array<() => void> = [];
   // Map: progress_group_id → expanded?  (preserved across re-renders so the
   // post-render fix-up step re-marks expanded groups). Per F14.
   private readonly expandedGroups : Set<string> = new Set();
@@ -84,9 +96,10 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private clickHandler        : ((e: Event) => void) | null = null;
 
   constructor(opts: NotificationsListRendererOptions) {
-    this.bus         = opts.eventBus;
-    this.stores      = opts.stores;
-    this.appTimezone = opts.appTimezone;
+    this.bus                  = opts.eventBus;
+    this.stores               = opts.stores;
+    this.appTimezone          = opts.appTimezone;
+    this.senderSortComparator = opts.senderSortComparator ?? DEFAULT_SENDER_SORT;
   }
 
   mount(root: HTMLElement): void {
@@ -204,8 +217,10 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       notifications: notifs,
     }));
 
-    // Sort senders by most-recent activity (newest first).
-    entries.sort((a, b) => b.sender.last_active_ts - a.sender.last_active_ts);
+    // Sort via the configurable sender-level comparator (Phase 6c Node D
+    // Step D3 + F-Arnold-D3). Default: most-recent-activity-first; Phase 6c
+    // boot override hoists conversation-mode-pinned senders to the top.
+    entries.sort((a, b) => this.senderSortComparator(a.sender, b.sender));
 
     keyedListMerge({
       parent  : this.senderCardsMount,
@@ -411,10 +426,11 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       if (n.ts > last) last = n.ts;
     }
     return {
-      sender_id      : senderId,
-      display_name   : senderId,
-      last_active_ts : last,
-      unread_count   : notifs.length,
+      sender_id                : senderId,
+      display_name             : senderId,
+      last_active_ts           : last,
+      unread_count             : notifs.length,
+      conversation_mode_active : false,
     };
   }
 }

@@ -36,10 +36,11 @@ function makePersona(over: Partial<VoicePersona> = {}): VoicePersona {
 
 function makeSender(over: Partial<SenderRecord> = {}): SenderRecord {
   return {
-    sender_id      : "sess_42",
-    display_name   : "Test Sender",
-    last_active_ts : Date.UTC(2026, 4, 5, 14, 7),
-    unread_count   : 3,
+    sender_id                : "sess_42",
+    display_name             : "Test Sender",
+    last_active_ts           : Date.UTC(2026, 4, 5, 14, 7),
+    unread_count             : 3,
+    conversation_mode_active : false,
     ...over,
   };
 }
@@ -64,11 +65,16 @@ test("senderCard: data-id-hash matches sender_id (F12); legacy data-sender-id mi
 });
 
 test("senderCard: voice_persona color applied via style.setProperty (NOT inline style attr)", () => {
-  const persona = makePersona({ color: "#ab1234" });
+  const persona = makePersona({ color: "#ab1234", icon: "🦊" });
   const card = renderSenderCard(makeSender({ voice_persona: persona }), [], { appTimezone: "UTC" });
   assert.equal(card.style.getPropertyValue("--persona-color"), "#ab1234");
-  assert.notEqual(card.querySelector(".persona-badge"), null);
-  assert.equal(card.querySelector(".persona-badge")!.textContent!.includes("Tiberius"), true);
+  // Phase 6c Node A Step A1: badge is now glyph-only (no inline name);
+  // the name surfaces via the persona-popover modal triggered by popovertarget.
+  const badge = card.querySelector(".sender-persona-badge");
+  assert.notEqual(badge, null);
+  assert.equal(badge!.textContent, "🦊");
+  assert.equal(badge!.tagName.toLowerCase(), "button", "Phase 6c Node A: chip is now a <button> with popovertarget");
+  assert.match(badge!.getAttribute("popovertarget") ?? "", /^persona-popover-sess_42/);
 });
 
 test("senderCard: groups notifications by date descending; multi-date produces multiple .date-accordion children", () => {
@@ -101,13 +107,13 @@ test("senderCard: unread_count === 0 renders no .sender-new-count badge", () => 
   assert.equal(card.querySelector(".sender-new-count"), null);
 });
 
-test("senderCard: borrowed persona gets the 'borrowed' class on .persona-badge", () => {
+test("senderCard: borrowed persona gets the 'borrowed' class on .sender-persona-badge", () => {
   const card = renderSenderCard(
     makeSender({ voice_persona: makePersona({ borrowed: true }) }),
     [],
     { appTimezone: "UTC" },
   );
-  const badge = card.querySelector(".persona-badge");
+  const badge = card.querySelector(".sender-persona-badge");
   assert.notEqual(badge, null);
   assert.ok(badge!.classList.contains("borrowed"));
 });
@@ -118,7 +124,7 @@ test("senderCard: non-borrowed persona omits the 'borrowed' class", () => {
     [],
     { appTimezone: "UTC" },
   );
-  const badge = card.querySelector(".persona-badge");
+  const badge = card.querySelector(".sender-persona-badge");
   assert.notEqual(badge, null);
   assert.ok(!badge!.classList.contains("borrowed"));
 });

@@ -18,6 +18,7 @@ import { html } from "../html";
 import { keyedListMerge } from "../dom";
 import { formatDateKey, formatHM } from "../time";
 import { renderDateAccordion } from "./dateAccordion";
+import { slugifySenderId } from "./slugify";
 import type { SenderRecord, Notification } from "../../shared/types";
 
 interface RenderOptions {
@@ -55,13 +56,28 @@ export function renderSenderCard(
     root.style.setProperty("--persona-color", persona.color);
   }
 
-  // Header chrome. Persona-badge class is computed before template interpolation
-  // because the helper only supports whole-attribute interpolation (not
-  // mid-attribute concatenation like `class="persona-badge${borrowed}"`).
+  // Header chrome. Persona-badge class is computed before template
+  // interpolation because the helper only supports whole-attribute
+  // interpolation (not mid-attribute concatenation).
+  //
+  // Phase 6c Node A Step A1 (2026-05-19): the badge was renamed from
+  // `.persona-badge` (span) to `.sender-persona-badge` (button) per
+  // F-Arnold-3 (rule-rename-in-place). The button carries `popovertarget`
+  // pointing at the matching persona-popover modal id (constructed via the
+  // same `slugifySenderId` helper personaModal.ts uses for the popover's
+  // `id` attribute — single source of truth per Recon-A5). The button is
+  // now glyph-only (icon, no inline name); the popover surfaces the name
+  // and other persona fields on demand.
+  //
+  // F-Arnold-4: when sender has NO voice_persona, the badge element is
+  // omitted entirely (not rendered as empty/stub). The `if (persona !==
+  // undefined)` guard covers this — `personaBadge` stays null and the
+  // header template's `${personaBadge}` interpolation skips it.
   let personaBadge: DocumentFragment | null = null;
   if (persona !== undefined) {
-    const badgeClass = persona.borrowed ? "persona-badge borrowed" : "persona-badge";
-    personaBadge = html`<span class="${badgeClass}">${persona.icon} ${persona.name}</span>` as DocumentFragment;
+    const badgeClass    = persona.borrowed ? "sender-persona-badge borrowed" : "sender-persona-badge";
+    const popoverTarget = `persona-popover-${slugifySenderId(sender.sender_id)}`;
+    personaBadge = html`<button class="${badgeClass}" type="button" popovertarget="${popoverTarget}">${persona.icon}</button>` as DocumentFragment;
   }
 
   const lastActivityText = sender.last_active_ts > 0
@@ -94,6 +110,19 @@ export function renderSenderCard(
     entries : groupedByDate.map(g => ({ idHash: g.dateKey, group: g })),
     create  : (e) => renderDateAccordion(e.group.dateKey, e.group.items, opts),
   });
+
+  // Phase 6c Node C Step C1 (2026-05-19): voice-input footer mount point.
+  // Verbatim attribute names per legacy `notifications.js:10956`. The
+  // SenderCardRecorderRenderer wires record + send buttons via click
+  // delegation on the .cc-voice-input container.
+  const sessionHash = sender.sender_id.includes("#")
+    ? sender.sender_id.split("#")[1] ?? ""
+    : sender.sender_id;
+  const voiceInput = document.createElement("div");
+  voiceInput.className = "cc-voice-input";
+  voiceInput.setAttribute("data-session-hash", sessionHash);
+  voiceInput.setAttribute("data-sender-id", sender.sender_id);
+  root.appendChild(voiceInput);
 
   return root;
 }

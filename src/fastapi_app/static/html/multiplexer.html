@@ -10,6 +10,9 @@
     <link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">
     <link rel="stylesheet" href="/static/css/multiplexer/action-required.css">
     <link rel="stylesheet" href="/static/css/multiplexer/tts-chrome.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/conversation-mode-pin.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/focus-tray.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/persona-modal.css">
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
 </head>
@@ -20,6 +23,13 @@
         <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
         <section id="notifications-pane" class="notifications-pane"
                  data-testid="multiplexer-notifications-pane">
+            <!-- Phase 6c Node B mount point (Step B1): focus-mode toggle at
+                 top of notifications-pane. FocusTrayRenderer lifts the hidden
+                 + data-phase6-pending markers when it mounts; until then the
+                 toggle is inert. -->
+            <button id="focus-mode-toggle" type="button"
+                    data-testid="multiplexer-focus-mode-toggle"
+                    data-phase6-pending="true" hidden>Focus mode OFF</button>
             <!-- D-L: action-required widgets render here, ABOVE sender cards -->
             <div id="action-required-section"
                  data-testid="multiplexer-action-required-section"></div>
@@ -44,6 +54,20 @@
         <section id="tts-pane" hidden
                  data-testid="multiplexer-tts-pane"
                  data-phase6-pending="true"></section>
+
+        <!-- Phase 6c Node B mount point (Step B1): focus-tray container.
+             FocusTrayRenderer populates this with .focus-tray-row buttons
+             when focus mode is active; lifts hidden + data-phase6-pending
+             when it mounts. -->
+        <aside id="focus-tray" data-testid="multiplexer-focus-tray"
+               data-phase6-pending="true" hidden></aside>
+
+        <!-- Phase 6c Node A mount point (Step A5): persona-modal portal.
+             PersonaModalRenderer appends one <div popover> per sender with a
+             voice persona; each popover's id matches the popovertarget on
+             the corresponding .sender-persona-badge button in the sender
+             card header. -->
+        <div id="persona-modal-portal" data-testid="multiplexer-persona-modal-portal"></div>
     </main>
     <script type="module" src="/static/dist/multiplexer/boot.js"></script>
 </body>
