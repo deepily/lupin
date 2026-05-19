@@ -1,5 +1,39 @@
 # TODO
 
+## 🟡 NEW — Phase 6c follow-on: mic-monopoly indicator on pinned sender card (filed 2026-05-19 by Tiberius 🌑, session `4e724860`)
+
+**Filing context**: Path δ ratified by Rick 2026-05-19 via `ask_multiple_choice` (~10-min decision window) during Roscoe 🤠's Node D pre-flight recon. The cascade Section D Q-D3 designed a mic-monopoly visual cue (`data-mic-monopoly="true"` on pinned card → CSS pulsing overlay), assuming the data would arrive via `conversation_mode_changed` payload field `mic_monopoly`. Recon-D2 confirmed at code-write that no such field exists server-side AND no legacy `notifications.js` precedent exists for a separate mic-monopoly indicator. Genuine cascade-design gap. Deferred to preserve Phase 6c "multiplexer client-side port only" scope (which Q-C2 escalation already reinforced).
+
+**System-wide-semantic question to resolve BEFORE designing the indicator**:
+- What does "this session monopolizes the mic" mean as a system concept?
+- Possible answers:
+  - (a) TTS engine has the mic dedicated to this session (engine-state derived)
+  - (b) Conversation-mode active + currently-speaking (cross-signal derivation)
+  - (c) User has explicitly pinned the mic to this sender (different concept entirely)
+
+**Once semantic ratified, decide wire path**:
+- (α) Server-add `mic_monopoly: bool` to existing `conversation_mode_changed` payload (CoSA submodule edit, additive)
+- (β) Separate `mic_monopoly_changed` notification.type (server-side scope expansion + new emission cadence)
+- (γ) Client-derive in multiplexer from `conversation_mode_active + TTS-playing-signal` (strict client-side, semantic-drift risk)
+
+**Files to amend when indicator lands** (per Phase 6c synthesis + execution plan):
+- [ ] **[LUPIN]** `src/fastapi_app/static/js/multiplexer/shared/types.ts` — add `mic_monopoly: boolean` to `SenderRecord` (path α or β only; γ uses a derived value)
+- [ ] **[LUPIN]** `src/fastapi_app/static/js/multiplexer/render/ConversationModePinRenderer.ts` — add `data-mic-monopoly="true"` attribute writing on pinned card; integrate into lastPinned-tracking across dual-emission window
+- [ ] **[LUPIN]** `src/fastapi_app/static/css/multiplexer/conversation-mode-pin.css` — add `.sender-card[data-mic-monopoly="true"]` (pulsing mic icon overlay) + combination `[data-pinned-conv-mode="true"][data-mic-monopoly="true"]` (glow + pulse) selectors
+- [ ] **[LUPIN]** `src/tests/unit/multiplexer/stores/sender_store_conversation_mode.test.ts` — restore AC-D3 #5 + #6 (mic_monopoly payload extraction) tests
+- [ ] **[LUPIN]** `src/tests/unit/multiplexer/render/conversation_mode_pin_renderer.test.ts` — add mic-monopoly attribute lifecycle tests
+- [ ] **[LUPIN]** `src/tests/smoke/test_multiplexer_phase6c_smoke.py` — add `mic_monopoly` smoke case back to AC-D10
+- [ ] **[LUPIN-COSA]** (if path α/β chosen) `src/cosa/rest/routers/notifications.py` (or wherever `conversation_mode_changed` originates) — add the wire field or emit the new notification.type. Handle in CoSA-context session per `feedback_lupin_only_never_cosa`.
+
+**Cross-refs**:
+- Synthesis: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/11-phase6c-cascade-synthesis.md` §3.D
+- Execution plan: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/12-phase6c-execution-plan.md` §3.D (shows deferred bits)
+- Parent design: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md` Cluster D Q-D3
+
+**Not blocking Phase 6c** — Section D ships with pin-glow + focus-flash mechanics; mic-monopoly indicator is purely additive.
+
+---
+
 ## ✅ DONE 2026-05-17 AM — history.md archive (resolved both deferred priority-1 entries from 2026-05-15 and 2026-05-16)
 
 **Executed by**: Tiberius 🌑 (session `2d916480`) at 2026-05-17 ~17:10 EDT, per Rick's voice approval ("affirmative Tiberius let's go ahead and archive the history before anything else") after reviewing the top-5 queues.

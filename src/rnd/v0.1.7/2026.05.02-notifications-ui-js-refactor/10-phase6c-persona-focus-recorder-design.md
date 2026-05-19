@@ -3,10 +3,11 @@
 | Field | Value |
 |---|---|
 | **Slice** | 6c per `07-phase6-slicing-manifest.md` |
-| **Status** | 🟡 **DRAFT — awaiting Rick's Q-decisions walkthrough** |
-| **Author** | Rachel 🕊️ (`56ee76d6`), 2026-05-12 |
+| **Status** | 🟢 **CASCADE-RATIFIED 2026-05-19** — All 4 clusters (A/B/C/D) closed via Run 3 cascade with 43 findings ratified (91% verbatim). Implementation handoff at [`12-phase6c-execution-plan.md`](12-phase6c-execution-plan.md). Canonical synthesis at [`11-phase6c-cascade-synthesis.md`](11-phase6c-cascade-synthesis.md). |
+| **Author** | Rachel 🕊️ (`56ee76d6`), 2026-05-12 — Cascade-amended by Tiberius 🌑 (`4e724860`), 2026-05-19 |
 | **Predecessors** | Phase 6a CLOSED 2026-05-06 (jobs surface); Phase 6b CLOSED 2026-05-12 (interactive widgets + TTS chrome + delete-button — see `97-phase6b-closure.md`) |
 | **Background docs to lean on** | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md`, `src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md` — Phase 6c is the **multiplexer port of features designed elsewhere**, not a greenfield design |
+| **Cascade closure** | Run 3 HYBRID authoring-cascade: launched 2026-05-19T02:28 UTC, cascade-complete 04:16 UTC (~108 min wall-clock). 4 sections at cap 2/2; 39/43 findings verbatim-accept; 1 user escalation (Section C F2 port-verbatim); 1 manager-unilateral ratification (Section D Q-D1 Path A by-concurrence); 1 hard-verification gate introduced (Section B AC-B15). Implementer: **Roscoe 🤠** (assigned post-cascade). |
 
 ---
 
@@ -133,7 +134,9 @@ Cluster A is closed. Concrete design surface:
 
 ---
 
-## Cluster B — Focus tray + focus-mode toggle (Q-B1..Q-B5)
+## Cluster B — Focus tray + focus-mode toggle (Q-B1..Q-B5) ✅ **FULLY RATIFIED (5/5) 2026-05-19** (Run 3 cascade)
+
+**Cascade closure**: All 5 PROPOSED positions ratified verbatim with `divergence: none`. Stage 0 author draft shipped with ZERO conditional-executability markers (Persona 2.A point 9 clean slate). Cap reached 2/2 via Round-2; 1 hard-verification gate (AC-B15) introduced; 1 reviewer reassignment (Mr Radio → Arnold for Stage 1 due to Anthropic rate-limit, ratified 03:32 UTC). Final ratified shape (ACs B1-B15, execution steps, file inventory) in [`11-phase6c-cascade-synthesis.md`](11-phase6c-cascade-synthesis.md) §3.B.
 
 **Surface**: Toggle that hides non-focused sender cards (per `data-focus-hidden`) and shows a compact "tray" of hidden senders so the user can re-focus quickly. Mirrors legacy at `notifications.js:9126-9362`.
 
@@ -160,20 +163,32 @@ Cluster A is closed. Concrete design surface:
 
 ---
 
-## Cluster C — Sender-card audio recorder (Q-C1..Q-C6)
+## Cluster C — Sender-card audio recorder (Q-C1..Q-C6) ✅ **FULLY RATIFIED (6/6) 2026-05-19** (Run 3 cascade — 1 user escalation)
+
+**Cascade closure**: 5 of 6 Qs ratified verbatim. **Q-C2 RETIRED via user escalation** — Mr Radio's Stage 1 F2 (foundational) flagged that the proposed `audio/webm;codecs=opus` MIME would not match any available transcribe endpoint. Manager escalated to Rick at 02:45 UTC; Rick ratified at 02:48 UTC: **"Port `audio-recorder.js` + `recordingManager` singleton verbatim into TS"** — abandoning the new MIME-chain proposal in favor of preserving the working legacy code. Counter-proposal accepted from Rachel on OSQ-C-3 (base64 option a over Manager option b). Final ratified shape (ACs C1-C13, execution steps with port-verbatim semantics, file inventory) in [`11-phase6c-cascade-synthesis.md`](11-phase6c-cascade-synthesis.md) §3.C.
 
 **Surface**: A recorder embedded in each sender card. User records audio → STT button transcribes → editable text → Send button POSTs to `/api/notify` as a fresh notification "from" the user back to the sender's Claude session.
 
-This is the most complex sub-feature of Phase 6c.
+This is the most complex sub-feature of Phase 6c. **Implementation strategy**: client-side PORT (AudioRecorder + recordingManager verbatim from legacy) wrapped in a thin multiplexer-surface integration (`SenderCardRecorderRenderer`). NOT a re-implementation.
 
 ### Q-C1 — Mount placement
 **Proposed**: Recorder controls live in a `.cc-voice-input` div appended to each `.sender-card`'s footer. Class verbatim from legacy. Rendered by `SenderCardRenderer` (extends Phase 5 sender-card template).
 
-### Q-C2 — `MediaRecorder` MIME type
+### Q-C2 — `MediaRecorder` MIME type ✅ **RETIRED via user escalation 2026-05-19T02:48 UTC** — Port AudioRecorder verbatim
+
+**Original options** (preserved for context):
 | Option | Tradeoff |
 |---|---|
-| **Proposed A**: `audio/webm;codecs=opus` (Chrome/Firefox default) | Best size; Safari support is recent (16.4+) |
-| B: Feature-detect with fallback chain | Bullet-proof; adds branching |
+| ~~Proposed A: `audio/webm;codecs=opus` (Chrome/Firefox default)~~ | ~~Best size; Safari support is recent (16.4+)~~ |
+| ~~B: Feature-detect with fallback chain~~ | ~~Bullet-proof; adds branching~~ |
+
+**Cascade closure (Section C F2 user escalation)**: Mr Radio's Stage 1 review flagged that NEITHER server endpoint accepts WebM — `/api/upload-and-transcribe-wav` takes multipart WAV; `/api/upload-and-transcribe-mp3` takes base64-encoded MP3 JSON envelope. The proposed MIME would 422 at the transcribe boundary. Foundational-severity finding (violates design-doc constraint "no new server-side endpoints in Phase 6c"). Manager escalated to Rick via `ask_yes_no` at 02:45 UTC. **Rick's ratification (02:48 UTC)**: "propose a variation of something that already works" — port `src/fastapi_app/static/js/audio-recorder.js` + `recordingManager` singleton from `notifications.js:3491+` verbatim into TypeScript. MIME negotiation, fetch path, single-active guard, TTS pause/resume, base64 encoding all inherited from legacy code.
+
+**Implementation contract** (per synthesis §3.C Step C2 + Step C3):
+- NEW `multiplexer/audio/AudioRecorder.ts` — verbatim port of `audio-recorder.js`. Constructor signature, public methods (`start`/`stop`/`cancel`/`getCurrentMimeType`), `_getBestMimeType()` MIME-fallback chain all preserved.
+- NEW `multiplexer/audio/recordingManager.ts` — singleton port of `notifications.js:3491+`. TTS pause-on-record, single-active guard, ESC cancel, duration counter.
+- NEW thin wrapper `SenderCardRecorderRenderer.ts` — multiplexer-surface integration only (event delegation, state-driven rendering).
+- OSQ-C-3 base64 → binary upload optimization: DEFERRED stand-alone perf R&D candidate (post-Phase-6c).
 
 ### Q-C3 — Recording state machine
 **Proposed**: 4 states: `idle → recording → processing → ready_to_send → (back to idle on send)`. State stored on the renderer instance keyed by `sender_id`. Same shape as legacy STT button.
@@ -189,15 +204,24 @@ This is the most complex sub-feature of Phase 6c.
 
 ---
 
-## Cluster D — Conversation-mode UI pin (Q-D1..Q-D4)
+## Cluster D — Conversation-mode UI pin (Q-D1..Q-D4) ✅ **FULLY RATIFIED (4/4) 2026-05-19** (Run 3 cascade — 1 manager-unilateral ratification, new closure category)
 
-**Surface**: When `conversation_mode_active=true` on a sender, that sender's card gets a persistent glow + sticks to the top of the notifications list. Mirrors legacy `_pinSenderCardForConversationMode` at `notifications.js:9601-10163`.
+**Cascade closure**: Q-D1 ratified via NEW closure category `manager_unilateral_ratify_by_concurrence` — distinct from user-ratification (foundational implications) and from default-PROPOSED carry-through. Manager (Tiberius) ratified Path A at 02:57 UTC based on author + reviewer + manager concurrence. Q-D2/D3/D4 ratified verbatim. Fewest findings of any section (9) due to cascade-learning-loop dividend (Rachel's proactive doctrine carry-forwards from Sections A/C). Cap reached 2/2 via Round-2; 0 user escalations; 0 votes; 0 counter-proposals. Final ratified shape (ACs D1-D14, execution steps with single-pin dual-emission contract, file inventory) in [`11-phase6c-cascade-synthesis.md`](11-phase6c-cascade-synthesis.md) §3.D.
 
-### Q-D1 — Where the pin state lives
+**Surface**: When `conversation_mode_active=true` on a sender, that sender's card gets a persistent glow + sticks to the top of the notifications list. Mirrors legacy `_pinSenderCardForSession` at `notifications.js:9472-9488` + `:10305-10361` (corrected line refs per Section D F3 closure).
+
+### Q-D1 — Where the pin state lives ✅ **PATH A RATIFIED via manager-unilateral by-concurrence 2026-05-19T02:57 UTC**
+
 | Option | Tradeoff |
 |---|---|
-| **Proposed A**: New `SenderRecord.conversation_mode_active: boolean` on the store; reducer flips on `conversation_mode_changed` events | Single source of truth; renderer reads it. |
-| B: DOM-only attribute managed by renderer | No store change; but invisible to other consumers. |
+| **Path A (RATIFIED)**: New `SenderRecord.conversation_mode_active: boolean` on the store; reducer flips on `conversation_mode_changed` events. Single-pin invariant enforced via TWO sequential `store_senders_changed{changeKind: "updated"}` emissions (prior-pinned cleared FIRST, new-pinned set SECOND — per F-Arnold-D2 refinement) | **Single source of truth; atomic store-level invariant prevents DOM-mutation race; Section B's focus-target lookup reads the store cleanly.** |
+| ~~B: DOM-only attribute managed by renderer~~ | ~~No store change; but invisible to other consumers; opens DOM-mutation race; Section B would need DOM-fallback branching.~~ **RETIRED IN-PLACE 2026-05-19** (Round-2 F-Arnold-D1 closure). |
+
+**Path A authority chain**: Rachel (Stage 0 PROPOSED Path A) + Mr Radio (Stage 1 explicit recommendation — "atomic store-level invariant prevents DOM-mutation race; Section B's focus-target lookup reads the store cleanly") + Tiberius (Manager concurrence — declared unilateral ratification at 02:57 UTC). No foundational implications; design-doc alignment.
+
+**Distinction from user-ratification** (e.g., Section C F2): Q-C2 required user-ratification due to FOUNDATIONAL severity (constraint violation). Q-D1 required only manager-unilateral by-concurrence — author + reviewer + manager all concur, no foundational implications, no design-decision flip.
+
+**Section B impact**: E4 contract is FIRM. B's Q-B3 focus-target selection reads `SenderRecord.conversation_mode_active` directly from store (no DOM-attribute fallback branching).
 
 ### Q-D2 — Top-of-list pinning mechanism
 | Option | Tradeoff |
@@ -213,9 +237,23 @@ This is the most complex sub-feature of Phase 6c.
 
 ---
 
-## Acceptance criteria (DRAFT)
+## Acceptance criteria — ✅ **FINAL RATIFIED 2026-05-19** (Run 3 cascade)
 
-Inherits AC1..AC10 machinery from Phases 5/6a/6b. AC11a/AC11b scheduled `:8000`. **All multiplexer TS files at c8 100%** per `feedback_100pct_coverage_multiplexer`.
+**Final ratified AC tables per section** (full text in [`11-phase6c-cascade-synthesis.md`](11-phase6c-cascade-synthesis.md) §3):
+- Section A — AC-A1 through AC-A13 (synthesis §3.A)
+- Section B — AC-B1 through AC-B15 (synthesis §3.B; **includes new hard-verification gate AC-B15** introduced Round 2 per F-Arnold-B-Stage2-1)
+- Section C — AC-C1 through AC-C13 (synthesis §3.C; AC-C3 documented "N/A" per F-Rio-C1 post-Q-C2 collapse)
+- Section D — AC-D1 through AC-D14 (synthesis §3.D)
+
+**AC-B15 hard-verification gate** (new in Section B Round 2): `grep -c "@keyframes focus-flash" src/fastapi_app/static/css/multiplexer/conversation-mode-pin.css` MUST equal 0 (no `@keyframes focus-flash` in Section D's CSS). B-CSS is single source of truth for the focus-flash keyframes. Supersedes the Round-1 post-cascade-fold disposition for B-keyframes-removal — now enforced mechanically at code-write time, not deferred. Per F-Rio-B1 cosmetic refinement, prefer `! grep -q "@keyframes focus-flash" conversation-mode-pin.css` for unambiguous "ensure pattern absent" shell idiom.
+
+**Standing coverage mandate**: All multiplexer TS files at c8 100% (line + branch + function) per `feedback_100pct_coverage_multiplexer` (scope expanded Lupin-wide 2026-05-16). Section-A F-Arnold-1 doctrine codified directory-wide glob `--include='src/fastapi_app/static/js/multiplexer/**/*.ts'` to prevent file-list drift — applied across all 4 sections' AC tables.
+
+**Cross-section dependency map**: see synthesis §4 mermaid diagram + edges table. Key: D provides contract surface (E1/E2/E4); B consumes; AC-B15 gates B's CSS-SSOT invariant.
+
+---
+
+### Legacy DRAFT AC table (preserved for historical context — superseded by section-specific ratified tables above)
 
 | AC | Test | Executor | Notes |
 |---|---|---|---|
@@ -239,7 +277,19 @@ Inherits AC1..AC10 machinery from Phases 5/6a/6b. AC11a/AC11b scheduled `:8000`.
 
 ---
 
-## Files affected (rough inventory — finalize after Q-decisions)
+## Files affected — ✅ **FINAL INVENTORY 2026-05-19** (Run 3 cascade)
+
+**Definitive per-section file inventory** (NEW vs EDITED) in [`11-phase6c-cascade-synthesis.md`](11-phase6c-cascade-synthesis.md) §3.{A,B,C,D} + [`12-phase6c-execution-plan.md`](12-phase6c-execution-plan.md) per DAG node.
+
+**Aggregate post-cascade counts**:
+- **NEW**: 24 files across 4 sections (renderers, templates, CSS, unit tests, smoke, E2E visual; including 2 audio port files for Section C)
+- **EDITED**: 20 file-touches (some files touched by multiple sections — `boot.ts`, `render/index.ts`, `shared/types.ts`, `multiplexer.html`, `.stylelintrc.json` each touched by all 4 sections; `senderCard.ts` touched by A + C; `NotificationsListRenderer.ts` + `SenderStore.ts` touched by D; `notifications-list.css` touched by A)
+
+**Cross-section coordination**: E5 same-file edit between Sections A (chip in header) + C (recorder in footer) on `senderCard.ts` — non-conflicting mount points; manager coordinates landing order.
+
+---
+
+### Legacy rough inventory (preserved for historical context — superseded by per-section synthesis tables)
 
 ### NEW (estimated 6-10 files)
 - `static/js/multiplexer/render/PersonaModalRenderer.ts` (Cluster A)
