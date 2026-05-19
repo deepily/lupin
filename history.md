@@ -2,6 +2,23 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Recent-activity panel UX polish (toggle move + fixed-width header columns)
+
+Quick CSS+JS tweaks to the broadcast-panel Recent Activity section while waiting on María's `/plan-authoring-cascaded` doc-spec authoring. Two user-driven refinements, both verified visually by Rick at :7999 dev:
+
+**Show-more toggle moved into the row header** — previously the `commons-activity-entry-body-toggle` button rendered inline below the body content, which was idiosyncratic vs other UI toggles in the app shell. Rick wanted it inline with the row header near the time. Approach: extended the entry grid from 5 to 6 columns (`icon name chip body toggle time`), moved `body.appendChild( toggle )` to `row.appendChild( toggle )` after `row.appendChild( body )`, and updated the toggle's CSS from `display: inline-block + margin-top: 2px` to `grid-area: toggle + align-self: start + white-space: nowrap`. Persona color preserved via the existing `--persona-color` CSS variable. Hidden-on-no-overflow + click-toggles-expanded behavior unchanged; existing E2E tests at `src/tests/e2e_ui/test_commons_activity_toggle.py` survive because their class-based selectors still find the toggle regardless of parent.
+
+**Name + chip columns fixed-width** — previously `auto`-sized so each row's body started at a different x-position depending on persona-name + chip-content lengths. Rick wanted a consistent left-edge for the body. Two iterations to land the visual: first pass at 100px/110px (too much whitespace per Rick); final at 70px/75px (~31% reduction, "looks great" per Rick). Chip right-aligned within its column via `justify-self: end`. Both name + chip get `overflow: hidden + text-overflow: ellipsis` for graceful truncation on edge cases (e.g. `cascade-scheduler` 17-char name or `cascaded-prototype-input-plan` 29-char topic name). Added `title` attribute on both elements in `_renderCommonsEntry` for full-text on hover when truncated.
+
+**Files**:
+- `src/fastapi_app/static/js/notifications.js` (MOD) — `_renderCommonsEntry`: appended toggle to row instead of body; added `name.title` + `chip.title` for hover full-text
+- `src/fastapi_app/static/css/notifications.css` (MOD) — `.commons-activity-entry` grid expansion (5→6 columns) + name/chip width fix + chip right-alignment + ellipsis on overflow on both
+- `history.md` (this entry)
+
+**Test impact**: zero — E2E tests query toggle/name/chip by class; structure-agnostic queries survive the parent-element change.
+
+---
+
 ### 2026.05.18 - Session 4e724860 (Tiberius 🌑) | Cascade Run 2 manager + V2 polish bundle (Items #1 + #3 Lupin-side)
 
 End-to-end manager of Run 2 of the `/plan-review-cascaded` prototype on the toy email-verification fixture, then coordinator of the v2 polish-bundle implementation cycle that followed. Same 5-persona cast as Run 1 (María 🌸 doctrine consultant, Mr. Radio 🦉 Author, Rachel 🕊️ Usability/Reuse, Arnold 🪨 Viability/Gap, Rio ⚡ Ownership-Language Audit, me Manager).

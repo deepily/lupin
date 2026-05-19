@@ -9910,6 +9910,7 @@ class NotificationsUI {
         const name = document.createElement( "div" );
         name.className   = "commons-activity-entry-name";
         name.textContent = entry.persona_name || "—";
+        name.title       = entry.persona_name || "";   // full name on hover when ellipsis-truncated
         row.appendChild( name );
 
         // Topic chip only for free-form topics (Q2 ratified). DM topics
@@ -9919,6 +9920,7 @@ class NotificationsUI {
         chip.className = "commons-activity-entry-topic-chip";
         const rawTopic = entry.topic || "";
         chip.textContent = rawTopic.startsWith( "dm-" ) ? `@${rawTopic.slice( 3 )}` : rawTopic;
+        chip.title       = rawTopic;   // full topic on hover when ellipsis-truncated
         if ( entry.topic_kind === "reserved" ) chip.hidden = true;
         row.appendChild( chip );
 
@@ -9971,8 +9973,9 @@ class NotificationsUI {
             const isExpanded = content.classList.toggle( "expanded" );
             toggle.textContent = isExpanded ? "Show less ▴" : "Show more ▾";
         } );
-        body.appendChild( toggle );
-
+        // Toggle lives in the row header (right of body, left of time) — same
+        // location users expect for other UI toggles. Persona-color stays via
+        // --persona-color on the row.
         // Measure overflow after layout; show toggle only when content actually
         // exceeds the clamp. Empty / very-short bodies stay clean (no toggle).
         requestAnimationFrame( () => {
@@ -9981,6 +9984,7 @@ class NotificationsUI {
         } );
 
         row.appendChild( body );
+        row.appendChild( toggle );
 
         const time = document.createElement( "div" );
         time.className = "commons-activity-entry-time";
