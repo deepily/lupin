@@ -46,6 +46,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
+from cosa.rest.voice_persona_helpers import pick_preferred_persona_from_env
 
 
 def _find_tmux_session( cc_pid ):
@@ -505,7 +506,11 @@ def _check_cosa_voice_status():
     return "\n".join( lines )
 
 
-def _allocate_voice_persona_via_http( server_url, project, stable_session_id, previous_persona_name=None ):
+def _allocate_voice_persona_via_http(
+    server_url, project, stable_session_id,
+    previous_persona_name  = None,
+    preferred_persona_name = None
+):
     """
     Allocate a voice persona for the given session by calling the cosa-voice
     HTTP endpoint at /api/cosa-voice/voice-persona/{sid}/allocate.
@@ -532,6 +537,12 @@ def _allocate_voice_persona_via_http( server_url, project, stable_session_id, pr
         - When previous_persona_name is non-empty, threads it as a
           query-string param so the server pushes a "Voice re-assigned"
           announcement after the assigned broadcast
+        - When preferred_persona_name is non-empty, threads it as a
+          query-string param so the server uses soft-preference semantics
+          (try preferred, fall back to random on miss, push a
+          voice_persona_conflict notification). Used by the env-var
+          default-persona path; mutually exclusive with the strict
+          requested_persona_name swap endpoint.
 
     Args:
         server_url: Lupin server URL
@@ -540,6 +551,9 @@ def _allocate_voice_persona_via_http( server_url, project, stable_session_id, pr
         previous_persona_name: Optional display_name of the outgoing persona
             (when /clear preservation failed); causes the server to push a
             "Voice re-assigned: X → Y" notification on successful allocation
+        preferred_persona_name: Optional persona name from the user's shell
+            env var (`COSA_VOICE_PREFERRED_PERSONA__<PROJECT>`) — soft
+            preference with graceful fallback + conflict notify on miss
 
     Returns:
         dict or None: The persona dict, or None on failure
@@ -564,10 +578,17 @@ def _allocate_voice_persona_via_http( server_url, project, stable_session_id, pr
                    file=sys.stderr )
             return None
 
-        # Step 2: POST /allocate (optionally with previous_persona_name)
-        alloc_url = f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate"
+        # Step 2: POST /allocate (optionally with previous_persona_name +
+        # preferred_persona_name as query params)
+        alloc_url    = f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate"
+        query_params = []
         if previous_persona_name:
-            alloc_url = f"{alloc_url}?previous_persona_name={urllib.parse.quote( previous_persona_name )}"
+            query_params.append( f"previous_persona_name={urllib.parse.quote( previous_persona_name )}" )
+        if preferred_persona_name:
+            query_params.append( f"preferred_persona_name={urllib.parse.quote( preferred_persona_name )}" )
+        if query_params:
+            alloc_url = f"{alloc_url}?{'&'.join( query_params )}"
+
         alloc_req = urllib.request.Request(
             alloc_url,
             data    = b"",  # empty body (endpoint takes session_id from path)
@@ -901,11 +922,19 @@ def main():
             project = detect_project()
         except Exception:
             project = "lupin"
+        # Per-repo default persona from user's shell env var
+        # `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` — when set, the server
+        # uses soft-preference semantics (try named persona, fall back to
+        # random + conflict notify on miss). When unset, the server falls
+        # back to its existing random-allocation behavior.
+        # See: planning-is-prompting/src/rnd/2026.05.19-cosa-voice-preferred-persona-env-var.md
+        preferred = pick_preferred_persona_from_env( project )
         try:
             voice_persona_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
             allocated = _allocate_voice_persona_via_http(
                 voice_persona_server_url, project, stable_session_id,
-                previous_persona_name=previous_persona_name
+                previous_persona_name  = previous_persona_name,
+                preferred_persona_name = preferred
             )
             if allocated is not None:
                 # The /allocate endpoint already wrote the persona to the
