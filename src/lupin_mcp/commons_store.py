@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -34,7 +35,16 @@ DEFAULT_PERSONA_NAME         = "<unknown>"
 DEFAULT_PERSONA_ICON         = "💬"
 DEFAULT_PERSONA_COLOR        = "#888888"
 SCHEMA_VERSION               = 1
-ENTRY_SEPARATOR              = "\n---\n"
+
+# Entry separator: the on-disk delimiter between entries. Must NOT collide
+# with markdown syntax that legitimately appears in entry bodies. The legacy
+# value `"\n---\n"` collided with markdown thematic-break syntax, silently
+# truncating any entry whose body contained `---` on its own line — see
+# src/rnd/v0.1.7/2026.05.18-body-display-truncation-investigation.md.
+# read() supports both forms during the migration window; migration script
+# at src/scripts/migrate-commons-entry-separator.py converts legacy files.
+ENTRY_SEPARATOR              = "\n<<<__lupin_commons_entry_boundary__>>>\n"
+LEGACY_ENTRY_SEPARATOR       = "\n---\n"
 
 _HEADER_RE = re.compile(
     r"^## (?P<ts>\S+) \| (?P<persona_name>.+?) (?P<persona_icon>\S+) #(?P<session_id>[A-Za-z0-9_-]+)\s*$"
@@ -126,6 +136,26 @@ def _parse_entry_block( block: str ) -> Optional[ Dict[ str, Any ] ]:
         "body"              : body,
         "metadata"          : metadata,
     }
+
+
+def _warn_orphan_blocks( path: Path, count: int ) -> None:
+    """
+    Log a warning when read() encountered orphan blocks (content that did
+    NOT parse into valid entries). Orphan blocks usually indicate one of:
+    - Legacy `\\n---\\n` separator colliding with markdown thematic breaks
+      in entry bodies (run `src/scripts/migrate-commons-entry-separator.py`)
+    - Manual edits that corrupted the on-disk format
+    - A `_format_entry` change that didn't round-trip cleanly
+
+    Emits to stderr — single line per read() call. See
+    src/rnd/v0.1.7/2026.05.18-body-display-truncation-investigation.md §5.3
+    (defense-in-depth fix).
+    """
+    sys.stderr.write(
+        f"[commons_store] WARN: {count} orphan block(s) in {path} — "
+        f"likely separator-collision (legacy '\\n---\\n' colliding with markdown "
+        f"thematic break); run migrate-commons-entry-separator.py\n"
+    )
 
 
 def _format_entry(
@@ -272,12 +302,27 @@ class CommonsStore:
             return [ ]
         content    = path.read_text( encoding="utf-8" )
         _, body    = _split_frontmatter( content )
-        raw_blocks = body.split( ENTRY_SEPARATOR )
+        # Try the canonical separator first. Fall back to the legacy "\n---\n"
+        # separator for files that have not yet been migrated. The legacy
+        # split is INTENTIONALLY a fallback (not a parallel always-attempt)
+        # because legacy split collides with markdown thematic-break syntax;
+        # using it on a migrated file would re-introduce the truncation bug.
+        if ENTRY_SEPARATOR in body:
+            raw_blocks = body.split( ENTRY_SEPARATOR )
+        else:
+            raw_blocks = body.split( LEGACY_ENTRY_SEPARATOR )
         entries: List[ Dict[ str, Any ] ] = [ ]
+        orphan_count = 0
         for block in raw_blocks:
+            if not block.strip():
+                continue
             entry = _parse_entry_block( block )
             if entry is not None:
                 entries.append( entry )
+            else:
+                orphan_count += 1
+        if orphan_count > 0:
+            _warn_orphan_blocks( path, orphan_count )
         if since is not None:
             entries = [ e for e in entries if e[ "ts" ] > since ]
             entries.sort( key=lambda e: e[ "ts" ] )
