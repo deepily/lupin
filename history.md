@@ -2,6 +2,37 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Voice persona pool expansion — +2 personas, Sam→pool / Arnold→overflow swap, generalized overflow loader
+
+Pool expansion driven by Rick's voice directive following the 6-persona-experiment validation in Run 3 cascade. Pool grew from 6 to 8 personas; the overflow slot rotated from Sam to Arnold via a config-only mechanism enabled by a small loader generalization. Color iterations + gender + profile corrections per Rick's voice walkthrough at ElevenLabs.
+
+**Pool composition (final)** — `maria, mr radio, Rachel, Tiberius, Rio, Roscoe, Krishna, sam` (8 personas).
+
+**Two new personas added**:
+- **Roscoe** 🤠 — ElevenLabs voice `DXX4Q5Bh1vqK8CciYVPf`, color `#FFD600` (vibrant yellow — Arnold's old hue, now free since Arnold moved to overflow), profile "Upbeat professional female" (gender corrected from initial "male" placeholder per Rick's mid-edit update)
+- **Krishna** 🦚 — ElevenLabs voice `ogSj7jM4rppgY9TgZMqW`, color `#1DE9B6` (Material Teal A400, vibrant aquamarine — documented green-rule exception per Rick's explicit override authority), profile "Reassuring warm male"
+
+**Sam ↔ Arnold role swap**: Sam promoted from the reserved overflow slot into the regular pool; Arnold demoted from pool into the overflow slot. Mechanically required a small loader generalization in `voice_persona_helpers.py:load_overflow_persona_from_config` — previously hardcoded the literal "sam", now reads a new `cc session voice persona overflow name` INI key (default "sam" for backward compat) and looks up that persona's existing pool-style INI keys. Backward-compat branch: when overflow_name resolves to "sam" AND no explicit `cc session voice persona sam voice id` key is present, falls back to sourcing voice_id from `elevenlabs tts default voice id` (the pre-2026-05-19 legacy non-explicit path). All 5 existing `TestLoadOverflowPersonaFromConfig` tests still pass byte-clean via the backward-compat branch.
+
+**Sam's transition**: added explicit `cc session voice persona sam voice id = G7ILShrCNLfmS0A37SXS` (same value as `elevenlabs tts default voice id` — now explicit so the regular pool loader can find him uniformly). Color changed from `#00BCD4` (cyan, formerly grandfathered under the `.persona-badge.overflow` styling exception) to `#5E35B1` (Material Deep Purple 600, green-rule compliant). Profile iterated through "System default voice (overflow)" → "Crisp neutral male" → "British male" (final, per Rick's verification of the actual ElevenLabs voice characteristics).
+
+**Rachel lightened to lilac**: `#7B1FA2` (Material Purple 700) → `#CE93D8` (Material Purple 200, lilac) per Rick's directive once Sam's new deep purple made the prior Rachel-Sam pairing too visually close. Lilac preserves Rachel's purple-family identity while widening visual separation from Sam.
+
+**Test verification**: `test_voice_persona_helpers.py` (52 tests) + `test_voice_persona_request.py` (49 tests) = **101 tests green in 2.5s**, zero regressions across all loader generalization + INI changes.
+
+**Voice persona reference page** at `/static/html/test/voice-persona-reference.html` auto-populates from `GET /api/cosa-voice/voice-persona/pool` — no HTML edit needed; after `/api/init` reload, the page renders 8 tiles including Sam in his new deep purple.
+
+**Files modified** (parent Lupin only — CoSA submodule untouched git-wise per `feedback_lupin_only_never_cosa`):
+- `src/conf/lupin-app.ini` — pool list updated to 8 personas; Roscoe + Krishna full blocks added; Sam block rewritten (voice id explicit, color changed, profile updated, comment rewritten); new `cc session voice persona overflow name = arnold` key; comment block above Arnold's old position explaining the role change
+- `src/conf/lupin-app-splainer.ini` — pool splainer rewritten for 8-persona reality; Roscoe + Krishna entries added; Sam splainer block rewritten (new voice id entry, color rationale updated, profile iteration history); new `overflow name` splainer entry with full backward-compat documentation; Rachel color splainer updated for lilac transition
+
+**CoSA submodule changes on disk (not in parent diff)**:
+- `src/cosa/rest/voice_persona_helpers.py` — `load_overflow_persona_from_config` generalized (~50 LoC); reads new INI key with `sam` default; backward-compat fallback to `elevenlabs tts default voice id` when overflow_name="sam" + no explicit voice id; updated Design-by-Contract docstring
+
+**Cross-refs**: original Sam-overflow design at `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` (now superseded by the generalized loader); pool architecture at `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md`; voice persona expansion authorized by Rick's voice directive 2026-05-19 mid-afternoon EDT.
+
+---
+
 ### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Per-repo preferred-persona env-var allocator — Lupin-side implementation + 7 unit tests
 
 End-to-end implementation of Rachel's planning-is-prompting design doc `2026.05.19-cosa-voice-preferred-persona-env-var.md` on the Lupin side. Reads `COSA_VOICE_PREFERRED_PERSONA__<PROJECT_UPPER>` at SessionStart hook time, threads through to the cosa-voice `/allocate` router endpoint with graceful-fallback semantics, fires a `voice_persona_conflict` notification on miss. Narrative goal: each repo gets a stable canonical voice persona across days/sessions/`/clear`s — Rick's two target defaults are `__PLAN=María` and `__LUPIN=Tiberius`.
