@@ -1,5 +1,31 @@
 # TODO
 
+## 🟢 RATIFIED — Phase 7 slicing manifest authored + 4 decisions locked (filed 2026-05-20 by Mr. Radio 🦉, session `32a6e563`)
+
+**Filing context**: Manifest at [`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md). Tiberius 🌑 (session `387b9201`) greenlit the draft; Rick ratified all 4 decisions via cosa-voice blocking tools 2026-05-20.
+
+**Ratified decisions**:
+1. **Sequencing**: Option A — 7a Telemetry → 7b CSP → 7c Trusted Types → 7d Accessibility
+2. **Pre-cascade recon**: ON (1-2h author-side per slice, 4-8h total before any design-doc cascade fires)
+3. **7b iterative-tightening**: DECOUPLED as operational close-out (not second cascade)
+4. **7d audit-driven cycle**: DECOUPLED as operational close-out (not second cascade)
+
+**Phase 7 implementation gated on Phase 6c close** — Roscoe 🤠 has Node C in flight per `12-phase6c-execution-plan.md`. Phase 7 start = Phase 6c ship.
+
+**Next moves when 6c ships** (TBD ownership; Rick's call):
+- [ ] **[LUPIN]** Author 7a Telemetry pre-cascade recon doc — OTel browser SDK version pin, Long Tasks API browser support floor, telemetry sink endpoint config (1-2h author work)
+- [ ] **[LUPIN]** Stage 0 author draft of `14-phase7a-telemetry-design.md` (Rachel 🕊️ likely; Rick's rotation call)
+- [ ] **[LUPIN]** Cascade Run 4 — first live test of Step 9 doctrine post-Phase-6c (María 🌸's doctrine consultant cycle)
+
+**Cross-refs**:
+- Slicing manifest: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md`
+- Phase 7 row in roadmap: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/00-synthesis-and-roadmap.md` §3
+- Phase 6 slicing template: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/07-phase6-slicing-manifest.md`
+
+**Empirical anchor for Step 0 doctrine** — Tiberius's brief said my manifest's §Pre-cascade recon section is validating the Step 0 cascade-prep doctrine he and María 🌸 are codifying on the PIP side. One-line back-ref pending when Step 0 codification commits.
+
+---
+
 ## 🟡 NEW — Phase 6c follow-on: mic-monopoly indicator on pinned sender card (filed 2026-05-19 by Tiberius 🌑, session `4e724860`)
 
 **Filing context**: Path δ ratified by Rick 2026-05-19 via `ask_multiple_choice` (~10-min decision window) during Roscoe 🤠's Node D pre-flight recon. The cascade Section D Q-D3 designed a mic-monopoly visual cue (`data-mic-monopoly="true"` on pinned card → CSS pulsing overlay), assuming the data would arrive via `conversation_mode_changed` payload field `mic_monopoly`. Recon-D2 confirmed at code-write that no such field exists server-side AND no legacy `notifications.js` precedent exists for a separate mic-monopoly indicator. Genuine cascade-design gap. Deferred to preserve Phase 6c "multiplexer client-side port only" scope (which Q-C2 escalation already reinforced).

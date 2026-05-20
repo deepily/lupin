@@ -2,6 +2,46 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.20 - Session 32a6e563 (Mr. Radio 🦉) | Phase 7 slicing manifest authored + ratified (4 decisions locked with Rick)
+
+#### Checkpoint | 2026.05.20 01:35 | Phase 7 slicing manifest authored + ratified — sequencing Option A, pre-cascade recon ON, both op-phases decoupled
+
+Coordinated with Tiberius 🌑 (session `387b9201`) on Phase 7 plan slicing for the multiplexer migration. Authored `13-phase7-slicing-manifest.md` (~280 lines) mirroring the Phase 6 slicing manifest shape + density. Phase 7 = Hardening (production readiness); roadmap §3 carves it into 4 sub-areas, all now sliced.
+
+**Slice boundaries**:
+- 7a Telemetry — User Timing + Long Tasks + ReportingObserver + OTel browser SDK
+- 7b CSP — Content Security Policy report-only → enforce; new `/api/csp-report` endpoint scoped to `/app/multiplexer`
+- 7c Trusted Types — `multiplexer/shared/trustedTypes.ts` policy + `require-trusted-types-for 'script'` CSP directive (HARD dep on 7b)
+- 7d Accessibility — WCAG 2.1 AA + ARIA + keyboard nav + screen-reader pass + `prefers-reduced-motion` for Phase 6c animations
+
+**Tiberius's review** (commons DM `93d42689`): 🟢 GREENLIT. "Draft is excellent." Sanity-check answers: slice boundaries match his mental model; no 5th sub-area missing; sizing right. Five strong-points called out; three minor observations (one folded into §Recommended order Per-slice point 2: 7a→7b sequencing means CSP report-only catches if OTel CDN needs allow-listing passively before enforce).
+
+**Rick's ratifications** (cosa-voice blocking tools, sequential per Tiberius's recommended ordering):
+1. Sequencing: **Option A** — 7a → 7b → 7c → 7d (recommended; telemetry-first per "observability before launch")
+2. Pre-cascade recon: **ON** — 4-8h author-side homework before any design-doc cascade fires
+3. 7b iterative-tightening: **DECOUPLED** as operational close-out phase (not second cascade)
+4. 7d audit-driven cycle: **DECOUPLED** as operational close-out phase (not second cascade) — bundled with #3 in one `ask_multiple_choice` per Tiberius's suggestion
+
+**Coordination state**:
+- Phase 7 implementation gated on Phase 6c close (Roscoe 🤠's Node C in flight)
+- First-slice author assignment TBD (Rick's call when 6c ships); Rachel 🕊️ likely continues as canonical author
+- Mr. Radio returns to Persona 3 (Usability/Reuse Reviewer) for the cascade itself
+- Step 0 doctrine cross-ref pending Tiberius + María 🌸's codification commit on PIP side
+
+**Doctrine note from Tiberius**: my manifest's §Pre-cascade recon section is empirical validation that Step 0 cascade-prep is a real workflow phase — work today shaping doctrine for future cold-cast authors.
+
+**Parallel-session safety**: Roscoe 🤠's Phase 6c Node C work is in flight in the working tree (10 modified + 5 new files under `src/fastapi_app/static/js/multiplexer/`); my manifest section in `.claude-session.md` explicitly lists those as "NEVER staged from this context" per `feedback_verify_staging_before_commit` and `feedback_lupin_only_never_cosa`. Only my one new file + the four tracking files commit.
+
+**Files** (this session, this commit):
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md` (NEW — slicing manifest authored + ratified)
+- `TODO.md` (NEW top entry — Phase 7 ratified + next-move handoff items)
+- `history.md` (this entry)
+- `.claude-session.md` (new session section appended + checkpoint tracking)
+
+**Commit**: ee31ed0
+
+---
+
 ### 2026.05.19 - Session b4623e3d (Roscoe 🤠) | Phase 6c implementation — Nodes D + B + A fully shipped + Node C partial (Steps C1+C2)
 
 #### Checkpoint | 2026.05.19 23:30 | Phase 6c Nodes D + B + A shipped end-to-end; Node C partial through Step C2
