@@ -2,9 +2,65 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
-### 2026.05.20 - Session 32a6e563 (Mr. Radio 🦉) | Phase 7 slicing manifest authored + ratified (4 decisions locked with Rick)
+### 2026.05.20 - Session 32a6e563 (Mr. Radio 🦉) | Phase 7 slicing manifest + Phase 7a pre-cascade recon + Stage 0 design doc
 
-#### Checkpoint | 2026.05.20 01:35 | Phase 7 slicing manifest authored + ratified — sequencing Option A, pre-cascade recon ON, both op-phases decoupled
+#### Checkpoint 2 | 2026.05.20 02:10 | Phase 7a pre-cascade recon + Stage 0 design doc + manifest amendments — cascade Run 4 inputs ready
+
+Continued Phase 7 planning track in parallel with Roscoe 🤠's Phase 6c implementation (Rick clarified parallel-track at ~01:40 UTC). Per Tiberius 🌑's direction across DMs `9d91b3a5` → `9e011230`:
+
+**Option 1 — 7a Telemetry pre-cascade recon doc** (DM `9d91b3a5` greenlight): authored `14-phase7a-telemetry-pre-cascade-recon.md` (~280 LOC). Empirical anchor #2 for Step 0 doctrine (anchor #1 was the slicing manifest's §Pre-cascade recon framework, ratified 01:20 UTC). Per-item shape Question → Finding → Source → Decision per Tiberius's spec. Resolved 6 recon items:
+- R-7a-1 OTel packages: `@opentelemetry/api` + `sdk-trace-web` + `exporter-trace-otlp-http` (skip `auto-instrumentations-web`; defer `sdk-metrics` to Q-T4 reviewer call)
+- R-7a-2 Long Tasks: Chrome ✅, FF ✅ at floor, Safari ❌ — feature-detect at boot
+- R-7a-3 Telemetry sink: env-driven INI key `multiplexer otel collector endpoint`; default empty (no-op); collector deployment OUT OF SCOPE
+- R-7a-4 ReportingObserver: Chrome ✅, FF + Safari ❌ — feature-detect; Chrome-only signal at zero cost elsewhere
+- R-7a-5 User Timing Level 3: unconditionally; meets Phase 1 floor (Chrome 114+ / FF 125+ / Safari 17+ per Phase 6c design doc line 88)
+- R-7a-6 `observability/` directory stubs: Stage 0 design doc + code-execution phase owns creation; recon does NOT pre-stub
+
+Tabulated 8 decisions for Stage 0 author + 8 open items deferred to cascade Stages 0-3. Tiberius's recon-doc verdict (DM `9e011230`): 🟢 GREENLIT. "High-quality. Question → Finding → Source → Decision shape is exactly what Step 0 doctrine should adopt as canonical recon-section template."
+
+**Option 3 — Step 0 doctrine cross-ref to manifest footer** (DM `9d91b3a5` greenlight, concurrent): added §Doctrine cross-refs section to `13-phase7-slicing-manifest.md` footer linking PIP commit `bbb3e47` (Step 0 codification by Tiberius + María 🌸) + Step 9 (RATIFICATION-CLOSED 2026-05-19, validation-pending-Run-4). Phase 7a's first cascade = first live test of BOTH doctrines simultaneously.
+
+**Option 2 — Stage 0 design doc** (initially HELD; ratified via Rick's cast spin-up): Tiberius reported (DM `9e011230`) that Rick spun up Rachel 🕊️ + Rio ⚡ + Krishna 🦚 explicitly to "assist Mr Radio in the plan creation and cascaded review process" — implicit ratification of author rotation. Authored `15-phase7a-telemetry-design.md` (~480 LOC) mirroring `10-phase6c-persona-focus-recorder-design.md` shape:
+- Single cluster T (Telemetry) with **Q-T1..Q-T7** PROPOSED stances:
+  - Q-T1: 6 canonical User Timing anchors
+  - Q-T2: `createLongTasksObserver()` factory with null-on-Safari
+  - Q-T3: ReportingObserver for `['deprecation', 'intervention', 'crash']`
+  - Q-T4: 3 OTel span types (page-load, key-action, Long Task events); sdk-metrics deferred
+  - Q-T5: perf budgets — boot<1500ms, first-queue-render<200ms, longtask<5/min (TBD-at-code-write per AC10b)
+  - Q-T6: head-based sampling via `TraceIdRatioBasedSampler`; second INI key `multiplexer otel sampling rate`
+  - Q-T7: telemetry init BEFORE renderer mount; `[multiplexer] telemetry:initialized` handshake
+- **14 ACs** with Convention 3 EXECUTOR tags, Convention 4 TBD markers (AC-7a-8b + AC-7a-10b), Convention 5 N/A note (no `:8000` rows in 7a), Persona 2.A point 9 conditional-executability on AC-7a-8b + AC-7a-10b
+- **Step T1-T7** sequential execution sequence per `feedback_pip_plan_review_is_sequential`
+- **5 NEW + 9 EDITED** files enumerated
+- **4 OSQs** with PROPOSED stances
+- **13-point Persona 2.A rubric self-audit** + 17 feedback memories audited; no violations at draft time
+
+Tiberius's Stage 0 first-scan verdict (DM `97c56ec9`): "Quality looks comprehensive at first scan (480 LOC, 7 Q-decisions, 14 ACs, full self-audit)." HOLD Stage 1 dispatch pending Step 0 doctrine §5.3 light-review by María 🌸 (6-criterion rubric). Rick's "Tiberius appears to be pleased" + explicit commit go-ahead resolved the conditional approval gate from his prior directive.
+
+**Manifest amendment housekeeping**: §Per-slice file naming table renumbered from 3-doc-per-slice → 4-doc-per-slice (added recon docs). 7a: 14/15/16/17. 7b: 18/19/20/21. 7c: 22/23/24/25. 7d: 26/27/28/29. Review findings 94-97 unchanged.
+
+**Coordination state**:
+- Stage 1 dispatch to Rachel 🕊️ pending María's light-review verdict (~15-20 min wall-clock)
+- If María 🟢 → Stage 1 fires; if ⚠️ gaps → I do 1 author-revision turn (CAPPED, no Round-2)
+- Cap 2/2 author-revision-turn-cap + 3 discussion-turn-cap per cascade rules
+- Step 9 synthesis-and-handoff doctrine will kick in after cap reached
+- Phase 6c implementation track (Roscoe 🤠) continues independently; my last empirical state remains Node C through Step C2
+
+**Parallel-session safety**: Roscoe 🤠's Phase 6c Node C work in flight (10 modified + 5 new files under `src/fastapi_app/static/js/multiplexer/`); my manifest section in `.claude-session.md` continues to list those as "NEVER staged from this context."
+
+**Files** (this commit):
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/14-phase7a-telemetry-pre-cascade-recon.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/15-phase7a-telemetry-design.md` (NEW)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md` (MOD — file-naming table renumber + §Doctrine cross-refs footer)
+- `TODO.md` (status updates on Phase 7a workstream)
+- `history.md` (this Checkpoint 2 entry)
+- `.claude-session.md` (Checkpoint 2 section + Touched Files update)
+
+**Commit**: 54a1e19
+
+---
+
+#### Checkpoint 1 | 2026.05.20 01:35 | Phase 7 slicing manifest authored + ratified — sequencing Option A, pre-cascade recon ON, both op-phases decoupled
 
 Coordinated with Tiberius 🌑 (session `387b9201`) on Phase 7 plan slicing for the multiplexer migration. Authored `13-phase7-slicing-manifest.md` (~280 lines) mirroring the Phase 6 slicing manifest shape + density. Phase 7 = Hardening (production readiness); roadmap §3 carves it into 4 sub-areas, all now sliced.
 

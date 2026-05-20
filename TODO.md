@@ -12,10 +12,17 @@
 
 **Phase 7 implementation gated on Phase 6c close** — Roscoe 🤠 has Node C in flight per `12-phase6c-execution-plan.md`. Phase 7 start = Phase 6c ship.
 
-**Next moves when 6c ships** (TBD ownership; Rick's call):
-- [ ] **[LUPIN]** Author 7a Telemetry pre-cascade recon doc — OTel browser SDK version pin, Long Tasks API browser support floor, telemetry sink endpoint config (1-2h author work)
-- [ ] **[LUPIN]** Stage 0 author draft of `14-phase7a-telemetry-design.md` (Rachel 🕊️ likely; Rick's rotation call)
-- [ ] **[LUPIN]** Cascade Run 4 — first live test of Step 9 doctrine post-Phase-6c (María 🌸's doctrine consultant cycle)
+**Phase 7a workflow progress** (Rick clarified parallel-track 2026-05-20 — planning unblocks before 6c ships):
+- [x] **[LUPIN]** Author 7a Telemetry pre-cascade recon doc — RESOLVED 6 items (OTel packages, Long Tasks support, telemetry sink endpoint config, ReportingObserver, User Timing Level 3, directory stubs). Path: `14-phase7a-telemetry-pre-cascade-recon.md`. Tiberius 🌑 greenlit DM `9e011230`. ✅ DONE 2026-05-20 (Checkpoint 2)
+- [x] **[LUPIN]** Stage 0 author draft — `15-phase7a-telemetry-design.md` (single cluster T, Q-T1..Q-T7, 14 ACs, 4 OSQs, ~480 LOC). Author rotation ratified via Rick's cast spin-up. ✅ DONE 2026-05-20 (Checkpoint 2)
+- [ ] **[LUPIN]** Step 0 doctrine light-review by María 🌸 — IN PROGRESS, ~15-20 min wall-clock. Run 4 is first live test of Step 0 doctrine
+- [ ] **[LUPIN]** Stage 1 Usability/Reuse dispatch to Rachel 🕊️ — gated on María's light-review pass
+- [ ] **[LUPIN]** Author revision loop (CAP 2/2) if Stage 1 surfaces foundational findings
+- [ ] **[LUPIN]** Stage 2 Ownership-Language Audit by Krishna 🦚 (NOT security per `feedback_pass2_is_ownership_audit_not_security`)
+- [ ] **[LUPIN]** Stage 3 Synthesis by Rio ⚡ → `16-phase7a-cascade-synthesis.md`
+- [ ] **[LUPIN]** Step 9 synthesis-and-handoff doctrine validation — Tiberius + María doctrine consultant cycle. Run 4 is first live test of Step 9 doctrine
+- [ ] **[LUPIN]** Phase 7a code-execution plan → `17-phase7a-execution-plan.md` (post-cascade)
+- [ ] **[LUPIN]** Phase 7a implementation (gated on Phase 6c close per slicing manifest §Where this manifest lives in the cadence)
 
 **Cross-refs**:
 - Slicing manifest: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md`

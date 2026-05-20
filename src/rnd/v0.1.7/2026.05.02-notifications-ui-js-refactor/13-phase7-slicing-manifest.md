@@ -180,18 +180,18 @@ Inherits from `00-synthesis-and-roadmap.md` §3 "What is NOT in this roadmap" + 
 
 ## Per-slice file naming
 
-Following the existing R&D directory convention:
+Following the existing R&D directory convention. Renumbered 2026-05-20 to make room for per-slice pre-cascade recon docs (ratified ON per §Ratification outcomes #2). Each slice gets 4 docs: recon → design → cascade synthesis → execution plan.
 
-| Slice | Design doc | Cascade artifacts (gitignored) | Review findings | Cascade synthesis | Execution plan |
-|---|---|---|---|---|---|
-| 7a | `14-phase7a-telemetry-design.md` | `io/commons/cascaded-prototype-phase-7a-section-*` | `94-phase7a-review-findings.md` | `15-phase7a-cascade-synthesis.md` | `16-phase7a-execution-plan.md` |
-| 7b | `17-phase7b-csp-design.md` | `io/commons/cascaded-prototype-phase-7b-section-*` | `95-phase7b-review-findings.md` | `18-phase7b-cascade-synthesis.md` | `19-phase7b-execution-plan.md` |
-| 7c | `20-phase7c-trusted-types-design.md` | `io/commons/cascaded-prototype-phase-7c-section-*` | `96-phase7c-review-findings.md` | `21-phase7c-cascade-synthesis.md` | `22-phase7c-execution-plan.md` |
-| 7d | `23-phase7d-accessibility-design.md` | `io/commons/cascaded-prototype-phase-7d-section-*` | `97-phase7d-review-findings.md` | `24-phase7d-cascade-synthesis.md` | `25-phase7d-execution-plan.md` |
+| Slice | Pre-cascade recon | Design doc | Cascade artifacts (gitignored) | Review findings | Cascade synthesis | Execution plan |
+|---|---|---|---|---|---|---|
+| 7a | `14-phase7a-telemetry-pre-cascade-recon.md` | `15-phase7a-telemetry-design.md` | `io/commons/cascaded-prototype-phase-7a-section-*` | `94-phase7a-review-findings.md` | `16-phase7a-cascade-synthesis.md` | `17-phase7a-execution-plan.md` |
+| 7b | `18-phase7b-csp-pre-cascade-recon.md` | `19-phase7b-csp-design.md` | `io/commons/cascaded-prototype-phase-7b-section-*` | `95-phase7b-review-findings.md` | `20-phase7b-cascade-synthesis.md` | `21-phase7b-execution-plan.md` |
+| 7c | `22-phase7c-trusted-types-pre-cascade-recon.md` | `23-phase7c-trusted-types-design.md` | `io/commons/cascaded-prototype-phase-7c-section-*` | `96-phase7c-review-findings.md` | `24-phase7c-cascade-synthesis.md` | `25-phase7c-execution-plan.md` |
+| 7d | `26-phase7d-accessibility-pre-cascade-recon.md` | `27-phase7d-accessibility-design.md` | `io/commons/cascaded-prototype-phase-7d-section-*` | `97-phase7d-review-findings.md` | `28-phase7d-cascade-synthesis.md` | `29-phase7d-execution-plan.md` |
 
-Numbering reserves the prior space (00-12 already taken; 13 is this manifest; Phase 6c synthesis + execution plan at 11-12 set the precedent for triple-doc-per-slice).
+Numbering reserves the prior space (00-12 already taken; 13 is this manifest; Phase 6c synthesis + execution plan at 11-12 set the precedent for triple-doc-per-slice — Phase 7 extends to quadruple-doc-per-slice with the pre-cascade recon prepended).
 
-Each slice's design doc has the same shape as the Phase 6c design doc (`10-phase6c-persona-focus-recorder-design.md`): per-feature scope tables, ACs, Recon items, OSQs, dependencies, browser-API surface, test pyramid plan.
+Each slice's design doc has the same shape as the Phase 6c design doc (`10-phase6c-persona-focus-recorder-design.md`): per-feature scope tables, ACs, Recon items (resolved upstream in the recon doc), OSQs, dependencies, browser-API surface, test pyramid plan.
 
 ---
 
@@ -331,3 +331,12 @@ No violations detected at draft time. Tiberius's review will catch what self-aud
 ---
 
 — Mr. Radio 🦉 (Author, Lupin session `32a6e563`) — Phase 7 slicing manifest, draft for Tiberius 🌑 greenlight + Rick ratification.
+
+---
+
+## Doctrine cross-refs
+
+| Doctrine | Anchor | Codified in | Relationship to this manifest |
+|---|---|---|---|
+| **Step 0 cascade-preparation doctrine** | PIP commit `bbb3e47` (Tiberius 🌑 + María 🌸, 2026-05-20) | `planning-is-prompting/workflow/plan-authoring-cascaded-common.md` §Step 0 + `planning-is-prompting/src/rnd/2026.05.20-step-0-cascade-preparation-doctrine.md` | This manifest's §Pre-cascade recon section is **empirical anchor #1** for Step 0 — a fresh-cast author independently arrived at the recon-before-cascade framework Step 0 codifies. Per-slice recon docs (`14-`, `18-`, `22-`, `26-`) are empirical anchor #2+. Cascade Run 4 will be the first live test of BOTH Step 0 and Step 9 doctrine. |
+| **Step 9 synthesis-and-handoff doctrine** | RATIFICATION-CLOSED 2026-05-19 (Tiberius 🌑 + María 🌸); validation-pending-Run-4 | `planning-is-prompting/workflow/plan-authoring-cascaded-common.md` §Step 9 (validation-pending) | Phase 6c Run 3 surfaced the synthesis-and-handoff gap; doctrine drafted same day. Phase 7's first cascade (likely 7a Telemetry) will validate the codification. |
