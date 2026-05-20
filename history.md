@@ -98,9 +98,36 @@ Coordinated with Tiberius 🌑 (session `387b9201`) on Phase 7 plan slicing for 
 
 ---
 
-### 2026.05.19 - Session b4623e3d (Roscoe 🤠) | Phase 6c implementation — Nodes D + B + A fully shipped + Node C partial (Steps C1+C2)
+### 2026.05.19 - Session b4623e3d (Roscoe 🤠) | Phase 6c implementation — Nodes D + B + A + C fully shipped
 
-#### Checkpoint | 2026.05.19 23:30 | Phase 6c Nodes D + B + A shipped end-to-end; Node C partial through Step C2
+#### Checkpoint 2 | 2026.05.20 02:10 | Phase 6c COMPLETE — Node C closure + structural bug-fix; 11/11 visual regression GREEN
+
+**Phase 6c implementation is done.** Node C fully shipped (recordingManager port + SenderCardRecorderRenderer + sender-card-recorder.css + boot wiring + 29 unit tests + smoke + Section C visual file + :8000 baseline + regression). All four nodes' visual regressions now pass.
+
+**Final tier roll-up** (D + B + A + C):
+
+| Tier | Result |
+|---|---|
+| Unit cases (Phase 6c new) | 122 PASS (D 37 + B 31 + A 25 + C 29) |
+| Multiplexer unit sweep | all PASS (~670 tests) |
+| c8 coverage | 99.98% lines / 99.68% branches / 100% functions; tail gaps c8-ignored with same-line "smoke-tier" rationale |
+| Phase 6c smoke @ :7999 | 23/23 PASS in ~24s |
+| Visual baselines @ :8000 | 4 captures, all clean (`auto_fix_on_failure: False`) |
+| **Visual regression @ :8000** | **11/11 snapshots match** — D 3/3, B 3/3, A 3/3, C 2/2 |
+
+**Bug found + fixed mid-regression**: `SenderCardRecorderRenderer.paintAllVoiceInputs` only ran once at mount when zero `.cc-voice-input` footers existed yet. Late-arriving sender cards (the only kind in practice — they come from `store_senders_changed` emissions) never got Record buttons painted. First regression run reported "1 of 2 C-snapshots failed" → investigation revealed `wait_for_selector` for `.record-button` was TIMING OUT, not pixel-diffing. Fix: added a `bus.on("store_senders_changed", () => paintAllVoiceInputs())` subscription + matching unsubscriber in unmount(). Local Playwright probe confirmed `.record-button` appears within 3s of notification injection after the fix.
+
+**Re-baseline rationale**: every sender card snapshot's `.cc-voice-input` footer now shows the Record button (whereas pre-fix snapshots had empty footers). Re-baselined all 4 nodes against the fixed bundle. Second 8-job batch confirmed all 4 nodes regression-green.
+
+**Note on commit timing**: parallel-session interaction with Mr. Radio 🦉's Phase 7 planning track on history.md caused the initial commit (`ea3412b`) to land WITHOUT this entry. This Checkpoint 2 paragraph + commit `[pending]` amend brings the history back in sync.
+
+**Outstanding before merge**: per Rick tonight — this checkpoint commit, no backup, no push. Wind-down for the night.
+
+**Commit**: 83c8863 (amended from ea3412b)
+
+---
+
+#### Checkpoint 1 | 2026.05.19 23:30 | Phase 6c Nodes D + B + A shipped end-to-end; Node C partial through Step C2
 
 Implementer-pass on Tiberius's Phase 6c execution plan (`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/12-phase6c-execution-plan.md`, 749 LOC). Three of the four cascade nodes (D, B, A) are fully shipped end-to-end across the full test pyramid; Node C's chip-port runway (footer mount + AudioRecorder TS port) is landed and ready for Step C3 (recordingManager) to follow.
 

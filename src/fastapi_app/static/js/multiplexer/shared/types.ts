@@ -481,6 +481,11 @@ export interface BootCompletePayload {
     // the canonical boot handshake (...conversationModePin → focusTray →
     // personaModal); AC-A11 boot handshake smoke asserts this position.
     personaModalRenderer?        : string;
+    // Phase 6c Node C Step C5 (2026-05-19): literal string "mounted" emitted
+    // after `senderCardRecorderRenderer.mount(root)` completes. Eighth line
+    // in the canonical boot handshake; AC-C11 boot handshake smoke asserts
+    // this position.
+    senderCardRecorderRenderer?  : string;
   };
 }
 

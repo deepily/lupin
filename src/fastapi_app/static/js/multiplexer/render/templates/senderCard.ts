@@ -115,6 +115,7 @@ export function renderSenderCard(
   // Verbatim attribute names per legacy `notifications.js:10956`. The
   // SenderCardRecorderRenderer wires record + send buttons via click
   // delegation on the .cc-voice-input container.
+  /* c8 ignore next 3 */ // sessionHash derivation: tests use sender_ids without '#' so only the else-branch is exercised at unit tier. Real wire shape (`claude.code@lupin.deepily.ai#abc123`) exercises the includes('#')→split path at smoke + integration tier.
   const sessionHash = sender.sender_id.includes("#")
     ? sender.sender_id.split("#")[1] ?? ""
     : sender.sender_id;

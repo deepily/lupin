@@ -73,6 +73,15 @@
           { "severity": "error", "message": "Phase 6c Node A F28 layer-2: persona-modal.css must not carry global selectors. Scope all rules under .persona-popover / .persona-popover-* selectors." }
         ]
       }
+    },
+    {
+      "files": ["src/fastapi_app/static/css/multiplexer/sender-card-recorder.css"],
+      "rules": {
+        "selector-disallowed-list": [
+          ["*", "html", "body", ":root"],
+          { "severity": "error", "message": "Phase 6c Node C F28 layer-2: sender-card-recorder.css must not carry global selectors. Scope all rules under .cc-voice-input / .cc-voice-input-* selectors." }
+        ]
+      }
     }
   ]
 }

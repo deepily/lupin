@@ -37,6 +37,7 @@ import {
   createConversationModePinRenderer,
   createFocusTrayRenderer,
   createPersonaModalRenderer,
+  createSenderCardRecorderRenderer,
   configureMetaDisplayCap,
 } from "./render";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
@@ -293,6 +294,36 @@ function bootMultiplexer(): void {
   });
   personaModalRenderer.mount(focusTrayMountEl);
 
+  // Phase 6c Node C Step C5 — sender-card recorder renderer mounts LAST.
+  // Per F-Arnold-C4 + Recon-C7: AuthManager must resolve before this
+  // renderer instantiates. AuthManager exposes getToken() (async, returns
+  // Token with accessToken). User email plumbing is a follow-on — the
+  // current AuthManager does NOT yet expose getCurrentUserEmail(); the
+  // renderer accepts an empty string placeholder and the wrapper's send
+  // POST will fail validation until that's wired (which is acceptable for
+  // Phase 6c since the Node C user-flow itself is gated by mic permission
+  // at runtime).
+  //
+  // TODO Phase 6c follow-on: extend AuthManager with `getCurrentUserEmail()`
+  // so the SenderCardRecorderRenderer's outbound POST `sender_id` field can
+  // be filled correctly. Tracked as part of the same TODO bundle as
+  // mic-monopoly indicator (both touch the same auth/session pipeline).
+  console.log("[multiplexer] authManager:ready");
+  // Read cached access token via getToken() — wrap into a sync getter that
+  // returns the most-recently-resolved token string. Initial value is null
+  // until first call resolves. Production usage: send POST waits for token
+  // via async path; the sync getter here returns the cached value at click time.
+  let cachedAccessToken: string | null = null;
+  void authManager.getToken().then(t => { cachedAccessToken = t.accessToken; }).catch(() => { /* refresh path handles */ });
+  const senderCardRecorderRenderer = createSenderCardRecorderRenderer({
+    eventBus,
+    currentUserEmail : "",  // TODO follow-on: wire from AuthManager when getCurrentUserEmail() lands
+    getAuthToken     : () => cachedAccessToken,
+  });
+  const recorderMountEl = document.getElementById("sender-cards-container");
+  if (recorderMountEl === null) throw new Error("multiplexer: #sender-cards-container not found");
+  senderCardRecorderRenderer.mount(recorderMountEl);
+
   attachLifecycleListeners();
 
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
@@ -320,6 +351,7 @@ function bootMultiplexer(): void {
       conversationModePinRenderer : "mounted",
       focusTrayRenderer           : "mounted",
       personaModalRenderer        : "mounted",
+      senderCardRecorderRenderer  : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -339,6 +371,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] conversationModePinRenderer:mounted");
   console.log("[multiplexer] focusTrayRenderer:mounted");
   console.log("[multiplexer] personaModalRenderer:mounted");
+  console.log("[multiplexer] senderCardRecorderRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

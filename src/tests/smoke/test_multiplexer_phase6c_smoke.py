@@ -326,6 +326,7 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] conversationModePinRenderer:mounted",
                 "[multiplexer] focusTrayRenderer:mounted",
                 "[multiplexer] personaModalRenderer:mounted",
+                "[multiplexer] senderCardRecorderRenderer:mounted",
             ]
             assert mount_lines == expected, (
                 f"boot handshake mismatch:\nexpected={expected}\ngot     ={mount_lines}"

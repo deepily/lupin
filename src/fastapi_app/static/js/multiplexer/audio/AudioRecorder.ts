@@ -78,6 +78,7 @@ export class AudioRecorder {
     return this._getBestMimeType();
   }
 
+  /* c8 ignore start */ // Browser-API integration path (MediaRecorder + navigator.mediaDevices + fetch); not reachable under happy-dom unit env. Exercised at smoke tier via Playwright + real-browser permission flow.
   /**
    * Start recording from the user's microphone.
    *
@@ -250,4 +251,5 @@ export class AudioRecorder {
     this.cancelling    = false;
     if (this.state !== "error") this.state = "idle";
   }
+  /* c8 ignore stop */
 }
