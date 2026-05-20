@@ -2,6 +2,57 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.20 - Session 387b9201 (Tiberius 🌑) | Phase 7a Run 4 cascade-complete — implementer-handoff-ready
+
+#### 2026.05.20 03:30 | Phase 7a Telemetry — Run 4 cascade closed 🟢 + Step 0 + Step 9 doctrine v1 validated
+
+Managed Run 4 of cascaded plan-review workflow for Phase 7a Telemetry. **Cascade-complete 03:30:47 UTC; total wall-clock ~1h 30min** (Step 0 light-review through Step 9 close). Phase 7a implementer-handoff-ready.
+
+**Cast**: Mr Radio 🦉 (Stage 0 Author), Rachel 🕊️ (Stage 1 Usability/Reuse), Krishna 🦚 (Stage 2 Risk/Anti-pattern + Step 9 light-review), Rio ⚡ (Stage 3 Ownership/Convention), María 🌸 (Observer + doctrine consultant), Tiberius 🌑 (Manager).
+
+**Cascade outcomes**:
+- Stage 1: 🟢 closed-clean (1F + 2P + 5 reuse confirms; cap-2 1/2 used)
+- Stage 2: 🟡 closed-with-quibbles → cleanup folded (9 closed + 1 cosmetic + 4 doctrine-sweep quibbles; cap-2 1/2)
+- Stage 3: 🟢 closed-clean (4 closed + 1 withdrawn; cap-2 1/2)
+- Step 9: 🟢 close-clean post-revision (2 friction points + candidate #6 placeholder; cap-1 1/1)
+- Net cap utilization: **8 of 14 possible revision turns = 57%**; 50%+ headroom preserved across every cap surface
+
+**Manager footers (4 ratifications)**:
+- R-3 Path A pin: drop `crash` from ReportingObserver registered types (PII safety; sanitizer-design deferred to v2 OSQ-T-6)
+- Footer 2 Option A pin: block-on-config-fetch over non-blocking + replay
+- Footer 2 sub-revision: Option A + 500ms `Promise.race` bounded timeout + safe-defaults fallback
+- Closure-context references KEEP ruling (multi-surface sweep mandate is about active-claim violations, not historical scrubbing)
+
+**Tier discipline outcome**: T1+T2 silent Manager-unilateral throughout; zero T3 escalations; zero T4 wake-ups; Rick stayed asleep as designed.
+
+**Step 0 doctrine v1 validation**: ✅ STRONG. Pre-cascade recon (R-7a-1..R-7a-6 resolved upstream) eliminated browser-API archaeology from reviewer cycles. 3 reviewers concurred. Q→F→S→D recon shape empirically clean. 1 minor v2 candidate identified (persona-conventions sub-section).
+
+**Step 9 doctrine v1 validation**: ✅ STRONG with empirical bonus. **Dual-administer cold-context test is ADDITIVE, not redundant** — Manager self-test surfaced 3 friction points; Krishna's external test surfaced 2 ADDITIONAL beyond mine. Net 5 cold-context observations. Empirical basis for promoting `light_review_required = true` to a hard requirement after Run 5+6 evidence.
+
+**5 v1.1 doctrine candidates surfaced** (full codification in synthesis doc §5):
+1. Heartbeat-daemon kickoff codification (Tiberius)
+2. 4-tier clarification doctrine T1/T2/T3/T4 (Tiberius)
+3. Heartbeat-tick-vs-peer-DM injection-density mitigation — **new failure-mode #6: signal-density-obscures-needle** (Tiberius + María phantom-detection catch)
+4. Author-side grep-sweep checklist (Krishna)
+5. Multi-surface footer-ratification close protocol with non-adjacent surfaces + synthesis-doc 7th-canonical-surface refinement (Rio + Mr Radio + Krishna refinement)
+6. PLACEHOLDER — Explicit closure-context markers (filed for Run 5 evidence-gathering)
+
+**Cascade-learning-loop forward-asymmetry empirical anchor**: Stage 1→2→3 wall-clock monotonically decreasing (38→33→21 min effective). Worth charting across Runs 1-4 for §10.18.
+
+**Tiffany-rename-pass empirical refinement** (Mr Radio's catch): user-initiated rename operations CAN revert non-adjacent edit regions in one pass. Author-side grep-sweep checklist must enumerate ALL canonical surfaces independently — "the area I just touched" assumption is unsafe.
+
+**Files**:
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/15-phase7a-telemetry-design.md` (cascade-ratified, ~470 LOC)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/16-phase7a-cascade-synthesis.md` (NEW, ~360 LOC, implementer-handoff doc)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/14-phase7a-telemetry-pre-cascade-recon.md` (Stage 0 background, untouched in cascade)
+- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md` (Step 0 inputs, untouched in cascade)
+
+**Standing playbook**: commit-only no-push per [[never-auto-commit-push]]. All work uncommitted in working tree awaiting Rick's morning go-ahead.
+
+**Manager-side phantom-lag observed**: 13-min lag at 02:33-02:46 UTC due to cascade-scheduler heartbeat ticks 11-14 obscuring Krishna's Stage 2 peer-DM. María's observer probe at 02:43:47 cleared. Mitigated for second half of run via proactive `commons_read` every N ticks. v1.1 doctrine candidate #3.
+
+---
+
 ### 2026.05.20 - Session 32a6e563 (Mr. Radio 🦉) | Phase 7 slicing manifest + Phase 7a pre-cascade recon + Stage 0 design doc
 
 #### Checkpoint 2 | 2026.05.20 02:10 | Phase 7a pre-cascade recon + Stage 0 design doc + manifest amendments — cascade Run 4 inputs ready

@@ -1,5 +1,36 @@
 # TODO
 
+## 🟢 PHASE 7A CASCADE-COMPLETE — Run 4 closed 2026-05-20 03:30 UTC (Manager: Tiberius 🌑, session `387b9201`)
+
+**Status**: Phase 7a Telemetry is implementer-handoff-ready. All 4 cap surfaces closed (Stage 1 + 2 + 3 + Step 9 light-review). 57% net cap utilization; 50%+ headroom preserved across every cap surface. Zero T3/T4 escalations.
+
+**Implementer entry points**:
+- Canonical design doc: [`15-phase7a-telemetry-design.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/15-phase7a-telemetry-design.md) (cascade-ratified, ~470 LOC)
+- Synthesis + handoff doc: [`16-phase7a-cascade-synthesis.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/16-phase7a-cascade-synthesis.md) (NEW, ~360 LOC, this run's deliverable)
+- Pre-cascade recon (background): [`14-phase7a-telemetry-pre-cascade-recon.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/14-phase7a-telemetry-pre-cascade-recon.md)
+- Slicing manifest (Step 0 inputs): [`13-phase7-slicing-manifest.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md)
+
+**Cast** (Run 4): Mr Radio 🦉 (Stage 0), Rachel 🕊️ (Stage 1), Krishna 🦚 (Stage 2 + Step 9 light-reviewer), Rio ⚡ (Stage 3), María 🌸 (Observer + doctrine consultant), Tiberius 🌑 (Manager).
+
+**Next steps**:
+- [ ] **[LUPIN]** Phase 7a code-execution plan → `17-phase7a-execution-plan.md` (post-cascade execution plan, DAG-first per Roscoe pattern) — Manager + implementer to draft
+- [ ] **[LUPIN]** Phase 7a implementation (gated on Phase 6c close per slicing manifest §Where this manifest lives in the cadence) — Roscoe 🤠's Node C must ship first
+- [ ] **[LUPIN-COSA]** Cross-project handoff: `/api/multiplexer/config` Pydantic extension (add `otel_collector_endpoint: str` + `otel_sampling_rate: float` fields). Filed at code-write time per [[cross-project-handoff-doc]] — handoff doc + seed TODO in CoSA TODO.md per [[lupin-only-never-cosa]]
+- [ ] **[LUPIN]** Phase 7b CSP cascade (Run 5) — gated on Phase 7a implementer-handoff acceptance
+- [ ] **[LUPIN]** Phase 7c Trusted Types cascade (Run 6) — gated on Phase 7b
+- [ ] **[LUPIN]** Phase 7d Accessibility cascade (Run 7) — gated on Phase 7c
+- [ ] **[LUPIN-PIP]** v1.1 doctrine codification — 5 candidates surfaced this run + 1 placeholder. Manager + María 🌸 to coordinate. See synthesis doc §5 for codification texts:
+  1. Heartbeat-daemon kickoff codification → `plan-review-cascaded-common.md` §Heartbeat protocol
+  2. 4-tier clarification doctrine (T1/T2/T3/T4) → new `plan-review-cascaded-common.md` §X subsection
+  3. Signal-density-obscures-needle as failure-mode #6 → §10.14 failure-mode catalog + common.md §6.4 phantom-detection threshold + Manager System Prompt proactive-`commons_read` self-audit item
+  4. Author-side grep-sweep checklist (Krishna) → Persona 2.A point 14 expansion OR new common.md §Author-side discipline
+  5. Multi-surface footer-ratification close protocol with non-adjacent + synthesis-doc 7th-canonical-surface refinement → §10.14 multi-surface coordination protocol
+  6. PLACEHOLDER — explicit closure-context markers — queued for Run 5+6 evidence-gathering
+
+**Standing playbook**: commit-only no-push per [[never-auto-commit-push]]. All work uncommitted in working tree awaiting Rick's morning go-ahead.
+
+---
+
 ## 🟢 RATIFIED — Phase 7 slicing manifest authored + 4 decisions locked (filed 2026-05-20 by Mr. Radio 🦉, session `32a6e563`)
 
 **Filing context**: Manifest at [`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md). Tiberius 🌑 (session `387b9201`) greenlit the draft; Rick ratified all 4 decisions via cosa-voice blocking tools 2026-05-20.
