@@ -305,7 +305,7 @@ test("forceRenderForTesting() reconciles to current store state (adds + removes)
   // Mutate store WITHOUT emitting; force reconcile picks up the new state.
   store.setList([
     makeSender({ sender_id: "b", voice_persona: makePersona({ name: "Maria" }) }),
-    makeSender({ sender_id: "c", voice_persona: makePersona({ name: "Roscoe" }) }),
+    makeSender({ sender_id: "c", voice_persona: makePersona({ name: "Tiffany" }) }),
   ]);
   r.forceRenderForTesting();
   assert.equal(portal.children.length, 2);

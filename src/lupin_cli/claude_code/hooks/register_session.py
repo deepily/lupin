@@ -929,19 +929,33 @@ def main():
         # back to its existing random-allocation behavior.
         # See: planning-is-prompting/src/rnd/2026.05.19-cosa-voice-preferred-persona-env-var.md
         preferred = pick_preferred_persona_from_env( project )
+        # ── TEMPORARY DEBUG (2026-05-19, Tiberius session 4e724860) ─────────
+        # Investigating why LookML hook never successfully allocates a persona
+        # despite the backend chain working when called manually via curl.
+        # Remove once root cause identified.
+        _env_key   = f"COSA_VOICE_PREFERRED_PERSONA__{project.upper().replace( '-', '_' )}"
+        _env_raw   = os.environ.get( _env_key, "<UNSET>" )
+        print( f"[LOOKML-DEBUG] phase4.5 entry — project={project!r} env_key={_env_key!r} env_raw={_env_raw!r} preferred={preferred!r}",
+               file=sys.stderr )
         try:
             voice_persona_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+            print( f"[LOOKML-DEBUG] calling _allocate_voice_persona_via_http — server={voice_persona_server_url!r} sid={stable_session_id!r} preferred={preferred!r}",
+                   file=sys.stderr )
             allocated = _allocate_voice_persona_via_http(
                 voice_persona_server_url, project, stable_session_id,
                 previous_persona_name  = previous_persona_name,
                 preferred_persona_name = preferred
             )
+            print( f"[LOOKML-DEBUG] _allocate_voice_persona_via_http returned — allocated={allocated!r}",
+                   file=sys.stderr )
             if allocated is not None:
                 # The /allocate endpoint already wrote the persona to the
                 # bridge file; no further write needed here.
                 session_data[ "voice_persona" ] = allocated
         except Exception as e:
             print( f"[register_session] WARNING: voice persona phase failed ({type( e ).__name__}: {e})",
+                   file=sys.stderr )
+            print( f"[LOOKML-DEBUG] exception in phase4.5 — type={type( e ).__name__} msg={e}",
                    file=sys.stderr )
 
     # ── Phase 5: Send TTS notification (with explicit sender_id) ────────

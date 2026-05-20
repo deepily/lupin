@@ -29,7 +29,7 @@ The manifest exists so each per-slice design doc can focus on slice-internal con
 | 7c — Trusted Types (browser-level dynamic-HTML lockdown) | ⏸ Not started | — | — | — |
 | 7d — Accessibility (WCAG 2.1 AA audit + ARIA + keyboard nav + screen-reader pass) | ⏸ Not started | — | — | — |
 
-**Upstream phase status (context)**: Phase 6a CLOSED 2026-05-06; 6b CLOSED 2026-05-12; **6c in flight** (Roscoe 🤠 implementing per `12-phase6c-execution-plan.md`; DAG nodes D + B + A shipped local-green; Node C partial — C1 + C2 done). Phase 7 begins after 6c closes.
+**Upstream phase status (context)**: Phase 6a CLOSED 2026-05-06; 6b CLOSED 2026-05-12; **6c in flight** (Tiffany 💍 implementing per `12-phase6c-execution-plan.md`; DAG nodes D + B + A shipped local-green; Node C partial — C1 + C2 done). Phase 7 begins after 6c closes.
 
 ---
 
@@ -271,7 +271,7 @@ This doc IS the slicing decision artifact. It does NOT replace per-slice design 
 2. **Rick ratification** of: (a) recommended sequencing order (Option A vs B vs C vs D); (b) pre-cascade recon ON / OFF; (c) 7b's iterative-tightening operational phase decoupling from cascade shape; (d) 7d's audit-driven implementation cycle decoupling from cascade shape.
 3. **First slice's design doc cascade fires** — likely Run 4 of the cascaded workflow (per Tiberius's brief; the first live test of Step 9 doctrine post-Phase-6c). Author rotation TBD by Rick; likely Rachel 🕊️ continues as canonical author, with Mr. Radio 🦉 (this manifest's author) returning to Persona 3 (Usability/Reuse Reviewer) for the cascade itself.
 
-**No code is written until per-slice design docs are ratified and per-slice execution plans drafted.** Phase 7 implementation begins only after Phase 6c closes (Roscoe 🤠's current node).
+**No code is written until per-slice design docs are ratified and per-slice execution plans drafted.** Phase 7 implementation begins only after Phase 6c closes (Tiffany 💍's current node).
 
 ---
 
@@ -326,7 +326,7 @@ No violations detected at draft time. Tiberius's review will catch what self-aud
 | Filed | Source | Note |
 |---|---|---|
 | 2026-05-20 | Tiberius observation #2 | Once Step 0 cascade-prep doctrine commits to planning-is-prompting (likely with María 🌸's codification), add one-line back-ref to that doc here so this manifest's §Pre-cascade recon becomes a v1 empirical anchor. |
-| 2026-05-20 | Phase 6c interlock | Phase 7 implementation begins ONLY after Phase 6c closes. Roscoe 🤠 has Node C in flight (C1 + C2 done; C3-C7 pending) — likely tonight or tomorrow per Tiberius's brief. First-slice pre-cascade recon kicks off on 6c close. |
+| 2026-05-20 | Phase 6c interlock | Phase 7 implementation begins ONLY after Phase 6c closes. Tiffany 💍 has Node C in flight (C1 + C2 done; C3-C7 pending) — likely tonight or tomorrow per Tiberius's brief. First-slice pre-cascade recon kicks off on 6c close. |
 
 ---
 

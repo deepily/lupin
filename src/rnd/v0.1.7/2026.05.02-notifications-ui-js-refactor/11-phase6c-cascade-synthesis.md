@@ -26,7 +26,7 @@ This document is the **canonical synthesis** of Phase 6c Run 3 cascade outputs. 
 
 **Cascade closed clean at 04:16 UTC 2026-05-19** with 43 findings ratified across 4 sections at full cap-counter discipline (4/4 sections at 2/2). This doc is the SSOT for downstream implementation work.
 
-The companion **execution plan** at `12-phase6c-execution-plan.md` translates this synthesis into a DAG-first per-section file inventory for an implementer (Roscoe 🤠 confirmed 2026-05-19) to ship section-by-section without re-deriving cascade context.
+The companion **execution plan** at `12-phase6c-execution-plan.md` translates this synthesis into a DAG-first per-section file inventory for an implementer (Tiffany 💍 confirmed 2026-05-19) to ship section-by-section without re-deriving cascade context.
 
 ---
 
@@ -456,7 +456,7 @@ D → B → A → C
 - Status header: flip from "design phase open" to "🟢 CASCADE-RATIFIED — implementation handoff at 12-phase6c-execution-plan.md"
 
 **Phase 2 — Execution plan at `12-phase6c-execution-plan.md`**:
-- DAG-first sequencing graph per implementer (Roscoe 🤠) preference (2026-05-19 confirmed)
+- DAG-first sequencing graph per implementer (Tiffany 💍) preference (2026-05-19 confirmed)
 - Per-DAG-node: file inventory, function signatures, AC list, test pyramid, gates, standing doctrine memories
 - Sequencing: D → B → A → C (per §7 recommendation)
 - Done-defined per section: AC table all green, c8 100% directory-wide glob, smoke + visual regression pass, boot handshake order verified

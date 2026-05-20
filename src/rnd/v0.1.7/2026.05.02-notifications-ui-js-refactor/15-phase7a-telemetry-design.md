@@ -3,9 +3,9 @@
 | Field | Value |
 |---|---|
 | **Slice** | 7a per `13-phase7-slicing-manifest.md` |
-| **Status** | 📝 **STAGE 0 AUTHOR DRAFT** — awaiting cascade Stage 1 (Rachel 🕊️ Usability/Reuse), Stage 2 (Krishna 🦚 Ownership-Language Audit), Stage 3 (Rio ⚡ Synthesis) |
+| **Status** | 📝 **STAGE 0 — STAGE 3 CAP-2 AUTHOR REVISION IN FLIGHT** (Stage 1 + Stage 2 cap-2 closed; Stage 3 Rio ⚡ Ownership/Convention returned 2026-05-20: 3 inconsistencies + 1 cosmetic + 1 withdrawn — F-Rio-7a-1 OSQ table missing T-5/T-6/T-7 rows, F-Rio-7a-4 `crash` survives §Scope T-T3, F-Rio-7a-5 Recon-T-5 survives §Cluster T summary, F-Rio-7a-3 CoSA cross-project handoff seed cosmetic, F-Rio-7a-2 WITHDRAWN as pre-re-apply state. Same multi-surface-sweep-gap anti-pattern family — 7th instance across cascades. All 7 Q-decisions ACCEPT-AS-PROPOSED; all 4 Manager footers HOLD; 21-memory self-audit CLEAN). Awaiting Rio's cap-3 re-read after this revision turn |
 | **Author** | Mr. Radio 🦉 (Lupin session `32a6e563`), 2026-05-20 |
-| **Predecessors** | Phase 6a CLOSED 2026-05-06 (jobs surface); Phase 6b CLOSED 2026-05-12 (interactive widgets + TTS chrome); Phase 6c in flight (Roscoe 🤠 Node C C1+C2 done) |
+| **Predecessors** | Phase 6a CLOSED 2026-05-06 (jobs surface); Phase 6b CLOSED 2026-05-12 (interactive widgets + TTS chrome); Phase 6c in flight (Tiffany 💍 Node C C1+C2 done) |
 | **Sister docs** | Upstream slicing manifest [`13-phase7-slicing-manifest.md`](13-phase7-slicing-manifest.md); upstream pre-cascade recon [`14-phase7a-telemetry-pre-cascade-recon.md`](14-phase7a-telemetry-pre-cascade-recon.md) (resolves R-7a-1..R-7a-6) |
 | **Cascade context** | Run 4 — **first live test of BOTH Step 0 and Step 9 doctrine** per Tiberius 🌑's DM `9d91b3a5` + manifest §Doctrine cross-refs |
 | **Background docs to lean on** | `00-synthesis-and-roadmap.md` §3 (Phase 7 row) + §2.3 (OpenAI exclusive findings: User Timing / Long Tasks / OTel) + §4.2 (`observability/` directory layout reserved) |
@@ -20,7 +20,7 @@ Phase 7a is the **observability before launch** slice — instrumentation only, 
 |---|---|---|
 | **7a-T1** | User Timing API marks at canonical lifecycle points | `performance.mark` at 6 anchors (boot start, boot complete, first queue render, TTS playback start, WS reconnect, auth refresh) |
 | **7a-T2** | Long Tasks API observer | `PerformanceObserver({type: 'longtask'})` with feature-detect; Safari falls back to no-op |
-| **7a-T3** | ReportingObserver registration | `deprecation` + `intervention` + `crash` report types; feature-detect; FF + Safari fall back to no-op |
+| **7a-T3** | ReportingObserver registration | `deprecation` + `intervention` report types (R-3 Path A 2026-05-20: `crash` removed for PII safety; sanitizer-based inclusion deferred to v2 per OSQ-T-6); feature-detect; FF + Safari fall back to no-op |
 | **7a-T4** | OTel browser SDK initialization | `@opentelemetry/api` + `sdk-trace-web` + `exporter-trace-otlp-http`; env-driven endpoint |
 | **7a-T5** | Perf budget gates | Smoke-tier wall-clock thresholds for boot, first-queue-render, longtask count |
 
@@ -57,7 +57,6 @@ These 6 items were resolved BEFORE this cascade fired, per the ratified Pre-casc
 | **Recon-T-2** | `ApiClient.AbortSignal.any` integration — does OTLP/HTTP exporter participate in the same abort signal as other HTTP traffic (so a page-unload aborts telemetry POSTs)? OTel SDK has its own exporter retry/backoff; integration point TBD at code-write. | Phase 2 `ApiClient` design (`03-phase2-foundation-design.md`) |
 | **Recon-T-3** | `console.log` boot handshake convention — should telemetry init emit `'[multiplexer] telemetry:initialized'` to extend the existing handshake (matching `'authManager:ready'`, `'conversationModePinRenderer:mounted'` pattern)? PROPOSED yes. | Phase 6c execution plan §2.4 boot log canonical order |
 | **Recon-T-4** | Persisted-vs-volatile trace_id — does the OTel trace_id persist across navigations (sessionStorage) or reset per page load? PROPOSED reset per page (page-load span is the canonical root). Stage 0 author's call; reviewer may flip. | OTel browser SDK conventions |
-| **Recon-T-5** | Bundle-delta budget for AC10b — exact gz weight of the 3 OTel packages after esbuild + minify. Cannot be measured without actual `npm install` — Stage 0 author runs the install in a working-tree-isolated branch and measures. **TBD** | Recon doc §Open items for Stage 0 author |
 
 ---
 
@@ -73,12 +72,14 @@ Phase 7a is monolithic — one cluster covering all telemetry. Q-decisions follo
 |---|---|---|
 | `multiplexer:boot:start` | `boot.ts` first line | `{ phase: "boot-start" }` |
 | `multiplexer:boot:complete` | `boot.ts` after all renderers mount | `{ phase: "boot-complete", handlerCount: N }` |
-| `multiplexer:queue:first-render` | `NotificationsListRenderer.forceRenderForTesting` first invocation | `{ entryCount: N }` |
+| `multiplexer:queue:first-render` | First production-path `renderSenderSection()` invocation, idempotency-guarded by new `#firstRenderEmitted` private flag (flag set on first emit). **Revised 2026-05-20 per Stage 1 F-1**: `forceRenderForTesting()` is test-only by naming convention (consistent across 4 renderers per Rachel's grep); `renderAll()` is itself test-only-reachable. The production path is `subscribe()` → bus event handler → `renderSenderSection()` directly, so the mark must hook there. Step T4 already specifies the `#firstRenderEmitted` idempotency guard. | `{ entryCount: N }` |
 | `multiplexer:tts:playback-start` | `AudioStore` on `store_audio_chunk_decoded` first emission per playback | `{ jobId: <id> }` |
 | `multiplexer:ws:reconnect` | `ws-channel.ts` on transition `disconnected → connected` (post-initial-connect) | `{ attemptCount: N, downtime_ms: N }` |
 | `multiplexer:auth:refresh` | `AuthManager` on successful refresh response | `{ tokenLifetime_ms: N }` |
 
 **Rationale**: matches OpenAI review §2.3 framing ("explicit User Timing marks at queue render, TTS start, reconnect, refresh"). Each anchor is a distinct UX-meaningful moment; granularity is intentionally coarse to keep emission overhead negligible (<1ms per mark).
+
+**Mark accumulation note (R-4 v2-defer 2026-05-20)**: User Timing marks accumulate for session lifetime; no `performance.clearMarks()` is called by Phase 7a. Bounded by browser-native User Timing buffer limits which are implementation-defined but empirically sufficient for typical session length (a 4-hour session ≈ ~95 marks under steady-state usage given the 6-anchor schema above; well under any reasonable browser-buffer cap). Long-running-session clear policy deferred to v2 per OSQ-T-7.
 
 **Options walked**:
 - ~~Fine-grained per-renderer mounts~~ — rejected: high-cardinality, low-signal; AC10b boot.js gz delta would balloon.
@@ -107,6 +108,10 @@ Feature-detect: `if ( !PerformanceObserver.supportedEntryTypes?.includes( "longt
 
 Each Long Task entry routed to (a) User Timing as a measure for inline visibility AND (b) OTel as an event on the active trace span if one exists.
 
+**Long Task event attribute schema (R-1 enumerated explicitly 2026-05-20)**: Long Task OTel events carry `{ duration, name, startTime }` ONLY. **EXCLUDE `attribution[*]` entirely** — TaskAttributionTiming fields (containerName, containerSrc, containerId) can carry DOM IDs, classes, or attribute values containing fragments of user content (e.g., notification text rendered into a Long-Task-causing repaint surfaces as `containerId="notif-{sessionId}"` or `containerSrc` referencing user-generated URLs). PII exclusion at the boundary.
+
+**Per-span event cap (R-1 2026-05-20)**: Max **50** longtask events attached per active OTel span. Once cap reached on a span, subsequent Long Task occurrences during that span's lifetime increment a `longtask_overflow_count: number` attribute on the span instead of attaching new events. Prevents unbounded cardinality on long-running spans (e.g., a stuck page-load span accumulating thousands of longtask entries before exporter flush).
+
 **Rationale**: factory pattern matches Phase 6c renderer/recorder precedent; null-return communicates feature-detect outcome explicitly. Routing to BOTH User Timing and OTel gives in-browser dev visibility AND production telemetry path.
 
 **Options walked**:
@@ -115,11 +120,15 @@ Each Long Task entry routed to (a) User Timing as a measure for inline visibilit
 
 ### Q-T3 — ReportingObserver registration scope
 
-**PROPOSED**: register `ReportingObserver` for `['deprecation', 'intervention', 'crash']` report types. Boot-time instantiation in `boot.ts` AFTER Long Tasks observer (no ordering constraint, just alongside). Feature-detect via `typeof ReportingObserver !== 'undefined'` per recon R-7a-4.
+**PROPOSED** (revised 2026-05-20 per Stage 2 R-3 Path A pin): register `ReportingObserver` for `['deprecation', 'intervention']` ONLY. **`crash` REMOVED** from registered types. Boot-time instantiation in `boot.ts` AFTER Long Tasks observer (no ordering constraint, just alongside). Feature-detect via `typeof ReportingObserver !== 'undefined'` per recon R-7a-4.
 
 Each report entry routed to OTel as a span event with `reportType` attribute (not as a separate trace).
 
-**Rationale**: Chrome-only signal (FF + Safari fall back to no-op) but the 3 report types are all production-meaningful — deprecation warnings catch upcoming browser-API breakage, intervention reports flag browser-side throttling (e.g., autoplay blocking), crash reports surface renderer crashes pre-user-report.
+**Rationale**: Chrome-only signal (FF + Safari fall back to no-op). The 2 retained report types are **browser-API metadata only** (no user content) — deprecation warnings catch upcoming browser-API breakage, intervention reports flag browser-side throttling (e.g., autoplay blocking).
+
+**`crash` report exclusion rationale (R-3 PATH A 2026-05-20)**: `crash` reports are EXCLUDED because raw `report.body` routinely contains stack traces with sensitive runtime data — auth tokens held in closures via in-flight `fetch()` `Authorization` headers, URL fragments with `token=` / `session=` / `auth=` query params, local variables holding user content fragments rendered into the active surface. Exporting raw crash bodies to an OTel collector would exfiltrate session tokens off-frontend into observability infrastructure. Sanitizer-based crash inclusion (Path B) is deferred to v2 per OSQ-T-6 when a redaction module can be designed with explicit pattern catalog + false-negative testing strategy.
+
+> **Manager-ratified 2026-05-20** (Tiberius 🌑, Run 4 Stage 2 cap-2 turn 2): Path A (drop `crash` from registered types) PINNED over Path B (sanitizer-based inclusion). Rationale: sanitizer false-negative risk is high (the absence of a token in stack traces is unverifiable; one missed pattern leaks indefinitely); exported telemetry to a collector cannot be remediated post-hoc; minimum-blast-radius wins. v2 OSQ-T-6 captures the sanitizer-design follow-on.
 
 **Options walked**:
 - ~~Skip ReportingObserver entirely (Chrome-only is too narrow)~~ — rejected: Chrome users represent significant traffic; the net signal is positive at zero cost on other browsers.
@@ -151,7 +160,7 @@ Each report entry routed to OTel as a span event with `reportType` attribute (no
 
 | Anchor | Budget (wall-clock) | Rationale |
 |---|---|---|
-| `multiplexer:boot:complete` since `boot:start` | **< 1500 ms** | Phase 6c boot completed in ~400 ms locally per Roscoe's history.md entry; 4x headroom for CI variance + telemetry init overhead. |
+| `multiplexer:boot:complete` since `boot:start` | **< 1500 ms** | Phase 6c boot completed in ~400 ms locally per Tiffany's history.md entry; 4x headroom for CI variance + telemetry init overhead. |
 | `multiplexer:queue:first-render` since `boot:complete` | **< 200 ms** | Phase 6c first-render observed < 50 ms; 4x headroom. |
 | Long Task count over typical 60-second load test | **< 5 longtasks** | Long Tasks > 50ms; modern browsers expect renderers to stay under this threshold during steady state. 5 budget allows for initial paint + audio-decode bursts. |
 
@@ -170,6 +179,8 @@ Each report entry routed to OTel as a span event with `reportType` attribute (no
 **Implementation**: `@opentelemetry/sdk-trace-web` ships with `TraceIdRatioBasedSampler(rate)`. Config-driven instantiation.
 
 **Rationale**: head-based at root is the canonical OTel pattern. Tail-based requires collector cooperation (out of scope). Always-on (no sampling) burns cost at scale; head-based-with-config gives the production knob.
+
+**Error-span preservation note (R-2 v2-defer 2026-05-20)**: head-based sampling at the trace root causes 90% of error spans to be dropped at the production sampling rate (0.1). Canonical OTel mitigation is collector-side **tail-based sampling** with always-on policy for `status_code: ERROR` — but collector deployment is OUT OF SCOPE per §Out-of-scope. Client-side `ParentBasedSampler` wrapping logic can also preserve error spans by overriding the root sampling decision when an exception fires; that approach is heavier and is deferred to v2 per OSQ-T-5.
 
 **Options walked**:
 - ~~Always-on (no sampling)~~ — rejected: production cost grows linearly with traffic; collector-side filtering would be required anyway.
@@ -196,7 +207,7 @@ Telemetry init steps inside the handshake:
 5. Instantiate OTel SDK + tracer + exporter (head-based sampler; no-op exporter if endpoint empty)
 6. Emit `[multiplexer] telemetry:initialized` to console + emit `multiplexer:boot:telemetry-init-complete` User Timing mark
 
-**`BootCompletePayload.handlers.telemetry?: string`** extension to `shared/types.ts` per Phase 6c boot handshake pattern.
+**`BootCompletePayload.handlers.telemetry?: string`** extension to `shared/types.ts` per Phase 6c boot handshake pattern. **Value semantics specified 2026-05-20 per Stage 1 P-1**: literal string `"initialized"` (mirroring `notificationsRenderer === "mounted"` AC pattern from Phase 5/6a/6b/6c renderers per `shared/types.ts:442-480`). Telemetry is NOT a renderer (no DOM mount); the `"initialized"` literal signals "observers attached + tracer ready + exporter wired (no-op if endpoint empty)." Distinct from renderer `"mounted"` semantics on purpose.
 
 **Rationale**: pre-renderer init means renderer-paint marks (first-queue-render) are captured. Console-log handshake extends existing convention. Telemetry being "initialized" means the observers are attached and the exporter is ready, even if the endpoint is empty (no-op exporter still constructs spans, just discards them).
 
@@ -212,12 +223,12 @@ Telemetry init steps inside the handshake:
 |---|---|
 | User Timing marks | 6 anchors per Q-T1 |
 | Long Tasks observer | Single factory; feature-detect; null-on-Safari; route entries to both User Timing measures + OTel span events |
-| ReportingObserver | `['deprecation', 'intervention', 'crash']`; feature-detect; null-on-FF+Safari; route to OTel span events |
+| ReportingObserver | `['deprecation', 'intervention']` (R-3 Path A 2026-05-20); feature-detect; null-on-FF+Safari; route to OTel span events |
 | OTel SDK | `api` + `sdk-trace-web` + `exporter-trace-otlp-http`; 3 span types (page-load, key-action, Long Task events) |
 | Sampling | Head-based via `TraceIdRatioBasedSampler`; config-driven rate (dev default 1.0, prod default TBD-by-deployment) |
 | Perf budgets | Boot < 1500ms, first-queue-render < 200ms, longtask count < 5/minute |
 | Boot wiring | Telemetry init BEFORE renderer mount; `[multiplexer] telemetry:initialized` handshake line |
-| Bundle delta | TBD at AC10b measure-time per Recon-T-5 |
+| Bundle delta | TBD at AC10b measure-time per OSQ-T-1 (Recon-T-5 consolidated into OSQ-T-1 per C-1 closure 2026-05-20) |
 
 ---
 
@@ -236,11 +247,11 @@ Per Phase 6c precedent + Conventions 3 (EXECUTOR tags), 4 (TBD markers explicit)
 | **AC-7a-6** | 100% c8 line + branch + function coverage on multiplexer TS via directory-wide glob `c8 --100 --include='src/fastapi_app/static/js/multiplexer/**/*.ts'` per `feedback_100pct_coverage_multiplexer` (Lupin-wide post-2026-05-16) | AI | — |
 | **AC-7a-7** | Stylelint: N/A — Phase 7a is JS+TS only, no CSS edits | AI | — |
 | **AC-7a-8a** | Functional smoke on `:7999`: User Timing marks present at all 6 canonical anchors after boot (asserted via `performance.getEntriesByType('mark')`) | AI | — |
-| **AC-7a-8b** | Perf gate on `:7999`: boot < 1500ms, first-queue-render < 200ms, longtask count < 5/minute under typical load. **TBD-at-code-write** if AC10b SDK weight forces budget revisit. | AI | Recon-T-5 (bundle delta) |
-| **AC-7a-9** | `boot_complete` handshake includes `telemetry:initialized` in canonical order BEFORE renderer mounts | AI | — |
+| **AC-7a-8b** | Perf gate on `:7999`: boot < 1500ms under steady-state, **assuming `/api/multiplexer/config` p99 < 200ms** (R-7 SLO clarification 2026-05-20); first-queue-render < 200ms; longtask count < 5/minute under typical load. CI cold-start warm-up may briefly exceed; budget gate runs after a 1-test-warm-up smoke ping (matches Phase 6c boot perf pattern). If steady-state `/api/multiplexer/config` p99 exceeds 200ms in production telemetry post-deployment, AC-7a-8b literal re-baselines to actual config-fetch p99 + 1300ms processing budget. **Paired with R-5 bounded-timeout** — worst-case boot bounded at 500ms (config-cap) + ~200ms (telemetry init) + ~50ms (first-queue-render) = ~750ms comfortably inside 1500ms. **TBD-at-code-write** if AC10b SDK weight forces budget revisit. | AI | OSQ-T-1 (bundle delta) |
+| **AC-7a-9** | `boot_complete` handshake includes `telemetry:initialized` in canonical order BEFORE renderer mounts. Grep gate: `payload.handlers.telemetry === "initialized"` literal string per Stage 1 P-1 (mirrors `notificationsRenderer === "mounted"` AC pattern). **Handshake-fires-within-500ms assertion (R-5 extension 2026-05-20)**: mocked test where `/api/multiplexer/config` never resolves still produces `telemetry:initialized` handshake within 500ms (bounded-timeout safe-defaults path verified). | AI | — |
 | **AC-7a-10** | Phase 5 + 6a + 6b + 6c regression suites all green after telemetry instrumentation (no regression) | AI | — |
-| **AC-7a-10b** | `boot.js` gz delta ≤ **TBD-KB** vs Phase 6c baseline (Phase 6c gz baseline TBD-at-author-time per Recon-T-5). Stage 0 author measures with actual `npm install` of 3 OTel packages. | AI | Recon-T-5 |
-| **AC-7a-LT** | Long Tasks observer feature-detect path returns no-op (`null`) on Safari; non-Safari emits longtask entries (mocked happy-dom test) | AI | — |
+| **AC-7a-10b** | `boot.js` gz delta ≤ **TBD-KB** vs Phase 6c baseline. Implementer resolves at code-write per `npm install` + esbuild measurement (R-6 polish 2026-05-20 — Manager call: TBD acceptable per Persona-2-pt-9 escape hatch, no author bandwidth burn on `npm install --dry-run`). **Suggested upper bound** based on `@opentelemetry/api` + `@opentelemetry/sdk-trace-web` + `@opentelemetry/exporter-trace-otlp-http` minified+gzipped: ~50KB. Implementer pins literal in revision PR once measured. | AI | OSQ-T-1 |
+| **AC-7a-LT** | Long Tasks observer feature-detect path returns no-op (`null`) on Safari; non-Safari emits longtask entries (mocked happy-dom test). **Attribute schema assertion (R-1 extension 2026-05-20)**: emitted Long Task OTel events carry `{ duration, name, startTime }` ONLY — assertion verifies `attribution` field NOT present on the event. **Per-span cap assertion (R-1 extension 2026-05-20)**: 51st longtask occurrence on a span attaches `longtask_overflow_count: 1` attribute and does NOT add a 51st event; 52nd → `longtask_overflow_count: 2`. | AI | — |
 | **AC-7a-REP** | ReportingObserver feature-detect path returns no-op on FF + Safari; Chrome path emits report entries (mocked happy-dom test) | AI | — |
 | **AC-7a-OTEL** | No-op exporter path verified at boot when INI endpoint empty; OTLP/HTTP exporter wired when endpoint is set (mock collector assertion) | AI | — |
 | **AC-7a-SAMP** | Head-based sampler honors INI rate (mock 10% rate → ~10% of trace IDs sampled in a 1000-id span) | AI | — |
@@ -300,10 +311,22 @@ Each mark also creates an OTel span event on the active span if one exists.
 
 ### Step T5 — `boot.ts` telemetry init wiring per Q-T7
 
-- Read INI config (endpoint + sampling rate) via existing config mechanism (TBD — check current `boot.ts` for how it gets config; likely a server-rendered `<script>` blob)
+- **Config injection mechanism RESOLVED 2026-05-20 per Stage 1 P-2** (replaces prior TBD):
+  - Existing pattern at `boot.ts:148-160`: `fetch('${apiBaseUrl}/api/multiplexer/config')` already runs at boot (per Phase 6a Pass 2 F20 precedent — currently fetches `meta_display_cap` consumed by `configureMetaDisplayCap()`)
+  - **Server-side extension required**: extend `/api/multiplexer/config` Pydantic response model (in `src/cosa/rest/routers/multiplexer.py` or wherever the endpoint lives — verify at code-write) to include `otel_collector_endpoint: str` (default empty) + `otel_sampling_rate: float` (default 1.0). Server reads from `ConfigurationManager` (which reads the new INI keys per Step T1). Pydantic-native validation per `feedback_pydantic_native_validation`.
+  - **Client-side wiring**: extend the `fetch('${apiBaseUrl}/api/multiplexer/config')` `.then()` handler at `boot.ts:155+` to read `serverConfig.otel_collector_endpoint` + `serverConfig.otel_sampling_rate` and pass into `createOtelTracer({endpoint, samplingRate, serviceName: 'lupin-multiplexer'})`
+- **Bounded-timeout + safe-defaults (R-5 SUB-REVISE 2026-05-20)**: the config-fetch wraps in `Promise.race([fetch('/api/multiplexer/config'), new Promise(resolve => setTimeout(() => resolve(SAFE_DEFAULTS), 500))])`. Hard cap **500ms**. On timeout OR error → telemetry init proceeds with safe defaults: `otel_collector_endpoint = ""` (no-op exporter) + `otel_sampling_rate = 1.0`. Telemetry handshake `[multiplexer] telemetry:initialized` still fires (renderers can mount). Log `console.warn('[multiplexer] telemetry: config-fetch timed out or failed; using safe defaults')` for dev-tools visibility. Failure-mode cascade (config-fetch stall → telemetry init stall → renderer mount stall → UI blank) bounded at 500ms worst-case.
 - Instantiate observers + tracer per Step T2/T3
-- Boot log emission: `console.log('[multiplexer] telemetry:initialized')` + extend `BootCompletePayload.handlers.telemetry`
+- Boot log emission: `console.log('[multiplexer] telemetry:initialized')` + set `payload.handlers.telemetry = "initialized"` literal per P-1
 - Mount BEFORE renderers per Q-T7
+
+> **Manager-ratified 2026-05-20** (Tiberius 🌑, Run 4 Stage 1 cap-2 close): P-2 CoSA config-plumbing extension lives within Phase 7a scope. Config plumbing (2 fields added to existing `/api/multiplexer/config` Pydantic response model) ≠ server-side instrumentation per §Out-of-scope semantics. Implementer responsibilities: commit Lupin-side changes in this session's working tree; commit CoSA-side router edit in CoSA-context session (separate git operation) per `feedback_lupin_only_never_cosa`.
+
+**Ordering note for the config-fetch boundary**: the existing `fetch('/api/multiplexer/config')` is fire-and-forget (boot proceeds before resolve). For Phase 7a telemetry, the OTel config needs to be available BEFORE renderers mount (so renderer-paint marks land in the configured tracer). Stage 0 author's PROPOSED resolution: telemetry init AWAITS the config-fetch before completing; renderers wait on telemetry handshake. Reviewer may flip if non-blocking init is preferred (then OTel buffers spans until config resolves and replays — heavier implementation).
+
+> **Manager-ratified 2026-05-20** (Tiberius 🌑, Run 4 Stage 1 cap-2 close): **Option A (block-on-config-fetch) PINNED** as PROPOSED. Rationale: +1 RTT acceptable on boot path already awaiting auth + multiplexer config; non-blocking + replay adds defect surface for marginal latency gain. Krishna 🦚 (Stage 2 Risk/Anti-pattern) may flip if her review surfaces a Risk lens reason; symmetric reversibility means flipping is cheap. Starting position is Option A, not "both visible."
+
+> **Sub-revised 2026-05-20** (Tiberius 🌑, Run 4 Stage 2 cap-2 turn 2 R-5): Option A structurally preserved + bounded-timeout 500ms + safe-defaults fallback added per Krishna's R-5. Failure-mode cascade (config-fetch stall → telemetry init stall → renderer mount stall → UI blank) bounded at 500ms worst-case. Pairs with R-7's AC-7a-8b SLO assumption — worst-case boot becomes ~750ms inside 1500ms budget (500ms config-cap + ~200ms telemetry init + ~50ms first-queue-render). Sanitizer-design (Path B from R-3) and `ParentBasedSampler` (R-2) remain v2 deferred per OSQ-T-6 + OSQ-T-5.
 
 ### Step T6 — Tests
 
@@ -342,10 +365,11 @@ Vitest run + c8 100% coverage gate per `feedback_100pct_coverage_multiplexer`.
 | `src/fastapi_app/static/js/multiplexer/stores/AudioStore.ts` | tts:playback-start mark on first chunk decode |
 | `src/fastapi_app/static/js/multiplexer/transport/ws-channel.ts` | ws:reconnect mark on reconnect transition |
 | `src/fastapi_app/static/js/multiplexer/auth/AuthManager.ts` | auth:refresh mark on refresh success |
-| `src/fastapi_app/static/js/multiplexer/shared/types.ts` | `BootCompletePayload.handlers.telemetry?: string` extension |
+| `src/fastapi_app/static/js/multiplexer/shared/types.ts` | `BootCompletePayload.handlers.telemetry?: string` extension; value literal `"initialized"` per Stage 1 P-1 |
 | `src/conf/lupin-app.ini` | `multiplexer otel collector endpoint` + `multiplexer otel sampling rate` keys |
 | `src/conf/lupin-app-splainer.ini` | Matching explanations |
 | `package.json` | Add 3 OTel deps + version pins |
+| `src/cosa/rest/routers/multiplexer.py` (or wherever `/api/multiplexer/config` lives — verify at code-write) | **Added 2026-05-20 per Stage 1 P-2 resolution**: extend Pydantic response model with `otel_collector_endpoint: str` (default empty) + `otel_sampling_rate: float` (default 1.0). Server reads from `ConfigurationManager` (INI keys per Step T1). Pydantic-native validation per `feedback_pydantic_native_validation`. **Scope note**: this is a 2-field extension of an EXISTING endpoint (not a new endpoint); §Out-of-scope's "Server-side OTel" carve-out refers to server-side instrumentation, NOT config plumbing. CoSA submodule edit per `feedback_lupin_only_never_cosa` — editing fine, git ops must happen in CoSA-context session. **F-Rio-7a-3 documented-not-revised 2026-05-20**: implementer files CoSA cross-project handoff seed at code-write time per `feedback_cross_project_handoff_doc` — handoff doc + seed TODO in CoSA TODO.md pointing to it. |
 
 ---
 
@@ -353,10 +377,13 @@ Vitest run + c8 100% coverage gate per `feedback_100pct_coverage_multiplexer`.
 
 | OSQ | Question | PROPOSED stance |
 |---|---|---|
-| **OSQ-T-1** | Bundle-delta budget for AC10b: cannot measure without actual npm install. Stage 0 author runs install in working-tree-isolated branch and measures gz delta. Reviewer ratifies the literal. | TBD-at-code-write |
+| **OSQ-T-1** | Bundle-delta budget for AC10b: cannot measure without actual npm install. Implementer resolves at code-write per `npm install` + esbuild measurement (consolidated from Recon-T-5 per C-1 closure 2026-05-20). Suggested upper bound ~50KB minified+gzipped per Stage 2 R-6. | TBD-at-code-write; ≤~50KB suggested |
 | **OSQ-T-2** | OTel `service.name` resource attribute: hardcode `lupin-multiplexer` or read from INI? PROPOSED hardcode; service identity is structural, not config. | Hardcode `lupin-multiplexer` |
 | **OSQ-T-3** | trace_id propagation to server-side: out of scope for 7a (server-side OTel is a separate initiative); 7a does NOT inject `traceparent` headers into server-bound requests. PROPOSED: defer. | Defer |
 | **OSQ-T-4** | Manual instrumentation of WS message round-trips: each WS request/response pair as a span? PROPOSED: NO — too high-cardinality; rely on the 6 canonical anchors. Reviewer may push for finer granularity. | Skip; rely on 6 anchors |
+| **OSQ-T-5** (filed per Stage 2 R-2 closure 2026-05-20) | Error-span preservation under reduced sampling rate. Head-based sampling at root drops 90% of error spans at `rate=0.1`. Mitigation options: collector-side tail-based sampler (always-on for `status_code: ERROR`) OR client-side `ParentBasedSampler` wrapping logic. Collector is out of scope; client-side wrap is heavier. | Defer to v2 |
+| **OSQ-T-6** (filed per Stage 2 R-3 Path A closure 2026-05-20) | Crash-report ingestion via sanitizer module. Pattern catalog for `Bearer\s+\S+`, query-string redaction (`token` / `session` / `auth` / `api[_-]?key`), stack-frame string-arg truncation. R-3 Path A removed `crash` from registered types for PII safety; sanitizer-based inclusion requires explicit false-negative test design. | Defer to v2 with explicit false-negative test design |
+| **OSQ-T-7** (filed per Stage 2 R-4 closure 2026-05-20) | `performance.clearMarks()` policy for long-running sessions. Phase 7a does NOT clear marks (browser-native buffer limits accepted as sufficient — ~95 marks/4-hour session). Add clear-after-export hook once telemetry collector lands and export cadence is known. | Defer to v2 (post-collector deployment) |
 
 ---
 
@@ -371,10 +398,10 @@ Per `planning-is-prompting/workflow/plan-review-cascaded-personas.md` Persona 2.
 | 3 | All Q-decisions present PROPOSED stances (not just options) | ✅ Q-T1..Q-T7 all have PROPOSED + Options walked |
 | 4 | Recon items distinguish RESOLVED (upstream) from open (Stage 0+) | ✅ §Pre-design recon RESOLVED + §Stage 0 Pre-flight Recon items open |
 | 5 | ACs use Convention 3 (EXECUTOR tags), 4 (TBD markers), 5 (`:8000` slot-coordination) | ✅ All AC rows have EXECUTOR; TBD markers explicit on AC-7a-8b + AC-7a-10b; Convention 5 N/A note present |
-| 6 | Persona 2.A point 9 conditional-executability markers present on ACs depending on Recon items | ✅ AC-7a-8b + AC-7a-10b marked Conditional-on Recon-T-5 |
+| 6 | Persona 2.A point 9 conditional-executability markers present on ACs depending on Recon items | ✅ AC-7a-8b + AC-7a-10b marked Conditional-on OSQ-T-1 (Recon-T-5 removed per C-1 closure 2026-05-20; OSQ-T-1 carries the bundle-delta budget tracking) |
 | 7 | Step-by-step execution sequence with explicit ordering | ✅ Step T1 → T7 sequential |
 | 8 | Files NEW + EDITED enumerated with size budgets | ✅ Two tables (Files NEW with LOC budgets; Files EDITED with change descriptions) |
-| 9 | OSQs flagged for cascade resolution (or PROPOSED stance for ratification) | ✅ OSQ-T-1..OSQ-T-4 with PROPOSED stances |
+| 9 | OSQs flagged for cascade resolution (or PROPOSED stance for ratification) | ✅ OSQ-T-1..OSQ-T-7 with PROPOSED stances (3 new OSQs filed 2026-05-20 per R-2/R-3/R-4 v2-defers) |
 | 10 | Background docs cited at metadata header | ✅ Sister docs + Background docs to lean on |
 | 11 | Test pyramid plan present (unit + smoke + perf + regression) | ✅ §Acceptance Criteria covers tsc/eslint/unit/smoke/perf/coverage; §Step T6 + T7 |
 | 12 | No `feedback_*` violations from `~/.claude/CLAUDE.md` MEMORY.md | ✅ §Self-audit checklist below |
@@ -393,7 +420,7 @@ Per `planning-is-prompting/workflow/plan-review-cascaded-personas.md` Persona 2.
 | `feedback_never_auto_commit_push` | ✅ Design doc commits no code; cascade ratification gate + Rick's commit go-ahead per slice |
 | `feedback_env_var_read_and_set_land_together` | ✅ Step T1 mandates INI key + splainer entry as paired landing |
 | `feedback_tests_must_cover_cross_target_invocations` | ✅ AC-7a-LT + AC-7a-REP + AC-7a-OTEL test cross-browser/cross-config invocations (Safari no-op path, FF+Safari no-op path, empty-endpoint no-op path) |
-| `feedback_pass2_is_ownership_audit_not_security` | ✅ Stage 2 reviewer is Krishna 🦚 doing Ownership-Language Audit (not security review) per Tiberius's brief |
+| `feedback_pass2_is_ownership_audit_not_security` | ✅ Stage 3 reviewer is Rio ⚡ doing Ownership-Language Audit (not security review) per cascade doctrine §Persona 5. Stage 2 reviewer is Krishna 🦚 doing Risk/Anti-pattern review (PII, cardinality, race conditions, failure cascades). R-8 role labels corrected 2026-05-20. |
 | `feedback_documentation_step_stops_at_doc` | ✅ This Stage 0 design doc is the deliverable; no code written; no auto-progression |
 | `feedback_always_serialize_plan_to_rd_scope_post_exit` | ✅ Doc lives in `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/` per slicing manifest §Per-slice file naming |
 | `feedback_tests_parameterize_base_url` | ✅ Smoke tests in `src/tests/smoke/test_multiplexer_phase7a_smoke.py` will inherit existing `LUPIN_API_URL` indirection pattern from Phase 6c smoke tests |
@@ -432,9 +459,9 @@ No violations detected at draft time. Cascade reviewers (Rachel 🕊️ Stage 1,
 2. **Tiberius reads + dispatches Stage 1 to Rachel 🕊️** with section-specific instructions per Run 3 dispatch pattern.
 3. **Stage 1 Usability/Reuse Review** — Rachel grepting prior art, AC2e safe-write checks, conditional-executability marker audit, Persona 2.A rubric application.
 4. **Possible author revision loops** (cap 2/2) if Stage 1 surfaces foundational findings.
-5. **Stage 2 Ownership-Language Audit** — Krishna 🦚 hunts executor-tagging gaps + silent user hand-offs per `feedback_pass2_is_ownership_audit_not_security`.
-6. **Stage 3 Synthesis** — Rio ⚡ produces the cascade synthesis doc at `16-phase7a-cascade-synthesis.md`.
-7. **Step 9 Synthesis-and-Handoff doctrine validation** — Tiberius + María 🌸 doctrine consultant cycle.
+5. **Stage 2 Risk/Anti-pattern** — Krishna 🦚 hunts PII leakage, cardinality explosion, race conditions, sampling bias, failure-mode cascades (R-8 role corrected 2026-05-20).
+6. **Stage 3 Ownership/Convention** — Rio ⚡ hunts executor-tagging gaps + silent user hand-offs + convention adherence (naming, INI key style, test venue rules) per `feedback_pass2_is_ownership_audit_not_security` (R-8 role corrected 2026-05-20).
+7. **Step 9 Synthesis** — Manager (Tiberius 🌑) produces the cascade synthesis doc at `16-phase7a-cascade-synthesis.md` after Stage 3 close + cap-lock per Step 9 doctrine (validation-pending-Run-4). This cascade has 4 total stages (Author Stage 0 + 3 reviewer stages: Stage 1 Usability/Reuse + Stage 2 Risk/Anti-pattern + Stage 3 Ownership/Convention) per Q-4 cleanup 2026-05-20.
 8. **Implementation handoff** — next-assigned implementer picks up post-cascade.
 
 **No commits per `feedback_never_auto_commit_push`** — this doc + recon doc + manifest amendments remain DIRTY in working tree until Rick's commit go-ahead.

@@ -7,7 +7,7 @@
 | **Author** | Rachel 🕊️ (`56ee76d6`), 2026-05-12 — Cascade-amended by Tiberius 🌑 (`4e724860`), 2026-05-19 |
 | **Predecessors** | Phase 6a CLOSED 2026-05-06 (jobs surface); Phase 6b CLOSED 2026-05-12 (interactive widgets + TTS chrome + delete-button — see `97-phase6b-closure.md`) |
 | **Background docs to lean on** | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md`, `src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md` — Phase 6c is the **multiplexer port of features designed elsewhere**, not a greenfield design |
-| **Cascade closure** | Run 3 HYBRID authoring-cascade: launched 2026-05-19T02:28 UTC, cascade-complete 04:16 UTC (~108 min wall-clock). 4 sections at cap 2/2; 39/43 findings verbatim-accept; 1 user escalation (Section C F2 port-verbatim); 1 manager-unilateral ratification (Section D Q-D1 Path A by-concurrence); 1 hard-verification gate introduced (Section B AC-B15). Implementer: **Roscoe 🤠** (assigned post-cascade). |
+| **Cascade closure** | Run 3 HYBRID authoring-cascade: launched 2026-05-19T02:28 UTC, cascade-complete 04:16 UTC (~108 min wall-clock). 4 sections at cap 2/2; 39/43 findings verbatim-accept; 1 user escalation (Section C F2 port-verbatim); 1 manager-unilateral ratification (Section D Q-D1 Path A by-concurrence); 1 hard-verification gate introduced (Section B AC-B15). Implementer: **Tiffany 💍** (assigned post-cascade). |
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-19
 **Author**: Tiberius 🌑 (Lupin session `4e724860`)
-**Status**: 🟢 **READY FOR IMPLEMENTATION — Roscoe 🤠 assigned**
+**Status**: 🟢 **READY FOR IMPLEMENTATION — Tiffany 💍 assigned**
 **Sister docs**:
 - Parent design: [`10-phase6c-persona-focus-recorder-design.md`](10-phase6c-persona-focus-recorder-design.md) — cascade-amended status header + per-cluster ratification markers
 - Canonical synthesis: [`11-phase6c-cascade-synthesis.md`](11-phase6c-cascade-synthesis.md) — full ratified shape per section, cascade telemetry, doctrine candidates
@@ -12,7 +12,7 @@
 
 ## How to read this document
 
-This is **the implementer's handoff doc**. It is structured DAG-first per the implementer's stated preference (Roscoe 🤠, 2026-05-19): the sequencing graph leads, then per-DAG-node deliverables (file inventory, function signatures, AC list, test pyramid, gates, doctrine memories, done-defined). Anyone picking this up cold should be able to ship section-by-section without re-deriving cascade context.
+This is **the implementer's handoff doc**. It is structured DAG-first per the implementer's stated preference (Tiffany 💍, 2026-05-19): the sequencing graph leads, then per-DAG-node deliverables (file inventory, function signatures, AC list, test pyramid, gates, doctrine memories, done-defined). Anyone picking this up cold should be able to ship section-by-section without re-deriving cascade context.
 
 **Order of read**:
 1. §1 — DAG (the dependency graph + suggested execution order)
@@ -730,20 +730,20 @@ These items fold into the parent design doc [`10-phase6c-persona-focus-recorder-
 
 ## 7. Implementer Coordination Surface
 
-**Implementer**: Roscoe 🤠 (assigned post-cascade 2026-05-19; framing preference: DAG-first then per-node file inventory — honored throughout this doc).
+**Implementer**: Tiffany 💍 (assigned post-cascade 2026-05-19; framing preference: DAG-first then per-node file inventory — honored throughout this doc).
 
 **Manager / synthesis owner**: Tiberius 🌑 (Lupin session `4e724860`). DM via `commons_send_to(recipient='Tiberius', body='...')`.
 
-**PIP doctrine track (parallel)**: María 🌸 (PIP session) — handling §10.14 doctrine redline of `/plan-authoring-cascaded` workflow. NOT in Roscoe's code path. Rendezvous when both tracks land.
+**PIP doctrine track (parallel)**: María 🌸 (PIP session) — handling §10.14 doctrine redline of `/plan-authoring-cascaded` workflow. NOT in Tiffany's code path. Rendezvous when both tracks land.
 
 **User / designer**: Rick. Out for lunch as of 2026-05-19 ~15:13 EDT broadcast `e8f75b0d`. Available for slot-coordination on `:8000` visual regression schedules. Per `feedback_never_auto_commit_push`, implementer waits for explicit "commit" / "push" per section landing.
 
 **Escalation paths** (in descending order of preference):
-1. **No-blocker default**: Roscoe ships section, DMs Tiberius with pass/fail report.
-2. **Blocker — design ambiguity**: Roscoe DMs Tiberius for synthesis cross-ref. Tiberius answers from cascade artifacts.
+1. **No-blocker default**: Tiffany ships section, DMs Tiberius with pass/fail report.
+2. **Blocker — design ambiguity**: Tiffany DMs Tiberius for synthesis cross-ref. Tiberius answers from cascade artifacts.
 3. **Blocker — cascade artifact contradiction** (rare): Tiberius re-reads section file at `io/commons/cascaded-prototype-phase-6c-section-{A,B,C,D}.md` line refs; if still ambiguous, escalate to Rick via `ask_multiple_choice` with pros/cons + recommendation.
-4. **Blocker — implementer-judgment call**: Roscoe makes the call (e.g., variable naming, comment wording) without escalation; documents in commit body.
+4. **Blocker — implementer-judgment call**: Tiffany makes the call (e.g., variable naming, comment wording) without escalation; documents in commit body.
 
 ---
 
-— Tiberius 🌑 (Manager, Lupin session `4e724860`) — Execution plan ready, Phase 6c handed off to Roscoe 🤠.
+— Tiberius 🌑 (Manager, Lupin session `4e724860`) — Execution plan ready, Phase 6c handed off to Tiffany 💍.
