@@ -173,7 +173,31 @@ class NotificationsUI {
         this.COMMONS_ACTIVITY_FILTER_KEY = 'notifications_commons_activity_filter';   // { direction, kind, persona } for Recent Activity 3-axis filter
         this.BROADCAST_CARD_OPEN_KEY     = 'notifications_broadcast_card_open';        // boolean: broadcast accordion open state
         this.RECENT_ACTIVITY_OPEN_KEY    = 'notifications_recent_activity_open';       // boolean: recent activity accordion open state
+        // Master-detail two-pane layout (2026-05-21 —
+        // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md).
+        this.LAYOUT_MODE_KEY             = 'notifications_layout_mode';                // "vertical" | "horizontal"
+        this.PANE_SPLIT_RATIO_KEY        = 'notifications_pane_split_ratio';           // float 0.30 - 0.85 (left column share)
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
+
+        // Layout mode hydration — must run BEFORE first paint to avoid flicker.
+        // The data-layout-mode body attribute gates all horizontal-mode CSS rules
+        // in notifications.css. Default is "vertical" (existing single-column page).
+        this._layoutMode = localStorage.getItem( this.LAYOUT_MODE_KEY ) === "horizontal"
+            ? "horizontal"
+            : "vertical";
+        if ( document.body ) {
+            document.body.setAttribute( "data-layout-mode", this._layoutMode );
+        }
+        // Reading Pane history stack (in-memory, depth-capped at 10). Entries are
+        // { type: "abstract" | "doc", payload, title }. Cleared on Close.
+        this._contentPaneHistory = [];
+
+        // Draggable-splitter ratio — left column's share of the .content-shell width
+        // when the pane is open (range [0.30, 0.85]). Default 2/3 = 0.667.
+        const persistedRatio = parseFloat( localStorage.getItem( this.PANE_SPLIT_RATIO_KEY ) );
+        this._paneSplitRatio = ( !isNaN( persistedRatio ) && persistedRatio >= 0.30 && persistedRatio <= 0.85 )
+            ? persistedRatio
+            : 0.667;
 
         // Session names cache (loaded from localStorage)
         this.sessionNames = JSON.parse( localStorage.getItem( this.SESSION_NAMES_KEY ) ) || {};
@@ -452,6 +476,12 @@ class NotificationsUI {
             // src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md).
             // Gated by INI flag fetched into this.commonsTrafficVisibilityEnabled.
             this._initCommonsRecentActivity();
+
+            // Master-detail two-pane layout init (2026-05-21 —
+            // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md).
+            // Wires the mode-toggle button + Reading Pane Close/Back buttons +
+            // .abstract-indicator branch + doc-link click interception.
+            this._initMasterDetailLayout();
 
             // Restore action-required notifications from localStorage (refresh survival)
             this.restoreActionRequiredState();
@@ -8342,6 +8372,21 @@ class NotificationsUI {
             if ( indicator ) {
                 e.stopPropagation();
                 const abstract = decodeURIComponent( indicator.dataset.abstract );
+
+                // Horizontal layout mode: route to Reading Pane instead of the
+                // legacy fixed-position tooltip. Design:
+                // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
+                if ( this._layoutMode === "horizontal" ) {
+                    // Derive a short title from the source message if available.
+                    const card    = indicator.closest( '.conversation-pair, .notification-message, .sender-card' );
+                    const titleEl = card ? card.querySelector( '.message-text' ) : null;
+                    const title   = titleEl
+                        ? ( titleEl.textContent || "" ).trim().slice( 0, 60 )
+                        : "Notification details";
+                    this._openContentPane( "abstract", abstract, title );
+                    return;
+                }
+
                 const content = tooltip.querySelector( '.abstract-tooltip-content' );
                 // Render markdown with XSS protection (was: content.textContent = abstract)
                 content.innerHTML = this.renderMarkdown( abstract );
@@ -10125,6 +10170,270 @@ class NotificationsUI {
     _setCommonsActivityWindow( value ) {
         this.log( `[COMMONS-ACTIVITY] window changed → ${value}` );
         this._loadCommonsRecentActivity( value );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  Master-Detail Two-Pane Layout (2026-05-21)
+    //  Design: src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
+    //  Phase 2 wires: layout-mode toggle button, Reading Pane Close/Back buttons,
+    //  .abstract-indicator click branch (horizontal-mode → pane; vertical-mode → tooltip),
+    //  doc-link click interception (^/app/docs?path= anchors → iframe-swap in pane).
+    // ──────────────────────────────────────────────────────────────────────
+
+    _initMasterDetailLayout() {
+        // Mode-toggle button — flips body[data-layout-mode] and persists.
+        const toggleBtn = document.getElementById( "layout-mode-toggle" );
+        if ( toggleBtn ) {
+            this._updateLayoutModeButtonTooltip( toggleBtn );
+            toggleBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                this._toggleLayoutMode();
+            } );
+        }
+
+        // Splitter — draggable divider between .left-column and .content-pane.
+        this._initPaneSplitter();
+        // Apply persisted ratio on init so the geometry is right from the first open.
+        this._applyPaneSplitRatio();
+
+        // Reading Pane Close button
+        const closeBtn = document.getElementById( "content-pane-close" );
+        if ( closeBtn ) {
+            closeBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                this._closeContentPane();
+            } );
+        }
+
+        // Reading Pane Back button
+        const backBtn = document.getElementById( "content-pane-back" );
+        if ( backBtn ) {
+            backBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                this._backContentPane();
+            } );
+        }
+
+        // Doc-link click interception (horizontal mode only). Document-level
+        // delegation catches anchors that resolve to /app/docs?path=... —
+        // both bare relative form AND absolute http://localhost:port/ form.
+        // Applies to abstracts, notification bodies, recent-activity entries,
+        // everywhere on the page outside the iframe.
+        document.addEventListener( "click", ( ev ) => {
+            if ( this._layoutMode !== "horizontal" ) return;
+            const anchor = ev.target.closest( "a[href]" );
+            if ( !anchor ) return;
+            // Iframe-internal clicks don't fire on the parent document anyway,
+            // but defense-in-depth bail if the target somehow resolves inside.
+            if ( ev.target.closest( "#content-pane-body iframe" ) ) return;
+            const raw = anchor.getAttribute( "href" );
+            const normalized = this._normalizeDocLinkHref( raw );
+            if ( !normalized || !normalized.startsWith( "/app/docs?path=" ) ) return;
+            ev.preventDefault();
+            const title = anchor.textContent || "Doc";
+            this._openContentPane( "doc", normalized, title );
+        } );
+    }
+
+    /**
+     * Strip any `http://localhost(:port)?` or `https://localhost(:port)?`
+     * prefix from a URL so it resolves correctly when the user accesses the
+     * dev server from a remote host (localhost on the user's machine fails
+     * the connection). Returns the original href unchanged if no prefix matches.
+     * Mirrors the doc-viewer's render-time rewrite (document-viewer.html).
+     */
+    _normalizeDocLinkHref( href ) {
+        if ( !href ) return href;
+        return href.replace( /^https?:\/\/localhost(:\d+)?/, "" );
+    }
+
+    _toggleLayoutMode() {
+        const next = this._layoutMode === "horizontal" ? "vertical" : "horizontal";
+        this._layoutMode = next;
+        document.body.setAttribute( "data-layout-mode", next );
+        try {
+            localStorage.setItem( this.LAYOUT_MODE_KEY, next );
+        } catch ( _ ) { /* Safari private-mode quota — degrade gracefully */ }
+        // Close the pane on switch-to-vertical so we don't leave orphan UI.
+        if ( next === "vertical" ) this._closeContentPane();
+        const toggleBtn = document.getElementById( "layout-mode-toggle" );
+        if ( toggleBtn ) this._updateLayoutModeButtonTooltip( toggleBtn );
+        // Toolbar re-positions based on the new mode (over-pane vs left-of-container).
+        this._updateToolbarPosition();
+    }
+
+    _updateLayoutModeButtonTooltip( btn ) {
+        btn.title = this._layoutMode === "horizontal"
+            ? "Switch back to vertical layout"
+            : "Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.";
+    }
+
+    /**
+     * Open the Reading Pane with abstract markdown or a doc-link iframe.
+     * Pushes onto the in-memory history stack (depth-capped at 10).
+     *
+     * @param {"abstract"|"doc"} type
+     * @param {string} payload — abstract markdown text OR doc-viewer href
+     * @param {string} title   — short title for the pane header
+     */
+    _openContentPane( type, payload, title ) {
+        const pane  = document.getElementById( "content-pane" );
+        const body  = document.getElementById( "content-pane-body" );
+        const titleEl = document.getElementById( "content-pane-title" );
+        const backBtn = document.getElementById( "content-pane-back" );
+        const shell   = document.querySelector( ".content-shell" );
+        if ( !pane || !body ) return;
+
+        // Push to history. Cap depth.
+        this._contentPaneHistory.push( { type, payload, title: title || "" } );
+        if ( this._contentPaneHistory.length > 10 ) this._contentPaneHistory.shift();
+
+        this._renderContentPaneEntry( { type, payload, title: title || "" } );
+        pane.hidden = false;
+        // Activate the 2-pane split (CSS gates the flex layout on .pane-open).
+        // Without this, .content-shell stays block-layout and .container stays
+        // centered — preserving white-space when the pane is empty.
+        if ( shell ) shell.classList.add( "pane-open" );
+        if ( titleEl ) titleEl.textContent = title || "";
+        if ( backBtn ) backBtn.disabled = this._contentPaneHistory.length <= 1;
+    }
+
+    _renderContentPaneEntry( entry ) {
+        const body = document.getElementById( "content-pane-body" );
+        if ( !body ) return;
+        body.innerHTML = "";
+        if ( entry.type === "abstract" ) {
+            // Reuse the class-method renderer (DOMPurify + marked + target=_blank baked in).
+            body.innerHTML = this.renderMarkdown( entry.payload );
+            // Rewrite any absolute-localhost anchors in the rendered abstract.
+            // Without this, clicks fall through to native navigation (the
+            // document-level interceptor only catches /app/docs?path= prefixes).
+            body.querySelectorAll( "a[href]" ).forEach( ( a ) => {
+                const raw  = a.getAttribute( "href" );
+                const norm = this._normalizeDocLinkHref( raw );
+                if ( norm !== raw ) a.setAttribute( "href", norm );
+            } );
+        } else if ( entry.type === "doc" ) {
+            const frame = document.createElement( "iframe" );
+            frame.src = this._normalizeDocLinkHref( entry.payload );
+            frame.setAttribute( "title", entry.title || "Document" );
+            body.appendChild( frame );
+        }
+    }
+
+    _closeContentPane() {
+        const pane = document.getElementById( "content-pane" );
+        const body = document.getElementById( "content-pane-body" );
+        const titleEl = document.getElementById( "content-pane-title" );
+        const backBtn = document.getElementById( "content-pane-back" );
+        const shell   = document.querySelector( ".content-shell" );
+        if ( pane ) pane.hidden = true;
+        if ( body ) body.innerHTML = "";
+        if ( titleEl ) titleEl.textContent = "";
+        if ( backBtn ) backBtn.disabled = true;
+        // Deactivate the 2-pane split — container returns to centered layout.
+        if ( shell ) shell.classList.remove( "pane-open" );
+        this._contentPaneHistory = [];
+    }
+
+    _backContentPane() {
+        if ( this._contentPaneHistory.length <= 1 ) return;
+        // Pop the current entry; render the new top.
+        this._contentPaneHistory.pop();
+        const prev = this._contentPaneHistory[ this._contentPaneHistory.length - 1 ];
+        if ( prev ) {
+            this._renderContentPaneEntry( prev );
+            const titleEl = document.getElementById( "content-pane-title" );
+            if ( titleEl ) titleEl.textContent = prev.title || "";
+        }
+        const backBtn = document.getElementById( "content-pane-back" );
+        if ( backBtn ) backBtn.disabled = this._contentPaneHistory.length <= 1;
+    }
+
+    /**
+     * Apply the persisted split ratio to .left-column / .content-pane via
+     * inline flex-grow values. Called on init and after every drag-end.
+     * Geometry: leftColumn.flex-grow = ratio * 100, contentPane.flex-grow = (1 - ratio) * 100.
+     * Also updates --toolbar-left CSS variable so the section-toolbar
+     * re-centers over the (resized) pane column.
+     */
+    _applyPaneSplitRatio() {
+        const leftColumn = document.querySelector( ".left-column" );
+        const pane       = document.getElementById( "content-pane" );
+        if ( !leftColumn || !pane ) return;
+        const ratio = this._paneSplitRatio;
+        leftColumn.style.flexGrow = ( ratio * 100 ).toFixed( 2 );
+        leftColumn.style.flexBasis = "0";
+        pane.style.flexGrow        = ( ( 1 - ratio ) * 100 ).toFixed( 2 );
+        pane.style.flexBasis       = "0";
+        this._updateToolbarPosition();
+    }
+
+    /**
+     * Position the section-toolbar at top-center of the CONTENT AREA
+     * (the left column / container, NOT the right-side reading pane) via
+     * the --toolbar-center-x CSS variable. The left column spans from 0
+     * to `ratio * 100%` of viewport width; its center is at `ratio / 2 * 100%`.
+     * The CSS uses `transform: translateX(-50%)` to self-center the toolbar
+     * around the `left` coordinate, so JS pushes the bare percentage.
+     *
+     * In vertical mode, the variable is removed so the legacy
+     * `left: calc(50% - 500px - 60px)` rule takes effect.
+     */
+    _updateToolbarPosition() {
+        if ( this._layoutMode !== "horizontal" ) {
+            document.documentElement.style.removeProperty( "--toolbar-center-x" );
+            return;
+        }
+        const ratio = this._paneSplitRatio;
+        // Center of the LEFT column (content area), where the container lives.
+        const centerPct = ( ratio / 2 ) * 100;
+        document.documentElement.style.setProperty(
+            "--toolbar-center-x",
+            `${ centerPct.toFixed( 2 ) }%`
+        );
+    }
+
+    _initPaneSplitter() {
+        const splitter = document.getElementById( "content-pane-splitter" );
+        const shell    = document.querySelector( ".content-shell" );
+        if ( !splitter || !shell ) return;
+
+        let dragging = false;
+
+        const onMouseMove = ( ev ) => {
+            if ( !dragging ) return;
+            const rect = shell.getBoundingClientRect();
+            if ( rect.width <= 0 ) return;
+            let ratio = ( ev.clientX - rect.left ) / rect.width;
+            // Clamp to [0.30, 0.85] to keep both panes usable.
+            if ( ratio < 0.30 ) ratio = 0.30;
+            if ( ratio > 0.85 ) ratio = 0.85;
+            this._paneSplitRatio = ratio;
+            this._applyPaneSplitRatio();
+        };
+
+        const onMouseUp = () => {
+            if ( !dragging ) return;
+            dragging = false;
+            splitter.classList.remove( "dragging" );
+            document.body.classList.remove( "splitter-dragging" );
+            // Persist on drag-end (avoid hammering localStorage during drag).
+            try {
+                localStorage.setItem( this.PANE_SPLIT_RATIO_KEY, this._paneSplitRatio.toFixed( 4 ) );
+            } catch ( _ ) { /* Safari private-mode quota — degrade gracefully */ }
+            document.removeEventListener( "mousemove", onMouseMove );
+            document.removeEventListener( "mouseup", onMouseUp );
+        };
+
+        splitter.addEventListener( "mousedown", ( ev ) => {
+            ev.preventDefault();
+            dragging = true;
+            splitter.classList.add( "dragging" );
+            document.body.classList.add( "splitter-dragging" );
+            document.addEventListener( "mousemove", onMouseMove );
+            document.addEventListener( "mouseup", onMouseUp );
+        } );
     }
 
     // ──────────────────────────────────────────────────────────────────────

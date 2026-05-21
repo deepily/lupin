@@ -9,8 +9,28 @@
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260512a">
 </head>
 <body>
+    <!-- Master-detail two-pane shell (2026-05-21 — see
+         src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md).
+         In vertical mode (default), .content-shell + .left-column are no-op
+         block-layout pass-throughs — everything looks like the legacy single-column
+         page. In horizontal mode (body[data-layout-mode="horizontal"]),
+         .content-shell becomes flex-row: left column (toolbar + container) holds
+         2/3 width; .content-pane on the right holds 1/3 width for read-only
+         abstracts + iframe-embedded doc views. Toggled via the layout-mode-btn
+         in #section-toolbar. -->
+    <div class="content-shell">
+    <div class="left-column">
     <!-- Floating Section Visibility Toolbar -->
     <div class="section-toolbar" id="section-toolbar">
+        <!-- Layout-mode toggle (2026-05-21). First child; semantically distinct
+             from the section-visibility toggles below — uses a different class
+             (`layout-mode-btn`, NOT `toolbar-btn`) and NO `data-section` attr,
+             so the section-visibility click dispatcher doesn't pick it up. -->
+        <button class="layout-mode-btn"
+                id="layout-mode-toggle"
+                data-testid="notifications-layout-mode-toggle"
+                type="button"
+                title="Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.">⇆</button>
         <button class="toolbar-btn active" data-section="section-qa" data-testid="notifications-toolbar-qa" title="Q&A Interface">❓</button>
         <button class="toolbar-btn active" data-section="section-job-submit" data-testid="notifications-toolbar-jobs" title="Submit Agentic Jobs">📝</button>
         <button class="toolbar-btn active" data-section="action-required-section" data-testid="notifications-toolbar-action" title="Action Required">⚠️</button>
@@ -1070,6 +1090,43 @@
             </div>
         </div>
     </div>
+    </div><!-- /.left-column -->
+
+    <!-- Draggable splitter between left column and Reading Pane (2026-05-21 tweak).
+         Hidden by CSS when the pane is closed. Mousedown wires up via
+         _initMasterDetailLayout(). Persists ratio to localStorage. -->
+    <div class="content-pane-splitter"
+         id="content-pane-splitter"
+         data-testid="notifications-content-pane-splitter"
+         role="separator"
+         aria-orientation="vertical"
+         title="Drag to resize"></div>
+
+    <!-- Reading Pane (2026-05-21 master-detail layout). Hidden until populated.
+         In vertical mode, stays hidden (CSS rule on .content-pane[hidden]).
+         In horizontal mode, becomes flex:1 sticky-top scrollable surface.
+         Content body holds either rendered abstract markdown OR an iframe at
+         /app/docs?path=... for doc-viewer links. -->
+    <aside class="content-pane" id="content-pane" hidden>
+        <div class="content-pane-header">
+            <button class="content-pane-back"
+                    id="content-pane-back"
+                    data-testid="notifications-content-pane-back"
+                    type="button"
+                    title="Back to previous content"
+                    disabled>←</button>
+            <span class="content-pane-title" id="content-pane-title"></span>
+            <button class="content-pane-close"
+                    id="content-pane-close"
+                    data-testid="notifications-content-pane-close"
+                    type="button"
+                    title="Close pane">×</button>
+        </div>
+        <div class="content-pane-body" id="content-pane-body" data-testid="notifications-content-pane-body">
+            <!-- Dynamic content: rendered markdown for abstracts, or an iframe for doc-links -->
+        </div>
+    </aside>
+    </div><!-- /.content-shell -->
 
     <!-- Navigation -->
     <script src="/static/js/lupin-nav.js" defer></script>
@@ -1081,7 +1138,7 @@
     <script src="/static/js/tts-audio-cache.js"></script>
     <script src="/static/js/job-completion-cache.js"></script>
     <script src="/static/js/audio-recorder.js"></script>
-    <script src="/static/js/notifications.js?v=20260505c"></script>
+    <script src="/static/js/notifications.js?v=20260521h"></script>
     <script src="/static/js/broadcast-panel.js?v=20260512a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

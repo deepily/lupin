@@ -5434,3 +5434,212 @@
     opacity : 0.6;
     cursor  : wait;
 }
+
+/* ==========================================================================
+   MASTER-DETAIL TWO-PANE LAYOUT (2026-05-21)
+   ==========================================================================
+   Design: src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
+   All horizontal-mode rules gate on body[data-layout-mode="horizontal"].
+   Vertical mode (default) is byte-for-byte unchanged from the legacy layout.
+   ========================================================================== */
+
+/* Layout-mode toggle button — first child of #section-toolbar. Semantically
+   distinct from the section-visibility .toolbar-btn buttons below (different
+   class so the section-toolbar JS handler ignores it; no data-section attr).
+   Visual separator (border-bottom) keeps the semantic distinction obvious. */
+.layout-mode-btn {
+    background    : transparent;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    padding       : 4px 6px;
+    cursor        : pointer;
+    font-size     : 18px;
+    line-height   : 1;
+    color         : #495057;
+    transition    : background-color 0.15s, opacity 0.15s;
+    margin-bottom : 8px;
+    padding-bottom: 8px;
+    border-bottom : 2px solid #dee2e6;
+}
+.layout-mode-btn:hover {
+    background-color: rgba( 0, 0, 0, 0.04 );
+}
+
+/* In horizontal mode the toolbar becomes a row; remove the vertical-separator
+   bottom border (the row doesn't need a horizontal divider) and add a small
+   right margin instead. */
+body[data-layout-mode="horizontal"] .layout-mode-btn {
+    margin-bottom : 0;
+    padding-bottom: 4px;
+    border-bottom : 1px solid #ced4da;
+    margin-right  : 8px;
+    padding-right : 8px;
+    border-right  : 2px solid #dee2e6;
+}
+
+/* Reading Pane — hidden default (vertical mode) */
+.content-pane[hidden] {
+    display: none;
+}
+
+.content-pane {
+    display       : flex;
+    flex-direction: column;
+    background    : #fafbfc;
+    border-left   : 1px solid #dee2e6;
+}
+
+.content-pane-header {
+    display        : flex;
+    align-items    : center;
+    gap            : 8px;
+    padding        : 8px 10px;
+    border-bottom  : 1px solid #dee2e6;
+    background     : #f1f3f5;
+    position       : sticky;
+    top            : 0;
+    z-index        : 5;
+}
+.content-pane-back,
+.content-pane-close {
+    background    : transparent;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    padding       : 2px 8px;
+    cursor        : pointer;
+    font-size     : 14px;
+    line-height   : 1.2;
+    color         : #495057;
+}
+.content-pane-back:disabled {
+    opacity: 0.4;
+    cursor : not-allowed;
+}
+.content-pane-back:hover:not(:disabled),
+.content-pane-close:hover {
+    background-color: rgba( 0, 0, 0, 0.04 );
+}
+.content-pane-title {
+    flex          : 1;
+    font-size     : 13px;
+    font-weight   : 600;
+    color         : #495057;
+    overflow      : hidden;
+    white-space   : nowrap;
+    text-overflow : ellipsis;
+}
+.content-pane-body {
+    flex            : 1;
+    padding         : 18px 22px 22px 22px;   /* generous gutters; extra right-padding clears the scrollbar */
+    overflow-y      : auto;
+    scrollbar-gutter: stable;                /* reserve scrollbar space so content never jumps when it appears */
+    font-size       : 13px;
+    line-height     : 1.5;
+    color           : #212529;
+}
+.content-pane-body iframe {
+    width  : 100%;
+    height : 100%;
+    border : 0;
+    display: block;
+}
+
+/* ---- Horizontal mode + pane-open activates the two-pane split ----
+   Gating on .content-shell.pane-open (toggled by JS in _openContentPane /
+   _closeContentPane) keeps the container centered when the pane is empty —
+   no point splitting the screen just to show an empty box. Pane-closed in
+   horizontal mode = visually identical to vertical mode. */
+body[data-layout-mode="horizontal"] .content-shell.pane-open {
+    display      : flex;
+    align-items  : stretch;
+    gap          : 0;
+    min-height   : calc( 100vh - 100px );  /* leave room for the nav strip */
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .left-column {
+    flex          : 2;
+    display       : flex;
+    flex-direction: column;
+    min-width     : 0;
+    overflow-y    : auto;
+    max-height    : calc( 100vh - 100px );
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .container {
+    /* Leave ~10% white space on each side of the container inside the left
+       column — content pane was eating too much of its 2/3 allocation
+       (2026-05-21 Rick tweak). Container becomes 80% of left column width,
+       horizontally centered. Restores breathing room. */
+    max-width    : 80%;
+    margin       : 0 auto;
+    width        : auto;
+}
+
+/* Draggable splitter between left column and Reading Pane (2026-05-21 tweak).
+   Hidden when the pane is closed; activates with the 2-pane split. */
+.content-pane-splitter {
+    display: none;
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter {
+    display        : block;
+    flex           : 0 0 6px;
+    background     : #dee2e6;
+    cursor         : col-resize;
+    transition     : background 0.15s;
+    position       : sticky;
+    top            : 100px;
+    align-self     : stretch;
+    max-height     : calc( 100vh - 100px );
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter:hover,
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter.dragging {
+    background: #adb5bd;
+}
+/* While dragging, force col-resize cursor everywhere + suppress text selection
+   so the user gets a clean drag experience even when crossing other elements. */
+body.splitter-dragging,
+body.splitter-dragging * {
+    cursor       : col-resize !important;
+    user-select  : none !important;
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane {
+    flex          : 1;
+    min-width     : 360px;
+    max-width     : 50%;
+    position      : sticky;
+    top           : 100px;
+    align-self    : flex-start;
+    max-height    : calc( 100vh - 100px );
+    overflow-y    : auto;
+}
+/* Section-toolbar in horizontal mode: horizontal ROW of buttons (each button
+   keeps its original size — no stretching), floating fixed over the top-center
+   of the content-pane column. The row width is `max-content` (natural width
+   of the 12 buttons + gaps), and the `transform: translateX(-50%)` self-centers
+   it around the `left` coordinate — so JS only needs to push the pane's
+   horizontal-center percentage into --toolbar-center-x. Re-centers as the
+   splitter is dragged.
+   2026-05-21 Rick clarification: "same size but now horizontal floating over
+   top of the center of the content pane." */
+body[data-layout-mode="horizontal"] .section-toolbar {
+    flex-direction : row;
+    flex-wrap      : nowrap;
+    width          : max-content;
+    /* Push to the very top of the content area, right below the .lupin-nav
+       (which is 56px tall at top:0). 2026-05-21 Rick tweak. */
+    top            : 56px;
+    left           : var( --toolbar-center-x, 33.3% );
+    transform      : translateX( -50% );
+    gap            : 4px;
+}
+
+/* The toolbar is position:fixed so it overlaps document flow. Push the
+   container's first content row down so the page H1 ("Lupin Notifications"
+   or the dev-environment title) isn't hidden behind the toolbar. Toolbar
+   row is ~40px tall + a few px breathing room → ~52px clearance. */
+body[data-layout-mode="horizontal"] .container {
+    padding-top: 52px;
+}
+
+/* The legacy .section-toolbar (vertical mode) is position:fixed and lives
+   outside the document flow. When we wrap it inside .left-column, vertical
+   mode is unaffected because position:fixed positions relative to the
+   viewport regardless of DOM ancestry. */

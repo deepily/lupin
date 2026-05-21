@@ -2,9 +2,50 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
-### 2026.05.21 - Session 679e8f04 (Mr. Radio 🦉) | Recent Activity filter strip + Focus-bar chronological lock — Part A + Part B shipped + 13/0 e2e green
+### 2026.05.21 - Session 679e8f04 (Mr. Radio 🦉) | Recent Activity filter strip + Focus-bar chronological lock + Master-detail two-pane layout experiment
 
-#### Checkpoint | 2026.05.21 14:50 EDT | Part A filter strip + Part B chrono lock + Playwright e2e suite all green
+#### Checkpoint 2 | 2026.05.21 18:30 EDT | Master-detail two-pane layout experiment — design + 7 iteration cycles + draggable splitter
+
+Second feature of the session, designed + implemented + iterated through Rick's voice feedback over the late afternoon. Switchable two-pane "horizontal" layout: existing `.container` collapses to ~2/3 width inside a new `.left-column`; new `<aside class="content-pane">` Reading Pane occupies the right ~1/3; draggable splitter between; persistent split ratio; section-toolbar floats horizontally over the top-center of the content area.
+
+**Process pattern (re-applied from morning feature)**: pre-impl exploration → item-by-item walkthrough of 6 design choices via `ask_yes_no` / `ask_multiple_choice` → reuse-review pass → Phase 1/2 implementation → iterative tweaks driven by live visual feedback on `:7999`.
+
+**Locked decisions (walkthrough)**: Reading Pane name; iframe for doc-links; Close + Back only (no Forward); mode-toggle button at top of `.section-toolbar` with `⇆` icon; respect-toggle on narrow viewports; never-interrupt-pane on notification arrival.
+
+**Iteration log (visual feedback rounds)**:
+1. Initial skeleton — Rick reported: iframe "localhost refused to connect" + empty pane occupying screen + container stretched + content jammed against scrollbar.
+2. `document-viewer.html` rewrites absolute `http://localhost:port/` URLs to host-relative on render (universal fix — every doc-viewer user benefits); `.pane-open` class on `.content-shell` gates the 2-pane flex split; `scrollbar-gutter: stable` + 18-22px pane padding.
+3. Draggable splitter (`notifications_pane_split_ratio` localStorage, clamps to `[0.30, 0.85]`, default 0.667); 80% max-width on container for breathing room.
+4. Toolbar reposition attempt #1 — kept vertical column, anchored right.
+5. Rick clarified "horizontal row, over the center of content area" — re-flipped to horizontal row.
+6. Centering formula flipped from "over pane" to "over container" (`ratio/2 * 100%` not `(1+ratio)/2 * 100%`).
+7. Toolbar pushed from `top: 136px` → `top: 56px` (just below `.lupin-nav` at 56px); `padding-top: 52px` on `.container` to clear the H1 from under the toolbar.
+
+**Final geometry summary**:
+- `body[data-layout-mode="horizontal"]` attribute gates all horizontal-mode CSS.
+- `.content-shell.pane-open` activates flex-row split (left column flex:ratio, pane flex:1-ratio via inline JS).
+- `.section-toolbar`: `position: fixed`, `flex-direction: row`, `width: max-content`, `top: 56px`, `left: var(--toolbar-center-x)`, `transform: translateX(-50%)`. JS pushes `(ratio/2)*100%` into the CSS variable on init/toggle/drag.
+- `.content-pane`: sticky, `min-width: 360px`, body has `scrollbar-gutter: stable` + generous padding.
+- `.content-pane-splitter`: 6px col-resize divider, hover/dragging visual state, body gets `.splitter-dragging` class during drag.
+
+**Cross-cutting fix**: `document-viewer.html` now rewrites absolute-localhost anchors on render — universal benefit.
+
+**Files**:
+- `src/fastapi_app/static/html/notifications.html` (content-shell wrapper + content-pane skeleton + layout-mode-btn + splitter)
+- `src/fastapi_app/static/css/notifications.css` (mode-gated horizontal layout rules + splitter + toolbar repositioning + pane padding)
+- `src/fastapi_app/static/js/notifications.js` (constructor hydration + 9 new methods including `_initMasterDetailLayout`, `_toggleLayoutMode`, `_openContentPane`/`_closeContentPane`/`_backContentPane`, `_renderContentPaneEntry`, `_initPaneSplitter`, `_applyPaneSplitRatio`, `_updateToolbarPosition` + `.abstract-indicator` mode-branch)
+- `src/fastapi_app/static/html/document-viewer.html` (absolute-localhost link rewriter)
+- `src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md` (NEW design doc with Resolved Design Choices + Reuse Review tables)
+- `history.md` (this entry)
+- `.claude-session.md` (Checkpoint 2 entry)
+
+**Cache busters bumped**: `v=20260521a` → `g` across the 7 iteration cycles.
+
+**Commit**: b599303
+
+---
+
+#### Checkpoint 1 | 2026.05.21 14:50 EDT | Part A filter strip + Part B chrono lock + Playwright e2e suite all green
 
 **Two related broadcast/strip enhancements designed, implemented, tested**:
 

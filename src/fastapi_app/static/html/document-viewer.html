@@ -390,6 +390,21 @@
                 target.className = 'doc-viewer-content';
                 target.innerHTML = frontmatterHtml + sanitizedHtml;
 
+                // Rewrite absolute localhost URLs to host-relative so the page
+                // stays usable when accessed from a remote host (the user's
+                // browser resolves "localhost" to their own machine, NOT the
+                // Lupin server). 2026-05-21 — surfaced via the master-detail
+                // Reading Pane iframe; affects any environment where the dev
+                // server is on a non-localhost host. See
+                // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md.
+                target.querySelectorAll( 'a[href]' ).forEach( ( a ) => {
+                    const href = a.getAttribute( 'href' );
+                    if ( href && /^https?:\/\/localhost(:\d+)?\//.test( href ) ) {
+                        const rewritten = href.replace( /^https?:\/\/localhost(:\d+)?/, '' );
+                        a.setAttribute( 'href', rewritten );
+                    }
+                } );
+
             } catch ( err ) {
                 target.className = 'doc-viewer-error';
                 target.textContent = err.message;
