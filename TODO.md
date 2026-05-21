@@ -19,13 +19,23 @@
 - [ ] **[LUPIN]** Phase 7b CSP cascade (Run 5) — gated on Phase 7a implementer-handoff acceptance
 - [ ] **[LUPIN]** Phase 7c Trusted Types cascade (Run 6) — gated on Phase 7b
 - [ ] **[LUPIN]** Phase 7d Accessibility cascade (Run 7) — gated on Phase 7c
-- [ ] **[LUPIN-PIP]** v1.1 doctrine codification — 5 candidates surfaced this run + 1 placeholder. Manager + María 🌸 to coordinate. See synthesis doc §5 for codification texts:
-  1. Heartbeat-daemon kickoff codification → `plan-review-cascaded-common.md` §Heartbeat protocol
-  2. 4-tier clarification doctrine (T1/T2/T3/T4) → new `plan-review-cascaded-common.md` §X subsection
-  3. Signal-density-obscures-needle as failure-mode #6 → §10.14 failure-mode catalog + common.md §6.4 phantom-detection threshold + Manager System Prompt proactive-`commons_read` self-audit item
-  4. Author-side grep-sweep checklist (Krishna) → Persona 2.A point 14 expansion OR new common.md §Author-side discipline
-  5. Multi-surface footer-ratification close protocol with non-adjacent + synthesis-doc 7th-canonical-surface refinement → §10.14 multi-surface coordination protocol
-  6. PLACEHOLDER — explicit closure-context markers — queued for Run 5+6 evidence-gathering
+- [x] **[LUPIN-PIP]** v1.1 doctrine codification — ✅ **SHIPPED 2026-05-20** at PIP commit `adcd96d` (committed, NOT pushed per Rick's standing EOD directive). 7 candidates promoted + 1 placeholder (final shape after María ↔ Tiberius post-Run-4 convergence DM thread, 4 cycles, ratified 2026-05-20):
+  1. Heartbeat-daemon kickoff codification → `plan-review-cascaded-common.md` §Heartbeat Handling — Daemon kickoff procedure (dual-independent default)
+  2. Manager close-out self-audit sweep → `plan-review-cascaded-common.md` §Step 9 cold-context rubric Q#6 + §Manager close-out self-audit sweep sub-section (added during convergence DM as 6th candidate)
+  3. Author-side grep-sweep checklist (Krishna Q-1..Q-4 anchor #2 + Tiffany-rename anchor #3) → `plan-review-cascaded-common.md` §Author-side Discipline — Grep-sweep Checklist
+  4. 4-tier clarification doctrine (T1/T2/T3/T4) → `plan-review-cascaded-common.md` §Clarification Tier Vocabulary
+  5. Manager proactive `commons_read` (failure-mode #6 single-loop mitigation) → `plan-review-cascaded-common.md` §Manager System Prompt self-audit item 7
+  6. Observer-probe-as-mitigation channel (failure-mode #6 double-loop mitigation) → `plan-review-cascaded-common.md` §Observer-mode Probe Protocol + `plan-review-cascaded-personas.md` Persona 6 (added during convergence DM as 7th candidate)
+  7. Multi-surface footer-ratification close protocol with non-adjacent + Step-9-synthesis-doc 7th-surface refinement → `plan-review-cascaded-common.md` §Multi-surface Footer-ratification Close Protocol
+  8. PLACEHOLDER — explicit `[CLOSURE: …]` markers — queued for Run 5+6 evidence per Krishna's FILE-not-FOLD recommendation
+
+  **Pre-committed re-evaluation gates** also locked at design-doc §10.18.12 (4 gates: Run 5/6 wisdom-curve slot-vs-persona controlled experiment + Run 7 forward-asymmetry re-evaluation + Run 7 `light_review_required` HARD-promotion + Run 5/6 failure-mode-#6 mitigation validation; anti-pattern of silent gate slippage forbidden).
+
+  **Bilateral review**: 8/8 ratification checkpoints verified by Tiberius 🌑 (Lupin session `173c0b35`); two non-blocking observations filed as v1.2 polish candidates (Persona-6 Step-9 cadence M=4 borderline-usefulness; Manager-System-Prompt item-7 → Q#6 → sweep-procedure 3-hop cross-reference chain consolidation).
+
+- [ ] **[LUPIN]** `start-cascade-heartbeat.sh --observer` convenience flag — explicit dual-launch ergonomics. Current invocation works via persona-name arg (`bash src/scripts/start-cascade-heartbeat.sh <persona>`); the v1.1 doctrine now formalizes the dual-independent kickoff (Manager daemon + Observer daemon both required when a doctrine consultant participates), so a `--observer` flag would smoothen the doctrine application. Doctrine motivation lives at `planning-is-prompting/workflow/plan-review-cascaded-common.md` §Heartbeat Handling — Daemon kickoff procedure (PIP commit `adcd96d`). Filed 2026-05-20 by Tiberius 🌑 session `173c0b35` per agreed Lupin TODO split-out from the v1.1 codification close.
+
+- [ ] **[LUPIN]** `commons_send_to` recipient pool-key vs display-name routing gap — existing TODO. The v1.1 Observer-mode Probe Protocol now structurally exercises this gap as a regular routine (Observer DMs Manager with unread-signal pointer on every probe-mitigation event), not a fringe case. Bump priority if codification-pass DM threads surface friction. Filed forward by Tiberius 🌑 session `173c0b35` per agreed Lupin-side cross-link from the v1.1 codification close.
 
 **Standing playbook**: commit-only no-push per [[never-auto-commit-push]]. All work uncommitted in working tree awaiting Rick's morning go-ahead.
 

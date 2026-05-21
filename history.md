@@ -2,6 +2,35 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.20 - Session 173c0b35 (Tiberius 🌑) | Persona resuscitation commit + Run-4 post-game convergence + Heartbeat-Poker design WIP
+
+#### 2026.05.20 PM | End-of-day wrap
+
+**Persona resuscitation work committed** at `c9db97c` — Rachel's three-thread fix bundled: (1) `start-cc-with-tmux.sh` forwards three `COSA_VOICE_PREFERRED_PERSONA__*` env vars into the tmux session via `-e` flags (the actual fix for why Tiberius was randomly allocated); (2) Roscoe → Tiffany persona rename swept across `lupin-app.ini` + splainer + 5 R&D docs + 1 test fixture; (3) four temporary `[LOOKML-DEBUG]` stderr prints in `register_session.py` phase 4.5 (flagged in-source for removal once Sam confirms allocation runs clean). 10 files, +103/-52.
+
+**Run-4 cascade post-game with María 🌸**: 4-DM convergence cycle on `dm-tiberius` (`0cfea56f` → `67ccf3f8` → `830f4833` → `52df46e2` → `569eeba8` → `614b41ab` → `830f4833`). Positions reached:
+- Q1 inverse density-vs-doctrine — HOLD on operationalizing pending Runs 5-6 controlled-slot experiment
+- Q2 forward-asymmetry 38→33→21 monotonic — don't formalize; 4 competing explanations indistinguishable at n=1
+- Q3 "Manager ad-hoc'd what should be codified" diagnostic — STRONG FOLD, codified as Step 9 rubric Q#6
+- Fold-order revised respecting dependency graph: 7 candidates + 1 placeholder
+- Dual-administer gate timing: keep default Runs 5-6, HARDen at Run 7 if +2/3 ratio holds
+- New candidate added: Observer-side probe-as-mitigation channel (per-stage INI keys; M=8 Stage 0, M=4 default, M=2 Stage 2)
+- 4 pre-committed re-evaluation gates locked at design-doc §10.18.12
+
+**PIP-side codification pass shipped** by María at commit `adcd96d` (10 files, +744/-17; committed not pushed per Rick's EOD directive). Bilateral review completed Lupin-side: 8/8 ratification checkpoints verified; 2 non-blocking observations filed as v1.2 polish candidates.
+
+**Lupin TODO.md updated**: closed `[LUPIN-PIP]` v1.1 codification line item with full 7-candidate map; added 2 new entries (`start-cascade-heartbeat.sh --observer` flag + `commons_send_to` recipient pool-key vs display-name routing priority bump).
+
+**Generic Heartbeat Poker abstraction design — WIP**: Rick proposed abstracting the cascade heartbeat shell-script into a Lupin-side `AgenticJobBase` subclass with N recipients + schedulable for off-peak execution. Conversation walked through 3 use cases (Observer / Manager / Watcher-of-implementer), landed two-layer architecture (generic poker + per-recipient doctrine), resolved Q1 (Path A — one minimal class), Q2 (3-layered exits: clean signal + dead-man's-switch escalation + hard cap), and concurrent-poker routing (two independent jobs, recipient routes via `poke_body` JSON metadata). Parked at Q3 (relationship to existing daemon) and doctrine-home open Q.
+
+**Files**:
+- Working tree at close: `TODO.md` (modified) + `src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md` (NEW, ~260 LOC, WIP design doc)
+- Committed: 10 files at `c9db97c`
+
+**Standing playbook**: commit-only history.md tradition; Rick authorized EOD push at session-end.
+
+---
+
 ### 2026.05.20 - Session 387b9201 (Tiberius 🌑) | Phase 7a Run 4 cascade-complete — implementer-handoff-ready
 
 #### 2026.05.20 03:30 | Phase 7a Telemetry — Run 4 cascade closed 🟢 + Step 0 + Step 9 doctrine v1 validated
