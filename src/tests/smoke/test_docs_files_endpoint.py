@@ -229,5 +229,64 @@ def test_directory_listing_view_url_uses_path_prefix( token ):
                 f"view_url missing 'lupin/' prefix: {view}"
 
 
+# ---------------------------------------------------------------------------
+# Aggressive deprecation of legacy ?scope= query parameter (2026-05-21)
+#
+# Policy: any presence of ?scope= (even empty) returns 400 with educational
+# detail. Replaces prior silent-ignore semantics (Phase 4b AC4b.7 original).
+# See src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md
+# (Amendment 2026-05-21) for the policy-flip record.
+# ---------------------------------------------------------------------------
+
+def _get_with_query( query_string: str, token: str = None ):
+    """GET /api/docs/file?<raw query> → (status, body_bytes)."""
+    url     = f"{DOCS_URL}?{query_string}"
+    headers = { "Authorization": f"Bearer {token}" } if token else { }
+    req     = urllib.request.Request( url, headers=headers, method="GET" )
+    try:
+        with urllib.request.urlopen( req, timeout=10 ) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def test_legacy_scope_param_with_value_returns_400( token ):
+    """?scope=docs alongside a valid path → 400 with educational detail."""
+    status, body = _get_with_query( "path=lupin/CLAUDE.md&scope=docs", token=token )
+    assert status == 400, f"got {status}: {body!r}"
+    detail = json.loads( body )[ "detail" ]
+    assert "RETIRED" in detail
+    assert "?path=<project>/<file>" in detail
+    assert "lupin" in detail  # registered-project list includes lupin
+    assert "doc-viewer-links.md" in detail or "Doc Viewer Scope" in detail
+
+
+def test_legacy_scope_param_with_empty_value_returns_400( token ):
+    """?scope= (empty value) is still presence → 400."""
+    status, body = _get_with_query( "path=lupin/CLAUDE.md&scope=", token=token )
+    assert status == 400, f"got {status}: {body!r}"
+    detail = json.loads( body )[ "detail" ]
+    assert "RETIRED" in detail
+
+
+def test_legacy_scope_param_fires_before_path_validation( token ):
+    """?scope= check fires BEFORE path validation — even with no path
+    prefix or empty path, the scope=-presence 400 wins.
+    """
+    # Path missing project prefix would normally 400 "Missing project prefix";
+    # presence of scope= overrides to the educational error.
+    status, body = _get_with_query( "path=bug-fix-queue.md&scope=docs", token=token )
+    assert status == 400, f"got {status}: {body!r}"
+    detail = json.loads( body )[ "detail" ]
+    assert "RETIRED" in detail
+    assert "Missing project prefix" not in detail
+
+
+def test_canonical_path_prefix_form_unchanged( token ):
+    """Canonical form (no scope=) keeps working — regression guard."""
+    status, _body = _get_with_query( "path=lupin/CLAUDE.md", token=token )
+    assert status == 200
+
+
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )

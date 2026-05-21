@@ -627,7 +627,7 @@ When modifying code in these areas, update the corresponding documentation:
 
 ## Doc Viewer Scope (unified path-prefix routing — 2026-05-15)
 
-**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is IGNORED.
+**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is **RETIRED** — its presence triggers HTTP 400 with an educational pointer to this section (policy flipped from silent-ignore to aggressive-400 on 2026-05-21 per amendment to AC4b.7 of `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`).
 
 - **Lupin files**: `/app/docs?path=lupin/<rel>` — e.g. `/app/docs?path=lupin/bug-fix-queue.md`, `/app/docs?path=lupin/src/rnd/foo.md`. Whitelist authority is `lupin/.docview.yml` at repo root.
 - **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile` — same URL shape, scope name is the project name.
@@ -641,5 +641,6 @@ When modifying code in these areas, update the corresponding documentation:
 - `/app/docs?path=lupin/CLAUDE.local.md` → 400 (floor blocks)
 - `/app/docs?path=bug-fix-queue.md` → 400 (missing project prefix)
 - `/app/docs?path=docs/anything` → 400 (unknown project — `docs` retired)
+- `/app/docs?path=lupin/CLAUDE.md&scope=docs` → 400 "The `?scope=` query parameter is RETIRED..." (aggressive-400 since 2026-05-21; scope-presence check fires BEFORE path validation)
 
-**For sessions emitting links**: ALWAYS prefix with the project name. `scope=` is dead — do not include it.
+**For sessions emitting links**: ALWAYS prefix with the project name. `scope=` is dead — do not include it. The endpoint will 400 immediately if you do, with an educational message naming the canonical form + the live registered-project list.
