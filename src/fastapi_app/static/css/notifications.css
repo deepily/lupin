@@ -4698,6 +4698,11 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    /* flex-wrap added 2026-05-21 — three new filter dropdowns increase horizontal pressure
+       on the header row; wrap defensively on narrow viewports rather than overflow.
+       Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md */
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .commons-recent-activity-controls select {
@@ -4707,6 +4712,14 @@
     border-radius: 4px;
     background: white;
     cursor: pointer;
+}
+
+/* Filter-axis dropdowns (Direction / Kind / Persona) — keep them compact so the
+   header row stays single-line on standard viewports. min-width prevents the
+   browser from squeezing dropdowns to unreadable widths under flex pressure. */
+.commons-recent-activity-controls select.commons-activity-filter-select {
+    min-width: 9em;
+    max-width: 14em;
 }
 
 .commons-recent-activity-controls button {

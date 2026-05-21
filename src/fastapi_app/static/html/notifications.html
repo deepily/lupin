@@ -701,6 +701,36 @@
                             <div class="commons-recent-activity-header" onclick="toggleSection('commons-recent-activity-body')">
                                 <h5>🕒 Recent Activity</h5>
                                 <div class="commons-recent-activity-controls">
+                                    <!-- Three-axis filter dropdowns (2026-05-21 — see
+                                         src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
+                                         Client-side filter over the in-memory entry cache; no server hit on change.
+                                         First option of each select is the "no filter" default. -->
+                                    <select id="commons-recent-activity-filter-direction"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-direction-dropdown"
+                                            title="Filter by direction (sender or recipient)"
+                                            onclick="event.stopPropagation();">
+                                        <option value="">Any direction</option>
+                                        <option value="sender">Sender</option>
+                                        <option value="recipient">Recipient</option>
+                                    </select>
+                                    <select id="commons-recent-activity-filter-kind"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-kind-dropdown"
+                                            title="Filter by message kind"
+                                            onclick="event.stopPropagation();">
+                                        <option value="all">All kinds</option>
+                                        <option value="heartbeats">Heartbeats</option>
+                                        <option value="personas">Personas</option>
+                                        <option value="broadcasts">Broadcasts</option>
+                                    </select>
+                                    <select id="commons-recent-activity-filter-persona"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-persona-dropdown"
+                                            title="Filter by persona (populated from active sessions)"
+                                            onclick="event.stopPropagation();">
+                                        <option value="">Any persona</option>
+                                    </select>
                                     <select id="commons-recent-activity-window"
                                             data-testid="notifications-commons-window-dropdown"
                                             title="Time window for the activity stream"
@@ -715,7 +745,7 @@
                                     <button type="button"
                                             id="commons-recent-activity-refresh"
                                             data-testid="notifications-commons-refresh-btn"
-                                            title="Reload activity stream"
+                                            title="Reload activity stream + refresh persona list"
                                             onclick="event.stopPropagation();">↻</button>
                                     <button class="toggle-button" id="commons-recent-activity-toggle">▼</button>
                                 </div>
@@ -1054,6 +1084,14 @@
     <script src="/static/js/notifications.js?v=20260505c"></script>
     <script src="/static/js/broadcast-panel.js?v=20260512a"></script>
     <script>
+        // Accordion sections whose open/closed state survives page reloads.
+        // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        // Map: sectionId → localStorage key (notifications_* convention).
+        const LUPIN_ACCORDION_PERSIST_KEYS = {
+            'broadcast-submit-section'    : 'notifications_broadcast_card_open',
+            'commons-recent-activity-body': 'notifications_recent_activity_open'
+        };
+
         function toggleSection(sectionId) {
             const content = document.getElementById(sectionId);
             if (!content) return;
@@ -1071,13 +1109,53 @@
                 if (header) toggle = header.querySelector('.toggle-button');
             }
 
+            let isOpen;
             if (content.classList.contains('collapsed')) {
                 content.classList.remove('collapsed');
                 if (toggle) toggle.textContent = '▼';
+                isOpen = true;
             } else {
                 content.classList.add('collapsed');
                 if (toggle) toggle.textContent = '▶';
+                isOpen = false;
             }
+
+            // Persist accordion state for tracked sections (no-op for others).
+            const persistKey = LUPIN_ACCORDION_PERSIST_KEYS[sectionId];
+            if (persistKey) {
+                try { localStorage.setItem(persistKey, JSON.stringify(isOpen)); } catch (_) {}
+            }
+        }
+
+        // Restore persisted accordion state before first paint to avoid flicker.
+        // Missing key = use the section's HTML-default state (typically open).
+        function applyPersistedAccordions() {
+            for (const sectionId in LUPIN_ACCORDION_PERSIST_KEYS) {
+                const persistKey = LUPIN_ACCORDION_PERSIST_KEYS[sectionId];
+                const raw = localStorage.getItem(persistKey);
+                if (raw === null) continue;
+                let isOpen;
+                try { isOpen = JSON.parse(raw); } catch (_) { continue; }
+                const content = document.getElementById(sectionId);
+                if (!content) continue;
+                let toggle = document.getElementById(sectionId.replace('-section', '-toggle'));
+                if (!toggle || toggle === content) {
+                    const header = content.previousElementSibling;
+                    if (header) toggle = header.querySelector('.toggle-button');
+                }
+                if (!isOpen) {
+                    content.classList.add('collapsed');
+                    if (toggle) toggle.textContent = '▶';
+                } else {
+                    content.classList.remove('collapsed');
+                    if (toggle) toggle.textContent = '▼';
+                }
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', applyPersistedAccordions);
+        } else {
+            applyPersistedAccordions();
         }
     </script>
 </body>

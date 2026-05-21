@@ -2,6 +2,53 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.21 - Session 679e8f04 (Mr. Radio 🦉) | Recent Activity filter strip + Focus-bar chronological lock — Part A + Part B shipped + 13/0 e2e green
+
+#### Checkpoint | 2026.05.21 14:50 EDT | Part A filter strip + Part B chrono lock + Playwright e2e suite all green
+
+**Two related broadcast/strip enhancements designed, implemented, tested**:
+
+**Part A — Recent Activity Filter Strip** (`#commons-recent-activity-section`):
+- Three inline native `<select>` dropdowns inside the existing `.commons-recent-activity-controls` flex row (no chip sub-row, dual-refresh consolidated to the single existing `↻` button per Rick's redundancy callout)
+- Axes intersect with boolean AND: **Direction** (Sender · Recipient, mutex), **Kind** (All · Heartbeats · Personas · Broadcasts — 4-option per Rick's walkthrough amendment), **Persona** (chip per active session, sourced from `/api/cosa-voice/voice-persona/pool`)
+- "Personas" predicate tightened to `topic.startsWith("dm-") && metadata.kind !== "heartbeat"`; "Broadcasts" unifies `broadcasts` + `broadcast-acks` topics; Direction=Recipient is a silent no-op when Kind=Broadcasts (broadcasts fan out)
+- Filter dropdowns are **client-side instant** over the in-memory raw-entry cache — no server hit on change. The existing `↻` reload button is the only server-hit path (refreshes activity stream + persona dropdown options in one click, sticky-when-valid persona selection)
+- **Filter state persists across page reload** via `notifications_commons_activity_filter` localStorage key (matches existing `notifications_*` convention)
+- Filter-aware empty-state copy ("No activity matches the current filter" when any axis is active)
+
+**Part B — Focus-bar Chronological Lock** (`#cc-session-strip`):
+- `_addStripIcon` now stamps `data-created-at` from `persona.assigned_at` and ALWAYS appends (kills the `insertAtTop=true` prepend branch)
+- `_promoteStripIcon` renamed to `_markStripIconActivity` — unread-badge pulse preserved untouched, `insertBefore` DOM reposition removed
+- New `_sortStripIconsChronological()` helper runs once after `loadConversationHistory()` in the startup chain; subsequent runtime adds just append
+- Backend plumbing verified intact end-to-end: `voice_persona_helpers.py` stamps `assigned_at` on allocation; `_voice_persona_for_sender_id` preserves it through to the senders-visible endpoint and the `voice_persona_assigned` WS event. **No backend changes needed.**
+
+**Persistence layer** (also added beyond the chrono lock):
+- Augmented the global `toggleSection()` helper with a write-through for two tracked accordions: `notifications_broadcast_card_open` + `notifications_recent_activity_open`
+- `applyPersistedAccordions()` runs on `DOMContentLoaded` (before first paint) to avoid flicker on reload
+- Existing focus-mode persistence (`notifications_cc_focus_state`) verified wired — Rick's "not implemented" report appears to be a misperception; the localStorage round-trip is in place with belt-and-suspenders restore via `_restoreCcUiAfterLoad()` after `loadConversationHistory()` completes
+
+**E2E Playwright suite — three rounds to ALL GREEN**:
+- Round 1: 4 pass / 9 fail — controller-global typo in test file (`window.__notifications_controller__` vs canonical `window.notificationsUI`)
+- Round 2: 11 pass / 2 fail — typo fixed; remaining 2 were test-timing bugs (dropdown init-lag after page reload + `wait_for_selector` waiting for `visible` on a correctly-collapsed element)
+- **Round 3: 13 pass / 0 fail / 2 graceful skips** (`TestStripChronologicalOrder` skips gracefully when fewer than 2 CC strip icons hydrate on the test server, which has no live CC sessions)
+
+**Incidents logged + memory updates**:
+- Accidentally bounced `:8000` while my first submitted test was mid-flight (chained `refresh-test-server.sh` as a polling-loop prelude). Job vanished, server self-recovered, re-submitted cleanly with new `scheduled_at`. Lesson: bounce commands NEVER belong inside a polling loop.
+- Saved new feedback memory: `feedback_never_defer_test_fixes_hold_fire_exception.md` — Rick's directive that hold-fire windows do NOT pause completing in-flight test fixes I wrote. "You wrote the code. You make it pass 100% coverage. Full stop!"
+
+**Cross-session coordination**: Three DM exchanges with Tiffany 💍 (lupin-mobile session 1b3f8c46) tracking the design deltas — initial inventory ask, post-walkthrough delta, post-amendment delta. Mobile parity work continues unblocked; the only cross-cutting wire item (`voice_persona.assigned_at` plumbing) is verified intact.
+
+**Files**:
+- `src/fastapi_app/static/html/notifications.html` (3 dropdowns inserted + `toggleSection()` augmented with localStorage write-through + `applyPersistedAccordions()` early-paint restore)
+- `src/fastapi_app/static/css/notifications.css` (flex-wrap + `.commons-activity-filter-select` styling)
+- `src/fastapi_app/static/js/notifications.js` (constructor hydration of 3 new `*_KEY` constants + `_commonsActivityFilter` + `_commonsRawEntries`; filter predicate / re-render / change handlers / persona-pool refresh / augmented reload button; strip chronological-lock surgery)
+- `src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md` (NEW — design doc with item-by-item walkthrough decisions + reuse-review pass + implementation-complete status)
+- `src/tests/e2e_ui/test_commons_activity_filters_and_strip_chrono.py` (NEW — 15-test Playwright suite across 5 classes)
+
+**Commit**: 35581a8
+
+---
+
 ### 2026.05.20 - Session 173c0b35 (Tiberius 🌑) | Persona resuscitation commit + Run-4 post-game convergence + Heartbeat-Poker design WIP
 
 #### 2026.05.20 PM | End-of-day wrap

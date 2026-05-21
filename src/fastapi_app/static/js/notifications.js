@@ -168,6 +168,11 @@ class NotificationsUI {
         this.CC_FOCUS_STATE_KEY     = 'notifications_cc_focus_state';      // CC session focus mode: { enabled, focused_sender_id }
         this.CC_HIDE_INACTIVE_KEY   = 'notifications_cc_hide_inactive_strip';  // Strip filter: hide icons for sessions with no allocated voice persona
         this.TTS_FRACTION_PREF_KEY  = 'notifications_tts_preview_fraction_runtime';  // Runtime override for the TTS preview fraction (0-1 float); layered on top of INI default
+        // Recent Activity filter + accordion-state keys (2026-05-21 —
+        // src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
+        this.COMMONS_ACTIVITY_FILTER_KEY = 'notifications_commons_activity_filter';   // { direction, kind, persona } for Recent Activity 3-axis filter
+        this.BROADCAST_CARD_OPEN_KEY     = 'notifications_broadcast_card_open';        // boolean: broadcast accordion open state
+        this.RECENT_ACTIVITY_OPEN_KEY    = 'notifications_recent_activity_open';       // boolean: recent activity accordion open state
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
 
         // Session names cache (loaded from localStorage)
@@ -211,6 +216,16 @@ class NotificationsUI {
                 toggle.textContent = "👁 Active";
             }
         }
+
+        // Recent Activity 3-axis filter state (client-only, persisted via localStorage).
+        // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        // Predicate is applied client-side over the in-memory raw-entry cache; dropdown
+        // changes re-render instantly with no server hit.
+        this._commonsActivityFilter = JSON.parse( localStorage.getItem( this.COMMONS_ACTIVITY_FILTER_KEY ) )
+                                      || { direction: null, kind: "all", persona: null };
+        // Raw entry cache — populated from /api/commons/broadcast-history responses + commons_activity
+        // WS events. Filtered re-render reads from this cache, not the DOM.
+        this._commonsRawEntries = [];
 
         // User role and filter state
         this.userRoles = [];  // NEW: User's roles from JWT
@@ -416,6 +431,14 @@ class NotificationsUI {
 
             // Load conversation history (after auth is complete)
             await this.loadConversationHistory();
+
+            // Normalize strip icon order by persona assigned_at ascending — oldest
+            // leftmost, newest rightmost. The initial batch of _addStripIcon calls
+            // appends in API-arrival order; this single sort pass anchors them to
+            // their chronological slots. Runtime adds just append (rightmost) so
+            // the order stays correct without re-running.
+            // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+            this._sortStripIconsChronological();
 
             // Belt-and-suspenders restore of focus + hide-inactive state AFTER
             // cards/icons are hydrated. Defends against any code path between
@@ -9214,6 +9237,15 @@ class NotificationsUI {
         icon.className = "cc-strip-icon";
         icon.setAttribute( "data-sender-id", senderId );
         if ( sessionId ) icon.setAttribute( "data-session-id", sessionId );
+        // Chronological-order anchor (2026-05-21 amendment — see
+        // src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
+        // Strip is now sorted by data-created-at ascending; oldest persona stays leftmost.
+        // Falls back to current time if assigned_at is missing — worst case: one-time
+        // reshuffle on the affected page reload.
+        icon.setAttribute(
+            "data-created-at",
+            persona?.assigned_at || new Date().toISOString()
+        );
         // Tooltip carries project + session + persona so users can identify
         // who's behind each color-coded icon at a glance.
         const titleParts = [ projectName ];
@@ -9250,15 +9282,11 @@ class NotificationsUI {
             this._handleStripIconClick( senderId );
         } );
 
-        // Initial load: append in the order createSenderCard was called
-        // (the senders endpoint returns newest-first), so the strip mirrors
-        // the list ordering — newest leftmost. Runtime: prepend so a fresh
-        // arrival lands at leftmost regardless of existing ordering.
-        if ( insertAtTop && iconsContainer.firstChild ) {
-            iconsContainer.insertBefore( icon, iconsContainer.firstChild );
-        } else {
-            iconsContainer.appendChild( icon );
-        }
+        // Chronological-order rule (2026-05-21): always append. New sessions land
+        // rightmost; initial-load order is then normalized by _sortStripIconsChronological()
+        // once after the initial hydration batch. The insertAtTop parameter is retained
+        // for callsite compatibility but is no longer honored — every icon appends.
+        iconsContainer.appendChild( icon );
 
         // First icon → reveal the strip.
         if ( strip.hasAttribute( "hidden" ) ) {
@@ -9350,16 +9378,22 @@ class NotificationsUI {
      *   shouldn't draw attention (e.g., in-place progress-group entries
      *   that are just tool-call progress, not user-actionable signals).
      */
-    _promoteStripIcon( senderId, options = {} ) {
+    /**
+     * Mark strip-icon activity for the unread-badge pulse in focus mode.
+     * Renamed 2026-05-21 from _promoteStripIcon — the DOM reposition was removed
+     * per the chronological-lock amendment; icons now stay anchored to their
+     * data-created-at slot and never reorder on activity. The unread-badge
+     * peripheral-awareness mechanic is preserved untouched. See
+     * src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md.
+     */
+    _markStripIconActivity( senderId, options = {} ) {
         const iconsContainer = document.getElementById( "cc-strip-icons" );
         if ( !iconsContainer ) return;
 
         const icon = document.getElementById( this._stripIconIdFor( senderId ) );
         if ( !icon ) return;
 
-        if ( iconsContainer.firstChild !== icon ) {
-            iconsContainer.insertBefore( icon, iconsContainer.firstChild );
-        }
+        // (Removed: insertBefore reposition. Strip is now chronological-locked.)
 
         if ( options.skipUnread ) return;
 
@@ -9377,6 +9411,28 @@ class NotificationsUI {
             icon.setAttribute( "data-unread", "true" );
             icon.setAttribute( "data-unread-count", String( next ) );
         }
+    }
+
+    /**
+     * Sort strip icons by data-created-at ascending (oldest leftmost, newest rightmost).
+     * Called once after the initial hydration batch — runtime adds just append, so the
+     * sort stays correct without re-running.
+     *
+     * Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+     */
+    _sortStripIconsChronological() {
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        if ( !iconsContainer ) return;
+        const icons = Array.from( iconsContainer.children );
+        if ( icons.length < 2 ) return;
+        icons.sort( ( a, b ) => {
+            const aTs = a.getAttribute( "data-created-at" ) || "";
+            const bTs = b.getAttribute( "data-created-at" ) || "";
+            if ( aTs === bTs ) return 0;
+            return aTs < bTs ? -1 : 1;
+        } );
+        // Re-attach in sorted order. DOM appendChild on an existing child moves it.
+        for ( const icon of icons ) iconsContainer.appendChild( icon );
     }
 
     /**
@@ -9829,15 +9885,46 @@ class NotificationsUI {
             } );
         }
 
-        // Refresh button
+        // Recent-Activity 3-axis filter dropdowns (Direction / Kind / Persona).
+        // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        // State is hydrated from localStorage in the constructor; here we apply the
+        // persisted state back into the dropdowns and bind the change handlers.
+        const directionEl = document.getElementById( "commons-recent-activity-filter-direction" );
+        if ( directionEl ) {
+            directionEl.value = this._commonsActivityFilter.direction || "";
+            directionEl.addEventListener( "change", ( ev ) => {
+                this._setCommonsActivityDirection( ev.target.value );
+            } );
+        }
+        const kindEl = document.getElementById( "commons-recent-activity-filter-kind" );
+        if ( kindEl ) {
+            kindEl.value = this._commonsActivityFilter.kind || "all";
+            kindEl.addEventListener( "change", ( ev ) => {
+                this._setCommonsActivityKind( ev.target.value );
+            } );
+        }
+        const personaEl = document.getElementById( "commons-recent-activity-filter-persona" );
+        if ( personaEl ) {
+            personaEl.addEventListener( "change", ( ev ) => {
+                this._setCommonsActivityPersona( ev.target.value );
+            } );
+        }
+
+        // Refresh button — augmented 2026-05-21 to also repopulate the persona dropdown
+        // (dual purpose: reload activity stream + refresh persona list).
         const refreshBtn = document.getElementById( "commons-recent-activity-refresh" );
         if ( refreshBtn ) {
             refreshBtn.addEventListener( "click", ( ev ) => {
                 ev.stopPropagation();
                 console.log( "[COMMONS-ACTIVITY] refresh clicked" );
                 this._loadCommonsRecentActivity( this._currentCommonsWindow() );
+                this._repopulatePersonaDropdown();
             } );
         }
+
+        // Initial persona-dropdown population (also restores persisted persona selection
+        // once options are in place, via the sticky-when-valid path in _repopulatePersonaDropdown).
+        this._repopulatePersonaDropdown();
 
         // Initial load
         this._loadCommonsRecentActivity( this._currentCommonsWindow() );
@@ -9886,12 +9973,11 @@ class NotificationsUI {
                 return;
             }
             const entries = body.entries || [ ];
-            entriesEl.innerHTML = "";
-            for ( const e of entries ) {
-                entriesEl.appendChild( this._renderCommonsEntry( e ) );
-            }
+            // Populate the raw-entry cache; rendering is delegated to _renderAllCommonsEntries
+            // so the active filter is applied to the freshly-loaded set.
+            this._commonsRawEntries = entries;
+            this._renderAllCommonsEntries();
             console.log( `[COMMONS-ACTIVITY] load complete, entries=${entries.length}` );
-            if ( emptyEl ) emptyEl.hidden = entries.length > 0;
         } catch ( err ) {
             this.error( `[COMMONS-ACTIVITY] load exception: ${err}` );
         }
@@ -10011,9 +10097,20 @@ class NotificationsUI {
         const entry = notification && notification.payload;
         if ( !entry ) return;
 
+        // Always seed the raw cache so a later filter-clear re-renders include this entry.
+        if ( !Array.isArray( this._commonsRawEntries ) ) this._commonsRawEntries = [ ];
+        this._commonsRawEntries.unshift( entry );
+
         const entriesEl = document.getElementById( "commons-recent-activity-entries" );
         const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
         if ( !entriesEl ) return;
+
+        // Predicate gate — live entries that don't match the active filter stay in the
+        // raw cache but are not inserted into the DOM.
+        if ( !this._matchesActivityFilter( entry ) ) {
+            if ( emptyEl && !entriesEl.firstChild ) this._updateEmptyStateCopy();
+            return;
+        }
 
         const row = this._renderCommonsEntry( entry );
         // Prepend — keep newest-first ordering (Q7)
@@ -10028,6 +10125,193 @@ class NotificationsUI {
     _setCommonsActivityWindow( value ) {
         this.log( `[COMMONS-ACTIVITY] window changed → ${value}` );
         this._loadCommonsRecentActivity( value );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  Recent-Activity 3-axis filter — predicate, re-render, change handlers,
+    //  persona-dropdown population, empty-state copy.
+    //  Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * Filter predicate. Boolean AND across active axes; any axis at its
+     * default contributes no constraint.
+     *
+     * Kind values:
+     *   - "all"        → no constraint
+     *   - "heartbeats" → entry.metadata.kind === "heartbeat"
+     *   - "personas"   → entry.topic startsWith "dm-" AND metadata.kind !== "heartbeat"
+     *   - "broadcasts" → entry.topic === "broadcasts" OR "broadcast-acks"
+     *
+     * Direction interactions:
+     *   - "sender"    → entry.persona_name (lowercased) === selectedPersona
+     *   - "recipient" → entry.topic === "dm-" + topicSuffix(selectedPersona)
+     *                   (silent no-op when kind === "broadcasts" — broadcasts fan out)
+     *   - null        → no constraint
+     *
+     * Persona null cancels the Direction axis (cannot filter direction without a target).
+     */
+    _matchesActivityFilter( entry ) {
+        const filter        = this._commonsActivityFilter || { direction: null, kind: "all", persona: null };
+        const topic         = entry.topic || "";
+        const meta          = entry.metadata || {};
+        const personaName   = ( entry.persona_name || "" ).toLowerCase();
+        const kind          = filter.kind || "all";
+        const direction     = filter.direction;
+        const targetPersona = filter.persona;
+
+        // Kind axis
+        if ( kind === "heartbeats" ) {
+            if ( meta.kind !== "heartbeat" ) return false;
+        } else if ( kind === "personas" ) {
+            if ( !topic.startsWith( "dm-" ) ) return false;
+            if ( meta.kind === "heartbeat" ) return false;
+        } else if ( kind === "broadcasts" ) {
+            if ( topic !== "broadcasts" && topic !== "broadcast-acks" ) return false;
+        }
+        // kind === "all" → no constraint
+
+        // Direction × Persona — active only when both axes have a value
+        if ( direction && targetPersona ) {
+            if ( direction === "sender" ) {
+                if ( personaName !== targetPersona ) return false;
+            } else if ( direction === "recipient" ) {
+                // Silent no-op when kind === "broadcasts" (broadcasts fan out — no per-recipient topic)
+                if ( kind !== "broadcasts" ) {
+                    const topicSuffix = targetPersona.replace( /[^\w-]+/gu, "_" );
+                    if ( topic !== "dm-" + topicSuffix ) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Re-render the entries list from the raw cache, applying the active filter.
+     * Called on filter changes (instant client-side re-render, no server hit) AND
+     * on /api/commons/broadcast-history responses (initial load).
+     */
+    _renderAllCommonsEntries() {
+        const entriesEl = document.getElementById( "commons-recent-activity-entries" );
+        const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
+        if ( !entriesEl ) return;
+
+        entriesEl.innerHTML = "";
+        let visibleCount = 0;
+        const raw = Array.isArray( this._commonsRawEntries ) ? this._commonsRawEntries : [ ];
+        for ( const entry of raw ) {
+            if ( this._matchesActivityFilter( entry ) ) {
+                entriesEl.appendChild( this._renderCommonsEntry( entry ) );
+                visibleCount += 1;
+            }
+        }
+        if ( emptyEl ) {
+            emptyEl.hidden = visibleCount > 0;
+            this._updateEmptyStateCopy();
+        }
+    }
+
+    /**
+     * Swap the empty-state copy between the time-window default and the
+     * filter-active variant. Filter-active = any axis off-default.
+     */
+    _updateEmptyStateCopy() {
+        const emptyEl = document.getElementById( "commons-recent-activity-empty" );
+        if ( !emptyEl ) return;
+        const f = this._commonsActivityFilter || {};
+        const anyFilterActive = !!f.direction || ( f.kind && f.kind !== "all" ) || !!f.persona;
+        emptyEl.innerHTML = anyFilterActive
+            ? "<em>No activity matches the current filter.</em>"
+            : "<em>No activity in window.</em>";
+    }
+
+    _setCommonsActivityDirection( value ) {
+        this._commonsActivityFilter.direction = value || null;
+        this._persistCommonsActivityFilter();
+        this._renderAllCommonsEntries();
+    }
+    _setCommonsActivityKind( value ) {
+        this._commonsActivityFilter.kind = value || "all";
+        this._persistCommonsActivityFilter();
+        this._renderAllCommonsEntries();
+    }
+    _setCommonsActivityPersona( value ) {
+        this._commonsActivityFilter.persona = ( value || "" ).toLowerCase() || null;
+        this._persistCommonsActivityFilter();
+        this._renderAllCommonsEntries();
+    }
+    _persistCommonsActivityFilter() {
+        try {
+            localStorage.setItem(
+                this.COMMONS_ACTIVITY_FILTER_KEY,
+                JSON.stringify( this._commonsActivityFilter )
+            );
+        } catch ( _ ) {
+            // Safari private-mode quota error — degrade gracefully to no-persistence.
+        }
+    }
+
+    /**
+     * Fetch the active voice-persona pool and rebuild the Persona dropdown's options.
+     * Sticky-when-valid: preserves the user's current selection if the persona is still
+     * in the refreshed pool; clears it (with write-through to filter state) otherwise.
+     * Wired to the augmented #commons-recent-activity-refresh click AND called once on init.
+     */
+    async _repopulatePersonaDropdown() {
+        const dropdown = document.getElementById( "commons-recent-activity-filter-persona" );
+        if ( !dropdown ) return;
+
+        // Resolve target value: prefer the dropdown's current value, but fall back to the
+        // persisted filter state for the initial-load case (dropdown is empty before populate).
+        const previousValue = dropdown.value || ( this._commonsActivityFilter.persona || "" );
+
+        try {
+            const resp = await this.authedFetch( "/api/cosa-voice/voice-persona/pool" );
+            if ( !resp.ok ) {
+                console.warn( `[COMMONS-ACTIVITY] persona-pool fetch failed: ${resp.status}` );
+                return;
+            }
+            const body     = await resp.json();
+            const sessions = body.active_sessions || [ ];
+            const pool     = body.pool || [ ];
+
+            // Build a name→pool-entry lookup for icon + display_name
+            const poolByName = {};
+            for ( const p of pool ) {
+                poolByName[ ( p.name || "" ).toLowerCase() ] = p;
+            }
+
+            // Rebuild dropdown options
+            dropdown.innerHTML = "";
+            const defaultOpt = document.createElement( "option" );
+            defaultOpt.value       = "";
+            defaultOpt.textContent = "Any persona";
+            dropdown.appendChild( defaultOpt );
+
+            const validValues = new Set();
+            for ( const s of sessions ) {
+                const lower = ( s.persona_name || "" ).toLowerCase();
+                if ( !lower ) continue;
+                validValues.add( lower );
+                const meta    = poolByName[ lower ] || {};
+                const icon    = meta.icon || "";
+                const display = meta.display_name || s.persona_name || lower;
+                const opt = document.createElement( "option" );
+                opt.value       = lower;
+                opt.textContent = icon ? `${icon} ${display}` : display;
+                dropdown.appendChild( opt );
+            }
+
+            // Sticky-when-valid: restore previous selection if still valid; clear otherwise.
+            if ( previousValue && validValues.has( previousValue ) ) {
+                dropdown.value = previousValue;
+            } else if ( previousValue ) {
+                // Stale selection — clear from filter state with write-through.
+                this._setCommonsActivityPersona( "" );
+            }
+        } catch ( err ) {
+            console.warn( `[COMMONS-ACTIVITY] persona-pool fetch exception: ${err}` );
+        }
     }
 
     /**
@@ -17169,7 +17453,7 @@ class NotificationsUI {
         // recency ordering: leftmost icon = most recently updated. Also
         // bumps the unread badge for non-focused sessions when focus is on
         // (unless caller passed skipUnread for tool-call progress noise).
-        this._promoteStripIcon( senderId, options );
+        this._markStripIconActivity( senderId, options );
 
         const container = document.getElementById( 'notifications-list' );
         const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
