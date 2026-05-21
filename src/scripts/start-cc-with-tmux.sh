@@ -26,6 +26,7 @@ shift 2>/dev/null || true  # Shift past session name if provided
 # key matching detect_project(), so unused keys are inert.
 PERSONA_ENV_FLAGS=(
     -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Tiberius"
+    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN_MOBILE=Tiffany"
     -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María"
     -e "COSA_VOICE_PREFERRED_PERSONA__LOOKML=Sam"
 )
