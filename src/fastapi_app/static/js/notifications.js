@@ -11003,11 +11003,17 @@ class NotificationsUI {
             // Only move card during runtime updates, not during initial page load
             // (initial load relies on API sort order preserved via appendChild)
             if ( !isNewSender && !this.isInitialLoad ) {
-                // Progress-group entries are tool-call progress updates —
-                // not user-actionable, so don't bump the focus-tray unread
-                // badge. Card still moves to top so recency reflects activity.
+                // Skip the focus-tray unread-badge bump for entries that are
+                // not user-actionable arrivals from a peer:
+                //   - Progress-group entries (tool-call progress updates)
+                //   - Outgoing responses (the user's own reply to a question;
+                //     they already know they responded — counting it as a
+                //     "new notification" on the asking persona is a false
+                //     positive). Fix added 2026-05-21 per Rick's report.
+                // Card still moves to top in both cases so recency ordering
+                // reflects activity.
                 const isProgressGroup = !!notification.progress_group_id;
-                this.moveSenderCardToTop( senderId, { skipUnread: isProgressGroup } );
+                this.moveSenderCardToTop( senderId, { skipUnread: isProgressGroup || isResponse } );
             }
         }
 
