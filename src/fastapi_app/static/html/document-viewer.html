@@ -306,12 +306,28 @@
 
                 // Polymorphic dispatch by Content-Type:
                 // - application/json → directory listing (renderDirectoryListing)
+                // - image/* → <img> tag from blob URL (added 2026-05-21 for PNG/JPG/SVG/etc.)
                 // - text/markdown* → markdown rendering (existing path below)
                 // - text/* (everything else) → plain <pre> code rendering
                 const contentType = response.headers.get( 'content-type' ) || '';
                 if ( contentType.includes( 'application/json' ) ) {
                     const listing = await response.json();
                     renderDirectoryListing( listing, target );
+                    return;
+                }
+                if ( contentType.startsWith( 'image/' ) ) {
+                    // Build blob URL from already-authenticated response so the
+                    // <img> tag's secondary fetch doesn't need the Bearer header.
+                    const blob      = await response.blob();
+                    const objectURL = URL.createObjectURL( blob );
+                    target.className = 'doc-viewer-content doc-viewer-image';
+                    target.innerHTML = '';
+                    const img = document.createElement( 'img' );
+                    img.src        = objectURL;
+                    img.alt        = filename || rawPath || '';
+                    img.style.maxWidth = '100%';
+                    img.style.height   = 'auto';
+                    target.appendChild( img );
                     return;
                 }
                 if ( contentType.startsWith( 'text/' ) && !contentType.startsWith( 'text/markdown' ) ) {

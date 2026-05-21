@@ -288,5 +288,51 @@ def test_canonical_path_prefix_form_unchanged( token ):
     assert status == 200
 
 
+# ---------------------------------------------------------------------------
+# Image MIME support (2026-05-21)
+#
+# Policy: extensions in {.png,.jpg,.jpeg,.gif,.svg,.webp} serve as image/*
+# via FileResponse (binary). Text MIMEs continue using PlainTextResponse.
+# Existing extensions are unaffected.
+# Driven by Rachel's git_loc_delta plot-sharing use case (CoSA session
+# e13fed4f) and the Lupin+CoSA joint-patch design ratified 2026-05-21.
+# ---------------------------------------------------------------------------
+
+def test_png_serves_with_image_png_content_type( token ):
+    """A real PNG (Firefox plugin icon) serves as image/png with binary bytes."""
+    status, ctype, body = _get(
+        "lupin/src/lupin-plugin-firefox/icons/microphone-48.png",
+        token = token,
+    )
+    assert status == 200, f"got {status}: {body[ :100 ]!r}"
+    assert ctype.startswith( "image/png" ), f"unexpected content-type: {ctype}"
+    # PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
+    assert body[ :8 ] == b"\x89PNG\r\n\x1a\n", f"missing PNG magic: {body[ :8 ]!r}"
+
+
+def test_text_markdown_still_serves_as_text( token ):
+    """Regression guard: existing text MIME path still serves as text/markdown."""
+    status, ctype, body = _get( "lupin/CLAUDE.md", token=token )
+    assert status == 200
+    assert ctype.startswith( "text/markdown" ), f"text path regressed: {ctype}"
+    # Should be human-readable markdown, not binary
+    assert b"#" in body[ :2000 ]
+
+
+def test_directory_listing_includes_image_files( token ):
+    """Directory listings include image files now that MEDIA_TYPES expanded."""
+    status, ctype, body = _get(
+        "lupin/src/lupin-plugin-firefox/icons/",
+        token = token,
+    )
+    assert status == 200, f"got {status}: {body[ :200 ]!r}"
+    assert ctype.startswith( "application/json" ), f"unexpected ctype: {ctype}"
+    listing = json.loads( body )
+    entry_names = [ e[ "name" ] for e in listing.get( "entries", [] ) ]
+    # The icons directory is full of PNGs; at least one should show up
+    png_count = sum( 1 for n in entry_names if n.endswith( ".png" ) )
+    assert png_count > 0, f"no PNGs in directory listing: {entry_names!r}"
+
+
 if __name__ == "__main__":
     pytest.main( [ __file__, "-v" ] )
