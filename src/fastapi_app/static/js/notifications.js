@@ -10236,15 +10236,54 @@ class NotificationsUI {
     }
 
     /**
-     * Strip any `http://localhost(:port)?` or `https://localhost(:port)?`
-     * prefix from a URL so it resolves correctly when the user accesses the
-     * dev server from a remote host (localhost on the user's machine fails
-     * the connection). Returns the original href unchanged if no prefix matches.
-     * Mirrors the doc-viewer's render-time rewrite (document-viewer.html).
+     * Strip any absolute loopback-host prefix (localhost / 127.0.0.1 / 0.0.0.0,
+     * with or without a port) from a URL so it resolves correctly when the user
+     * accesses the dev server from a remote host — "localhost" on the user's
+     * own machine fails the connection. Returns the original href unchanged
+     * if no loopback prefix matches.
      */
     _normalizeDocLinkHref( href ) {
         if ( !href ) return href;
-        return href.replace( /^https?:\/\/localhost(:\d+)?/, "" );
+        return href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, "" );
+    }
+
+    /**
+     * Attach a parent-owned click handler to a same-origin doc-viewer iframe.
+     *
+     * Root cause this solves: clicks inside an iframe do NOT bubble to the
+     * parent document — the parent's document-level interceptor is blind to
+     * them. The only thing previously handling iframe-internal links was
+     * document-viewer.html's own render-time rewrite, which is cache-fragile
+     * (the iframe lazy-loads it; parent hard-reloads never bust it). This
+     * moves link handling to the parent side: the iframe is same-origin, so
+     * `iframe.contentDocument` is fully scriptable, and the parent's code is
+     * `?v=` cache-busted so it is always current.
+     *
+     * Bonus: routing iframe-internal doc-links through `_openContentPane`
+     * makes them participate in the pane's Back history stack.
+     */
+    _bindIframeLinkInterception( frame ) {
+        frame.addEventListener( "load", () => {
+            let idoc;
+            try { idoc = frame.contentDocument; } catch ( _ ) { idoc = null; }
+            if ( !idoc ) return;
+            idoc.addEventListener( "click", ( ev ) => {
+                const a = ev.target && ev.target.closest ? ev.target.closest( "a[href]" ) : null;
+                if ( !a ) return;
+                const norm = this._normalizeDocLinkHref( a.getAttribute( "href" ) );
+                if ( !norm ) return;
+                if ( norm.startsWith( "/app/docs?path=" ) ) {
+                    // Doc-link → render in the pane; Back-history participates.
+                    ev.preventDefault();
+                    this._openContentPane( "doc", norm, a.textContent || "Doc" );
+                } else if ( /^https?:\/\//.test( norm ) ) {
+                    // External absolute link → new tab (avoid framing breakage).
+                    ev.preventDefault();
+                    window.open( norm, "_blank", "noopener,noreferrer" );
+                }
+                // else: same-origin non-doc relative link — let the iframe navigate.
+            } );
+        } );
     }
 
     _toggleLayoutMode() {
@@ -10317,6 +10356,10 @@ class NotificationsUI {
             const frame = document.createElement( "iframe" );
             frame.src = this._normalizeDocLinkHref( entry.payload );
             frame.setAttribute( "title", entry.title || "Document" );
+            // Parent-owned link interception — handles iframe-internal doc-links
+            // regardless of any stale cached document-viewer.html. See
+            // _bindIframeLinkInterception for the full root-cause writeup.
+            this._bindIframeLinkInterception( frame );
             body.appendChild( frame );
         }
     }

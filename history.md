@@ -4,6 +4,23 @@
 
 ### 2026.05.21 - Session 679e8f04 (Mr. Radio 🦉) | Recent Activity filter strip + Focus-bar chronological lock + Master-detail two-pane layout experiment
 
+#### Checkpoint 3 | 2026.05.21 19:10 EDT | Iframe doc-link interception — root-cause fix; master-detail experiment pinned pending cascade review
+
+Post-Checkpoint-2 follow-up. Rick kept hitting "localhost refused to connect" when clicking doc-links **inside** the Reading Pane's iframe. Earlier patches (document-viewer.html render-time URL rewrite, parent-page click interceptor) didn't resolve it because the failure is architectural, not a regex gap:
+
+- **Clicks inside an iframe do NOT bubble to the parent document.** The parent's `document`-level click interceptor is structurally blind to iframe-internal clicks — an iframe is a separate browsing context.
+- The only handler for iframe-internal links was `document-viewer.html`'s own render-time rewrite. That file is **cache-fragile**: the iframe lazy-loads `/app/docs?path=...` AFTER the parent page is interactive, so parent hard-reloads never bust it — the iframe kept serving a stale cached `document-viewer.html` predating the rewrite.
+
+**Fix — parent-owned iframe link interception**: the iframe is same-origin, so the parent can script into it via `iframe.contentDocument`. New `_bindIframeLinkInterception(frame)` attaches a delegated click handler to the iframe's document on every `load`. `/app/docs?path=` links route through `_openContentPane` (Back-history participates); external links open in a new tab; same-origin non-doc relative links navigate natively. Parent code is `?v=`-cache-busted so it is always current — the stale-`document-viewer.html` problem becomes irrelevant. `_normalizeDocLinkHref` broadened to strip `127.0.0.1` / `0.0.0.0` loopback prefixes, not just `localhost`. `document-viewer.html`'s own rewrite retained as harmless defense-in-depth (regex similarly broadened).
+
+**Status**: master-detail experiment **PINNED** per Rick — the iterative tail-chasing is paused pending a fresh cascaded plan-review run (Tiberius managing). Cache buster `v=20260521i`.
+
+**Files**: `src/fastapi_app/static/js/notifications.js` (+`_bindIframeLinkInterception`, broadened `_normalizeDocLinkHref`), `src/fastapi_app/static/html/notifications.html` (cache buster), `src/fastapi_app/static/html/document-viewer.html` (regex broadening).
+
+**Commit**: c1d611e
+
+---
+
 #### Checkpoint 2 | 2026.05.21 18:30 EDT | Master-detail two-pane layout experiment — design + 7 iteration cycles + draggable splitter
 
 Second feature of the session, designed + implemented + iterated through Rick's voice feedback over the late afternoon. Switchable two-pane "horizontal" layout: existing `.container` collapses to ~2/3 width inside a new `.left-column`; new `<aside class="content-pane">` Reading Pane occupies the right ~1/3; draggable splitter between; persistent split ratio; section-toolbar floats horizontally over the top-center of the content area.

@@ -399,8 +399,8 @@
                 // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md.
                 target.querySelectorAll( 'a[href]' ).forEach( ( a ) => {
                     const href = a.getAttribute( 'href' );
-                    if ( href && /^https?:\/\/localhost(:\d+)?\//.test( href ) ) {
-                        const rewritten = href.replace( /^https?:\/\/localhost(:\d+)?/, '' );
+                    if ( href && /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?\//.test( href ) ) {
+                        const rewritten = href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, '' );
                         a.setAttribute( 'href', rewritten );
                     }
                 } );
