@@ -389,9 +389,9 @@ class NotificationsUI {
     async init() {
         this.log( "NotificationsUI initializing..." );
 
-        // Run TTS sentence-splitter self-test (no-op unless this.debug is truthy).
-        // Added 2026-05-14 to catch regressions in the abbreviation pre-mask
-        // + split() rewrite of _splitIntoSentences.
+        // Run TTS boundary-scan self-test (no-op unless this.debug is truthy).
+        // Covers the 2026-05-22 _truncateAtBoundary rewrite — newline-boundary
+        // truncation for punctuation-free technical lists.
         this._tts_quick_self_test();
 
         try {
@@ -763,10 +763,9 @@ class NotificationsUI {
                 // Runtime user override via the slider in #cc-session-strip is layered
                 // on top of `tts_preview_fraction` immediately after this fetch.
                 // See src/rnd/v0.1.7/2026.05.14-tts-preview-stop-and-slider.md
-                this.ttsPreviewEnabled           = !!config.tts_preview_enabled;
-                this.ttsPreviewFraction          = config.tts_preview_fraction || 0.25;
-                this.ttsPreviewMinChars          = config.tts_preview_min_chars || 100;
-                this.ttsPreviewIncludeSemicolons = !!config.tts_preview_include_semicolons;
+                this.ttsPreviewEnabled  = !!config.tts_preview_enabled;
+                this.ttsPreviewFraction = config.tts_preview_fraction || 0.25;
+                this.ttsPreviewMinChars = config.tts_preview_min_chars || 100;
 
                 // tts_interaction_mode drives mode-conditional icon rendering for the
                 // per-session DND toggle on each sender card. Added 2026-05-14 evening
@@ -829,10 +828,9 @@ class NotificationsUI {
 
             // TTS preview-and-pause fallbacks — conservative: feature DISABLED
             // on config-fetch failure so we don't accidentally truncate audio.
-            this.ttsPreviewEnabled           = false;
-            this.ttsPreviewFraction          = 0.25;
-            this.ttsPreviewMinChars          = 100;
-            this.ttsPreviewIncludeSemicolons = false;
+            this.ttsPreviewEnabled  = false;
+            this.ttsPreviewFraction = 0.25;
+            this.ttsPreviewMinChars = 100;
 
             this.log( "⚠️ Using default client config (server fetch failed)" );
         }
@@ -14182,36 +14180,50 @@ class NotificationsUI {
      * @param {object} item - TTS queue item: {id, type, notification, ttsText, addedAt}
      */
     /**
-     * Split text into sentences for the TTS preview-and-pause feature.
+     * Truncate `text` to roughly `fraction` of its length, extending forward
+     * from the fraction mark to the next natural boundary.
      *
-     * Primary algorithm: `String.split()` with a zero-width boundary anchored
-     * by lookbehind on terminal punctuation and lookahead on a capital letter.
-     * Common abbreviations (Mr., Mrs., e.g., a.m., etc.) are pre-masked so
-     * their periods don't trigger false sentence boundaries.
+     * Algorithm (2026-05-22 — replaces the old sentence-count splitter):
+     *   1. targetPos = ceil( text.length * fraction ) — the character index of
+     *      the desired fraction (e.g. 25% of the message).
+     *   2. Scan FORWARD from targetPos for the first boundary:
+     *        - '\n' newline       — always a boundary. THE TWIST: a list item
+     *                               ends at a newline even with no sentence
+     *                               punctuation, so a newline-separated
+     *                               technical list is cut cleanly instead of
+     *                               read whole.
+     *        - em/en-dash         — always a boundary.
+     *        - '.', '!', '?', ';' — a boundary ONLY when the next char is
+     *                               whitespace or end-of-string. This rejects
+     *                               the internal periods in "3.14", "v0.1.7",
+     *                               "file.py" (followed by a digit/letter).
+     *   3. Cut inclusive of the marker character.
+     *   4. No boundary found → fall back to the next word boundary after
+     *      targetPos, so the preview is never silently expanded to 100%.
      *
-     * Fallback: when the primary algorithm produces a single chunk but the
-     * text is clearly long (>12 words), split at the rough midpoint by word
-     * count.
+     * Hyphen-minus '-' is deliberately NOT a boundary — it is ubiquitous
+     * inside compound words and file names (bug-fix-queue, end-to-end) and
+     * would shred list items mid-term.
      *
-     * Semicolons (`;`) are included as boundaries iff `this.ttsPreviewIncludeSemicolons`
-     * is true (INI key `tts preview include semicolons`).
+     * Common abbreviations (Mr., e.g., a.m., etc.) are pre-masked with a
+     * length-preserving U+0001 placeholder so their periods never become
+     * false boundaries; the placeholder is restored after slicing. Masking is
+     * length-preserving, so every character index stays valid.
      *
-     * 2026-05-14 rewrite — replaced match()-based algorithm with split()+lookbehind.
-     * Old approach silently dropped text when its lookahead failed (e.g. "3.14"
-     * lost the "3." prefix). Old approach also lacked abbreviation handling
-     * despite the 2026-05-13 design doc claiming otherwise (line 87 of
-     * 2026.05.13-tts-preview-and-pause-design.md).
+     * See: src/rnd/v0.1.7/2026.05.22-tts-limiter-boundary-scan.md
      *
-     * See:
-     *   - src/rnd/v0.1.7/2026.05.13-tts-preview-and-pause-design.md (original)
-     *   - src/rnd/v0.1.7/2026.05.14-tts-preview-action-required-and-mr-split-fix.md (this fix)
+     * @param   {string} text     - the full TTS message
+     * @param   {number} fraction - desired fraction in (0, 1)
+     * @returns {string} the truncated, trimmed preview slice
      */
-    _splitIntoSentences( text ) {
-        if ( !text || typeof text !== 'string' ) return [];
+    _truncateAtBoundary( text, fraction ) {
+        if ( !text || typeof text !== 'string' ) return '';
+        if ( fraction >= 1 ) return text.trim();
 
-        // Pre-mask common abbreviations so their periods don't trigger false
-        // sentence boundaries. The placeholder is U+0001 (SOH control char) —
-        // never appears in real TTS text.
+        // Pre-mask common abbreviations so their periods don't become false
+        // boundaries. The placeholder is U+0001 (SOH control char) — never
+        // appears in real TTS text. Masking is length-preserving ("Mr." and
+        // its masked form are the same length), so character indices stay valid.
         const ABBREVIATIONS = [
             // Personal titles
             "Mr.", "Mrs.", "Ms.", "Mx.", "Dr.", "Prof.", "Sr.", "Jr.", "Rev.",
@@ -14226,114 +14238,123 @@ class NotificationsUI {
 
         let masked = text;
         ABBREVIATIONS.forEach( abbr => {
-            const placeholder = abbr.replace( /\./g, ABBR_MASK );
-            masked = masked.split( abbr ).join( placeholder );
+            masked = masked.split( abbr ).join( abbr.replace( /\./g, ABBR_MASK ) );
         } );
 
-        // Split on zero-width sentence boundary: lookbehind on terminal punct,
-        // lookahead on a capital letter. split() preserves all inter-boundary
-        // content (unlike match() which can drop prefixes when its lookahead
-        // fails).
-        const terminalChars = this.ttsPreviewIncludeSemicolons ? ".!?;" : ".!?";
-        const escaped       = terminalChars.replace( /[.!?;]/g, c => "\\" + c );
-        const splitRegex    = new RegExp( `(?<=[${escaped}])\\s+(?=[A-Z])`, "g" );
+        const targetPos = Math.ceil( masked.length * fraction );
 
-        const restoreMask = new RegExp( ABBR_MASK, "g" );
-        const parts = masked.split( splitRegex )
-            .map( p => p.replace( restoreMask, "." ).trim() )
-            .filter( p => p.length > 0 );
-
-        if ( parts.length > 1 ) return parts;
-
-        // Fallback for clearly-long single-chunk text — split at word midpoint
-        const words = text.trim().split( /\s+/ );
-        if ( words.length > 12 ) {
-            const mid = Math.floor( words.length / 2 );
-            return [ words.slice( 0, mid ).join( " " ), words.slice( mid ).join( " " ) ];
+        // Forward scan from the fraction mark for the first boundary.
+        const SENTENCE_TERMINALS = ".!?;";
+        const DASHES             = "—–";   // em-dash, en-dash (NOT hyphen-minus '-')
+        let cut = -1;
+        for ( let i = targetPos; i < masked.length; i++ ) {
+            const ch   = masked[ i ];
+            const next = masked[ i + 1 ];            // undefined at end-of-string
+            if ( ch === "\n" || DASHES.includes( ch ) ) {
+                cut = i;
+                break;
+            }
+            if ( SENTENCE_TERMINALS.includes( ch ) && ( next === undefined || /\s/.test( next ) ) ) {
+                cut = i;
+                break;
+            }
         }
 
-        return [ text.trim() ];
+        let slice;
+        if ( cut !== -1 ) {
+            slice = masked.slice( 0, cut + 1 );
+        } else {
+            // No natural boundary after the fraction mark — fall back to the
+            // next word boundary so the verbosity cut is still honored and the
+            // preview never silently expands back to the full message.
+            const ws = masked.indexOf( " ", targetPos );
+            slice = ( ws === -1 ) ? masked : masked.slice( 0, ws );
+        }
+
+        // Restore the masked abbreviation periods, then trim edge whitespace.
+        return slice.split( ABBR_MASK ).join( "." ).trim();
     }
 
     /**
-     * Inline self-test for _splitIntoSentences. Runs only when this.debug is
+     * Inline self-test for _truncateAtBoundary. Runs only when this.debug is
      * truthy. Logs `[TTS-SELFTEST] N/N passed` on success or fails loudly via
      * console.assert with the offending case. Intended to fire once at init().
      *
-     * Covers:
-     *   - Abbreviation false-positive (Mr., e.g., a.m., etc.)
-     *   - Decimal-number false-positive (3.14)
-     *   - Single-sentence pass-through
-     *   - Word-count fallback for long run-on text
-     *   - Rick's two real-world bug-report inputs (2026-05-13/14)
+     * Covers the 2026-05-22 boundary-scan rewrite:
+     *   - newline boundary for punctuation-free technical lists (the twist)
+     *   - sentence-terminal boundary in plain prose
+     *   - decimal / version internal periods are NOT false boundaries
+     *   - em-dash IS a boundary; hyphen-minus is NOT
+     *   - abbreviation periods (Mr.) are NOT false boundaries
+     *   - no-boundary run-on falls back to a word boundary
+     *   - fraction >= 1 returns the whole text
      */
     _tts_quick_self_test() {
         if ( !this.debug ) return;
 
+        const list = "Affected modules below:\nrunning_fifo_queue\ntodo_fifo_queue\nqueue_consumer\nagentic_job_factory\napi_resource_manager";
+
         const cases = [
             {
-                name     : "Mr. Smith two-sentence",
-                input    : "Mr. Smith said hi. Then he left.",
-                expected : [ "Mr. Smith said hi.", "Then he left." ]
+                name   : "Newline boundary — punctuation-free list cuts at a newline",
+                input  : list,
+                frac   : 0.25,
+                expect : ( got ) => got === "Affected modules below:\nrunning_fifo_queue"
             },
             {
-                name     : "Mr. Radio two-sentence",
-                input    : "Mr. Radio here. End of session ritual complete.",
-                expected : [ "Mr. Radio here.", "End of session ritual complete." ]
+                name   : "Sentence terminal — prose cuts at a period",
+                input  : "First sentence here. Second sentence here. Third sentence here. Fourth one here.",
+                frac   : 0.25,
+                expect : ( got ) => got.endsWith( "." ) && got.length < 80
             },
             {
-                name     : "Decimal preserved",
-                input    : "3.14 is pi. Cool fact!",
-                expected : [ "3.14 is pi.", "Cool fact!" ]
+                name   : "Decimal is not a false boundary",
+                input  : "The value of pi is 3.14159 and it matters here. Next part follows after now.",
+                frac   : 0.25,
+                expect : ( got ) => got.includes( "3.14159" )
             },
             {
-                name     : "e.g. abbreviation",
-                input    : "e.g. Foo. Bar baz.",
-                expected : [ "e.g. Foo.", "Bar baz." ]
+                name   : "Em-dash is a boundary",
+                input  : "Alpha beta gamma delta — epsilon zeta eta theta iota kappa lambda mu now.",
+                frac   : 0.25,
+                expect : ( got ) => got.endsWith( "—" )
             },
             {
-                name     : "a.m./p.m. abbreviations",
-                input    : "a.m. start. p.m. end.",
-                expected : [ "a.m. start.", "p.m. end." ]
+                name   : "Hyphen-minus is NOT a boundary",
+                input  : "The bug-fix-queue and end-to-end pipeline ran fine. Second sentence here now.",
+                frac   : 0.1,
+                expect : ( got ) => got.indexOf( "-" ) !== -1 && got.endsWith( "." )
             },
             {
-                name     : "Single sentence",
-                input    : "Hello.",
-                expected : [ "Hello." ]
+                name   : "Abbreviation period is not a false boundary",
+                input  : "Mr. Radio reviewed the plan. Then the team shipped it after lunch today.",
+                frac   : 0.1,
+                expect : ( got ) => got.startsWith( "Mr. Radio" )
             },
             {
-                name     : "Rick's 9-sentence session-end message",
-                input    : "Mr. Radio here. End of session ritual complete. Five CoSA commits landed and pushed to origin on the tracking branch. Body one is inter-session commons phase three steps three through nine plus Maria's broadcast UI bug fixes. Body two is Arnold's broadcast munger mode. Body three is Arnold's TTS preview config endpoint. Plus session-end docs and the manifest hash-backfill. Branch stats: seven hundred thirty net lines added across seven files. You're clear to step away.",
-                expectedLength : 9
+                name   : "No-boundary run-on falls back to a word boundary",
+                input  : "one two three four five six seven eight nine ten eleven twelve thirteen",
+                frac   : 0.25,
+                expect : ( got ) => got.split( " " ).length >= 2 && got.length < 30 && !/\s$/.test( got )
             },
             {
-                name     : "Rick's 8-sentence Layered message",
-                input    : "Layered. The doctrine lives in your global Claude file plus a new workflow doc — every session reads it at startup. Then we embed tier markers right into the MCP tool descriptions themselves, so at the decision point the model sees attention-demanding flagged inline. And the reserved topic names themselves become signals to peers — a post to presence means self-disclosure, a post to help-wanted means I'm blocking on input. That neatly couples this with question two on topic vocabulary. Finally, whenever a session enters attention-demanding mode, it also fires a notify to you, so you see in your UI when one session is blocking on another. Visibility without you having to ask. Does any layer feel missing, or any one feel like overkill?",
-                expectedLength : 8
-            },
-            {
-                name     : "Long run-on falls back to word-midpoint split",
-                input    : "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty",
-                expectedLength : 2
+                name   : "Fraction >= 1 returns the whole text",
+                input  : "Alpha. Beta. Gamma.",
+                frac   : 1,
+                expect : ( got ) => got === "Alpha. Beta. Gamma."
             }
         ];
 
         let passed = 0;
         let failed = 0;
         cases.forEach( ( c, idx ) => {
-            const got = this._splitIntoSentences( c.input );
-            let ok;
-            if ( c.expected ) {
-                ok = ( got.length === c.expected.length )
-                    && got.every( ( s, i ) => s === c.expected[ i ] );
-            } else {
-                ok = ( got.length === c.expectedLength );
-            }
+            const got = this._truncateAtBoundary( c.input, c.frac );
+            const ok  = c.expect( got );
             if ( ok ) {
                 passed += 1;
             } else {
                 failed += 1;
-                console.assert( false, `[TTS-SELFTEST] Case ${idx + 1} "${c.name}" FAILED. Got:`, got, "Expected:", c.expected || `length ${c.expectedLength}` );
+                console.assert( false, `[TTS-SELFTEST] Case ${idx + 1} "${c.name}" FAILED. Got:`, JSON.stringify( got ) );
             }
         } );
 
@@ -14353,54 +14374,60 @@ class NotificationsUI {
      *
      * stage values:
      *   - "full"    — play the entire ttsText (slider at 100%, opt-out, or short message)
-     *   - "preview" — play the previewText slice (slider at 25/50/75%, message long enough to split)
+     *   - "preview" — play the boundary-scan slice (slider at 25/50/75%, message long enough to truncate)
      *   - "skip"    — slider at 0%, no TTS dispatch; handled upstream in activateNextTTS
      *
      * Opt-out (stage = "full"):
      *   - this.ttsPreviewEnabled is false
+     *   - this.ttsPreviewFraction >= 1 (slider at 100%)
      *   - item.ttsText.length < this.ttsPreviewMinChars (too short to bother)
-     *   - splitter produces a single sentence
+     *   - the boundary scan consumes the whole message
      *
      * 2026-05-14 evening: preview-and-pause was superseded by preview-and-advance.
      * `remainderText` is no longer populated — the preview is the only audio that
      * plays. Runtime slider in `#cc-session-strip` controls the fraction.
+     *
+     * 2026-05-22: sentence-count truncation replaced by a character-position
+     * forward-scan — see _truncateAtBoundary and
+     * src/rnd/v0.1.7/2026.05.22-tts-limiter-boundary-scan.md.
      *
      * Logs cost-savings telemetry (per Q10) when a preview cut happens.
      */
     _computeTTSPreview( item ) {
         const text = item.ttsText || '';
 
-        // Phase 2 (slider at 0%): skip TTS entirely. Notification still appears
-        // in the visible list (decouple fix from earlier today), but no audio
-        // dispatches for this item.
+        // Slider at 0%: skip TTS entirely. The notification still appears in
+        // the visible list, but no audio dispatches for this item.
         if ( this.ttsPreviewFraction === 0 ) {
             item.previewText = '';
             item.stage       = 'skip';
             return item;
         }
 
-        // Opt-out paths
-        if ( !this.ttsPreviewEnabled || text.length < this.ttsPreviewMinChars ) {
+        // Opt-out paths — play the message in full:
+        //   - feature disabled
+        //   - slider at 100% (fraction >= 1) — nothing to truncate
+        //   - message too short to be worth truncating
+        if ( !this.ttsPreviewEnabled
+             || this.ttsPreviewFraction >= 1
+             || text.length < this.ttsPreviewMinChars ) {
             item.previewText = text;
             item.stage       = 'full';
             return item;
         }
 
-        // Sentence split + preview-count calc
-        const sentences    = this._splitIntoSentences( text );
-        const totalCount   = sentences.length;
-        // 2026-05-14: floor → ceil so N*fraction rounds UP. Ceil never undershoots
-        // the configured fraction; floor often did.
-        const previewCount = Math.max( 1, Math.ceil( totalCount * this.ttsPreviewFraction ) );
+        // Character-position boundary scan (2026-05-22 — replaces the old
+        // sentence-count splitter). See _truncateAtBoundary.
+        const previewText = this._truncateAtBoundary( text, this.ttsPreviewFraction );
 
-        if ( totalCount <= previewCount ) {
-            // Entire utterance fits in preview — play in full
+        if ( previewText.length >= text.trim().length ) {
+            // The forward scan reached the end of the message — play in full.
             item.previewText = text;
             item.stage       = 'full';
             return item;
         }
 
-        item.previewText = sentences.slice( 0, previewCount ).join( ' ' );
+        item.previewText = previewText;
         item.stage       = 'preview';
 
         // Cost-savings telemetry (browser console only — Q10 chose local-only)

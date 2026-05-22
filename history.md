@@ -2,6 +2,22 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.22 - Session 76351966 (Rio ⚡) | Heartbeat-poker abstraction implementation (10-task run) + TTS limiter boundary-scan fix
+
+Two bodies of work this session.
+
+**TTS limiter — boundary-scan rewrite.** The notifications TTS preview-fraction slider truncated by sentence count; a newline-separated technical list (no `.!?` punctuation) defeated the splitter and read ~half the list aloud at the 25% stop. Replaced the sentence-count algorithm in `_computeTTSPreview()` with a character-position forward scan: jump to `ceil(length × fraction)`, then scan forward to the next boundary — a sentence terminal, an em/en-dash, or a **newline** (the key fix: a list item ends at a newline even with no punctuation). New `_truncateAtBoundary()` helper; `_splitIntoSentences()` retired; inline self-test rewritten (8 cases, verified in Node). Hyphen-minus deliberately NOT a boundary. The vestigial `tts preview include semicolons` INI key + splainer entry removed.
+
+**Heartbeat-poker abstraction — full 10-task implementation run (Tiberius-managed).** Implemented the approved `src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md` plan end-to-end: 3 design-tier specs (D1+D4 class spec, D2 Watcher-protocol spec, D3 co-exist/swap/retirement doc); the `HeartbeatPokerJob` `AgenticJobBase` subclass + its three layered exits — clean-signal / dead-man's-switch / hard-cap (I1, I2); a production `LupinCommonsGateway` adapter; the `implementer-watch-protocol.md` Layer-2 doctrine (I3); two new termination-signal kinds in the PIP cascade defaults (I5); the full test pyramid (I6); Manager/Observer protocol `poke_body` compatibility (I9); and the production agentic-pool override (I10). Verified: 66 tests (58 unit + 8 smoke) green, 100% line+branch coverage (`pytest-cov --cov-fail-under=100`) on both heartbeat modules; integration + E2E files written + skip-marked for `:8000`. Swap-validation gates I4a-d/I7/I8 left for the operator-event-driven post-run. One gap surfaced + escalated to Tiberius: `HeartbeatPokerJob` is not yet wired into `agentic_job_factory` CJ Flow ingestion.
+
+**Verification**: TTS — `node --check` + 8/8 inline self-test cases + config-load. Heartbeat — 66 tests green, gate-enforced 100% line+branch on `heartbeat_poker_job.py` + `heartbeat_poker_commons_gateway.py`; INI parse confirmed.
+
+**Files** (parent-Lupin, this commit): `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/html/notifications.html`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/rnd/v0.1.7/2026.05.22-tts-limiter-boundary-scan.md` (new), `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` (new), `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` (new), `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d3-coexist-and-swap.md` (new), `src/docs/agents/implementer-watch-protocol.md` (new), `src/tests/integration/test_heartbeat_poker_integration.py` (new), `src/tests/e2e/test_heartbeat_poker_e2e.py` (new), `history.md` (this entry).
+
+**Committed separately** (own repos, own contexts): CoSA submodule — `heartbeat_poker_job.py`, `heartbeat_poker_commons_gateway.py`, `system.py`, `test_heartbeat_poker_job.py`, `test_heartbeat_poker_commons_gateway.py`, `test_heartbeat_poker_smoke.py`. planning-is-prompting repo — `plan-review-cascaded-defaults.md`, `plan-review-cascaded-common.md`.
+
+---
+
 ### 2026.05.22 - Session 2ce59c03 (Tiberius 🌑) | Voice persona: `request_persona` MCP tool + compaction carry-forward fix
 
 Triggered by a live observation — the Mr. Radio session went through a context compaction and came back re-allocated as Krishna. Rick asked for two fixes, done in his stated order.
