@@ -590,7 +590,7 @@ mcp = FastMCP(
         f"| **Commons read** | `commons_read`, `commons_who` | Always-allowed inspection of cross-session traffic |\n"
         f"| **Commons self-disclosure** | `commons_post` | Append to topic blackboard; recipient sees on next poll |\n"
         f"| **Commons DM** | `commons_send_to`, `commons_ask_async`, `commons_ask_sync` | Directed attention-demanding messages to peer sessions |\n"
-        f"| **Session state** | `get_session_info`, `set_session_topic`, `enable_speakerphone`, `disable_speakerphone` | Read or update this session's bridge state |\n\n"
+        f"| **Session state** | `get_session_info`, `set_session_topic`, `enable_speakerphone`, `disable_speakerphone`, `request_persona` | Read or update this session's bridge state |\n\n"
         f"Each per-tool docstring opens with a `**[TIER]**` marker on line 1 "
         f"that signals user-permission requirements (READ / SELF-DISCLOSURE / "
         f"ATTENTION-DEMANDING / DM). Consult the marker AT DECISION-TIME — when "
@@ -1748,6 +1748,178 @@ def disable_speakerphone() -> dict:
         dict with status, session_id, speakerphone_on=False on success
     """
     return _flip_speakerphone( False )
+
+
+def _persona_error_detail( resp ) -> dict:
+    """
+    Extract the structured `detail` dict from a voice-persona error response.
+
+    The allocate endpoint raises HTTPException(detail={...}) for its 422
+    (not-in-pool) and 409 (occupied) cases, so the JSON body is
+    `{"detail": {...}}`. Defensive: returns `{}` when the body is not JSON or
+    `detail` is not a dict, so the caller's `.get()` chains stay safe.
+
+    Requires:
+        - resp is a requests.Response
+
+    Ensures:
+        - returns the `detail` dict on a well-formed error body
+        - returns {} on any parse failure or non-dict `detail`
+    """
+    try:
+        detail = resp.json().get( "detail" )
+        return detail if isinstance( detail, dict ) else { }
+    except ( ValueError, AttributeError ):
+        return { }
+
+
+def _request_persona( name: str ) -> dict:
+    """
+    Internal helper: request (or swap to) a named voice persona for this session.
+
+    Routes through the canonical allocate endpoint POST
+    /api/cosa-voice/voice-persona/{session_id}/allocate with the strict
+    `requested_persona_name` query parameter. The server swaps this session's
+    persona atomically under its `_voice_persona_lock` and broadcasts a
+    `voice_persona_assigned` WebSocket event so connected browser tabs re-badge.
+
+    There is intentionally NO degraded bridge-write fallback (unlike
+    `_flip_speakerphone`): persona allocation must pass through the server's
+    locked allocator to keep pool-occupancy accounting correct — a direct
+    bridge write would risk a double allocation.
+
+    Resolves session_id by stable_session_id (preferred for /clear-resistance),
+    falling back to session_id then the SESSION_ID prefix.
+
+    Requires:
+        - name is a string
+
+    Ensures:
+        - On HTTP 200: returns {status:"ok", session_id, voice_persona, swapped,
+          message}
+        - On HTTP 422: returns {status:"not_in_pool", requested, available}
+        - On HTTP 409: returns {status:"occupied", requested,
+          holding_session_id, holding_persona_name, available}
+        - On any other HTTP status or transport failure: returns
+          {status:"error", reason, ...}
+        - Never raises exceptions
+    """
+    # Client-side guard — skip the round-trip on an empty/whitespace name.
+    if not isinstance( name, str ) or not name.strip():
+        return { "status": "error", "reason": "persona name must be a non-empty string" }
+    requested = name.strip()
+
+    try:
+        cc_meta = _get_cc_metadata()
+        sid     = cc_meta.get( "stable_session_id" ) or cc_meta.get( "session_id" ) or SESSION_ID
+    except Exception:
+        sid = SESSION_ID
+
+    if not sid:
+        return { "status": "error", "reason": "No session_id available" }
+
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+        project         = _get_project()
+        email, password = get_hook_credentials( project )
+
+        # Login to obtain a JWT (each call — no caching for low-frequency swaps)
+        login_resp = requests.post(
+            f"{SERVER_URL}/auth/login",
+            json    = { "email": email, "password": password },
+            timeout = 5
+        )
+        if login_resp.status_code != 200:
+            return { "status": "error", "reason": f"login HTTP {login_resp.status_code}" }
+
+        access_token = login_resp.json()[ "tokens" ][ "access_token" ]
+
+        # Strict request-or-swap path on the canonical allocate endpoint.
+        alloc_resp = requests.post(
+            f"{SERVER_URL}/api/cosa-voice/voice-persona/{sid}/allocate",
+            params  = { "requested_persona_name": requested },
+            headers = { "Authorization": f"Bearer {access_token}" },
+            timeout = 5
+        )
+
+        if alloc_resp.status_code == 200:
+            body    = alloc_resp.json()
+            persona = body.get( "voice_persona" ) or { }
+            display = persona.get( "display_name" ) or persona.get( "name" ) or requested
+            return {
+                "status"        : "ok",
+                "session_id"    : sid,
+                "voice_persona" : persona,
+                "swapped"       : bool( body.get( "swapped", False ) ),
+                "message"       : f"You are now {display}."
+            }
+
+        if alloc_resp.status_code == 422:
+            detail = _persona_error_detail( alloc_resp )
+            return {
+                "status"    : "not_in_pool",
+                "requested" : detail.get( "requested", requested ),
+                "available" : detail.get( "available", [] )
+            }
+
+        if alloc_resp.status_code == 409:
+            detail = _persona_error_detail( alloc_resp )
+            return {
+                "status"               : "occupied",
+                "requested"            : detail.get( "requested", requested ),
+                "holding_session_id"   : detail.get( "holding_session_id" ),
+                "holding_persona_name" : detail.get( "holding_persona_name" ),
+                "available"            : detail.get( "available", [] )
+            }
+
+        return {
+            "status" : "error",
+            "reason" : f"allocate HTTP {alloc_resp.status_code}: {alloc_resp.text[:200]}"
+        }
+
+    except ( requests.ConnectionError, requests.Timeout, RuntimeError, KeyError, FileNotFoundError, ValueError ) as http_err:
+        return {
+            "status"     : "error",
+            "reason"     : f"{type( http_err ).__name__}: {http_err}",
+            "session_id" : sid
+        }
+
+
+@mcp.tool
+def request_persona( name: str ) -> dict:
+    """
+    Request (or swap to) a named voice persona for this session.
+
+    USER-INITIATED ONLY (HARD RULE): Call this ONLY in direct response to an
+    explicit user instruction — e.g. "become Mr. Radio", "switch my voice to
+    Rachel", or a request to reclaim a persona that was lost after a context
+    compaction. NEVER call it on your own initiative. The persona pool is a
+    shared resource and the voice is the user's to assign, not yours to grab.
+
+    Routes through the canonical allocate endpoint, which swaps this session's
+    persona atomically under a server-side lock and broadcasts a
+    `voice_persona_assigned` WebSocket event — every connected browser tab
+    re-badges immediately, no extra client work. If another LIVE session
+    already holds the requested name you get status "occupied"; if the name is
+    not in the configured pool you get status "not_in_pool".
+
+    Args:
+        name: The persona name to request (e.g. "Mr. Radio", "rachel",
+              "Tiberius"). Server-side resolution is case-insensitive.
+
+    Returns:
+        dict — one of:
+          {status:"ok", session_id, voice_persona, swapped, message}
+          {status:"not_in_pool", requested, available}
+          {status:"occupied", requested, holding_session_id,
+           holding_persona_name, available}
+          {status:"error", reason, ...}
+
+    Examples:
+        request_persona("Mr. Radio")   # reclaim after a bad compaction re-roll
+        request_persona("Rachel")      # deliberate voice swap
+    """
+    return _request_persona( name )
 
 
 # ============================================================================

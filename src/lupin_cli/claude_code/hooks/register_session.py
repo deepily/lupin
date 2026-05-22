@@ -779,14 +779,23 @@ def main():
             "tmux_session"      : tmux_session,
         }
 
-        # Carry voice_persona forward across /clear so the user keeps the
-        # same allocated voice. Without this, the SessionStart on a /clear
-        # would lose the persona (since session_data is rebuilt from scratch
-        # above) and Phase 4.5 would re-roll a new voice — confusing the
-        # user mid-session. Keying on stable_session_id alone isn't enough;
-        # the bridge WRITE must also preserve the field.
+        # Carry voice_persona forward across ANY context reset (/clear,
+        # /compact, resume, --continue double-fire) so the user keeps the same
+        # allocated voice. Without this, the SessionStart that follows the reset
+        # would lose the persona (session_data is rebuilt from scratch above)
+        # and Phase 4.5 would re-roll a new voice — confusing the user
+        # mid-session (e.g. Mr. Radio → Krishna after a compaction).
+        #
+        # The gate is deliberately NOT keyed on is_context_clear: that flag is
+        # True only when the transient session UUID changed, which a compaction
+        # need not do. A session keeps its persona for life, and old_data is
+        # non-None only on a subsequent lifecycle event — never on a genuinely
+        # fresh start (the lockfile is created fresh there, leaving old_data
+        # None). So whenever a prior bridge carries a valid voice_persona dict,
+        # preserve it regardless of whether the transient id rotated.
         # See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §5
-        if is_context_clear and old_data and isinstance( old_data.get( "voice_persona" ), dict ):
+        #      src/rnd/v0.1.7/2026.05.22-voice-persona-request-tool-and-compaction-carry-forward.md
+        if old_data and isinstance( old_data.get( "voice_persona" ), dict ):
             session_data[ "voice_persona" ] = old_data[ "voice_persona" ]
 
         # Defense-in-depth: if the carry-forward above did NOT preserve the
@@ -910,8 +919,9 @@ def main():
     # notifications UI accordion. Sam is reserved as the system default for
     # any TTS request lacking a voice_id (and thus is NOT in the pool).
     #
-    # If voice_persona was carried forward across /clear (set in Phase 2),
-    # skip allocation — the user keeps the same voice across context clears.
+    # If voice_persona was carried forward (set in Phase 2 from a prior bridge),
+    # skip allocation — the user keeps the same voice across any context reset
+    # (/clear, /compact, resume), not just /clear.
     # If allocation fails (server unreachable, auth issue, pool empty), the
     # bridge stays without a persona; the speech router falls back to Sam,
     # exactly today's behavior. No SessionStart blocking.

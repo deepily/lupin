@@ -318,3 +318,63 @@ class TestCarryForwardReadModifyWrite:
         assert bridge[ "another_future_field" ] == { "nested" : True }
         # Fresh session_data still wins for its own keys
         assert bridge[ "session_id" ] == TEST_NEW_SESSION_ID
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestCompactionAndResumeCarryForward — 2026-05-22 carry-forward gate broadening
+# ═════════════════════════════════════════════════════════════════════════════
+# The carry-forward gate at register_session.py:789 was keyed on
+# is_context_clear, which is True only when the transient session UUID changes.
+# A context COMPACTION (and a plain resume / --continue double-fire) can keep
+# the same transient id, leaving is_context_clear False — so the persona was
+# NOT preserved and Phase 4.5 re-rolled a random voice (Mr. Radio → Krishna).
+#
+# The fix drops is_context_clear from the gate: whenever a prior bridge carries
+# a valid voice_persona dict, preserve it regardless of UUID rotation. These
+# tests pin that behavior — the lockfile + bridge carry the SAME id that
+# read_hook_input returns, so is_context_clear stays False.
+#
+# Design: src/rnd/v0.1.7/2026.05.22-voice-persona-request-tool-and-compaction-carry-forward.md
+
+class TestCompactionAndResumeCarryForward:
+    """Carry-forward fires on a same-transient-id lifecycle event (compaction / resume)."""
+
+    def test_compaction_same_id_with_persona_preserves( self, isolated_session_dir, patched_main ):
+        """Same-id event (is_context_clear=False) with persona → persona still carried forward."""
+        # Lockfile + bridge both carry TEST_NEW_SESSION_ID — the id read_hook_input
+        # returns — so old_session_id == session_id → is_context_clear stays False.
+        _write_lockfile( isolated_session_dir, TEST_NEW_SESSION_ID )
+        _write_bridge( isolated_session_dir, {
+            "session_id"        : TEST_NEW_SESSION_ID,
+            "stable_session_id" : TEST_NEW_SESSION_ID,
+            "session_ids"       : [ TEST_NEW_SESSION_ID ],
+            "voice_persona"     : TEST_PERSONA
+        } )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge is not None
+        # Persona preserved despite is_context_clear=False — the regression this fixes
+        assert bridge[ "voice_persona" ] == TEST_PERSONA
+        # Preservation succeeded → release MUST NOT fire, allocation MUST be skipped
+        patched_main[ "_release_voice_persona_via_http" ].assert_not_called()
+        patched_main[ "_allocate_voice_persona_via_http" ].assert_not_called()
+
+    def test_compaction_same_id_without_persona_allocates( self, isolated_session_dir, patched_main ):
+        """Same-id event with NO persona on old bridge → no carry-forward → allocation fires."""
+        _write_lockfile( isolated_session_dir, TEST_NEW_SESSION_ID )
+        _write_bridge( isolated_session_dir, {
+            "session_id"        : TEST_NEW_SESSION_ID,
+            "stable_session_id" : TEST_NEW_SESSION_ID,
+            "session_ids"       : [ TEST_NEW_SESSION_ID ]
+        } )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge is not None
+        assert "voice_persona" not in bridge
+        # No persona to carry → Phase 4.5 allocation runs; release still skipped
+        assert patched_main[ "_allocate_voice_persona_via_http" ].call_count == 1
+        patched_main[ "_release_voice_persona_via_http" ].assert_not_called()

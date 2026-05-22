@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.22 - Session 2ce59c03 (Tiberius 🌑) | Voice persona: `request_persona` MCP tool + compaction carry-forward fix
+
+Triggered by a live observation — the Mr. Radio session went through a context compaction and came back re-allocated as Krishna. Rick asked for two fixes, done in his stated order.
+
+**`request_persona` MCP tool** — new `@mcp.tool` (plus `_request_persona` helper + `_persona_error_detail`) in `cosa_voice_mcp.py`, modeled on the speakerphone-toggle tool. Wraps the existing allocate/swap endpoint with the strict `requested_persona_name` query param; maps `200` → ok, `422` → not_in_pool, `409` → occupied, else → error. No degraded bridge-write fallback — allocation stays behind the server's `_voice_persona_lock`. First MCP-surfaced way to request or reclaim a named persona.
+
+**Compaction carry-forward fix** — the `register_session.py` carry-forward gate was keyed on `is_context_clear`, which is True only when the transient session UUID rotates. A compaction can keep the same id, so the persona was dropped, the defense-in-depth block released it, and Phase 4.5 re-rolled (Mr. Radio → Krishna). Dropped `is_context_clear` from the gate: whenever a prior bridge holds a valid `voice_persona` dict it is preserved — across `/clear`, `/compact`, resume, and `--continue`. The fix is live immediately (SessionStart hooks are re-exec'd per event).
+
+**Verification**: 30/30 unit tests (19 new for the tool, 11 register_session incl. 2 new compaction/resume cases); 38/38 sibling MCP tests pass (no regression); 100% branch coverage on all new code; live E2E against `:7999` exercised the `409 occupied` and `200 ok` response paths.
+
+**Files**: `src/lupin_mcp/cosa_voice_mcp.py`, `src/lupin_cli/claude_code/hooks/register_session.py`, `src/tests/unit/test_cosa_voice_mcp_request_persona.py` (new), `src/tests/unit/test_register_session_preservation.py`, `src/tests/smoke/test_mcp_smoke.py`, `src/rnd/v0.1.7/2026.05.22-voice-persona-request-tool-and-compaction-carry-forward.md` (new), `history.md` (this entry).
+
+---
+
 ### 2026.05.21 - Session 679e8f04 (Mr. Radio 🦉) | Recent Activity filter strip + Focus-bar chronological lock + Master-detail two-pane layout experiment
 
 #### Checkpoint 3 | 2026.05.21 19:10 EDT | Iframe doc-link interception — root-cause fix; master-detail experiment pinned pending cascade review
