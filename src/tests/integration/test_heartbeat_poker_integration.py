@@ -21,8 +21,9 @@ import os
 import pytest
 
 pytestmark = pytest.mark.skip(
-    reason="I6 integration tier — :8000-scheduled; requires HeartbeatPokerJob "
-           "CJ Flow ingestion wiring (see I6 sequencing note). Un-skip when wired."
+    reason="I6 integration tier — :8000-scheduled; run via POST /api/test-suite/submit. "
+           "CJ Flow ingestion wiring landed 2026-05-22 (agentic_job_factory heartbeat_poker "
+           "branch) — the wiring no longer blocks; the skip now reflects venue only."
 )
 
 LUPIN_API_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )

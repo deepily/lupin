@@ -2,6 +2,18 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-12 to 05-15](history/2026-05-12-to-15-history.md). History health: ✅ **HEALTHY at 9,853 tokens (39.4% of 25k)** — archived 2026-05-17 by Tiberius 🌑 (session 2d916480), 31,413 tokens moved to archive.
 
+### 2026.05.22 - Session 76351966 (Rio ⚡) | Heartbeat-poker CJ Flow ingestion wiring (gap-close)
+
+Follow-on to the heartbeat-poker run (commit `cd37c3f`): closed the gap surfaced + escalated during I6 — `HeartbeatPokerJob` was not dispatchable through CJ Flow because `agentic_job_factory` had no `heartbeat_poker` entry. Tiberius assigned the close per Rick's follow-through directive.
+
+**Factory wiring**: added the `agent router go to heartbeat poker` branch to `agentic_job_factory.create_agentic_job()` — parses `recipients` (dict list → `RecipientSpec` list), `termination_signal_kinds` (list or CSV), and the `_parse_optional_int` defaults; constructs the `HeartbeatPokerJob` + a `LupinCommonsGateway`. Added `LupinCommonsGateway.from_environment()` — the production IO-boundary constructor (real `CommonsStore` + API key + `requests`); `# pragma: no cover` with reason (exercised by the :8000 integration tier, not unit-mockable in isolation).
+
+**Tests**: 11 factory-wiring unit tests (`test_agentic_job_factory_heartbeat.py`, new) + 1 factory-dispatch smoke test. Full local heartbeat suite — 78 tests green; both heartbeat modules hold gate-enforced 100% line+branch coverage. Integration + E2E skip-marks updated — the missing-wiring clause dropped (integration now venue-only; E2E now task-I7-only); both collect clean (5 tests, `--collect-only`).
+
+**Files** — parent-Lupin (this commit): `src/tests/integration/test_heartbeat_poker_integration.py`, `src/tests/e2e/test_heartbeat_poker_e2e.py`, `history.md` (this entry). CoSA submodule (committed separately, own context): `heartbeat_poker_commons_gateway.py`, `agentic_job_factory.py`, `test_agentic_job_factory_heartbeat.py`, `test_heartbeat_poker_smoke.py`.
+
+---
+
 ### 2026.05.22 - Session 76351966 (Rio ⚡) | Heartbeat-poker abstraction implementation (10-task run) + TTS limiter boundary-scan fix
 
 Two bodies of work this session.

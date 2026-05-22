@@ -20,7 +20,8 @@ import pytest
 
 pytestmark = pytest.mark.skip(
     reason="I6 E2E tier — :8000-scheduled; exercises the cascade-flavored poker "
-           "preset (task I7) + requires CJ Flow ingestion wiring. Un-skip post-I7."
+           "preset (task I7, operator-gated post-run). CJ Flow ingestion wiring "
+           "landed 2026-05-22; the remaining gate is task I7. Un-skip post-I7."
 )
 
 LUPIN_API_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
