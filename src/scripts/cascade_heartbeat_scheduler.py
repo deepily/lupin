@@ -25,6 +25,7 @@ to the user.
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -62,6 +63,31 @@ def load_api_key( key_path: Path ) -> str:
     return key_path.read_text().strip()
 
 
+def dm_topic_for( manager: str ) -> str:
+    """
+    Build a server-pattern-safe DM topic from a manager persona name.
+
+    Mirrors `lupin_mcp.cosa_voice_mcp._derive_dm_topic` so a daemon-built
+    poke topic is byte-identical to the topic the MCP DM layer routes to —
+    both yield "dm-mr_radio" for "mr radio". Uses the `re.UNICODE` word
+    class so non-ASCII persona names (e.g. "maría") are preserved rather
+    than mangled.
+
+    Requires:
+        - manager is a non-empty string
+
+    Ensures:
+        - return value starts with "dm-"
+        - return value matches the server-side [\\w-]+ (re.UNICODE) pattern
+
+    PG-6 fix (Cascade Run 5): a manager name containing a space — e.g.
+    "mr radio" — previously produced topic "dm-mr radio", which fails the
+    server's [\\w-]+ validation and 422-fails every register-question poke.
+    """
+    slug = re.sub( r"[^\w-]+", "_", manager.strip().lower(), flags=re.UNICODE )
+    return f"dm-{slug}"
+
+
 def fire_heartbeat(
     api_base_url : str,
     api_key      : str,
@@ -71,7 +97,7 @@ def fire_heartbeat(
 ) -> dict:
     """Write a heartbeat entry to dm-<manager>.md + register-question for Phase 3 push."""
     qid   = str( uuid.uuid4() )
-    topic = f"dm-{manager.lower()}"
+    topic = dm_topic_for( manager )
     body  = (
         f"heartbeat-{tick_num} from cascade-scheduler — universal-step-zero: "
         f"disk-read all active topics + dispatch any pending stages"
@@ -178,7 +204,7 @@ def fire_budget_warning(
     a COMMONS PEER MESSAGE system-reminder.
     """
     qid   = str( uuid.uuid4() )
-    topic = f"dm-{manager.lower()}"
+    topic = dm_topic_for( manager )
     body  = f"Section {section} exceeded message budget ({count}/{threshold})"
 
     try:

@@ -41,6 +41,19 @@
 
 ---
 
+## 🎨 NEW — Tiberius persona emoji contrast fix: 🌑 → 👑 (filed 2026-05-21 by Rachel 🕊️, session `e13fed4f`)
+
+**Context**: Rick flagged that Tiberius's persona badge renders as a dark blob. The icon `🌑` (U+1F311 new moon — a near-black filled disc) sits on color `#3F51B5` (Material Indigo 500), giving near-zero contrast. Rick ratified the replacement `👑` (crown) via cosa-voice `ask_multiple_choice` on 2026-05-21 — high-contrast gold-on-indigo, and it reinforces the Roman-Emperor namesake. Investigated read-only from CoSA session `e13fed4f`; INI lines 920-923 confirmed as the culprit.
+
+**The change** (2 paired lines, config-only — no code):
+
+- [ ] **[LUPIN]** `src/conf/lupin-app.ini` (~line 921): `cc session voice persona Tiberius icon` — change `🌑` to `👑`
+- [ ] **[LUPIN]** `src/conf/lupin-app-splainer.ini` (~line 328): update the paired splainer entry — `Default: 👑.` plus a note that it changed from `🌑` on 2026-05-22 for the dark-on-dark contrast fix (per the every-INI-key-needs-a-splainer mandate)
+
+**Ownership note**: this TODO entry was written by a CoSA-context session (`e13fed4f`, Rachel 🕊️) under Rick's explicit voice authorization to cross the CoSA→Lupin boundary *for this TODO file only*. The INI edit itself remains a Lupin-context task — natural owner is Tiberius 🌑 (it is literally his own persona icon, and his session runs in Lupin context) or any Lupin-context session.
+
+---
+
 ## 🟢 RATIFIED — Phase 7 slicing manifest authored + 4 decisions locked (filed 2026-05-20 by Mr. Radio 🦉, session `32a6e563`)
 
 **Filing context**: Manifest at [`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md`](src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md). Tiberius 🌑 (session `387b9201`) greenlit the draft; Rick ratified all 4 decisions via cosa-voice blocking tools 2026-05-20.
