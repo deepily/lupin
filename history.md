@@ -2,6 +2,22 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.05.29 - Session c9c582b7 (Tiberius 👑) | LanceDB rebuild + ~303GB disk reclaim + pgvector migration analysis
+
+**Disk-reclamation campaign (~303GB freed), a corrupted-table rebuild, and a deferred pgvector analysis. On branch `wip-v0.1.8-2026.05.29-preparing-for-gcp-deployment`.**
+
+**LanceDB `input_and_output_tbl` rebuild (~81GB reclaimed, 82GB → 679MB).** The table's version chain was corrupted (a missing/shifting `_versions/<n>.manifest`), so `optimize()` could not compact its ~100k uncompacted append-log versions. Current data was intact (101,521 rows). Rebuilt via new `src/scripts/rebuild_lancedb_table.py` (staged build/swap/backfill/reclaim): verified full backup → DATA02 → snapshot → drop + create fresh single-fragment table → bounce both servers. **Gotcha captured:** `rename_table` is `NotImplementedError` in LanceDB OSS (failed *closed* — caught atomically); the `drop_table`+`create_table`-into-same-dir fallback stranded a stray V1 manifest → mixed V1/V2 schemes → both REST servers crash-looped ~2 min → recovered by quarantining the stray manifest + restart. Lesson logged in TODO.md as a requirement for the durable-scheduled-job swap step.
+
+**~303GB total reclaimed:** ~81GB lancedb rebuild (DATA01) + ~80GB backup-drive re-sync (DATA02 — re-ran `backup.sh --write`, `--delete` removed the stale 80GB copy) + ~142GB Docker (removed superseded `lupin:0.9.0` 130GB image that baked in the old ~80GB DB before `.dockerignore` excluded it, + 12.4GB build cache; orphaned model-server images + unused volumes pruned). Confirmed live `lupin:1.0.0` does NOT bake the DB (layer audit + `.dockerignore`) → **no image rebuild needed.**
+
+**pgvector migration analysis (deferred).** A multi-agent research workflow produced `src/rnd/v0.1.8/2026.05.29-lancedb-to-postgresql-pgvector-migration-analysis.md`: verdict — the 81GB bloat was a missing-compaction-cron problem, NOT a vector-engine problem; "migrate-to-fix-bloat" was adversarially refuted. Revisit logged in TODO.md.
+
+**Files** (this checkpoint, Lupin-parent): `src/scripts/rebuild_lancedb_table.py` (new), `src/rnd/v0.1.8/2026.05.29-lancedb-to-postgresql-pgvector-migration-analysis.md` (new), `src/rnd/README.md` (index: backfilled v0.1.7, added v0.1.8), `TODO.md` (durable scheduled-job persistence task + swap-lesson), `history.md`. **Operational reclaim (lancedb compaction, Docker prune) is not a committable artifact** — this commit captures the reusable tool + analysis + tracking docs. **Not staged:** Krishna's parallel `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md` (his session).
+
+**Commit**: 1fbe9ee
+
+---
+
 ### 2026.05.28 - Session 0da441e6 (Tiberius 🌑) | Extra-N overflow personas + Manager-Spawned Headless Reviewer Sessions
 
 **Two features shipped (Lupin-parent commit; CoSA submodule + INI managed separately).**

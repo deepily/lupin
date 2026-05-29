@@ -18,7 +18,9 @@ Documents are archived into the branch/version where they were completed. Date p
 | [v0.1.3](v0.1.3/) | Jan 29 – Feb 4, 2026 | 11 | 1 | CJ Flow protocol, test remediation, runtime expeditor |
 | [v0.1.4](v0.1.4/) | Feb 5 – Feb 16, 2026 | 29 | 2 | PEFT training, calculator agent, proxy design, SWE team |
 | [v0.1.5](v0.1.5/) | Feb 17 – Mar 11, 2026 | 15 | 3 | Playwright E2E, trust proxy, voice I/O integration |
-| [v0.1.6](v0.1.6/) | Mar 12 – present | 37 | 3 | CJ Flow persistence, timed execution + monopolize + pause, scheduling UI + voice runtime args, presentation generator, test isolation, bug fix expediter, SDK upgrade, Docker non-root user, session-start top-10 briefings |
+| [v0.1.6](v0.1.6/) | Mar 12 – Apr 23, 2026 | 37 | 3 | CJ Flow persistence, timed execution + monopolize + pause, scheduling UI + voice runtime args, presentation generator, test isolation, bug fix expediter, SDK upgrade, Docker non-root user, session-start top-10 briefings |
+| [v0.1.7](v0.1.7/) | Apr 24 – May 28, 2026 | 68 | 25 | CJ Flow async multi-lane, per-session voice personas, TTS solo/chorus interaction mode, inter-session commons, notifications UI JS refactor, bounded Claude Code redesign, manager-spawned reviewers |
+| [v0.1.8](v0.1.8/) | May 29, 2026 – present | 1 | 0 | GCP deployment prep; LanceDB → PostgreSQL/pgvector migration analysis |
 
 **Note**: v0.1.2 was released the same day as v0.1.1 (2026-01-28) — no documents fall in its window.
 
@@ -31,6 +33,6 @@ Documents are archived into the branch/version where they were completed. Date p
 
 ## Adding New Documents
 
-New R&D documents should be placed directly in the **current version directory** (currently `v0.1.6/`). When a new version branch is created, create a new directory for it and place subsequent documents there.
+New R&D documents should be placed directly in the **current version directory** (currently `v0.1.8/`). When a new version branch is created, create a new directory for it and place subsequent documents there.
 
 Naming convention: `YYYY.MM.DD-descriptive-kebab-case-name.md`

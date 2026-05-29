@@ -9,6 +9,16 @@ Feature **v1 is feature-complete + live-validated** (spawn-1-reap-1 passed; coll
 - [ ] **[LUPIN]** Optional next: wire `expected_ack_deadline` into the spawn result (María's §3.3 swap); derive reviewer tmux `name_prefix`/role surfaces if cosmetics matter.
 - Design doc: `src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md` · Runbook (María): `planning-is-prompting/workflow/plan-review-cascaded-on-demand-spawn.md`
 
+## 🗓️ NEW (2026-05-29) — Durable scheduled-job persistence across server bounces
+
+**Problem (Rick, 2026-05-29):** Scheduled jobs (e.g. `/api/test-suite/submit` with `scheduled_at`, plus recurring maintenance like the LanceDB compaction routine) live in **server memory**. Bouncing a server — common when you schedule a night job mid-day then redeploy — silently **loses** all queued/scheduled jobs. Rick wants object permanence: scheduled + recurring jobs must survive restarts.
+
+- [ ] **[LUPIN]** Design a serialization/persistence format for scheduled jobs — both one-shot (`scheduled_at`) and recurring/cron-like — that survives server bounces. **Investigate current state first**: `src/cosa/rest/job_persistence.py`, the test-suite scheduler, the PG-* scheduler, CJ Flow queue persistence. Then design (likely Postgres-backed — `lupin-postgres` is already deployed). **Sequenced AFTER the LanceDB compaction + Krishna coordination** per Rick.
+- [ ] **[LUPIN]** First durable client of the new mechanism: the recurring LanceDB compaction routine (nightly off-peak 12am–9am EDT).
+- [ ] **[LUPIN]** **Swap-step robustness — learned 2026-05-29 during the live `input_and_output_tbl` rebuild (82GB→679MB, ~81GB reclaimed):** a corrupt-version-chain table needs a REBUILD, not `optimize()`. On LanceDB OSS, `rename_table` is `NotImplementedError` (the method exists but fails — fails *closed*, so it's safe). The `drop_table` + `create_table`-into-the-same-dir fallback works BUT can strand a stray V1 `_versions/<n>.manifest` from the dropped table → **mixed V1/V2 manifest schemes → table unreadable → both servers crash-loop on open** (happened; recovered by quarantining the stray manifest + restart). The durable swap MUST: (a) quarantine/clean stray manifests in the target dir before serving, (b) bounce BOTH servers (they hold the table open + voice rides :7999), (c) keep a staged copy + verified backup covering the drop→create window. Reusable tool exists: `src/scripts/rebuild_lancedb_table.py` (staged build/swap/status). This belongs in the pgvector revisit note too (it's concrete evidence the append-log, not the engine, is the problem).
+
+Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`).
+
 ## 🔬 POST-PR (2026-05-29) — Revisit: LanceDB → PostgreSQL/pgvector migration analysis
 
 Tiberius 👑 ran a multi-agent research workflow (`wkiwwi4u4`) on moving semantic-similarity storage off LanceDB. **Verdict: the 81GB "bloat" is stale, uncompacted version history in ONE append-only log table** (`input_and_output_tbl`: 81G `_versions/`, only ~898MB live `data/`) — a missing-compaction-cron problem, NOT a vector-engine problem. The "migrate to fix the disk" premise was **refuted** adversarially. At Lupin's scale (tens of thousands of 768-dim vectors, single node) pgvector vs LanceDB query perf is a wash (both sub-10ms).
