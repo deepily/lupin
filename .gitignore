@@ -75,6 +75,7 @@ src/conf/long-term-memory/question-embeddings-dictionary.pickle
 
 # Re-don't want to track venv!
 venv/**
+/.venv/
 
 # Python web server artifact
 nohup.out
