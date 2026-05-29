@@ -38,9 +38,9 @@ PROJECT_ROOT="$(pwd)"
 INCLUDE_OPUS=false
 INCLUDE_R2P=false
 LOG_FILE="/tmp/presentation-regression-latest.log"
-VENV_ACTIVATE="src/cosa/.venv/bin/activate"
+VENV_ACTIVATE=".venv/bin/activate"
 # Use venv python on host, fall back to system python in Docker container
-VENV_PYTHON="$PROJECT_ROOT/src/cosa/.venv/bin/python3"
+VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
 if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
 PYTEST="$VENV_PYTHON -m pytest"
 

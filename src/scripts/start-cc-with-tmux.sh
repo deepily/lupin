@@ -65,7 +65,7 @@ CLAUDE_ARGS=( "${POSITIONALS[@]:1}" )  # everything after the session name → c
 
 # ── venv + PYTHONPATH provision (see header) ──────────────────────────────────
 LUPIN_ROOT="${LUPIN_ROOT:?LUPIN_ROOT must be set}"
-VENV_ACTIVATE="$LUPIN_ROOT/src/cosa/.venv/bin/activate"
+VENV_ACTIVATE="$LUPIN_ROOT/.venv/bin/activate"
 
 # Build the inner command run inside the tmux pane. Activating the venv (if
 # present) and exporting PYTHONPATH are prefixed so `claude` + its hooks inherit

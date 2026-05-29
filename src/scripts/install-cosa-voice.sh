@@ -102,7 +102,7 @@ else
 fi
 
 # 2. Python venv
-VENV_PYTHON="$LUPIN_ROOT/src/cosa/.venv/bin/python"
+VENV_PYTHON="$LUPIN_ROOT/.venv/bin/python"
 if [ ! -f "$VENV_PYTHON" ]; then
     fail_check "Python venv not found: $VENV_PYTHON"
     echo ""

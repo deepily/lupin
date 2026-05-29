@@ -26,8 +26,8 @@ if [ -z "$LUPIN_ROOT" ]; then
 fi
 
 DOCS_DIR="$LUPIN_ROOT/src/docs/fastapi"
-VENV_PYTHON="$LUPIN_ROOT/src/cosa/.venv/bin/python3"
-API2MD="$LUPIN_ROOT/src/cosa/.venv/bin/openapi-to-markdown"
+VENV_PYTHON="$LUPIN_ROOT/.venv/bin/python3"
+API2MD="$LUPIN_ROOT/.venv/bin/openapi-to-markdown"
 SERVER_URL="http://localhost:7999"
 OPENAPI_URL="$SERVER_URL/openapi.json"
 
