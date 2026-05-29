@@ -38,6 +38,7 @@ if _src_path not in sys.path:
 
 import urllib.request
 import urllib.error
+import urllib.parse
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
@@ -45,6 +46,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
+from cosa.rest.voice_persona_helpers import pick_preferred_persona_from_env
 
 
 def _find_tmux_session( cc_pid ):
@@ -504,6 +506,184 @@ def _check_cosa_voice_status():
     return "\n".join( lines )
 
 
+def _allocate_voice_persona_via_http(
+    server_url, project, stable_session_id,
+    previous_persona_name  = None,
+    preferred_persona_name = None
+):
+    """
+    Allocate a voice persona for the given session by calling the cosa-voice
+    HTTP endpoint at /api/cosa-voice/voice-persona/{sid}/allocate.
+
+    The server endpoint atomically picks an unallocated persona from the pool
+    (under asyncio.Lock), writes it to the bridge file, and broadcasts a
+    voice_persona_assigned WebSocket event.
+
+    Fail-soft: any failure (server unreachable, auth failure, pool empty)
+    logs a warning to stderr and returns None. The session continues
+    without a persona; the speech router will fall back to Sam (the global
+    default voice) on TTS dispatch.
+
+    Requires:
+        - server_url is a non-empty string (e.g. http://localhost:7999)
+        - project is a non-empty string used to look up hook credentials
+        - stable_session_id is a non-empty string
+
+    Ensures:
+        - Returns the persona dict on success
+        - Returns None on any failure (logged to stderr)
+        - Never raises exceptions
+        - Uses 2-second timeouts for both /auth/login and /allocate
+        - When previous_persona_name is non-empty, threads it as a
+          query-string param so the server pushes a "Voice re-assigned"
+          announcement after the assigned broadcast
+        - When preferred_persona_name is non-empty, threads it as a
+          query-string param so the server uses soft-preference semantics
+          (try preferred, fall back to random on miss, push a
+          voice_persona_conflict notification). Used by the env-var
+          default-persona path; mutually exclusive with the strict
+          requested_persona_name swap endpoint.
+
+    Args:
+        server_url: Lupin server URL
+        project: Project key (for credential lookup)
+        stable_session_id: Stable session ID to allocate for
+        previous_persona_name: Optional display_name of the outgoing persona
+            (when /clear preservation failed); causes the server to push a
+            "Voice re-assigned: X → Y" notification on successful allocation
+        preferred_persona_name: Optional persona name from the user's shell
+            env var (`COSA_VOICE_PREFERRED_PERSONA__<PROJECT>`) — soft
+            preference with graceful fallback + conflict notify on miss
+
+    Returns:
+        dict or None: The persona dict, or None on failure
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+        email, password = get_hook_credentials( project )
+
+        # Step 1: login to get JWT
+        login_body = json.dumps( { "email": email, "password": password } ).encode()
+        login_req  = urllib.request.Request(
+            f"{server_url}/auth/login",
+            data    = login_body,
+            method  = "POST",
+            headers = { "Content-Type": "application/json" }
+        )
+        with urllib.request.urlopen( login_req, timeout=2 ) as resp:
+            login_data = json.loads( resp.read().decode() )
+        access_token = login_data.get( "tokens", {} ).get( "access_token" )
+        if not access_token:
+            print( f"[register_session] WARNING: voice persona allocate — login response missing access_token",
+                   file=sys.stderr )
+            return None
+
+        # Step 2: POST /allocate (optionally with previous_persona_name +
+        # preferred_persona_name as query params)
+        alloc_url    = f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate"
+        query_params = []
+        if previous_persona_name:
+            query_params.append( f"previous_persona_name={urllib.parse.quote( previous_persona_name )}" )
+        if preferred_persona_name:
+            query_params.append( f"preferred_persona_name={urllib.parse.quote( preferred_persona_name )}" )
+        if query_params:
+            alloc_url = f"{alloc_url}?{'&'.join( query_params )}"
+
+        alloc_req = urllib.request.Request(
+            alloc_url,
+            data    = b"",  # empty body (endpoint takes session_id from path)
+            method  = "POST",
+            headers = {
+                "Content-Type"  : "application/json",
+                "Authorization" : f"Bearer {access_token}"
+            }
+        )
+        with urllib.request.urlopen( alloc_req, timeout=2 ) as resp:
+            alloc_data = json.loads( resp.read().decode() )
+        return alloc_data.get( "voice_persona" )
+
+    except ( urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError,
+             KeyError, FileNotFoundError, OSError, ValueError ) as e:
+        print( f"[register_session] WARNING: voice persona allocate failed ({type( e ).__name__}: {e})",
+               file=sys.stderr )
+        return None
+
+
+def _release_voice_persona_via_http( server_url, project, stable_session_id ):
+    """
+    Release the currently-allocated voice persona for the given session by
+    calling the cosa-voice HTTP endpoint at
+    /api/cosa-voice/voice-persona/{sid}/release.
+
+    The server endpoint clears the voice_persona field on the bridge file and
+    broadcasts a voice_persona_released WebSocket event. The frontend uses the
+    event to drop the stale persona from senderPersonaMap so subsequent
+    notifications re-hydrate from the freshly-stamped envelope.
+
+    Fail-soft: any failure (server unreachable, auth failure, no persona to
+    release) logs a warning to stderr and returns False. The hook continues
+    with its bridge write either way.
+
+    Requires:
+        - server_url is a non-empty string (e.g. http://localhost:7999)
+        - project is a non-empty string used to look up hook credentials
+        - stable_session_id is a non-empty string
+
+    Ensures:
+        - Returns True on successful POST /release (HTTP 2xx)
+        - Returns False on any failure (logged to stderr)
+        - Never raises exceptions
+        - Uses 2-second timeouts for both /auth/login and /release
+
+    Args:
+        server_url: Lupin server URL
+        project: Project key (for credential lookup)
+        stable_session_id: Stable session ID to release
+
+    Returns:
+        bool: True on success, False on failure
+    """
+    try:
+        from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
+        email, password = get_hook_credentials( project )
+
+        # Step 1: login to get JWT
+        login_body = json.dumps( { "email": email, "password": password } ).encode()
+        login_req  = urllib.request.Request(
+            f"{server_url}/auth/login",
+            data    = login_body,
+            method  = "POST",
+            headers = { "Content-Type": "application/json" }
+        )
+        with urllib.request.urlopen( login_req, timeout=2 ) as resp:
+            login_data = json.loads( resp.read().decode() )
+        access_token = login_data.get( "tokens", {} ).get( "access_token" )
+        if not access_token:
+            print( f"[register_session] WARNING: voice persona release — login response missing access_token",
+                   file=sys.stderr )
+            return False
+
+        # Step 2: POST /release
+        rel_req = urllib.request.Request(
+            f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/release",
+            data    = b"",
+            method  = "POST",
+            headers = {
+                "Content-Type"  : "application/json",
+                "Authorization" : f"Bearer {access_token}"
+            }
+        )
+        with urllib.request.urlopen( rel_req, timeout=2 ) as resp:
+            resp.read()  # drain
+        return True
+
+    except ( urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError,
+             KeyError, FileNotFoundError, OSError, ValueError ) as e:
+        print( f"[register_session] WARNING: voice persona release failed ({type( e ).__name__}: {e})",
+               file=sys.stderr )
+        return False
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -520,7 +700,8 @@ def main():
     session_dir  = os.path.expanduser( "~/.claude/sessions" )
     session_file = None
     old_data     = None
-    is_context_clear = False
+    is_context_clear      = False
+    previous_persona_name = None  # Set when /clear preservation fails AND old bridge had a persona; threaded into Phase 4.5 alloc
 
     if session_id:
         os.makedirs( session_dir, exist_ok=True )
@@ -598,9 +779,102 @@ def main():
             "tmux_session"      : tmux_session,
         }
 
+        # Manager-spawned headless reviewer tagging (2026-05-28). When this
+        # session was launched by the cosa-voice spawn_sessions MCP tool, the
+        # spawn script forwards COSA_VOICE_SPAWNED_BY / COSA_VOICE_HEADLESS /
+        # COSA_VOICE_ROLE into the tmux env. Record lineage + mark headless, and
+        # start the session speakerphone-OFF so its (rare, stray) notify() isn't
+        # spoken — reviewers normally communicate via commons text, and un-muting
+        # one is just enable_speakerphone on its session_id. Fully env-gated:
+        # zero effect on normal interactive sessions (the block only runs when
+        # COSA_VOICE_SPAWNED_BY is present).
+        # See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
+        _spawned_by = os.environ.get( "COSA_VOICE_SPAWNED_BY" )
+        if _spawned_by:
+            session_data[ "spawned_by" ]      = _spawned_by
+            session_data[ "headless" ]        = os.environ.get( "COSA_VOICE_HEADLESS", "" ) == "1"
+            session_data[ "role" ]            = os.environ.get( "COSA_VOICE_ROLE", "reviewer" )
+            session_data[ "speakerphone_on" ] = False
+
+        # Carry voice_persona forward across ANY context reset (/clear,
+        # /compact, resume, --continue double-fire) so the user keeps the same
+        # allocated voice. Without this, the SessionStart that follows the reset
+        # would lose the persona (session_data is rebuilt from scratch above)
+        # and Phase 4.5 would re-roll a new voice — confusing the user
+        # mid-session (e.g. Mr. Radio → Krishna after a compaction).
+        #
+        # The gate is deliberately NOT keyed on is_context_clear: that flag is
+        # True only when the transient session UUID changed, which a compaction
+        # need not do. A session keeps its persona for life, and old_data is
+        # non-None only on a subsequent lifecycle event — never on a genuinely
+        # fresh start (the lockfile is created fresh there, leaving old_data
+        # None). So whenever a prior bridge carries a valid voice_persona dict,
+        # preserve it regardless of whether the transient id rotated.
+        # See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §5
+        #      src/rnd/v0.1.7/2026.05.22-voice-persona-request-tool-and-compaction-carry-forward.md
+        if old_data and isinstance( old_data.get( "voice_persona" ), dict ):
+            session_data[ "voice_persona" ] = old_data[ "voice_persona" ]
+
+        # Defense-in-depth: if the carry-forward above did NOT preserve the
+        # persona but the old bridge had one, explicitly release it via HTTP
+        # before the bridge write below. This emits a voice_persona_released
+        # WS event, prompting the frontend to drop the stale persona from
+        # senderPersonaMap so the about-to-arrive new persona doesn't render
+        # under the old badge. Also captures the outgoing display_name so
+        # Phase 4.5's alloc can request a "Voice re-assigned" announcement.
+        # Fail-soft.
+        if not session_data.get( "voice_persona" ) and old_data and isinstance( old_data.get( "voice_persona" ), dict ):
+            old_persona_dict = old_data[ "voice_persona" ]
+            if isinstance( old_persona_dict.get( "display_name" ), str ):
+                previous_persona_name = old_persona_dict[ "display_name" ]
+            try:
+                _release_project = detect_project()
+            except Exception:
+                _release_project = "lupin"
+            _release_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+            _release_voice_persona_via_http( _release_server_url, _release_project, stable_session_id )
+
+        # Initialize idle_detection block — tracks per-session state for the
+        # deferred "Anything else?" prompt with exponential backoff.
+        # See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+        import datetime as _dt
+        idle_block = {
+            "last_interaction_at" : _dt.datetime.now().astimezone().isoformat( timespec="seconds" ),
+            "backoff_index"       : 0,
+            "waiter_pid"          : None,
+        }
+        # Carry forward backoff_index across /clear (the user shouldn't lose
+        # backoff progression just because they cleared context). Reset
+        # last_interaction_at to now (the clear itself is activity) and
+        # waiter_pid to None (any old waiter is now orphaned and will exit
+        # on its next wake when it sees the new bridge state).
+        if is_context_clear and old_data and isinstance( old_data.get( "idle_detection" ), dict ):
+            old_idle = old_data[ "idle_detection" ]
+            if isinstance( old_idle.get( "backoff_index" ), int ):
+                idle_block[ "backoff_index" ] = old_idle[ "backoff_index" ]
+        session_data[ "idle_detection" ] = idle_block
+
+        # Carry-forward read-modify-write — preserves any bridge fields not in
+        # session_data (e.g., user_id, owner_user_id stamped by the listener
+        # post-SessionStart). Without this merge, a /clear would clobber every
+        # listener-stamped field because session_data is rebuilt from scratch
+        # above and only voice_persona + idle_detection.backoff_index appear in
+        # the explicit carry-forward list. session_data wins for keys it
+        # provides; existing fills in everything else.
+        # See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md §D4 Fix B
         try:
+            existing = { }
+            if os.path.exists( session_file ):
+                try:
+                    with open( session_file ) as f:
+                        existing = json.load( f )
+                    if not isinstance( existing, dict ):
+                        existing = { }
+                except ( json.JSONDecodeError, OSError ):
+                    existing = { }
+            merged = { **existing, **session_data }
             with open( session_file, "w" ) as f:
-                json.dump( session_data, f, indent=2 )
+                json.dump( merged, f, indent=2 )
         except OSError:
             pass  # Best-effort
 
@@ -635,6 +909,81 @@ def main():
                     os.remove( fpath )
     except Exception:
         pass  # Best-effort cleanup
+
+    # ── Phase 4.4: Prune stale persona allocations (host-side only) ──────
+    # Strike dead-PID bridges' voice_persona fields BEFORE allocation runs
+    # so the in-container occupancy scan (which intentionally bypasses the
+    # dead-PID filter — see find_active_voice_persona_sessions) sees a clean
+    # pool. Without this prune, leftovers from prior days accumulate as
+    # "occupied", exhausting the pool at day-start and forcing every new
+    # session into the borrow/overflow path.
+    #
+    # Host-side only: prune_dead_persona_bridges() short-circuits to no-op
+    # when called from inside a container (host PIDs invisible there).
+    #
+    # See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+    try:
+        from lupin_cli.claude_code.hooks.lib.session_bridge import prune_dead_persona_bridges
+        pruned_count = prune_dead_persona_bridges()
+        if pruned_count > 0:
+            print( f"[register_session] Pruned voice_persona on {pruned_count} dead-PID bridge(s)", file=sys.stderr )
+    except Exception as e:
+        print( f"[register_session] WARNING: prune phase failed ({type( e ).__name__}: {e})", file=sys.stderr )
+
+    # ── Phase 4.5: Allocate voice persona (synchronous, fail-soft) ───────
+    # New CC session → assign a uniformly random voice from the 6-voice pool
+    # so the user can audibly distinguish parallel sessions in the
+    # notifications UI accordion. Sam is reserved as the system default for
+    # any TTS request lacking a voice_id (and thus is NOT in the pool).
+    #
+    # If voice_persona was carried forward (set in Phase 2 from a prior bridge),
+    # skip allocation — the user keeps the same voice across any context reset
+    # (/clear, /compact, resume), not just /clear.
+    # If allocation fails (server unreachable, auth issue, pool empty), the
+    # bridge stays without a persona; the speech router falls back to Sam,
+    # exactly today's behavior. No SessionStart blocking.
+    #
+    # Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+    if session_id and "voice_persona" not in session_data:
+        try:
+            project = detect_project()
+        except Exception:
+            project = "lupin"
+        # Per-repo default persona from user's shell env var
+        # `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` — when set, the server
+        # uses soft-preference semantics (try named persona, fall back to
+        # random + conflict notify on miss). When unset, the server falls
+        # back to its existing random-allocation behavior.
+        # See: planning-is-prompting/src/rnd/2026.05.19-cosa-voice-preferred-persona-env-var.md
+        preferred = pick_preferred_persona_from_env( project )
+        # ── TEMPORARY DEBUG (2026-05-19, Tiberius session 4e724860) ─────────
+        # Investigating why LookML hook never successfully allocates a persona
+        # despite the backend chain working when called manually via curl.
+        # Remove once root cause identified.
+        _env_key   = f"COSA_VOICE_PREFERRED_PERSONA__{project.upper().replace( '-', '_' )}"
+        _env_raw   = os.environ.get( _env_key, "<UNSET>" )
+        print( f"[LOOKML-DEBUG] phase4.5 entry — project={project!r} env_key={_env_key!r} env_raw={_env_raw!r} preferred={preferred!r}",
+               file=sys.stderr )
+        try:
+            voice_persona_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
+            print( f"[LOOKML-DEBUG] calling _allocate_voice_persona_via_http — server={voice_persona_server_url!r} sid={stable_session_id!r} preferred={preferred!r}",
+                   file=sys.stderr )
+            allocated = _allocate_voice_persona_via_http(
+                voice_persona_server_url, project, stable_session_id,
+                previous_persona_name  = previous_persona_name,
+                preferred_persona_name = preferred
+            )
+            print( f"[LOOKML-DEBUG] _allocate_voice_persona_via_http returned — allocated={allocated!r}",
+                   file=sys.stderr )
+            if allocated is not None:
+                # The /allocate endpoint already wrote the persona to the
+                # bridge file; no further write needed here.
+                session_data[ "voice_persona" ] = allocated
+        except Exception as e:
+            print( f"[register_session] WARNING: voice persona phase failed ({type( e ).__name__}: {e})",
+                   file=sys.stderr )
+            print( f"[LOOKML-DEBUG] exception in phase4.5 — type={type( e ).__name__} msg={e}",
+                   file=sys.stderr )
 
     # ── Phase 5: Send TTS notification (with explicit sender_id) ────────
     short_id = session_id[:8] if session_id else "unknown"

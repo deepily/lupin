@@ -252,13 +252,26 @@ class ResearchToPresentationLiveSmokeTest( InteractiveSmokeTest ):
             debug    = getattr( args, "proxy_debug", False )
             email    = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_EMAIL" )
             password = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_PASSWORD" )
-            self._start_proxy( debug=debug, email=email, password=password )
-
-            if not self.proxy_running:
-                print( "  ABORT: Proxy failed to start. DR/PR gates would timeout." )
+            try:
+                self._start_proxy( debug=debug, email=email, password=password )
+            except RuntimeError as e:
+                print( f"\n  ABORT: Proxy startup failed — DR/PR gates would timeout (would 503-cascade)." )
+                print( f"  {e}" )
                 _remove_pid_file()
                 return False
         else:
+            # When running under pytest (i.e. scheduled :8000 invocation), there's
+            # no human at the UI to approve the gates — the test would burn its
+            # full 2400s timeout for nothing. Fail fast in <1s so the scheduling
+            # bug is loud and visible. CLI dev mode still gets the warning + manual flow.
+            if os.environ.get( "PYTEST_CURRENT_TEST" ):
+                _remove_pid_file()
+                raise RuntimeError(
+                    "test_research_to_presentation_live requires --auto-proxy when invoked under pytest. "
+                    "The DR + PR gate approvals cannot complete without an auto-answer proxy. "
+                    "Re-submit via /api/test-suite/submit with pytest_args including "
+                    "'--auto-proxy --cost-cap-usd <N>' (e.g. '--auto-proxy --cost-cap-usd 10.00')."
+                )
             print( "\n  WARNING: --auto-proxy not set. Gates will NOT be auto-answered." )
 
         return True

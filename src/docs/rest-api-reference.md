@@ -67,6 +67,7 @@
 |--------|------|------|---------|
 | POST | `/api/push` | JWT | Submit question to processing queue |
 | GET | `/api/get-queue/{queue_name}` | JWT | Get queue contents (user-filtered) |
+| GET | `/api/queue/pool-status` | JWT | CJ Flow agentic-pool state + per-provider API contention (Phase 2 core + Phase 3 `api_resource_manager` enrichment) |
 | POST | `/api/reset-queues` | JWT | Clear all queues for current user |
 | GET | `/api/get-job-interactions/{job_id}` | JWT | Get interaction history for a job |
 | POST | `/api/jobs/{job_id}/message` | JWT | Send message to running job |
@@ -160,18 +161,20 @@
 |--------|------|------|---------|
 | POST | `/api/deep-research-to-podcast/submit` | JWT | Submit chained research + podcast job |
 
-## 14. Claude Code (`/api/claude-code/*`)
+## 14. Claude Code (`/api/claude-code/*`) — RETIRED 2026-05-05
 
-| Method | Path | Auth | Summary |
-|--------|------|------|---------|
-| POST | `/api/claude-code/dispatch` | Public | Dispatch Claude Code task |
-| POST | `/api/claude-code/{task_id}/inject` | Public | Inject message into session |
-| POST | `/api/claude-code/{task_id}/interrupt` | Public | Interrupt running session |
-| POST | `/api/claude-code/{task_id}/end` | Public | End session |
-| GET | `/api/claude-code/{task_id}/status` | Public | Get task status |
-| WebSocket | `/api/claude-code/ws/{task_id}` | Public | Stream task output |
+> **Retired endpoints.** The legacy direct-dispatch + interactive-control cluster was eliminated on 2026-05-05 due to four catalogued structural defects (URL contract mismatch, no auth, module-level state, parallel pre-cj-flow path). Use **Section 15 (`/api/claude-code/queue/submit`)** instead — it is JWT-authenticated and rides the standard CJ Flow + WebSocketManager dispatch plane. See `src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/01-plan.md`.
 
-## 15. Claude Code Queue
+| Method | Path | Status |
+|--------|------|--------|
+| POST | `/api/claude-code/dispatch` | ❌ Retired 2026-05-05 → use `/api/claude-code/queue/submit` |
+| POST | `/api/claude-code/{task_id}/inject` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
+| POST | `/api/claude-code/{task_id}/interrupt` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
+| POST | `/api/claude-code/{task_id}/end` | ❌ Retired 2026-05-05 → INTERACTIVE control parity pending on cj-flow path |
+| GET | `/api/claude-code/{task_id}/status` | ❌ Retired 2026-05-05 → use job-card status via CJ Flow accordion |
+| WebSocket | `/api/claude-code/ws/{task_id}` | ❌ Retired 2026-05-05 → progress now arrives via `/ws/queue/{session_id}` notifications keyed by `cc-*` job_id |
+
+## 15. Claude Code Queue (active path)
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
@@ -214,6 +217,55 @@ TFE is submitted via the generic `/api/push` endpoint using the agent router com
 | POST | `/api/push` | JWT | Submit TFE job with `question = "agent router go to test fix expediter"` and `args = { remediation_snapshot_path, source_test_suite_job_id, original_test_types (comma-separated), original_pytest_args (optional), dry_run (optional) }`. Returns `{ job_id }` with `tfe-` prefix. |
 
 Watchdog auto-dispatch: requires `test fix expediter auto fix enabled = true` in `lupin-app.ini`. See the TFE guide for full INI reference (16 keys), six-phase pipeline, and the `TestSuiteCompletionWatchdog` eligibility gates.
+
+## 17c. Inter-Session Commons (`/api/commons/*`)
+
+> **Deep-dive**: See [`../rnd/v0.1.7/2026.05.09-inter-session-commons/`](../rnd/v0.1.7/2026.05.09-inter-session-commons/) (design + execution log) and [`notification-types.md`](notification-types.md) §`commons_broadcast_ack` for the ack notification contract.
+
+The commons subsystem layers two related capabilities on the same file-backed transport (`<LUPIN_ROOT>/io/commons/*.md`):
+
+1. **Session ↔ Session commons** — Claude Code instances post / read from a shared blackboard via the 5 cosa-voice MCP tools (`commons_post`, `commons_read`, `commons_who`, `commons_ask_sync`, `commons_ask_async`).
+2. **User → All Sessions broadcast** — single message from the notifications UI fans out to every active CC session belonging to the authenticated user, with persona-aware directive parsing (`@PersonaName:` lines).
+
+The endpoints below cover surface #2. The MCP tools are surface #1 and are not REST endpoints.
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| GET    | `/api/commons/active-sessions`           | JWT | Returns same-user-scoped active CC sessions for the broadcast recipient preview. Same-user filter (per `user_id` on each bridge file) + freshness filter (`commons broadcast active session threshold seconds`, default 600). Response: `{ sessions: [{ session_id, persona_name, persona_icon, persona_color, last_seen_iso, speakerphone_on }] }`. Never leaks bridge filesystem paths. |
+| POST   | `/api/commons/broadcast-to-cc-sessions`  | JWT | Fans out a message to every active CC session belonging to the caller. Body: `{ message, broadcast_id?, require_ack=true, include_originator=true }`. Rate-limited at 1 broadcast per `commons broadcast rate limit seconds` (default 30) per `user_id`; exceeded → `HTTP 429` with `Retry-After` header. Body containing literal `<system-reminder>` / `</system-reminder>` substring → `HTTP 400`. Caller-supplied `broadcast_id` colliding with an in-flight broadcast → `HTTP 409`. Zero recipients → `HTTP 200` with `status="no-active-sessions"`. Success → `HTTP 200` with `{ broadcast_id, recipients, failed_recipients, status="queued" }`. When `require_ack=true`, downstream `commons_broadcast_ack` notifications stream in via the existing `notification_queue_update` envelope as each recipient listener acks. |
+| GET    | `/api/commons/broadcast-history`         | JWT | **NEW 2026-05-14** — Aggregates entries across all commons topics (minus the configurable blacklist; defaults to `presence` + `system-events` per Q5) and returns them newest-first, scoped to the authenticated user. Powers the broadcast-card Recent Activity admin-oversight stream (Phase 2.5/3.5). Query params: `since` (ISO cutoff), `hours` (back-window from now; e.g. `today`-equivalent), `limit` (default 200; capped server-side by `commons traffic visibility max entries per response`, default 1000). Response: `{ entries: [{ ts, topic, topic_kind: "reserved"\|"free-form", sender_session_id, persona_name, persona_icon, persona_color, body, metadata }], since_used, next_cursor }`. When the master INI flag `commons traffic visibility enabled` is False, returns `{ entries: [], since_used: null, next_cursor: null, disabled: true }`. Same-user scoping mirrors `/active-sessions`: graceful-degradation for un-stamped legacy bridges (`owner_user_id == None` passes through). Design: [`../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`](../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md). |
+
+### Broadcast directive parsing
+
+`message` body is free-form text with optional `@PersonaName:` directive lines:
+
+```text
+Run the daily smoke check on master.
+@Maria: also re-baseline the visual snapshots.
+```
+
+Default lines (no leading `@`) apply to every recipient. `@PersonaName:` lines apply only to sessions whose persona matches (case-insensitive + punctuation-tolerant per `commons_persona_matcher.match_persona`). `@all:` / `@everyone:` aliases match the default scope. Sessions whose persona doesn't match any `@` line — and the body has no default lines — ack with `status="skipped"`.
+
+### Ack flow
+
+When `require_ack=true`:
+
+1. Server registers the `broadcast_id` in the `CommonsAckWatcher` in-flight tracker (5-min TTL).
+2. Per-recipient fanout writes one entry to the `broadcasts` reserved topic + pushes one `user_initiated_message` notification with `title="action:broadcast_received"` to each listener.
+3. Each listener's `_handle_action()` dispatcher routes to `broadcast_handler.handle_broadcast()`, which parses the directive, injects the effective text as a `<system-reminder>` block, and posts an ack to the `broadcast-acks` reserved topic.
+4. `CommonsAckWatcher` daemon (poll every `commons broadcast ack watch interval seconds`, default 1) tails `broadcast-acks` and dispatches one `commons_broadcast_ack` notification per ack to the originating user — see [`notification-types.md`](notification-types.md) for the payload shape.
+
+When `require_ack=false`: steps 1–3 still happen, but no acks fan back to the user — the watcher's in-flight tracking is skipped for this broadcast.
+
+### INI configuration
+
+| Key | Default | Effect |
+|---|---|---|
+| `commons broadcast rate limit seconds` | `30` | Per-user sliding-window rate limit |
+| `commons broadcast active session threshold seconds` | `600` | Inactivity threshold (s) — sessions older than this are excluded from fanout |
+| `commons broadcast ack watch interval seconds` | `1` | Poll period for the `CommonsAckWatcher` daemon |
+
+Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 
 ## 18. Decision Proxy (`/api/proxy/*`)
 
@@ -292,6 +344,14 @@ Watchdog auto-dispatch: requires `test fix expediter auto fix enabled = true` in
 | `/app/admin/proxy-ratify` | Proxy ratification |
 | `/app/admin/proxy-dashboard` | Trust dashboard |
 | `/app/admin/dev-tools` | Developer tools |
+
+## 24. Multiplexer (`/api/multiplexer/*`)
+
+> Front-end client-config exposer. Returns display-tuning values fetched once at boot by `/static/js/multiplexer/boot.ts`. No auth required (display tuning, no PII or state).
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| GET | `/api/multiplexer/config` | None | Multiplexer client-config (boot-time tuning values) |
 
 ---
 

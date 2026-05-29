@@ -180,6 +180,15 @@ class SweTeamProxySmokeTest( InteractiveSmokeTest ):
 
         # Handle cancellation
         if data.get( "status" ) == "cancelled":
+            notif_status = config.get( "notification_status" )
+            # Re-classify HTTP infra failures (e.g. http_error_503 from /api/notify)
+            # as a distinct "infra_error" status — these are NOT user cancellations.
+            if notif_status and notif_status.startswith( "http_error_" ):
+                return {
+                    "status"         : "infra_error",
+                    "answer_preview" : "",
+                    "details"        : f"Infra failure: notification dispatch returned {notif_status} (proxy unreachable or /api/notify down)",
+                }
             if scenario.get( "expect_cancel" ):
                 return {
                     "status"         : "pass",
@@ -331,10 +340,12 @@ class SweTeamProxySmokeTest( InteractiveSmokeTest ):
             debug    = getattr( args, "proxy_debug", False )
             email    = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_EMAIL" )
             password = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_PASSWORD" )
-            self._start_proxy( debug=debug, email=email, password=password )
-
-            if not self.proxy_running:
-                print( "  WARNING: Proxy failed to start. Scenarios may timeout." )
+            try:
+                self._start_proxy( debug=debug, email=email, password=password )
+            except RuntimeError as e:
+                print( f"\n  ABORT: Proxy startup failed — refusing to run scenarios without a proxy (would 503-cascade)." )
+                print( f"  {e}" )
+                return False
 
         return True
 

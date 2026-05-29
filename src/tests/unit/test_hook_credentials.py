@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from lupin_cli.claude_code.hooks.lib.hook_credentials import (
     get_hook_credentials,
+    get_owner_credentials,
     _derive_project_name,
     _read_credentials_from_file,
     CREDENTIALS_FILE,
@@ -183,3 +184,74 @@ class TestConstants:
     def test_credentials_file_points_to_unified_config( self ):
         """Test that CREDENTIALS_FILE points to ~/.lupin/config."""
         assert CREDENTIALS_FILE == Path.home() / ".lupin" / "config"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestGetOwnerCredentials — writer-side follow-up to 2026-05-14 Option C
+# ═════════════════════════════════════════════════════════════════════════════
+# Per src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
+# §D1: the HUMAN owner's credentials live in `~/.lupin/config[owner]`. Distinct
+# from per-project SERVICE-account credentials read by get_hook_credentials.
+
+class TestGetOwnerCredentials:
+    """Test suite for get_owner_credentials() function."""
+
+    def test_reads_owner_section_from_unified_config( self, tmp_path ):
+        """Test reading owner credentials from [owner] section."""
+        config_file = tmp_path / 'config'
+        config_file.write_text( """[lupin]
+email = service@lupin.deepily.ai
+password = service-pass
+
+[owner]
+email = ricardo.felipe.ruiz@gmail.com
+password = owner-pass
+""" )
+
+        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', config_file ):
+            email, password = get_owner_credentials()
+
+            assert email    == "ricardo.felipe.ruiz@gmail.com"
+            assert password == "owner-pass"
+
+    def test_raises_file_not_found_when_config_missing( self, tmp_path ):
+        """Test FileNotFoundError when ~/.lupin/config doesn't exist."""
+        nonexistent = tmp_path / 'config'
+
+        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', nonexistent ):
+            with pytest.raises( FileNotFoundError, match="~/.lupin/config not found" ):
+                get_owner_credentials()
+
+    def test_raises_value_error_when_owner_section_missing( self, tmp_path ):
+        """Test ValueError when [owner] section not found."""
+        config_file = tmp_path / 'config'
+        config_file.write_text( """[lupin]
+email = service@lupin.deepily.ai
+password = service-pass
+""" )
+
+        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', config_file ):
+            with pytest.raises( ValueError, match="No \\[owner\\] section found" ):
+                get_owner_credentials()
+
+    def test_raises_value_error_for_missing_owner_email( self, tmp_path ):
+        """Test ValueError when [owner] email key is missing."""
+        config_file = tmp_path / 'config'
+        config_file.write_text( """[owner]
+password = owner-pass
+""" )
+
+        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', config_file ):
+            with pytest.raises( ValueError, match="Missing 'email'" ):
+                get_owner_credentials()
+
+    def test_raises_value_error_for_missing_owner_password( self, tmp_path ):
+        """Test ValueError when [owner] password key is missing."""
+        config_file = tmp_path / 'config'
+        config_file.write_text( """[owner]
+email = ricardo.felipe.ruiz@gmail.com
+""" )
+
+        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', config_file ):
+            with pytest.raises( ValueError, match="Missing 'password'" ):
+                get_owner_credentials()

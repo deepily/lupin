@@ -150,12 +150,13 @@ class TestDropdownRendering:
         _inject_sandbox( logged_in_page )
         assert logged_in_page.locator( "#e2e-sandbox .resume-effort-select option" ).count() == 6
 
-    def test_default_model_is_opus_4_7( self, logged_in_page ):
+    def test_default_model_is_sonnet_4_6( self, logged_in_page ):
+        # Default flipped Opus 4.7 → Sonnet 4.6 on 2026-04-22 (Session b486e9dc) per matrix 23-*.
         _nav_notifications( logged_in_page )
         _clear_prefs( logged_in_page )
         _inject_sandbox( logged_in_page )
         value = logged_in_page.locator( "#e2e-sandbox .resume-model-select" ).input_value()
-        assert value == "claude-opus-4-7"
+        assert value == "claude-sonnet-4-6"
 
     def test_default_effort_is_high( self, logged_in_page ):
         _nav_notifications( logged_in_page )

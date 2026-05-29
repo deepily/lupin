@@ -1,3 +1,39 @@
+## THE USER IS NEVER A TESTER
+
+The user is (1) the architect/designer and (2) the end user. They are
+NEVER the tester. Before declaring any piece of work "done" — or inviting
+the user to try the software — YOU must:
+
+1. Execute every verification layer yourself: py_compile, unit, smoke,
+   WebSocket smoke, E2E UI, integration, and any protocol E2E written
+   into a design doc.
+
+2. Report results, not requests. A "done" claim without executed and
+   passing verification is a bug.
+
+3. "Manual E2E" in any doc means "not yet in pytest" — it does NOT mean
+   "the user does it." You execute protocol E2Es via the dev :7999 server's
+   API (submit via /api/push, poll /api/get-queue/done, read
+   /api/queue/pool-status, observe WebSocket events).
+
+4. If a step genuinely requires human judgment (visual pixel comparison
+   in a subjective sense, UX intent), name that explicitly and ASK —
+   do not silently defer.
+
+5. The :8000 test-server protocol is SEPARATE from "user is never a
+   tester" — it's MONOPOLIZE-MODE COLLISION AVOIDANCE, not tester duty
+   and not budget approval. Rules:
+   - :7999 (dev) — unrestricted. AI runs smoke, regressions, ad-hoc
+     probes without asking.
+   - :8000 (test) — all non-unit tests run in monopolize mode, one at
+     a time. NEVER inject via ad-hoc API / curl / CLI (side-door
+     injection collides with in-flight scheduled tests and poisons both
+     runs). Submit ONLY via /api/test-suite/submit with a scheduled_at
+     that does not overlap other scheduled tests. Ask the user first
+     so they can confirm the slot is clean — the user has visibility
+     into the schedule that the AI does not. The ask is slot
+     availability, never budget approval.
+
 ## Technology Warnings
 - Flask Is deprecated. DO NOT use, ever!
 

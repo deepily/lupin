@@ -1,7 +1,16 @@
-# PostgreSQL data directories (Docker volumes - should not be in image)
-src/conf/long-term-memory/postgresql-dev-data
-src/conf/long-term-memory/postgresql-dev-data/**
+# Postgres data directory was relocated outside the build context on 2026-04-30
+# (now at /mnt/DATA01/include/www.deepily.ai/projects/lupin-data/postgresql-dev-data),
+# so BuildKit no longer needs ignore patterns for it. Keep .lancedb.backup-* exclusion.
 src/conf/long-term-memory/*.lancedb.backup-*
+
+# Lance DB — NEVER baked into the image (was 41 GB of dead weight in lupin:0.9.0).
+# Sourced at runtime from the host bind-mount in docker-compose.yml (./src),
+# or from GCS-FUSE in production (Tier 3, separate PR).
+src/conf/long-term-memory/lupin.lancedb
+src/conf/long-term-memory/lupin.lancedb/
+src/conf/long-term-memory/lupin.lancedb/**
+**/lupin.lancedb
+**/lupin.lancedb/**
 
 # Runtime bind-mount dirs (container writes here; never COPY'd into image)
 # Excluded to avoid "permission denied" on container-owned files during build context send.

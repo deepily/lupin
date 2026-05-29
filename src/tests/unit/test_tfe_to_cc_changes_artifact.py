@@ -344,7 +344,8 @@ class TestHarnessCLI:
                              choices=[ "low", "medium", "high", "xhigh", "max", "none" ] )
         parser.add_argument( "--max-budget-usd", type=float, default=None )
         args = parser.parse_args( [] )
-        assert args.model          == "claude-opus-4-7"
+        # Default model flipped Opus 4.7 → Sonnet 4.6 on 2026-04-22 per matrix 23-* (Session b486e9dc)
+        assert args.model          == "claude-sonnet-4-6"
         assert args.effort         == "high"
         assert args.max_budget_usd is None
 
@@ -355,7 +356,7 @@ class TestHarnessCLI:
         with pytest.raises( SystemExit ):
             parser.parse_args( [ "--effort", "turbo" ] )
 
-    def test_production_default_is_opus( self, harness ):
-        """Contract: harness ships with Opus 4.7 as the production default."""
-        assert harness.DEFAULT_MODEL  == "claude-opus-4-7"
+    def test_production_default_is_sonnet( self, harness ):
+        """Contract: harness ships with Sonnet 4.6 as the production default (Session b486e9dc, 2026-04-22)."""
+        assert harness.DEFAULT_MODEL  == "claude-sonnet-4-6"
         assert harness.DEFAULT_EFFORT == "high"

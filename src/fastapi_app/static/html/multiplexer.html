@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Multiplexer</title>
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/action-required.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/tts-chrome.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/conversation-mode-pin.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/focus-tray.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/persona-modal.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/purify.min.js"></script>
+</head>
+<body>
+    <main class="container">
+        <h1>Multiplexer</h1>
+
+        <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
+        <section id="notifications-pane" class="notifications-pane"
+                 data-testid="multiplexer-notifications-pane">
+            <!-- Phase 6c Node B mount point (Step B1): focus-mode toggle at
+                 top of notifications-pane. FocusTrayRenderer lifts the hidden
+                 + data-phase6-pending markers when it mounts; until then the
+                 toggle is inert. -->
+            <button id="focus-mode-toggle" type="button"
+                    data-testid="multiplexer-focus-mode-toggle"
+                    data-phase6-pending="true" hidden>Focus mode OFF</button>
+            <!-- D-L: action-required widgets render here, ABOVE sender cards -->
+            <div id="action-required-section"
+                 data-testid="multiplexer-action-required-section"></div>
+            <!-- D-L: sender cards render here, BELOW action-required widgets -->
+            <div id="sender-cards-container"
+                 data-testid="multiplexer-sender-cards"></div>
+        </section>
+
+        <!-- Phase 6a jobs-pane (lit up 2026-05-06; data-phase6-pending lifted on mount) -->
+        <section id="jobs-pane"
+                 data-testid="multiplexer-jobs-pane">
+            <header class="jobs-pane-header">
+                <h2>Jobs</h2>
+                <button class="jobs-pane-history-load"
+                        data-testid="multiplexer-jobs-load-history">Load history</button>
+            </header>
+            <div id="jobs-buckets-container"
+                 data-testid="multiplexer-jobs-buckets"></div>
+        </section>
+
+        <!-- Phase 6b mount point (Q-L pre-add — TTS chrome lands in 6b) -->
+        <section id="tts-pane" hidden
+                 data-testid="multiplexer-tts-pane"
+                 data-phase6-pending="true"></section>
+
+        <!-- Phase 6c Node B mount point (Step B1): focus-tray container.
+             FocusTrayRenderer populates this with .focus-tray-row buttons
+             when focus mode is active; lifts hidden + data-phase6-pending
+             when it mounts. -->
+        <aside id="focus-tray" data-testid="multiplexer-focus-tray"
+               data-phase6-pending="true" hidden></aside>
+
+        <!-- Phase 6c Node A mount point (Step A5): persona-modal portal.
+             PersonaModalRenderer appends one <div popover> per sender with a
+             voice persona; each popover's id matches the popovertarget on
+             the corresponding .sender-persona-badge button in the sender
+             card header. -->
+        <div id="persona-modal-portal" data-testid="multiplexer-persona-modal-portal"></div>
+    </main>
+    <script type="module" src="/static/dist/multiplexer/boot.js"></script>
+</body>
+</html>

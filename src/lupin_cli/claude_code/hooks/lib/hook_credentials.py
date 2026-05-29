@@ -91,6 +91,61 @@ def get_hook_credentials( project: Optional[str] = None ) -> Tuple[str, str]:
     )
 
 
+def get_owner_credentials() -> Tuple[str, str]:
+    """
+    Resolve the HUMAN OWNER's credentials from ~/.lupin/config [owner] section.
+
+    Writer-side follow-up to the 2026-05-14 Option C design. Used by
+    cc_notification_listener._stamp_owner_user_id_on_bridge to resolve the
+    human owner's user_id via /auth/login and stamp it on the bridge file.
+
+    Distinct from `get_hook_credentials()`: that returns the per-PROJECT
+    SERVICE-account credentials used for the listener's OWN login (e.g.,
+    `claude.code@lupin.deepily.ai`). This returns the HUMAN owner's
+    credentials (e.g., `ricardo.felipe.ruiz@gmail.com`), which is what
+    the broadcast UI's same-user filter actually compares against.
+
+    INI section shape:
+        [owner]
+        email = <human_owner_email>
+        password = <human_owner_password>
+
+    See: src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
+
+    Requires:
+        - ~/.lupin/config exists
+        - INI file has an [owner] section with non-empty email + password keys
+
+    Ensures:
+        - Returns ( email, password ) tuple on success
+        - Raises FileNotFoundError if ~/.lupin/config not found
+        - Raises ValueError if [owner] section or required keys are missing
+
+    Returns:
+        Tuple[str, str]: ( email, password )
+
+    Raises:
+        FileNotFoundError: If no credentials file exists
+        ValueError: If [owner] section or required keys not found
+    """
+    if not CREDENTIALS_FILE.exists():
+        raise FileNotFoundError(
+            f"~/.lupin/config not found.\n"
+            f"Create it with: lupin-config init\n"
+            f"Or migrate from legacy files: lupin-config migrate"
+        )
+
+    result = _read_credentials_from_file( CREDENTIALS_FILE, "owner" )
+    if result is not None:
+        return result
+
+    raise ValueError(
+        f"No [owner] section found in {CREDENTIALS_FILE}\n"
+        f"Add an [owner] section with 'email' and 'password' keys for the human owner.\n"
+        f"This is distinct from the per-project service-account credentials."
+    )
+
+
 def _read_credentials_from_file( file_path: Path, project: str ) -> Optional[Tuple[str, str]]:
     """
     Read credentials for a project from a specific INI file.
@@ -166,3 +221,12 @@ if __name__ == "__main__":
         print( f"Password: {'*' * len( password )}" )
     except ( FileNotFoundError, ValueError ) as e:
         print( f"Error: {e}" )
+
+    print()
+    print( f"--- Owner credentials ([owner] section) ---" )
+    try:
+        owner_email, owner_password = get_owner_credentials()
+        print( f"Owner email: {owner_email}" )
+        print( f"Owner password: {'*' * len( owner_password )}" )
+    except ( FileNotFoundError, ValueError ) as e:
+        print( f"Owner error: {e}" )

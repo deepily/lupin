@@ -69,12 +69,14 @@ class InteractiveSmokeTest( LivePipelineTestBase, EmbeddedProxyMixin ):
             debug    = getattr( args, "proxy_debug", False )
             email    = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_EMAIL" )
             password = os.environ.get( f"{self.CREDENTIAL_ENV_PREFIX}_PASSWORD" )
-            self._start_proxy( debug=debug, email=email, password=password )
-
-            if not self.proxy_running:
-                print( "  WARNING: Proxy failed to start. Interactive scenarios may timeout." )
-                print( "  You can run the proxy manually in a separate terminal:" )
+            try:
+                self._start_proxy( debug=debug, email=email, password=password )
+            except RuntimeError as e:
+                print( f"\n  ABORT: Proxy startup failed — refusing to run interactive scenarios without a proxy (would 503-cascade)." )
+                print( f"  {e}" )
+                print( f"\n  You can run the proxy manually in a separate terminal:" )
                 print( f"    python -m cosa.agents.notification_proxy --profile {self.PROXY_PROFILE} --debug" )
+                return False
 
         return True
 

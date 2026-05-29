@@ -193,7 +193,6 @@ def test_list_users_pagination( admin_headers, multiple_test_users):
     assert data2["offset"] == 2
 
 
-@pytest.mark.xfail( reason="multiple_test_users fixture returns [] due to passlib/bcrypt version mismatch (bcrypt.__about__ missing)" )
 def test_list_users_search_filter( admin_headers, multiple_test_users):
     """
     Test search filter by email.
@@ -328,7 +327,6 @@ def test_update_user_roles_add_admin( admin_headers, create_test_user):
     assert "admin" in data["user"]["roles"]
 
 
-@pytest.mark.xfail( reason="multiple_test_users fixture returns [] due to passlib/bcrypt version mismatch (bcrypt.__about__ missing)" )
 def test_update_user_roles_remove_admin( admin_headers, multiple_test_users):
     """
     Test demoting admin to user.

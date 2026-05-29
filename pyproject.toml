@@ -1,0 +1,147 @@
+# ============================================================================
+# Lupin — Python project metadata and dependency declaration
+#
+# Generated as part of the Tier 0+1 Dockerfile hygiene pass (2026-04-26).
+# See: src/rnd/v0.1.7/2026.04.26-dockerfile-cpython-3.11.9-upgrade-to-3.13.13.md
+#
+# Pinning policy (per the expert plan):
+#   - Pin EXACTLY: torch, flash-attn, autoawq (ABI-locked native code)
+#   - Range-pin everything else with an upper bound on the next major
+#   - Existing exact pins from the prior Dockerfile are preserved here so
+#     this PR does not mix Python-version migration with version-bump risk
+#
+# Lockfile is generated via:
+#   docker run --rm -v "$PWD:/work" -w /work ghcr.io/astral-sh/uv:0.8 uv lock
+# ============================================================================
+
+[project]
+name            = "lupin"
+version         = "0.0.0"
+description     = "Lupin: AI agent platform"
+requires-python = ">=3.13,<3.14"
+
+dependencies = [
+  # --- Core ML / inference (ABI-locked exact pins) ---
+  "torch==2.6.0",                         # exact pin — avoids PEP 440 local-segment ambiguity (`+cu124` vs `+cpu`)
+  "autoawq>=0.2.6",                       # range: 0.2.6 has no cp313 wheels; let resolver pick
+  # flash-attn declared in main deps; built non-isolated via [tool.uv] below
+
+  # --- ML libraries ---
+  "transformers>=4.46,<5",
+  "accelerate>=1,<2",
+  "huggingface_hub>=0.26,<1",
+  "sentence-transformers==5.2.2",
+
+  # --- LLM clients / orchestration ---
+  "openai>=1.50,<2",
+  "google-generativeai>=0.8,<1",
+  "groq>=0.11,<1",
+  "claude-agent-sdk==0.1.56",
+  "fastmcp==2.14.2",
+
+  # --- Data / search / memory ---
+  "lancedb>=0.13,<1",
+  "pylance==0.36.0",
+  "kagiapi",
+  "tantivy",
+  "llama-index==0.14.14",
+  "llama-index-embeddings-nomic==0.7.1",
+
+  # --- Web framework ---
+  "fastapi>=0.115,<1",
+  "pydantic[email]>=2.9,<3",
+  "pydantic-ai==0.6.2",                   # 2026-04-28: dropped [slim] — pydantic-ai==0.6.2 has
+                                          # NO `slim` extra at the meta-package level (per PyPI
+                                          # metadata); the 14 sub-extras are already pulled in
+                                          # transitively via pydantic-ai-slim. Old uv lock writer
+                                          # was permissive about unknown extras; uv 0.8.x's
+                                          # --locked check now enforces consistency. See
+                                          # src/rnd/v0.1.7/2026.04.28-uv-lock-pydantic-ai-slim-extra-mismatch.md
+
+  # --- Database ---
+  "sqlalchemy==2.0.40",
+  "psycopg2-binary==2.9.11",
+  "alembic==1.18.1",
+
+  # --- Auth (some pins are pre-3.13-wheel-era; bump if uv lock fails) ---
+  "PyJWT==2.10.1",
+  "passlib==1.7.4",
+  "bcrypt==4.3.0",                        # pinned at 4.3.0 (last 4.x, cp313 wheels) — 5.x breaks passlib 1.7.4 (__about__ removed); see io/plans/2026.04.29-bcrypt-passlib-version-mismatch-plan.md
+  "cffi==2.0.0",
+  "pycparser==2.23",
+
+  # --- NLP / parsing ---
+  "spacy[lookups]>=3.7,<4",
+  "scikit-learn>=1.5,<2",
+  "tiktoken>=0.7,<1",
+  "xmlschema>=3.4,<4",
+  "xmltodict==0.14.2",
+  "lxml>=5,<6",                           # xmlschema's optional fast parser; required by CalendaringAgent
+                                          # (was in src/cosa/requirements.txt but uv sync builds from
+                                          # pyproject.toml + uv.lock, so the dep was never reaching the image)
+
+  # --- Audio / media ---
+  "pyaudio>=0.2,<1",
+  "pydub==0.25.1",
+  "audioop-lts; python_version >= '3.13'", # Python 3.13 removed stdlib audioop;
+                                           # pydub 0.25.1 imports it. This is the
+                                           # community-maintained drop-in shim.
+
+  # --- Visualization ---
+  "seaborn==0.13.2",
+  "pillow==11.1.0",
+  "pixelmatch==0.4.0",
+
+  # --- Utilities ---
+  "pandas>=2.2,<3",
+  "pyperclip>=1.9,<2",
+  "tabulate>=0.9,<1",
+
+  # --- Build helpers (kept in main env; flash-attn build needs ninja+packaging) ---
+  "wheel",
+  "packaging",
+  "ninja",
+
+  # --- Native ML build (ABI-locked; built non-isolated, see [tool.uv] below) ---
+  "flash-attn>=2.8.3",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.4.2",
+  "pytest-asyncio==1.2.0",
+  "pytest-cov>=7.0.0",
+  "pytest-playwright==0.7.2",
+  "pytest-playwright-visual-snapshot==0.5.1",
+]
+
+# flash-attn ABI-locked declaration so uv resolver doesn't try to fetch
+# its full requires-dist tree from PyPI metadata (which would re-pull
+# `torch` from default PyPI = cu130 wheels and break our cu124 lock).
+[[tool.uv.dependency-metadata]]
+name         = "flash-attn"
+version      = "2.8.3"
+requires-dist = ["torch", "einops"]
+
+# ============================================================================
+# uv-specific configuration
+# ============================================================================
+# Torch from PyTorch's cu124 index — matches our `cuda-toolkit-12-4` apt
+# install. Default PyPI ships cu130 wheels which mismatch the toolkit's
+# nvcc (12.4) and break flash-attn's compile-time CUDA-version check.
+# Driver 535+ supports CUDA 12.4 via Minor Version Compatibility.
+[[tool.uv.index]]
+name     = "pytorch-cu124"
+url      = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch       = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }
+torchaudio  = { index = "pytorch-cu124" }
+
+[tool.uv]
+# flash-attn must be built with --no-build-isolation against the resolved
+# torch in /opt/venv. uv ensures torch (and the other build deps) install
+# before flash-attn so the unisolated build sees them.
+no-build-isolation-package = ["flash-attn"]

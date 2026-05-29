@@ -372,6 +372,162 @@
             background-color: #e9ecef;
         }
 
+        /* ========================================
+           CORNER PAUSE BUTTON (Conversation Mode)
+           Hidden by default; shown only on the <li> that is currently
+           playing or paused. Lets the user pause/resume from a distance
+           without targeting the small inline 4-button panel.
+           ======================================== */
+        .notification-corner-pause-btn {
+            display: none;
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: 1px solid rgba( 25, 135, 84, 0.5 );
+            border-radius: 50%;
+            background: rgba( 25, 135, 84, 0.15 );
+            color: #155724;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            text-align: center;
+            transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+            z-index: 2;
+        }
+
+        li.is-playing-current .notification-corner-pause-btn,
+        .sender-message.tts-playing .notification-corner-pause-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .notification-corner-pause-btn:hover {
+            background: rgba( 25, 135, 84, 0.3 );
+            transform: scale( 1.1 );
+        }
+
+        .notification-corner-pause-btn:active {
+            transform: scale( 0.95 );
+        }
+
+        /* Paused: subtle visual cue separate from the icon swap */
+        li.is-paused-current .notification-corner-pause-btn,
+        .sender-message.is-paused-current .notification-corner-pause-btn {
+            background: rgba( 255, 193, 7, 0.2 );
+            border-color: rgba( 255, 193, 7, 0.6 );
+            color: #856404;
+        }
+
+        li.is-paused-current .notification-corner-pause-btn:hover,
+        .sender-message.is-paused-current .notification-corner-pause-btn:hover {
+            background: rgba( 255, 193, 7, 0.35 );
+        }
+
+        /* Pending TTS rendering — applied 2026-05-14 by the decouple fix so high/urgent
+         * notifications can appear in the visible list immediately on WebSocket arrival,
+         * BEFORE the TTS queue actually engages playback (which may be paused mid-queue
+         * due to the preview-and-pause feature). The pending state is cleared by
+         * activateNextTTS when the item reaches the active playback slot.
+         *
+         * Treatment: subtle desaturation + left border stripe (amber to match the paused
+         * palette but lighter) + small ⏳ glyph in the corner that flips to ⏸/▶ when audio
+         * engages. The corner-pause button stays hidden (gated by .is-playing-current). */
+        li.is-tts-pending {
+            opacity: 0.78;
+            border-left: 3px solid rgba( 255, 193, 7, 0.55 );
+            transition: opacity 0.2s ease, border-left-color 0.2s ease;
+        }
+
+        li.is-tts-pending::after {
+            content: "⏳";
+            position: absolute;
+            top: 6px;
+            right: 8px;
+            font-size: 14px;
+            line-height: 1;
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        /* When the queued item engages playback, .is-tts-pending is removed and
+         * .is-playing-current is added — the hourglass disappears and the pause
+         * button takes over the same corner via .notification-corner-pause-btn. */
+
+        /* Corner STOP button — sibling to pause/resume. Sits to the LEFT
+         * of the pause button (right: 32 = 4 + 24 + 4). Clicking stops
+         * the active TTS playback and advances the queue (dismisses this
+         * notification's rendering). */
+        .notification-corner-stop-btn {
+            display: none;
+            position: absolute;
+            top: 4px;
+            right: 32px;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            border: 1px solid rgba( 220, 53, 69, 0.5 );
+            border-radius: 50%;
+            background: rgba( 220, 53, 69, 0.15 );
+            color: #842029;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            text-align: center;
+            transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+            z-index: 2;
+        }
+
+        /* Visibility rule mirrors .notification-corner-pause-btn exactly:
+         * gated by .tts-playing only. .is-paused-current persists across
+         * pause→stop and would strand this button if included here. The
+         * pause button hides correctly when stopTTSPlayingIndicator
+         * removes .tts-playing; we want the stop button to follow suit. */
+        li.is-playing-current .notification-corner-stop-btn,
+        .sender-message.tts-playing .notification-corner-stop-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .notification-corner-stop-btn:hover {
+            background: rgba( 220, 53, 69, 0.30 );
+            transform: scale( 1.1 );
+        }
+
+        .notification-corner-stop-btn:active {
+            transform: scale( 0.95 );
+        }
+
+        /* ========================================
+           PINNED CONVERSATION-MODE SENDER CARD
+           Marks the sender card whose session currently holds conversation
+           mode. Two responsibilities:
+             1. DOM index 0 — handled by JS (createSenderCard insertion +
+                moveSenderCardToTop's pinned-card check).
+             2. Visual cue — soft green glow border + box-shadow that
+                matches the corner-pause-btn accent palette.
+           Mutex: at most one pinned card per accordion at a time.
+           ======================================== */
+        .sender-card[data-pinned-conv-mode="true"] {
+            border: 1px solid rgba( 25, 135, 84, 0.55 );
+            box-shadow:
+                0 0 0 2px rgba( 25, 135, 84, 0.15 ),
+                0 2px 8px rgba( 25, 135, 84, 0.18 );
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
+        }
+
+        .sender-card[data-pinned-conv-mode="true"] .sender-card-header {
+            background: linear-gradient(
+                to right,
+                rgba( 25, 135, 84, 0.08 ),
+                rgba( 25, 135, 84, 0.02 )
+            );
+        }
+
         .loading {
             display: inline-block;
             margin-left: 10px;
@@ -1029,6 +1185,16 @@
             color: white;
         }
 
+        .response-button.neither {
+            border-color: #6c757d;
+            color: #6c757d;
+        }
+
+        .response-button.neither:hover {
+            background-color: #6c757d;
+            color: white;
+        }
+
         /* Default button highlighting (Phase 2.2) */
         .response-button.default-value {
             border: 3px solid #ffc107;
@@ -1445,29 +1611,52 @@
            SENDER-AWARE NOTIFICATION CARDS (Phase 5)
            ======================================== */
 
+        /* Persona theming Round 1 (Tier 1): card chrome — border + shadow tinted
+         * with the per-session voice persona color when --persona-color-rgb is
+         * set on the card root (see notifications.js createSenderCard +
+         * _setPersonaBadgeOnCard). Cards without a persona fall back to the
+         * neutral grey palette via the var() default values.
+         * See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/02-theming-round1-design.md §3 */
         .sender-card {
             margin-bottom: 12px;
-            border: 1px solid #dee2e6;
+            border: 1px solid rgba( var( --persona-color-rgb, 222, 226, 230 ), 0.55 );
             border-radius: 8px;
             background-color: #ffffff;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            box-shadow:
+                0 0 0 1px rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
+                0 2px 6px  rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
             overflow: hidden;
+            transition: border-color 0.25s ease, box-shadow 0.25s ease;
         }
 
+        /* Persona theming Round 1 (Tier 2): header background — subtle
+         * persona-tinted top-to-bottom gradient when --persona-color-rgb is
+         * set; falls back to the original flat #f8f9fa for personaless cards.
+         * The pinned-conversation-mode rule at the top of this file is more
+         * specific (selector .sender-card[data-pinned-conv-mode="true"]
+         * .sender-card-header) and wins automatically when both apply. */
         .sender-card-header {
             display: flex;
             align-items: center;
             gap: 10px;
             padding: 10px 15px;
-            background-color: #f8f9fa;
+            background: linear-gradient(
+                to bottom,
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.14 ),
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.04 )
+            );
             border-bottom: 1px solid #e9ecef;
             cursor: pointer;
             user-select: none;
-            transition: background-color 0.2s ease;
+            transition: background 0.2s ease;
         }
 
         .sender-card-header:hover {
-            background-color: #e9ecef;
+            background: linear-gradient(
+                to bottom,
+                rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
+                rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.08 )
+            );
         }
 
         .sender-status {
@@ -1601,6 +1790,114 @@
         }
 
         /* ========================================
+           PER-SESSION CONVERSATION MODE TOGGLE
+           Default = notification mode (🔔). Active = conversation mode (📞).
+           Server-canonical: bridge file → WebSocket conversation_mode_changed.
+           ======================================== */
+        .sender-conversation-mode-btn {
+            background: rgba( 108, 117, 125, 0.15 );
+            border: 1px solid rgba( 108, 117, 125, 0.3 );
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 2px 8px;
+            margin-left: 6px;
+            font-size: 0.85em;
+            opacity: 0.8;
+            transition: all 0.2s ease;
+        }
+
+        .sender-conversation-mode-btn:hover {
+            opacity: 1;
+            background: rgba( 108, 117, 125, 0.25 );
+            border-color: rgba( 108, 117, 125, 0.5 );
+            transform: scale( 1.05 );
+        }
+
+        .sender-conversation-mode-btn:active {
+            transform: scale( 0.95 );
+        }
+
+        .sender-conversation-mode-btn.is-active {
+            background: #d1e7dd;  /* solid pale mint — matches strip-icon idle badge (Bootstrap success-bg-subtle) */
+            border-color: rgba( 25, 135, 84, 0.6 );
+            opacity: 1;
+        }
+
+        .sender-conversation-mode-btn.is-active:hover {
+            background: #a3cfbb;  /* slightly-darker mint — preserves hover affordance (Bootstrap success-200) */
+            border-color: rgba( 25, 135, 84, 0.85 );
+        }
+
+        /* ========================================
+         * Per-Session Voice Persona Badge
+         * (2026-04-28 — sender card header chip showing
+         *  the voice this CC session was assigned at SessionStart)
+         * Design: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+         * ======================================== */
+
+        .persona-badge {
+            display          : inline-flex;
+            align-items      : center;
+            gap              : 4px;
+            margin-left      : 8px;
+            padding          : 2px 8px;
+            border-radius    : 12px;
+            font-size        : 0.8em;
+            font-weight      : 500;
+            color            : #fff;
+            text-shadow      : 0 1px 1px rgba( 0, 0, 0, 0.25 );
+            border           : 1px solid rgba( 255, 255, 255, 0.15 );
+            box-shadow       : 0 1px 2px rgba( 0, 0, 0, 0.15 );
+            cursor           : default;
+            white-space      : nowrap;
+            user-select      : none;
+            line-height      : 1.2;
+            /* background-color is set inline from persona.color */
+        }
+
+        .persona-badge-icon {
+            font-size: 1.0em;
+        }
+
+        .persona-badge-name {
+            letter-spacing: 0.02em;
+        }
+
+        /* Borrowed badge: pool was exhausted, this session is sharing a
+         * voice with another. Dashed border + reduced opacity signals
+         * "not exclusively yours". */
+        .persona-badge.borrowed {
+            border-style    : dashed;
+            border-color    : rgba( 255, 255, 255, 0.5 );
+            opacity         : 0.85;
+        }
+
+        .persona-badge.borrowed::after {
+            content     : "↻";
+            margin-left : 2px;
+            font-size   : 0.85em;
+            opacity     : 0.8;
+        }
+
+        /* Overflow badge: every pool persona is occupied, this session is
+         * speaking with Sam (system-default voice). Dotted border + ✱ signals
+         * "pool spilled to default" — semantically distinct from .borrowed
+         * (which meant "using someone else's pool voice"). See:
+         * src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md */
+        .persona-badge.overflow {
+            border-style    : dotted;
+            border-color    : rgba( 255, 255, 255, 0.6 );
+            opacity         : 0.9;
+        }
+
+        .persona-badge.overflow::after {
+            content     : "✱";
+            margin-left : 2px;
+            font-size   : 0.85em;
+            opacity     : 0.8;
+        }
+
+        /* ========================================
            SESSION NAME EDIT MODAL (Voice-First)
            ======================================== */
 
@@ -1723,9 +2020,12 @@
             line-height: 1;
         }
 
-        /* Active session - green indicator */
+        /* Persona theming Round 1 (Tier 1): active-session indicator dot uses
+         * persona color when set, falls back to the original green for
+         * personaless cards. Conversation-mode pin keeps green via the more
+         * specific .sender-card[data-pinned-conv-mode="true"] rule. */
         .sender-card-active .sender-active-indicator {
-            color: #28a745;
+            color: var( --persona-color, #28a745 );
         }
 
         /* Inactive session - gray indicator */
@@ -1733,13 +2033,362 @@
             color: #adb5bd;
         }
 
-        /* Active sender card - left border highlight */
+        /* Persona theming Round 1 (Tier 1): left stripe always carries the
+         * persona color so identity is visible across active AND inactive
+         * cards. Active cards use the full persona color; inactive cards use
+         * the same color (per user feedback 2026-04-29 — "all themed cards
+         * should show the colored left border, not just the active one").
+         * Personaless cards fall back to transparent so non-themed senders
+         * render unchanged. The active vs inactive distinction now relies on
+         * the indicator dot (filled ●  vs hollow ○) and the box-shadow
+         * intensity, not the left stripe. */
         .sender-card-active {
-            border-left: 3px solid #28a745;
+            border-left: 3px solid var( --persona-color, #28a745 );
         }
 
         .sender-card:not(.sender-card-active) {
-            border-left: 3px solid transparent;
+            border-left: 3px solid var( --persona-color, transparent );
+        }
+
+        /* ========================================
+           CC SESSION SELECTOR STRIP + EXCLUSIVE FOCUS MODE
+           Permanent chrome above #notifications-list. One icon per active
+           CC (claude.code) session. Leftmost = most recently updated.
+           Embedded toggle pill enters/exits focus mode: when ON, all
+           sender cards except the focused one are hidden via
+           data-focus-hidden="true" → display:none.
+           Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+           Orthogonal to conversation-mode pin.
+           ======================================== */
+        .cc-session-strip {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            background: linear-gradient( to bottom, #ffffff, #f8f9fa );
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.08 );
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .cc-strip-icons {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow-x: auto;
+            /* Suppress the implicit Y scrollbar that overflow-x: auto would
+             * otherwise enable (CSS spec promotes the other axis to auto).
+             * Padding below leaves enough room that nothing visually clips. */
+            overflow-y: hidden;
+            scrollbar-width: thin;
+            /* Internal breathing room so hover scale (1.08), focus scale (1.10),
+             * the focus ring (2px outer box-shadow), the focus drop-shadow
+             * (0 2px 8px), and the protruding ::before mic badge (-6px) /
+             * ::after unread badge (top: 6px) aren't clipped vertically. */
+            padding: 9px 4px;
+        }
+
+        .cc-strip-icon {
+            position: relative;
+            flex: 0 0 auto;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var( --persona-color, #6c757d );
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 14px;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 2px solid transparent;
+            box-shadow: 0 1px 3px rgba( 0, 0, 0, 0.18 );
+            text-shadow: 0 1px 1px rgba( 0, 0, 0, 0.25 );
+            transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+            user-select: none;
+        }
+
+        .cc-strip-icon:hover {
+            transform: scale( 1.08 );
+            box-shadow: 0 2px 6px rgba( 0, 0, 0, 0.25 );
+        }
+
+        .cc-strip-icon:active {
+            transform: scale( 0.95 );
+        }
+
+        /* Focused session: highlighted border + slight scale-up so it's
+         * obvious which session is currently expanded in focus mode. */
+        .cc-strip-icon[data-focused="true"] {
+            border-color: #ffffff;
+            box-shadow:
+                0 0 0 2px var( --persona-color, #495057 ),
+                0 2px 8px rgba( 0, 0, 0, 0.30 );
+            transform: scale( 1.10 );
+        }
+
+        /* Unread peripheral-awareness badge: shown on non-focused icons
+         * when their session receives notifications while focus mode is
+         * on. Numeric count rendered via ::after using data-unread-count.
+         *
+         * The pulse runs 3 iterations on attribute (re-)apply rather than
+         * forever — JS restarts it via remove+reflow+re-add in
+         * _promoteStripIcon for each new notification. */
+        .cc-strip-icon[data-unread="true"] {
+            animation: cc-strip-icon-pulse 1.6s ease-in-out 3;
+        }
+
+        /* Badge midpoint anchored on the persona-circle perimeter at the
+         * top-right (~45° above horizontal). Persona is 40×40, radius 20,
+         * center (20, 20); perimeter at 45° = (34.14, 5.86) ≈ (34, 6).
+         * transform: translate(-50%, -50%) centers the badge box on that
+         * anchor regardless of digit count making the box wider — single-
+         * digit and double-digit counts both stay centered on the perimeter
+         * instead of drifting inward as the box grows. (Edge-offset
+         * positioning broke this for 2-digit counts.) */
+        .cc-strip-icon[data-unread="true"]::after {
+            content: attr( data-unread-count );
+            position: absolute;
+            top: 6px;
+            left: 34px;
+            right: auto;
+            transform: translate( -50%, -50% );
+            min-width: 16px;
+            height: 16px;
+            padding: 0 3px;
+            background: #dc3545;
+            color: #ffffff;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 400;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #ffffff;
+            box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.35 );
+            line-height: 1;
+        }
+
+        /* Speakerphone/quiet-state overlay on each strip persona icon.
+         * The indicator's center sits on the persona-circle perimeter
+         * (45° below horizontal); offsets pulled outward from -3 to
+         * -6 per design feedback so the visible glyph reads as docked
+         * to the persona's edge rather than overlapping its interior.
+         *
+         * 2026-05-14 evening: extended from binary (on/off — was 🎤 only) to
+         * three-state. When user has actuated the toggle EITHER WAY, show the
+         * corresponding badge: 🎤 (green) for speakerphone, 🤭 (amber) for
+         * quiet. Default state (user has never toggled) shows no badge. */
+        .cc-strip-icon[data-conv-mode="speakerphone"]::before,
+        .cc-strip-icon[data-conv-mode="quiet"]::before {
+            position: absolute;
+            bottom: -6px;
+            right: -6px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #ffffff;
+            box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.30 );
+            line-height: 1;
+            transition: background 500ms ease-in-out;  /* polished fade between idle/active TTS-speaker states */
+        }
+
+        .cc-strip-icon[data-conv-mode="speakerphone"]::before {
+            content: "🔊";
+            background: #d1e7dd;  /* solid pale mint — idle (Bootstrap success-bg-subtle, perceptual match for the toggle's rgba(25,135,84,0.25) over a light card; SOLID here because the badge sits on a persona-colored circle, so alpha-blending reads as washed-out instead of green) */
+        }
+
+        .cc-strip-icon[data-conv-mode="quiet"]::before {
+            content: "🤭";
+            background: rgba( 255, 193, 7, 0.95 );  /* amber — small ding only */
+        }
+
+        /* Active-speaker state: this persona's notification is currently being read aloud via TTS.
+         * Darker green background re-asserted; pulsing yellow glow uses size-scaled keyframes
+         * tuned for the 18px badge (full-size ttsPulseGlow would bleed into adjacent icons).
+         * Quiet-mode amber badges are intentionally exempt — only speakerphone personas signal TTS. */
+        .cc-strip-icon[data-conv-mode="speakerphone"][data-tts-active="true"]::before {
+            background: rgba( 25, 135, 84, 0.95 );
+            animation: ttsPulseGlowSmall 1s ease-in-out infinite;
+        }
+
+        @keyframes ttsPulseGlowSmall {
+            0%, 100% {
+                box-shadow: 0 0 2px 1px rgba( 255, 193, 7, 0.4 );
+                outline: 1px solid rgba( 255, 193, 7, 0.6 );
+            }
+            50% {
+                box-shadow: 0 0 6px 2px rgba( 255, 193, 7, 0.9 );
+                outline: 1px solid #ffc107;
+            }
+        }
+
+        /* Mic at bottom-right + count badge at top-right are on opposite
+         * corners — no override needed for both-fire overlap. */
+
+        @keyframes cc-strip-icon-pulse {
+            0%, 100% {
+                box-shadow: 0 0 0 0 rgba( 220, 53, 69, 0.40 );
+            }
+            50% {
+                box-shadow: 0 0 0 6px rgba( 220, 53, 69, 0.00 );
+            }
+        }
+
+        .cc-strip-toggle {
+            flex: 0 0 auto;
+            background: rgba( 108, 117, 125, 0.15 );
+            border: 1px solid rgba( 108, 117, 125, 0.3 );
+            border-radius: 16px;
+            cursor: pointer;
+            padding: 5px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            color: #495057;
+            opacity: 0.9;
+            transition: all 0.2s ease;
+            user-select: none;
+            white-space: nowrap;
+        }
+
+        .cc-strip-toggle:hover {
+            opacity: 1;
+            background: rgba( 108, 117, 125, 0.25 );
+            border-color: rgba( 108, 117, 125, 0.5 );
+        }
+
+        .cc-strip-toggle:active {
+            transform: scale( 0.97 );
+        }
+
+        /* Active focus-mode state: pill becomes a high-contrast "ON"
+         * affordance so the user can see at a glance whether they're in
+         * exclusive view. */
+        .cc-strip-toggle[data-focus-active="true"] {
+            background: #495057;
+            border-color: #343a40;
+            color: #ffffff;
+            opacity: 1;
+        }
+
+        .cc-strip-toggle[data-focus-active="true"]:hover {
+            background: #343a40;
+            border-color: #212529;
+        }
+
+        /* Hide-inactive pill active state — same affordance as focus-active
+         * (high-contrast dark fill) so both pills read consistently when ON.
+         * See: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md */
+        .cc-strip-toggle[data-hide-inactive="true"] {
+            background: #495057;
+            border-color: #343a40;
+            color: #ffffff;
+            opacity: 1;
+        }
+
+        .cc-strip-toggle[data-hide-inactive="true"]:hover {
+            background: #343a40;
+            border-color: #212529;
+        }
+
+        /* TTS preview-fraction slider — added 2026-05-14 evening alongside the
+         * preview-and-pause → preview-and-advance refactor. Runtime control
+         * over the fraction of each high-priority notification that gets
+         * synthesized as TTS audio. Five stops: 0 / 25 / 50 / 75 / 100. State
+         * persists in localStorage under `notifications_tts_preview_fraction_runtime`.
+         * Lives inside #cc-session-strip between the persona-icon tray and the
+         * Focus/All toggles, sharing the strip's flex layout. */
+        .cc-tts-fraction-control {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 12px;
+            background: #f8f9fa;
+            color: #495057;
+            font-size: 11px;
+            line-height: 1;
+        }
+
+        .cc-tts-fraction-label {
+            font-weight: 600;
+            opacity: 0.7;
+        }
+
+        .cc-tts-fraction-slider {
+            width: 80px;
+            cursor: pointer;
+            accent-color: rgba( 25, 135, 84, 0.85 );  /* matches existing is-active green */
+        }
+
+        .cc-tts-fraction-slider:focus-visible {
+            outline: 2px solid rgba( 25, 135, 84, 0.6 );
+            outline-offset: 2px;
+        }
+
+        .cc-tts-fraction-value {
+            min-width: 32px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700;
+            color: #198754;  /* green to match the slider accent */
+        }
+
+        /* Strip filter: icons whose senderId has no allocated voice persona
+         * disappear from the tray. Independent of [data-focus-hidden] —
+         * either rule can fire display: none, no interaction needed. */
+        .cc-strip-icon[data-inactive-hidden="true"] {
+            display: none;
+        }
+
+        /* Focus-mode visibility filter: when focus is ON, every sender
+         * card except the focused one is hidden via this attribute. The
+         * underlying DOM still receives notifications and persona/conv-mode
+         * updates — only display is suppressed. */
+        .sender-card[data-focus-hidden="true"] {
+            display: none;
+        }
+
+        /* Focus-mode entry flash: briefly highlights the focused card when
+         * the user toggles focus mode OFF→ON, so they immediately see which
+         * card is now in focus. Only fires on the toggle-pill click — not on
+         * mid-mode focus switches via strip-icon click (the user already
+         * knows which session they clicked). Driven from JS by setting
+         * data-focus-flash="true" on the card; the attribute is removed after
+         * the animation completes. Persona-tinted via --persona-color-rgb
+         * (set inline by the sender card), with a Bootstrap-primary fallback. */
+        .sender-card[data-focus-flash="true"] {
+            animation: sender-card-focus-flash 1.5s ease-out;
+        }
+        @keyframes sender-card-focus-flash {
+            0% {
+                box-shadow:
+                    0 0 0 3px rgba( var( --persona-color-rgb, 13, 110, 253 ), 0.85 ),
+                    0 0 18px 6px rgba( var( --persona-color-rgb, 13, 110, 253 ), 0.45 );
+            }
+            60% {
+                box-shadow:
+                    0 0 0 2px rgba( var( --persona-color-rgb, 13, 110, 253 ), 0.55 ),
+                    0 0 14px 4px rgba( var( --persona-color-rgb, 13, 110, 253 ), 0.25 );
+            }
+            100% {
+                box-shadow:
+                    0 0 0 0 rgba( var( --persona-color-rgb, 13, 110, 253 ), 0 ),
+                    0 0 0 0 rgba( var( --persona-color-rgb, 13, 110, 253 ), 0 );
+            }
         }
 
         .sender-card-messages {
@@ -1763,9 +2412,18 @@
             line-height: 1.4;
         }
 
-        /* Incoming messages (from Claude Code) - left aligned */
+        /* Incoming messages (from Claude Code) - left aligned.
+         * Persona-tinted gradient mirroring the .sender-card-header direction
+         * and fallback values, but at slightly lighter alphas (0.10 / 0.02 vs
+         * the header's 0.14 / 0.04) so the bubble reads as a quieter cousin
+         * of the header tint — same family, less weight. Personaless cards
+         * fall back to a faint #f8f9fa wash on the white card surface. */
         .sender-message.incoming {
-            background-color: #e9ecef;
+            background: linear-gradient(
+                to bottom,
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+            );
             margin-right: 40px;
             border-bottom-left-radius: 2px;
         }
@@ -1777,6 +2435,36 @@
             margin-left: 40px;
             flex-direction: row-reverse;
             border-bottom-right-radius: 2px;
+        }
+
+        /* PERSONALESS-CARD BUBBLE FILL (Option 4 — visible gray gradient).
+         *
+         * Personaless = "inactive session": its voice persona has been
+         * deallocated, so neither the card nor the strip icon carries a
+         * persona color. The default `.sender-message.incoming` gradient
+         * uses `rgba(--persona-color-rgb, 248, 249, 250)` at 0.10/0.02
+         * alpha — when the fallback fires, both stops collapse to the same
+         * near-white wash and the conversation pane reads as undifferentiated
+         * wallpaper.
+         *
+         * Override personaless cards' incoming bubbles with a real, visible
+         * vertical gray gradient (Bootstrap gray-200 → gray-100). Same bubble
+         * size, same content, same date/abstract icon layout — only the fill
+         * is changed. Each individual bubble now has internal gradient depth
+         * that gives the eye structure without striping or row separators.
+         *
+         * Gating mechanic: createSenderCard + _setPersonaBadgeOnCard
+         * setProperty/removeProperty --persona-color on .sender-card.style
+         * (notifications.js:10227, 8927). The substring match is the same
+         * signal used by every other fallback rule in this file.
+         *
+         * See: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md §3.2 */
+        .sender-card:not([style*="--persona-color"]) .sender-message.incoming {
+            background: linear-gradient(
+                to bottom,
+                #e9ecef,
+                #f8f9fa
+            );
         }
 
         .sender-message.outgoing .message-time {
@@ -2021,7 +2709,11 @@
         }
 
         .date-accordion-messages .sender-message.incoming {
-            background-color: #e9ecef;
+            background: linear-gradient(
+                to bottom,
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+                rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+            );
             margin-right: 30px;
             border-bottom-left-radius: 2px;
         }
@@ -3686,8 +4378,9 @@
     z-index: 10001;
     width: auto;               /* Content-driven width */
     min-width: 200px;
-    max-width: min( 450px, calc( 100vw - 40px ) );   /* Viewport-safe max */
-    max-height: min( 400px, calc( 100vh - 100px ) ); /* Prevent overflow */
+    /* Tier 1 default — prose-shaped abstracts (the ~90% case) */
+    max-width: min( 450px, calc( 100vw - 40px ) );
+    max-height: min( 400px, calc( 100vh - 100px ) );
     padding: 0;
     background: #ffffff;
     border: 1px solid #dee2e6;
@@ -3696,14 +4389,31 @@
     font-size: 13px;
     line-height: 1.5;
     color: #333;
-    resize: both;              /* Enable user resizing */
+    resize: both;              /* Drag handle still available as manual override */
     overflow: hidden;          /* Required for CSS resize */
-    /* Hidden by default */
+    /* Flex column so inner content can scroll within parent's max-height */
+    flex-direction: column;
+    /* Hidden by default — display: flex applied via .visible */
     display: none;
 }
 
 .abstract-tooltip.visible {
-    display: block;
+    display: flex;
+}
+
+/* Tier 2 — table OR code block: medium technical content */
+.abstract-tooltip:has( .abstract-tooltip-content table ),
+.abstract-tooltip:has( .abstract-tooltip-content pre ) {
+    max-width:  min( 800px, calc( 100vw - 40px ) );
+    max-height: min( 700px, calc( 100vh - 80px ) );
+}
+
+/* Tier 3 — table AND code, or multi-section markdown: heavy technical content */
+.abstract-tooltip:has( .abstract-tooltip-content table ):has( .abstract-tooltip-content pre ),
+.abstract-tooltip:has( .abstract-tooltip-content h2 ~ h2 ),
+.abstract-tooltip:has( .abstract-tooltip-content h3 ~ h3 ) {
+    max-width:  min( 1100px, calc( 100vw - 40px ) );
+    max-height: min( 850px,  calc( 100vh - 60px ) );
 }
 
 .abstract-tooltip-header {
@@ -3733,8 +4443,9 @@
 }
 
 .abstract-tooltip-content {
-    height: auto;              /* Content-driven height */
-    max-height: 300px;         /* Cap with scroll for long content */
+    /* Flex item: fills remaining vertical space, scrolls when parent hits max-height */
+    flex: 1 1 auto;
+    min-height: 0;             /* required for flex children to enable overflow */
     overflow-y: auto;
     padding: 12px 14px;
     font-family: inherit;
@@ -3946,6 +4657,294 @@
 
 .job-submit-card .section-content.collapsed {
     padding: 0 14px;
+}
+
+/* ========================================
+   COMMONS RECENT ACTIVITY — admin-oversight stream inside the broadcast card.
+   Design: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+   Q1 — AI replies route here (not to session cards)
+   Q2 — free-form topics get a topic chip prefix
+   Q3 — real-time WS push via `commons_activity` notification
+   Q5 — `presence` + `system-events` excluded by default
+   Q6 — Today + history-window dropdown
+   Q7 — flat reverse-chronological
+   Q8 — default-EXPANDED, no localStorage persistence
+   Q9 — feature ships on, broadcast card parent also default-expanded
+   ======================================== */
+
+.commons-recent-activity {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid #dee2e6;
+}
+
+.commons-recent-activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 0;
+}
+
+.commons-recent-activity-header h5 {
+    margin: 0;
+    font-size: 13px;
+    color: #495057;
+    font-weight: 600;
+}
+
+.commons-recent-activity-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    /* flex-wrap added 2026-05-21 — three new filter dropdowns increase horizontal pressure
+       on the header row; wrap defensively on narrow viewports rather than overflow.
+       Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md */
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.commons-recent-activity-controls select {
+    font-size: 11px;
+    padding: 2px 6px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background: white;
+    cursor: pointer;
+}
+
+/* Filter-axis dropdowns (Direction / Kind / Persona) — keep them compact so the
+   header row stays single-line on standard viewports. min-width prevents the
+   browser from squeezing dropdowns to unreadable widths under flex pressure. */
+.commons-recent-activity-controls select.commons-activity-filter-select {
+    min-width: 9em;
+    max-width: 14em;
+}
+
+.commons-recent-activity-controls button {
+    background: transparent;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 11px;
+    color: #495057;
+    transition: background-color 0.15s;
+}
+
+.commons-recent-activity-controls button:hover {
+    background-color: rgba( 0, 0, 0, 0.04 );
+}
+
+/* Toggle pill mirrors the existing .toggle-button pattern */
+.commons-recent-activity-controls .toggle-button {
+    border: none;
+    padding: 2px 6px;
+    background: transparent;
+}
+
+#commons-recent-activity-body {
+    margin-top: 10px;
+    max-height: 480px;
+    overflow-y: auto;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    background: #fafbfc;
+    padding: 8px;
+}
+
+#commons-recent-activity-body.collapsed {
+    display: none;
+}
+
+#commons-recent-activity-entries {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#commons-recent-activity-empty {
+    text-align: center;
+    color: #868e96;
+    font-size: 12px;
+    padding: 24px 12px;
+}
+
+#commons-recent-activity-empty[hidden] {
+    display: none;
+}
+
+/* Individual entry row — populated by notifications.js Step 7. */
+.commons-activity-entry {
+    display: grid;
+    grid-template-columns: 24px 70px 75px 1fr auto auto;
+    grid-template-areas: "icon name chip body toggle time";
+    gap: 8px;
+    align-items: start;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background: white;
+    border-left: 3px solid var( --persona-color, #6c757d );
+    transition: background-color 0.15s;
+}
+
+.commons-activity-entry:hover {
+    background-color: rgba( 0, 0, 0, 0.02 );
+}
+
+.commons-activity-entry-icon {
+    grid-area: icon;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var( --persona-color, #6c757d );
+    color: white;
+    font-size: 13px;
+}
+
+.commons-activity-entry-name {
+    grid-area: name;
+    font-weight: 600;
+    font-size: 12px;
+    color: #495057;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.commons-activity-entry-topic-chip {
+    grid-area: chip;
+    justify-self: end;
+    max-width: 100%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    border: 1px solid var( --persona-color, #ced4da );
+    color: #495057;
+    background-color: rgba( 0, 0, 0, 0.02 );
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.commons-activity-entry-topic-chip[hidden] {
+    display: none;
+}
+
+.commons-activity-entry-body {
+    grid-area: body;
+    font-size: 12px;
+    color: #212529;
+    line-height: 1.4;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+/* ========================================
+   COMMONS ACTIVITY BODY — collapsible + markdown (2026-05-16 ship)
+   The inner .commons-activity-entry-body-content is the line-clamp target;
+   the .commons-activity-entry-body-toggle button below it toggles the
+   .expanded class on the content to show full text. Markdown content is
+   rendered via marked.parse + DOMPurify.sanitize (page globals; same
+   pattern as broadcast-panel.js).
+   ======================================== */
+
+.commons-activity-entry-body-content {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    max-height: 3em;   /* belt + suspenders for browsers that ignore -webkit-line-clamp */
+}
+
+.commons-activity-entry-body-content.expanded {
+    display: block;
+    -webkit-line-clamp: unset;
+    max-height: none;
+    overflow: visible;
+}
+
+/* Compact markdown rendering inside entries — prevents tall paragraphs +
+   list spacing from blowing up the Recent Activity panel. */
+.commons-activity-entry-body-content p,
+.commons-activity-entry-body-content ul,
+.commons-activity-entry-body-content ol {
+    margin: 0.25em 0;
+}
+.commons-activity-entry-body-content ul,
+.commons-activity-entry-body-content ol {
+    padding-left: 1.4em;
+}
+.commons-activity-entry-body-content h1,
+.commons-activity-entry-body-content h2,
+.commons-activity-entry-body-content h3,
+.commons-activity-entry-body-content h4 {
+    font-size: 1em;
+    font-weight: 600;
+    margin: 0.3em 0 0.15em;
+}
+.commons-activity-entry-body-content code {
+    font-size: 90%;
+    background: rgba( 0, 0, 0, 0.05 );
+    padding: 0 3px;
+    border-radius: 3px;
+}
+.commons-activity-entry-body-content pre {
+    font-size: 90%;
+    background: rgba( 0, 0, 0, 0.04 );
+    padding: 6px 8px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    margin: 0.3em 0;
+}
+.commons-activity-entry-body-content pre code {
+    background: none;
+    padding: 0;
+}
+.commons-activity-entry-body-content blockquote {
+    margin: 0.3em 0;
+    padding-left: 0.8em;
+    border-left: 3px solid rgba( 0, 0, 0, 0.15 );
+    color: #495057;
+}
+.commons-activity-entry-body-content a {
+    color: #1c4587;
+    text-decoration: underline;
+}
+
+.commons-activity-entry-body-toggle {
+    grid-area: toggle;
+    align-self: start;
+    padding: 1px 4px;
+    background: none;
+    border: none;
+    color: var( --persona-color, #1c4587 );
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+.commons-activity-entry-body-toggle:hover {
+    text-decoration: underline;
+}
+.commons-activity-entry-body-toggle[hidden] {
+    display: none;
+}
+
+.commons-activity-entry-time {
+    grid-area: time;
+    font-size: 10px;
+    color: #868e96;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    align-self: start;
 }
 
 /* ========================================
@@ -4186,6 +5185,23 @@
     flex-shrink: 0;
 }
 
+/* Conversation-mode toggle sits to the immediate left of the cc-session mic
+   inside .cc-voice-input-row, matched in size + alignment to the mic button
+   so the two read as a horizontal pair within the session pane. */
+.cc-voice-input .sender-conversation-mode-btn {
+    align-self: center;
+    height: 34px;
+    min-width: 40px;
+    padding: 4px 8px;
+    margin-left: 0;
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
 .cc-session-msg-input {
     flex: 1;
     padding: 6px 10px;
@@ -4351,3 +5367,279 @@
     outline: 0;
     box-shadow: 0 0 0 0.2rem rgba( 13, 110, 253, 0.25 );
 }
+
+/* =====================================================================
+   WS reconnect circuit-breaker banner (Phase 3 of the WS circuit-breaker
+   milestone). Shown when either WSChannel emits `ws-circuit-open`.
+   ===================================================================== */
+
+.ws-circuit-banner {
+    background-color : #b00020;
+    color            : #ffffff;
+    padding          : 12px 16px;
+    display          : flex;
+    align-items      : center;
+    justify-content  : space-between;
+    gap              : 16px;
+    font-weight      : 500;
+    border-radius    : 4px;
+    margin-bottom    : 12px;
+}
+
+.ws-circuit-banner[hidden] {
+    display: none;
+}
+
+.ws-circuit-banner-text {
+    flex   : 1 1 auto;
+    line-height : 1.4;
+}
+
+.ws-circuit-banner-dev-hint {
+    flex      : 0 1 auto;
+    font-size : 0.875em;
+    opacity   : 0.85;
+    font-style: italic;
+}
+
+.ws-circuit-banner-dev-hint[hidden] {
+    display: none;
+}
+
+.ws-circuit-banner-dev-hint code {
+    background-color : rgba( 255, 255, 255, 0.15 );
+    padding          : 1px 5px;
+    border-radius    : 2px;
+    font-family      : "SFMono-Regular", Menlo, Consolas, "Courier New", monospace;
+    font-size        : 0.95em;
+}
+
+.ws-circuit-retry-btn {
+    background-color : transparent;
+    color            : inherit;
+    border           : 1px solid currentColor;
+    padding          : 6px 14px;
+    border-radius    : 3px;
+    cursor           : pointer;
+    font-weight      : 600;
+    font-size        : 0.95em;
+    flex             : 0 0 auto;
+}
+
+.ws-circuit-retry-btn:hover:not(:disabled) {
+    background-color : rgba( 255, 255, 255, 0.12 );
+}
+
+.ws-circuit-retry-btn:disabled {
+    opacity : 0.6;
+    cursor  : wait;
+}
+
+/* ==========================================================================
+   MASTER-DETAIL TWO-PANE LAYOUT (2026-05-21)
+   ==========================================================================
+   Design: src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
+   All horizontal-mode rules gate on body[data-layout-mode="horizontal"].
+   Vertical mode (default) is byte-for-byte unchanged from the legacy layout.
+   ========================================================================== */
+
+/* Layout-mode toggle button — first child of #section-toolbar. Semantically
+   distinct from the section-visibility .toolbar-btn buttons below (different
+   class so the section-toolbar JS handler ignores it; no data-section attr).
+   Visual separator (border-bottom) keeps the semantic distinction obvious. */
+.layout-mode-btn {
+    background    : transparent;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    padding       : 4px 6px;
+    cursor        : pointer;
+    font-size     : 18px;
+    line-height   : 1;
+    color         : #495057;
+    transition    : background-color 0.15s, opacity 0.15s;
+    margin-bottom : 8px;
+    padding-bottom: 8px;
+    border-bottom : 2px solid #dee2e6;
+}
+.layout-mode-btn:hover {
+    background-color: rgba( 0, 0, 0, 0.04 );
+}
+
+/* In horizontal mode the toolbar becomes a row; remove the vertical-separator
+   bottom border (the row doesn't need a horizontal divider) and add a small
+   right margin instead. */
+body[data-layout-mode="horizontal"] .layout-mode-btn {
+    margin-bottom : 0;
+    padding-bottom: 4px;
+    border-bottom : 1px solid #ced4da;
+    margin-right  : 8px;
+    padding-right : 8px;
+    border-right  : 2px solid #dee2e6;
+}
+
+/* Reading Pane — hidden default (vertical mode) */
+.content-pane[hidden] {
+    display: none;
+}
+
+.content-pane {
+    display       : flex;
+    flex-direction: column;
+    background    : #fafbfc;
+    border-left   : 1px solid #dee2e6;
+}
+
+.content-pane-header {
+    display        : flex;
+    align-items    : center;
+    gap            : 8px;
+    padding        : 8px 10px;
+    border-bottom  : 1px solid #dee2e6;
+    background     : #f1f3f5;
+    position       : sticky;
+    top            : 0;
+    z-index        : 5;
+}
+.content-pane-back,
+.content-pane-close {
+    background    : transparent;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    padding       : 2px 8px;
+    cursor        : pointer;
+    font-size     : 14px;
+    line-height   : 1.2;
+    color         : #495057;
+}
+.content-pane-back:disabled {
+    opacity: 0.4;
+    cursor : not-allowed;
+}
+.content-pane-back:hover:not(:disabled),
+.content-pane-close:hover {
+    background-color: rgba( 0, 0, 0, 0.04 );
+}
+.content-pane-title {
+    flex          : 1;
+    font-size     : 13px;
+    font-weight   : 600;
+    color         : #495057;
+    overflow      : hidden;
+    white-space   : nowrap;
+    text-overflow : ellipsis;
+}
+.content-pane-body {
+    flex            : 1;
+    padding         : 18px 22px 22px 22px;   /* generous gutters; extra right-padding clears the scrollbar */
+    overflow-y      : auto;
+    scrollbar-gutter: stable;                /* reserve scrollbar space so content never jumps when it appears */
+    font-size       : 13px;
+    line-height     : 1.5;
+    color           : #212529;
+}
+.content-pane-body iframe {
+    width  : 100%;
+    height : 100%;
+    border : 0;
+    display: block;
+}
+
+/* ---- Horizontal mode + pane-open activates the two-pane split ----
+   Gating on .content-shell.pane-open (toggled by JS in _openContentPane /
+   _closeContentPane) keeps the container centered when the pane is empty —
+   no point splitting the screen just to show an empty box. Pane-closed in
+   horizontal mode = visually identical to vertical mode. */
+body[data-layout-mode="horizontal"] .content-shell.pane-open {
+    display      : flex;
+    align-items  : stretch;
+    gap          : 0;
+    min-height   : calc( 100vh - 100px );  /* leave room for the nav strip */
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .left-column {
+    flex          : 2;
+    display       : flex;
+    flex-direction: column;
+    min-width     : 0;
+    overflow-y    : auto;
+    max-height    : calc( 100vh - 100px );
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .container {
+    /* Leave ~10% white space on each side of the container inside the left
+       column — content pane was eating too much of its 2/3 allocation
+       (2026-05-21 Rick tweak). Container becomes 80% of left column width,
+       horizontally centered. Restores breathing room. */
+    max-width    : 80%;
+    margin       : 0 auto;
+    width        : auto;
+}
+
+/* Draggable splitter between left column and Reading Pane (2026-05-21 tweak).
+   Hidden when the pane is closed; activates with the 2-pane split. */
+.content-pane-splitter {
+    display: none;
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter {
+    display        : block;
+    flex           : 0 0 6px;
+    background     : #dee2e6;
+    cursor         : col-resize;
+    transition     : background 0.15s;
+    position       : sticky;
+    top            : 100px;
+    align-self     : stretch;
+    max-height     : calc( 100vh - 100px );
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter:hover,
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter.dragging {
+    background: #adb5bd;
+}
+/* While dragging, force col-resize cursor everywhere + suppress text selection
+   so the user gets a clean drag experience even when crossing other elements. */
+body.splitter-dragging,
+body.splitter-dragging * {
+    cursor       : col-resize !important;
+    user-select  : none !important;
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane {
+    flex          : 1;
+    min-width     : 360px;
+    max-width     : 50%;
+    position      : sticky;
+    top           : 100px;
+    align-self    : flex-start;
+    max-height    : calc( 100vh - 100px );
+    overflow-y    : auto;
+}
+/* Section-toolbar in horizontal mode: horizontal ROW of buttons (each button
+   keeps its original size — no stretching), floating fixed over the top-center
+   of the content-pane column. The row width is `max-content` (natural width
+   of the 12 buttons + gaps), and the `transform: translateX(-50%)` self-centers
+   it around the `left` coordinate — so JS only needs to push the pane's
+   horizontal-center percentage into --toolbar-center-x. Re-centers as the
+   splitter is dragged.
+   2026-05-21 Rick clarification: "same size but now horizontal floating over
+   top of the center of the content pane." */
+body[data-layout-mode="horizontal"] .section-toolbar {
+    flex-direction : row;
+    flex-wrap      : nowrap;
+    width          : max-content;
+    /* Push to the very top of the content area, right below the .lupin-nav
+       (which is 56px tall at top:0). 2026-05-21 Rick tweak. */
+    top            : 56px;
+    left           : var( --toolbar-center-x, 33.3% );
+    transform      : translateX( -50% );
+    gap            : 4px;
+}
+
+/* The toolbar is position:fixed so it overlaps document flow. Push the
+   container's first content row down so the page H1 ("Lupin Notifications"
+   or the dev-environment title) isn't hidden behind the toolbar. Toolbar
+   row is ~40px tall + a few px breathing room → ~52px clearance. */
+body[data-layout-mode="horizontal"] .container {
+    padding-top: 52px;
+}
+
+/* The legacy .section-toolbar (vertical mode) is position:fixed and lives
+   outside the document flow. When we wrap it inside .left-column, vertical
+   mode is unaffected because position:fixed positions relative to the
+   viewport regardless of DOM ancestry. */

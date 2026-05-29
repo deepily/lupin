@@ -44,6 +44,7 @@ from cosa.agents.utils.proxy_agents.base_config import (
     DEFAULT_SERVER_HOST,
     DEFAULT_SERVER_PORT,
 )
+from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -293,8 +294,184 @@ class CCNotificationListener( BaseWebSocketListener ):
             topic = notification.get( "message", "" ).strip()
             if topic:
                 self._update_session_topic( topic )
+        elif action == "disable_speakerphone":
+            self._inject_exit_conversation_reminder()
+        elif action == "broadcast_received":
+            self._handle_broadcast_received( notification )
+        elif action == "commons_answer_received":
+            self._handle_commons_answer_received( notification )
+        elif action == "commons_question_received":
+            self._handle_commons_question_received( notification )
         else:
             self._log( f"{self.LOG_PREFIX} Unknown action: {action}" )
+
+    def _handle_broadcast_received( self, notification ):
+        """
+        Handle an `action:broadcast_received` notification from the user-broadcast
+        endpoint (Phase 2 step 6 — see
+        src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md AC6).
+
+        Delegates to `lupin_mcp.broadcast_handler.handle_broadcast` which is the
+        keystone orchestrator — pure-logic + 100% covered + identical contract
+        whether invoked from this listener or from a future MCP tool path.
+
+        The listener provides:
+        - `inject_fn`: lambda wrapping `_inject_via_tmux(text, wrap=False)`
+        - `store`: a fresh `CommonsStore` rooted at `<LUPIN_ROOT>/io/commons`
+        - `local_persona`: pulled from `get_session_metadata().voice_persona`
+        - `sender_session_id`: the local session id from bridge metadata
+        """
+        import os
+        try:
+            from lupin_mcp.broadcast_handler import handle_broadcast
+            from lupin_mcp.commons_store import CommonsStore
+            from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
+        except ImportError as e:
+            self._log( f"{self.LOG_PREFIX} broadcast_handler import failed: {e}" )
+            return
+
+        meta = get_session_metadata()
+        local_persona     = meta.get( "voice_persona" )
+        sender_session_id = meta.get( "stable_session_id" ) or meta.get( "session_id" ) or "<unknown>"
+
+        commons_root = os.environ.get( "LUPIN_ROOT" )
+        if not commons_root:
+            self._log( f"{self.LOG_PREFIX} LUPIN_ROOT unset — cannot post broadcast ack" )
+            return
+
+        try:
+            store = CommonsStore( commons_root )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} CommonsStore init failed at {commons_root}: {e}" )
+            return
+
+        handle_broadcast(
+            notification      = notification,
+            local_persona     = local_persona,
+            inject_fn         = lambda text: self._inject_via_tmux( text, wrap=False ),
+            store             = store,
+            sender_session_id = sender_session_id,
+        )
+
+    def _handle_commons_answer_received( self, notification ):
+        """
+        Handle an `action:commons_answer_received` notification from the
+        server-side `CommonsQuestionWatcher` (Phase 3 step 8).
+
+        Per AC4 + Q3 of
+        src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md:
+        - Reads `persona_name` from the STAMPED notification payload (F9-fit
+          immutability — never a live lookup; the answerer's persona at
+          answer-write time is the authoritative attribution).
+        - Builds the `<system-reminder>` body using the Q3 framing:
+              "COMMONS PEER REPLY (question_id X, from @PersonaName):
+                  [body]"
+          PEER ≠ USER (intra-AI principle), REPLY ≠ BROADCAST.
+        - Injects via `_inject_via_tmux(text, wrap=False)` — the body
+          is already a complete <system-reminder> block.
+        """
+        payload      = notification.get( "payload" ) or { }
+        question_id  = payload.get( "question_id" )
+        body         = payload.get( "body", "" )
+        persona_name = payload.get( "persona_name" ) or "unknown"
+
+        if not question_id:
+            self._log( f"{self.LOG_PREFIX} commons_answer_received missing question_id; skipping" )
+            return
+
+        # Q3 framing — persona attribution preserves provenance; question_id
+        # lets the LLM correlate to the original ask_async call.
+        reminder_body = (
+            f"COMMONS PEER REPLY (question_id {question_id}, from @{persona_name}):\n\n"
+            f"{body}"
+        )
+        wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+        self._inject_via_tmux( wrapped, wrap=False )
+
+    def _handle_commons_question_received( self, notification ):
+        """
+        Handle an `action:commons_question_received` notification — an inter-
+        session directed DM addressed to this CC session.
+
+        Per AC6 + Phase 0 Q5-rev framing of
+        src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md:
+        - Reads payload fields stamped at register-question dispatch time by
+          the endpoint's `_dispatch_commons_question_received` helper (the
+          sender's persona is NOT stamped here today — the listener can read
+          it from the topic entry if needed). For v1, the sender is identified
+          via the asker_session_id field; future enhancement adds the sender's
+          persona to the dispatch payload.
+        - Builds the `<system-reminder>` body using the Q5-rev framing
+          (parallel to Phase 3's COMMONS PEER REPLY):
+              "COMMONS PEER MESSAGE (question_id X, topic Y, from session Z):
+                  <body to be read from the commons topic>"
+          For v1, the body is not in the dispatch payload (the entry sits in
+          the commons topic) — the listener injects the framing with a
+          pointer to the topic + question_id so the recipient AI can call
+          commons_read() to retrieve the actual body and any subsequent
+          context. v1.1 enhancement: include body in dispatch payload to
+          avoid the read round-trip.
+        - Injects via `_inject_via_tmux(text, wrap=False)` — body is a
+          complete <system-reminder> block.
+        """
+        payload          = notification.get( "payload" ) or { }
+        question_id      = payload.get( "question_id" )
+        topic            = payload.get( "topic" )
+        asker_session    = payload.get( "asker_session" ) or "unknown"
+
+        if not question_id:
+            self._log( f"{self.LOG_PREFIX} commons_question_received missing question_id; skipping" )
+            return
+        if not topic:
+            self._log( f"{self.LOG_PREFIX} commons_question_received missing topic; skipping" )
+            return
+
+        reminder_body = (
+            f"COMMONS PEER MESSAGE (question_id {question_id}, topic {topic}, from session {asker_session[:8]}):\n\n"
+            f"A peer CC session has addressed a directed DM to you on topic '{topic}' with question_id '{question_id}'.\n"
+            f"Read the message body via commons_read(topic='{topic}', limit=10) and look for the entry whose "
+            f"metadata.question_id == '{question_id}'. To reply, call commons_post(topic='{topic}', body='<your reply>', "
+            f"metadata={{'in_reply_to': '{question_id}'}}) — the original asker's watcher will push your reply back "
+            f"to their tmux session via Phase 3 commons_answer_received."
+        )
+        wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+        try:
+            self._inject_via_tmux( wrapped, wrap=False )
+        except Exception as e:
+            # T7 listener-injection isolation: failure logs + skips, doesn't crash listener
+            self._log( f"{self.LOG_PREFIX} commons_question_received inject failed: {e}" )
+
+    def _inject_exit_conversation_reminder( self ):
+        """
+        Inject the deactivation system-reminder into the CC session's tmux
+        prompt. Triggered by an `action:disable_speakerphone` push from
+        the speakerphone router when this session has been displaced by
+        another session entering speakerphone mode (solo) or when this
+        session toggled off itself (solo or chorus).
+
+        The reminder body is generated by hook_common.speakerphone_exit_reminder
+        so the wrapping format stays in lockstep with the entry-side helpers.
+        Mode is read here so the body chooses the right framing (solo
+        includes "displaced or toggled off"; chorus omits the displaced
+        framing since chorus has no displacement).
+
+        Bypasses _inject_via_tmux's bridge-gated wrap path — the reminder is
+        already a complete <system-reminder> block and must be injected
+        verbatim regardless of bridge state (which has, by this point,
+        already flipped to speakerphone_on=false).
+
+        Ensures:
+            - Tmux pane receives the mode-appropriate reminder followed by Enter
+            - Never raises (logging-only on injection failure)
+        """
+        try:
+            from lupin_cli.claude_code.hooks.lib.hook_common import speakerphone_exit_reminder
+            import cosa.utils.util as cu
+            reminder = speakerphone_exit_reminder( cu.get_tts_interaction_mode() )
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} speakerphone_exit_reminder import/build failed: {e}" )
+            return
+        self._inject_via_tmux( reminder, wrap=False )
 
     def _update_session_topic( self, topic ):
         """
@@ -361,7 +538,7 @@ class CCNotificationListener( BaseWebSocketListener ):
 
         return None
 
-    def _inject_via_tmux( self, message_text ):
+    def _inject_via_tmux( self, message_text, wrap=True ):
         """
         Type the voice message into the CC session's tmux pane, then press Enter.
 
@@ -372,6 +549,11 @@ class CCNotificationListener( BaseWebSocketListener ):
         Requires:
             - message_text is a non-empty string
             - tmux session is resolvable
+            - wrap is a bool — True (default) applies speakerphone_wrap, False
+              injects the text verbatim. Set False when the caller has
+              already produced a complete <system-reminder> block (e.g.
+              the disable_speakerphone action handler) that must reach the
+              model regardless of bridge state.
 
         Ensures:
             - Types message text into the CC prompt
@@ -383,6 +565,22 @@ class CCNotificationListener( BaseWebSocketListener ):
         if not tmux_session:
             self._log( f"{self.LOG_PREFIX} No tmux session found -- skipping injection" )
             return
+
+        # Phase 5b — speakerphone rider: wrap voice input with the per-turn
+        # rider. Content varies by (tts_interaction_mode, speakerphone_on);
+        # rider fires on every turn (no on-state gating).
+        # See: src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md
+        if wrap:
+            try:
+                from lupin_cli.claude_code.hooks.lib.hook_common import speakerphone_wrap
+                message_text = speakerphone_wrap(
+                    message_text,
+                    source     = "voice",
+                    session_id = self.session_id_hash
+                )
+            except Exception as e:
+                # Wrap failure is non-fatal — fall through with raw text
+                self._log( f"{self.LOG_PREFIX} speakerphone_wrap failed (passing through unwrapped): {e}" )
 
         try:
             # Step 1: Type the message text (literal mode — no key interpretation)
@@ -449,8 +647,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             )
             from lupin_cli.notifications.notify_user_async import notify_user_async
 
-            # Build sender_id matching the CC session format
-            sender_id = f"claude.code@lupin.deepily.ai#{self.session_id_hash}"
+            sender_id = build_sender_id_for_cc( session_id=self.session_id_hash ) or f"claude.code@lupin.deepily.ai#{self.session_id_hash}"
 
             request = AsyncNotificationRequest(
                 message           = f"Received: {gist}",
@@ -509,6 +706,119 @@ class CCNotificationListener( BaseWebSocketListener ):
         except Exception as e:
             self._log( f"{self.LOG_PREFIX} ERROR buffering message: {e}" )
 
+    def _stamp_user_id_on_bridge( self ):
+        """
+        Phase 3 Option 2 — resolve the authenticated user_id and stamp it on
+        this session's bridge file so the inter-session-commons broadcast
+        surface can same-user-scope active sessions correctly.
+
+        Per `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`:
+        - Posts to f"http://{host}:{port}/auth/login" with `email` + `password`
+        - Extracts `user.id` from the response (canonical user UUID)
+        - Calls `session_bridge.set_user_id(session_id_hash, user_id)` —
+          set_user_id accepts the 8-char prefix via find_session_path_by_id
+        - Best-effort: any failure (network, auth, parse, missing bridge) is
+          debug-logged and swallowed. Option 1's graceful-degradation filter
+          in `routers/commons.py::filter_and_project_sessions` covers the gap.
+
+        Fires once at `run()` startup, not on each reconnect cycle.
+
+        Ensures:
+            - Never raises publicly. All errors caught + logged.
+            - Bridge file is mutated only on full success.
+        """
+        try:
+            import urllib.request
+            import urllib.error
+            from lupin_cli.claude_code.hooks.lib.session_bridge import set_user_id
+
+            url = f"http://{self.host}:{self.port}/auth/login"
+            body = json.dumps( { "email": self.email, "password": self.password } ).encode( "utf-8" )
+            req  = urllib.request.Request(
+                url,
+                data    = body,
+                headers = { "Content-Type": "application/json" },
+                method  = "POST",
+            )
+            with urllib.request.urlopen( req, timeout=10.0 ) as resp:
+                payload = json.loads( resp.read().decode( "utf-8" ) )
+            user_id = payload.get( "user", { } ).get( "id" )
+            if not user_id:
+                self._log( f"{self.LOG_PREFIX} user_id stamp skipped — no user.id in /auth/login response" )
+                return
+            ok = set_user_id( self.session_id_hash, user_id )
+            if ok:
+                self._log( f"{self.LOG_PREFIX} user_id stamped on bridge: {user_id}" )
+            else:
+                self._log( f"{self.LOG_PREFIX} user_id stamp skipped — bridge not found for session {self.session_id_hash}" )
+        except ( urllib.error.URLError, json.JSONDecodeError, OSError, KeyError, ValueError ) as e:
+            self._log( f"{self.LOG_PREFIX} user_id stamp failed (silent fallback): {e!r}" )
+        except Exception as e:
+            # Defense-in-depth: never let stamping kill the listener startup
+            self._log( f"{self.LOG_PREFIX} user_id stamp unexpected error (silent fallback): {e!r}" )
+
+    def _stamp_owner_user_id_on_bridge( self ):
+        """
+        Writer-side follow-up to the 2026-05-14 Option C design. Resolves
+        the HUMAN OWNER's user_id via /auth/login using owner credentials
+        from ~/.lupin/config[owner], then stamps it on the bridge via
+        session_bridge.set_owner_user_id.
+
+        Per `src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md`.
+
+        Distinct from `_stamp_user_id_on_bridge`: that stamps the listener's
+        OWN service-account identity (`claude.code@lupin.deepily.ai`); this
+        stamps the HUMAN owner's identity, which is what the broadcast UI's
+        same-user filter (`filter_and_project_sessions` in CoSA's
+        `routers/commons.py`) actually compares against.
+
+        Best-effort: any failure (creds missing, network, auth, parse,
+        missing bridge) is logged and swallowed. CoSA-side graceful-
+        degradation filter covers the gap until the stamp succeeds.
+
+        Fires once at run() startup, immediately after _stamp_user_id_on_bridge.
+
+        Ensures:
+            - Never raises publicly. All errors caught + logged.
+            - Bridge file is mutated only on full success.
+        """
+        try:
+            import urllib.request
+            import urllib.error
+            from lupin_cli.claude_code.hooks.lib.hook_credentials import get_owner_credentials
+            from lupin_cli.claude_code.hooks.lib.session_bridge import set_owner_user_id
+
+            try:
+                owner_email, owner_password = get_owner_credentials()
+            except ( FileNotFoundError, ValueError ) as e:
+                self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — no owner credentials: {e}" )
+                return
+
+            url  = f"http://{self.host}:{self.port}/auth/login"
+            body = json.dumps( { "email": owner_email, "password": owner_password } ).encode( "utf-8" )
+            req  = urllib.request.Request(
+                url,
+                data    = body,
+                headers = { "Content-Type": "application/json" },
+                method  = "POST",
+            )
+            with urllib.request.urlopen( req, timeout=10.0 ) as resp:
+                payload = json.loads( resp.read().decode( "utf-8" ) )
+            owner_user_id = payload.get( "user", { } ).get( "id" )
+            if not owner_user_id:
+                self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — no user.id in /auth/login response" )
+                return
+            ok = set_owner_user_id( self.session_id_hash, owner_user_id )
+            if ok:
+                self._log( f"{self.LOG_PREFIX} owner_user_id stamped on bridge: {owner_user_id}" )
+            else:
+                self._log( f"{self.LOG_PREFIX} owner_user_id stamp skipped — bridge not found for session {self.session_id_hash}" )
+        except ( urllib.error.URLError, json.JSONDecodeError, OSError, KeyError, ValueError ) as e:
+            self._log( f"{self.LOG_PREFIX} owner_user_id stamp failed (silent fallback): {e!r}" )
+        except Exception as e:
+            # Defense-in-depth: never let stamping kill the listener startup
+            self._log( f"{self.LOG_PREFIX} owner_user_id stamp unexpected error (silent fallback): {e!r}" )
+
     def _print_stats( self ):
         """Print session statistics on shutdown."""
         self._log( "" )
@@ -549,6 +859,20 @@ class CCNotificationListener( BaseWebSocketListener ):
         self._log( f"{self.LOG_PREFIX} Debug        : {self.debug}" )
         self._log( f"{self.LOG_PREFIX} Verbose      : {self.verbose}" )
         self._log_central( "=== LISTENER STARTED ===" )
+
+        # Phase 3 Option 2 — stamp user_id on the bridge so inter-session-commons
+        # active-sessions endpoint can same-user-scope correctly. Best-effort;
+        # silent fallback on failure since Option 1's graceful filter covers
+        # the gap. Fires once at startup, not on every reconnect cycle.
+        # Per src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md.
+        self._stamp_user_id_on_bridge()
+
+        # Writer-side follow-up — stamp the HUMAN OWNER's user_id on the
+        # bridge. The broadcast UI's filter compares against the human
+        # owner, not the listener's service account. Best-effort with
+        # silent fallback; CoSA-side graceful-degradation covers the gap.
+        # Per src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md
+        self._stamp_owner_user_id_on_bridge()
 
         restart_cycle    = 0
         restart_cooldown = 60  # seconds

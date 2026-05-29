@@ -81,6 +81,30 @@ class TestExtractQualifierComment:
         assert answer is None
         assert qualifier is None
 
+    def test_neither_with_comment( self ):
+        """'neither [comment: re-frame please]' → ('neither', 're-frame please')."""
+        answer, qualifier = extract_qualifier_comment( "neither [comment: re-frame please]" )
+        assert answer == "neither"
+        assert qualifier == "re-frame please"
+
+    def test_neither_no_comment( self ):
+        """'neither' → ('neither', None)."""
+        answer, qualifier = extract_qualifier_comment( "neither" )
+        assert answer == "neither"
+        assert qualifier is None
+
+    def test_neither_case_insensitive( self ):
+        """'NEITHER' → ('neither', None)."""
+        answer, qualifier = extract_qualifier_comment( "NEITHER" )
+        assert answer == "neither"
+        assert qualifier is None
+
+    def test_neither_with_whitespace( self ):
+        """'  neither  ' → ('neither', None) after stripping."""
+        answer, qualifier = extract_qualifier_comment( "  neither  " )
+        assert answer == "neither"
+        assert qualifier is None
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TestSummarizeTask
@@ -219,7 +243,26 @@ class TestShouldAskAnythingElse:
 # TestVoiceDrain
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _disable_idle_detection_fixture():
+    """
+    Shared autouse fixture body: disables idle_detection so tests that exercise
+    the legacy immediate-ask path keep hitting it after the 2026-04-29 idle-aware
+    Stop hook landing. See:
+        src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+    Apply via @pytest.fixture(autouse=True) wrapping in each test class that
+    expects _ask_anything_else (legacy) instead of _arm_idle_waiter (deferred).
+    """
+    return ( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
+             lambda: { "enabled": False, "backoff_minutes": [ ] } )
+
+
 class TestVoiceDrain:
+
+    @pytest.fixture( autouse=True )
+    def _disable_idle( self, monkeypatch ):
+        target, value = _disable_idle_detection_fixture()
+        monkeypatch.setattr( target, value )
+
     """Tests for voice buffer drain in Stop hook."""
 
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
@@ -286,6 +329,12 @@ class TestEmptyPayload:
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestVoiceBlocking:
+
+    @pytest.fixture( autouse=True )
+    def _disable_idle( self, monkeypatch ):
+        target, value = _disable_idle_detection_fixture()
+        monkeypatch.setattr( target, value )
+
     """Tests for voice-driven stop blocking."""
 
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
@@ -365,6 +414,94 @@ class TestLoopPrevention:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# TestConversationModeGate (Bug B — Session c7333045, 2026-04-28)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestConversationModeGate:
+
+    @pytest.fixture( autouse=True )
+    def _disable_idle( self, monkeypatch ):
+        target, value = _disable_idle_detection_fixture()
+        monkeypatch.setattr( target, value )
+
+    """
+    When the session is in conversation mode the hook must be a silent no-op:
+    no voice-buffer drain, no notify_user_sync prompt, no TTS, no block. The
+    user is holding a continuous voice dialogue at a distance and any of those
+    side effects interrupts the flow.
+    """
+
+    @patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" )
+    @patch( "lupin_cli.claude_code.hooks.stop.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge" )
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=True )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    def test_speakerphone_on_skips_everything( self, mock_read, mock_log, mock_conv,
+                                                  mock_session, mock_resolve, mock_drain,
+                                                  mock_emit, mock_notify, mock_send_tts,
+                                                  mock_try_auto_narrate ):
+        """speakerphone_on=True → emit {}, run auto-narrate safety net,
+        NO drain, NO notify, NO direct TTS via the prompt paths.
+
+        `_try_auto_narrate` (Phase 4 Layer 3) is patched as a no-op here so the
+        send_tts assertion specifically covers the prompt-path code; auto-narrate
+        has its own tests at TestAutoNarrate*. See:
+        src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
+        """
+        mock_read.return_value = {
+            "stop_hook_active" : False,
+            "session_id"       : "abc12345"
+        }
+
+        with pytest.raises( SystemExit ):
+            main()
+
+        # The gate fired with the resolved session_id
+        mock_conv.assert_called_once_with( "abc12345" )
+        # Allow the stop, no block payload
+        mock_emit.assert_called_once_with( {} )
+        # The auto-narrate safety net DOES run (this is intentional in conv mode)
+        mock_try_auto_narrate.assert_called_once_with( "abc12345", mock_read.return_value )
+        # The prompt-path side effects MUST NOT fire
+        mock_drain.assert_not_called()
+        mock_notify.assert_not_called()
+        # send_tts was patched separately from _try_auto_narrate, so this asserts
+        # nothing in main()'s prompt path bypassed the gate to call TTS.
+        mock_send_tts.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else", return_value={} )
+    @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False )
+    @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
+    def test_notification_mode_runs_normal_flow( self, mock_read, mock_log, mock_conv,
+                                                  mock_session, mock_resolve, mock_emit,
+                                                  mock_ask, mock_reset, mock_drain ):
+        """speakerphone_on=False → falls through to standard flow (drain runs)."""
+        mock_read.return_value = {
+            "stop_hook_active" : False,
+            "session_id"       : "abc12345"
+        }
+
+        main()
+
+        mock_conv.assert_called_once_with( "abc12345" )
+        # Standard flow: drain ran, ask_anything_else fired (empty buffer path)
+        mock_drain.assert_called_once_with( "abc12345" )
+        mock_ask.assert_called_once()
+        mock_emit.assert_called_once_with( {} )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # TestBlockCounter (Phase 4)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -430,6 +567,21 @@ class TestBlockCounter:
 
 class TestNotifyUserSync:
     """Tests for the notify_user_sync 'Anything else?' branch."""
+
+    @pytest.fixture( autouse=True )
+    def _disable_idle_detection( self, monkeypatch ):
+        """
+        These tests exercise the legacy immediate-ask path. After the
+        2026-04-29 idle-aware Stop hook landing, that path only fires when
+        ~/.claude/settings.json idle_detection.enabled is False. Force-disable
+        for the whole class so the tests keep exercising the immediate-ask
+        flow they were written against.
+        See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+        """
+        monkeypatch.setattr(
+            "lupin_cli.claude_code.hooks.stop.load_idle_settings",
+            lambda: { "enabled": False, "backoff_minutes": [ ] }
+        )
 
     @patch( "lupin_cli.claude_code.hooks.stop._should_ask_anything_else", return_value=True )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
@@ -754,10 +906,17 @@ class TestNotifyUserSync:
 class TestInjectQualifierViaTmux:
     """Tests for inject_qualifier_via_tmux() in hook_common."""
 
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap",
+            side_effect=lambda text, **_kw: text )
     @patch( "subprocess.Popen" )
     @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
-    def test_spawns_popen( self, mock_find, mock_popen ):
-        """Valid session → spawns Popen with tmux send-keys command."""
+    def test_spawns_popen( self, mock_find, mock_popen, _mock_wrap ):
+        """Valid session → spawns Popen with tmux send-keys command.
+
+        Patches hook_common.speakerphone_wrap to identity so the assertion
+        focuses on the bash-positional-args structure (security boundary),
+        not the per-turn rider content (covered by test_speakerphone_wrap.py).
+        """
         mock_find.return_value = { "tmux_session": "lupin", "session_id": "abc12345" }
 
         from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux
@@ -785,10 +944,17 @@ class TestInjectQualifierViaTmux:
 
         mock_popen.assert_not_called()
 
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap",
+            side_effect=lambda text, **_kw: text )
     @patch( "subprocess.Popen" )
     @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
-    def test_special_chars_safe( self, mock_find, mock_popen ):
-        """Special chars in text → passed as separate positional arg, not embedded in shell."""
+    def test_special_chars_safe( self, mock_find, mock_popen, _mock_wrap ):
+        """Special chars in text → passed as separate positional arg, not embedded in shell.
+
+        Patches hook_common.speakerphone_wrap to identity so the assertion
+        targets the bash-positional-args injection boundary, not the per-turn
+        rider content.
+        """
         mock_find.return_value = { "tmux_session": "lupin", "session_id": "abc12345" }
 
         from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux

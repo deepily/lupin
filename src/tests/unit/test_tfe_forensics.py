@@ -69,7 +69,10 @@ class TestTfeDoAllErrorCapture:
             raise KeyError( "forced-test-failure-marker" )
         tfe._execute = _raise
 
-        result = tfe.do_all()
+        # Backlog item 5 (2026-04-29): do_all() re-raises now (canonical
+        # Future contract). State + error are still set on the job object.
+        with pytest.raises( KeyError ):
+            tfe.do_all()
 
         # State + timestamps
         assert tfe.state == JobState.FAILED, f"expected FAILED, got {tfe.state}"
@@ -88,7 +91,6 @@ class TestTfeDoAllErrorCapture:
         # Note: str(KeyError("x")) == "'x'" — KeyError wraps in quotes, that's fine
         assert tfe.answer_conversational.startswith( "TFE failed:" )
         assert "forced-test-failure-marker" in tfe.answer_conversational
-        assert result == tfe.answer_conversational
 
         # Legacy self.status attribute should no longer be used as the lifecycle indicator
         # (it may still exist for other reasons, but state is the canonical source)
@@ -102,7 +104,9 @@ class TestTfeDoAllErrorCapture:
             raise RuntimeError( "stdout-probe-marker" )
         tfe._execute = _raise
 
-        tfe.do_all()
+        # Backlog item 5: do_all() re-raises (canonical Future contract).
+        with pytest.raises( RuntimeError ):
+            tfe.do_all()
         captured = capsys.readouterr()
 
         assert "[TestFixExpediterJob] Failed" in captured.out, \

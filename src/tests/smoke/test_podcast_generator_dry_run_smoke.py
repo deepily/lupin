@@ -260,6 +260,19 @@ def quick_smoke_test():
 
 def test_podcast_generator_dry_run_smoke():
     """Pytest entry point."""
+    import pytest
+    email = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    if email:
+        research_full_path = cu.get_project_root() + f"/io/deep-research/{email}/"
+        if not os.path.exists( research_full_path ) or not [
+            f for f in ( os.listdir( research_full_path ) if os.path.exists( research_full_path ) else [] )
+            if f.endswith( '.md' )
+        ]:
+            pytest.skip(
+                f"No research files in {research_full_path} — podcast test needs a "
+                "real DR report as input. DR dry_run paths emit mock-only metadata "
+                "(no file written). Run a non-dry-run DR first to populate this directory."
+            )
     assert quick_smoke_test()
 
 

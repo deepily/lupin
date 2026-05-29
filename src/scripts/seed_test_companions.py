@@ -47,11 +47,12 @@ TEST_DB     = "lupin_db_test"
 # Companion emails to seed from dev → test
 ADMIN_EMAIL        = os.environ.get( "LUPIN_DEV_EMAIL", "ricardo.felipe.ruiz@gmail.com" )
 SYSTEM_ADMIN       = "admin@lupin.deepily.ai"
-SERVICE_ACCT       = "claude.code@deepily.ai"
+SERVICE_ACCT       = "claude.code@deepily.ai"             # cross-project service account (no project)
+CC_LISTENER_LUPIN  = "claude.code@lupin.deepily.ai"       # 2026-04-28: Lupin-project CC listener identity
 INTERACTIVE_TESTER = "interactive.job.tester@lupin.deepily.ai"
 MOCK_TESTER        = "mock.job.tester@lupin.deepily.ai"
 
-COMPANION_EMAILS = [ ADMIN_EMAIL, SYSTEM_ADMIN, SERVICE_ACCT, INTERACTIVE_TESTER, MOCK_TESTER ]
+COMPANION_EMAILS = [ ADMIN_EMAIL, SYSTEM_ADMIN, SERVICE_ACCT, CC_LISTENER_LUPIN, INTERACTIVE_TESTER, MOCK_TESTER ]
 
 # ANSI colors
 GREEN  = "\033[0;32m"

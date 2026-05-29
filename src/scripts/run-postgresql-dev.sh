@@ -233,7 +233,7 @@ display_connection_info() {
     echo "  • $TEST_DB_NAME   (integration tests)"
     echo ""
     echo "Data Location:"
-    echo "  $LUPIN_ROOT/src/conf/long-term-memory/postgresql-dev-data/"
+    echo "  /mnt/DATA01/include/www.deepily.ai/projects/lupin-data/postgresql-dev-data/"
     echo ""
     echo "Management:"
     echo "  • Stop:   docker compose down"

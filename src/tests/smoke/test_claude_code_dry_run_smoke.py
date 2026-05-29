@@ -113,7 +113,7 @@ class ClaudeCodeDryRunSmokeTest( LivePipelineTestBase ):
     """
 
     TEST_NAME       = "Claude Code Dry Run"
-    SUBMIT_ENDPOINT = "/api/claude-code/queue/submit"
+    SUBMIT_ENDPOINT = "/api/claude-code/submit"
     DEFAULT_TIMEOUT = 120
     POLL_INTERVAL   = 2
     SCENARIOS       = CLAUDE_CODE_DRY_RUN_SCENARIOS

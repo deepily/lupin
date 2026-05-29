@@ -169,6 +169,16 @@ def quick_smoke_test():
             elif "LUPIN_APP_SERVER_URL" in os.environ:
                 del os.environ["LUPIN_APP_SERVER_URL"]
 
+        # Test 11: Verify request_persona tool is registered on the real server module
+        print( "\nTest 11: Verifying request_persona tool registration..." )
+        from lupin_mcp import cosa_voice_mcp
+        assert hasattr( cosa_voice_mcp, "request_persona" ), "request_persona tool missing"
+        assert "FunctionTool" in str( type( cosa_voice_mcp.request_persona ) ), \
+            "request_persona is not a registered @mcp.tool"
+        assert callable( cosa_voice_mcp._request_persona ), "_request_persona helper missing"
+        assert callable( cosa_voice_mcp._persona_error_detail ), "_persona_error_detail helper missing"
+        print( "✓ request_persona registered as FunctionTool; helpers present" )
+
         print( "\n" + "=" * 70 )
         print( "✅ ALL SMOKE TESTS PASSED!" )
         print( "=" * 70 )

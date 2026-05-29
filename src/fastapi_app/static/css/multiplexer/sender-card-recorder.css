@@ -1,0 +1,80 @@
+/* ============================================================================
+   Multiplexer Phase 6c Node C — sender-card recorder stylesheet.
+
+   Styles the per-sender-card `.cc-voice-input` footer rendered by
+   senderCard.ts (Step C1) + `SenderCardRecorderRenderer` state machine:
+   - `.cc-voice-input[data-recorder-state="idle"]` — Record button only
+   - `.cc-voice-input[data-recorder-state="recording"]` — Stop button (red)
+   - `.cc-voice-input[data-recorder-state="ready_to_send"]` — textarea + Re-record + Send
+
+   Scope-leak protection (matching Phase 6a/6b/6c-D/B/A pattern):
+   - NO global selectors — fail-build rule in .stylelintrc.json override
+   - All rules scoped under .cc-voice-input + descendants
+   ============================================================================ */
+
+.cc-voice-input {
+    display    : flex;
+    flex-wrap  : wrap;
+    gap        : 6px;
+    align-items: center;
+    padding    : 8px 12px;
+    border-top : 1px solid #e9ecef;
+    margin-top : 4px;
+}
+
+.cc-voice-input .record-button,
+.cc-voice-input .send-button {
+    padding       : 4px 12px;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    background    : #fff;
+    font-size     : 12px;
+    cursor        : pointer;
+    color         : #212529;
+}
+
+.cc-voice-input .record-button:hover,
+.cc-voice-input .send-button:hover {
+    background : #f8f9fa;
+}
+
+.cc-voice-input .record-button.recording {
+    background   : #dc3545;
+    color        : #fff;
+    border-color : #b02a37;
+}
+
+.cc-voice-input .send-button {
+    background   : #198754;
+    color        : #fff;
+    border-color : #146c43;
+}
+
+.cc-voice-input .send-button:hover {
+    background : #146c43;
+}
+
+.cc-voice-input-textarea {
+    flex          : 1 1 200px;
+    min-height    : 28px;
+    padding       : 4px 8px;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    font-family   : inherit;
+    font-size     : 12px;
+    resize        : vertical;
+}
+
+.cc-voice-input-error {
+    flex            : 1 1 100%;
+    margin-top      : 4px;
+    padding         : 4px 8px;
+    border-left     : 3px solid #dc3545;
+    background-color: #f8d7da;
+    color           : #842029;
+    font-size       : 11px;
+}
+
+.cc-voice-input[data-recorder-state="idle"] .record-button {
+    /* Default state — no additional styling needed; uses base rules above. */
+}

@@ -23,6 +23,8 @@ The system defines **22 events** in `lupin-app.ini`. Clients subscribe to specif
 | `notification_play_sound` | Notifications | Server → Client | Yes |
 | `notification_expired` | Notifications | Server → Client | Yes |
 | `notification_responded` | Notifications | Server → Client | Yes |
+| `commons_activity` | Notifications (notification_queue_update wrapper, `type="commons_activity"`) | Server → Client | Yes |
+| `speakerphone_changed` | Notifications (notification_queue_update wrapper, `type="speakerphone_changed"`) | Server → Client | Yes |
 | `proxy_decision_new` | Proxy / Ratification | Server → Client | Yes |
 | `sys_time_update` | System | Server → Client | No (broadcast) |
 | `status` | System | Server → Client | Varies |
@@ -216,6 +218,68 @@ Broadcast when a user submits a response to a response-required notification. Al
 
 ---
 
+### `commons_activity`
+
+**NEW 2026-05-14** — Real-time push of new commons-topic entries to the broadcast-card Recent Activity stream. Powers the admin-oversight surface described in [`../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`](../rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md).
+
+Wrapped in the canonical `notification_queue_update` envelope with `notification.type == "commons_activity"`. Fired by `CommonsActivityWatcher` (FastAPI-side daemon in `src/cosa/rest/commons_activity_watcher.py`) on each ~1s tick when new entries land in the commons store on any non-excluded topic. Recipient is resolved best-effort from `metadata.sender_user_id` first, then a bridge-owner lookup keyed by `sender_session_id`; falls back to broadcast-to-all-authenticated-WS in single-user dev.
+
+Gated by two INI keys (both default True per Q9):
+- `commons traffic visibility enabled` — master flag (hot-reloadable via the config re-init endpoint)
+- `commons traffic visibility ws push enabled` — emergency-throttle to disable the WS push while keeping the section visible
+
+**Payload** (under `notification.payload`):
+```json
+{
+  "ts": "2026-05-14T20:00:00+00:00",
+  "topic": "coord-notifications-js",
+  "topic_kind": "free-form",
+  "sender_session_id": "...",
+  "persona_name": "Maria",
+  "persona_icon": "🌸",
+  "persona_color": "#F06292",
+  "body": "...",
+  "metadata": { ... }
+}
+```
+
+`topic_kind` is `"reserved"` for `broadcasts` + `broadcast-acks`; `"free-form"` otherwise. The client uses this to decide whether to render a topic-chip prefix (Q2 ratification — free-form gets a chip; reserved doesn't). Excluded topics (`presence` + `system-events` by default per `commons traffic visibility exclude topics`) never appear in this stream.
+
+Client handling: `notifications.js::_handleCommonsActivityWS()` prepends the new entry to `#commons-recent-activity-entries`, preserving newest-first ordering (Q7 ratification).
+
+---
+
+### `speakerphone_changed`
+
+**Renamed 2026-05-13** from `conversation_mode_changed` during the Speakerphone solo/chorus refactor (see [`../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`](../rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/) Phase 3). Broadcast on every speakerphone-mode toggle so all connected UI tabs sync. In solo mode, activating one session displaces any other active session; in chorus mode, multiple sessions can be simultaneously active.
+
+Wrapped in the canonical `notification_queue_update` envelope with `notification.type == "speakerphone_changed"`. Origin: `src/cosa/rest/routers/speakerphone.py` — emits at two sites: (a) the displaced-other-session push (when a different session previously held the slot in solo mode) and (b) the self-state-change push (always fires on POST `/api/cosa-voice/speakerphone/{sid}`). User-scoped — only sent to the authenticated owner's sessions.
+
+**Payload** (under `notification.payload`):
+```json
+{
+  "session_id": "abc123-uuid",
+  "on": true,
+  "displaced": false,
+  "displaced_by": null
+}
+```
+
+- `session_id` — the session whose speakerphone state just changed
+- `on` — `true` if speakerphone is now active, `false` if deactivated
+- `displaced` (optional) — `true` when this session was forcibly deactivated because another session activated in solo mode
+- `displaced_by` (optional) — the session_id that displaced this one (only present when `displaced: true`)
+
+Client handling:
+- Legacy UI: `notifications.js::handleConversationModeChanged()` (line ~5552) — client-side maps `payload.on → conversation_mode_active` for the legacy in-memory state model; the legacy handler kept its original method name for callsite stability.
+- Multiplexer UI: `src/fastapi_app/static/js/multiplexer/stores/SenderStore.ts` — `STATE_UPDATE_TYPES` Set includes BOTH `"speakerphone_changed"` (current wire) AND `"conversation_mode_changed"` (post-rename target, in case the type is ever re-renamed back). Reducer reads `payload.active ?? payload.on` to accept either field name. **Forward-compat bridge** — implementer can rename either direction without breaking the client. See `2026-05-19 Run 3 cascade Section D` for the Path III bridge ratification rationale.
+
+**INI subscription**: included in `lupin-app.ini` `websocket available events` (line 741). Subscribed by both legacy and multiplexer clients via the WS auth handshake.
+
+**Server-side whitelist**: `src/cosa/rest/routers/notifications.py:359-364` `valid_types` list. The deprecated `conversation_mode_changed` is NOT in the list — pushing that type would return HTTP 400.
+
+---
+
 ## Proxy / Ratification Events
 
 ### `proxy_decision_new`
@@ -399,6 +463,49 @@ The following events were removed in July 2025 and replaced by `job_state_transi
 | `queue_running_update` | `job_state_transition` (with `to_queue: "run"`) |
 | `queue_done_update` | `job_state_transition` (with `to_queue: "done"`) |
 | `queue_dead_update` | `job_state_transition` (with `to_queue: "dead"`) |
+
+The following event was renamed during the 2026-05-13 Speakerphone solo/chorus refactor (Phase 3 of `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`):
+
+| Deprecated Event | Replacement | Rename Date |
+|-----------------|-------------|-------------|
+| `conversation_mode_changed` | `speakerphone_changed` (semantic payload identical; `payload.on` carries the boolean state) | 2026-05-13 |
+
+The deprecated name is NOT in the `valid_types` whitelist; pushing it returns HTTP 400. The multiplexer `SenderStore` accepts both names client-side as a **forward-compat bridge** in case the event is ever re-renamed back — see `speakerphone_changed` entry above for details.
+
+---
+
+## Close Code Semantics
+
+The server uses RFC 6455 application close codes (4000–4999) to signal
+auth-failure outcomes that the browser-side state machine
+(`src/fastapi_app/static/js/ws-channel.js`) treats as PERMANENT — the
+channel goes straight to `OPEN_CIRCUIT` and does NOT auto-retry.
+
+Codes were introduced in Phase 5 of the WS reconnect circuit-breaker
+milestone (`src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/06-phase-5-server-side-hardening.md`).
+Constants live in `src/cosa/rest/routers/websocket.py`.
+
+| Code | Constant | Meaning | Server emits when… | Client behavior |
+|------|----------|---------|---------------------|------------------|
+| 4001 | `CLOSE_CODE_AUTH_INVALID_TOKEN`       | Invalid / expired / malformed token; bad `auth_request` envelope | Auth flow on `/ws/queue/{session}` rejects the supplied token (any of: malformed JSON, missing `token` field, empty token, signature failure, `TokenExpiredException`) | `notifications.js` attempts a single `refreshAccessToken()` call FIRST. On refresh-success, `manualRetry()` runs on both channels (no banner shown). On refresh-failure, the auth-permanent banner is shown ("Authentication failed — please log in again."). |
+| 4002 | `CLOSE_CODE_AUTH_SESSION_CONFLICT`    | Single-session-per-user policy displaced this connection | A second connection arrives for a user already connected, AND `websocket enforce single session per user = True`. The OLD session receives 4002. | Banner: "Another session has taken over. Refresh to reclaim." Channel does NOT auto-retry. |
+| 4003 | `CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED` | RBAC reject on one or more `subscribed_events` | RESERVED — no current branch emits 4003. The audio path filters denied events silently today. Reserved for future RBAC enforcement. | Banner: "Permission denied for one or more notification streams." Channel does NOT auto-retry. |
+
+For comparison, the standard close codes the server still uses unchanged:
+
+| Code | Meaning | Client behavior |
+|------|---------|------------------|
+| 1000 | Normal client-initiated close | No reconnect. State → `DISCONNECTED`. |
+| 1001 | Going away (server shutdown) | Reconnect per normal full-jitter backoff. |
+| 1006 / no-code | Abnormal closure (transport-level fault) | Reconnect per normal backoff. |
+| 1008 | Policy violation (e.g. invalid session ID format at the URL) | Reconnect per normal backoff. |
+
+### Browser-side reaction
+
+The full reaction logic lives in `ws-channel.js` (`PERMANENT_CLOSE_CODES` set + `socket.onclose` handler) and `notifications.js` (`_showCircuitBanner` / `_renderCircuitBanner`):
+
+- queue WS `onclose` with `event.code` in {4001, 4002, 4003} → `openCircuit("auth-permanent", code)` → `ws-circuit-open` event with `detail.reason="auth-permanent"` + `detail.code` → NotificationsUI: 4001 → try token refresh; else → render auth-permanent banner.
+- queue WS `onclose` with any other code (1000 / 1001 / 1006 / …) → `handleClose()` → `scheduleReconnect()` (full-jitter backoff, capped at 20 attempts before the breaker trips for transport reasons).
 
 ---
 

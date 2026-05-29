@@ -12,6 +12,15 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-05-16-to-18](2026-05-16-to-18-history.md) | May 16-18, 2026 | ~12 sessions | Model-server carve-out (Whisper + 2 encoders → lupin-model-server:7998), Daily LoC Delta tool (`cosa.repo.git_loc_delta`), cosa-voice MCP discovery-surface expansion, Doc viewer SPA dispatcher 404 fix, Voice persona stale-bridge pool-exhaustion fix + Sam-as-overflow, Coordinator dispatch + Phase 5 unit tests, Multiplexer Phase 6c implementation (Nodes A-D) + cascade runs 1-3, Voice persona pool expansion (+2, Sam→pool/Arnold→overflow), Recent-activity panel UX polish |
+| [2026-05-12-to-15](2026-05-12-to-15-history.md) | May 12-15, 2026 | 25 sessions | Inter-Session Commons Phase 2-3 + Phase 0 DM landing, Multi-Repo Doc Viewer + Doc-Viewer Scope Unification, Speakerphone refactor Phases 5b/6/7 + solo/chorus design, Multiplexer Phase 6b CLOSED + 6c launch, Notifications UI three-fix arc (Recent-Activity refresh / focus-tray persistence / header-toggle children-wipe), Broadcast-acks consumer-side dedupe, Commons Blackboard summary, Bounded-CC migration audit, TTS preview-and-advance + runtime percentage slider, Mr. Radio prior-archive meta-session |
+| [2026-05-07-to-11](2026-05-07-to-11-history.md) | May 7-12 AM, 2026 | 12 sessions | Inter-Session Commons Phase 1 wrap + Phase 2 backend, Multiplexer Phase 6b Pass 1 Fitness ratification, CC Card Normalization Phases 1-5a, ask_yes_no "Neither" affordance, Voice Persona Rename Domi→Rio, CC notifications-card normalization plan-review, Multiplexer Phase 6a final closure on :8000 + Phase 6b planning launch, Bug Fix Mode notification 503 cascade reconciliation |
+| [2026-05-03-to-06](2026-05-03-to-06-history.md) | May 3-6, 2026 | 13 sessions | (See archive header for topic summary) |
+| [2026-04-30-to-05-02](2026-04-30-to-05-02-history.md) | Apr 30 - May 2, 2026 | ~13 sessions | cc-strip-icons hover clipping, Conversation-Mode Three-Layer Mic-Monopoly Enforcement, CC Notification Session Panel + exclusive focus mode, postmortem remediation, WS reconnect outage root cause, persona rename + display_name helper, history archival, Today filter + focus-mode flash, focus-tray icon stranding cleanup, TODO size-management skill, WS reconnect circuit breaker, focus-tray inactive-session toggle + bubble differentiation, voice persona desync investigation + /clear preservation fix |
+| [2026-04-29](2026-04-29-history.md) | Apr 29, 2026 | 3 sessions | Persona Theming Round 1 + WS-event cleanup, passlib/bcrypt 4.3.0 pin diagnosis, Test-Suite Anomaly Remediation Phases 1+2+3 + Idle-Aware Stop Hook |
+| [2026-04-25-to-28](2026-04-25-to-28-history.md) | Apr 25-28, 2026 | 11 sessions | Per-session voice personas, conversation-mode v1.1, test-suite anomaly remediation, conversation-mode-for-CC, docker image hygiene 130→31.6 GB, notification dispatch unification, cosa-voice MCP fix, podcast completion URLs |
+| [2026-04-22-to-24](2026-04-22-to-24-history.md) | Apr 22-24, 2026 | 6 sessions | PR Readiness 100%-green, CJ Flow Async Phase 0+1, cosa-voice nested-repo fix, [UNKNOWN] hyphen fix, TFE model flip, LanceDB-GCS CUDA OOM resolution |
+| [2026-04-14-to-21](2026-04-14-to-21-history.md) | Apr 14-21, 2026 | 12 sessions | TFE Resume E2E live path, env-vars API, test-suite scheduling, Peer Queue Watch UI, BFE Phase 6 observability, CJ Flow "Delete All" buttons, Truncate BFE job ID badge, TFE Option A tier budgets, container preflight, TFE-to-CC Opus 4.7 + thinking-effort, telemetry demotion, BFE stderr parity, DELETE /queue/all 404 fix, CJ Flow Async Multi-Lane Design Review (v0.1.7) |
 | [2026-04-08-to-14](2026-04-08-to-14-history.md) | Apr 8-14, 2026 | 23 sessions | TFE E2E live path, BFE Phase 6 completion, checkpoint-resume, MCP-503 stall fix, SDK creds mount, TFE/BFE observability, lifecycle fixes |
 | [2026-03-26-to-04-07](2026-03-26-to-04-07-history.md) | Mar 26 - Apr 7, 2026 | 379-a47f938e | BFE Phase 6 (automated repair loop, dead-queue watchdog), CJ Flow persistence gaps fix, Presentation Generator Phases 6-10 (visual renderers: Matplotlib, D2, NanoBanana, Veo), Sonnet automated-testing default, UPE LanceDB test isolation, E2E background execution, SDK 0.1.36→0.1.56 upgrade, Test Suite CJ Flow agentic job, CJ Flow Scheduling UI + Voice Runtime Args |
 | [2026-03-13-to-26](2026-03-13-to-26-history.md) | Mar 13-26, 2026 | 349-378 | INI config key naming convention rollout, prediction engine validation, Phase D collision root cause |
@@ -58,10 +67,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 16 files
-- **Date Range**: May 2025 - April 2026
-- **Total Sessions Documented**: 326+
+- **Total Archives**: 23 files
+- **Date Range**: May 2025 - May 2026
+- **Total Sessions Documented**: 409+
 
 ---
 
-*Last updated: 2026-04-16*
+*Last updated: 2026-05-17*

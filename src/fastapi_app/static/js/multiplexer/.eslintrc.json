@@ -1,0 +1,47 @@
+{
+  "root"          : true,
+  "parser"        : "@typescript-eslint/parser",
+  "parserOptions" : {
+    "ecmaVersion" : 2022,
+    "sourceType"  : "module"
+  },
+  "plugins" : [ "@typescript-eslint" ],
+  "extends" : [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "env" : {
+    "browser" : true,
+    "es2022"  : true
+  },
+  "rules" : {
+    "@typescript-eslint/no-unused-vars" : [ 2, {
+      "argsIgnorePattern"            : "^_",
+      "varsIgnorePattern"            : "^_",
+      "caughtErrorsIgnorePattern"    : "^_",
+      "destructuredArrayIgnorePattern": "^_"
+    } ],
+    "no-restricted-properties" : [ 2,
+      {
+        "object"   : "window",
+        "property" : "notificationsUI",
+        "message"  : "Use EventBus instead of window.notificationsUI globals (multiplexer no-globals rule, Phase 1)."
+      },
+      {
+        "object"   : "window",
+        "property" : "multiplexerUI",
+        "message"  : "Use EventBus instead of window.multiplexerUI globals (multiplexer no-globals rule, Phase 1)."
+      }
+    ],
+    "no-restricted-globals" : [ 2,
+      {
+        "name"    : "notificationsUI",
+        "message" : "Use EventBus instead of bare notificationsUI global."
+      },
+      {
+        "name"    : "multiplexerUI",
+        "message" : "Use EventBus instead of bare multiplexerUI global."
+      }
+    ]
+  }
+}

@@ -79,21 +79,6 @@ class TestClaudeCodeCard:
 
         assert logged_in_page.get_by_test_id( "notifications-cc-task-type-select" ).count() > 0
 
-    def test_cc_card_has_execution_mode_select( self, logged_in_page ):
-        """
-        CC card has execution mode selector.
-
-        Requires:
-            - Authenticated session
-
-        Ensures:
-            - Execution mode select element exists
-        """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-
-        assert logged_in_page.get_by_test_id( "notifications-cc-execution-mode-select" ).count() > 0
-
     def test_cc_card_has_dry_run_checkbox( self, logged_in_page ):
         """
         CC card has dry-run checkbox.
@@ -139,23 +124,42 @@ class TestClaudeCodeCard:
 
         assert logged_in_page.get_by_test_id( "notifications-cc-stt-btn" ).count() > 0
 
-    def test_cc_card_has_session_controls( self, logged_in_page ):
+    def test_cc_card_renders_in_sibling_shape( self, logged_in_page ):
         """
-        CC card has interactive session controls (inject, interrupt, end).
+        CC card renders in the standard sibling DOM shape post-normalization
+        (2026-05-11): header text, prompt textarea, submit button, status div.
+        Zero references to the 5 dead UI blocks deleted by Phase 1 (no
+        cc-execution-mode, cc-response, cc-option-b-controls, cc-session-info,
+        cc-retired-banner). See
+        src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md.
 
         Requires:
             - Authenticated session
 
         Ensures:
-            - Inject input, inject button, interrupt button, end button exist
+            - Header h4 reads "🤖 Submit Claude Code Task"
+            - Prompt textarea + submit button + status div all present
+            - INTERACTIVE option exists but is disabled (Q2 FROZEN — visible
+              breadcrumb for future return)
         """
         logged_in_page.goto( f"{BASE_URL}/app/notifications" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
-        assert logged_in_page.get_by_test_id( "notifications-cc-inject-input" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-cc-inject-btn" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-cc-interrupt-btn" ).count() > 0
-        assert logged_in_page.get_by_test_id( "notifications-cc-end-btn" ).count() > 0
+        # Header text
+        card_header = logged_in_page.locator( "#claude-code-submit-card h4" )
+        assert card_header.count() > 0
+        assert "Submit Claude Code Task" in card_header.text_content()
+
+        # Standard sibling controls present
+        assert logged_in_page.get_by_test_id( "notifications-cc-prompt-textarea" ).count() > 0
+        assert logged_in_page.get_by_test_id( "notifications-cc-submit-btn" ).count() > 0
+        assert logged_in_page.get_by_test_id( "notifications-cc-submit-status" ).count() > 0
+
+        # INTERACTIVE option present but disabled (Q2 FROZEN)
+        task_type_select = logged_in_page.get_by_test_id( "notifications-cc-task-type-select" )
+        interactive_option = task_type_select.locator( "option[value='INTERACTIVE']" )
+        assert interactive_option.count() > 0
+        assert interactive_option.is_disabled()
 
     def test_cc_card_can_fill_prompt( self, logged_in_page ):
         """

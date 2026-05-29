@@ -2,14 +2,11 @@
 """
 Reset User Password - Simple password reset utility.
 
-IMPORTANT: Run from inside the Docker container. The host .venv has bcrypt 5.x
-which is incompatible with passlib. The container has bcrypt 3.2.2 which works.
-
-Usage (Docker — recommended):
+Usage (Docker):
     docker exec -it lupin-rest python3 -m scripts.reset_user_password user@example.com "NewPassword123!"
     docker exec -it lupin-rest python3 -m scripts.reset_user_password --use-original user@example.com
 
-Usage (host — only if bcrypt <4.1 is installed in .venv):
+Usage (host):
     python src/scripts/reset_user_password.py user@example.com "NewPassword123!"
     python src/scripts/reset_user_password.py --use-original user@example.com
 """

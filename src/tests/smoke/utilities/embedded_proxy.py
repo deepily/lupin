@@ -29,6 +29,8 @@ import sys
 import threading
 import time
 
+import requests
+
 
 class EmbeddedProxyMixin:
     """
@@ -51,7 +53,10 @@ class EmbeddedProxyMixin:
 
     PROXY_PROFILE    = "deep_research"
     PROXY_STRATEGY   = "llm_script"
-    PROXY_STARTUP_WAIT = 5  # seconds to wait for proxy to connect
+    PROXY_STARTUP_WAIT          = 1    # seconds — brief settle for subprocess launch before WS-auth poll begins
+    PROXY_WS_AUTH_TIMEOUT       = 30   # seconds — hard cap on WS-auth poll (login + handshake + subscribe)
+    PROXY_WS_AUTH_POLL_INTERVAL = 0.5  # seconds — gap between WS-state polls
+    PROXY_EXPECTED_SESSION_ID   = "auto proxy"  # matches DEFAULT_SESSION_ID in notification_proxy/config.py
 
     def __init__( self, *args, **kwargs ):
         """Initialize proxy state."""
@@ -93,16 +98,23 @@ class EmbeddedProxyMixin:
 
     def _start_proxy( self, profile=None, strategy=None, debug=False, email=None, password=None ):
         """
-        Launch notification proxy as a subprocess.
+        Launch notification proxy as a subprocess and wait for WS-auth to complete.
 
         Requires:
             - No proxy is currently running (will skip if already active)
             - PYTHONPATH includes src/ directory
+            - Lupin REST server reachable at LUPIN_API_URL (default http://localhost:7999)
 
         Ensures:
-            - Proxy subprocess is started and given time to connect
-            - self._proxy_process holds the Popen handle
-            - If email/password provided, proxy authenticates as that user
+            - Proxy subprocess is launched
+            - Polls /api/debug/websocket-state until proxy registers a WS session
+            - Returns normally once proxy is verified WS-authenticated
+            - On any failure: best-effort kills the subprocess, clears self._proxy_process,
+              and raises RuntimeError with diagnostics
+
+        Raises:
+            RuntimeError: When the proxy subprocess fails to launch, dies during startup,
+                or fails to register a WS session within PROXY_WS_AUTH_TIMEOUT seconds.
         """
         if self.proxy_running:
             print( "  Proxy already running, skipping launch." )
@@ -148,33 +160,136 @@ class EmbeddedProxyMixin:
                 # Start in new process group so we can signal it cleanly
                 preexec_fn=os.setsid if hasattr( os, "setsid" ) else None
             )
-
-            # Give the proxy time to authenticate and subscribe
-            print( f"  Waiting {self.PROXY_STARTUP_WAIT}s for proxy to connect..." )
-            time.sleep( self.PROXY_STARTUP_WAIT )
-
-            if self._proxy_process.poll() is not None:
-                # Proxy exited prematurely
-                stdout = self._proxy_process.stdout.read().decode( "utf-8", errors="replace" )
-                print( f"  WARNING: Proxy exited prematurely (code={self._proxy_process.returncode})" )
-                print( f"  Output: {stdout[ :2000 ]}" )
-                self._proxy_process = None
-            else:
-                print( f"  Proxy started (pid={self._proxy_process.pid})" )
-
-                # Spawn reader thread for real-time log streaming
-                if debug:
-                    self._reader_thread = threading.Thread(
-                        target = self._proxy_log_reader,
-                        name   = "proxy-log-reader",
-                        daemon = True,
-                    )
-                    self._reader_thread.start()
-                    print( "  Real-time proxy log streaming enabled." )
-
         except Exception as e:
-            print( f"  WARNING: Failed to start proxy: {e}" )
             self._proxy_process = None
+            raise RuntimeError( f"Failed to launch proxy subprocess: {e}" )
+
+        # Brief settle so the subprocess can attempt login + WS handshake
+        print( f"  Waiting {self.PROXY_STARTUP_WAIT}s for subprocess to settle..." )
+        time.sleep( self.PROXY_STARTUP_WAIT )
+
+        if self._proxy_process.poll() is not None:
+            # Proxy exited during settle — surface stdout in the exception
+            stdout      = self._proxy_process.stdout.read().decode( "utf-8", errors="replace" )
+            return_code = self._proxy_process.returncode
+            self._proxy_process = None
+            raise RuntimeError(
+                f"Proxy subprocess exited during settle (code={return_code}).\n"
+                f"  Last stdout:\n{stdout[ :2000 ]}"
+            )
+
+        print( f"  Proxy subprocess alive (pid={self._proxy_process.pid}). Polling for WS-auth..." )
+
+        # Spawn reader thread before the poll so stdout doesn't fill the pipe
+        if debug:
+            self._reader_thread = threading.Thread(
+                target = self._proxy_log_reader,
+                name   = "proxy-log-reader",
+                daemon = True,
+            )
+            self._reader_thread.start()
+            print( "  Real-time proxy log streaming enabled." )
+
+        # Poll for WS-auth completion — raises RuntimeError on timeout
+        self._wait_for_proxy_ws_auth( email )
+
+        print( f"  Proxy WS-auth verified — proxy is registered with the server." )
+
+    def _wait_for_proxy_ws_auth( self, expected_email ):
+        """
+        Poll /api/debug/websocket-state until the proxy's WS session appears.
+
+        Requires:
+            - self._proxy_process is alive at call time
+            - Lupin REST server reachable at LUPIN_API_URL (default http://localhost:7999)
+
+        Ensures:
+            - Returns normally when PROXY_EXPECTED_SESSION_ID appears in active_connections
+              with a non-empty session_to_user mapping
+            - Raises RuntimeError on PROXY_WS_AUTH_TIMEOUT (after killing subprocess)
+            - Raises RuntimeError if subprocess dies during the poll (with stdout)
+
+        Raises:
+            RuntimeError: On poll timeout or subprocess death.
+        """
+        base_url   = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
+        poll_url   = f"{base_url}/api/debug/websocket-state"
+        deadline   = time.time() + self.PROXY_WS_AUTH_TIMEOUT
+        last_state = None
+        expected   = self.PROXY_EXPECTED_SESSION_ID
+
+        while time.time() < deadline:
+            # If subprocess died during poll, abort with diagnostics
+            if self._proxy_process.poll() is not None:
+                stdout      = self._proxy_process.stdout.read().decode( "utf-8", errors="replace" )
+                return_code = self._proxy_process.returncode
+                self._proxy_process = None
+                raise RuntimeError(
+                    f"Proxy subprocess died during WS-auth poll (code={return_code}).\n"
+                    f"  Last stdout:\n{stdout[ :2000 ]}"
+                )
+
+            try:
+                resp = requests.get( poll_url, timeout=5 )
+                if resp.status_code == 200:
+                    state           = resp.json()
+                    last_state      = state
+                    active          = state.get( "active_connections", [] )
+                    session_to_user = state.get( "session_to_user", {} )
+
+                    if expected in active and session_to_user.get( expected ):
+                        user_uuid = session_to_user[ expected ]
+                        print( f"  WS-auth confirmed: session '{expected}' → user UUID {user_uuid}" )
+                        return
+            except requests.exceptions.RequestException as e:
+                if self._proxy_debug: print( f"  Poll exception (will retry): {e}" )
+
+            time.sleep( self.PROXY_WS_AUTH_POLL_INTERVAL )
+
+        # Timeout — kill proxy and raise with diagnostics
+        last_users  = list( ( last_state or {} ).get( "user_sessions", {} ).keys() )
+        last_active = ( last_state or {} ).get( "active_connections", [] )
+        self._kill_proxy_subprocess()
+
+        raise RuntimeError(
+            f"Proxy WS-auth did not complete within {self.PROXY_WS_AUTH_TIMEOUT}s.\n"
+            f"  Expected session ID:  '{expected}'\n"
+            f"  Expected user email:  {expected_email or '(env-var fallback — set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL)'}\n"
+            f"  Last observed active_connections: {last_active}\n"
+            f"  Last observed user_sessions keys: {last_users}\n"
+            f"  Possible causes:\n"
+            f"    - Login 401 (account doesn't exist in target DB)\n"
+            f"    - Env vars LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL/_PASSWORD unset\n"
+            f"    - Server unreachable at {base_url}\n"
+            f"    - Proxy crashed silently (check {poll_url} for current state)"
+        )
+
+    def _kill_proxy_subprocess( self ):
+        """
+        Best-effort SIGINT then SIGKILL the proxy subprocess.
+
+        Ensures:
+            - Sends SIGINT (graceful), waits up to 5s
+            - Falls back to SIGKILL if still alive, waits up to 2s
+            - Sets self._proxy_process = None after best-effort cleanup
+            - Swallows all exceptions (called from error paths)
+        """
+        if not self._proxy_process:
+            return
+        try:
+            if hasattr( os, "setsid" ):
+                os.killpg( os.getpgid( self._proxy_process.pid ), signal.SIGINT )
+            else:
+                self._proxy_process.send_signal( signal.SIGINT )
+            try:
+                self._proxy_process.wait( timeout=5 )
+            except subprocess.TimeoutExpired:
+                self._proxy_process.kill()
+                try: self._proxy_process.wait( timeout=2 )
+                except subprocess.TimeoutExpired: pass
+        except Exception:
+            pass
+        self._proxy_process = None
 
     def _stop_proxy( self ):
         """

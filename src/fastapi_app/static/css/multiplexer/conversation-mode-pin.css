@@ -1,0 +1,75 @@
+/* ============================================================================
+   Multiplexer Phase 6c Node D — conversation-mode pin stylesheet.
+
+   Applies pin-glow + focus-flash styling to sender cards based on the
+   attributes written by ConversationModePinRenderer (Step D2):
+
+   - `.sender-card[data-pinned-conv-mode="true"]` — pin-glow (box-shadow
+     accent using --persona-color; falls back to a neutral accent when the
+     pinned sender has no voice persona assigned yet)
+   - `.sender-card[data-focus-flash="true"]` — references the
+     `focus-flash keyframes` definition that lives in focus-tray.css
+     (B-CSS owns the keyframes as SSOT per AC-B15 hard-gate). D-CSS has
+     ZERO `focus-flash keyframes` declarations — AC-B15 grep at Node B
+     code-write enforces this invariant.
+
+   Path δ scope (Rick 2026-05-19): the mic-monopoly indicator
+   (`data-mic-monopoly` attribute + combination selectors) was DEFERRED to
+   a Phase 6c follow-on. See TODO.md "Phase 6c follow-on: mic-monopoly
+   indicator" before re-adding back; the system-wide semantic question
+   ("what does this session monopolizes the mic mean as a system concept?")
+   gates the scope.
+
+   Scope-leak protection (matching the Phase 6a/6b CSS file pattern):
+   - NO global selectors (*, html, body, :root) — fail-build rule in
+     .stylelintrc.json override for this file
+   - All rules scoped under `.sender-card[...]` attribute selectors
+   ============================================================================ */
+
+
+/* ============================================================================
+   Pin-glow — `.sender-card[data-pinned-conv-mode="true"]`
+
+   The glow uses a two-ring box-shadow: a tight 2px solid ring for the card
+   edge plus a softer 12px blur for the halo. Both rings consume
+   `--persona-color` (set by senderCard.ts:55 when the sender has a voice
+   persona); a neutral blue fallback applies when no persona is assigned.
+
+   `transition` smooths the appearance/disappearance so a pin-state flip
+   doesn't snap to the new state instantly.
+
+   `position: relative; z-index: 1` lifts the glowing card above neighbors
+   in stacking order so the halo isn't clipped by sibling card backgrounds.
+   ============================================================================ */
+
+.sender-card[data-pinned-conv-mode="true"] {
+    box-shadow : 0 0 0 2px var(--persona-color, #4a90e2),
+                 0 0 12px  var(--persona-color, #4a90e2);
+    transition : box-shadow 250ms ease-out;
+    position   : relative;
+    z-index    : 1;
+}
+
+
+/* ============================================================================
+   Focus-flash — `.sender-card[data-focus-flash="true"]`
+
+   The `focus-flash keyframes` definition lives in focus-tray.css (B-CSS)
+   per AC-B15 single-source-of-truth invariant. This rule REFERENCES the
+   keyframe by name; the browser resolves it via the global CSS namespace
+   at runtime.
+
+   Until Node B ships its CSS, an unknown animation name resolves to a
+   no-op (browsers silently ignore `animation:` with an unresolvable name).
+   The pin-glow above is the primary visual; focus-flash is the
+   supplementary attention cue on pin-MOVES (ConversationModePinRenderer
+   writes the attribute only when `lastPinned !== currentPinned`).
+
+   The 1.2s duration matches the renderer's `setTimeout` auto-remove
+   timer; the easing is `ease-out` for a soft attention-pull rather than
+   a jarring spike.
+   ============================================================================ */
+
+.sender-card[data-focus-flash="true"] {
+    animation : focus-flash 1.2s ease-out;
+}

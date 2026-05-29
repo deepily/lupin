@@ -134,6 +134,90 @@
         }
         .doc-frontmatter dt { font-weight: 600; color: #374151; }
         .doc-frontmatter dd { margin: 0; color: #6b7280; word-break: break-word; }
+
+        /* Directory listing — added 2026-05-12 per
+           src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md */
+        .doc-dir-breadcrumb {
+            margin: 16px 0 24px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        .doc-dir-breadcrumb a {
+            color: #4f46e5;
+            text-decoration: none;
+        }
+        .doc-dir-breadcrumb a:hover { text-decoration: underline; }
+        .doc-dir-breadcrumb .sep {
+            margin: 0 6px;
+            color: #d1d5db;
+        }
+        .doc-dir-breadcrumb .current {
+            color: #1f2937;
+            font-weight: 600;
+        }
+        .doc-dir-listing {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .doc-dir-entry {
+            display: flex;
+            align-items: center;
+            padding: 3.1640625px 16px;
+            border-bottom: 1px solid #f3f4f6;
+            transition: background 0.1s ease;
+        }
+        .doc-dir-entry:last-child { border-bottom: none; }
+        .doc-dir-entry:hover { background: #f9fafb; }
+        .doc-dir-entry a {
+            display: flex;
+            align-items: center;
+            flex: 1;
+            color: #1f2937;
+            text-decoration: none;
+        }
+        .doc-dir-entry a:hover { color: #4f46e5; }
+        .doc-dir-icon {
+            margin-right: 12px;
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
+        }
+        .doc-dir-name {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+        }
+        .doc-dir-meta {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+            color: #6b7280;
+            margin-left: 16px;
+        }
+        .doc-dir-empty {
+            padding: 32px 16px;
+            text-align: center;
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        /* Plain-text/code rendering — added 2026-05-12 per
+           src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3g */
+        .doc-code-content {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            border-radius: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.5;
+            margin: 16px 0;
+            tab-size: 4;
+        }
     </style>
 </head>
 <body>
@@ -144,27 +228,114 @@
     <script src="/static/js/lupin-nav.js" defer></script>
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
+    <!--
+        Path-prefix dispatch table — keep KNOWN_PROJECTS in sync with the
+        `external repos` key in src/conf/lupin-app.ini and the unified
+        scope registry built by cosa/rest/routers/_scope_registry.py.
+        Per the 2026-05-15 unification (Q-R2), the `?scope=` query param
+        is RETIRED on the server side; the first segment of `path` is now
+        the routing key. Legacy bare io-relative URLs emitted by
+        notifications.js renderReportLinkSection and persisted in old job
+        metadata still resolve via the legacy-fallback branch below.
+    -->
     <script>
         ( async function() {
             const target = document.getElementById( 'doc-viewer-target' );
             const params = new URLSearchParams( window.location.search );
-            const path   = params.get( 'path' );
+            const rawPath = params.get( 'path' ) ?? '';
 
-            if ( !path ) {
-                target.className = 'doc-viewer-error';
-                target.textContent = 'No document path specified. Use ?path=/io/...';
+            // Missing-path early-fail (preserves the prior UX message for
+            // bare /app/docs visits with no query string at all).
+            if ( params.get( 'path' ) === null ) {
+                target.className   = 'doc-viewer-error';
+                target.textContent = 'No document path specified. Use ?path=<project>/<file>';
                 return;
             }
 
+            // First-segment routing per 2026-05-15 unification. See _scope_registry.py.
+            const KNOWN_PROJECTS = new Set( [
+                'lupin', 'cosa-voice', 'planning-is-prompting',
+                'lookml', 'par-pacific', 'claude-plans',
+                'lupin-mobile', 'retail-ai-location-strategy'
+            ] );
+            const firstSeg = rawPath.split( '/' )[ 0 ];
+
+            let apiPath, fetchPath;
+            if ( firstSeg === 'io' ) {
+                // New form: ?path=io/<rel> → /api/io/file?path=<rel>
+                apiPath   = '/api/io/file';
+                fetchPath = rawPath.slice( 3 );
+            } else if ( KNOWN_PROJECTS.has( firstSeg ) ) {
+                // New form: ?path=<project>/<rel> → /api/docs/file?path=<full>
+                apiPath   = '/api/docs/file';
+                fetchPath = rawPath;
+            } else {
+                // Legacy bare io-relative path (pre-unification notification
+                // URLs, persisted job artifacts). Route to IO endpoint as-is.
+                apiPath   = '/api/io/file';
+                fetchPath = rawPath;
+            }
+
             // Set page title from filename
-            const filename = path.split( '/' ).pop();
+            const filename = rawPath.split( '/' ).pop();
             if ( filename ) document.title = filename + ' — Lupin';
 
+            const fetchUrl = apiPath + '?path=' + encodeURIComponent( fetchPath );
+
+            // JWT auth — every /api/docs/file + /api/io/file request now requires
+            // an Authorization: Bearer header per multi-repo-doc-viewer §3f.
+            // Canonical localStorage key is `lupin_access_token` (auth.js, lupin-nav.js).
+            const token   = localStorage.getItem( 'lupin_access_token' );
+            const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+
             try {
-                const response = await fetch( '/api/io/file?path=' + encodeURIComponent( path ) );
+                const response = await fetch( fetchUrl, { headers } );
+
+                // 401 → redirect to login, preserving the current URL as the
+                // post-login return target. Skip the redirect when there's no
+                // current_url to bounce back to (defensive).
+                if ( response.status === 401 ) {
+                    const here = window.location.pathname + window.location.search;
+                    window.location.href = '/app/login?next=' + encodeURIComponent( here );
+                    return;
+                }
+
                 if ( !response.ok ) {
                     throw new Error( 'Failed to load document (HTTP ' + response.status + ')' );
                 }
+
+                // Polymorphic dispatch by Content-Type:
+                // - application/json → directory listing (renderDirectoryListing)
+                // - image/* → <img> tag from blob URL (added 2026-05-21 for PNG/JPG/SVG/etc.)
+                // - text/markdown* → markdown rendering (existing path below)
+                // - text/* (everything else) → plain <pre> code rendering
+                const contentType = response.headers.get( 'content-type' ) || '';
+                if ( contentType.includes( 'application/json' ) ) {
+                    const listing = await response.json();
+                    renderDirectoryListing( listing, target );
+                    return;
+                }
+                if ( contentType.startsWith( 'image/' ) ) {
+                    // Build blob URL from already-authenticated response so the
+                    // <img> tag's secondary fetch doesn't need the Bearer header.
+                    const blob      = await response.blob();
+                    const objectURL = URL.createObjectURL( blob );
+                    target.className = 'doc-viewer-content doc-viewer-image';
+                    target.innerHTML = '';
+                    const img = document.createElement( 'img' );
+                    img.src        = objectURL;
+                    img.alt        = filename || rawPath || '';
+                    img.style.maxWidth = '100%';
+                    img.style.height   = 'auto';
+                    target.appendChild( img );
+                    return;
+                }
+                if ( contentType.startsWith( 'text/' ) && !contentType.startsWith( 'text/markdown' ) ) {
+                    const code = await response.text();
+                    renderPlainText( code, target );
+                    return;
+                }
+
                 const markdown = await response.text();
 
                 // Configure marked (mirrors notifications.js renderMarkdown config)
@@ -219,11 +390,131 @@
                 target.className = 'doc-viewer-content';
                 target.innerHTML = frontmatterHtml + sanitizedHtml;
 
+                // Rewrite absolute localhost URLs to host-relative so the page
+                // stays usable when accessed from a remote host (the user's
+                // browser resolves "localhost" to their own machine, NOT the
+                // Lupin server). 2026-05-21 — surfaced via the master-detail
+                // Reading Pane iframe; affects any environment where the dev
+                // server is on a non-localhost host. See
+                // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md.
+                target.querySelectorAll( 'a[href]' ).forEach( ( a ) => {
+                    const href = a.getAttribute( 'href' );
+                    if ( href && /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?\//.test( href ) ) {
+                        const rewritten = href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, '' );
+                        a.setAttribute( 'href', rewritten );
+                    }
+                } );
+
             } catch ( err ) {
                 target.className = 'doc-viewer-error';
                 target.textContent = err.message;
             }
         } )();
+
+        // Directory-listing renderer — added 2026-05-12 per
+        // src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md
+        // Updated 2026-05-16 for path-prefix routing per 2026-05-15 unification.
+        function renderDirectoryListing( listing, target ) {
+            const scope = listing.scope || 'lupin';
+            const segments = listing.path ? listing.path.split( '/' ) : [];
+
+            // Page title
+            const last = segments.length > 0 ? segments[ segments.length - 1 ] : ( scope === 'io' ? 'Lupin IO' : 'Lupin Docs' );
+            document.title = last + ' — Lupin';
+
+            // Helper: build a /app/docs URL for a scope-relative path. Under
+            // unified path-prefix routing the project name is the first
+            // segment of `path`; legacy `?scope=` is retired (Q-R2).
+            function viewerUrl( rel ) {
+                const composed = rel ? scope + '/' + rel : scope + '/';
+                return '/app/docs?path=' + encodeURIComponent( composed );
+            }
+
+            // Breadcrumb
+            let breadcrumbHtml = '<div class="doc-dir-breadcrumb">';
+            const rootLabel = scope === 'io' ? 'IO' : ( scope.charAt( 0 ).toUpperCase() + scope.slice( 1 ) );
+            if ( segments.length > 0 ) {
+                let accumulated = '';
+                const parts = [ '<a href="' + viewerUrl( '' ) + '">' + rootLabel + '</a>' ];
+                for ( let i = 0; i < segments.length; i++ ) {
+                    accumulated = accumulated ? accumulated + '/' + segments[ i ] : segments[ i ];
+                    if ( i < segments.length - 1 ) {
+                        parts.push( '<a href="' + viewerUrl( accumulated ) + '">' + segments[ i ] + '</a>' );
+                    } else {
+                        parts.push( '<span class="current">' + segments[ i ] + '</span>' );
+                    }
+                }
+                breadcrumbHtml += parts.join( ' <span class="sep">›</span> ' );
+            } else {
+                breadcrumbHtml += '<span class="current">' + rootLabel + '</span>';
+            }
+            breadcrumbHtml += '</div>';
+
+            // Entry icon — purely cosmetic, derived from kind + extension
+            function iconFor( entry ) {
+                if ( entry.kind === 'directory' ) return '📁';
+                const dotIdx = entry.name.lastIndexOf( '.' );
+                const ext = dotIdx >= 0 ? entry.name.slice( dotIdx ).toLowerCase() : '';
+                if ( ext === '.mp3' || ext === '.wav' ) return '🔊';
+                if ( ext === '.pdf' ) return '📑';
+                if ( ext === '.pptx' ) return '📊';
+                // Source-code hints — added 2026-05-12 per multi-repo doc viewer
+                if ( ext === '.py' ) return '🐍';
+                if ( ext === '.js' || ext === '.jsx' || ext === '.ts' || ext === '.tsx' ) return '📜';
+                if ( ext === '.css' || ext === '.html' ) return '🎨';
+                if ( ext === '.sh' ) return '💻';
+                if ( ext === '.sql' ) return '🗄️';
+                if ( ext === '.json' || ext === '.yaml' || ext === '.yml' || ext === '.toml' ) return '⚙️';
+                if ( ext === '.ini' || ext === '.cfg' || ext === '.xml' ) return '⚙️';
+                return '📄';
+            }
+
+            function formatSize( bytes ) {
+                if ( bytes === null || bytes === undefined ) return '';
+                if ( bytes < 1024 ) return bytes + ' B';
+                if ( bytes < 1024 * 1024 ) return ( bytes / 1024 ).toFixed( 1 ) + ' KB';
+                if ( bytes < 1024 * 1024 * 1024 ) return ( bytes / ( 1024 * 1024 ) ).toFixed( 1 ) + ' MB';
+                return ( bytes / ( 1024 * 1024 * 1024 ) ).toFixed( 1 ) + ' GB';
+            }
+
+            let entriesHtml = '<ul class="doc-dir-listing">';
+            if ( !listing.entries || listing.entries.length === 0 ) {
+                entriesHtml += '<li class="doc-dir-empty">(empty directory)</li>';
+            } else {
+                for ( const entry of listing.entries ) {
+                    entriesHtml += '<li class="doc-dir-entry">';
+                    entriesHtml += '<a href="' + entry.view_url + '">';
+                    entriesHtml += '<span class="doc-dir-icon">' + iconFor( entry ) + '</span>';
+                    entriesHtml += '<span class="doc-dir-name">' + entry.name + '</span>';
+                    entriesHtml += '</a>';
+                    if ( entry.size !== null && entry.size !== undefined ) {
+                        entriesHtml += '<span class="doc-dir-meta">' + formatSize( entry.size ) + '</span>';
+                    }
+                    entriesHtml += '</li>';
+                }
+            }
+            entriesHtml += '</ul>';
+
+            const sanitized = DOMPurify.sanitize( breadcrumbHtml + entriesHtml, {
+                ALLOWED_TAGS : [ 'div', 'span', 'a', 'ul', 'li' ],
+                ALLOWED_ATTR : [ 'href', 'class' ]
+            } );
+
+            target.className = 'doc-viewer-content';
+            target.innerHTML = sanitized;
+        }
+
+        // Plain-text/source-code renderer — added 2026-05-12 per
+        // src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3g.
+        // Uses textContent to defang HTML/script content entirely; no innerHTML.
+        function renderPlainText( code, target ) {
+            target.className = '';
+            target.innerHTML = '';
+            const pre = document.createElement( 'pre' );
+            pre.className   = 'doc-code-content';
+            pre.textContent = code;
+            target.appendChild( pre );
+        }
     </script>
 </body>
 </html>

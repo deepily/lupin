@@ -4,12 +4,33 @@
     <meta charset="UTF-8">
     <title>Notifications</title>
     <link rel="stylesheet" href="/static/css/lupin-base.css">
-    <link rel="stylesheet" href="/static/css/notifications.css?v=20260220">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=20260505c">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260512a">
 </head>
 <body>
+    <!-- Master-detail two-pane shell (2026-05-21 — see
+         src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md).
+         In vertical mode (default), .content-shell + .left-column are no-op
+         block-layout pass-throughs — everything looks like the legacy single-column
+         page. In horizontal mode (body[data-layout-mode="horizontal"]),
+         .content-shell becomes flex-row: left column (toolbar + container) holds
+         2/3 width; .content-pane on the right holds 1/3 width for read-only
+         abstracts + iframe-embedded doc views. Toggled via the layout-mode-btn
+         in #section-toolbar. -->
+    <div class="content-shell">
+    <div class="left-column">
     <!-- Floating Section Visibility Toolbar -->
     <div class="section-toolbar" id="section-toolbar">
+        <!-- Layout-mode toggle (2026-05-21). First child; semantically distinct
+             from the section-visibility toggles below — uses a different class
+             (`layout-mode-btn`, NOT `toolbar-btn`) and NO `data-section` attr,
+             so the section-visibility click dispatcher doesn't pick it up. -->
+        <button class="layout-mode-btn"
+                id="layout-mode-toggle"
+                data-testid="notifications-layout-mode-toggle"
+                type="button"
+                title="Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.">⇆</button>
         <button class="toolbar-btn active" data-section="section-qa" data-testid="notifications-toolbar-qa" title="Q&A Interface">❓</button>
         <button class="toolbar-btn active" data-section="section-job-submit" data-testid="notifications-toolbar-jobs" title="Submit Agentic Jobs">📝</button>
         <button class="toolbar-btn active" data-section="action-required-section" data-testid="notifications-toolbar-action" title="Action Required">⚠️</button>
@@ -24,6 +45,22 @@
     </div>
 
     <div class="container">
+        <!-- WS reconnect circuit-breaker banner (Phase 3 of the WS circuit-breaker
+             milestone). Hidden until either WSChannel emits `ws-circuit-open`.
+             aria-live="polite" on the text; role="alert" on the container so
+             screen readers announce on transition without stealing focus. -->
+        <div id="ws-circuit-banner" class="ws-circuit-banner" hidden role="alert" data-testid="ws-circuit-banner">
+            <span class="ws-circuit-banner-text" aria-live="polite" data-reason="default" data-testid="ws-circuit-banner-text">
+                Connection lost — server unreachable after repeated attempts. Check the network, then click Retry now.
+            </span>
+            <span class="ws-circuit-banner-dev-hint" hidden>
+                (Dev tip: if you're using <code>ssh -L</code>, check whether the tunnel is still alive or has hit "Too many open files".)
+            </span>
+            <button type="button" id="ws-circuit-retry-btn" class="ws-circuit-retry-btn" data-testid="ws-circuit-retry-btn">
+                Retry now
+            </button>
+        </div>
+
         <h2><span id="env-label"></span>Notifications <span id="clock"></span></h2>
         
         <!-- Q&A Section -->
@@ -100,7 +137,7 @@
                 <!-- Claude Code Dispatcher Card -->
                 <div class="job-submit-card" id="claude-code-submit-card" data-testid="notifications-cc-card">
                     <div class="job-submit-card-header" onclick="toggleSection('claude-code-section')">
-                        <h4>🤖 Claude Code Dispatcher</h4>
+                        <h4>🤖 Submit Claude Code Task</h4>
                         <button class="toggle-button" id="claude-code-toggle">▶</button>
                     </div>
                     <div class="section-content collapsed" id="claude-code-section">
@@ -127,14 +164,7 @@
                                 <label for="cc-task-type" style="font-size: 12px; color: #666;">Task:</label>
                                 <select id="cc-task-type" data-testid="notifications-cc-task-type-select" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
                                     <option value="BOUNDED" selected>Bounded</option>
-                                    <option value="INTERACTIVE">Unbounded (Interactive)</option>
-                                </select>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <label for="cc-execution-mode" style="font-size: 12px; color: #666;">Flow:</label>
-                                <select id="cc-execution-mode" data-testid="notifications-cc-execution-mode-select" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
-                                    <option value="queue" selected>CJ Flow</option>
-                                    <option value="direct">Socket</option>
+                                    <option value="INTERACTIVE" disabled title="Returns when ClaudeCodeJob.inject/interrupt/end_session ship — see TODO.md 'CC DISPATCH RETIREMENT — Follow-ups'">Interactive (coming back later)</option>
                                 </select>
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
@@ -148,6 +178,8 @@
                                 </span>
                             </button>
                         </div>
+
+                        <div id="cc-submit-status" data-testid="notifications-cc-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
 
                         <!-- Scheduling Options -->
                         <div class="schedule-section" data-testid="notifications-cc-schedule-section">
@@ -164,29 +196,6 @@
                             </div>
                         </div>
 
-                        <div class="form-group" style="margin-bottom: 12px;">
-                            <label style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Response:</label>
-                            <pre id="cc-response" data-testid="notifications-cc-response" style="background: #1e1e1e; color: #d4d4d4; padding: 12px; border-radius: 4px; min-height: 100px; max-height: 300px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; word-wrap: break-word;"></pre>
-                        </div>
-
-                        <!-- Option B Controls (hidden by default) -->
-                        <div id="cc-option-b-controls" style="display: none; padding: 12px; background: #f8f9fa; border-radius: 4px; margin-bottom: 12px;">
-                            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-                                <input type="text" id="cc-inject-input" data-testid="notifications-cc-inject-input" placeholder="Follow-up message..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
-                                <button id="cc-inject-btn" data-testid="notifications-cc-inject-btn" type="button" style="padding: 8px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;">💬 Inject</button>
-                            </div>
-                            <div style="display: flex; gap: 8px;">
-                                <button id="cc-interrupt-btn" data-testid="notifications-cc-interrupt-btn" type="button" style="padding: 8px 12px; background: #ffc107; color: #212529; border: none; border-radius: 4px; cursor: pointer;">⏹️ Interrupt</button>
-                                <button id="cc-end-btn" data-testid="notifications-cc-end-btn" type="button" style="padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">🛑 End Session</button>
-                            </div>
-                        </div>
-
-                        <!-- Session Info -->
-                        <div id="cc-session-info" data-testid="notifications-cc-session-info" style="display: none; padding: 8px 12px; background: #e7f3ff; border-radius: 4px; font-size: 12px;">
-                            <span style="margin-right: 16px;">Task ID: <code id="cc-task-id">--</code></span>
-                            <span style="margin-right: 16px;">Status: <span id="cc-status">--</span></span>
-                            <span>Cost: <span id="cc-cost">$0.00</span></span>
-                        </div>
                     </div>
                 </div>
 
@@ -608,6 +617,32 @@
                 <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
                 <span class="filter-mode-badge" id="notifications-filter-badge" style="display: none;"
                       data-testid="notifications-filter-badge" title="Current filter mode">👤 Mine</span>
+                <!-- TTS preview-fraction slider (relocated 2026-05-14 evening from #cc-session-strip,
+                     then moved left of history dropdown per Rick's tweak). Right-aligned via
+                     margin-left: auto on this container; everything to its right (history dropdown,
+                     Clear All, toggle button) follows in DOM order. event.stopPropagation() prevents
+                     drag from toggling the accordion. See src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md -->
+                <div class="cc-tts-fraction-control"
+                     onclick="event.stopPropagation();"
+                     style="margin-left: auto;"
+                     title="Percentage of high-priority notification text rendered as TTS audio. 0% = silent; 100% = full message.">
+                    <label for="cc-tts-fraction-slider" class="cc-tts-fraction-label">TTS:</label>
+                    <input type="range"
+                           id="cc-tts-fraction-slider"
+                           class="cc-tts-fraction-slider"
+                           min="0" max="100" step="25"
+                           value="25"
+                           list="cc-tts-fraction-ticks"
+                           aria-label="TTS preview percentage" />
+                    <span class="cc-tts-fraction-value" id="cc-tts-fraction-value">25%</span>
+                    <datalist id="cc-tts-fraction-ticks">
+                        <option value="0"></option>
+                        <option value="25"></option>
+                        <option value="50"></option>
+                        <option value="75"></option>
+                        <option value="100"></option>
+                    </datalist>
+                </div>
                 <div id="history-dropdown-container" style="margin-left: auto;"></div>
                 <!-- Refresh button commented out - filter dropdown now works correctly
                 <button id="refresh-notifications" type="button"
@@ -626,6 +661,150 @@
                 <button class="toggle-button" id="notifications-toggle">▼</button>
             </div>
             <div class="section-content" id="notifications-section">
+                <!-- Commons Broadcast Panel (Phase 2 — inter-session-commons).
+                     Re-located 2026-05-13 (Maria) — placed between the accordion
+                     header and the focus bar per Rick's direction. Broadcasts are
+                     NOT jobs; the prior submit-a-job stack was a category mismatch.
+                     The 🎤 voice-input mic was added 2026-05-13 because Lupin is
+                     a voice-first app — typing into the textarea was a regression
+                     from the established STT-button pattern used everywhere else.
+                -->
+                <div class="job-submit-card" id="broadcast-submit-card" data-testid="notifications-broadcast-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('broadcast-submit-section')">
+                        <h4>📢 Broadcast to all CC sessions</h4>
+                        <button class="toggle-button" id="broadcast-submit-toggle">▶</button>
+                    </div>
+                    <!-- Broadcast card parent default-expanded per Q9 of
+                         src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+                         — Recent Activity admin-oversight surface is visible on page load. -->
+                    <div class="section-content" id="broadcast-submit-section">
+                        <div id="broadcast-panel-body">
+                            <div id="broadcast-recipients-row">
+                                <span id="broadcast-recipients-label">Sending to:</span>
+                                <button type="button" id="broadcast-recipients-refresh" data-testid="notifications-broadcast-refresh-btn" title="Refresh active session list">↻ refresh</button>
+                            </div>
+                            <!-- Single-row compose layout (2026-05-13 redesign per Rick):
+                                 [🎤] [textarea, half-height] [Send]
+                                 Markdown preview pane removed; the dictate-label removed.
+                                 broadcast-panel.js's `input` listener on the textarea still
+                                 fires for Send-button enablement; preview-DOM ops are no-ops
+                                 because the elements no longer exist. -->
+                            <div id="broadcast-compose-row">
+                                <button type="button"
+                                        id="broadcast-stt-button"
+                                        data-testid="notifications-broadcast-stt-btn"
+                                        class="stt-button cc-session-stt"
+                                        title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <textarea id="broadcast-textarea"
+                                          data-testid="notifications-broadcast-textarea"
+                                          placeholder="Message body — use @PersonaName: lines for persona-specific directives. Markdown supported."></textarea>
+                                <button id="broadcast-send-button"
+                                        data-testid="notifications-broadcast-send-btn"
+                                        class="response-submit-button cc-session-send"
+                                        type="button"
+                                        disabled>Send</button>
+                            </div>
+                            <!-- 2026-05-13: removed `#broadcast-submit-status` + `#broadcast-aggregate-panel` per Rick.
+                                 Empty containers were rendering as a visual artifact below the compose row.
+                                 broadcast-panel.js `setStatus()` + `renderAggregate()` already null-guard
+                                 against missing DOM — both become silent no-ops. Post-send feedback now arrives
+                                 via the standard notification stream below (`commons_broadcast_ack` cards). -->
+                        </div>
+
+                        <!-- Recent Activity — admin-oversight surface for inter-session commons traffic.
+                             Design: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+                             Gated by INI key `commons traffic visibility enabled` (read via /api/config/client
+                             on page load). When disabled, notifications.js hides the section via display:none.
+                             Default-expanded per Q9; toggle pill hides the body within the session only
+                             (no localStorage persistence — defers the parked focus-bar persistence lesson). -->
+                        <div class="commons-recent-activity" id="commons-recent-activity-section" data-testid="notifications-broadcast-recent-activity">
+                            <div class="commons-recent-activity-header" onclick="toggleSection('commons-recent-activity-body')">
+                                <h5>🕒 Recent Activity</h5>
+                                <div class="commons-recent-activity-controls">
+                                    <!-- Three-axis filter dropdowns (2026-05-21 — see
+                                         src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
+                                         Client-side filter over the in-memory entry cache; no server hit on change.
+                                         First option of each select is the "no filter" default. -->
+                                    <select id="commons-recent-activity-filter-direction"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-direction-dropdown"
+                                            title="Filter by direction (sender or recipient)"
+                                            onclick="event.stopPropagation();">
+                                        <option value="">Any direction</option>
+                                        <option value="sender">Sender</option>
+                                        <option value="recipient">Recipient</option>
+                                    </select>
+                                    <select id="commons-recent-activity-filter-kind"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-kind-dropdown"
+                                            title="Filter by message kind"
+                                            onclick="event.stopPropagation();">
+                                        <option value="all">All kinds</option>
+                                        <option value="heartbeats">Heartbeats</option>
+                                        <option value="personas">Personas</option>
+                                        <option value="broadcasts">Broadcasts</option>
+                                    </select>
+                                    <select id="commons-recent-activity-filter-persona"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-persona-dropdown"
+                                            title="Filter by persona (populated from active sessions)"
+                                            onclick="event.stopPropagation();">
+                                        <option value="">Any persona</option>
+                                    </select>
+                                    <select id="commons-recent-activity-window"
+                                            data-testid="notifications-commons-window-dropdown"
+                                            title="Time window for the activity stream"
+                                            onclick="event.stopPropagation();">
+                                        <option value="today">Today</option>
+                                        <option value="24">Last 24 hours</option>
+                                        <option value="48">Last 2 days</option>
+                                        <option value="168">Last week</option>
+                                        <option value="720">Last month</option>
+                                        <option value="all">All time</option>
+                                    </select>
+                                    <button type="button"
+                                            id="commons-recent-activity-refresh"
+                                            data-testid="notifications-commons-refresh-btn"
+                                            title="Reload activity stream + refresh persona list"
+                                            onclick="event.stopPropagation();">↻</button>
+                                    <button class="toggle-button" id="commons-recent-activity-toggle">▼</button>
+                                </div>
+                            </div>
+                            <div class="section-content" id="commons-recent-activity-body">
+                                <div id="commons-recent-activity-entries" data-testid="notifications-commons-entries-list">
+                                    <!-- Entries populated by notifications.js (Step 7); newest at top.
+                                         Each entry: persona icon | name | optional topic chip | HH:MM | body. -->
+                                </div>
+                                <div id="commons-recent-activity-empty" data-testid="notifications-commons-empty">
+                                    <em>No activity in window.</em>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CC Session Selector Strip + Focus Mode (2026-04-30 — see src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md).
+                     Sticky chrome above #notifications-list. One icon per active CC session, leftmost = most recently
+                     updated. Embedded toggle pill enters/exits exclusive focus mode (only the focused session's
+                     card is rendered). Hidden until ≥1 CC sender card exists. -->
+                <div id="cc-session-strip" class="cc-session-strip" hidden>
+                    <div class="cc-strip-icons" id="cc-strip-icons"></div>
+                    <button type="button"
+                            class="cc-strip-toggle"
+                            id="cc-strip-toggle"
+                            data-focus-active="false"
+                            title="Focus mode: hide all sessions except the one you click">
+                        👁 Focus
+                    </button>
+                    <button type="button"
+                            class="cc-strip-toggle"
+                            id="cc-hide-inactive-toggle"
+                            data-hide-inactive="false"
+                            title="Hide icons for sessions whose voice persona has been deallocated (showing all sessions in the last 24 h)">
+                        👁 All
+                    </button>
+                </div>
+
                 <div id="notifications-list">
                     <!-- Sender cards will be populated here -->
                 </div>
@@ -911,6 +1090,43 @@
             </div>
         </div>
     </div>
+    </div><!-- /.left-column -->
+
+    <!-- Draggable splitter between left column and Reading Pane (2026-05-21 tweak).
+         Hidden by CSS when the pane is closed. Mousedown wires up via
+         _initMasterDetailLayout(). Persists ratio to localStorage. -->
+    <div class="content-pane-splitter"
+         id="content-pane-splitter"
+         data-testid="notifications-content-pane-splitter"
+         role="separator"
+         aria-orientation="vertical"
+         title="Drag to resize"></div>
+
+    <!-- Reading Pane (2026-05-21 master-detail layout). Hidden until populated.
+         In vertical mode, stays hidden (CSS rule on .content-pane[hidden]).
+         In horizontal mode, becomes flex:1 sticky-top scrollable surface.
+         Content body holds either rendered abstract markdown OR an iframe at
+         /app/docs?path=... for doc-viewer links. -->
+    <aside class="content-pane" id="content-pane" hidden>
+        <div class="content-pane-header">
+            <button class="content-pane-back"
+                    id="content-pane-back"
+                    data-testid="notifications-content-pane-back"
+                    type="button"
+                    title="Back to previous content"
+                    disabled>←</button>
+            <span class="content-pane-title" id="content-pane-title"></span>
+            <button class="content-pane-close"
+                    id="content-pane-close"
+                    data-testid="notifications-content-pane-close"
+                    type="button"
+                    title="Close pane">×</button>
+        </div>
+        <div class="content-pane-body" id="content-pane-body" data-testid="notifications-content-pane-body">
+            <!-- Dynamic content: rendered markdown for abstracts, or an iframe for doc-links -->
+        </div>
+    </aside>
+    </div><!-- /.content-shell -->
 
     <!-- Navigation -->
     <script src="/static/js/lupin-nav.js" defer></script>
@@ -922,19 +1138,81 @@
     <script src="/static/js/tts-audio-cache.js"></script>
     <script src="/static/js/job-completion-cache.js"></script>
     <script src="/static/js/audio-recorder.js"></script>
-    <script src="/static/js/notifications.js?v=20260422b"></script>
+    <script src="/static/js/notifications.js?v=20260522a"></script>
+    <script src="/static/js/broadcast-panel.js?v=20260512a"></script>
     <script>
+        // Accordion sections whose open/closed state survives page reloads.
+        // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        // Map: sectionId → localStorage key (notifications_* convention).
+        const LUPIN_ACCORDION_PERSIST_KEYS = {
+            'broadcast-submit-section'    : 'notifications_broadcast_card_open',
+            'commons-recent-activity-body': 'notifications_recent_activity_open'
+        };
+
         function toggleSection(sectionId) {
             const content = document.getElementById(sectionId);
-            const toggle = document.getElementById(sectionId.replace('-section', '-toggle'));
-            
+            if (!content) return;
+            // Find the toggle button. The original convention is sectionId
+            // ends in -section and the button is the same prefix + -toggle.
+            // Several callers in this file pass ids that DON'T end in
+            // -section (commons-recent-activity-body, action-required-content,
+            // tts-queue-content). For those, the replace returns the input
+            // unchanged, `toggle === content`, and the textContent assignment
+            // below WIPES the content div's children. Fall back to finding
+            // the toggle button inside the previous-sibling header element.
+            let toggle = document.getElementById(sectionId.replace('-section', '-toggle'));
+            if (!toggle || toggle === content) {
+                const header = content.previousElementSibling;
+                if (header) toggle = header.querySelector('.toggle-button');
+            }
+
+            let isOpen;
             if (content.classList.contains('collapsed')) {
                 content.classList.remove('collapsed');
-                toggle.textContent = '▼';
+                if (toggle) toggle.textContent = '▼';
+                isOpen = true;
             } else {
                 content.classList.add('collapsed');
-                toggle.textContent = '▶';
+                if (toggle) toggle.textContent = '▶';
+                isOpen = false;
             }
+
+            // Persist accordion state for tracked sections (no-op for others).
+            const persistKey = LUPIN_ACCORDION_PERSIST_KEYS[sectionId];
+            if (persistKey) {
+                try { localStorage.setItem(persistKey, JSON.stringify(isOpen)); } catch (_) {}
+            }
+        }
+
+        // Restore persisted accordion state before first paint to avoid flicker.
+        // Missing key = use the section's HTML-default state (typically open).
+        function applyPersistedAccordions() {
+            for (const sectionId in LUPIN_ACCORDION_PERSIST_KEYS) {
+                const persistKey = LUPIN_ACCORDION_PERSIST_KEYS[sectionId];
+                const raw = localStorage.getItem(persistKey);
+                if (raw === null) continue;
+                let isOpen;
+                try { isOpen = JSON.parse(raw); } catch (_) { continue; }
+                const content = document.getElementById(sectionId);
+                if (!content) continue;
+                let toggle = document.getElementById(sectionId.replace('-section', '-toggle'));
+                if (!toggle || toggle === content) {
+                    const header = content.previousElementSibling;
+                    if (header) toggle = header.querySelector('.toggle-button');
+                }
+                if (!isOpen) {
+                    content.classList.add('collapsed');
+                    if (toggle) toggle.textContent = '▶';
+                } else {
+                    content.classList.remove('collapsed');
+                    if (toggle) toggle.textContent = '▼';
+                }
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', applyPersistedAccordions);
+        } else {
+            applyPersistedAccordions();
         }
     </script>
 </body>

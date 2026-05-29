@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Persona Reference — Lupin Dev Tools</title>
+
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/html/admin/css/admin-dashboard.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <style>
+        .reference-intro {
+            background: #fffbea;
+            border: 1px solid #facc15;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin: 0 0 24px 0;
+            font-size: 13px;
+            color: #422006;
+            line-height: 1.5;
+        }
+
+        .reference-intro code {
+            background: #fde68a;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .toolbar button:hover { background: #4338ca; }
+        .toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .toolbar .toolbar-status {
+            font-size: 12px;
+            color: #6b7280;
+            margin-left: 8px;
+        }
+
+        .persona-grid {
+            display: grid;
+            grid-template-columns: repeat( auto-fit, minmax( 320px, 1fr ) );
+            gap: 16px;
+            margin-bottom: 32px;
+        }
+
+        .persona-tile {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px;
+            transition: border-color 200ms, box-shadow 200ms;
+        }
+
+        .persona-tile.playing {
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 2px rgba( 79, 70, 229, 0.15 );
+        }
+
+        /* Badge style mirrors notifications.js _renderPersonaBadgeHTML so the
+           reference is visually identical to what shows in notification cards. */
+        .persona-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            color: white;
+            text-shadow: 0 1px 1px rgba( 0, 0, 0, 0.25 );
+        }
+
+        .persona-badge.borrowed {
+            outline: 2px dashed rgba( 0, 0, 0, 0.3 );
+            outline-offset: 2px;
+        }
+
+        .persona-badge-icon {
+            font-size: 15px;
+            filter: drop-shadow( 0 1px 1px rgba( 0, 0, 0, 0.25 ) );
+        }
+
+        .persona-tile-meta {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #4b5563;
+            line-height: 1.5;
+        }
+
+        .persona-tile-voice-id {
+            margin-top: 6px;
+            font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+            font-size: 11px;
+            color: #6b7280;
+            word-break: break-all;
+        }
+
+        .persona-tile-controls {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .persona-tile-play {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 7px 14px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .persona-tile-play:hover { background: #059669; }
+        .persona-tile-play:disabled { opacity: 0.55; cursor: progress; }
+
+        .persona-tile-status {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .persona-tile-status.error { color: #dc2626; }
+
+        .allocations-section {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 32px;
+        }
+
+        .allocations-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #374151;
+            margin: 0 0 10px 0;
+        }
+
+        .allocations-section .empty {
+            color: #6b7280;
+            font-size: 13px;
+            font-style: italic;
+        }
+
+        .allocations-section table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .allocations-section th,
+        .allocations-section td {
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .allocations-section th {
+            color: #6b7280;
+            font-weight: 500;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .allocations-section td.session-id {
+            font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+            color: #4b5563;
+        }
+
+        .error-banner {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 6px;
+            color: #991b1b;
+            padding: 10px 14px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .error-banner.visible { display: block; }
+    </style>
+</head>
+<body>
+    <div class="admin-dashboard-container">
+        <div class="dashboard-header">
+            <h1>Voice Persona Reference</h1>
+            <p class="subtitle">Audio ground-truth for every persona in the configured pool.</p>
+        </div>
+
+        <div class="reference-intro">
+            <strong>Purpose:</strong> Click ▶ on each tile to hear an identical reference script in that persona's voice.
+            Use this page to identify which voice you're actually hearing in a notification —
+            the badge styling here matches the badges you see in the notifications UI.
+            Pool is read from <code>cc session voice persona pool</code> in <code>lupin-app.ini</code>.
+        </div>
+
+        <div id="error-banner" class="error-banner"></div>
+
+        <div class="toolbar">
+            <button id="play-all-btn" type="button" data-testid="play-all-personas">▶ Play all in sequence</button>
+            <button id="stop-btn" type="button" data-testid="stop-playback">■ Stop</button>
+            <span id="toolbar-status" class="toolbar-status"></span>
+        </div>
+
+        <div id="persona-grid" class="persona-grid" data-testid="persona-grid"></div>
+
+        <div id="allocations-section" class="allocations-section">
+            <h3>Currently allocated personas</h3>
+            <div id="allocations-body"></div>
+        </div>
+
+        <footer class="dashboard-footer">
+            <p>Reference page for the per-session voice persona feature
+            (R&amp;D: <code>src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/</code>).</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/lupin-nav.js" defer></script>
+    <script src="/static/html/auth/js/auth.js"></script>
+    <script>
+        // Require admin role — same gate as dev-tools.html
+        requireAdmin();
+
+        const POOL_ENDPOINT   = "/api/cosa-voice/voice-persona/pool";
+        const SAMPLE_ENDPOINT = "/api/cosa-voice/voice-persona/sample";
+
+        // Identical script across personas — substitute display name + profile
+        // so differences are purely vocal, not script-driven.
+        function buildSampleText( persona ) {
+            const name    = persona.display_name || persona.name || "Voice";
+            const profile = persona.profile      ? persona.profile.toLowerCase() : "no profile description";
+            return `Hello, I'm ${name}. My profile is: ${profile}. This is a reference sample for voice identification.`;
+        }
+
+        let activeAudio = null;
+        let activeTile  = null;
+
+        function showError( msg ) {
+            const banner = document.getElementById( "error-banner" );
+            banner.textContent = msg;
+            banner.classList.add( "visible" );
+        }
+
+        function clearError() {
+            const banner = document.getElementById( "error-banner" );
+            banner.textContent = "";
+            banner.classList.remove( "visible" );
+        }
+
+        function setStatus( msg ) {
+            document.getElementById( "toolbar-status" ).textContent = msg || "";
+        }
+
+        function stopActive() {
+            if ( activeAudio ) {
+                activeAudio.pause();
+                activeAudio.removeAttribute( "src" );
+                activeAudio.load();
+                activeAudio = null;
+            }
+            if ( activeTile ) {
+                activeTile.classList.remove( "playing" );
+                activeTile = null;
+            }
+        }
+
+        async function fetchSample( voiceId, text ) {
+            await ensureValidToken();
+            const token = getAccessToken();
+            const response = await fetch( SAMPLE_ENDPOINT, {
+                method  : "POST",
+                headers : {
+                    "Content-Type"  : "application/json",
+                    "Authorization" : `Bearer ${token}`
+                },
+                body : JSON.stringify( { voice_id: voiceId, text } )
+            } );
+            if ( !response.ok ) {
+                let detail;
+                try { detail = ( await response.json() ).detail; }
+                catch { detail = response.statusText; }
+                throw new Error( `${response.status}: ${detail || response.statusText}` );
+            }
+            return await response.blob();
+        }
+
+        async function playPersona( persona, tile, statusEl ) {
+            stopActive();
+            clearError();
+
+            const playBtn = tile.querySelector( ".persona-tile-play" );
+            playBtn.disabled = true;
+            statusEl.textContent = "Loading…";
+            statusEl.classList.remove( "error" );
+
+            try {
+                const blob = await fetchSample( persona.voice_id, buildSampleText( persona ) );
+                const url  = URL.createObjectURL( blob );
+
+                const audio = new Audio( url );
+                activeAudio = audio;
+                activeTile  = tile;
+                tile.classList.add( "playing" );
+                statusEl.textContent = "Playing…";
+
+                return await new Promise( ( resolve, reject ) => {
+                    audio.onended = () => {
+                        URL.revokeObjectURL( url );
+                        if ( activeTile === tile ) {
+                            tile.classList.remove( "playing" );
+                            activeTile  = null;
+                            activeAudio = null;
+                        }
+                        statusEl.textContent = "";
+                        playBtn.disabled = false;
+                        resolve();
+                    };
+                    audio.onerror = ( ev ) => {
+                        URL.revokeObjectURL( url );
+                        playBtn.disabled = false;
+                        statusEl.textContent = "Playback failed";
+                        statusEl.classList.add( "error" );
+                        reject( new Error( "Audio playback failed" ) );
+                    };
+                    audio.play().catch( reject );
+                } );
+            } catch ( err ) {
+                statusEl.textContent = err.message || String( err );
+                statusEl.classList.add( "error" );
+                playBtn.disabled = false;
+                throw err;
+            }
+        }
+
+        function renderTile( persona ) {
+            const tile = document.createElement( "div" );
+            tile.className = "persona-tile";
+            tile.dataset.testid = `persona-tile-${persona.name}`;
+            tile.dataset.poolName = persona.name;
+
+            const label = persona.display_name || persona.name || "(unnamed)";
+            const icon  = persona.icon         || "🎙️";
+            const color = persona.color        || "#888888";
+
+            const badge = document.createElement( "span" );
+            badge.className = "persona-badge" + ( persona.borrowed ? " borrowed" : "" );
+            badge.style.backgroundColor = color;
+            badge.title = `${label}${persona.borrowed ? " (borrowed — pool exhausted)" : ""}${persona.profile ? " — " + persona.profile : ""}`;
+
+            const iconSpan = document.createElement( "span" );
+            iconSpan.className = "persona-badge-icon";
+            iconSpan.textContent = icon;
+            const nameSpan = document.createElement( "span" );
+            nameSpan.className = "persona-badge-name";
+            nameSpan.textContent = label;
+            badge.appendChild( iconSpan );
+            badge.appendChild( nameSpan );
+
+            const meta = document.createElement( "div" );
+            meta.className = "persona-tile-meta";
+            meta.textContent = persona.profile || "(no profile description)";
+
+            const voiceIdEl = document.createElement( "div" );
+            voiceIdEl.className = "persona-tile-voice-id";
+            voiceIdEl.textContent = `voice_id: ${persona.voice_id}`;
+
+            const controls = document.createElement( "div" );
+            controls.className = "persona-tile-controls";
+            const playBtn = document.createElement( "button" );
+            playBtn.type = "button";
+            playBtn.className = "persona-tile-play";
+            playBtn.dataset.testid = `persona-play-${persona.name}`;
+            playBtn.setAttribute( "aria-label", `Play sample for ${label}` );
+            playBtn.textContent = "▶ Play sample";
+            const statusEl = document.createElement( "span" );
+            statusEl.className = "persona-tile-status";
+            controls.appendChild( playBtn );
+            controls.appendChild( statusEl );
+
+            playBtn.addEventListener( "click", () => {
+                playPersona( persona, tile, statusEl ).catch( ( e ) => {
+                    console.error( `[voice-persona-reference] play failed for ${persona.name}:`, e );
+                } );
+            } );
+
+            tile.appendChild( badge );
+            tile.appendChild( meta );
+            tile.appendChild( voiceIdEl );
+            tile.appendChild( controls );
+            return tile;
+        }
+
+        function renderAllocations( activeSessions ) {
+            const body = document.getElementById( "allocations-body" );
+            body.innerHTML = "";
+
+            if ( !activeSessions || activeSessions.length === 0 ) {
+                const p = document.createElement( "p" );
+                p.className = "empty";
+                p.textContent = "No personas are currently allocated to live sessions.";
+                body.appendChild( p );
+                return;
+            }
+
+            const table = document.createElement( "table" );
+            const thead = document.createElement( "thead" );
+            thead.innerHTML = "<tr><th>Session ID</th><th>Persona</th><th>Borrowed</th></tr>";
+            table.appendChild( thead );
+            const tbody = document.createElement( "tbody" );
+            for ( const row of activeSessions ) {
+                const tr = document.createElement( "tr" );
+                const sidTd = document.createElement( "td" );
+                sidTd.className = "session-id";
+                sidTd.textContent = ( row.session_id || "(unknown)" ).substring( 0, 8 );
+                const nameTd = document.createElement( "td" );
+                nameTd.textContent = row.persona_name || "(none)";
+                const borrowTd = document.createElement( "td" );
+                borrowTd.textContent = row.borrowed ? "yes" : "no";
+                tr.appendChild( sidTd );
+                tr.appendChild( nameTd );
+                tr.appendChild( borrowTd );
+                tbody.appendChild( tr );
+            }
+            table.appendChild( tbody );
+            body.appendChild( table );
+        }
+
+        async function loadPool() {
+            try {
+                await ensureValidToken();
+                const token = getAccessToken();
+                const response = await fetch( POOL_ENDPOINT, {
+                    headers: { "Authorization": `Bearer ${token}` }
+                } );
+                if ( !response.ok ) {
+                    throw new Error( `${response.status} ${response.statusText}` );
+                }
+                const data = await response.json();
+                const grid = document.getElementById( "persona-grid" );
+                grid.innerHTML = "";
+                if ( !data.pool || data.pool.length === 0 ) {
+                    showError( "Pool is empty. Check `cc session voice persona pool` in lupin-app.ini." );
+                    return;
+                }
+                for ( const persona of data.pool ) {
+                    grid.appendChild( renderTile( persona ) );
+                }
+                renderAllocations( data.active_sessions );
+                setStatus( `Loaded ${data.pool.length} personas; ${data.occupied_names.length} currently allocated.` );
+            } catch ( err ) {
+                showError( `Failed to load persona pool: ${err.message || err}` );
+            }
+        }
+
+        async function playAll() {
+            const tiles = Array.from( document.querySelectorAll( ".persona-tile" ) );
+            const playAllBtn = document.getElementById( "play-all-btn" );
+            playAllBtn.disabled = true;
+            setStatus( `Playing all (${tiles.length})…` );
+            try {
+                for ( let i = 0; i < tiles.length; i++ ) {
+                    const tile  = tiles[ i ];
+                    const name  = tile.dataset.poolName;
+                    const card  = tile.querySelector( ".persona-tile-play" );
+                    setStatus( `Playing ${i + 1}/${tiles.length}: ${name}` );
+                    card.click();
+                    // Wait for the playing class to clear (sample finished)
+                    await new Promise( ( resolve ) => {
+                        const observer = new MutationObserver( () => {
+                            if ( !tile.classList.contains( "playing" ) ) {
+                                observer.disconnect();
+                                resolve();
+                            }
+                        } );
+                        observer.observe( tile, { attributes: true, attributeFilter: [ "class" ] } );
+                        // Safety timeout: 30s per persona, then move on
+                        setTimeout( () => {
+                            observer.disconnect();
+                            resolve();
+                        }, 30000 );
+                    } );
+                }
+                setStatus( "Done." );
+            } finally {
+                playAllBtn.disabled = false;
+            }
+        }
+
+        document.getElementById( "play-all-btn" ).addEventListener( "click", () => {
+            playAll().catch( ( e ) => console.error( "[voice-persona-reference] playAll failed:", e ) );
+        } );
+        document.getElementById( "stop-btn" ).addEventListener( "click", () => {
+            stopActive();
+            setStatus( "Stopped." );
+        } );
+
+        loadPool();
+    </script>
+</body>
+</html>

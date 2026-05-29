@@ -15,6 +15,13 @@ The Lupin WebSocket architecture provides real-time bidirectional communication 
 - **Dual-Session Architecture**: Separate channels for queue management and audio streaming
 - **Thread-Safe Emission**: Background threads emit via `asyncio.run_coroutine_threadsafe`
 - **Session Persistence**: localStorage-based session management across page reloads
+- **Concurrent `job_state_transition` events** (v0.1.7+): with the agentic pool
+  active (`cj flow max concurrent agentic jobs > 1`), multiple agentic jobs
+  may emit `RUNNING → COMPLETED/FAILED` transitions **simultaneously** from
+  different pool worker threads. Cross-job event order is non-deterministic;
+  clients MUST key cards by `job_id` (as they already do). Within a single
+  `job_id`, sequence is preserved by the pop-before-transition invariant in
+  `RunningFifoQueue._on_agentic_complete`.
 
 ---
 
@@ -166,16 +173,25 @@ The `/ws/queue/{session_id}` endpoint uses **in-band auth** (not HTTP headers), 
 
 ### Auth Error Conditions
 
-| Condition | Error Message |
-|-----------|---------------|
-| Not valid JSON | `"Authentication message must be valid JSON"` |
-| Not a dict | `"Authentication message must be a JSON object"` |
-| `type` != `auth_request` | `"First message must be auth_request"` |
-| Missing `token` key | `"Authentication message must include token field"` |
-| Token not a string | `"Token must be a string"` |
-| Token empty/whitespace | `"Token cannot be empty"` |
-| Token expired | `"Token expired"` (closes connection) |
-| Verification exception | Exception message (closes connection) |
+| Condition | Error Message | Close Code |
+|-----------|---------------|------------|
+| Not valid JSON | `"Authentication message must be valid JSON"` | 4001 |
+| Not a dict | `"Authentication message must be a JSON object"` | 4001 |
+| `type` != `auth_request` | `"First message must be auth_request"` | 4001 |
+| Missing `token` key | `"Authentication message must include token field"` | 4001 |
+| Token not a string | `"Token must be a string"` | 4001 |
+| Token empty/whitespace | `"Token cannot be empty"` | 4001 |
+| Token expired | `"Token expired"` | 4001 |
+| Verification exception | Exception message | 4001 |
+| Single-session displaced | (no in-band message; displaced session sees 4002 close frame) | 4002 |
+| RBAC subscription denied | _(RESERVED — not currently emitted)_ | 4003 |
+
+All 4001/4002/4003 codes are PERMANENT from the client's perspective —
+the browser-side `ws-channel.js` state machine routes them straight to
+`OPEN_CIRCUIT` and does NOT auto-retry. NotificationsUI attempts a single
+token refresh on 4001 before showing the auth-permanent banner. See
+[WebSocket Events §Close Code Semantics](websocket-events.md#close-code-semantics)
+for the full reaction matrix and design source.
 
 ### Audio WebSocket Authentication
 

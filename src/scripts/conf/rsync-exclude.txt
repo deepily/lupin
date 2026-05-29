@@ -79,10 +79,10 @@ temp/
 # *.sqlite
 # *.db
 
-# PostgreSQL data directory (backed up via pg_dump instead)
-# Raw data files are owned by postgres/docker user and can't be read by rsync.
-# Use backup-postgres.sh to create postgresql-backup.sql which IS included.
-src/conf/long-term-memory/postgresql-dev-data/
+# PostgreSQL data directory was relocated outside the project tree on 2026-04-30
+# (now at /mnt/DATA01/include/www.deepily.ai/projects/lupin-data/postgresql-dev-data),
+# so the rsync sweep no longer touches it from this project root.
+# Use backup-postgres.sh to create postgresql-backup.sql for portable backups.
 
 # LanceDB FTS indices (regeneratable, often created by root/docker)
 */_indices/fts/

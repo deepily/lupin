@@ -104,13 +104,17 @@ class TestRepairChainStyling:
 
     def test_original_failure_has_dead_styling( self, seeded_repair_chain_page ):
         """
-        The original failed job card has status-dead CSS class.
+        The original failed job card in the history pane carries the
+        unified `status-history` outer class (post 2026-04-26 unification —
+        was `status-dead` under the old status→queue mapping). The
+        failed-state signal is now carried by the inner ✗ completion badge.
 
         Requires:
             - Seeded record 0 (repair-001) has status=failed
 
         Ensures:
-            - Card has 'status-dead' in its class list
+            - Card has 'status-history' in its class list
+            - Card contains a `.completion-badge.failed` (✗) inner element
         """
         page, records = seeded_repair_chain_page
         expand_history_section( page )
@@ -121,17 +125,25 @@ class TestRepairChainStyling:
         card = page.locator( f".job-card[data-job-id='{failed_rec[ 'id_hash' ]}']" )
         assert card.count() > 0, f"Failed job card not found: {failed_rec[ 'id_hash' ]}"
         classes = card.get_attribute( "class" ) or ""
-        assert "status-dead" in classes, f"Expected 'status-dead', got: {classes}"
+        assert "status-history" in classes, f"Expected 'status-history', got: {classes!r}"
+        failed_badge = card.locator( ".completion-badge.failed" )
+        assert failed_badge.count() > 0, (
+            "Expected a `.completion-badge.failed` (✗) inside the failed history card."
+        )
 
     def test_bfe_job_has_completed_styling( self, seeded_repair_chain_page ):
         """
-        The BFE job card has status-done CSS class.
+        The BFE job card in the history pane carries the unified
+        `status-history` outer class (post 2026-04-26 unification —
+        was `status-done` under the old status→queue mapping). The
+        completed-state signal is now carried by the inner ✓ completion badge.
 
         Requires:
             - Seeded record 1 (repair-bfe-002) has status=completed
 
         Ensures:
-            - Card has 'status-done' in its class list
+            - Card has 'status-history' in its class list
+            - Card contains a `.completion-badge.success` (✓) inner element
         """
         page, records = seeded_repair_chain_page
         expand_history_section( page )
@@ -142,17 +154,25 @@ class TestRepairChainStyling:
         card = page.locator( f".job-card[data-job-id='{bfe_rec[ 'id_hash' ]}']" )
         assert card.count() > 0, f"BFE job card not found: {bfe_rec[ 'id_hash' ]}"
         classes = card.get_attribute( "class" ) or ""
-        assert "status-done" in classes, f"Expected 'status-done', got: {classes}"
+        assert "status-history" in classes, f"Expected 'status-history', got: {classes!r}"
+        success_badge = card.locator( ".completion-badge.success" )
+        assert success_badge.count() > 0, (
+            "Expected a `.completion-badge.success` (✓) inside the completed BFE history card."
+        )
 
     def test_resubmitted_job_has_completed_styling( self, seeded_repair_chain_page ):
         """
-        The resubmitted job card has status-done CSS class.
+        The resubmitted job card in the history pane carries the unified
+        `status-history` outer class (post 2026-04-26 unification —
+        was `status-done` under the old status→queue mapping). The
+        completed-state signal is now carried by the inner ✓ completion badge.
 
         Requires:
             - Seeded record 2 (repair-003) has status=completed
 
         Ensures:
-            - Card has 'status-done' in its class list
+            - Card has 'status-history' in its class list
+            - Card contains a `.completion-badge.success` (✓) inner element
         """
         page, records = seeded_repair_chain_page
         expand_history_section( page )
@@ -163,7 +183,11 @@ class TestRepairChainStyling:
         card = page.locator( f".job-card[data-job-id='{resubmit_rec[ 'id_hash' ]}']" )
         assert card.count() > 0, f"Resubmitted job card not found: {resubmit_rec[ 'id_hash' ]}"
         classes = card.get_attribute( "class" ) or ""
-        assert "status-done" in classes, f"Expected 'status-done', got: {classes}"
+        assert "status-history" in classes, f"Expected 'status-history', got: {classes!r}"
+        success_badge = card.locator( ".completion-badge.success" )
+        assert success_badge.count() > 0, (
+            "Expected a `.completion-badge.success` (✓) inside the completed resubmitted history card."
+        )
 
 
 # =============================================================================

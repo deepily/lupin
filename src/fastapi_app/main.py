@@ -63,7 +63,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs
 
@@ -93,6 +93,13 @@ jobs_notification_queue = None
 snapshot_mgr = None
 io_tbl = None
 id_generator = None
+
+# Inter-Session Commons (Phase 2 — user-broadcast surface; Phase 3 — push-mode + LLM)
+commons_store            = None
+commons_rate_limiter     = None
+commons_ack_watcher      = None
+commons_activity_watcher = None
+commons_question_watcher = None  # Phase 3 step 9
 
 # WebSocket connection management
 websocket_manager = WebSocketManager()
@@ -479,7 +486,17 @@ async def lifespan( app: FastAPI ):
     
     # Initialize the manager (required for both backends)
     snapshot_mgr.initialize()
-    
+
+    # Register a cache invalidator so /api/init reloads snapshots uniformly
+    # with the rest of the cache_registry. Mirrors the per-instance .reload()
+    # call previously inlined in routers/system.py:/api/init.
+    from cosa.config.cache_registry import register_invalidator
+    def _invalidate_snapshot_mgr():
+        if snapshot_mgr is not None:
+            print( "Reloading solution snapshots..." )
+            snapshot_mgr.reload()
+    register_invalidator( "snapshot_mgr", _invalidate_snapshot_mgr )
+
     # Initialize queues with websocket manager
     # NOTE (Session 97): emit_speech_callback is deprecated - queues now use notification service via _notify()
     jobs_todo_queue = TodoFifoQueue( websocket_manager, snapshot_mgr, app, config_mgr, emit_speech_callback=None, debug=app_debug, verbose=app_verbose, silent=app_silent )
@@ -513,47 +530,219 @@ async def lifespan( app: FastAPI ):
         print( f"[WARN] CJ Flow startup recovery failed: {e}" )
 
     # ===================================================================
+    # Inter-Session Commons — Phase 2 (user-broadcast surface)
+    # ===================================================================
+    # Per src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md
+    # AC14 (router) + AC7 (CommonsAckWatcher daemon). Gated by `commons enabled`
+    # INI key — when False, the subsystem is fully absent and the router
+    # endpoints will 503 per `_require_initialized()`.
+    global commons_store, commons_rate_limiter, commons_ack_watcher, commons_question_watcher, commons_activity_watcher
+    if config_mgr.get( "commons enabled", default=True, return_type="boolean" ):
+        try:
+            import os
+            from cosa.rest.commons_ack_watcher import CommonsAckWatcher
+            from cosa.rest.commons_activity_watcher import CommonsActivityWatcher
+            from cosa.rest.commons_question_watcher import CommonsQuestionWatcher
+            from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
+            from cosa.rest.routers.commons import init_commons_state, _load_bridge_fields
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
+            from lupin_mcp.commons_llm_disambiguator import CommonsLlmDisambiguator
+            from lupin_mcp.commons_persona_matcher import configure_llm_disambiguator
+            from lupin_mcp.commons_store import CommonsStore
+
+            commons_root = os.environ.get( "LUPIN_ROOT" ) or os.getcwd()
+            commons_store        = CommonsStore( commons_root )
+            commons_rate_limiter = CommonsBroadcastRateLimiter(
+                window_seconds = config_mgr.get( "commons broadcast rate limit seconds", default=30, return_type="int" )
+            )
+            commons_ack_watcher  = CommonsAckWatcher(
+                store                  = commons_store,
+                push_notification_fn   = jobs_notification_queue.push_notification,
+                poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
+            )
+            # Phase 3 — CommonsQuestionWatcher for push-mode ask_async
+            commons_question_watcher = CommonsQuestionWatcher(
+                store                  = commons_store,
+                poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
+                in_flight_ttl_seconds  = float( config_mgr.get( "commons question tracker ttl seconds", default=3600, return_type="int" ) ),
+                per_user_max           = config_mgr.get( "commons question tracker per user max", default=50, return_type="int" ),
+                global_max             = config_mgr.get( "commons question tracker global max", default=1000, return_type="int" ),
+            )
+            init_commons_state(
+                store                            = commons_store,
+                rate_limiter                     = commons_rate_limiter,
+                ack_watcher                      = commons_ack_watcher,
+                active_session_threshold_seconds = config_mgr.get( "commons broadcast active session threshold seconds", default=600, return_type="int" ),
+                question_watcher                 = commons_question_watcher,
+            )
+            commons_ack_watcher.start()
+            commons_question_watcher.start()
+
+            # Phase 2.5/3.5 — CommonsActivityWatcher for broadcast-card Recent Activity WS push.
+            # Per src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (AC3).
+            # Gated by `commons traffic visibility enabled` AND `commons traffic visibility ws push enabled`.
+            if (
+                config_mgr.get( "commons traffic visibility enabled", default=True, return_type="boolean" )
+                and config_mgr.get( "commons traffic visibility ws push enabled", default=True, return_type="boolean" )
+            ):
+                excluded_raw     = config_mgr.get( "commons traffic visibility exclude topics", default="presence, system-events" )
+                excluded_topics  = [ t.strip() for t in excluded_raw.split( "," ) if t.strip() ]
+
+                def _commons_activity_bridge_owner_resolver():
+                    """Build a fresh {session_id: owner_user_id|None} map for each tick."""
+                    out = { }
+                    for path, sid, _persona in find_active_voice_persona_sessions():
+                        bridge = _load_bridge_fields( path )
+                        if bridge is not None:
+                            out[ sid ] = bridge.get( "owner_user_id" )
+                    return out
+
+                commons_activity_watcher = CommonsActivityWatcher(
+                    store                    = commons_store,
+                    push_notification_fn     = jobs_notification_queue.push_notification,
+                    excluded_topics          = excluded_topics,
+                    bridge_owner_resolver_fn = _commons_activity_bridge_owner_resolver,
+                    poll_interval_seconds    = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
+                )
+                commons_activity_watcher.start()
+                print( f"[COMMONS] Phase 2.5/3.5 CommonsActivityWatcher started (excluded={excluded_topics})" )
+
+            # Phase 3 — wire the LLM disambiguator singleton for commons_persona_matcher
+            try:
+                configure_llm_disambiguator( CommonsLlmDisambiguator( config_mgr ) )
+                print( "[COMMONS] Phase 3 LLM disambiguator installed" )
+            except Exception as e:
+                print( f"[COMMONS] WARN — LLM disambiguator init failed (matcher falls back to Phase 1 stub): {e}" )
+            print( f"[COMMONS] Phase 2+3 subsystem started (root={commons_root})" )
+        except Exception as e:
+            print( f"[COMMONS] WARN — Phase 2+3 init failed: {e}" )
+    else:
+        print( "[COMMONS] Disabled via `commons enabled = false` — skipping Phase 2+3 init" )
+
+    # ===================================================================
     # GPU Model Loading (smallest → largest to minimize CUDA fragmentation)
     # ===================================================================
+    #
+    # Phase 3.6 of the model-server carve-out: read the INI provider switch.
+    # When `speech to text provider = model-server`, SKIP all 3 eager GPU loads
+    # and route embeddings + transcription via HTTP to lupin-model-server:7998.
+    # Defaults to `local` (today's behavior) so a compute container without
+    # `LUPIN_MODEL_SERVER_URL` injected continues to eager-load identically.
+    # See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+    provider_mode = config_mgr.get(
+        "speech to text provider", default="local", silent=True
+    ).lower().strip()
+    remote_mode = ( provider_mode == "model-server" )
 
-    # 1. CodeRankEmbed — Load + multi-batch warmup
-    from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
-
-    print( "Loading CodeRankEmbed embedding engine... ", end="" )
-    code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
-    code_engine.encode_code( [ "def hello(): return 'world'" ] )
-    code_engine.encode_query( [ "How do I sort a list in Python?" ] )
-    code_engine.encode_code( [ "import os\nimport sys\n\ndef main():\n    path = os.getcwd()\n    print( path )\n    return 0" ] )
-    print( "Done!" )
-    _log_vram( "CodeRankEmbed" )
-
-    # 2. Prose Embedding — Load + multi-batch warmup
-    print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
-    prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
-    prose_engine.encode_query( [ "What is the meaning of life?" ] )
-    prose_engine.encode_document( [ "The quick brown fox jumps over the lazy dog. This is a longer document to exercise memory allocation patterns." ] )
-    prose_engine.encode_query( [ "Explain quantum computing in simple terms" ] )
-    print( "Done!" )
-    _log_vram( "Prose Embedding" )
-
-    # 3. Whisper STT — Load + warmup transcription (LAST, largest GPU footprint)
     global whisper_pipeline
-    print( "Loading distill whisper engine... ", end="" )
-    try:
-        whisper_pipeline = await load_stt_model()
-        # Warmup: transcribe audio to establish stable CUDA footprint
-        warmup_path = du.get_project_root() + "/src/conf/warmup/whisper-warmup-85s.mp3"
-        if os.path.exists( warmup_path ):
-            whisper_pipeline( warmup_path, chunk_length_s=30, stride_length_s=5, return_timestamps=False )
-            print( "Done! (with warmup)" )
-        else:
-            print( "Done! (no warmup file)" )
-    except Exception as e:
+
+    if remote_mode:
+        print( "[REMOTE-MODE] Skipping eager GPU loads — routing via HTTP to lupin-model-server" )
+
+        # Set process-ownership flags appropriately for remote mode:
+        # - Skip `EmbeddingProvider.declare_in_process_engine_owner()` →
+        #   HTTP fallback engages on every embedding call (per R1=C, the
+        #   `_resolve_http_target()` resolver returns the model-server URL
+        #   when `LUPIN_MODEL_SERVER_URL` is set in env).
+        # - Explicit `SpeechToTextProvider.declare_remote_only()` so the
+        #   speech provider's `_should_use_local()` returns False even if
+        #   some earlier path accidentally flipped the owner flag.
+        from cosa.memory.speech_to_text_provider import SpeechToTextProvider
+        SpeechToTextProvider.declare_remote_only()
         whisper_pipeline = None
-        print( "FAILED!" )
-        print( f"[WARN] Whisper STT model failed to load: {e}" )
-        print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
-    _log_vram( "Whisper" )
+
+        # Readiness probe — wait up to `model server startup probe timeout
+        # seconds` (default 60 s) for the model-server's `/health` endpoint
+        # to return 200. Best-effort: on timeout, log a warning and continue
+        # so the rest of FastAPI (queue, notifications, doc viewer, auth)
+        # comes up cleanly. Model endpoints will 503 (via the provider's
+        # HTTP-fallback error path) until lupin-model-server becomes reachable.
+        model_server_url = os.environ.get(
+            "LUPIN_MODEL_SERVER_URL",
+            config_mgr.get( "model server url", default="http://lupin-model-server:7998", silent=True )
+        )
+        probe_timeout = config_mgr.get(
+            "model server startup probe timeout seconds",
+            default=60, return_type="int", silent=True
+        )
+        probe_url = f"{model_server_url}/health"
+        print( f"[REMOTE-MODE] Probing model-server readiness at {probe_url} (budget={probe_timeout}s)... ", end="" )
+        import requests as _requests
+        probe_start    = time.time()
+        probe_deadline = probe_start + probe_timeout
+        probe_ok       = False
+        while time.time() < probe_deadline:
+            try:
+                _r = _requests.get( probe_url, timeout=2 )
+                if _r.status_code == 200:
+                    probe_ok = True
+                    break
+            except _requests.RequestException:
+                pass
+            await asyncio.sleep( 1.0 )
+        elapsed = int( time.time() - probe_start )
+        if probe_ok:
+            print( f"OK ({elapsed}s)" )
+        else:
+            print( f"TIMEOUT after {elapsed}s — continuing; model endpoints will 503 until reachable" )
+
+    else:
+        # Local-mode (today's behavior): eager-load all 3 models on cuda:0,
+        # declare in-process ownership so the provider classes route locally.
+
+        # 1. CodeRankEmbed — Load + multi-batch warmup
+        from cosa.memory.local_embedding_engine import get_code_engine, get_prose_engine
+
+        print( "Loading CodeRankEmbed embedding engine... ", end="" )
+        code_engine = get_code_engine( debug=app_debug, verbose=app_verbose )
+        code_engine.encode_code( [ "def hello(): return 'world'" ] )
+        code_engine.encode_query( [ "How do I sort a list in Python?" ] )
+        code_engine.encode_code( [ "import os\nimport sys\n\ndef main():\n    path = os.getcwd()\n    print( path )\n    return 0" ] )
+        print( "Done!" )
+        _log_vram( "CodeRankEmbed" )
+
+        # 2. Prose Embedding — Load + multi-batch warmup
+        print( "Loading nomic-embed-text-v1.5 embedding engine... ", end="" )
+        prose_engine = get_prose_engine( debug=app_debug, verbose=app_verbose )
+        prose_engine.encode_query( [ "What is the meaning of life?" ] )
+        prose_engine.encode_document( [ "The quick brown fox jumps over the lazy dog. This is a longer document to exercise memory allocation patterns." ] )
+        prose_engine.encode_query( [ "Explain quantum computing in simple terms" ] )
+        print( "Done!" )
+        _log_vram( "Prose Embedding" )
+
+        # Mark this process as the in-process owner of the GPU embedding singletons.
+        # After this point, EmbeddingProvider.generate_embedding() in THIS process
+        # routes directly to the loaded engines. Every other process (scripts,
+        # tests, MCP, CC subagents) keeps the default flag=False and routes via
+        # HTTP to /api/embeddings/{generate,batch} — so no second process ever
+        # lazy-loads a duplicate GPU model.
+        from cosa.memory.embedding_provider import EmbeddingProvider
+        EmbeddingProvider.declare_in_process_engine_owner()
+        print( "[EmbeddingProvider] Declared in-process engine owner — local routing enabled for this FastAPI process" )
+
+        # 3. Whisper STT — Load + warmup transcription (LAST, largest GPU footprint)
+        print( "Loading distill whisper engine... ", end="" )
+        try:
+            whisper_pipeline = await load_stt_model()
+            # Warmup: transcribe audio to establish stable CUDA footprint
+            warmup_path = du.get_project_root() + "/src/conf/warmup/whisper-warmup-85s.mp3"
+            if os.path.exists( warmup_path ):
+                whisper_pipeline( warmup_path, chunk_length_s=30, stride_length_s=5, return_timestamps=False )
+                print( "Done! (with warmup)" )
+            else:
+                print( "Done! (no warmup file)" )
+            # Phase 3.3 of the model-server carve-out: tell the SpeechToTextProvider
+            # singleton that THIS process owns the in-process Whisper pipeline.
+            # Mirrors EmbeddingProvider.declare_in_process_engine_owner() above.
+            # See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
+            from cosa.memory.speech_to_text_provider import SpeechToTextProvider
+            SpeechToTextProvider.declare_in_process_owner()
+        except Exception as e:
+            whisper_pipeline = None
+            print( "FAILED!" )
+            print( f"[WARN] Whisper STT model failed to load: {e}" )
+            print( "[WARN] STT endpoints will return 503. All other endpoints remain functional." )
+        _log_vram( "Whisper" )
 
     # 4. Prediction Engine — no GPU model, just initialization
     from cosa.agents.prediction_engine import get_prediction_engine
@@ -591,6 +780,12 @@ async def lifespan( app: FastAPI ):
     from cosa.rest.repair_attempt_tracker import init_tracker
     init_tracker( config_mgr, debug=app_debug )
     init_watchdogs( config_mgr, jobs_todo_queue, debug=app_debug )
+
+    # Initialize API Resource Manager singleton (Phase 1 CJ Flow async multi-lane).
+    # No agents call it yet — wiring ensures the infrastructure is alive from boot
+    # so Phase 2/3 can migrate callers without a startup-plumbing pass.
+    from cosa.utils.api_resource_manager import init_arm
+    init_arm()
 
     # Restore scheduled jobs that survived the restart (preserved by mark_interrupted_jobs)
     try:
@@ -668,13 +863,24 @@ async def lifespan( app: FastAPI ):
         except Exception as e:
             print( f"[WS-CLEANUP] Error during cleanup task shutdown: {e}" )
     
+    # Phase 2 (CJ Flow async multi-lane): drain agentic pool BEFORE consumer stops
+    # and BEFORE HTTP socket closes. In-flight pool workers need the WebSocket
+    # channel alive long enough to emit their final job_state_transition events
+    # as they finish (or are dead-lettered on timeout).
+    if jobs_run_queue is not None and hasattr( jobs_run_queue, "shutdown_pool" ):
+        try:
+            print( "[AGENTIC-POOL] Draining agentic pool before consumer stop..." )
+            jobs_run_queue.shutdown_pool( wait=True, timeout=30.0 )
+        except Exception as e:
+            print( f"[AGENTIC-POOL] Error during pool drain (continuing): {e}" )
+
     # Shutdown consumer thread
     if consumer_thread:
         print( "[CONSUMER] Stopping todo-producer-run-consumer thread..." )
         with jobs_todo_queue.condition:
             jobs_todo_queue.consumer_running = False
             jobs_todo_queue.condition.notify()
-        
+
         # Wait for consumer thread to finish
         consumer_thread.join( timeout=5.0 )
         if consumer_thread.is_alive():
@@ -689,6 +895,32 @@ async def lifespan( app: FastAPI ):
         print( "[PEER-WATCH] Peer-queue watchers cancelled" )
     except Exception as e:
         print( f"[PEER-WATCH] Error cancelling watchers: {e}" )
+
+    # Stop the commons ack watcher daemon (Phase 2)
+    if commons_activity_watcher is not None:
+        try:
+            print( "[COMMONS] Stopping CommonsActivityWatcher daemon..." )
+            commons_activity_watcher.stop( join_timeout=3.0 )
+            print( "[COMMONS] CommonsActivityWatcher stopped" )
+        except Exception as e:
+            print( f"[COMMONS] WARN — CommonsActivityWatcher shutdown failed: {e}" )
+
+    if commons_ack_watcher is not None:
+        try:
+            print( "[COMMONS] Stopping CommonsAckWatcher daemon..." )
+            commons_ack_watcher.stop( join_timeout=3.0 )
+            print( "[COMMONS] CommonsAckWatcher stopped" )
+        except Exception as e:
+            print( f"[COMMONS] Error stopping watcher: {e}" )
+
+    # Stop the commons question watcher daemon (Phase 3)
+    if commons_question_watcher is not None:
+        try:
+            print( "[COMMONS] Stopping CommonsQuestionWatcher daemon..." )
+            commons_question_watcher.stop( join_timeout=3.0 )
+            print( "[COMMONS] CommonsQuestionWatcher stopped" )
+        except Exception as e:
+            print( f"[COMMONS] Error stopping question watcher: {e}" )
 
     # Add any other cleanup code here if needed
 
@@ -749,13 +981,14 @@ app.include_router(queues.router)
 app.include_router(jobs.router)
 app.include_router(websocket.router)
 app.include_router(websocket_admin.router)
-app.include_router(claude_code.router)
+# claude_code router retired 2026-05-05 — see src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/
 app.include_router(claude_code_queue.router)
 app.include_router(embeddings.router)
 app.include_router(mode.router)
 app.include_router(stats.router)
 app.include_router(deep_research.router)
 app.include_router(io_files.router)
+app.include_router(docs_files.router)
 app.include_router(mock_job.router)
 app.include_router(podcast_generator.router)
 app.include_router(presentation_generator.router)
@@ -767,6 +1000,10 @@ app.include_router(test_suite.router)
 app.include_router(decision_proxy.router)
 app.include_router(pages.router)
 app.include_router(peer.router)
+app.include_router(speakerphone.router)
+app.include_router(voice_persona.router)
+app.include_router(multiplexer_config.router)
+app.include_router(commons.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -814,11 +1051,20 @@ if __name__ == "__main__":
     lupin_env = os.environ.get( "LUPIN_ENV", "" ).lower()
     is_production_or_test = lupin_env in ["production", "test", "testing"]
 
+    # reload_dirs whitelist: only watch runtime code paths. Without this, --reload
+    # would scan the entire src/ tree (including tests/, rnd/, and the LanceDB
+    # long-term-memory store), causing repeated 12-18s server restarts whenever
+    # any of those files was touched — surfacing in the browser as
+    # ERR_CONNECTION_REFUSED for 30s-2min at a time.
+    reload_kwargs = {}
+    if not is_production_or_test:
+        reload_kwargs[ "reload" ] = True
+        reload_kwargs[ "reload_dirs" ] = [ "fastapi_app", "cosa", "lib", "lupin_cli", "lupin_mcp" ]
     uvicorn.run(
         "fastapi_app.main:app",
         host="0.0.0.0",
         port=port,
         workers=1,  # Single worker required for in-memory notification state (pending_responses dict)
-        reload=not is_production_or_test,
-        log_level="info"
+        log_level="info",
+        **reload_kwargs
     )

@@ -704,6 +704,33 @@ Find snapshots with similar code or explanation. Requires admin role.
 | 500 | Internal Server Error |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## POST `/admin/admin/refresh-source`
+
+> **Force test server to reload source (test env only)**
+
+Re-execs the uvicorn process in place so bind-mounted source edits take effect. Gated by LUPIN_ENV in {test,testing} AND config 'admin refresh source enabled'. Discards in-memory state.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 202 | Successful Response | [RefreshSourceResponse](#refreshsourceresponse)
+ |
+| 401 | Unauthorized |  |
+| 403 | Forbidden - Admin role required |  |
+| 404 | Not Found |  |
+| 500 | Internal Server Error |  |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## GET `/`
 
 > **Root health check**
@@ -963,6 +990,7 @@ Dispatch notification to a user via WebSocket. Supports fire-and-forget or SSE b
 | prediction_hint_override |  | False | JSON override for prediction_hint (testing/debug). Bypasses PredictionEngine. |
 | display_qualifier_widget | boolean | False | Render yes/no qualifier comment widget expanded by default with softer instructional text. |
 | session_name |  | False | Human-readable session name for UI header display. Updates sender-session-name span in notification history card. |
+| idempotency_key |  | False | UUID idempotency key to prevent duplicate notifications on retry. Same key = same notification, skip push/persist. |
 | x-api-key |  | False |  |
 | authorization |  | False |  |
 
@@ -1440,6 +1468,36 @@ Submit a new job to the todo queue. Requires question and websocket_id in reques
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+## POST `/api/push-agentic`
+
+> **Submit agentic job without the runtime argument expeditor**
+
+Unattended / service-to-service agentic job submission. Caller supplies routing_command + explicit args dict. No voice-path LORA parsing, no interactive Q&A. Flexible passthrough args support current and future agents.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+## GET `/api/queue/pool-status`
+
+> **CJ Flow agentic-pool state**
+
+Returns inflight/pending counts and max workers for the agentic ThreadPoolExecutor. Phase 2 (v0.1.7 CJ Flow async multi-lane).
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
 ## GET `/api/get-queue/{queue_name}`
 
 > **Get queue contents**
@@ -1544,6 +1602,51 @@ Request graceful cancellation of a running agentic job at its next phase boundar
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## DELETE `/api/queue/{queue_name}/all`
+
+> **Delete all jobs from a queue**
+
+Bulk remove all jobs from todo, run, done, or dead queue. Admins clear the entire queue; regular users delete only their own jobs.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| queue_name | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## DELETE `/api/queue/{queue_name}/{job_id}`
+
+> **Remove job from queue**
+
+Forcefully remove a job from todo, run, done, or dead queue.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| queue_name | string | True |  |
+| job_id | string | True |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## GET `/api/job-history`
 
 > **Query job history**
@@ -1615,6 +1718,28 @@ Hard delete a job history record. Admin or job owner only.
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## DELETE `/api/job-history/all`
+
+> **Bulk delete job history**
+
+Delete all job history records matching the given time window. Admins delete across all users; regular users delete only their own records.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| days |  | False | Time window: 1, 7, 14, 30, or 'all'. Defaults to 'all'. |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## POST `/api/job-history/{job_id}/retry`
 
 > **Retry a failed or interrupted job**
@@ -1673,6 +1798,53 @@ Set paused=False and notify consumer to recalculate eligibility.
 |------|------|----------|-------------|
 | job_id | string | True |  |
 
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/jobs/{id_hash}/resume-from-checkpoint`
+
+> **Resume a stalled job from its saved checkpoint**
+
+Reconstructs a stalled (voice-gate-timeout) job from its checkpoint in job_history, pushes to todo queue. Optional body may specify per-resume model + thinking-effort overrides.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| id_hash | string | True |  |
+
+
+### 📦 Request Body 
+
+[ResumeFromCheckpointRequest](#resumefromcheckpointrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/test-fix-expediter/resume-from`
+
+> **Smart TFE resume — auto-detect job ID or plan path**
+
+Accepts free-form input (job ID, plan doc path, or description) and resolves to a stalled TFE job, then resumes from checkpoint.
+
+
+
+
+
+### 📦 Request Body 
+
+[TFEResumeFromRequest](#tferesumefromrequest)
 
 ### ✅ Responses
 
@@ -1821,121 +1993,29 @@ Return sorted list of all available WebSocket event types.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-## POST `/api/claude-code/dispatch`
-
-> **Dispatch Claude Code task**
-
-Launch a Claude Agent SDK task in BOUNDED or INTERACTIVE mode. Returns task_id and WebSocket URL.
-
-
-
-
-
-### 📦 Request Body 
-
-[DispatchRequest](#dispatchrequest)
-
-### ✅ Responses
-
-| Status Code | Description | Component |
-|-------------|-------------|-----------|
-| 200 | Successful Response | [DispatchResponse](#dispatchresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
-## POST `/api/claude-code/{task_id}/inject`
-
-> **Inject message into session**
-
-Send a follow-up message into an active INTERACTIVE session.
-
-
-
-### 🔗 Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| task_id | string | True |  |
-
-
-### 📦 Request Body 
-
-[InjectRequest](#injectrequest)
-
-### ✅ Responses
-
-| Status Code | Description | Component |
-|-------------|-------------|-----------|
-| 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
-## POST `/api/claude-code/{task_id}/interrupt`
-
-> **Interrupt active session**
-
-Interrupt the current response in an INTERACTIVE session.
-
-
-
-### 🔗 Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| task_id | string | True |  |
-
-
-### ✅ Responses
-
-| Status Code | Description | Component |
-|-------------|-------------|-----------|
-| 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
-## POST `/api/claude-code/{task_id}/end`
-
-> **End interactive session**
-
-Gracefully end an INTERACTIVE session and close its WebSocket.
-
-
-
-### 🔗 Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| task_id | string | True |  |
-
-
-### ✅ Responses
-
-| Status Code | Description | Component |
-|-------------|-------------|-----------|
-| 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
-## GET `/api/claude-code/{task_id}/status`
-
-> **Get task status**
-
-Return current status, cost, and error state for a Claude Code task.
-
-
-
-### 🔗 Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| task_id | string | True |  |
-
-
-### ✅ Responses
-
-| Status Code | Description | Component |
-|-------------|-------------|-----------|
-| 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
 ## POST `/api/claude-code/queue/submit`
+
+> **DEPRECATED: use /api/claude-code/submit**
+
+Alias for /api/claude-code/submit. Removed after one release cycle. See src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.
+
+
+
+
+
+### 📦 Request Body 
+
+[ClaudeCodeQueueRequest](#claudecodequeuerequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [ClaudeCodeQueueResponse](#claudecodequeueresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/claude-code/submit`
 
 > **Submit Claude Code queue job**
 
@@ -2217,6 +2297,7 @@ Serve files from the io/ directory with extension validation and traversal prote
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | path | string | True | Relative path within io/ directory |
+| download | boolean | False | Force download with Content-Disposition: attachment |
 
 
 ### ✅ Responses
@@ -2231,6 +2312,43 @@ Serve files from the io/ directory with extension validation and traversal prote
 > **IO files health check**
 
 Report io/ directory status and file counts in research and podcast subdirectories.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+## GET `/api/docs/file`
+
+> **Serve project documentation file or directory listing**
+
+Polymorphic: returns text content for files OR JSON directory listing for whitelisted directories. Whitelist covers src/docs/, src/rnd/, src/workflow/ and root-level *.md. Path traversal is blocked.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| path | string | True | Project-relative path; must be in the docs whitelist |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/docs/health`
+
+> **Docs files health check**
+
+Report which whitelisted prefixes/files are present on disk.
 
 
 
@@ -2618,6 +2736,347 @@ Hot-reload trust mode at runtime. Persists to INI and updates running proxy if a
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/admin/peer-queue/{queue_name}`
+
+> **Proxy a queue read to a peer Lupin server**
+
+Admin-only. Forwards the caller's JWT to the peer's /api/get-queue/{name} and returns the response. Peer host must be in the 'peer queue allowed hosts' whitelist.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| queue_name | string | True |  |
+| host | string | True | Peer docker-compose service:port (e.g. lupin-rest-test:7999) |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [PeerQueueResponse](#peerqueueresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/admin/peer-queue-watch/start`
+
+> **Start a background peer-queue drain watcher**
+
+Admin-only. Spawns an asyncio task that polls the peer queue and fires a high-priority notification on drain. One active watcher per admin; re-calling replaces the prior.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[WatchStartRequest](#watchstartrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [WatchActionResponse](#watchactionresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/admin/peer-queue-watch/stop`
+
+> **Stop the caller's peer-queue watcher**
+
+Admin-only. Idempotent — returns 'not_active' if no watcher was running.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [WatchActionResponse](#watchactionresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/admin/peer-queue-watch/status`
+
+> **Get current peer-queue watcher status**
+
+Admin-only. Returns live state for this admin's watcher (if any).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [WatchStatusResponse](#watchstatusresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/cosa-voice/conversation-mode/{session_id}`
+
+> **Get conversation mode flag for a session**
+
+Returns the conversation_mode_active flag from the cosa-voice session bridge file.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| session_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/cosa-voice/conversation-mode/{session_id}`
+
+> **Set conversation mode flag for a session**
+
+Writes conversation_mode_active to the bridge file and broadcasts a conversation_mode_changed WebSocket event so all connected UI tabs sync.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| session_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[ConversationModeBody](#conversationmodebody)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/cosa-voice/voice-persona/pool`
+
+> **Pool snapshot — allocatable pool, occupied names, free slots**
+
+Returns the configured pool plus current occupancy. Diagnostics endpoint; does not allocate.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/cosa-voice/voice-persona/{session_id}`
+
+> **Read voice persona for a session**
+
+Returns the voice_persona dict from the cosa-voice session bridge file, or null when none is set.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| session_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/cosa-voice/voice-persona/{session_id}/allocate`
+
+> **Allocate a voice persona for a session**
+
+Idempotent: if a persona is already set on the bridge, returns it without re-allocating. Otherwise atomically picks the first uniform-random unallocated persona and writes it to the bridge.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| session_id | string | True |  |
+| previous_persona_name |  | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/cosa-voice/voice-persona/{session_id}/release`
+
+> **Release the voice persona allocated to a session**
+
+Clears the voice_persona field on the bridge and broadcasts a voice_persona_released event.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| session_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/cosa-voice/voice-persona/sample`
+
+> **Synthesize a voice sample for the persona-reference page**
+
+Returns audio/mpeg bytes inline. The voice_id MUST belong to the configured persona pool — arbitrary voice_ids are rejected so this endpoint cannot be used as a general-purpose TTS oracle.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[VoicePersonaSampleRequest](#voicepersonasamplerequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ...... |
+| 400 | voice_id is not in the configured persona pool |  |
+| 503 | ElevenLabs API unavailable or returned an error |  |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/multiplexer/config`
+
+> **Multiplexer client-config**
+
+Returns display-tuning values that the multiplexer boot path fetches once at startup. Values are sourced from `ConfigurationManager` INI (`[Lupin: Baseline]` section). No auth required (no PII, no state).
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [MultiplexerConfigResponse](#multiplexerconfigresponse)
+ |
+## GET `/api/commons/active-sessions`
+
+> **List active CC sessions belonging to the authenticated user**
+
+Returns same-user-scoped active sessions with persona info for the broadcast recipient preview.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/commons/broadcast-to-cc-sessions`
+
+> **Fan out a broadcast to active CC sessions belonging to the authenticated user**
+
+Posts a per-recipient `broadcasts` entry + a per-session listener notification for each active CC session belonging to the caller. Returns the broadcast_id + recipient count + any failed recipients.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[BroadcastRequestBody](#broadcastrequestbody)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ---
 
 # 📋 Components
@@ -2680,6 +3139,20 @@ Response model for batch user deletion.
 | Field | Type | Description |
 |-------|------|-------------|
 | file | string |  |
+
+
+## BroadcastRequestBody
+
+
+POST /broadcast-to-cc-sessions request body.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| message | string |  |
+| broadcast_id |  |  |
+| require_ack | boolean |  |
+| include_originator | boolean |  |
 
 
 ## BugFixExpediterSubmitRequest
@@ -2773,6 +3246,20 @@ Individual result for code/explanation/gist similarity search.
 | created_date | string | Creation timestamp |
 
 
+## ConversationModeBody
+
+
+POST body for setting conversation mode.
+
+Requires:
+    - active is a bool (True to enter conversation mode, False to exit)
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| active | boolean |  |
+
+
 ## CreateUserRequest
 
 
@@ -2812,6 +3299,7 @@ Request body for submitting a deep research job.
 | websocket_id |  | WebSocket session ID for notifications |
 | lead_model |  | Model for lead agent (None = use default) |
 | dry_run | boolean | Simulate execution without API calls |
+| force_failure_mode |  | Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run |
 | audience |  | Target audience level: beginner, general, expert, academic |
 | audience_context |  | Custom audience description |
 | scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
@@ -2841,42 +3329,6 @@ Request model for admin user deletion.
 | Field | Type | Description |
 |-------|------|-------------|
 | reason |  | Reason for audit trail |
-
-
-## DispatchRequest
-
-
-Request model for task dispatch.
-
-Attributes:
-    project: Target project name (e.g., "lupin", "cosa")
-    prompt: Task description/prompt for Claude Code
-    task_type: BOUNDED (Option A) or INTERACTIVE (Option B)
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| project | string |  |
-| prompt | string |  |
-| task_type |  |  |
-
-
-## DispatchResponse
-
-
-Response model for task dispatch.
-
-Attributes:
-    task_id: Unique identifier for the dispatched task
-    status: Current status ("dispatched", "running", etc.)
-    websocket_url: WebSocket URL for streaming responses
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| task_id | string |  |
-| status | string |  |
-| websocket_url | string |  |
 
 
 ## EmbedBatchRequest
@@ -2966,17 +3418,6 @@ Contains:
 | detail | array |  |
 
 
-## InjectRequest
-
-
-Request model for injecting messages into Option B sessions.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| message | string |  |
-
-
 ## LoginRequest
 
 
@@ -3057,6 +3498,7 @@ Request body for submitting a mock job.
 | description |  | Custom description for queue display |
 | websocket_id |  | WebSocket session ID for notifications |
 | voice_command |  | Test expeditor: provide a voice command to route through RuntimeArgumentExpeditor |
+| force_failure_mode |  | Force the spawned dry-run job to fail with a specific error category, landing it in the dead queue so the Phase 6 auto-fix loop can be exercised. Only honored when voice_command is set (expeditor path) and dry_run is True. |
 | scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
 | monopolize | boolean | Run exclusively, block all other jobs until complete |
 
@@ -3130,6 +3572,36 @@ Request body for setting user mode.
 | mode |  |  |
 
 
+## MultiplexerConfigResponse
+
+
+Display-tuning values for the multiplexer front-end.
+
+Field names use snake_case to match server convention. Keys here become
+properties on the JSON object that `boot.ts` reads via
+`configureMetaDisplayCap(serverConfig)` per Phase 6a design F20.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| multiplexer_max_meta_display_bytes | integer |  |
+
+
+## PeerQueueResponse
+
+
+One-shot peer queue snapshot.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| peer_host | string |  |
+| queue_name | string |  |
+| fetched_at | string |  |
+| total_jobs | integer |  |
+| upstream | object | Raw upstream response body |
+
+
 ## PodcastMatchingResponse
 
 
@@ -3158,6 +3630,7 @@ The research_source field is overloaded:
 | target_languages |  |  |
 | max_segments |  |  |
 | dry_run | boolean |  |
+| force_failure_mode |  | Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run |
 | audience |  |  |
 | audience_context |  |  |
 | scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
@@ -3189,7 +3662,10 @@ Request body for presentation generation submission.
 | target_duration_minutes |  |  |
 | audience |  |  |
 | theme |  |  |
+| content_model |  | Override content model (e.g. claude-sonnet-4-6 for automated tests) |
+| render_only | boolean | Render-only mode: source_path must be a YAML file, skips Phases 1-5 |
 | dry_run | boolean |  |
+| force_failure_mode |  | Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run |
 | scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
 | monopolize | boolean | Run exclusively, block all other jobs until complete |
 
@@ -3235,6 +3711,19 @@ Contains:
 |-------|------|-------------|
 | message | string | Success message |
 | tokens |  | New JWT token pair |
+
+
+## RefreshSourceResponse
+
+
+Response model for refresh-source endpoint.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| status | string |  |
+| pid | integer |  |
+| env | string |  |
 
 
 ## RegisterRequest
@@ -3330,6 +3819,7 @@ Mirrors DeepResearchSubmitRequest with additional presentation parameters.
 | theme |  | Presentation theme name |
 | audience |  | Target audience level |
 | audience_context |  | Custom audience description |
+| lead_model |  | Override DR lead model (e.g. claude-haiku-4-5 for testing) |
 | dry_run | boolean | Simulate execution without API calls |
 
 
@@ -3357,6 +3847,24 @@ Response model for password reset.
 | message | string |  |
 | temporary_password | string |  |
 | user | object |  |
+
+
+## ResumeFromCheckpointRequest
+
+
+Optional per-resume model + thinking-effort overrides.
+
+All fields optional. Old clients may POST with no body — `request` is then
+an empty model and no overrides apply. New clients may POST:
+``{"lead_model_override": "claude-opus-4-7", "thinking_effort": "xhigh"}``
+to steer a specific resume without touching INI defaults.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| lead_model_override |  |  |
+| worker_model_override |  |  |
+| thinking_effort |  |  |
 
 
 ## SearchSnapshotsResponse
@@ -3484,12 +3992,28 @@ Response body for SWE Team job submission.
 | message | string | Human-readable confirmation message |
 
 
-## TaskTypeEnum
+## TFEResumeFromRequest
 
 
-Task type selection for dispatch.
+Request body for smart TFE resume-from endpoint.
+
+The resume_from field accepts any of:
+- TFE job ID: "tfe-7c25082a" or "tfe-7c25082a::user@example.com"
+- Plan doc path: "io/swe-team/plans/.../c1-plan.md"
+- Checkpoint JSON path (future): "io/checkpoints/.../checkpoint.json"
+- Natural language description (Phase 2, not yet implemented)
+
+Optional overrides (all default None, SDK/INI default applies):
+- lead_model_override / worker_model_override: per-resume model swap
+- thinking_effort: extended-thinking level for this resume
 
 
+| Field | Type | Description |
+|-------|------|-------------|
+| resume_from | string |  |
+| lead_model_override |  |  |
+| worker_model_override |  |  |
+| thinking_effort |  |  |
 
 
 ## TestSuiteSubmitRequest
@@ -3505,6 +4029,8 @@ Request body for submitting a test suite job.
 | dry_run | boolean | Simulate execution without running tests |
 | websocket_id |  | WebSocket session ID for notifications |
 | scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
+| auto_fix_on_failure |  | Per-run override for the TestSuiteCompletionWatchdog. None = use INI default ('test fix expediter auto fix enabled'), True = force-enable TFE auto-dispatch, False = force-disable TFE auto-dispatch for this run only. |
+| env_vars |  | Extra env vars to inject into the pytest subprocess. Filtered by prefix allowlist (TFE_, BFE_, LUPIN_TEST_) on the runner side. Example: {'TFE_RESUME_E2E_LIVE': '1'} |
 
 
 ## TestSuiteSubmitResponse
@@ -3643,6 +4169,8 @@ Contains:
 | loc | array |  |
 | msg | string |  |
 | type | string |  |
+| input |  |  |
+| ctx | object |  |
 
 
 ## VerifyEmailRequest
@@ -3654,6 +4182,65 @@ Request to verify email address with token.
 | Field | Type | Description |
 |-------|------|-------------|
 | token | string | Email verification token from email |
+
+
+## VoicePersonaSampleRequest
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| voice_id | string |  |
+| text | string |  |
+
+
+## WatchActionResponse
+
+
+Generic response for start/stop actions.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| status | string |  |
+| message | string |  |
+
+
+## WatchStartRequest
+
+
+Start a peer-queue watcher.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| host | string | Peer host:port (must be in whitelist) |
+| signal | string | Drain signal: 'run' or 'run+todo' |
+| interval_seconds | integer | Poll interval (10-600s) |
+| stable_for | integer | Consecutive zero polls required |
+| priority | string | Notification priority on drain |
+
+
+## WatchStatusResponse
+
+
+Current watcher state for the requesting admin.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| active | boolean |  |
+| host |  |  |
+| signal |  |  |
+| interval_seconds |  |  |
+| stable_for |  |  |
+| started_at |  |  |
+| last_poll_at |  |  |
+| last_run |  |  |
+| last_todo |  |  |
+| consecutive_zero | integer |  |
+| last_error |  |  |
+| drained_at |  |  |
 
 
 ## cosa__rest__auth_models__MessageResponse
@@ -3702,4 +4289,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.04.06 13:02:00 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.05.12 11:49:59 by `src/scripts/generate-api-docs.sh`_

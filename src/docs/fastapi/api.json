@@ -1845,6 +1845,68 @@
                 }
             }
         },
+        "/admin/admin/refresh-source": {
+            "post": {
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Force test server to reload source (test env only)",
+                "description": "Re-execs the uvicorn process in place so bind-mounted source edits take effect. Gated by LUPIN_ENV in {test,testing} AND config 'admin refresh source enabled'. Discards in-memory state.",
+                "operationId": "refresh_source_admin_admin_refresh_source_post",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RefreshSourceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "403": {
+                        "description": "Forbidden - Admin role required"
+                    },
+                    "404": {
+                        "description": "Not Found"
+                    },
+                    "500": {
+                        "description": "Internal Server Error"
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/": {
             "get": {
                 "tags": [
@@ -2532,6 +2594,24 @@
                             "title": "Session Name"
                         },
                         "description": "Human-readable session name for UI header display. Updates sender-session-name span in notification history card."
+                    },
+                    {
+                        "name": "idempotency_key",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "UUID idempotency key to prevent duplicate notifications on retry. Same key = same notification, skip push/persist.",
+                            "title": "Idempotency Key"
+                        },
+                        "description": "UUID idempotency key to prevent duplicate notifications on retry. Same key = same notification, skip push/persist."
                     },
                     {
                         "name": "x-api-key",
@@ -3708,6 +3788,56 @@
                 ]
             }
         },
+        "/api/push-agentic": {
+            "post": {
+                "tags": [
+                    "queues"
+                ],
+                "summary": "Submit agentic job without the runtime argument expeditor",
+                "description": "Unattended / service-to-service agentic job submission. Caller supplies routing_command + explicit args dict. No voice-path LORA parsing, no interactive Q&A. Flexible passthrough args support current and future agents.",
+                "operationId": "push_agentic_api_push_agentic_post",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ]
+            }
+        },
+        "/api/queue/pool-status": {
+            "get": {
+                "tags": [
+                    "queues"
+                ],
+                "summary": "CJ Flow agentic-pool state",
+                "description": "Returns inflight/pending counts and max workers for the agentic ThreadPoolExecutor. Phase 2 (v0.1.7 CJ Flow async multi-lane).",
+                "operationId": "get_pool_status_api_queue_pool_status_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ]
+            }
+        },
         "/api/get-queue/{queue_name}": {
             "get": {
                 "tags": [
@@ -3904,6 +4034,107 @@
                     }
                 ],
                 "parameters": [
+                    {
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Job Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/queue/{queue_name}/all": {
+            "delete": {
+                "tags": [
+                    "queues"
+                ],
+                "summary": "Delete all jobs from a queue",
+                "description": "Bulk remove all jobs from todo, run, done, or dead queue. Admins clear the entire queue; regular users delete only their own jobs.",
+                "operationId": "delete_all_queue_jobs_api_queue__queue_name__all_delete",
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "queue_name",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Queue Name"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/queue/{queue_name}/{job_id}": {
+            "delete": {
+                "tags": [
+                    "queues"
+                ],
+                "summary": "Remove job from queue",
+                "description": "Forcefully remove a job from todo, run, done, or dead queue.",
+                "operationId": "delete_queue_job_api_queue__queue_name___job_id__delete",
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "queue_name",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Queue Name"
+                        }
+                    },
                     {
                         "name": "job_id",
                         "in": "path",
@@ -4164,6 +4395,61 @@
                 }
             }
         },
+        "/api/job-history/all": {
+            "delete": {
+                "tags": [
+                    "queues"
+                ],
+                "summary": "Bulk delete job history",
+                "description": "Delete all job history records matching the given time window. Admins delete across all users; regular users delete only their own records.",
+                "operationId": "delete_all_job_history_api_job_history_all_delete",
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "days",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Time window: 1, 7, 14, 30, or 'all'. Defaults to 'all'.",
+                            "title": "Days"
+                        },
+                        "description": "Time window: 1, 7, 14, 30, or 'all'. Defaults to 'all'."
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/job-history/{job_id}/retry": {
             "post": {
                 "tags": [
@@ -4300,6 +4586,106 @@
                         }
                     }
                 }
+            }
+        },
+        "/api/jobs/{id_hash}/resume-from-checkpoint": {
+            "post": {
+                "tags": [
+                    "queues"
+                ],
+                "summary": "Resume a stalled job from its saved checkpoint",
+                "description": "Reconstructs a stalled (voice-gate-timeout) job from its checkpoint in job_history, pushes to todo queue. Optional body may specify per-resume model + thinking-effort overrides.",
+                "operationId": "resume_stalled_job_api_jobs__id_hash__resume_from_checkpoint_post",
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ],
+                "parameters": [
+                    {
+                        "name": "id_hash",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Id Hash"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ResumeFromCheckpointRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/test-fix-expediter/resume-from": {
+            "post": {
+                "tags": [
+                    "queues"
+                ],
+                "summary": "Smart TFE resume \u2014 auto-detect job ID or plan path",
+                "description": "Accepts free-form input (job ID, plan doc path, or description) and resolves to a stalled TFE job, then resumes from checkpoint.",
+                "operationId": "resume_tfe_smart_api_test_fix_expediter_resume_from_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TFEResumeFromRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ]
             }
         },
         "/api/delete-snapshot/{id}": {
@@ -4570,19 +4956,19 @@
                 ]
             }
         },
-        "/api/claude-code/dispatch": {
+        "/api/claude-code/queue/submit": {
             "post": {
                 "tags": [
-                    "claude-code"
+                    "claude-code-queue"
                 ],
-                "summary": "Dispatch Claude Code task",
-                "description": "Launch a Claude Agent SDK task in BOUNDED or INTERACTIVE mode. Returns task_id and WebSocket URL.",
-                "operationId": "dispatch_task_api_claude_code_dispatch_post",
+                "summary": "DEPRECATED: use /api/claude-code/submit",
+                "description": "Alias for /api/claude-code/submit. Removed after one release cycle. See src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.",
+                "operationId": "submit_claude_code_to_queue_api_claude_code_queue_submit_post",
                 "requestBody": {
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/DispatchRequest"
+                                "$ref": "#/components/schemas/ClaudeCodeQueueRequest"
                             }
                         }
                     },
@@ -4594,7 +4980,7 @@
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/DispatchResponse"
+                                    "$ref": "#/components/schemas/ClaudeCodeQueueResponse"
                                 }
                             }
                         }
@@ -4606,194 +4992,26 @@
                                 "schema": {
                                     "$ref": "#/components/schemas/HTTPValidationError"
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/claude-code/{task_id}/inject": {
-            "post": {
-                "tags": [
-                    "claude-code"
-                ],
-                "summary": "Inject message into session",
-                "description": "Send a follow-up message into an active INTERACTIVE session.",
-                "operationId": "inject_message_api_claude_code__task_id__inject_post",
-                "parameters": [
-                    {
-                        "name": "task_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Task Id"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/InjectRequest"
                             }
                         }
                     }
                 },
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/claude-code/{task_id}/interrupt": {
-            "post": {
-                "tags": [
-                    "claude-code"
-                ],
-                "summary": "Interrupt active session",
-                "description": "Interrupt the current response in an INTERACTIVE session.",
-                "operationId": "interrupt_session_api_claude_code__task_id__interrupt_post",
-                "parameters": [
+                "deprecated": true,
+                "security": [
                     {
-                        "name": "task_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Task Id"
-                        }
+                        "HTTPBearerWith401": []
                     }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
+                ]
             }
         },
-        "/api/claude-code/{task_id}/end": {
-            "post": {
-                "tags": [
-                    "claude-code"
-                ],
-                "summary": "End interactive session",
-                "description": "Gracefully end an INTERACTIVE session and close its WebSocket.",
-                "operationId": "end_session_api_claude_code__task_id__end_post",
-                "parameters": [
-                    {
-                        "name": "task_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Task Id"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/claude-code/{task_id}/status": {
-            "get": {
-                "tags": [
-                    "claude-code"
-                ],
-                "summary": "Get task status",
-                "description": "Return current status, cost, and error state for a Claude Code task.",
-                "operationId": "get_session_status_api_claude_code__task_id__status_get",
-                "parameters": [
-                    {
-                        "name": "task_id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Task Id"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {}
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/claude-code/queue/submit": {
+        "/api/claude-code/submit": {
             "post": {
                 "tags": [
                     "claude-code-queue"
                 ],
                 "summary": "Submit Claude Code queue job",
                 "description": "Submit a Claude Agent SDK task to the CJ Flow queue in BOUNDED or INTERACTIVE mode.",
-                "operationId": "submit_claude_code_to_queue_api_claude_code_queue_submit_post",
+                "operationId": "submit_claude_code_to_queue_api_claude_code_submit_post",
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -5378,6 +5596,18 @@
                             "title": "Path"
                         },
                         "description": "Relative path within io/ directory"
+                    },
+                    {
+                        "name": "download",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean",
+                            "description": "Force download with Content-Disposition: attachment",
+                            "default": false,
+                            "title": "Download"
+                        },
+                        "description": "Force download with Content-Disposition: attachment"
                     }
                 ],
                 "responses": {
@@ -5410,6 +5640,69 @@
                 "summary": "IO files health check",
                 "description": "Report io/ directory status and file counts in research and podcast subdirectories.",
                 "operationId": "io_files_health_api_io_health_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/docs/file": {
+            "get": {
+                "tags": [
+                    "docs-files"
+                ],
+                "summary": "Serve project documentation file or directory listing",
+                "description": "Polymorphic: returns text content for files OR JSON directory listing for whitelisted directories. Whitelist covers src/docs/, src/rnd/, src/workflow/ and root-level *.md. Path traversal is blocked.",
+                "operationId": "get_docs_file_api_docs_file_get",
+                "parameters": [
+                    {
+                        "name": "path",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Project-relative path; must be in the docs whitelist",
+                            "title": "Path"
+                        },
+                        "description": "Project-relative path; must be in the docs whitelist"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/docs/health": {
+            "get": {
+                "tags": [
+                    "docs-files"
+                ],
+                "summary": "Docs files health check",
+                "description": "Report which whitelisted prefixes/files are present on disk.",
+                "operationId": "docs_files_health_api_docs_health_get",
                 "responses": {
                     "200": {
                         "description": "Successful Response",
@@ -6277,6 +6570,930 @@
                     }
                 ]
             }
+        },
+        "/api/admin/peer-queue/{queue_name}": {
+            "get": {
+                "tags": [
+                    "peer-queue"
+                ],
+                "summary": "Proxy a queue read to a peer Lupin server",
+                "description": "Admin-only. Forwards the caller's JWT to the peer's /api/get-queue/{name} and returns the response. Peer host must be in the 'peer queue allowed hosts' whitelist.",
+                "operationId": "get_peer_queue_api_admin_peer_queue__queue_name__get",
+                "parameters": [
+                    {
+                        "name": "queue_name",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Queue Name"
+                        }
+                    },
+                    {
+                        "name": "host",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Peer docker-compose service:port (e.g. lupin-rest-test:7999)",
+                            "title": "Host"
+                        },
+                        "description": "Peer docker-compose service:port (e.g. lupin-rest-test:7999)"
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PeerQueueResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/peer-queue-watch/start": {
+            "post": {
+                "tags": [
+                    "peer-queue"
+                ],
+                "summary": "Start a background peer-queue drain watcher",
+                "description": "Admin-only. Spawns an asyncio task that polls the peer queue and fires a high-priority notification on drain. One active watcher per admin; re-calling replaces the prior.",
+                "operationId": "start_watcher_api_admin_peer_queue_watch_start_post",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/WatchStartRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WatchActionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/peer-queue-watch/stop": {
+            "post": {
+                "tags": [
+                    "peer-queue"
+                ],
+                "summary": "Stop the caller's peer-queue watcher",
+                "description": "Admin-only. Idempotent \u2014 returns 'not_active' if no watcher was running.",
+                "operationId": "stop_watcher_api_admin_peer_queue_watch_stop_post",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WatchActionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/admin/peer-queue-watch/status": {
+            "get": {
+                "tags": [
+                    "peer-queue"
+                ],
+                "summary": "Get current peer-queue watcher status",
+                "description": "Admin-only. Returns live state for this admin's watcher (if any).",
+                "operationId": "get_watcher_status_api_admin_peer_queue_watch_status_get",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WatchStatusResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cosa-voice/conversation-mode/{session_id}": {
+            "get": {
+                "tags": [
+                    "cosa-voice"
+                ],
+                "summary": "Get conversation mode flag for a session",
+                "description": "Returns the conversation_mode_active flag from the cosa-voice session bridge file.",
+                "operationId": "get_conversation_mode_endpoint_api_cosa_voice_conversation_mode__session_id__get",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Session Id"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "cosa-voice"
+                ],
+                "summary": "Set conversation mode flag for a session",
+                "description": "Writes conversation_mode_active to the bridge file and broadcasts a conversation_mode_changed WebSocket event so all connected UI tabs sync.",
+                "operationId": "set_conversation_mode_endpoint_api_cosa_voice_conversation_mode__session_id__post",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Session Id"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ConversationModeBody"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cosa-voice/voice-persona/pool": {
+            "get": {
+                "tags": [
+                    "cosa-voice"
+                ],
+                "summary": "Pool snapshot \u2014 allocatable pool, occupied names, free slots",
+                "description": "Returns the configured pool plus current occupancy. Diagnostics endpoint; does not allocate.",
+                "operationId": "get_voice_persona_pool_api_cosa_voice_voice_persona_pool_get",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cosa-voice/voice-persona/{session_id}": {
+            "get": {
+                "tags": [
+                    "cosa-voice"
+                ],
+                "summary": "Read voice persona for a session",
+                "description": "Returns the voice_persona dict from the cosa-voice session bridge file, or null when none is set.",
+                "operationId": "get_voice_persona_endpoint_api_cosa_voice_voice_persona__session_id__get",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Session Id"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cosa-voice/voice-persona/{session_id}/allocate": {
+            "post": {
+                "tags": [
+                    "cosa-voice"
+                ],
+                "summary": "Allocate a voice persona for a session",
+                "description": "Idempotent: if a persona is already set on the bridge, returns it without re-allocating. Otherwise atomically picks the first uniform-random unallocated persona and writes it to the bridge.",
+                "operationId": "allocate_voice_persona_endpoint_api_cosa_voice_voice_persona__session_id__allocate_post",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Session Id"
+                        }
+                    },
+                    {
+                        "name": "previous_persona_name",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Previous Persona Name"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cosa-voice/voice-persona/{session_id}/release": {
+            "post": {
+                "tags": [
+                    "cosa-voice"
+                ],
+                "summary": "Release the voice persona allocated to a session",
+                "description": "Clears the voice_persona field on the bridge and broadcasts a voice_persona_released event.",
+                "operationId": "release_voice_persona_endpoint_api_cosa_voice_voice_persona__session_id__release_post",
+                "parameters": [
+                    {
+                        "name": "session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Session Id"
+                        }
+                    },
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cosa-voice/voice-persona/sample": {
+            "post": {
+                "tags": [
+                    "cosa-voice"
+                ],
+                "summary": "Synthesize a voice sample for the persona-reference page",
+                "description": "Returns audio/mpeg bytes inline. The voice_id MUST belong to the configured persona pool \u2014 arbitrary voice_ids are rejected so this endpoint cannot be used as a general-purpose TTS oracle.",
+                "operationId": "voice_persona_sample_api_cosa_voice_voice_persona_sample_post",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/VoicePersonaSampleRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            },
+                            "audio/mpeg": {}
+                        }
+                    },
+                    "400": {
+                        "description": "voice_id is not in the configured persona pool"
+                    },
+                    "503": {
+                        "description": "ElevenLabs API unavailable or returned an error"
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/multiplexer/config": {
+            "get": {
+                "tags": [
+                    "multiplexer"
+                ],
+                "summary": "Multiplexer client-config",
+                "description": "Returns display-tuning values that the multiplexer boot path fetches once at startup. Values are sourced from `ConfigurationManager` INI (`[Lupin: Baseline]` section). No auth required (no PII, no state).",
+                "operationId": "get_multiplexer_config_api_multiplexer_config_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MultiplexerConfigResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/commons/active-sessions": {
+            "get": {
+                "tags": [
+                    "commons"
+                ],
+                "summary": "List active CC sessions belonging to the authenticated user",
+                "description": "Returns same-user-scoped active sessions with persona info for the broadcast recipient preview.",
+                "operationId": "get_active_sessions_api_commons_active_sessions_get",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/commons/broadcast-to-cc-sessions": {
+            "post": {
+                "tags": [
+                    "commons"
+                ],
+                "summary": "Fan out a broadcast to active CC sessions belonging to the authenticated user",
+                "description": "Posts a per-recipient `broadcasts` entry + a per-session listener notification for each active CC session belonging to the caller. Returns the broadcast_id + recipient count + any failed recipients.",
+                "operationId": "post_broadcast_to_cc_sessions_api_commons_broadcast_to_cc_sessions_post",
+                "parameters": [
+                    {
+                        "name": "x-api-key",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "X-Api-Key"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BroadcastRequestBody"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "components": {
@@ -6385,7 +7602,7 @@
                 "properties": {
                     "file": {
                         "type": "string",
-                        "format": "binary",
+                        "contentMediaType": "application/octet-stream",
                         "title": "File"
                     }
                 },
@@ -6394,6 +7611,41 @@
                     "file"
                 ],
                 "title": "Body_upload_and_transcribe_wav_file_api_upload_and_transcribe_wav_post"
+            },
+            "BroadcastRequestBody": {
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "broadcast_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Broadcast Id"
+                    },
+                    "require_ack": {
+                        "type": "boolean",
+                        "title": "Require Ack",
+                        "default": true
+                    },
+                    "include_originator": {
+                        "type": "boolean",
+                        "title": "Include Originator",
+                        "default": true
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "message"
+                ],
+                "title": "BroadcastRequestBody",
+                "description": "POST /broadcast-to-cc-sessions request body."
             },
             "BugFixExpediterSubmitRequest": {
                 "properties": {
@@ -6673,6 +7925,20 @@
                 "title": "CodeSimilarityResult",
                 "description": "Individual result for code/explanation/gist similarity search."
             },
+            "ConversationModeBody": {
+                "properties": {
+                    "active": {
+                        "type": "boolean",
+                        "title": "Active"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "active"
+                ],
+                "title": "ConversationModeBody",
+                "description": "POST body for setting conversation mode.\n\nRequires:\n    - active is a bool (True to enter conversation mode, False to exit)"
+            },
             "CreateUserRequest": {
                 "properties": {
                     "email": {
@@ -6781,6 +8047,18 @@
                         "description": "Simulate execution without API calls",
                         "default": false
                     },
+                    "force_failure_mode": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Force Failure Mode",
+                        "description": "Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run"
+                    },
                     "audience": {
                         "anyOf": [
                             {
@@ -6882,53 +8160,6 @@
                 "type": "object",
                 "title": "DeleteUserRequest",
                 "description": "Request model for admin user deletion."
-            },
-            "DispatchRequest": {
-                "properties": {
-                    "project": {
-                        "type": "string",
-                        "title": "Project"
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "title": "Prompt"
-                    },
-                    "task_type": {
-                        "$ref": "#/components/schemas/TaskTypeEnum",
-                        "default": "BOUNDED"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "project",
-                    "prompt"
-                ],
-                "title": "DispatchRequest",
-                "description": "Request model for task dispatch.\n\nAttributes:\n    project: Target project name (e.g., \"lupin\", \"cosa\")\n    prompt: Task description/prompt for Claude Code\n    task_type: BOUNDED (Option A) or INTERACTIVE (Option B)"
-            },
-            "DispatchResponse": {
-                "properties": {
-                    "task_id": {
-                        "type": "string",
-                        "title": "Task Id"
-                    },
-                    "status": {
-                        "type": "string",
-                        "title": "Status"
-                    },
-                    "websocket_url": {
-                        "type": "string",
-                        "title": "Websocket Url"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "task_id",
-                    "status",
-                    "websocket_url"
-                ],
-                "title": "DispatchResponse",
-                "description": "Response model for task dispatch.\n\nAttributes:\n    task_id: Unique identifier for the dispatched task\n    status: Current status (\"dispatched\", \"running\", etc.)\n    websocket_url: WebSocket URL for streaming responses"
             },
             "EmbedBatchRequest": {
                 "properties": {
@@ -7088,20 +8319,6 @@
                 },
                 "type": "object",
                 "title": "HTTPValidationError"
-            },
-            "InjectRequest": {
-                "properties": {
-                    "message": {
-                        "type": "string",
-                        "title": "Message"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "message"
-                ],
-                "title": "InjectRequest",
-                "description": "Request model for injecting messages into Option B sessions."
             },
             "LoginRequest": {
                 "properties": {
@@ -7291,6 +8508,23 @@
                         ],
                         "title": "Voice Command",
                         "description": "Test expeditor: provide a voice command to route through RuntimeArgumentExpeditor"
+                    },
+                    "force_failure_mode": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "code_bug",
+                                    "infra_timeout",
+                                    "rate_limit"
+                                ]
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Force Failure Mode",
+                        "description": "Force the spawned dry-run job to fail with a specific error category, landing it in the dead queue so the Phase 6 auto-fix loop can be exercised. Only honored when voice_command is set (expeditor path) and dry_run is True."
                     },
                     "scheduled_at": {
                         "anyOf": [
@@ -7486,6 +8720,56 @@
                 "title": "ModeSetRequest",
                 "description": "Request body for setting user mode."
             },
+            "MultiplexerConfigResponse": {
+                "properties": {
+                    "multiplexer_max_meta_display_bytes": {
+                        "type": "integer",
+                        "title": "Multiplexer Max Meta Display Bytes"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "multiplexer_max_meta_display_bytes"
+                ],
+                "title": "MultiplexerConfigResponse",
+                "description": "Display-tuning values for the multiplexer front-end.\n\nField names use snake_case to match server convention. Keys here become\nproperties on the JSON object that `boot.ts` reads via\n`configureMetaDisplayCap(serverConfig)` per Phase 6a design F20."
+            },
+            "PeerQueueResponse": {
+                "properties": {
+                    "peer_host": {
+                        "type": "string",
+                        "title": "Peer Host"
+                    },
+                    "queue_name": {
+                        "type": "string",
+                        "title": "Queue Name"
+                    },
+                    "fetched_at": {
+                        "type": "string",
+                        "title": "Fetched At"
+                    },
+                    "total_jobs": {
+                        "type": "integer",
+                        "title": "Total Jobs"
+                    },
+                    "upstream": {
+                        "additionalProperties": true,
+                        "type": "object",
+                        "title": "Upstream",
+                        "description": "Raw upstream response body"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "peer_host",
+                    "queue_name",
+                    "fetched_at",
+                    "total_jobs",
+                    "upstream"
+                ],
+                "title": "PeerQueueResponse",
+                "description": "One-shot peer queue snapshot."
+            },
             "PodcastMatchingResponse": {
                 "properties": {
                     "status": {
@@ -7540,6 +8824,18 @@
                         "type": "boolean",
                         "title": "Dry Run",
                         "default": false
+                    },
+                    "force_failure_mode": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Force Failure Mode",
+                        "description": "Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run"
                     },
                     "audience": {
                         "anyOf": [
@@ -7652,10 +8948,40 @@
                         ],
                         "title": "Theme"
                     },
+                    "content_model": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Content Model",
+                        "description": "Override content model (e.g. claude-sonnet-4-6 for automated tests)"
+                    },
+                    "render_only": {
+                        "type": "boolean",
+                        "title": "Render Only",
+                        "description": "Render-only mode: source_path must be a YAML file, skips Phases 1-5",
+                        "default": false
+                    },
                     "dry_run": {
                         "type": "boolean",
                         "title": "Dry Run",
                         "default": false
+                    },
+                    "force_failure_mode": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Force Failure Mode",
+                        "description": "Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run"
                     },
                     "scheduled_at": {
                         "anyOf": [
@@ -7743,6 +9069,30 @@
                 ],
                 "title": "RefreshResponse",
                 "description": "Token refresh response.\n\nContains:\n    - message: Success message\n    - tokens: New JWT token pair"
+            },
+            "RefreshSourceResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status"
+                    },
+                    "pid": {
+                        "type": "integer",
+                        "title": "Pid"
+                    },
+                    "env": {
+                        "type": "string",
+                        "title": "Env"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "status",
+                    "pid",
+                    "env"
+                ],
+                "title": "RefreshSourceResponse",
+                "description": "Response model for refresh-source endpoint."
             },
             "RegisterRequest": {
                 "properties": {
@@ -7984,6 +9334,18 @@
                         "title": "Audience Context",
                         "description": "Custom audience description"
                     },
+                    "lead_model": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Lead Model",
+                        "description": "Override DR lead model (e.g. claude-haiku-4-5 for testing)"
+                    },
                     "dry_run": {
                         "type": "boolean",
                         "title": "Dry Run",
@@ -8049,6 +9411,53 @@
                 ],
                 "title": "ResetPasswordResponse",
                 "description": "Response model for password reset."
+            },
+            "ResumeFromCheckpointRequest": {
+                "properties": {
+                    "lead_model_override": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Lead Model Override"
+                    },
+                    "worker_model_override": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Worker Model Override"
+                    },
+                    "thinking_effort": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                ]
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Thinking Effort"
+                    }
+                },
+                "type": "object",
+                "title": "ResumeFromCheckpointRequest",
+                "description": "Optional per-resume model + thinking-effort overrides.\n\nAll fields optional. Old clients may POST with no body \u2014 `request` is then\nan empty model and no overrides apply. New clients may POST:\n``{\"lead_model_override\": \"claude-opus-4-7\", \"thinking_effort\": \"xhigh\"}``\nto steer a specific resume without touching INI defaults."
             },
             "SearchSnapshotsResponse": {
                 "properties": {
@@ -8449,14 +9858,59 @@
                 "title": "SweTeamSubmitResponse",
                 "description": "Response body for SWE Team job submission."
             },
-            "TaskTypeEnum": {
-                "type": "string",
-                "enum": [
-                    "BOUNDED",
-                    "INTERACTIVE"
+            "TFEResumeFromRequest": {
+                "properties": {
+                    "resume_from": {
+                        "type": "string",
+                        "title": "Resume From"
+                    },
+                    "lead_model_override": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Lead Model Override"
+                    },
+                    "worker_model_override": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Worker Model Override"
+                    },
+                    "thinking_effort": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                ]
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Thinking Effort"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "resume_from"
                 ],
-                "title": "TaskTypeEnum",
-                "description": "Task type selection for dispatch."
+                "title": "TFEResumeFromRequest",
+                "description": "Request body for smart TFE resume-from endpoint.\n\nThe resume_from field accepts any of:\n- TFE job ID: \"tfe-7c25082a\" or \"tfe-7c25082a::user@example.com\"\n- Plan doc path: \"io/swe-team/plans/.../c1-plan.md\"\n- Checkpoint JSON path (future): \"io/checkpoints/.../checkpoint.json\"\n- Natural language description (Phase 2, not yet implemented)\n\nOptional overrides (all default None, SDK/INI default applies):\n- lead_model_override / worker_model_override: per-resume model swap\n- thinking_effort: extended-thinking level for this resume"
             },
             "TestSuiteSubmitRequest": {
                 "properties": {
@@ -8507,6 +9961,33 @@
                         ],
                         "title": "Scheduled At",
                         "description": "ISO datetime for deferred execution (None = immediate)"
+                    },
+                    "auto_fix_on_failure": {
+                        "anyOf": [
+                            {
+                                "type": "boolean"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Auto Fix On Failure",
+                        "description": "Per-run override for the TestSuiteCompletionWatchdog. None = use INI default ('test fix expediter auto fix enabled'), True = force-enable TFE auto-dispatch, False = force-disable TFE auto-dispatch for this run only."
+                    },
+                    "env_vars": {
+                        "anyOf": [
+                            {
+                                "additionalProperties": {
+                                    "type": "string"
+                                },
+                                "type": "object"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Env Vars",
+                        "description": "Extra env vars to inject into the pytest subprocess. Filtered by prefix allowlist (TFE_, BFE_, LUPIN_TEST_) on the runner side. Example: {'TFE_RESUME_E2E_LIVE': '1'}"
                     }
                 },
                 "type": "object",
@@ -8827,6 +10308,13 @@
                     "type": {
                         "type": "string",
                         "title": "Error Type"
+                    },
+                    "input": {
+                        "title": "Input"
+                    },
+                    "ctx": {
+                        "type": "object",
+                        "title": "Context"
                     }
                 },
                 "type": "object",
@@ -8852,6 +10340,225 @@
                 ],
                 "title": "VerifyEmailRequest",
                 "description": "Request to verify email address with token."
+            },
+            "VoicePersonaSampleRequest": {
+                "properties": {
+                    "voice_id": {
+                        "type": "string",
+                        "title": "Voice Id"
+                    },
+                    "text": {
+                        "type": "string",
+                        "title": "Text"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "voice_id",
+                    "text"
+                ],
+                "title": "VoicePersonaSampleRequest"
+            },
+            "WatchActionResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status"
+                    },
+                    "message": {
+                        "type": "string",
+                        "title": "Message"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "status",
+                    "message"
+                ],
+                "title": "WatchActionResponse",
+                "description": "Generic response for start/stop actions."
+            },
+            "WatchStartRequest": {
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "title": "Host",
+                        "description": "Peer host:port (must be in whitelist)"
+                    },
+                    "signal": {
+                        "type": "string",
+                        "title": "Signal",
+                        "description": "Drain signal: 'run' or 'run+todo'",
+                        "default": "run+todo"
+                    },
+                    "interval_seconds": {
+                        "type": "integer",
+                        "maximum": 600.0,
+                        "minimum": 10.0,
+                        "title": "Interval Seconds",
+                        "description": "Poll interval (10-600s)",
+                        "default": 60
+                    },
+                    "stable_for": {
+                        "type": "integer",
+                        "maximum": 10.0,
+                        "minimum": 1.0,
+                        "title": "Stable For",
+                        "description": "Consecutive zero polls required",
+                        "default": 2
+                    },
+                    "priority": {
+                        "type": "string",
+                        "title": "Priority",
+                        "description": "Notification priority on drain",
+                        "default": "high"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "host"
+                ],
+                "title": "WatchStartRequest",
+                "description": "Start a peer-queue watcher."
+            },
+            "WatchStatusResponse": {
+                "properties": {
+                    "active": {
+                        "type": "boolean",
+                        "title": "Active"
+                    },
+                    "host": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Host"
+                    },
+                    "signal": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Signal"
+                    },
+                    "interval_seconds": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Interval Seconds"
+                    },
+                    "stable_for": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Stable For"
+                    },
+                    "started_at": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Started At"
+                    },
+                    "last_poll_at": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Last Poll At"
+                    },
+                    "last_run": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Last Run"
+                    },
+                    "last_todo": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Last Todo"
+                    },
+                    "consecutive_zero": {
+                        "type": "integer",
+                        "title": "Consecutive Zero"
+                    },
+                    "last_error": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Last Error"
+                    },
+                    "drained_at": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Drained At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "active",
+                    "host",
+                    "signal",
+                    "interval_seconds",
+                    "stable_for",
+                    "started_at",
+                    "last_poll_at",
+                    "last_run",
+                    "last_todo",
+                    "consecutive_zero",
+                    "last_error",
+                    "drained_at"
+                ],
+                "title": "WatchStatusResponse",
+                "description": "Current watcher state for the requesting admin."
             },
             "cosa__rest__auth_models__MessageResponse": {
                 "properties": {

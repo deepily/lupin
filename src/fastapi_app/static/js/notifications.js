@@ -11,6 +11,18 @@
 // Also mirrored in notifications.html inline <script> as FILE_DRIVEN_TEST_TYPES_HTML.
 const FILE_DRIVEN_TEST_TYPES = new Set( [ 'smoke_direct', 'pytest_direct' ] );
 
+// Delete-handler routing for job cards. Replaces the prior `_isHistory` boolean
+// flag pattern with a queueName-keyed lookup table — single chokepoint, easy to
+// extend, no string-template branching in the renderer.
+// See src/rnd/v0.1.7/2026.04.26-cj-flow-card-rendering-unification/04-frontend-flag-removal.md
+const DELETE_HANDLERS = {
+    todo    : ( jobId, queueName ) => window.notificationsUI.deleteQueueJob( jobId, queueName ),
+    run     : ( jobId, queueName ) => window.notificationsUI.deleteQueueJob( jobId, queueName ),
+    done    : ( jobId, queueName ) => window.notificationsUI.deleteQueueJob( jobId, queueName ),
+    dead    : ( jobId, queueName ) => window.notificationsUI.deleteQueueJob( jobId, queueName ),
+    history : ( jobId )            => window.notificationsUI.deleteHistoryJob( jobId )
+};
+
 class NotificationsUI {
     constructor() {
         // Configuration
@@ -23,12 +35,12 @@ class NotificationsUI {
         this.TTS_MODE_DEFAULT = this.TTS_MODE_INSTANT;  // Default to instant (PCM 24000 streaming)
 
         // WebSocket connections
-        this.queueWS = null;
-        this.audioWS = null;
-        this.claudeCodeWs = null;  // Claude Code Dispatcher WebSocket
-
-        // Claude Code Dispatcher state
-        this.currentClaudeCodeTaskId = null;
+        this.queueChannel = null;
+        this.audioChannel = null;
+        // Claude Code submissions route through /api/claude-code/submit (canonical) and
+        // surface in the CJ Flow accordion via agent-agnostic job_state_transition events.
+        // The /api/claude-code/queue/submit alias is preserved for one release cycle per
+        // src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.
 
         // Session management
         this.queueSessionId = null;
@@ -81,8 +93,11 @@ class NotificationsUI {
         this.firstChunkPlayed = false;
         
         // State management
-        this.isConnecting = false;
-        this.connectionRetries = 0;
+        // Note: per-channel reconnect attempts + circuit-breaker state live
+        // inside each WSChannel facade (this.queueChannel / this.audioChannel).
+        // Phase 2 of the WS reconnect circuit-breaker milestone removed the
+        // legacy shared retry-counter + reconnect-in-flight flags from this
+        // class — channels own those today.
         this.queueWsConnected = false;
         this.audioWsConnected = false;
         this.authRefreshAttempted = false; // Track refresh attempts to prevent loops
@@ -109,6 +124,12 @@ class NotificationsUI {
         // Event deduplication
         this.processedEvents = new Set();
         this.maxProcessedEvents = 100; // Prevent memory leaks
+
+        // Per-session voice persona map: sender_id → { name, voice_id, icon, color, borrowed }
+        // Hydrated from notification.voice_persona as notifications arrive.
+        // Used by playTTS to pass voice_id so each session speaks with its own voice.
+        // See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
+        this.senderPersonaMap = new Map();
         
         // Notification sound system
         this.notificationSounds = {};
@@ -143,10 +164,92 @@ class NotificationsUI {
         this.SESSION_NAMES_KEY = 'notifications_session_names';  // Persist user-edited session names
         this.RESUME_MODEL_PREF_KEY  = 'notifications_resume_model';   // Default model for stalled-job resume (TFE/BFE)
         this.RESUME_EFFORT_PREF_KEY = 'notifications_resume_effort';  // Default thinking-effort for stalled-job resume
+        this.CONVERSATION_MODES_KEY = 'notifications_conversation_modes';  // Per-session conversation/notification toggle (object keyed by session_id)
+        this.CC_FOCUS_STATE_KEY     = 'notifications_cc_focus_state';      // CC session focus mode: { enabled, focused_sender_id }
+        this.CC_HIDE_INACTIVE_KEY   = 'notifications_cc_hide_inactive_strip';  // Strip filter: hide icons for sessions with no allocated voice persona
+        this.TTS_FRACTION_PREF_KEY  = 'notifications_tts_preview_fraction_runtime';  // Runtime override for the TTS preview fraction (0-1 float); layered on top of INI default
+        // Recent Activity filter + accordion-state keys (2026-05-21 —
+        // src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
+        this.COMMONS_ACTIVITY_FILTER_KEY = 'notifications_commons_activity_filter';   // { direction, kind, persona } for Recent Activity 3-axis filter
+        this.BROADCAST_CARD_OPEN_KEY     = 'notifications_broadcast_card_open';        // boolean: broadcast accordion open state
+        this.RECENT_ACTIVITY_OPEN_KEY    = 'notifications_recent_activity_open';       // boolean: recent activity accordion open state
+        // Master-detail two-pane layout (2026-05-21 —
+        // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md).
+        this.LAYOUT_MODE_KEY             = 'notifications_layout_mode';                // "vertical" | "horizontal"
+        this.PANE_SPLIT_RATIO_KEY        = 'notifications_pane_split_ratio';           // float 0.30 - 0.85 (left column share)
         this.CURRENT_VERSION = '2.0.0'; // Increment to invalidate old cache - date grouping release
+
+        // Layout mode hydration — must run BEFORE first paint to avoid flicker.
+        // The data-layout-mode body attribute gates all horizontal-mode CSS rules
+        // in notifications.css. Default is "vertical" (existing single-column page).
+        this._layoutMode = localStorage.getItem( this.LAYOUT_MODE_KEY ) === "horizontal"
+            ? "horizontal"
+            : "vertical";
+        if ( document.body ) {
+            document.body.setAttribute( "data-layout-mode", this._layoutMode );
+        }
+        // Reading Pane history stack (in-memory, depth-capped at 10). Entries are
+        // { type: "abstract" | "doc", payload, title }. Cleared on Close.
+        this._contentPaneHistory = [];
+
+        // Draggable-splitter ratio — left column's share of the .content-shell width
+        // when the pane is open (range [0.30, 0.85]). Default 2/3 = 0.667.
+        const persistedRatio = parseFloat( localStorage.getItem( this.PANE_SPLIT_RATIO_KEY ) );
+        this._paneSplitRatio = ( !isNaN( persistedRatio ) && persistedRatio >= 0.30 && persistedRatio <= 0.85 )
+            ? persistedRatio
+            : 0.667;
 
         // Session names cache (loaded from localStorage)
         this.sessionNames = JSON.parse( localStorage.getItem( this.SESSION_NAMES_KEY ) ) || {};
+
+        // Speakerphone state cache (per-session: { [sessionId]: bool }). Read-through cache for
+        // instant render — server-canonical state lives in the cosa-voice bridge file and arrives via
+        // the speakerphone_changed notification type (wrapped in notification_queue_update).
+        this.conversationModes = JSON.parse( localStorage.getItem( this.CONVERSATION_MODES_KEY ) ) || {};
+
+        // CC focus mode state (client-only, per-browser). Persists across reload via localStorage.
+        // Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+        this.ccFocusState = JSON.parse( localStorage.getItem( this.CC_FOCUS_STATE_KEY ) )
+                            || { enabled: false, focused_sender_id: null };
+        // Per-sender unread counter for the strip's peripheral-awareness badge while focus is on.
+        this.ccStripUnreadCounts = {};
+        // Wire the strip toggle pill once. The button lives in notifications.html and
+        // is hidden alongside the strip until the first CC sender card arrives.
+        this._bindStripToggle();
+        // If focus mode was on at last save, restore the toggle pill's visual state
+        // immediately. Card-level data-focus-hidden is applied per-card by
+        // createSenderCard as the cards are hydrated.
+        if ( this.ccFocusState.enabled ) {
+            const toggle = document.getElementById( "cc-strip-toggle" );
+            if ( toggle ) {
+                toggle.setAttribute( "data-focus-active", "true" );
+                toggle.textContent = "👁 Focus: ON";
+            }
+        }
+        // Strip "hide inactive" filter: tray icons whose session has no allocated
+        // voice persona (deallocated bridges) get data-inactive-hidden="true" and
+        // disappear from the tray. Driven by the same signal that drives the
+        // CSS slate-gray fallback (--persona-color absent).
+        // Design: src/rnd/v0.1.7/2026.05.02-focus-tray-inactive-toggle/01-design.md
+        this.ccHideInactiveStrip = localStorage.getItem( this.CC_HIDE_INACTIVE_KEY ) === "true";
+        this._bindHideInactiveToggle();
+        if ( this.ccHideInactiveStrip ) {
+            const toggle = document.getElementById( "cc-hide-inactive-toggle" );
+            if ( toggle ) {
+                toggle.setAttribute( "data-hide-inactive", "true" );
+                toggle.textContent = "👁 Active";
+            }
+        }
+
+        // Recent Activity 3-axis filter state (client-only, persisted via localStorage).
+        // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        // Predicate is applied client-side over the in-memory raw-entry cache; dropdown
+        // changes re-render instantly with no server hit.
+        this._commonsActivityFilter = JSON.parse( localStorage.getItem( this.COMMONS_ACTIVITY_FILTER_KEY ) )
+                                      || { direction: null, kind: "all", persona: null };
+        // Raw entry cache — populated from /api/commons/broadcast-history responses + commons_activity
+        // WS events. Filtered re-render reads from this cache, not the DOM.
+        this._commonsRawEntries = [];
 
         // User role and filter state
         this.userRoles = [];  // NEW: User's roles from JWT
@@ -232,9 +335,20 @@ class NotificationsUI {
         // History window configuration (activity-anchored loading)
         this.HISTORY_WINDOW_KEY = 'notifications_history_window';
         const storedWindow = localStorage.getItem( this.HISTORY_WINDOW_KEY );
-        // Handle 'all' sentinel AND legacy empty string (migration from pre-fix code)
-        this.historyWindowHours = ( storedWindow === 'all' || storedWindow === '' ) ? null : ( parseInt( storedWindow ) || 48 ); // Default to 2 days
+        // Sentinel values:
+        //   null    → "All time" (no hours filter)
+        //   'today' → since the user's local-midnight (calendar day, NOT last 24h)
+        //   number  → fixed-hours window
+        // Handles 'all' sentinel AND legacy empty string (migration from pre-fix code).
+        if ( storedWindow === 'all' || storedWindow === '' ) {
+            this.historyWindowHours = null;
+        } else if ( storedWindow === 'today' ) {
+            this.historyWindowHours = 'today';
+        } else {
+            this.historyWindowHours = parseInt( storedWindow ) || 48; // Default to 2 days
+        }
         this.WINDOW_OPTIONS = [
+            { label: 'Today',         hours: 'today' },
             { label: 'Last 24 hours', hours: 24 },
             { label: 'Last 2 days',   hours: 48 },
             { label: 'Last week',     hours: 168 },
@@ -274,7 +388,12 @@ class NotificationsUI {
     
     async init() {
         this.log( "NotificationsUI initializing..." );
-        
+
+        // Run TTS boundary-scan self-test (no-op unless this.debug is truthy).
+        // Covers the 2026-05-22 _truncateAtBoundary rewrite — newline-boundary
+        // truncation for punctuation-free technical lists.
+        this._tts_quick_self_test();
+
         try {
             // Check and clear old cache if needed
             this.validateCache();
@@ -321,11 +440,48 @@ class NotificationsUI {
             // Initialize history dropdown UI
             this.initializeHistoryDropdown();
 
+            // Wire the WS circuit-breaker banner (Phase 3) — must be called
+            // before connectWebSockets so the listener is registered before
+            // any potential ws-circuit-open dispatch.
+            this._wireCircuitBanner();
+
             // Connect WebSockets
             await this.connectWebSockets();
 
+            // Wire Page Lifecycle events (Phase 4) — must run AFTER channel
+            // construction so this.queueChannel / this.audioChannel exist
+            // when the event handlers reference them. Idempotent.
+            this._attachPageLifecycle();
+
             // Load conversation history (after auth is complete)
             await this.loadConversationHistory();
+
+            // Normalize strip icon order by persona assigned_at ascending — oldest
+            // leftmost, newest rightmost. The initial batch of _addStripIcon calls
+            // appends in API-arrival order; this single sort pass anchors them to
+            // their chronological slots. Runtime adds just append (rightmost) so
+            // the order stays correct without re-running.
+            // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+            this._sortStripIconsChronological();
+
+            // Belt-and-suspenders restore of focus + hide-inactive state AFTER
+            // cards/icons are hydrated. Defends against any code path between
+            // constructor and here that wiped the in-memory state (e.g., an
+            // early `_exitFocusMode()` from a WS event-driven icon churn).
+            // Also discards stale `focused_sender_id` per the 2026-04-30
+            // design contract when the focused sender has no notifications.
+            this._restoreCcUiAfterLoad();
+
+            // Commons Traffic Visibility — Recent Activity stream init (Step 7 of
+            // src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md).
+            // Gated by INI flag fetched into this.commonsTrafficVisibilityEnabled.
+            this._initCommonsRecentActivity();
+
+            // Master-detail two-pane layout init (2026-05-21 —
+            // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md).
+            // Wires the mode-toggle button + Reading Pane Close/Back buttons +
+            // .abstract-indicator branch + doc-link click interception.
+            this._initMasterDetailLayout();
 
             // Restore action-required notifications from localStorage (refresh survival)
             this.restoreActionRequiredState();
@@ -602,6 +758,34 @@ class NotificationsUI {
                 this.envLabel = config.env_label || "DEVELOPMENT";
                 this.updateElement( "env-label", `[${this.envLabel}]: ` );
 
+                // TTS preview-and-pause feature flags (2026-05-13 INI seed defaults).
+                // 2026-05-14 evening: preview-and-pause superseded by preview-and-advance.
+                // Runtime user override via the slider in #cc-session-strip is layered
+                // on top of `tts_preview_fraction` immediately after this fetch.
+                // See src/rnd/v0.1.7/2026.05.14-tts-preview-stop-and-slider.md
+                this.ttsPreviewEnabled  = !!config.tts_preview_enabled;
+                this.ttsPreviewFraction = config.tts_preview_fraction || 0.25;
+                this.ttsPreviewMinChars = config.tts_preview_min_chars || 100;
+
+                // tts_interaction_mode drives mode-conditional icon rendering for the
+                // per-session DND toggle on each sender card. Added 2026-05-14 evening
+                // per src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
+                this.ttsInteractionMode = config.tts_interaction_mode || 'chorus';
+
+                // Commons Traffic Visibility — broadcast-card Recent Activity feature flag (2026-05-14)
+                // Default True per Q9 of src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+                this.commonsTrafficVisibilityEnabled        = config.commons_traffic_visibility_enabled !== false;
+                this.commonsTrafficVisibilityDefaultWindow  = config.commons_traffic_visibility_default_hours_window || 'today';
+
+                // Layer the user's runtime slider override on top of the INI default
+                const userFractionOverride = localStorage.getItem( this.TTS_FRACTION_PREF_KEY );
+                if ( userFractionOverride !== null && userFractionOverride !== '' ) {
+                    const parsed = parseFloat( userFractionOverride );
+                    if ( !isNaN( parsed ) && parsed >= 0 && parsed <= 1 ) {
+                        this.ttsPreviewFraction = parsed;
+                    }
+                }
+
                 // Sync the test runner submission card's auto-fix checkbox to the
                 // INI default. The user can still toggle it for any individual
                 // submission — that override travels in the request body and
@@ -641,6 +825,12 @@ class NotificationsUI {
             this.WEBSOCKET_HEARTBEAT_INTERVAL_SECS = 30;            // 30 seconds
             this.appTimezone = 'America/New_York';                  // Default timezone
             this.tfeAutoFixDefault = false;                         // Conservative fallback
+
+            // TTS preview-and-pause fallbacks — conservative: feature DISABLED
+            // on config-fetch failure so we don't accidentally truncate audio.
+            this.ttsPreviewEnabled  = false;
+            this.ttsPreviewFraction = 0.25;
+            this.ttsPreviewMinChars = 100;
 
             this.log( "⚠️ Using default client config (server fetch failed)" );
         }
@@ -806,52 +996,38 @@ class NotificationsUI {
 
     checkWebSocketHealth() {
         /**
-         * Periodic health check for WebSocket connections.
+         * Watchdog for WebSocket connections.
          *
-         * Behavior:
-         *     1. Check if current time is within work hours (8 AM - Midnight)
-         *     2. If outside work hours: Skip check, update UI to show "Off-hours"
-         *     3. If inside work hours: Check both WebSocket states
-         *     4. If disconnected: Reset retry counter and trigger reconnection
-         *     5. If connected: Update UI to show "Healthy"
+         * Phase 2 of the WS reconnect circuit-breaker milestone converted this
+         * from a *scheduler* to a *watchdog*. The previous behavior — zeroing
+         * the shared retry counter and immediately re-arming a reconnect — was
+         * the proximate cause of the 461-attempts-without-cap incident. Per
+         * Q3 frozen in 01-design-review.md, the watchdog now:
          *
-         * Ensures:
-         *     - No reconnection attempts during off-hours (Midnight - 8 AM)
-         *     - Automatic recovery from server restarts
-         *     - Visual feedback in UI status indicator
+         *   1. NEVER touches any attempt counter (channels own their counters)
+         *   2. NEVER re-arms a reconnect directly (the per-channel scheduler is
+         *      internal); only delegates to channel._tickWatchdog() which
+         *      no-ops unless state==DISCONNECTED with no pending timer
+         *   3. NO off-hours gate. The 8 AM–Midnight gate was a workaround for
+         *      unbounded reconnect spam during overnight server restarts; the
+         *      circuit breaker (max 20 attempts ≈ 6–10 min wall) bounds the
+         *      spam regardless of clock time.
          */
-
-        // Check if we're in work hours (8 AM - Midnight)
         const now = new Date();
-        const hour = now.getHours();
+        const queueState = this.queueChannel ? this.queueChannel.state : "DISCONNECTED";
+        const audioState = this.audioChannel ? this.audioChannel.state : "DISCONNECTED";
 
-        if ( hour < this.WORK_HOURS_START || hour >= this.WORK_HOURS_END ) {
-            // Outside work hours - skip check
-            this.updateHealthStatus( "Off-hours (Midnight - 8 AM)", "status-info" );
-            return;
-        }
+        if ( this.queueChannel ) this.queueChannel._tickWatchdog();
+        if ( this.audioChannel ) this.audioChannel._tickWatchdog();
 
-        // Check queue WebSocket state
-        const queueNeedsReconnect = !this.queueWS || this.queueWS.readyState !== WebSocket.OPEN;
-
-        // Check audio WebSocket state
-        const audioNeedsReconnect = !this.audioWS || this.audioWS.readyState !== WebSocket.OPEN;
-
-        if ( queueNeedsReconnect || audioNeedsReconnect ) {
-            // Disconnection detected — reconnect only what's broken
-            const target = ( queueNeedsReconnect && audioNeedsReconnect ) ? 'both'
-                         : queueNeedsReconnect ? 'queue' : 'audio';
-            this.wsDiag( `Health check: Disconnected WebSockets detected (queue=${queueNeedsReconnect}, audio=${audioNeedsReconnect}) → reconnecting ${target}` );
-            this.updateHealthStatus( "Reconnecting...", "status-warning" );
-
-            // Reset retry counter to give reconnection a fresh start from health monitor
-            this.connectionRetries = 0;
-
-            // Trigger targeted reconnection
-            this.scheduleReconnect( target );
-        } else {
-            // Both WebSockets healthy
+        const queueOk = queueState === "CONNECTED";
+        const audioOk = audioState === "CONNECTED";
+        if ( queueOk && audioOk ) {
             this.updateHealthStatus( `✓ Healthy (checked ${now.toLocaleTimeString()})`, "status-success" );
+        } else if ( queueState === "OPEN_CIRCUIT" || audioState === "OPEN_CIRCUIT" ) {
+            this.updateHealthStatus( "Circuit open — click Retry-now", "status-error" );
+        } else {
+            this.updateHealthStatus( `Watchdog: queue=${queueState} audio=${audioState}`, "status-warning" );
         }
     }
 
@@ -1023,11 +1199,11 @@ class NotificationsUI {
         localStorage.removeItem( 'lupin_refresh_token' );
 
         // Disconnect WebSockets
-        if ( this.queueWS ) {
-            this.queueWS.close();
+        if ( this.queueChannel ) {
+            this.queueChannel.close();
         }
-        if ( this.audioWS ) {
-            this.audioWS.close();
+        if ( this.audioChannel ) {
+            this.audioChannel.close();
         }
 
         // Redirect to login with current page as redirect target
@@ -1049,14 +1225,15 @@ class NotificationsUI {
         localStorage.removeItem( 'lupin_access_token' );
         localStorage.removeItem( 'lupin_refresh_token' );
 
-        // Disconnect WebSockets gracefully
-        if ( this.queueWS ) {
-            this.queueWS.close();
-            this.queueWS = null;
+        // Disconnect WebSockets gracefully (Phase 2: destroy() also detaches
+        // window listeners + cancels watchdog timer, not just close).
+        if ( this.queueChannel ) {
+            this.queueChannel.destroy();
+            this.queueChannel = null;
         }
-        if ( this.audioWS ) {
-            this.audioWS.close();
-            this.audioWS = null;
+        if ( this.audioChannel ) {
+            this.audioChannel.destroy();
+            this.audioChannel = null;
         }
 
         // Update UI
@@ -1174,26 +1351,32 @@ class NotificationsUI {
     refreshWebSocketStatus() {
         /**
          * Update WebSocket connection status displays.
-         * Evaluates current readyState of both WebSocket connections.
          *
-         * WebSocket readyState values:
-         *     0 = CONNECTING, 1 = OPEN, 2 = CLOSING, 3 = CLOSED
+         * Phase 2: reads `channel.state` (string) from the WSChannel facade
+         * rather than `WebSocket.readyState` (numeric). Maps each channel
+         * state to the existing UI status pill text + class.
          */
-        const stateNames = [ 'Connecting', 'Connected', 'Closing', 'Disconnected' ];
-        const stateTypes = [ 'warning', 'good', 'warning', 'error' ];
+        const stateMap = {
+            DISCONNECTED   : [ 'Disconnected',     'error'   ],
+            CONNECTING     : [ 'Connecting...',    'warning' ],
+            AUTHENTICATING : [ 'Authenticating...', 'warning' ],
+            CONNECTED      : [ 'Connected',        'good'    ],
+            BACKOFF        : [ 'Reconnecting...',  'warning' ],
+            OPEN_CIRCUIT   : [ 'Circuit open',     'error'   ]
+        };
 
-        // Queue WebSocket status
-        if ( this.queueWS ) {
-            const state = this.queueWS.readyState;
-            this.updateStatus( 'queue-ws-status', stateNames[ state ], stateTypes[ state ] );
+        // Queue channel status
+        if ( this.queueChannel ) {
+            const entry = stateMap[ this.queueChannel.state ] || [ 'Unknown', 'warning' ];
+            this.updateStatus( 'queue-ws-status', entry[ 0 ], entry[ 1 ] );
         } else {
             this.updateStatus( 'queue-ws-status', 'Not initialized', 'error' );
         }
 
-        // Audio WebSocket status
-        if ( this.audioWS ) {
-            const state = this.audioWS.readyState;
-            this.updateStatus( 'audio-ws-status', stateNames[ state ], stateTypes[ state ] );
+        // Audio channel status
+        if ( this.audioChannel ) {
+            const entry = stateMap[ this.audioChannel.state ] || [ 'Unknown', 'warning' ];
+            this.updateStatus( 'audio-ws-status', entry[ 0 ], entry[ 1 ] );
         } else {
             this.updateStatus( 'audio-ws-status', 'Not initialized', 'error' );
         }
@@ -1404,6 +1587,28 @@ class NotificationsUI {
     }
     
     setupEventListeners() {
+        // TTS preview-fraction slider (added 2026-05-14 evening).
+        // Five stops (0/25/50/75/100). Drives `this.ttsPreviewFraction` at runtime;
+        // persists override in localStorage. INI default seeds it on first load.
+        const fractionSlider = document.getElementById( 'cc-tts-fraction-slider' );
+        const fractionLabel  = document.getElementById( 'cc-tts-fraction-value' );
+        if ( fractionSlider && fractionLabel ) {
+            // Seed slider DOM from current runtime fraction (INI default OR
+            // localStorage override applied during config-fetch path above).
+            const initPercent = Math.round( ( this.ttsPreviewFraction || 0 ) * 100 );
+            fractionSlider.value = String( initPercent );
+            fractionLabel.textContent = `${initPercent}%`;
+
+            fractionSlider.addEventListener( 'input', ( e ) => {
+                const pct      = parseInt( e.target.value, 10 );
+                const fraction = pct / 100;
+                this.ttsPreviewFraction = fraction;
+                fractionLabel.textContent = `${pct}%`;
+                localStorage.setItem( this.TTS_FRACTION_PREF_KEY, String( fraction ) );
+                this.log( `[TTS-PREVIEW] User set runtime fraction to ${pct}% (${fraction})` );
+            } );
+        }
+
         // Direct TTS test (bypass Q&A)
         document.getElementById( 'direct-tts-button' ).addEventListener( 'click', () => {
             this.directTTSTest();
@@ -1519,51 +1724,9 @@ class NotificationsUI {
             });
         }
 
-        // Inject button (Option B)
-        const injectBtn = document.getElementById( 'cc-inject-btn' );
-        if ( injectBtn ) {
-            injectBtn.addEventListener( 'click', () => {
-                this.injectClaudeCode();
-            });
-        }
-
-        // Interrupt button (Option B)
-        const interruptBtn = document.getElementById( 'cc-interrupt-btn' );
-        if ( interruptBtn ) {
-            interruptBtn.addEventListener( 'click', () => {
-                this.interruptClaudeCode();
-            });
-        }
-
-        // End Session button (Option B)
-        const endBtn = document.getElementById( 'cc-end-btn' );
-        if ( endBtn ) {
-            endBtn.addEventListener( 'click', () => {
-                this.endClaudeCodeSession();
-            });
-        }
-
-        // Show/hide Option B controls based on task type selection
-        const taskTypeSelect = document.getElementById( 'cc-task-type' );
-        if ( taskTypeSelect ) {
-            taskTypeSelect.addEventListener( 'change', ( e ) => {
-                const optionBControls = document.getElementById( 'cc-option-b-controls' );
-                if ( optionBControls ) {
-                    optionBControls.style.display = e.target.value === 'INTERACTIVE' ? 'block' : 'none';
-                }
-            });
-        }
-
-        // Enter key in inject input
-        const injectInput = document.getElementById( 'cc-inject-input' );
-        if ( injectInput ) {
-            injectInput.addEventListener( 'keydown', ( e ) => {
-                if ( e.key === 'Enter' ) {
-                    e.preventDefault();
-                    this.injectClaudeCode();
-                }
-            });
-        }
+        // Inject / Interrupt / End-session buttons + #cc-inject-input + INTERACTIVE-mode
+        // option-b toggle were retired 2026-05-05 with /api/claude-code/dispatch.
+        // See src/rnd/v0.1.7/2026.05.05-claude-code-dispatch-retirement/.
 
         // Ctrl+Enter in prompt to submit
         const promptInput = document.getElementById( 'cc-prompt' );
@@ -1694,6 +1857,8 @@ class NotificationsUI {
         sendBtn.disabled = true;
         input.value      = '';
 
+        let success = false;
+
         try {
             await this.ensureValidToken();
 
@@ -1741,6 +1906,8 @@ class NotificationsUI {
                 this.addNotificationToSenderGroup( outgoing, true );
             }
 
+            success = true;
+
         } catch ( error ) {
             this.error( `[CC-VOICE] Failed to send to session ${sessionHash}:`, error );
             input.style.borderColor = '#dc3545';
@@ -1748,7 +1915,16 @@ class NotificationsUI {
         } finally {
             input.disabled   = false;
             sendBtn.disabled = false;
-            input.focus();
+            if ( success ) {
+                // UX: post-send focus shift to the mic so the user can
+                // immediately dictate a follow-up thought without an extra click.
+                const recBtn = document.getElementById( `cc-session-stt-${sessionHash}` );
+                if ( recBtn ) recBtn.focus();
+                else input.focus();
+            } else {
+                // Send failed — keep focus in the input so user can retry typing.
+                input.focus();
+            }
         }
     }
 
@@ -1863,6 +2039,18 @@ class NotificationsUI {
         if ( presentationSttBtn ) {
             presentationSttBtn.addEventListener( 'click', () => {
                 this.handleSTTButtonClick( 'presentation-source', presentationSttBtn );
+            });
+        }
+
+        // Commons Broadcast STT button (voice input) — Phase 2 + Phase 3 voice-first.
+        // Transcription targets the multi-line #broadcast-textarea; the broadcast-panel.js
+        // IIFE listens to that textarea's `input` events for live preview + Send-button enablement.
+        // Routed through munge_text_broadcast server-side (preserves @-mentions, dots,
+        // underscores) — see src/rnd/v0.1.7/2026.05.13-broadcast-munger-mode-design.md.
+        const broadcastSttBtn = document.getElementById( 'broadcast-stt-button' );
+        if ( broadcastSttBtn ) {
+            broadcastSttBtn.addEventListener( 'click', () => {
+                this.handleSTTButtonClick( 'broadcast-textarea', broadcastSttBtn, { recordingMode: 'broadcast' } );
             });
         }
 
@@ -2056,6 +2244,17 @@ class NotificationsUI {
     // ========================================
     
     async connectWebSockets( target = 'both' ) {
+        // Phase 2 of the WS reconnect circuit-breaker milestone: this method
+        // now constructs (or reuses) two WSChannel state machines instead of
+        // raw WebSockets. Per-channel reconnect logic + 20-attempt circuit
+        // breaker live inside each channel facade. The legacy per-socket
+        // connect helpers + their separate auth-send methods + the shared
+        // retry-helper have been replaced by:
+        //   - the channel factory (createChannel from ws-channel.js)
+        //   - per-channel onclose -> internal backoff inside the channel
+        //   - the authMessage callback (channel sends auth on AUTHENTICATING)
+        //   - the _buildQueueAuthMessage / _buildAudioAuthMessage builders
+        // See src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/01-design-review.md
         this.log( `Connecting WebSockets (target=${target})...` );
 
         try {
@@ -2067,126 +2266,122 @@ class NotificationsUI {
             this.updateElement( "queue-session", this.queueSessionId );
             this.updateElement( "audio-session", this.audioSessionId );
 
-            // Connect only the requested WebSocket(s)
-            const promises = [];
-            if ( target === 'both' || target === 'queue' ) promises.push( this.connectQueueWebSocket() );
-            if ( target === 'both' || target === 'audio' ) promises.push( this.connectAudioWebSocket() );
+            // Lazy dynamic import of the channel factory (notifications.js is
+            // a regular script, not an ES module — dynamic import is the only
+            // way to pull in `createChannel` here).
+            if ( !this._createChannel ) {
+                const mod = await import( "/static/js/ws-channel.js?v=20260503a" );
+                this._createChannel = mod.createChannel;
+            }
 
-            await Promise.all( promises );
+            const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
 
-            this.log( `WebSocket(s) connected successfully (target=${target})` );
+            // Construct or recreate the queue channel
+            if ( ( target === 'both' || target === 'queue' ) && !this.queueChannel ) {
+                const queueUrl = `${protocol}//${window.location.host}/ws/queue/${this.queueSessionId}`;
+                this.queueChannel = this._createChannel( {
+                    url            : queueUrl,
+                    name           : "queue",
+                    authMessage    : () => this._buildQueueAuthMessage(),
+                    onMessage      : ( envelope ) => {
+                        // Channel already JSON-parsed the envelope. Re-pack into the
+                        // shape the legacy handleQueueMessage expects (event.data string).
+                        if ( envelope === null || envelope === undefined ) return;
+                        this.handleQueueMessage( { data : JSON.stringify( envelope ) } );
+                    },
+                    onAuthSuccess  : ( envelope ) => {
+                        // Channel transitions to CONNECTED before this fires; the
+                        // legacy auth_success branch in handleQueueMessage updates UI
+                        // and seeds notificationState — no extra hook needed here.
+                        this.queueWsConnected = true;
+                    },
+                    // onCircuitOpen omitted — the window-level `ws-circuit-open`
+                    // listener registered by _wireCircuitBanner is the single
+                    // owner of the banner-render path. A per-channel callback
+                    // here would double-fire and break the 4001 token-refresh
+                    // single-attempt guard (Phase 5).
+                    onStateChange  : ( newState ) => {
+                        // Map channel state to existing UI status pill so the
+                        // existing #queue-ws-status display keeps working.
+                        const map = {
+                            DISCONNECTED   : [ "Disconnected",     "error"   ],
+                            CONNECTING     : [ "Connecting...",    "warning" ],
+                            AUTHENTICATING : [ "Authenticating...", "warning" ],
+                            CONNECTED      : [ "Connected",        "good"    ],
+                            BACKOFF        : [ "Reconnecting...",  "warning" ],
+                            OPEN_CIRCUIT   : [ "Circuit open",     "error"   ]
+                        };
+                        const entry = map[ newState ];
+                        if ( entry ) this.updateStatus( "queue-ws-status", entry[ 0 ], entry[ 1 ] );
+                        if ( newState !== "CONNECTED" ) this.queueWsConnected = false;
+                    }
+                } );
+            }
+
+            // Construct or recreate the audio channel
+            if ( ( target === 'both' || target === 'audio' ) && !this.audioChannel ) {
+                const audioUrl = `${protocol}//${window.location.host}/ws/audio/${this.audioSessionId}`;
+                this.audioChannel = this._createChannel( {
+                    url             : audioUrl,
+                    name            : "audio",
+                    authMessage     : () => this._buildAudioAuthMessage(),
+                    onMessage       : ( envelope ) => {
+                        if ( envelope === null || envelope === undefined ) return;
+                        this.handleAudioMessage( { data : JSON.stringify( envelope ) } );
+                    },
+                    onBinaryMessage : ( blob ) => { this.handleAudioChunk( blob ); },
+                    onAuthSuccess   : ( envelope ) => { this.audioWsConnected = true; },
+                    // onCircuitOpen omitted — the window-level `ws-circuit-open`
+                    // listener registered by _wireCircuitBanner is the single
+                    // owner of the banner-render path. A per-channel callback
+                    // here would double-fire and break the 4001 token-refresh
+                    // single-attempt guard (Phase 5).
+                    onStateChange   : ( newState ) => {
+                        const map = {
+                            DISCONNECTED   : [ "Disconnected",     "error"   ],
+                            CONNECTING     : [ "Connecting...",    "warning" ],
+                            AUTHENTICATING : [ "Authenticating...", "warning" ],
+                            CONNECTED      : [ "Connected",        "good"    ],
+                            BACKOFF        : [ "Reconnecting...",  "warning" ],
+                            OPEN_CIRCUIT   : [ "Circuit open",     "error"   ]
+                        };
+                        const entry = map[ newState ];
+                        if ( entry ) this.updateStatus( "audio-ws-status", entry[ 0 ], entry[ 1 ] );
+                        if ( newState !== "CONNECTED" ) this.audioWsConnected = false;
+                    }
+                } );
+            }
+
+            // Audio binary frames (MP3/PCM chunks) flow via WSChannel's onBinaryMessage
+            // hook directly to handleAudioChunk; JSON envelopes flow through onMessage
+            // -> handleAudioMessage. Pre-WSChannel-facade, both shared a single
+            // ws.onmessage = handleAudioMessage that branched on Blob vs JSON. The
+            // facade splits them on the wire-frame type — the legacy Blob branch
+            // inside handleAudioMessage (audio handler) is now dead but kept as
+            // defense-in-depth for any direct-onmessage callers added later.
+
+            // Initiate connect on each requested channel
+            if ( target === 'both' || target === 'queue' ) this.queueChannel.connect();
+            if ( target === 'both' || target === 'audio' ) this.audioChannel.connect();
+
+            this.log( `WebSocket(s) connect() invoked (target=${target}) — channel state machines own backoff` );
 
         } catch ( error ) {
-            this.error( "WebSocket connection failed:", error );
-            this.scheduleReconnect( target );
+            this.error( "WebSocket setup failed:", error );
+            // No external retry-helper fallback — channels handle their own
+            // backoff once constructed. If construction itself failed, surface
+            // to the user via the circuit-breaker banner.
+            this._showCircuitBanner( { name : "init", attempts : 0, reason : error && error.message || String( error ) } );
         }
     }
-    
-    async connectQueueWebSocket() {
-        return new Promise( ( resolve, reject ) => {
-            try {
-                const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-                const wsUrl = `${protocol}//${window.location.host}/ws/queue/${this.queueSessionId}`;
-                
-                this.log( `Connecting to queue WebSocket: ${wsUrl}` );
-                this.queueWS = new WebSocket( wsUrl );
-                
-                this.queueWS.onopen = () => {
-                    this.wsDiag( "Queue WebSocket TCP open, authenticating..." );
-                    this.queueWsConnected = true;
-                    this.updateStatus( "queue-ws-status", "Authenticating...", "warning" );
-                    this.authenticateQueueWebSocket();
-                };
 
-                this.queueWS.onmessage = ( event ) => {
-                    this.handleQueueMessage( event );
-                };
-
-                this.queueWS.onclose = ( event ) => {
-                    this.wsDiag( `Queue WebSocket closed: code=${event.code} reason=${event.reason}` );
-                    this.queueWsConnected = false;
-                    this.updateStatus( "queue-ws-status", "Disconnected", "error" );
-                    this.scheduleReconnect( 'queue' );
-                };
-
-                this.queueWS.onerror = ( error ) => {
-                    this.wsDiag( `Queue WebSocket error: ${error}` );
-                    this.queueWsConnected = false;
-                    this.updateStatus( "queue-ws-status", "Error", "error" );
-                    reject( error );
-                };
-                
-                // Resolve when connection is established
-                this.queueWS.addEventListener( 'open', resolve, { once: true } );
-                
-                // Set timeout for connection
-                setTimeout( () => {
-                    if ( this.queueWS.readyState !== WebSocket.OPEN ) {
-                        reject( new Error( "Queue WebSocket connection timeout" ) );
-                    }
-                }, 10000 );
-                
-            } catch ( error ) {
-                reject( error );
-            }
-        });
-    }
-    
-    async connectAudioWebSocket() {
-        return new Promise( ( resolve, reject ) => {
-            try {
-                const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-                const wsUrl = `${protocol}//${window.location.host}/ws/audio/${this.audioSessionId}`;
-                
-                this.log( `Connecting to audio WebSocket: ${wsUrl}` );
-                this.audioWS = new WebSocket( wsUrl );
-                
-                this.audioWS.onopen = () => {
-                    this.wsDiag( "Audio WebSocket TCP open, authenticating..." );
-                    this.audioWsConnected = true;
-                    this.updateStatus( "audio-ws-status", "Authenticating...", "warning" );
-                    this.authenticateAudioWebSocket();
-                };
-
-                this.audioWS.onmessage = ( event ) => {
-                    this.handleAudioMessage( event );
-                };
-
-                this.audioWS.onclose = ( event ) => {
-                    this.wsDiag( `Audio WebSocket closed: code=${event.code} reason=${event.reason}` );
-                    this.audioWsConnected = false;
-                    this.updateStatus( "audio-ws-status", "Disconnected", "error" );
-                    this.scheduleReconnect( 'audio' );
-                };
-
-                this.audioWS.onerror = ( error ) => {
-                    this.wsDiag( `Audio WebSocket error: ${error}` );
-                    this.audioWsConnected = false;
-                    this.updateStatus( "audio-ws-status", "Error", "error" );
-                    reject( error );
-                };
-                
-                // Resolve when connection is established
-                this.audioWS.addEventListener( 'open', resolve, { once: true } );
-                
-                // Set timeout for connection
-                setTimeout( () => {
-                    if ( this.audioWS && this.audioWS.readyState !== WebSocket.OPEN ) {
-                        this.audioWsConnected = false;
-                        this.updateStatus( "audio-ws-status", "Timeout", "error" );
-                        try { this.audioWS.close(); } catch ( e ) { /* ignore close errors */ }
-                        reject( new Error( "Audio WebSocket connection timeout" ) );
-                    }
-                }, 10000 );
-                
-            } catch ( error ) {
-                reject( error );
-            }
-        });
-    }
-    
-    authenticateQueueWebSocket() {
-        const authMessage = {
+    // ----------------------------------------------------------------------
+    // Phase 2 — auth-message builders. The channel's `authMessage` opt is
+    // invoked when state transitions to AUTHENTICATING; the channel sends
+    // the JSON-stringified return value via the live socket itself.
+    // ----------------------------------------------------------------------
+    _buildQueueAuthMessage() {
+        return {
             type: "auth_request",
             token: this.authToken.replace( "Bearer ", "" ), // Strip Bearer prefix for WebSocket auth
             session_id: this.queueSessionId,
@@ -2199,6 +2394,10 @@ class NotificationsUI {
                 "notification_queue_update",
                 "notification_responded",  // Phase 2.2 SSE - multi-device sync
                 "notification_expired",    // Phase 2.2 SSE - timeout handling
+                // speakerphone_changed / voice_persona_assigned / voice_persona_released
+                // arrive via notification_queue_update (custom notification_type values),
+                // not as top-level WS events. See:
+                // src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
                 // job_paused/job_resumed removed — now handled as job_state_transition events
                 "auth_success",
                 "auth_error",
@@ -2206,15 +2405,12 @@ class NotificationsUI {
                 "sys_ping"
             ]
         };
-        
-        this.queueWS.send( JSON.stringify( authMessage ) );
-        this.wsDiag( "Queue WebSocket auth_request sent" );
     }
 
-    authenticateAudioWebSocket() {
-        const authMessage = {
+    _buildAudioAuthMessage() {
+        return {
             type: "auth_request",
-            token: this.authToken.replace( "Bearer ", "" ), // Strip Bearer prefix for WebSocket auth
+            token: this.authToken.replace( "Bearer ", "" ),
             session_id: this.audioSessionId,
             subscribed_events: [
                 "audio_streaming_chunk",
@@ -2227,11 +2423,198 @@ class NotificationsUI {
                 "connect"
             ]
         };
-        
-        this.audioWS.send( JSON.stringify( authMessage ) );
-        this.wsDiag( "Audio WebSocket auth_request sent" );
     }
-    
+
+    // Phase 3 — circuit-breaker banner UI.
+    //
+    // The banner is global (per Q10): one banner if EITHER channel is
+    // OPEN_CIRCUIT. Banner disappears on the FIRST channel's auth_success
+    // after a Retry-now click, even if the other channel is still climbing
+    // back to CONNECTED — the residual state is visible in the WS-status
+    // pills, not via a duplicate banner.
+    //
+    // Phase 5 extension: detail.reason / detail.code disambiguate the trip
+    // cause. For `reason === "auth-permanent"` AND `code === 4001`, attempt
+    // a token refresh BEFORE showing the banner — if refresh succeeds,
+    // manualRetry on both channels and the user never sees a banner flash.
+    // If refresh fails (or reason is 4002/4003), banner copy reflects the
+    // auth-permanent semantics.
+    _showCircuitBanner( detail ) {
+        const reason = ( detail && detail.reason ) || "budget-exhausted";
+        const code   = ( detail && detail.code !== undefined ) ? detail.code : null;
+        this.error( `[ws-circuit-open] ${detail && detail.name || "?"} — attempts=${detail && detail.attempts || 0} reason=${reason}${code !== null ? " code=" + code : ""}` );
+
+        // Phase 5 — auth-permanent + code 4001 path: try token refresh FIRST.
+        // If refresh succeeds, manualRetry both channels and skip showing the
+        // banner. If refresh fails, fall through to the auth-permanent banner.
+        if ( reason === "auth-permanent" && code === 4001 && !this.authRefreshAttempted ) {
+            this.authRefreshAttempted = true;
+            this.log( "[ws-circuit-open] 4001 received — attempting token refresh before showing banner" );
+            this.refreshAccessToken().then( ( success ) => {
+                this.authRefreshAttempted = false;
+                if ( success ) {
+                    this.log( "[ws-circuit-open] token refresh succeeded — manualRetry both channels (no banner shown)" );
+                    if ( this.queueChannel ) this.queueChannel.manualRetry();
+                    if ( this.audioChannel ) this.audioChannel.manualRetry();
+                } else {
+                    this.error( "[ws-circuit-open] token refresh failed — showing auth-permanent banner" );
+                    this._renderCircuitBanner( reason, code );
+                }
+            } );
+            return;
+        }
+
+        this._renderCircuitBanner( reason, code );
+    }
+
+    // Internal: actually paint the banner. Split out from _showCircuitBanner
+    // so the 4001 token-refresh path can defer rendering until refresh resolves.
+    _renderCircuitBanner( reason, code ) {
+        const banner = document.getElementById( "ws-circuit-banner" );
+        if ( !banner ) return;
+
+        const textEl = banner.querySelector( ".ws-circuit-banner-text" );
+        if ( textEl ) {
+            // Phase 5: swap copy by reason. data-reason is exposed for tests
+            // and CSS hooks. Keys map to the spec:
+            //   - default          → network/budget-exhausted/rapid-fail
+            //   - auth-permanent   → 4001 (after refresh failure) or 4003
+            //   - session-conflict → 4002 (other tab/session won)
+            const copy = (
+                reason === "auth-permanent" && code === 4001 ? "Authentication failed — please log in again." :
+                reason === "auth-permanent" && code === 4002 ? "Another session has taken over. Refresh to reclaim." :
+                reason === "auth-permanent" && code === 4003 ? "Permission denied for one or more notification streams." :
+                reason === "auth-permanent"                  ? "Authentication failed — please log in again." :
+                "Connection lost — server unreachable after repeated attempts. Check the network, then click Retry now."
+            );
+            textEl.textContent = copy;
+            textEl.setAttribute(
+                "data-reason",
+                reason === "auth-permanent" && code === 4002 ? "session-conflict"
+              : reason === "auth-permanent"                  ? "auth-permanent"
+              : "default"
+            );
+        }
+        banner.hidden = false;
+
+        // Toggle dev-hint visibility based on environment label
+        const devHint = banner.querySelector( ".ws-circuit-banner-dev-hint" );
+        if ( devHint ) {
+            devHint.hidden = !( this.envLabel === "DEVELOPMENT" );
+        }
+
+        // Re-enable the retry button (clean slate after each trip)
+        const btn = document.getElementById( "ws-circuit-retry-btn" );
+        if ( btn ) btn.disabled = false;
+    }
+
+    _hideCircuitBanner() {
+        const banner = document.getElementById( "ws-circuit-banner" );
+        if ( !banner ) return;
+        banner.hidden = true;
+        // Re-enable the button regardless of disabled state, so a future trip
+        // starts from a clean state.
+        const btn = document.getElementById( "ws-circuit-retry-btn" );
+        if ( btn ) btn.disabled = false;
+    }
+
+    _wireCircuitBanner() {
+        // Idempotent — safe to call multiple times across init/auth-refresh paths.
+        if ( this._circuitBannerWired ) return;
+        this._circuitBannerWired = true;
+
+        // 1) Listen for the channel-emitted ws-circuit-open custom event.
+        window.addEventListener( "ws-circuit-open", ( ev ) => {
+            const detail = ( ev && ev.detail ) || { name: "?", attempts: 0 };
+            this._showCircuitBanner( detail );
+        } );
+
+        // 2) Wire the Retry-now button click. Disable visually during the
+        //    in-flight retry; the next STATE_CHANGE_EVENT (CONNECTED/auth_success
+        //    or another OPEN_CIRCUIT) re-enables it via _showCircuitBanner /
+        //    _hideCircuitBanner.
+        const btn = document.getElementById( "ws-circuit-retry-btn" );
+        if ( btn ) {
+            btn.addEventListener( "click", () => {
+                btn.disabled = true;
+                try {
+                    if ( this.queueChannel ) this.queueChannel.manualRetry();
+                    if ( this.audioChannel ) this.audioChannel.manualRetry();
+                } catch ( err ) {
+                    // Defensive try/finally so a synchronous throw in
+                    // manualRetry() doesn't strand the button forever (Phase 3
+                    // §Risks row 2). manualRetry() is built to swallow its own
+                    // failures — this catch is a belt-and-braces safety net.
+                    this.error( "manualRetry threw — re-enabling button:", err );
+                    btn.disabled = false;
+                }
+            } );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 4 — Page Lifecycle integration. Wires browser lifecycle events
+    // into both WS channels at once. Each channel ALSO auto-attaches its own
+    // listeners at construction (per `ws-channel.js`); the Phase 4 handlers
+    // here orchestrate cross-channel actions and are deliberately idempotent
+    // — `manualRetry()` no-ops when state===CONNECTED, `close()` is a no-op
+    // when state===DISCONNECTED, etc. — so the duplication is benign.
+    //
+    // Init order: must be called AFTER `connectWebSockets()` so that
+    // `this.queueChannel` and `this.audioChannel` exist when handlers fire.
+    //
+    // Spec: src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/
+    //       05-phase-4-page-lifecycle.md §Lifecycle Wiring
+    // -----------------------------------------------------------------------
+    _attachPageLifecycle() {
+        if ( this._pageLifecycleAttached ) return;
+        this._pageLifecycleAttached = true;
+
+        // visibilitychange — re-arm channels' connect when tab becomes visible.
+        // Each channel's internal connect() guards on visibilityState==="hidden"
+        // and no-ops while hidden; we just call .connect() to re-arm on visible.
+        document.addEventListener( "visibilitychange", () => {
+            if ( document.visibilityState === "visible" ) {
+                if ( this.queueChannel ) this.queueChannel.connect();
+                if ( this.audioChannel ) this.audioChannel.connect();
+            }
+        } );
+
+        // pageshow — BFCache restore. Old WS objects are invalid; full reset.
+        window.addEventListener( "pageshow", ( ev ) => {
+            if ( ev && ev.persisted ) {
+                if ( this.queueChannel ) this.queueChannel.manualRetry();
+                if ( this.audioChannel ) this.audioChannel.manualRetry();
+            }
+        } );
+
+        // pagehide — release sockets so this page is BFCache-eligible.
+        window.addEventListener( "pagehide", () => {
+            if ( this.queueChannel ) this.queueChannel.close();
+            if ( this.audioChannel ) this.audioChannel.close();
+        } );
+
+        // Chrome-only freeze/resume (PageLifecycleAPI).
+        document.addEventListener( "freeze", () => {
+            if ( this.queueChannel ) this.queueChannel.close();
+            if ( this.audioChannel ) this.audioChannel.close();
+        } );
+        document.addEventListener( "resume", () => {
+            if ( this.queueChannel ) this.queueChannel.connect();
+            if ( this.audioChannel ) this.audioChannel.connect();
+        } );
+
+        // Network-aware: online → manualRetry; offline → close (release slots).
+        window.addEventListener( "online", () => {
+            if ( this.queueChannel ) this.queueChannel.manualRetry();
+            if ( this.audioChannel ) this.audioChannel.manualRetry();
+        } );
+        window.addEventListener( "offline", () => {
+            if ( this.queueChannel ) this.queueChannel.close();
+            if ( this.audioChannel ) this.audioChannel.close();
+        } );
+    }
+
     // ========================================
     // MESSAGE HANDLERS
     // ========================================
@@ -2247,7 +2630,11 @@ class NotificationsUI {
                     this.wsDiag( `Queue WebSocket authenticated for user: ${envelope.user_id}` );
                     this.updateStatus( "queue-ws-status", "Connected", "good" );
                     this.updateStatus( "auth-status", `Authenticated as ${envelope.user_id}`, "good" );
-                    this.connectionRetries = 0; // Reset backoff on successful auth
+                    // Phase 2: the per-channel retry counter reset is handled by the
+                    // WSChannel itself on auth_success — no shared counter to zero here.
+                    // Phase 3: hide the circuit-breaker banner on the FIRST successful
+                    // auth (per Q10 — global banner, not per-channel).
+                    this._hideCircuitBanner();
 
                     // Store the server-provided user ID for notifications
                     this.notificationState.userId = envelope.user_id;
@@ -2269,9 +2656,13 @@ class NotificationsUI {
 
                         this.refreshAccessToken().then( ( success ) => {
                             if ( success ) {
-                                this.log( "Token refreshed - reconnecting WebSockets" );
+                                this.log( "Token refreshed - reconnecting WebSockets via manualRetry" );
                                 this.authRefreshAttempted = false;
-                                this.connectWebSockets();
+                                // Phase 2: bypass the channel's circuit breaker via
+                                // manualRetry() rather than calling connectWebSockets()
+                                // (which would no-op because the channels already exist).
+                                if ( this.queueChannel ) this.queueChannel.manualRetry();
+                                if ( this.audioChannel ) this.audioChannel.manualRetry();
                             } else {
                                 this.error( "Token refresh failed - redirecting to login" );
                                 this.handleAuthFailure();
@@ -2283,7 +2674,7 @@ class NotificationsUI {
                         this.handleAuthFailure();
                     }
                     break;
-                    
+
                 case "connect":
                     this.log( `Queue WebSocket connected: ${envelope.message}` );
                     break;
@@ -2370,6 +2761,8 @@ class NotificationsUI {
                 case "auth_success":
                     this.wsDiag( `Audio WebSocket authenticated for user: ${envelope.user_id}` );
                     this.updateStatus( "audio-ws-status", "Connected", "good" );
+                    // Phase 3: same global-banner-hide as the queue auth_success path.
+                    this._hideCircuitBanner();
                     break;
 
                 case "auth_error":
@@ -2385,9 +2778,11 @@ class NotificationsUI {
 
                         this.refreshAccessToken().then( ( success ) => {
                             if ( success ) {
-                                this.log( "Token refreshed - reconnecting WebSockets" );
+                                this.log( "Token refreshed - reconnecting WebSockets via manualRetry" );
                                 this.authRefreshAttempted = false;
-                                this.connectWebSockets();
+                                // Phase 2: same manualRetry pattern as the queue auth_error path.
+                                if ( this.queueChannel ) this.queueChannel.manualRetry();
+                                if ( this.audioChannel ) this.audioChannel.manualRetry();
                             } else {
                                 this.error( "Token refresh failed - redirecting to login" );
                                 this.handleAuthFailure();
@@ -2431,15 +2826,15 @@ class NotificationsUI {
     }
     
     async handlePing( connectionType ) {
-        const ws = connectionType === "queue" ? this.queueWS : this.audioWS;
-
-        // Send pong response (existing behavior)
-        if ( ws && ws.readyState === WebSocket.OPEN ) {
-            const pongMessage = {
+        // Phase 2: `channel.send()` no-ops when state is not CONNECTED, so
+        // the pre-existing readyState check is no longer needed. The channel
+        // facade encapsulates that guard.
+        const channel = connectionType === "queue" ? this.queueChannel : this.audioChannel;
+        if ( channel ) {
+            channel.send( {
                 type: "sys_pong",
                 timestamp: new Date().toISOString()
-            };
-            ws.send( JSON.stringify( pongMessage ) );
+            } );
         }
 
         // NEW: Piggyback token freshness check on heartbeat
@@ -2651,7 +3046,7 @@ class NotificationsUI {
             const schedulingParams = this._getSchedulingParams( 'research' );
             let body = { query: topic, budget: budget, dry_run: dryRun, ...schedulingParams };
             if ( withPodcast ) {
-                body.target_languages = [ 'en' ];
+                body.target_languages = [ 'en', 'es-MX' ];
             } else if ( withPresentation ) {
                 body.target_duration_minutes = 15;
             }
@@ -2738,7 +3133,7 @@ class NotificationsUI {
                 },
                 body: JSON.stringify({
                     research_source: source,
-                    target_languages: [ 'en' ],
+                    target_languages: [ 'en', 'es-MX' ],
                     dry_run: dryRun,
                     ...this._getSchedulingParams( 'podcast' )
                 })
@@ -3111,8 +3506,11 @@ class NotificationsUI {
      * @param {string} inputId - ID of the input element to fill with transcription
      * @param {HTMLElement} button - The STT button element
      */
-    async handleSTTButtonClick( inputId, button ) {
-        // Delegate to the recording manager with appropriate context
+    async handleSTTButtonClick( inputId, button, options = {} ) {
+        // Delegate to the recording manager with appropriate context.
+        // `options` is forwarded to recordingManager.startRecording — see that
+        // function's JSDoc for the supported keys (e.g. `recordingMode` for
+        // broadcast-mode munger routing).
         const inputElement = document.getElementById( inputId );
         if ( !inputElement ) {
             this.error( `Input element not found: ${inputId}` );
@@ -3123,7 +3521,7 @@ class NotificationsUI {
         if ( this.recordingManager.isRecording() ) {
             await this.recordingManager.stopRecording();
         } else if ( !this.recordingManager.isProcessing() ) {
-            await this.recordingManager.startRecording( inputId, button, inputElement );
+            await this.recordingManager.startRecording( inputId, button, inputElement, options );
         }
     }
 
@@ -3148,6 +3546,16 @@ class NotificationsUI {
             cancelListener       : null,
             durationInterval     : null,
             MAX_DURATION_SECONDS : 30,
+            TTS_RESUME_DELAY_MS  : 750,
+
+            // TTS pause/recording coordination state.
+            // _ttsPausedByRecording: true if WE caused the current pause (so we know
+            //   it's safe to auto-resume; never auto-resume a user-initiated pause).
+            // _resumeTimeoutHandle: pending setTimeout handle for the delayed resume;
+            //   non-null between recording-stop and resume-fire. Cleared when a new
+            //   recording starts mid-delay to prevent audible blip.
+            _ttsPausedByRecording : false,
+            _resumeTimeoutHandle  : null,
 
             /**
              * Start recording for a given context.
@@ -3159,6 +3567,11 @@ class NotificationsUI {
              * @param {object} options - Optional callbacks and settings
              *   - onTranscriptionComplete: Called after filling input (for context-specific logic)
              *   - autoSelectElement: Element to auto-select (e.g., "Other" radio button)
+             *   - recordingMode: STT post-processing mode. Default is "generic" (server applies
+             *     the default `munge_text_punctuation`). Pass "broadcast" to route to
+             *     `munge_text_broadcast` server-side, which preserves @-mentions, dots, and
+             *     underscores for the broadcast `@mention` syntax. See
+             *     src/rnd/v0.1.7/2026.05.13-broadcast-munger-mode-design.md for the design.
              */
             startRecording: async function( contextId, button, inputElement, options = {} ) {
                 const self = this;
@@ -3167,6 +3580,28 @@ class NotificationsUI {
                 if ( this.activeRecording ) {
                     this.ui.log( `Auto-cancelling previous recording: ${this.activeRecording.contextId}` );
                     this.cancelRecording();
+                }
+
+                // Pause TTS synchronously, BEFORE the mic engages, so other personas
+                // don't barge in while the user is recording. State-preserving: we only
+                // auto-resume on stop if WE caused the pause.
+                if ( self._resumeTimeoutHandle ) {
+                    // Cancel a delayed-resume left pending by a just-finished recording
+                    // so we don't flicker (resume → re-pause when chaining mic presses).
+                    clearTimeout( self._resumeTimeoutHandle );
+                    self._resumeTimeoutHandle = null;
+                }
+                if ( !self._ttsPausedByRecording ) {
+                    self._ttsPausedByRecording = !self.ui.isTTSPaused;
+                    if ( self._ttsPausedByRecording ) {
+                        self.ui.pauseTTS();
+                        // pauseTTS() early-returns when nothing's currently playing,
+                        // leaving isTTSPaused false — which means new TTS items arriving
+                        // mid-recording would bypass the activateNextTTS gate (line 12950)
+                        // and barge in. Force-set the gate flag to block queue advance
+                        // even when no item is active at pause-time.
+                        self.ui.isTTSPaused = true;
+                    }
                 }
 
                 // Get auth token
@@ -3185,8 +3620,17 @@ class NotificationsUI {
                 this.activeRecording = { contextId, button, inputElement, options };
 
                 try {
+                    // Build upload endpoint with optional mode-routing prefix query param.
+                    // recordingMode "broadcast" routes to munge_text_broadcast server-side
+                    // (preserves @-mentions, dots, underscores). Default "generic" lets the
+                    // server-side default (munge_text_punctuation) handle it.
+                    let uploadEndpoint = '/api/upload-and-transcribe-mp3';
+                    if ( options.recordingMode === 'broadcast' ) {
+                        uploadEndpoint += '?prefix=' + encodeURIComponent( 'multimodal text broadcast' );
+                    }
+
                     this.audioRecorder = new AudioRecorder( {
-                        uploadEndpoint : '/api/upload-and-transcribe-mp3',
+                        uploadEndpoint : uploadEndpoint,
                         authToken      : token,
 
                         onRecordingStart: () => {
@@ -3207,6 +3651,9 @@ class NotificationsUI {
                             button.textContent = '⏳';
                             button.title = 'Transcribing audio...';
                             button.disabled = true;
+
+                            // Resume TTS 750ms after recording stops (no audible blip).
+                            self._scheduleTTSResume();
                         },
 
                         onTranscription: ( text ) => {
@@ -3284,6 +3731,9 @@ class NotificationsUI {
 
                 this._resetButton( button );
                 this.activeRecording = null;
+
+                // ESC-cancel does not fire onRecordingStop, so schedule resume here too.
+                this._scheduleTTSResume();
             },
 
             /**
@@ -3320,6 +3770,25 @@ class NotificationsUI {
                     clearInterval( this.durationInterval );
                     this.durationInterval = null;
                 }
+            },
+
+            _scheduleTTSResume: function() {
+                const self = this;
+                if ( !self._ttsPausedByRecording ) return;
+                if ( self._resumeTimeoutHandle ) clearTimeout( self._resumeTimeoutHandle );
+                self._resumeTimeoutHandle = setTimeout( () => {
+                    self.ui.resumeTTS();
+                    // resumeTTS() only kicks playback for the suspended item (if any).
+                    // If nothing was playing when we paused but items accumulated in the
+                    // queue during recording, the queue is now stalled — no completion
+                    // event will fire to drain it. Kick activateNextTTS() directly when
+                    // no item is active.
+                    if ( !self.ui.activeTTSItem && self.ui.ttsQueue && self.ui.ttsQueue.length > 0 ) {
+                        self.ui.activateNextTTS();
+                    }
+                    self._ttsPausedByRecording = false;
+                    self._resumeTimeoutHandle  = null;
+                }, self.TTS_RESUME_DELAY_MS );
             },
 
             _attachCancelListener: function( button ) {
@@ -3398,10 +3867,13 @@ class NotificationsUI {
         // Store job completion data in cache for replay functionality
         this.storeJobCompletionForReplay( envelope, actualText );
         
-        // Play TTS audio based on current mode
-        this.playTTS( actualText || "Job completed", mode );
+        // Play TTS audio based on current mode. Use the persona for the
+        // job's sender (when known) so each session's job completions
+        // speak with that session's assigned voice.
+        const jobVoiceId = this.getVoiceIdForSender( envelope.sender_id );
+        this.playTTS( actualText || "Job completed", mode, jobVoiceId );
     }
-    
+
     async storeJobCompletionForReplay( envelope, actualText ) {
         /**
          * Store job completion data in JobCompletionCache for replay functionality.
@@ -3475,42 +3947,41 @@ class NotificationsUI {
         const project = document.getElementById( 'cc-project' ).value;
         const prompt = document.getElementById( 'cc-prompt' ).value;
         const taskType = document.getElementById( 'cc-task-type' ).value;
-        const executionMode = document.getElementById( 'cc-execution-mode' ).value;
         const dryRunCheckbox = document.getElementById( 'cc-dry-run' );
         const dryRun = dryRunCheckbox ? dryRunCheckbox.checked : false;
 
+        await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun );
+    }
+
+    async submitClaudeCodeToQueue( project, prompt, taskType, dryRun ) {
+        /**
+         * Submit a Claude Code task to CJ Flow queue for background execution.
+         *
+         * Mirrors the sibling-card pattern (research handler at ~L2865-2949):
+         * statusDiv updates, button disable + spinner, no response panel.
+         * Submitted jobs surface in the multiplexer Jobs pane via agent-agnostic
+         * job_state_transition events.
+         */
+        const submitButton = document.getElementById( 'cc-submit' );
+        const loadingSpinner = document.getElementById( 'cc-loading' );
+        const statusDiv = document.getElementById( 'cc-submit-status' );
+
         if ( !prompt.trim() ) {
-            alert( 'Please enter a task prompt' );
+            statusDiv.textContent = '⚠️ Please enter a task prompt.';
+            statusDiv.style.color = '#dc3545';
             return;
         }
 
-        // Show loading state
-        const loadingEl = document.getElementById( 'cc-loading' );
-        const submitBtn = document.getElementById( 'cc-submit' );
-        const responseEl = document.getElementById( 'cc-response' );
-
-        if ( loadingEl ) loadingEl.style.display = 'inline-block';
-        if ( submitBtn ) submitBtn.disabled = true;
-
-        // Route to appropriate submission method based on execution mode
-        if ( executionMode === 'queue' ) {
-            await this.submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl );
-        } else {
-            await this.submitClaudeCodeDirect( project, prompt, taskType, loadingEl, submitBtn, responseEl );
-        }
-    }
-
-    async submitClaudeCodeToQueue( project, prompt, taskType, dryRun, loadingEl, submitBtn, responseEl ) {
-        /**
-         * Submit Claude Code task to CJF queue for background execution.
-         * Jobs appear in the queue section and are tracked via job cards.
-         */
-        if ( responseEl ) responseEl.textContent = 'Submitting to CJF queue...';
-
-        this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
-
         try {
-            const response = await fetch( '/api/claude-code/queue/submit', {
+            // Update UI
+            submitButton.disabled = true;
+            loadingSpinner.style.display = 'inline-block';
+            statusDiv.textContent = 'Submitting to CJ Flow queue...';
+            statusDiv.style.color = '#666';
+
+            this.log( `Claude Code queue submit: project=${project}, type=${taskType}, dry_run=${dryRun}` );
+
+            const response = await fetch( '/api/claude-code/submit', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -3528,277 +3999,39 @@ class NotificationsUI {
             } );
 
             if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'Queue submission failed' );
+                const errorData = await response.json().catch( () => ({ detail: response.statusText }) );
+                throw new Error( errorData.detail || `HTTP ${response.status}` );
             }
 
             const data = await response.json();
-
             this.log( `Claude Code job queued: ${data.job_id} at position ${data.queue_position}` );
 
-            // Update UI for queue mode
-            document.getElementById( 'cc-task-id' ).textContent = data.job_id;
-            document.getElementById( 'cc-status' ).textContent = 'Queued';
-            document.getElementById( 'cc-session-info' ).style.display = 'flex';
+            // Success feedback
+            statusDiv.textContent = `✓ Claude Code job submitted! Job ID: ${data.job_id}, Position: ${data.queue_position}`;
+            statusDiv.style.color = '#28a745';
 
-            // Update response area with queue info
-            if ( responseEl ) {
-                responseEl.textContent = `Job ${data.job_id} queued at position ${data.queue_position}.\n\nThe job will appear in the CJF queue section and send notifications via the job card.\n\nNo WebSocket streaming in queue mode - check the queue section for progress.`;
-            }
-
-            // Clear cost display (not available until job completes)
-            document.getElementById( 'cc-cost' ).textContent = '$0.00 (pending)';
-
-            // Hide Option B controls in queue mode (handled via notifications)
-            document.getElementById( 'cc-option-b-controls' ).style.display = 'none';
-
-            // Refresh queues to show new job
+            // Refresh queues to show new job in the CJ Flow accordion
             this.refreshAllQueues();
 
         } catch ( error ) {
             this.error( 'Claude Code queue submit failed:', error );
-            if ( responseEl ) responseEl.textContent = `Error: ${error.message}`;
+            statusDiv.textContent = `✗ Error: ${error.message}`;
+            statusDiv.style.color = '#dc3545';
         } finally {
-            if ( loadingEl ) loadingEl.style.display = 'none';
-            if ( submitBtn ) submitBtn.disabled = false;
+            submitButton.disabled = false;
+            loadingSpinner.style.display = 'none';
         }
     }
 
-    async submitClaudeCodeDirect( project, prompt, taskType, loadingEl, submitBtn, responseEl ) {
-        /**
-         * Submit Claude Code task for direct execution with WebSocket streaming.
-         * This is the original behavior - real-time output streaming.
-         */
-        if ( responseEl ) responseEl.textContent = 'Dispatching task...';
-
-        this.log( `Claude Code dispatch: project=${project}, type=${taskType}` );
-
-        try {
-            const response = await fetch( '/api/claude-code/dispatch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify( { project, prompt, task_type: taskType } )
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'Dispatch failed' );
-            }
-
-            const data = await response.json();
-            this.currentClaudeCodeTaskId = data.task_id;
-
-            this.log( `Claude Code task dispatched: ${data.task_id}` );
-
-            // Update UI
-            document.getElementById( 'cc-task-id' ).textContent = data.task_id;
-            document.getElementById( 'cc-status' ).textContent = 'Dispatched';
-            document.getElementById( 'cc-session-info' ).style.display = 'flex';
-
-            // Clear response area
-            if ( responseEl ) responseEl.textContent = '';
-
-            // Connect to WebSocket for streaming
-            this.connectClaudeCodeWebSocket( data.task_id );
-
-        } catch ( error ) {
-            this.error( 'Claude Code dispatch failed:', error );
-            if ( responseEl ) responseEl.textContent = `Error: ${error.message}`;
-        } finally {
-            if ( loadingEl ) loadingEl.style.display = 'none';
-            if ( submitBtn ) submitBtn.disabled = false;
-        }
-    }
-
-    connectClaudeCodeWebSocket( taskId ) {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/api/claude-code/ws/${taskId}`;
-
-        this.log( `Connecting to Claude Code WebSocket: ${wsUrl}` );
-
-        this.claudeCodeWs = new WebSocket( wsUrl );
-
-        this.claudeCodeWs.onopen = () => {
-            this.log( 'Claude Code WebSocket connected' );
-            document.getElementById( 'cc-status' ).textContent = 'Connected';
-        };
-
-        this.claudeCodeWs.onmessage = ( event ) => {
-            try {
-                const data = JSON.parse( event.data );
-                this.handleClaudeCodeMessage( data );
-            } catch ( e ) {
-                this.error( 'Failed to parse Claude Code message:', e );
-            }
-        };
-
-        this.claudeCodeWs.onclose = ( event ) => {
-            this.log( `Claude Code WebSocket closed: code=${event.code}` );
-            const statusEl = document.getElementById( 'cc-status' );
-            if ( statusEl && statusEl.textContent === 'Running' ) {
-                statusEl.textContent = 'Disconnected';
-            }
-        };
-
-        this.claudeCodeWs.onerror = ( error ) => {
-            this.error( 'Claude Code WebSocket error:', error );
-        };
-    }
-
-    handleClaudeCodeMessage( data ) {
-        const responseArea = document.getElementById( 'cc-response' );
-        if ( !responseArea ) return;
-
-        switch ( data.type ) {
-            case 'connected':
-                this.log( `Claude Code connected: task=${data.task_id}` );
-                break;
-
-            case 'status':
-                document.getElementById( 'cc-status' ).textContent = data.state || 'Unknown';
-                break;
-
-            case 'text':
-                responseArea.textContent += data.content;
-                break;
-
-            case 'tool_use':
-                responseArea.textContent += `\n[TOOL: ${data.name}]\n`;
-                break;
-
-            case 'tool_result':
-                const content = typeof data.content === 'string' ? data.content : JSON.stringify( data.content );
-                responseArea.textContent += `${content}\n`;
-                break;
-
-            case 'complete':
-                document.getElementById( 'cc-status' ).textContent = data.success ? 'Complete' : 'Failed';
-                if ( data.cost_usd ) {
-                    document.getElementById( 'cc-cost' ).textContent = `$${data.cost_usd.toFixed( 4 )}`;
-                }
-                if ( data.error ) {
-                    responseArea.textContent += `\n[ERROR: ${data.error}]\n`;
-                }
-                break;
-
-            case 'error':
-                responseArea.textContent += `\n[ERROR: ${data.message}]\n`;
-                document.getElementById( 'cc-status' ).textContent = 'Error';
-                break;
-
-            case 'info':
-                responseArea.textContent += `[INFO: ${data.content}]\n`;
-                break;
-
-            case 'keepalive':
-                // Ignore keepalive messages
-                break;
-
-            default:
-                this.log( `Unknown Claude Code message type: ${data.type}` );
-        }
-
-        // Auto-scroll
-        responseArea.scrollTop = responseArea.scrollHeight;
-    }
-
-    async injectClaudeCode() {
-        const injectInput = document.getElementById( 'cc-inject-input' );
-        const message = injectInput ? injectInput.value.trim() : '';
-
-        if ( !message || !this.currentClaudeCodeTaskId ) {
-            if ( !message ) alert( 'Please enter a follow-up message' );
-            return;
-        }
-
-        this.log( `Injecting message: ${message.substring( 0, 50 )}...` );
-
-        try {
-            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/inject`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify( { message } )
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'Inject failed' );
-            }
-
-            // Clear input and show in response
-            if ( injectInput ) injectInput.value = '';
-            const responseEl = document.getElementById( 'cc-response' );
-            if ( responseEl ) {
-                responseEl.textContent += `\n[YOU: ${message}]\n`;
-                responseEl.scrollTop = responseEl.scrollHeight;
-            }
-
-            this.log( 'Message injected successfully' );
-
-        } catch ( error ) {
-            this.error( 'Inject failed:', error );
-            alert( `Inject failed: ${error.message}` );
-        }
-    }
-
-    async interruptClaudeCode() {
-        if ( !this.currentClaudeCodeTaskId ) return;
-
-        this.log( 'Interrupting Claude Code session' );
-
-        try {
-            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/interrupt`, {
-                method: 'POST'
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'Interrupt failed' );
-            }
-
-            const responseEl = document.getElementById( 'cc-response' );
-            if ( responseEl ) {
-                responseEl.textContent += '\n[INTERRUPTED]\n';
-            }
-
-            this.log( 'Session interrupted' );
-
-        } catch ( error ) {
-            this.error( 'Interrupt failed:', error );
-            alert( `Interrupt failed: ${error.message}` );
-        }
-    }
-
-    async endClaudeCodeSession() {
-        if ( !this.currentClaudeCodeTaskId ) return;
-
-        this.log( 'Ending Claude Code session' );
-
-        try {
-            const response = await fetch( `/api/claude-code/${this.currentClaudeCodeTaskId}/end`, {
-                method: 'POST'
-            });
-
-            if ( !response.ok ) {
-                const errorData = await response.json();
-                throw new Error( errorData.detail || 'End session failed' );
-            }
-
-            document.getElementById( 'cc-status' ).textContent = 'Ended';
-            this.currentClaudeCodeTaskId = null;
-
-            if ( this.claudeCodeWs ) {
-                this.claudeCodeWs.close();
-                this.claudeCodeWs = null;
-            }
-
-            this.log( 'Session ended' );
-
-        } catch ( error ) {
-            this.error( 'End session failed:', error );
-            alert( `End session failed: ${error.message}` );
-        }
-    }
+    // submitClaudeCode / submitClaudeCodeToQueue normalized 2026-05-11 to mirror the
+    // sibling research-handler pattern (statusDiv + spinner + button disable; no
+    // response panel; submitted jobs surface in the multiplexer Jobs pane via
+    // agent-agnostic job_state_transition events). URL switched to the canonical
+    // /api/claude-code/submit; the /api/claude-code/queue/submit alias is preserved
+    // server-side for one release cycle. See:
+    //   src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md
+    // Inject / interrupt / end-session controls remain retired (since 2026-05-05)
+    // and will return when ClaudeCodeJob gains bidirectional control on cj-flow.
 
     // ========================================
     // TTS FUNCTIONALITY
@@ -3855,9 +4088,9 @@ class NotificationsUI {
         await this.playTTS( testText, mode );
     }
     
-    async playTTS( text, mode ) {
-        this.log( `Playing TTS: "${text}" in ${mode} mode` );
-        
+    async playTTS( text, mode, voiceId = null ) {
+        this.log( `Playing TTS: "${text}" in ${mode} mode${ voiceId ? ` (voice: ${voiceId})` : "" }` );
+
         try {
             // Check cache first if available
             if ( this.audioCacheInitialized ) {
@@ -3874,15 +4107,15 @@ class NotificationsUI {
             } else {
                 this.log( `⚠️ Cache not initialized - skipping cache check for: "${text.substring( 0, 30 )}..."` );
             }
-            
+
             // Store current text for caching after TTS generation
             this.currentTTSText = text;
-            
+
             // Cache miss or cache not available - generate TTS as normal
             if ( mode === this.TTS_MODE_INSTANT ) {
-                await this.playInstantTTS( text );
+                await this.playInstantTTS( text, voiceId );
             } else {
-                await this.playReliableTTS( text );
+                await this.playReliableTTS( text, voiceId );
             }
         } catch ( error ) {
             this.error( `TTS playback failed in ${mode} mode:`, error );
@@ -3921,7 +4154,7 @@ class NotificationsUI {
         });
     }
     
-    async playInstantTTS( text ) {
+    async playInstantTTS( text, voiceId = null ) {
         this.log( "Starting instant TTS (11labs streaming)..." );
 
         // Start pulsing indicator on notification card
@@ -3935,7 +4168,15 @@ class NotificationsUI {
             this.startTime = Date.now();
             this.metricsTTSStartTime = Date.now();
 
-            // Request TTS via 11labs streaming endpoint
+            // Request TTS via 11labs streaming endpoint.
+            // Body key is `voice_id` (server reads `voice_id`, NOT `voice`).
+            // When voiceId is null, omit the field so the server falls back to
+            // its configured default (Sam, the system default voice).
+            const ttsBody = {
+                text       : text,
+                session_id : this.audioSessionId  // Ensure session_id is included
+            };
+            if ( voiceId ) ttsBody.voice_id = voiceId;
             const response = await fetch( '/api/get-speech-elevenlabs', {
                 method: 'POST',
                 headers: {
@@ -3943,11 +4184,7 @@ class NotificationsUI {
                     'Authorization': this.getAuthHeader(),
                     'X-Session-ID': this.audioSessionId
                 },
-                body: JSON.stringify({
-                    text: text,
-                    voice: 'default',
-                    session_id: this.audioSessionId  // Ensure session_id is included
-                })
+                body: JSON.stringify( ttsBody )
             });
             
             if ( !response.ok ) {
@@ -3974,7 +4211,7 @@ class NotificationsUI {
         }
     }
     
-    async playReliableTTS( text ) {
+    async playReliableTTS( text, voiceId = null ) {
         this.log( "Starting reliable TTS (OpenAI batch)..." );
 
         // Start pulsing indicator on notification card
@@ -3992,7 +4229,14 @@ class NotificationsUI {
             // Ensure token is valid before API call (auto-refresh if expired)
             await this.ensureValidToken();
 
-            // Request TTS via OpenAI batch endpoint
+            // Request TTS via OpenAI batch endpoint.
+            // Body key is `voice_id` (server reads `voice_id`, NOT `voice`).
+            // Omit when voiceId is null so server-side default applies.
+            const ttsBody = {
+                text       : text,
+                session_id : this.audioSessionId  // Add missing session_id
+            };
+            if ( voiceId ) ttsBody.voice_id = voiceId;
             const response = await fetch( '/api/get-speech', {
                 method: 'POST',
                 headers: {
@@ -4000,11 +4244,7 @@ class NotificationsUI {
                     'Authorization': this.getAuthHeader(),
                     'X-Session-ID': this.audioSessionId
                 },
-                body: JSON.stringify({
-                    text: text,
-                    voice: 'default',
-                    session_id: this.audioSessionId  // Add missing session_id
-                })
+                body: JSON.stringify( ttsBody )
             });
 
             if ( !response.ok ) {
@@ -4713,6 +4953,7 @@ class NotificationsUI {
         const notificationElement = document.getElementById( notificationId );
         if ( notificationElement ) {
             notificationElement.classList.add( 'tts-playing' );
+            this._mirrorTTSStateToStripIcons( notificationElement, true );
             if ( this.debug ) this.log( `Started TTS indicator for: ${notificationId}` );
         }
     }
@@ -4731,8 +4972,40 @@ class NotificationsUI {
         const notificationElement = document.getElementById( notificationId );
         if ( notificationElement ) {
             notificationElement.classList.remove( 'tts-playing' );
+            this._mirrorTTSStateToStripIcons( notificationElement, false );
             if ( this.debug ) this.log( `Stopped TTS indicator for: ${notificationId}` );
         }
+    }
+
+    /**
+     * Mirror TTS-active state from a notification element onto the matching focused-tray
+     * strip icons (`.cc-strip-icon[data-sender-id="..."]::before`) so Mr. Rick can see
+     * at-a-glance which persona is currently being read aloud.
+     *
+     * The CSS rule `.cc-strip-icon[data-conv-mode="speakerphone"][data-tts-active="true"]::before`
+     * re-asserts the darker green background AND applies the size-scaled `ttsPulseGlowSmall`
+     * keyframes; on `false` we delete the attribute and the 500ms background transition
+     * fades the badge back to the lighter idle green.
+     *
+     * Quiet-mode (🤭 amber) icons are exempt by CSS selector — only speakerphone personas
+     * signal TTS activity.
+     *
+     * @param {HTMLElement} notificationElement - The notification list item being TTS'd
+     * @param {boolean}     active              - true on TTS-start, false on TTS-end
+     */
+    _mirrorTTSStateToStripIcons( notificationElement, active ) {
+        const senderCard = notificationElement.closest( '.sender-card' );
+        const senderId   = senderCard?.getAttribute( 'data-sender-id' );
+        if ( !senderId ) return;
+
+        const stripIcons = document.querySelectorAll( `.cc-strip-icon[data-sender-id="${ senderId }"]` );
+        stripIcons.forEach( el => {
+            if ( active ) {
+                el.dataset.ttsActive = "true";
+            } else {
+                delete el.dataset.ttsActive;
+            }
+        } );
     }
 
     // ========================================
@@ -5297,7 +5570,91 @@ class NotificationsUI {
             this.log( "No notification data in WebSocket event" );
             return;
         }
-        
+
+        // Custom-typed state-update notifications (not user-facing messages).
+        // Routed through the canonical notification subsystem rather than as
+        // ad-hoc top-level WS events. Each case handles its own state update
+        // and returns early so the message-render path is skipped.
+        // See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
+        switch ( notification.type ) {
+            case "voice_persona_assigned":
+                if ( notification.sender_id && notification.voice_persona ) {
+                    this.senderPersonaMap.set( notification.sender_id, notification.voice_persona );
+                    // Layer A: patch any existing card header in place so the
+                    // badge appears without a re-render. No-op when card not yet built.
+                    this._setPersonaBadgeOnCard( notification.sender_id, notification.voice_persona );
+                    // Re-evaluate strip filter: this senderId may have just become
+                    // active and (if the toggle is on) needs to un-hide.
+                    this._applyHideInactiveStripFilter();
+                }
+                return;
+
+            case "voice_persona_released":
+                if ( notification.sender_id ) {
+                    this.senderPersonaMap.delete( notification.sender_id );
+                    // Layer A: remove the badge from any existing card header
+                    this._setPersonaBadgeOnCard( notification.sender_id, null );
+                    // Re-evaluate strip filter: this senderId is now inactive
+                    // and (if the toggle is on) should be hidden.
+                    this._applyHideInactiveStripFilter();
+                }
+                return;
+
+            case "speakerphone_changed":
+                // Re-shape from notification.payload to the legacy envelope keys
+                // that handleConversationModeChanged reads. Server-side wire field
+                // is `on` (boolean) per Phase 3 of the 2026.05.11 speakerphone
+                // refactor; the legacy handler still reads
+                // `conversation_mode_active`, so map here. The strip-icon mic
+                // overlay is updated INSIDE handleConversationModeChanged so it
+                // benefits from the full→8-char session_id normalization
+                // (mismatched-key bug logged at line 9553-9564).
+                this.handleConversationModeChanged({
+                    session_id              : notification.payload?.session_id,
+                    conversation_mode_active: notification.payload?.on,
+                    displaced               : notification.payload?.displaced,
+                    displaced_by            : notification.payload?.displaced_by
+                });
+                return;
+
+            case "commons_broadcast_ack":
+                // Phase 2 inter-session-commons — delegate to broadcast-panel.js
+                // for live aggregate update. The panel module is loaded after
+                // notifications.js; window.broadcastPanel is its public hook.
+                // See: src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md AC9
+                if ( window.broadcastPanel && typeof window.broadcastPanel.handleAck === "function" ) {
+                    window.broadcastPanel.handleAck( notification );
+                }
+                return;
+
+            case "commons_activity":
+                // Phase 2.5/3.5 — prepend the new commons entry to the broadcast-card
+                // Recent Activity stream. Per Q3 + Q7 ratification:
+                //   - Real-time WS push (no polling)
+                //   - Flat reverse-chronological (newest goes to the top)
+                // Source: CommonsActivityWatcher tick → push_notification_fn → here.
+                // See: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md AC3
+                this._handleCommonsActivityWS( notification );
+                return;
+        }
+
+        // ─── Commons Traffic Visibility — Q1 ratification (Step 8/11) ───────
+        // When `commons_traffic_visibility_enabled` is True, AI replies to
+        // broadcasts and AI-to-AI commons answers are routed exclusively to
+        // the broadcast-card Recent Activity stream (via the `commons_activity`
+        // WS event handler above). Suppress the duplicate session-card render
+        // of those notifications here so the user doesn't see the same content
+        // twice. Toggling the INI flag to False (kill-switch per Q4 + Q9)
+        // restores legacy session-card rendering on next page load.
+        // See: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (Q1)
+        if ( this.commonsTrafficVisibilityEnabled
+             && notification.type === "user_initiated_message"
+             && ( notification.title === "action:broadcast_received"
+                  || notification.title === "action:commons_answer_received" ) ) {
+            this.log( `[COMMONS-ACTIVITY] suppressing session-card render of ${notification.title} (broadcast-card-only per Q1)` );
+            return;
+        }
+
         // Check for duplicates (same logic as old queue.js)
         const exists = this.notificationState.notifications.find( n => n.id_hash === notification.id_hash );
         if ( exists ) {
@@ -5308,6 +5665,14 @@ class NotificationsUI {
         // New notification - add to local cache
         this.notificationState.notifications.push( notification );
         this.log( `Processing new notification: ${notification.type}/${notification.priority} - ${notification.message}` );
+
+        // Hydrate sender → voice persona map. The server stamps voice_persona on
+        // every outbound notification envelope; we cache it here so playTTS and
+        // sender-card badge rendering can look it up without re-fetching the bridge.
+        // See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md §4.3
+        if ( notification.voice_persona && notification.sender_id ) {
+            this.senderPersonaMap.set( notification.sender_id, notification.voice_persona );
+        }
 
         // Session topic control message — update header span, skip history card
         const notifType = notification.type || notification.notification_type;
@@ -5403,14 +5768,43 @@ class NotificationsUI {
             return;  // Don't add to sender cards
         }
 
-        // Regular fire-and-forget notification handling
+        // Regular fire-and-forget notification handling.
+        //
+        // 2026-05-14 evening — belt-and-suspenders per-session DND. If the sender
+        // session is in quiet-mode (this.conversationModes[sessionId] === false)
+        // AND the notification arrived with priority='high' or 'urgent', rewrite
+        // it to medium + suppress_ding=false BEFORE the ding fires and BEFORE the
+        // priority branch dispatches. This catches the case where Claude didn't
+        // honor the hook-rider quiet-mode directive and still sent priority=high.
+        // The rewrite ensures the notification still arrives in the list with a
+        // small ding (historical record preserved) but doesn't engage full TTS.
+        // See src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
+        if ( notification.sender_id ) {
+            const parsed    = this.parseSenderId( notification.sender_id );
+            const sessionId = parsed && parsed.sessionId;
+            if ( sessionId && this.conversationModes[ sessionId ] === false ) {
+                if ( notification.priority === "high" || notification.priority === "urgent" ) {
+                    this.log( `[QUIET-MODE] Rewriting priority for muted session ${sessionId}: ${notification.priority} → medium` );
+                    notification.priority      = "medium";
+                    notification.suppress_ding = false;
+                }
+            }
+        }
+
         // 1. Play notification sound based on priority unless suppress_ding is set
         if ( notification.suppress_ding !== true ) {
             await this.playNotificationSoundByPriority( notification.priority );
         }
 
-        // 2. High/urgent priority: Queue for TTS, add to project card when playback starts
+        // 2. High/urgent priority: Render to project card IMMEDIATELY on WS arrival + queue for TTS
         //    Low/medium priority: Add to project card immediately (no TTS)
+        //
+        // 2026-05-14: Decoupled high/urgent list-render from TTS playback advancement. Previous
+        // design deferred the addNotificationToSenderGroup call to activateNextTTS, which left
+        // notifications invisible when the TTS queue was paused (e.g., preview-and-pause feature
+        // shipped 2026-05-13 sets isTTSPaused=true between turns, stranding the deferred render).
+        // Now mirrors the low/medium branch's immediate-render pattern; TTS playback engages
+        // independently via the queue. Card carries `.is-tts-pending` until activateNextTTS clears it.
         if ( notification.priority === "high" || notification.priority === "urgent" ) {
             // Phase 6 FIX: Check tts_raw flag - default to contextualized for backward compatibility
             const ttsMessage = notification.tts_raw === true
@@ -5418,9 +5812,23 @@ class NotificationsUI {
                 : this.formatNotificationTTSMessage( notification );
             const notificationId = notification.id || notification.id_hash;
 
-            this.log( `Queuing high priority notification for TTS (will add to project card on playback): "${ttsMessage}"` );
+            this.log( `Rendering high-priority notification to project card + queuing for TTS: "${ttsMessage}"` );
 
-            // Add slight delay to let notification sound finish
+            // Render to visible notification list IMMEDIATELY (decoupled from TTS queue)
+            this.addNotificationToSenderGroup( notification, false );
+            this.updateTotalNotificationsCount();
+
+            // Mark the rendered card with pending-TTS visual state. activateNextTTS clears it
+            // when this item engages for playback.
+            const newPanel = document.querySelector( `.audio-control-panel[data-notification-id="${notificationId}"]` );
+            if ( newPanel ) {
+                const listItem = newPanel.closest( 'li' );
+                if ( listItem ) {
+                    listItem.classList.add( 'is-tts-pending' );
+                }
+            }
+
+            // Add slight delay to let notification sound finish before TTS engages
             setTimeout( () => {
                 this.addToTTSQueue( {
                     id           : notificationId,
@@ -5430,7 +5838,6 @@ class NotificationsUI {
                     addedAt      : Date.now()
                 } );
             }, 300 );
-            // NOTE: addNotificationToSenderGroup() is called from activateNextTTS() when playback starts
         } else {
             // Low/medium priority: Add to project card immediately (no TTS)
             const senderId = this.resolveSenderId( notification );
@@ -5482,27 +5889,11 @@ class NotificationsUI {
     // ========================================
     // CONNECTION MANAGEMENT
     // ========================================
+    // (The legacy retry-helper was removed in Phase 2 of the WS reconnect
+    // circuit-breaker milestone — each WSChannel owns its own per-channel
+    // backoff schedule + 20-attempt circuit breaker, and the watchdog
+    // delegates to channel._tickWatchdog() rather than scheduling externally.)
 
-    scheduleReconnect( target = 'both' ) {
-        if ( this.isConnecting ) {
-            return; // Already attempting to reconnect
-        }
-
-        this.connectionRetries++;
-        // Exponential backoff: 2s, 4s, 8s, 16s, 30s... then cap at 60s after 10 failures
-        const maxDelay = this.connectionRetries > 10 ? 60000 : 30000;
-        const delay = Math.min( 1000 * Math.pow( 2, this.connectionRetries ), maxDelay );
-
-        this.wsDiag( `Scheduling reconnect attempt #${this.connectionRetries} for ${target} in ${delay}ms` );
-
-        setTimeout( () => {
-            this.isConnecting = true;
-            this.connectWebSockets( target ).finally( () => {
-                this.isConnecting = false;
-            });
-        }, delay );
-    }
-    
     // ========================================
     // AUTHENTICATION HELPERS (from original queue.js)
     // ========================================
@@ -6025,60 +6416,33 @@ class NotificationsUI {
 
     renderHistoryCard( job ) {
         /**
-         * Adapt a PostgreSQL job history record to renderJobCard() format.
+         * Render a history-pane job card.
+         *
+         * After the 2026-04-26 unification (A1+B+C), this is a thin splicer:
+         * `/api/job-history` returns the same flat shape as `/api/get-queue/done`
+         * (per src/cosa/rest/job_persistence.py:_build_history_row), so no
+         * adapter normalization is needed here. We just normalize `job_id`
+         * (history rows use `id_hash` as primary key but the response now also
+         * sets `job_id` for parity), call the unified renderer with
+         * queueName='history', and splice the prominent history-specific
+         * action buttons (Delete / Retry) at card close.
          *
          * Requires:
-         *     - job is a dict from /api/job-history with id_hash, metadata_json, etc.
+         *     - job is a flat dict from /api/job-history (Phase 1 shape, 2026-04-26+)
          *
          * Ensures:
-         *     - Normalizes DB record shape to renderJobCard expected shape
-         *     - Maps status to queue name for correct styling
-         *     - Appends management action buttons (delete, retry)
+         *     - Returns full card HTML rendered via the unified renderJobCard path
+         *     - Appends management action buttons (delete, optional retry)
          */
-        const metadata = job.metadata_json || {};
+        // Render using the unified renderer with queueName='history'.
+        // renderJobCard's queueName-driven branches handle history-aware
+        // behavior (completion badges, interactions indicator, delete routing).
+        let cardHtml = this.renderJobCard( job, 'history' );
 
-        // Normalize history record to match renderJobCard expected shape
-        const normalized = {
-            job_id           : job.id_hash,
-            question_text    : job.question_text || '',
-            timestamp        : job.created_at,
-            agent_type       : metadata.agent_type || job.job_type || '',
-            response_text    : metadata.response_text || null,
-            abstract         : metadata.abstract || null,
-            report_path               : metadata.report_link || null,
-            remediation_snapshot_path : metadata.remediation_snapshot_path || null,
-            yaml_path                 : metadata.yaml_path || ( metadata.artifacts && metadata.artifacts.yaml_path ) || null,
-            pptx_path                 : metadata.pptx_path || ( metadata.artifacts && metadata.artifacts.pptx_path ) || null,
-            cost_summary              : metadata.cost_summary || null,
-            is_cache_hit     : job.is_cache_hit || false,
-            has_interactions  : false,
-            started_at       : job.started_at,
-            completed_at     : job.completed_at,
-            duration_seconds : job.duration_seconds,
-            status           : job.status,
-            error            : job.error,
-            session_id       : job.session_id,
-            user_email       : job.user_email || metadata.user_email || null,
-            scheduled_at     : metadata.scheduled_at || null,
-            monopolize       : metadata.monopolize || false,
-            paused           : metadata.paused || false,
-            _isHistory       : true
-        };
-
-        // Map history status to queue name for styling
-        const statusToQueue = {
-            completed   : 'done',
-            failed      : 'dead',
-            interrupted : 'dead',
-            pending     : 'todo',
-            running     : 'run'
-        };
-        const queueName = statusToQueue[ job.status ] || 'done';
-
-        // Render using existing renderJobCard
-        let cardHtml = this.renderJobCard( normalized, queueName );
-
-        // Inject management action buttons before the last closing </div> of the card
+        // Inject management action buttons before the last closing </div> of the card.
+        // These are the prominent styled "🗑 Delete" / "↻ Retry" buttons distinct
+        // from the small ✕ in the card header. Kept as a splice (rather than inlined
+        // into renderJobCard) to preserve their visual UX placement at card-bottom.
         const actionsHtml = this.renderHistoryActions( job );
         const lastDivClose = cardHtml.lastIndexOf( '</div>' );
         if ( lastDivClose > 0 ) {
@@ -6118,6 +6482,31 @@ class NotificationsUI {
                 ${retryBtn}${deleteBtn}
             </div>
         `;
+    }
+
+    _dispatchDelete( jobId, queueName ) {
+        /**
+         * Single chokepoint for card-level delete actions.
+         *
+         * Looks up the appropriate handler in DELETE_HANDLERS by queueName and
+         * invokes it. Replaces the prior `job._isHistory` ternary that branched
+         * inline in renderJobCard's HTML template — keeps the lookup private to
+         * the class and makes future logging/instrumentation a one-liner.
+         *
+         * Requires:
+         *     - jobId: string (the job's id_hash; for history this is the row id)
+         *     - queueName: one of 'todo', 'run', 'done', 'dead', 'history'
+         *
+         * Ensures:
+         *     - On valid queueName, invokes the registered handler
+         *     - On unknown queueName, logs an error and is a no-op
+         */
+        const handler = DELETE_HANDLERS[ queueName ];
+        if ( !handler ) {
+            console.error( `[Notifications ERROR] No delete handler for queueName=${queueName}` );
+            return;
+        }
+        handler( jobId, queueName );
     }
 
     async deleteHistoryJob( jobId ) {
@@ -6847,7 +7236,7 @@ class NotificationsUI {
         // All external lookups (websocket handlers, interaction appenders)
         // address live cards by bare jobId, so this prefix only applies to
         // history renders — `toggleJobCard` applies the same rule.
-        const idKey = job._isHistory ? `history-${jobId}` : jobId;
+        const idKey = queueName === 'history' ? `history-${jobId}` : jobId;
 
         // ═══════════════════════════════════════════════════════════════════
         // Phase 7: Enhanced indicators based on queue type
@@ -6897,7 +7286,10 @@ class NotificationsUI {
 
         // Done job: completion badge
         let completionBadge = '';
-        if ( queueName === 'done' ) {
+        // Completion badges: ✓ for completed, ✗ for failed.
+        // Renders in the done bucket (queueName='done') AND the history pane
+        // (queueName='history'), since history mirrors terminal-state cards.
+        if ( queueName === 'done' || queueName === 'history' ) {
             const jobStatus = job.status || 'completed';
             if ( jobStatus === 'completed' ) {
                 completionBadge = '<span class="completion-badge success" title="Completed">✓</span>';
@@ -6907,7 +7299,9 @@ class NotificationsUI {
         }
 
         // Dead job: error badge
-        if ( queueName === 'dead' ) {
+        // Renders in the dead bucket and for any history row whose status is
+        // 'failed' / 'interrupted' / 'dead' (terminal failure state).
+        if ( queueName === 'dead' || ( queueName === 'history' && [ 'failed', 'interrupted', 'dead' ].includes( job.status ) ) ) {
             completionBadge = '<span class="completion-badge failed" title="Failed">✗</span>';
         }
 
@@ -6938,9 +7332,11 @@ class NotificationsUI {
             completionBadge = '<span class="completion-badge stopped" title="Stopped — user cancelled">✕ Stopped</span>';
         }
 
-        // Interaction indicator for done queue
+        // Interaction indicator for any terminal-state pane (done or history).
+        // Backend now returns accurate has_interactions count from the
+        // notifications table — see Phase 1 (2026-04-26).
         let interactionIndicator = '';
-        if ( queueName === 'done' && job.has_interactions ) {
+        if ( ( queueName === 'done' || queueName === 'history' ) && job.has_interactions ) {
             interactionIndicator = '<span class="interaction-indicator" title="Has interaction history">💬</span>';
         }
 
@@ -6972,10 +7368,13 @@ class NotificationsUI {
         if ( queueName === 'run' ) {
             cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${jobId}" onclick="event.stopPropagation(); window.notificationsUI.cancelJob('${jobId}')" title="Cancel this job">✕</button>`;
             headerCancelClass = ' has-cancel';
-        } else if ( queueName === 'todo' || queueName === 'done' || queueName === 'dead' ) {
-            const deleteAction = job._isHistory
-                ? `window.notificationsUI.deleteHistoryJob('${jobId}')`
-                : `window.notificationsUI.deleteQueueJob('${jobId}', '${queueName}')`;
+        } else if ( [ 'todo', 'done', 'dead' ].includes( queueName ) ) {
+            // Small ✕ delete button rendered for live-bucket cards. History
+            // cards intentionally OMIT this button — they get the prominent
+            // "🗑 Delete" / "↻ Retry" buttons spliced by renderHistoryActions
+            // at card-bottom. Rendering both produced a confusing double-delete
+            // (user feedback 2026-04-26).
+            const deleteAction = `window.notificationsUI._dispatchDelete('${jobId}', '${queueName}')`;
             cancelBtnHtml     = `<button type="button" class="job-cancel-button" id="job-cancel-${idKey}" onclick="event.stopPropagation(); ${deleteAction}" title="Remove this job">✕</button>`;
             headerCancelClass = ' has-cancel';
         }
@@ -7023,7 +7422,7 @@ class NotificationsUI {
                     <div class="job-partial-artifacts" style="${( queueName === 'dead' && ( job.plan_path || ( job.remediation_snapshot_path && !job.report_path ) ) ) ? '' : 'display: none'}">
                         ${queueName === 'dead' && job.plan_path ? `
                             <div class="partial-artifact">
-                                <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 Partial Plan (written before failure)</a>
+                                <a href="/app/docs?path=${encodeURIComponent( job.plan_path || '' )}" target="_blank" class="report-link-btn">📋 Partial plan written before failure</a>
                             </div>
                         ` : ''}
                         ${queueName === 'dead' && job.remediation_snapshot_path && !job.report_path ? `
@@ -7082,7 +7481,7 @@ class NotificationsUI {
                         </div>
                     </div>
                     ` : ''}
-                    ${queueName === 'done' ? `
+                    ${( queueName === 'done' || queueName === 'history' ) ? `
                     <div class="job-interactions-section" id="job-interactions-${idKey}">
                         <div class="interactions-header" onclick="window.notificationsUI.toggleJobInteractions('${idKey}', event)">
                             <span>📋 Notification Conversation</span>
@@ -7971,28 +8370,53 @@ class NotificationsUI {
             if ( indicator ) {
                 e.stopPropagation();
                 const abstract = decodeURIComponent( indicator.dataset.abstract );
+
+                // Horizontal layout mode: route to Reading Pane instead of the
+                // legacy fixed-position tooltip. Design:
+                // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
+                if ( this._layoutMode === "horizontal" ) {
+                    // Derive a short title from the source message if available.
+                    const card    = indicator.closest( '.conversation-pair, .notification-message, .sender-card' );
+                    const titleEl = card ? card.querySelector( '.message-text' ) : null;
+                    const title   = titleEl
+                        ? ( titleEl.textContent || "" ).trim().slice( 0, 60 )
+                        : "Notification details";
+                    this._openContentPane( "abstract", abstract, title );
+                    return;
+                }
+
                 const content = tooltip.querySelector( '.abstract-tooltip-content' );
                 // Render markdown with XSS protection (was: content.textContent = abstract)
                 content.innerHTML = this.renderMarkdown( abstract );
 
                 // Position near the indicator
                 const rect = indicator.getBoundingClientRect();
-                const tooltipHeight = 200; // Approximate initial height
-                const viewportHeight = window.innerHeight;
 
-                // Position below indicator, but flip above if near bottom
-                let top = rect.bottom + 8;
-                if ( top + tooltipHeight > viewportHeight ) {
-                    top = rect.top - tooltipHeight - 8;
-                }
-
-                // Keep within horizontal bounds
-                let left = Math.max( 10, rect.left - 100 );
-                left = Math.min( left, window.innerWidth - 420 );
-
-                tooltip.style.top = `${top}px`;
-                tooltip.style.left = `${left}px`;
+                // Show hidden first so :has()-driven tier sizing takes effect, then measure
+                tooltip.style.visibility = 'hidden';
                 tooltip.classList.add( 'visible' );
+
+                requestAnimationFrame( () => {
+                    const tipRect        = tooltip.getBoundingClientRect();
+                    const tooltipHeight  = tipRect.height;
+                    const tooltipWidth   = tipRect.width;
+                    const viewportHeight = window.innerHeight;
+                    const viewportWidth  = window.innerWidth;
+
+                    // Position below indicator, flip above if it would clip viewport bottom
+                    let top = rect.bottom + 8;
+                    if ( top + tooltipHeight > viewportHeight - 10 ) {
+                        top = Math.max( 10, rect.top - tooltipHeight - 8 );
+                    }
+
+                    // Center on indicator horizontally, clamp to viewport
+                    let left = rect.left + ( rect.width / 2 ) - ( tooltipWidth / 2 );
+                    left = Math.max( 10, Math.min( left, viewportWidth - tooltipWidth - 10 ) );
+
+                    tooltip.style.top        = `${top}px`;
+                    tooltip.style.left       = `${left}px`;
+                    tooltip.style.visibility = 'visible';
+                } );
 
             } else if ( !e.target.closest( '.abstract-tooltip' ) ) {
                 // Click outside closes tooltip
@@ -8587,7 +9011,10 @@ class NotificationsUI {
      * @returns {string} - Project name in uppercase (e.g., "LUPIN")
      */
     getProjectFromSenderId( senderId ) {
-        const match = senderId.match( /^claude\.code@([a-z]+)\.deepily\.ai/ );
+        // Project segment must allow hyphens for nested repos like
+        // "lupin-mobile" and "lupin-plugin-firefox". Matches the canonical
+        // pattern used by cosa_voice_mcp.py and notification_models.py.
+        const match = senderId.match( /^claude\.code@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.deepily\.ai/ );
         if ( match ) {
             return match[1].toUpperCase();
         }
@@ -8614,8 +9041,9 @@ class NotificationsUI {
             sessionId = null;
         }
 
-        // Parse agent type and project
-        const match = base.match( /^([^@]+)@([a-z]+)\.deepily\.ai$/ );
+        // Parse agent type and project. Project segment must allow hyphens
+        // for nested repos like "lupin-mobile" and "lupin-plugin-firefox".
+        const match = base.match( /^([^@]+)@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.deepily\.ai$/ );
         const agentType = match ? match[ 1 ] : 'unknown';
         const project = match ? match[ 2 ] : 'unknown';
 
@@ -8626,6 +9054,1614 @@ class NotificationsUI {
             fullSenderId  : senderId,
             baseSenderId  : base
         };
+    }
+
+    /**
+     * Look up the voice_id for a given sender_id from the per-session
+     * persona map. Returns null when no persona is known (server-side
+     * default kicks in — Sam, the system default).
+     *
+     * Hydration happens in handleNotificationUpdate as soon as a
+     * notification with a voice_persona payload arrives. The server
+     * stamps voice_persona on every outbound envelope (see
+     * src/cosa/rest/routers/notifications.py _voice_persona_for_sender_id).
+     *
+     * @param {string|null} senderId - Sender id (e.g., claude.code@lupin.deepily.ai#c7333045)
+     * @returns {string|null} voice_id or null
+     */
+    getVoiceIdForSender( senderId ) {
+        if ( !senderId ) return null;
+        const persona = this.senderPersonaMap.get( senderId );
+        return persona && persona.voice_id ? persona.voice_id : null;
+    }
+
+    /**
+     * Look up the full persona object for a given sender_id.
+     * Used by sender-card badge rendering.
+     *
+     * @param {string|null} senderId
+     * @returns {object|null} persona dict or null
+     */
+    getPersonaForSender( senderId ) {
+        if ( !senderId ) return null;
+        return this.senderPersonaMap.get( senderId ) || null;
+    }
+
+    /**
+     * Convert a hex color (e.g., "#E91E63") into the comma-separated RGB
+     * triplet form ("233, 30, 99") that CSS `rgba()` consumes.
+     *
+     * Used to produce --persona-color-rgb on each sender card so Tier 1
+     * (border + shadow) and Tier 2 (header gradient) CSS rules can apply
+     * persona color with arbitrary alpha via rgba(var(--persona-color-rgb), 0.55).
+     *
+     * Returns null on malformed input — caller should skip setting the var.
+     *
+     * @param {string|null} hex — "#RRGGBB" or "#RGB"
+     * @returns {string|null} "r, g, b" or null on parse failure
+     */
+    _hexToRgb( hex ) {
+        if ( !hex || typeof hex !== "string" ) return null;
+        let h = hex.trim().replace( /^#/, "" );
+        if ( h.length === 3 ) {
+            h = h.split( "" ).map( c => c + c ).join( "" );
+        }
+        if ( h.length !== 6 || !/^[0-9a-fA-F]{6}$/.test( h ) ) return null;
+        const r = parseInt( h.substring( 0, 2 ), 16 );
+        const g = parseInt( h.substring( 2, 4 ), 16 );
+        const b = parseInt( h.substring( 4, 6 ), 16 );
+        return `${r}, ${g}, ${b}`;
+    }
+
+    /**
+     * Build the persona-badge HTML string for a given persona dict.
+     * Returns '' when persona is null/undefined so callers can safely
+     * inject the result into a template literal.
+     *
+     * Centralizes the markup so createSenderCard and the live DOM-patch
+     * path (handleNotificationUpdate dispatch for voice_persona_assigned)
+     * produce identical badges.
+     *
+     * @param {object|null} persona — { name, display_name, color, icon, profile, borrowed, overflow }
+     * @returns {string} badge HTML, or '' when persona is null
+     */
+    _renderPersonaBadgeHTML( persona ) {
+        if ( !persona ) return '';
+        // Overflow (Sam-as-default-spillover) takes precedence over the legacy
+        // borrowed state — both shouldn't fire on the same persona, but if a
+        // misconfigured envelope ever flips both flags, the overflow semantic
+        // ("pool spilled to default voice") is the more accurate label.
+        // See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+        let stateClass = '';
+        let stateTitle = '';
+        if ( persona.overflow ) {
+            stateClass = ' overflow';
+            stateTitle = ' (overflow — pool exhausted, using system default voice)';
+        } else if ( persona.borrowed ) {
+            stateClass = ' borrowed';
+            stateTitle = ' (borrowed — pool exhausted)';
+        }
+        const profile = persona.profile ? ` — ${persona.profile}` : '';
+        // Pool names are stored lowercase, no-punctuation per project key
+        // convention (e.g. "mr radio"). The server stamps `display_name`
+        // (e.g. "Mr. Radio") via voice_persona_helpers.display_name_for for
+        // UI surfaces. Fall back to `name` only if `display_name` is absent
+        // (legacy envelope or hand-built persona dict).
+        const label = persona.display_name || persona.name || '';
+        return `<span class="persona-badge${stateClass}"
+                  style="background-color: ${persona.color || '#888'};"
+                  title="${label}${stateTitle}${profile}">
+                <span class="persona-badge-icon">${persona.icon || '🎙️'}</span>
+                <span class="persona-badge-name">${label}</span>
+            </span>`;
+    }
+
+    /**
+     * Patch an EXISTING sender-card header in place to reflect the given
+     * persona. Used after voice_persona_assigned/released arrives so the
+     * badge appears (or disappears) without waiting for a re-render.
+     *
+     * Behavior:
+     *   - persona truthy + no badge present → insert badge before stats group
+     *   - persona truthy + badge already present → replace badge
+     *   - persona null → remove existing badge if present
+     *   - card not found → no-op (card may be rendered later via createSenderCard,
+     *     which will read senderPersonaMap and pick up the persona then)
+     *
+     * @param {string} senderId
+     * @param {object|null} persona
+     */
+    _setPersonaBadgeOnCard( senderId, persona ) {
+        if ( !senderId ) return;
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+        const card   = document.getElementById( cardId );
+        if ( !card ) return;
+        const header = card.querySelector( ':scope > .sender-card-header' );
+        if ( !header ) return;
+
+        // Locate the existing badge (now inside .sender-stats-group as its first
+        // child — see createSenderCard). Search the whole header so we also
+        // catch legacy-positioned badges from cards rendered before the
+        // 2026-04-29 right-align relocation.
+        const existingBadge = header.querySelector( '.persona-badge' );
+        const statsGroup    = header.querySelector( ':scope > .sender-stats-group' );
+
+        if ( !persona ) {
+            if ( existingBadge ) existingBadge.remove();
+            // Foundation: also clear the persona-color custom properties on the
+            // card so Tier 1/2 CSS rules fall back to their defaults.
+            card.style.removeProperty( "--persona-color"     );
+            card.style.removeProperty( "--persona-color-rgb" );
+            // Mirror the clear onto the strip icon.
+            this._setStripIconPersonaColor( senderId, null );
+            return;
+        }
+
+        // Foundation: set --persona-color and --persona-color-rgb on the card
+        // so Tier 1 (border + shadow) and Tier 2 (header gradient) CSS rules
+        // pick up the persona color via var() with no inline-style coupling.
+        if ( persona.color ) {
+            card.style.setProperty( "--persona-color", persona.color );
+            const rgb = this._hexToRgb( persona.color );
+            if ( rgb ) card.style.setProperty( "--persona-color-rgb", rgb );
+            // Mirror the persona-color update onto the strip icon.
+            this._setStripIconPersonaColor( senderId, persona.color );
+        }
+
+        const html = this._renderPersonaBadgeHTML( persona );
+        if ( existingBadge ) {
+            existingBadge.outerHTML = html;
+            return;
+        }
+
+        // Insert as the FIRST child of .sender-stats-group so the badge sits
+        // in the right-aligned cluster (stats group has margin-left: auto).
+        const tmp = document.createElement( 'template' );
+        tmp.innerHTML = html.trim();
+        const badgeNode = tmp.content.firstChild;
+        if ( statsGroup ) {
+            statsGroup.insertBefore( badgeNode, statsGroup.firstChild );
+        } else {
+            header.appendChild( badgeNode );
+        }
+    }
+
+    // ============================================================
+    // CC SESSION SELECTOR STRIP + EXCLUSIVE FOCUS MODE
+    // Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
+    // Permanent chrome above #notifications-list. One icon per active CC
+    // session. Leftmost = most recently updated. Embedded toggle pill
+    // enters/exits focus mode (only the focused session's card is rendered).
+    // Orthogonal to conversation mode.
+    // ============================================================
+
+    /**
+     * Build the DOM id used for a strip icon, derived from senderId
+     * with the same escaping rules used for sender-card ids.
+     */
+    _stripIconIdFor( senderId ) {
+        return `cc-strip-icon-${senderId.replace( /[@.#]/g, '-' )}`;
+    }
+
+    /**
+     * Add a CC session icon to the selector strip. Idempotent — calling
+     * twice for the same senderId is a no-op (the existing icon is
+     * promoted to leftmost via _promoteStripIcon if you want that effect).
+     *
+     * @param {boolean} insertAtTop — true for runtime adds (newest leftmost),
+     *   false for initial-load adds (the API delivers cards newest-first;
+     *   appending preserves that order in the strip). Mirrors the
+     *   sender-card list's `insertAtTop` semantics so strip ordering
+     *   tracks the list ordering.
+     *
+     * Requires:
+     *   - senderId is a non-empty string
+     *   - This is a claude.code session (caller filters)
+     */
+    _addStripIcon( senderId, projectName, persona, sessionId, insertAtTop = true ) {
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        const strip          = document.getElementById( "cc-session-strip" );
+        if ( !iconsContainer || !strip ) return;
+
+        const iconId = this._stripIconIdFor( senderId );
+        if ( document.getElementById( iconId ) ) return;  // idempotent
+
+        const initial     = (
+            persona?.display_name
+            || persona?.name
+            || projectName
+            || "?"
+        ).charAt( 0 ).toUpperCase();
+        const color       = persona?.color || null;
+        const personaName = persona?.display_name || persona?.name || null;
+
+        const icon = document.createElement( "div" );
+        icon.id = iconId;
+        icon.className = "cc-strip-icon";
+        icon.setAttribute( "data-sender-id", senderId );
+        if ( sessionId ) icon.setAttribute( "data-session-id", sessionId );
+        // Chronological-order anchor (2026-05-21 amendment — see
+        // src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
+        // Strip is now sorted by data-created-at ascending; oldest persona stays leftmost.
+        // Falls back to current time if assigned_at is missing — worst case: one-time
+        // reshuffle on the affected page reload.
+        icon.setAttribute(
+            "data-created-at",
+            persona?.assigned_at || new Date().toISOString()
+        );
+        // Tooltip carries project + session + persona so users can identify
+        // who's behind each color-coded icon at a glance.
+        const titleParts = [ projectName ];
+        if ( sessionId   ) titleParts.push( "#" + sessionId );
+        if ( personaName ) titleParts.push( "(" + personaName + ")" );
+        icon.setAttribute( "title", titleParts.join( " " ) );
+        icon.textContent = initial;
+        if ( color ) {
+            icon.style.setProperty( "--persona-color", color );
+        }
+
+        // Mark focused if focus mode is on and this senderId matches the
+        // persisted focused id (covers the case where a card for a
+        // previously-focused session arrives after a page reload).
+        if ( this.ccFocusState.enabled
+             && this.ccFocusState.focused_sender_id === senderId ) {
+            icon.setAttribute( "data-focused", "true" );
+        }
+
+        // Mirror conv-mode state at icon creation. Every persona icon gets a
+        // state badge — sessions never explicitly toggled default to
+        // "speakerphone" (the default state). Rick's directive 2026-05-14
+        // evening: "Everybody gets state rendered."
+        if ( sessionId ) {
+            const explicit = this.conversationModes && ( sessionId in this.conversationModes )
+                ? !!this.conversationModes[ sessionId ]
+                : true;  // no entry → default speakerphone
+            icon.setAttribute( "data-conv-mode", explicit ? "speakerphone" : "quiet" );
+        }
+
+        // Click dispatch — scroll-to-card in default mode, switch-focus in focus mode.
+        icon.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            this._handleStripIconClick( senderId );
+        } );
+
+        // Chronological-order rule (2026-05-21): always append. New sessions land
+        // rightmost; initial-load order is then normalized by _sortStripIconsChronological()
+        // once after the initial hydration batch. The insertAtTop parameter is retained
+        // for callsite compatibility but is no longer honored — every icon appends.
+        iconsContainer.appendChild( icon );
+
+        // First icon → reveal the strip.
+        if ( strip.hasAttribute( "hidden" ) ) {
+            strip.removeAttribute( "hidden" );
+        }
+
+        // Honor the hide-inactive toggle for this freshly-inserted icon.
+        // Cheap one-icon walk via the same helper used for bulk re-apply.
+        if ( this.ccHideInactiveStrip ) {
+            const shouldHide = this._isStripIconInactive( senderId );
+            if ( shouldHide ) icon.setAttribute( "data-inactive-hidden", "true" );
+        }
+    }
+
+    /**
+     * Remove a CC session icon from the selector strip. If the removed
+     * session was the focused session, auto-exit focus mode so the user
+     * isn't stranded staring at a now-empty pane.
+     */
+    _removeStripIcon( senderId ) {
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        const strip          = document.getElementById( "cc-session-strip" );
+        if ( !iconsContainer ) return;
+
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( icon ) icon.remove();
+
+        // If the deleted session was the focused one, exit focus mode.
+        // Auto-exit only — preserve persisted intent so a transient icon
+        // removal (e.g. WS dealloc + re-add) doesn't permanently clobber
+        // the user's focus choice.
+        if ( this.ccFocusState.enabled
+             && this.ccFocusState.focused_sender_id === senderId ) {
+            this._exitFocusMode( false );
+        }
+
+        delete this.ccStripUnreadCounts[ senderId ];
+
+        // Hide the whole strip when no icons remain.
+        if ( strip && iconsContainer.children.length === 0 ) {
+            strip.setAttribute( "hidden", "" );
+        }
+    }
+
+    /**
+     * Clear ALL strip icons in one shot. Used by bulk-clear paths
+     * (Clear All, history-window change) where every sender card is
+     * being torn down at once and per-sender _removeStripIcon would
+     * thrash. Side effects mirror _removeStripIcon's cleanup:
+     *   - Exits focus mode if active.
+     *   - Empties #cc-strip-icons and hides #cc-session-strip.
+     *   - Resets ccStripUnreadCounts.
+     */
+    _clearAllStripIcons() {
+        // Auto-exit only — preserve persisted intent so a bulk-clear
+        // (history-window change, init churn) doesn't permanently clobber
+        // the user's focus choice.
+        if ( this.ccFocusState && this.ccFocusState.enabled ) {
+            this._exitFocusMode( false );
+        }
+
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        if ( iconsContainer ) {
+            iconsContainer.innerHTML = "";
+        }
+
+        const strip = document.getElementById( "cc-session-strip" );
+        if ( strip ) {
+            strip.setAttribute( "hidden", "" );
+        }
+
+        this.ccStripUnreadCounts = {};
+    }
+
+    /**
+     * Move the icon for senderId to leftmost (most-recent-activity slot).
+     * Called from moveSenderCardToTop's path so strip ordering stays
+     * synchronized with stack ordering. Idempotent — if the icon is
+     * already leftmost, no DOM mutation occurs.
+     *
+     * Side effect: when focus mode is on AND this senderId is NOT the
+     * focused session, increment the unread badge so the user gets
+     * peripheral awareness of activity on hidden sessions.
+     *
+     * @param {string} senderId
+     * @param {object} [options]
+     * @param {boolean} [options.skipUnread=false] — When true, do not bump
+     *   the unread badge. Used by callers handling "noisy" updates that
+     *   shouldn't draw attention (e.g., in-place progress-group entries
+     *   that are just tool-call progress, not user-actionable signals).
+     */
+    /**
+     * Mark strip-icon activity for the unread-badge pulse in focus mode.
+     * Renamed 2026-05-21 from _promoteStripIcon — the DOM reposition was removed
+     * per the chronological-lock amendment; icons now stay anchored to their
+     * data-created-at slot and never reorder on activity. The unread-badge
+     * peripheral-awareness mechanic is preserved untouched. See
+     * src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md.
+     */
+    _markStripIconActivity( senderId, options = {} ) {
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        if ( !iconsContainer ) return;
+
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( !icon ) return;
+
+        // (Removed: insertBefore reposition. Strip is now chronological-locked.)
+
+        if ( options.skipUnread ) return;
+
+        // Bump unread badge for non-focused sessions in focus mode.
+        if ( this.ccFocusState.enabled
+             && this.ccFocusState.focused_sender_id !== senderId ) {
+            const next = ( this.ccStripUnreadCounts[ senderId ] || 0 ) + 1;
+            this.ccStripUnreadCounts[ senderId ] = next;
+            // Restart the pulse animation for every notification (not just
+            // the first). CSS rule fires when [data-unread="true"] applies;
+            // remove + reflow + re-add forces the browser to re-trigger
+            // the animation on already-marked icons.
+            icon.removeAttribute( "data-unread" );
+            void icon.offsetWidth;  // force reflow
+            icon.setAttribute( "data-unread", "true" );
+            icon.setAttribute( "data-unread-count", String( next ) );
+        }
+    }
+
+    /**
+     * Sort strip icons by data-created-at ascending (oldest leftmost, newest rightmost).
+     * Called once after the initial hydration batch — runtime adds just append, so the
+     * sort stays correct without re-running.
+     *
+     * Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+     */
+    _sortStripIconsChronological() {
+        const iconsContainer = document.getElementById( "cc-strip-icons" );
+        if ( !iconsContainer ) return;
+        const icons = Array.from( iconsContainer.children );
+        if ( icons.length < 2 ) return;
+        icons.sort( ( a, b ) => {
+            const aTs = a.getAttribute( "data-created-at" ) || "";
+            const bTs = b.getAttribute( "data-created-at" ) || "";
+            if ( aTs === bTs ) return 0;
+            return aTs < bTs ? -1 : 1;
+        } );
+        // Re-attach in sorted order. DOM appendChild on an existing child moves it.
+        for ( const icon of icons ) iconsContainer.appendChild( icon );
+    }
+
+    /**
+     * Update the persona color on a strip icon. Mirror of
+     * _setPersonaBadgeOnCard's color-var update for cards.
+     * @param {string} senderId
+     * @param {string|null} color — hex string or null to revert
+     */
+    _setStripIconPersonaColor( senderId, color ) {
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( !icon ) return;
+
+        if ( color ) {
+            icon.style.setProperty( "--persona-color", color );
+        } else {
+            icon.style.removeProperty( "--persona-color" );
+        }
+    }
+
+    /**
+     * Set/clear the conv-mode mic overlay on a strip icon, looked up by
+     * sessionId (which is what the conversation_mode_changed event
+     * carries). Each strip icon has both data-sender-id and
+     * data-session-id for flexible lookup.
+     */
+    _setStripIconConvMode( sessionId, isOn ) {
+        if ( !sessionId ) return;
+        const icon = document.querySelector(
+            `#cc-strip-icons .cc-strip-icon[data-session-id="${sessionId}"]`
+        );
+        if ( !icon ) return;
+
+        // 2026-05-14 evening: extended the badge semantics from binary
+        // (on/off) to three-state (speakerphone/quiet/undefined). When the
+        // user has actuated the toggle EITHER WAY, show the corresponding
+        // badge: 🎤 for speakerphone, 🤭 for quiet. Default state (user has
+        // never toggled this session) shows no badge.
+        icon.setAttribute( "data-conv-mode", isOn ? "speakerphone" : "quiet" );
+    }
+
+    /**
+     * Enter exclusive focus mode for the given senderId. All sender
+     * cards except the focused one are hidden via data-focus-hidden.
+     * Persists state to localStorage so reload restores the same focus.
+     *
+     * @param {string} senderId - Session to focus on
+     * @param {boolean} flash - Briefly highlight the focused card on entry.
+     *   True for the off→on toggle (user just turned focus mode on; flash
+     *   draws their eye to which card now has it). False for mid-mode
+     *   focus switches (user clicked a strip icon — they already know).
+     */
+    _enterFocusMode( senderId, flash = false ) {
+        if ( !senderId ) return;
+
+        this.ccFocusState = { enabled: true, focused_sender_id: senderId };
+        this._saveCcFocusState();
+
+        // Mark the toggle pill as active.
+        const toggle = document.getElementById( "cc-strip-toggle" );
+        if ( toggle ) {
+            toggle.setAttribute( "data-focus-active", "true" );
+            toggle.textContent = "👁 Focus: ON";
+        }
+
+        // Walk all strip icons: mark focused, clear focused on others.
+        const icons = document.querySelectorAll( "#cc-strip-icons .cc-strip-icon" );
+        icons.forEach( ( icon ) => {
+            const iconSender = icon.getAttribute( "data-sender-id" );
+            if ( iconSender === senderId ) {
+                icon.setAttribute( "data-focused", "true" );
+                this._clearStripUnreadFor( iconSender );  // visiting this session clears its badge
+            } else {
+                icon.removeAttribute( "data-focused" );
+            }
+        } );
+
+        // Walk all sender cards: hide all except the focused one.
+        const cards = document.querySelectorAll( "#notifications-list .sender-card" );
+        const expectedId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+        cards.forEach( ( card ) => {
+            if ( card.id === expectedId ) {
+                card.removeAttribute( "data-focus-hidden" );
+            } else {
+                card.setAttribute( "data-focus-hidden", "true" );
+            }
+        } );
+
+        if ( flash ) this._flashFocusedCard( expectedId );
+    }
+
+    /**
+     * Briefly highlight the focused sender card so the user sees which
+     * card now holds focus. Implemented via a short data-focus-flash
+     * attribute that drives a CSS keyframe animation in notifications.css.
+     */
+    _flashFocusedCard( cardId ) {
+        const card = document.getElementById( cardId );
+        if ( !card ) return;
+
+        // Restart the animation if a previous flash is still in flight
+        // (e.g. user double-toggles): clearing then setting on the next
+        // frame forces the keyframe to replay from 0%.
+        card.removeAttribute( "data-focus-flash" );
+        // Force reflow so the re-set attribute is treated as a state change.
+        // eslint-disable-next-line no-unused-expressions
+        void card.offsetWidth;
+        card.setAttribute( "data-focus-flash", "true" );
+
+        const cleanup = () => card.removeAttribute( "data-focus-flash" );
+        card.addEventListener( "animationend", cleanup, { once: true } );
+        // Belt-and-suspenders: drop the attribute after a fixed timeout in case
+        // the animation never fires (e.g. card is detached mid-flash).
+        setTimeout( cleanup, 2000 );
+    }
+
+    /**
+     * Exit focus mode — revert all cards to visible, clear focused state.
+     *
+     * @param {boolean} persist  When true (default), the wiped state is written
+     *   to localStorage — appropriate for user-initiated toggle-off. When false,
+     *   only in-memory state + UI revert; localStorage intent is preserved so
+     *   the user's focus choice survives transient init/WS churn (icon removal,
+     *   bulk clear, missing-card-at-restore-time). Per the L9647 design note,
+     *   auto-exits during init were a known failure mode for state preservation;
+     *   this parameter is the surgical mitigation.
+     */
+    _exitFocusMode( persist = true ) {
+        this.ccFocusState = { enabled: false, focused_sender_id: null };
+        if ( persist ) this._saveCcFocusState();
+
+        const toggle = document.getElementById( "cc-strip-toggle" );
+        if ( toggle ) {
+            toggle.setAttribute( "data-focus-active", "false" );
+            toggle.textContent = "👁 Focus";
+        }
+
+        // Clear focused-marker on all icons.
+        document.querySelectorAll( "#cc-strip-icons .cc-strip-icon[data-focused]" )
+                .forEach( ( icon ) => icon.removeAttribute( "data-focused" ) );
+
+        // Reveal all cards.
+        document.querySelectorAll( "#notifications-list .sender-card[data-focus-hidden]" )
+                .forEach( ( card ) => card.removeAttribute( "data-focus-hidden" ) );
+
+        // Visiting all sessions clears all unread badges.
+        document.querySelectorAll( "#cc-strip-icons .cc-strip-icon[data-unread]" )
+                .forEach( ( icon ) => {
+                    icon.removeAttribute( "data-unread" );
+                    icon.removeAttribute( "data-unread-count" );
+                } );
+        this.ccStripUnreadCounts = {};
+    }
+
+    /**
+     * Click dispatcher for a strip icon. Behavior depends on mode:
+     *   - Default mode → smooth-scroll the corresponding card into view
+     *   - Focus mode, different session → switch focus to clicked
+     *   - Focus mode, same session → no-op
+     */
+    _handleStripIconClick( senderId ) {
+        if ( this.ccFocusState.enabled ) {
+            if ( this.ccFocusState.focused_sender_id === senderId ) return;  // no-op
+            this._enterFocusMode( senderId );
+            return;
+        }
+
+        // Default mode → scroll to that card.
+        const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
+        const card   = document.getElementById( cardId );
+        if ( card ) {
+            card.scrollIntoView( { behavior: "smooth", block: "start" } );
+        }
+    }
+
+    /**
+     * Click handler for the focus-toggle pill. Off → on (using leftmost
+     * icon's senderId or the persisted focused id); on → off.
+     */
+    _handleStripToggleClick() {
+        if ( this.ccFocusState.enabled ) {
+            this._exitFocusMode();
+            return;
+        }
+
+        // Determine which session to focus: prefer persisted choice, else
+        // leftmost icon (= most recently updated).
+        let targetSenderId = this.ccFocusState.focused_sender_id;
+        if ( !targetSenderId ) {
+            const firstIcon = document.querySelector( "#cc-strip-icons .cc-strip-icon" );
+            if ( firstIcon ) targetSenderId = firstIcon.getAttribute( "data-sender-id" );
+        }
+        if ( !targetSenderId ) {
+            this.log( "Focus toggle: no CC sessions to focus on" );
+            return;
+        }
+
+        this._enterFocusMode( targetSenderId, true );  // flash on off→on entry
+    }
+
+    /**
+     * Wire up the toggle pill's click handler. Called once from the
+     * constructor — the button exists in the HTML at page load.
+     */
+    _bindStripToggle() {
+        const toggle = document.getElementById( "cc-strip-toggle" );
+        if ( !toggle ) return;
+        toggle.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            this._handleStripToggleClick();
+        } );
+    }
+
+    /**
+     * Wire the hide-inactive toggle pill once. Mirrors _bindStripToggle.
+     */
+    _bindHideInactiveToggle() {
+        const toggle = document.getElementById( "cc-hide-inactive-toggle" );
+        if ( !toggle ) return;
+        toggle.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            this._setHideInactiveStrip( !this.ccHideInactiveStrip );
+        } );
+    }
+
+    /**
+     * Inactive predicate for a strip-icon's senderId.
+     *
+     * "Inactive" on the frontend == no allocated voice persona for this sender.
+     * The cosa-voice bridge file owns persona allocation; when the bridge dies
+     * the server stops stamping voice_persona on outbound notifications and the
+     * client clears senderPersonaMap on the voice_persona_released event. The
+     * same signal drives the CSS slate-gray fallback (--persona-color absent
+     * → background falls back to #6c757d at notifications.css:2044).
+     */
+    _isStripIconInactive( senderId ) {
+        return !this.senderPersonaMap.has( senderId );
+    }
+
+    /**
+     * Apply or clear data-inactive-hidden across every strip icon based on
+     * the current ccHideInactiveStrip flag. Called on toggle click, on
+     * _addStripIcon (single-icon update), and on persona-assigned/released
+     * WS events (state-change update).
+     */
+    _applyHideInactiveStripFilter() {
+        const icons = document.querySelectorAll( "#cc-strip-icons .cc-strip-icon" );
+        icons.forEach( ( icon ) => {
+            const senderId = icon.getAttribute( "data-sender-id" );
+            if ( !senderId ) return;
+            const shouldHide = this.ccHideInactiveStrip && this._isStripIconInactive( senderId );
+            if ( shouldHide ) {
+                icon.setAttribute( "data-inactive-hidden", "true" );
+            } else {
+                icon.removeAttribute( "data-inactive-hidden" );
+            }
+        } );
+    }
+
+    /**
+     * Update the hide-inactive flag, persist it, mirror the toggle pill's
+     * visual state, and re-apply the filter to existing icons.
+     */
+    _setHideInactiveStrip( enabled ) {
+        this.ccHideInactiveStrip = !!enabled;
+        try {
+            localStorage.setItem( this.CC_HIDE_INACTIVE_KEY, String( this.ccHideInactiveStrip ) );
+        } catch ( err ) {
+            this.error( "Failed to persist cc hide-inactive state:", err );
+        }
+        const toggle = document.getElementById( "cc-hide-inactive-toggle" );
+        if ( toggle ) {
+            toggle.setAttribute( "data-hide-inactive", String( this.ccHideInactiveStrip ) );
+            toggle.textContent = this.ccHideInactiveStrip ? "👁 Active" : "👁 All";
+        }
+        this._applyHideInactiveStripFilter();
+        this.log( `[STRIP] hide-inactive → ${this.ccHideInactiveStrip ? "ON" : "OFF"}` );
+    }
+
+    /**
+     * Apply data-focus-hidden to a card if focus is on and the card is
+     * not the focused sender. Called from createSenderCard so newly
+     * inserted cards respect existing focus mode.
+     */
+    _applyFocusHiddenToCard( card, senderId ) {
+        if ( !this.ccFocusState.enabled ) return;
+        if ( this.ccFocusState.focused_sender_id === senderId ) return;
+        card.setAttribute( "data-focus-hidden", "true" );
+    }
+
+    /**
+     * Clear the unread badge + counter for a single sender's strip icon.
+     */
+    _clearStripUnreadFor( senderId ) {
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( icon ) {
+            icon.removeAttribute( "data-unread" );
+            icon.removeAttribute( "data-unread-count" );
+        }
+        delete this.ccStripUnreadCounts[ senderId ];
+    }
+
+    /**
+     * Persist focus-mode state to localStorage.
+     */
+    _saveCcFocusState() {
+        try {
+            localStorage.setItem(
+                this.CC_FOCUS_STATE_KEY,
+                JSON.stringify( this.ccFocusState )
+            );
+        } catch ( err ) {
+            this.error( "Failed to persist cc focus state:", err );
+        }
+    }
+
+    /**
+     * Belt-and-suspenders restore of focus + hide-inactive state AFTER
+     * loadConversationHistory finishes hydrating sender cards/icons.
+     *
+     * The constructor reads localStorage and sets in-memory state +
+     * toggle-pill visuals, and `createSenderCard` / `_addStripIcon` apply
+     * per-card / per-icon attributes as cards arrive. In principle that's
+     * enough — but in practice users have reported "I refresh and focus
+     * is gone, all sessions render." Possible causes (any of which this
+     * function recovers from):
+     *
+     * - In-memory `ccFocusState` was reset by an `_exitFocusMode()` call
+     *   firing during init (e.g., a WS event handler that removed and
+     *   re-added the focused session's icon early in the lifecycle).
+     * - A render path other than `createSenderCard` produced the sender
+     *   cards (cached/server-rendered HTML) so `_applyFocusHiddenToCard`
+     *   never ran.
+     * - The toggle-pill visual restore in the constructor ran before
+     *   `#cc-strip-toggle` was painted (DOMContentLoaded race).
+     *
+     * Strategy: re-read localStorage directly (bypassing potentially-wiped
+     * in-memory state), and if focus is persisted, walk the now-hydrated
+     * DOM and apply the focus state in full. Discards stale state per the
+     * 2026-04-30 design doc ("if the persisted focused session does NOT
+     * exist on reload, state is discarded and default mode is shown").
+     */
+    _restoreCcUiAfterLoad() {
+        // ─── Focus mode ─────────────────────────────────────────────────
+        let persistedFocus = null;
+        try {
+            persistedFocus = JSON.parse( localStorage.getItem( this.CC_FOCUS_STATE_KEY ) );
+        } catch ( e ) {
+            this.error( "Failed to parse persisted focus state:", e );
+        }
+        if ( persistedFocus && persistedFocus.enabled && persistedFocus.focused_sender_id ) {
+            // Reconcile in-memory state with persisted state (in case something
+            // in init() reset it).
+            if ( !this.ccFocusState.enabled
+                 || this.ccFocusState.focused_sender_id !== persistedFocus.focused_sender_id ) {
+                this.log( `[FOCUS-RESTORE] reconciling wiped in-memory state from localStorage: ${persistedFocus.focused_sender_id}` );
+                this.ccFocusState = { ...persistedFocus };
+            }
+
+            const expectedId  = `sender-card-${this.ccFocusState.focused_sender_id.replace( /[@.#]/g, '-' )}`;
+            const focusedCard = document.getElementById( expectedId );
+
+            if ( !focusedCard ) {
+                // Persisted focused sender no longer has any visible cards.
+                // Revert UI to default mode but PRESERVE persisted intent — the
+                // focused session may simply not be hydrated yet (async WS
+                // arrival), and a next reload may find it. The original
+                // 2026-04-30 design said "discard stale state" but that
+                // produced "every reload drops focus" when icon-churn races
+                // the restore check.
+                this.log( `[FOCUS-RESTORE] focused sender ${this.ccFocusState.focused_sender_id} not in current data set; UI reverted to default, persisted intent preserved for next reload` );
+                this._exitFocusMode( false );
+            } else {
+                // Walk all sender cards: hide all except the focused one.
+                document.querySelectorAll( '#notifications-list .sender-card' ).forEach( card => {
+                    if ( card.id === expectedId ) {
+                        card.removeAttribute( 'data-focus-hidden' );
+                    } else {
+                        card.setAttribute( 'data-focus-hidden', 'true' );
+                    }
+                } );
+
+                // Mark the focused strip icon.
+                document.querySelectorAll( '#cc-strip-icons .cc-strip-icon' ).forEach( icon => {
+                    if ( icon.getAttribute( 'data-sender-id' ) === this.ccFocusState.focused_sender_id ) {
+                        icon.setAttribute( 'data-focused', 'true' );
+                    } else {
+                        icon.removeAttribute( 'data-focused' );
+                    }
+                } );
+
+                // Restore toggle-pill visual (idempotent if constructor already set it).
+                const toggle = document.getElementById( 'cc-strip-toggle' );
+                if ( toggle ) {
+                    toggle.setAttribute( 'data-focus-active', 'true' );
+                    toggle.textContent = '👁 Focus: ON';
+                }
+
+                this.log( `[FOCUS-RESTORE] focus mode restored on ${this.ccFocusState.focused_sender_id}` );
+            }
+        }
+
+        // ─── Hide-inactive (Active) toggle ──────────────────────────────
+        const persistedHideInactive = localStorage.getItem( this.CC_HIDE_INACTIVE_KEY ) === 'true';
+        if ( persistedHideInactive !== this.ccHideInactiveStrip ) {
+            this.log( `[ACTIVE-TOGGLE-RESTORE] reconciling wiped in-memory state from localStorage: ${persistedHideInactive}` );
+            this.ccHideInactiveStrip = persistedHideInactive;
+        }
+        if ( this.ccHideInactiveStrip ) {
+            // Re-apply filter to all existing icons (per-icon filter in
+            // _addStripIcon depends on senderPersonaMap, which populates
+            // asynchronously — re-walking after load catches any icon
+            // that was added before its persona arrived).
+            this._applyHideInactiveStripFilter();
+
+            const toggle = document.getElementById( 'cc-hide-inactive-toggle' );
+            if ( toggle ) {
+                toggle.setAttribute( 'data-hide-inactive', 'true' );
+                toggle.textContent = '👁 Active';
+            }
+            this.log( '[ACTIVE-TOGGLE-RESTORE] hide-inactive filter reapplied' );
+        }
+    }
+
+    // ─── Commons Traffic Visibility — broadcast-card Recent Activity stream ───
+    // Step 7/11 of src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+    // Wires the visual scaffold from Step 6 (HTML + CSS) to the aggregator
+    // endpoint (Step 3) + the WS push (Step 4). Five methods:
+    //   _initCommonsRecentActivity()  — feature-flag gate + handler binding + initial load
+    //   _loadCommonsRecentActivity()  — GET /api/commons/broadcast-history + render
+    //   _renderCommonsEntry()         — build one entry row from a projected entry dict
+    //   _handleCommonsActivityWS()    — WS event → prepend new row at top
+    //   _setCommonsActivityWindow()   — dropdown change handler
+
+    _initCommonsRecentActivity() {
+        // Gate: if INI feature flag is off, hide the entire section and bail.
+        const section = document.getElementById( "commons-recent-activity-section" );
+        if ( !section ) return;
+        if ( !this.commonsTrafficVisibilityEnabled ) {
+            section.style.display = "none";
+            this.log( "[COMMONS-ACTIVITY] feature disabled via INI — section hidden" );
+            return;
+        }
+
+        // Initial dropdown value from INI default
+        const dropdown = document.getElementById( "commons-recent-activity-window" );
+        if ( dropdown ) {
+            dropdown.value = this.commonsTrafficVisibilityDefaultWindow;
+            dropdown.addEventListener( "change", ( ev ) => {
+                this._setCommonsActivityWindow( ev.target.value );
+            } );
+        }
+
+        // Recent-Activity 3-axis filter dropdowns (Direction / Kind / Persona).
+        // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        // State is hydrated from localStorage in the constructor; here we apply the
+        // persisted state back into the dropdowns and bind the change handlers.
+        const directionEl = document.getElementById( "commons-recent-activity-filter-direction" );
+        if ( directionEl ) {
+            directionEl.value = this._commonsActivityFilter.direction || "";
+            directionEl.addEventListener( "change", ( ev ) => {
+                this._setCommonsActivityDirection( ev.target.value );
+            } );
+        }
+        const kindEl = document.getElementById( "commons-recent-activity-filter-kind" );
+        if ( kindEl ) {
+            kindEl.value = this._commonsActivityFilter.kind || "all";
+            kindEl.addEventListener( "change", ( ev ) => {
+                this._setCommonsActivityKind( ev.target.value );
+            } );
+        }
+        const personaEl = document.getElementById( "commons-recent-activity-filter-persona" );
+        if ( personaEl ) {
+            personaEl.addEventListener( "change", ( ev ) => {
+                this._setCommonsActivityPersona( ev.target.value );
+            } );
+        }
+
+        // Refresh button — augmented 2026-05-21 to also repopulate the persona dropdown
+        // (dual purpose: reload activity stream + refresh persona list).
+        const refreshBtn = document.getElementById( "commons-recent-activity-refresh" );
+        if ( refreshBtn ) {
+            refreshBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                console.log( "[COMMONS-ACTIVITY] refresh clicked" );
+                this._loadCommonsRecentActivity( this._currentCommonsWindow() );
+                this._repopulatePersonaDropdown();
+            } );
+        }
+
+        // Initial persona-dropdown population (also restores persisted persona selection
+        // once options are in place, via the sticky-when-valid path in _repopulatePersonaDropdown).
+        this._repopulatePersonaDropdown();
+
+        // Initial load
+        this._loadCommonsRecentActivity( this._currentCommonsWindow() );
+    }
+
+    _currentCommonsWindow() {
+        const dropdown = document.getElementById( "commons-recent-activity-window" );
+        return dropdown ? dropdown.value : ( this.commonsTrafficVisibilityDefaultWindow || "today" );
+    }
+
+    async _loadCommonsRecentActivity( windowValue ) {
+        console.log( `[COMMONS-ACTIVITY] load start, window=${windowValue}` );
+        const entriesEl = document.getElementById( "commons-recent-activity-entries" );
+        const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
+        if ( !entriesEl ) {
+            console.warn( "[COMMONS-ACTIVITY] entries element missing from DOM — bailing out" );
+            return;
+        }
+
+        // Map window value → hours query param (mirrors getEffectiveHoursForQuery shape)
+        const params = new URLSearchParams();
+        if ( windowValue === "all" ) {
+            // no hours param → no cutoff
+        } else if ( windowValue === "today" ) {
+            // Resolve client-side: hours since local-midnight
+            const now      = new Date();
+            const midnight = new Date( now.getFullYear(), now.getMonth(), now.getDate() );
+            const hours    = Math.max( 1, Math.ceil( ( now - midnight ) / 3600000 ) );
+            params.append( "hours", String( hours ) );
+        } else {
+            params.append( "hours", String( windowValue ) );
+        }
+        params.append( "limit", "200" );
+
+        try {
+            const resp = await this.authedFetch( `/api/commons/broadcast-history?${params}` );
+            if ( !resp.ok ) {
+                this.error( `[COMMONS-ACTIVITY] load failed: ${resp.status}` );
+                return;
+            }
+            const body = await resp.json();
+            if ( body.disabled ) {
+                // Server-side flag flipped to False mid-session — hide section
+                const section = document.getElementById( "commons-recent-activity-section" );
+                if ( section ) section.style.display = "none";
+                return;
+            }
+            const entries = body.entries || [ ];
+            // Populate the raw-entry cache; rendering is delegated to _renderAllCommonsEntries
+            // so the active filter is applied to the freshly-loaded set.
+            this._commonsRawEntries = entries;
+            this._renderAllCommonsEntries();
+            console.log( `[COMMONS-ACTIVITY] load complete, entries=${entries.length}` );
+        } catch ( err ) {
+            this.error( `[COMMONS-ACTIVITY] load exception: ${err}` );
+        }
+    }
+
+    _renderCommonsEntry( entry ) {
+        const row = document.createElement( "div" );
+        row.className = "commons-activity-entry";
+        if ( entry.persona_color ) row.style.setProperty( "--persona-color", entry.persona_color );
+
+        const icon = document.createElement( "div" );
+        icon.className   = "commons-activity-entry-icon";
+        icon.textContent = entry.persona_icon || "·";
+        row.appendChild( icon );
+
+        const name = document.createElement( "div" );
+        name.className   = "commons-activity-entry-name";
+        name.textContent = entry.persona_name || "—";
+        name.title       = entry.persona_name || "";   // full name on hover when ellipsis-truncated
+        row.appendChild( name );
+
+        // Topic chip only for free-form topics (Q2 ratified). DM topics
+        // (`dm-<persona>`) are rendered as `@<persona>` to collapse the older
+        // two-element `dm-tiberius → @Tiberius` form into a single chip.
+        const chip = document.createElement( "span" );
+        chip.className = "commons-activity-entry-topic-chip";
+        const rawTopic = entry.topic || "";
+        chip.textContent = rawTopic.startsWith( "dm-" ) ? `@${rawTopic.slice( 3 )}` : rawTopic;
+        chip.title       = rawTopic;   // full topic on hover when ellipsis-truncated
+        if ( entry.topic_kind === "reserved" ) chip.hidden = true;
+        row.appendChild( chip );
+
+        // Body — collapsible + markdown rendered (2026-05-16 feature ship).
+        // Wraps content in a `.commons-activity-entry-body-content` inner div so
+        // the line-clamp targets that div and not the body wrapper (which also
+        // holds the Show-more toggle button). Markdown rendered via the same
+        // marked.parse + DOMPurify.sanitize pattern broadcast-panel.js uses
+        // (page-loaded globals window.marked + window.DOMPurify); graceful
+        // fallback to plain textContent if either library is unavailable.
+        const body = document.createElement( "div" );
+        body.className = "commons-activity-entry-body";
+
+        const content = document.createElement( "div" );
+        content.className = "commons-activity-entry-body-content";
+        // broadcast-acks bodies are bare status words ("completed" / "skipped" /
+        // "rejected-malformed") per `_post_ack` in broadcast_handler.py. Reshape
+        // to descriptive phrasing so the row reads as a real event, not a status code.
+        let rawBody = entry.body || "";
+        if ( entry.topic === "broadcast-acks" ) {
+            const ackPhrasing = {
+                "completed"          : "received broadcast",
+                "skipped"            : "skipped broadcast",
+                "rejected-malformed" : "rejected broadcast (malformed)"
+            };
+            rawBody = ackPhrasing[ rawBody ] || rawBody;
+        }
+        if ( typeof marked !== "undefined" && typeof DOMPurify !== "undefined" ) {
+            try {
+                content.innerHTML = DOMPurify.sanitize( marked.parse( rawBody ) );
+            } catch ( err ) {
+                this.log( `[COMMONS-ACTIVITY] markdown render failed, falling back to text: ${err}` );
+                content.textContent = rawBody;
+            }
+        } else {
+            content.textContent = rawBody;
+        }
+        body.appendChild( content );
+
+        // Show-more toggle — appears only when the rendered content actually
+        // overflows the 2-line clamp. Measurement deferred to next layout pass
+        // via requestAnimationFrame so scrollHeight/clientHeight are reliable.
+        const toggle = document.createElement( "button" );
+        toggle.className   = "commons-activity-entry-body-toggle";
+        toggle.type        = "button";
+        toggle.textContent = "Show more ▾";
+        toggle.hidden      = true;   // measured + revealed below
+        toggle.addEventListener( "click", ( ev ) => {
+            ev.stopPropagation();
+            const isExpanded = content.classList.toggle( "expanded" );
+            toggle.textContent = isExpanded ? "Show less ▴" : "Show more ▾";
+        } );
+        // Toggle lives in the row header (right of body, left of time) — same
+        // location users expect for other UI toggles. Persona-color stays via
+        // --persona-color on the row.
+        // Measure overflow after layout; show toggle only when content actually
+        // exceeds the clamp. Empty / very-short bodies stay clean (no toggle).
+        requestAnimationFrame( () => {
+            const overflows = content.scrollHeight > content.clientHeight + 1;
+            if ( overflows ) toggle.hidden = false;
+        } );
+
+        row.appendChild( body );
+        row.appendChild( toggle );
+
+        const time = document.createElement( "div" );
+        time.className = "commons-activity-entry-time";
+        if ( entry.ts ) {
+            try {
+                const d  = new Date( entry.ts );
+                const hh = String( d.getHours() ).padStart( 2, "0" );
+                const mm = String( d.getMinutes() ).padStart( 2, "0" );
+                time.textContent = `${hh}:${mm}`;
+            } catch ( _ ) {
+                time.textContent = "";
+            }
+        }
+        row.appendChild( time );
+
+        return row;
+    }
+
+    _handleCommonsActivityWS( notification ) {
+        if ( !this.commonsTrafficVisibilityEnabled ) return;
+
+        // The watcher pushes the projected entry as the notification's payload.
+        // (See cosa/rest/commons_activity_watcher.py::_dispatch_activity_event.)
+        const entry = notification && notification.payload;
+        if ( !entry ) return;
+
+        // Always seed the raw cache so a later filter-clear re-renders include this entry.
+        if ( !Array.isArray( this._commonsRawEntries ) ) this._commonsRawEntries = [ ];
+        this._commonsRawEntries.unshift( entry );
+
+        const entriesEl = document.getElementById( "commons-recent-activity-entries" );
+        const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
+        if ( !entriesEl ) return;
+
+        // Predicate gate — live entries that don't match the active filter stay in the
+        // raw cache but are not inserted into the DOM.
+        if ( !this._matchesActivityFilter( entry ) ) {
+            if ( emptyEl && !entriesEl.firstChild ) this._updateEmptyStateCopy();
+            return;
+        }
+
+        const row = this._renderCommonsEntry( entry );
+        // Prepend — keep newest-first ordering (Q7)
+        if ( entriesEl.firstChild ) {
+            entriesEl.insertBefore( row, entriesEl.firstChild );
+        } else {
+            entriesEl.appendChild( row );
+        }
+        if ( emptyEl ) emptyEl.hidden = true;
+    }
+
+    _setCommonsActivityWindow( value ) {
+        this.log( `[COMMONS-ACTIVITY] window changed → ${value}` );
+        this._loadCommonsRecentActivity( value );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  Master-Detail Two-Pane Layout (2026-05-21)
+    //  Design: src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
+    //  Phase 2 wires: layout-mode toggle button, Reading Pane Close/Back buttons,
+    //  .abstract-indicator click branch (horizontal-mode → pane; vertical-mode → tooltip),
+    //  doc-link click interception (^/app/docs?path= anchors → iframe-swap in pane).
+    // ──────────────────────────────────────────────────────────────────────
+
+    _initMasterDetailLayout() {
+        // Mode-toggle button — flips body[data-layout-mode] and persists.
+        const toggleBtn = document.getElementById( "layout-mode-toggle" );
+        if ( toggleBtn ) {
+            this._updateLayoutModeButtonTooltip( toggleBtn );
+            toggleBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                this._toggleLayoutMode();
+            } );
+        }
+
+        // Splitter — draggable divider between .left-column and .content-pane.
+        this._initPaneSplitter();
+        // Apply persisted ratio on init so the geometry is right from the first open.
+        this._applyPaneSplitRatio();
+
+        // Reading Pane Close button
+        const closeBtn = document.getElementById( "content-pane-close" );
+        if ( closeBtn ) {
+            closeBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                this._closeContentPane();
+            } );
+        }
+
+        // Reading Pane Back button
+        const backBtn = document.getElementById( "content-pane-back" );
+        if ( backBtn ) {
+            backBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                this._backContentPane();
+            } );
+        }
+
+        // Doc-link click interception (horizontal mode only). Document-level
+        // delegation catches anchors that resolve to /app/docs?path=... —
+        // both bare relative form AND absolute http://localhost:port/ form.
+        // Applies to abstracts, notification bodies, recent-activity entries,
+        // everywhere on the page outside the iframe.
+        document.addEventListener( "click", ( ev ) => {
+            if ( this._layoutMode !== "horizontal" ) return;
+            const anchor = ev.target.closest( "a[href]" );
+            if ( !anchor ) return;
+            // Iframe-internal clicks don't fire on the parent document anyway,
+            // but defense-in-depth bail if the target somehow resolves inside.
+            if ( ev.target.closest( "#content-pane-body iframe" ) ) return;
+            const raw = anchor.getAttribute( "href" );
+            const normalized = this._normalizeDocLinkHref( raw );
+            if ( !normalized || !normalized.startsWith( "/app/docs?path=" ) ) return;
+            ev.preventDefault();
+            const title = anchor.textContent || "Doc";
+            this._openContentPane( "doc", normalized, title );
+        } );
+    }
+
+    /**
+     * Strip any absolute loopback-host prefix (localhost / 127.0.0.1 / 0.0.0.0,
+     * with or without a port) from a URL so it resolves correctly when the user
+     * accesses the dev server from a remote host — "localhost" on the user's
+     * own machine fails the connection. Returns the original href unchanged
+     * if no loopback prefix matches.
+     */
+    _normalizeDocLinkHref( href ) {
+        if ( !href ) return href;
+        return href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, "" );
+    }
+
+    /**
+     * Attach a parent-owned click handler to a same-origin doc-viewer iframe.
+     *
+     * Root cause this solves: clicks inside an iframe do NOT bubble to the
+     * parent document — the parent's document-level interceptor is blind to
+     * them. The only thing previously handling iframe-internal links was
+     * document-viewer.html's own render-time rewrite, which is cache-fragile
+     * (the iframe lazy-loads it; parent hard-reloads never bust it). This
+     * moves link handling to the parent side: the iframe is same-origin, so
+     * `iframe.contentDocument` is fully scriptable, and the parent's code is
+     * `?v=` cache-busted so it is always current.
+     *
+     * Bonus: routing iframe-internal doc-links through `_openContentPane`
+     * makes them participate in the pane's Back history stack.
+     */
+    _bindIframeLinkInterception( frame ) {
+        frame.addEventListener( "load", () => {
+            let idoc;
+            try { idoc = frame.contentDocument; } catch ( _ ) { idoc = null; }
+            if ( !idoc ) return;
+            idoc.addEventListener( "click", ( ev ) => {
+                const a = ev.target && ev.target.closest ? ev.target.closest( "a[href]" ) : null;
+                if ( !a ) return;
+                const norm = this._normalizeDocLinkHref( a.getAttribute( "href" ) );
+                if ( !norm ) return;
+                if ( norm.startsWith( "/app/docs?path=" ) ) {
+                    // Doc-link → render in the pane; Back-history participates.
+                    ev.preventDefault();
+                    this._openContentPane( "doc", norm, a.textContent || "Doc" );
+                } else if ( /^https?:\/\//.test( norm ) ) {
+                    // External absolute link → new tab (avoid framing breakage).
+                    ev.preventDefault();
+                    window.open( norm, "_blank", "noopener,noreferrer" );
+                }
+                // else: same-origin non-doc relative link — let the iframe navigate.
+            } );
+        } );
+    }
+
+    _toggleLayoutMode() {
+        const next = this._layoutMode === "horizontal" ? "vertical" : "horizontal";
+        this._layoutMode = next;
+        document.body.setAttribute( "data-layout-mode", next );
+        try {
+            localStorage.setItem( this.LAYOUT_MODE_KEY, next );
+        } catch ( _ ) { /* Safari private-mode quota — degrade gracefully */ }
+        // Close the pane on switch-to-vertical so we don't leave orphan UI.
+        if ( next === "vertical" ) this._closeContentPane();
+        const toggleBtn = document.getElementById( "layout-mode-toggle" );
+        if ( toggleBtn ) this._updateLayoutModeButtonTooltip( toggleBtn );
+        // Toolbar re-positions based on the new mode (over-pane vs left-of-container).
+        this._updateToolbarPosition();
+    }
+
+    _updateLayoutModeButtonTooltip( btn ) {
+        btn.title = this._layoutMode === "horizontal"
+            ? "Switch back to vertical layout"
+            : "Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.";
+    }
+
+    /**
+     * Open the Reading Pane with abstract markdown or a doc-link iframe.
+     * Pushes onto the in-memory history stack (depth-capped at 10).
+     *
+     * @param {"abstract"|"doc"} type
+     * @param {string} payload — abstract markdown text OR doc-viewer href
+     * @param {string} title   — short title for the pane header
+     */
+    _openContentPane( type, payload, title ) {
+        const pane  = document.getElementById( "content-pane" );
+        const body  = document.getElementById( "content-pane-body" );
+        const titleEl = document.getElementById( "content-pane-title" );
+        const backBtn = document.getElementById( "content-pane-back" );
+        const shell   = document.querySelector( ".content-shell" );
+        if ( !pane || !body ) return;
+
+        // Push to history. Cap depth.
+        this._contentPaneHistory.push( { type, payload, title: title || "" } );
+        if ( this._contentPaneHistory.length > 10 ) this._contentPaneHistory.shift();
+
+        this._renderContentPaneEntry( { type, payload, title: title || "" } );
+        pane.hidden = false;
+        // Activate the 2-pane split (CSS gates the flex layout on .pane-open).
+        // Without this, .content-shell stays block-layout and .container stays
+        // centered — preserving white-space when the pane is empty.
+        if ( shell ) shell.classList.add( "pane-open" );
+        if ( titleEl ) titleEl.textContent = title || "";
+        if ( backBtn ) backBtn.disabled = this._contentPaneHistory.length <= 1;
+    }
+
+    _renderContentPaneEntry( entry ) {
+        const body = document.getElementById( "content-pane-body" );
+        if ( !body ) return;
+        body.innerHTML = "";
+        if ( entry.type === "abstract" ) {
+            // Reuse the class-method renderer (DOMPurify + marked + target=_blank baked in).
+            body.innerHTML = this.renderMarkdown( entry.payload );
+            // Rewrite any absolute-localhost anchors in the rendered abstract.
+            // Without this, clicks fall through to native navigation (the
+            // document-level interceptor only catches /app/docs?path= prefixes).
+            body.querySelectorAll( "a[href]" ).forEach( ( a ) => {
+                const raw  = a.getAttribute( "href" );
+                const norm = this._normalizeDocLinkHref( raw );
+                if ( norm !== raw ) a.setAttribute( "href", norm );
+            } );
+        } else if ( entry.type === "doc" ) {
+            const frame = document.createElement( "iframe" );
+            frame.src = this._normalizeDocLinkHref( entry.payload );
+            frame.setAttribute( "title", entry.title || "Document" );
+            // Parent-owned link interception — handles iframe-internal doc-links
+            // regardless of any stale cached document-viewer.html. See
+            // _bindIframeLinkInterception for the full root-cause writeup.
+            this._bindIframeLinkInterception( frame );
+            body.appendChild( frame );
+        }
+    }
+
+    _closeContentPane() {
+        const pane = document.getElementById( "content-pane" );
+        const body = document.getElementById( "content-pane-body" );
+        const titleEl = document.getElementById( "content-pane-title" );
+        const backBtn = document.getElementById( "content-pane-back" );
+        const shell   = document.querySelector( ".content-shell" );
+        if ( pane ) pane.hidden = true;
+        if ( body ) body.innerHTML = "";
+        if ( titleEl ) titleEl.textContent = "";
+        if ( backBtn ) backBtn.disabled = true;
+        // Deactivate the 2-pane split — container returns to centered layout.
+        if ( shell ) shell.classList.remove( "pane-open" );
+        this._contentPaneHistory = [];
+    }
+
+    _backContentPane() {
+        if ( this._contentPaneHistory.length <= 1 ) return;
+        // Pop the current entry; render the new top.
+        this._contentPaneHistory.pop();
+        const prev = this._contentPaneHistory[ this._contentPaneHistory.length - 1 ];
+        if ( prev ) {
+            this._renderContentPaneEntry( prev );
+            const titleEl = document.getElementById( "content-pane-title" );
+            if ( titleEl ) titleEl.textContent = prev.title || "";
+        }
+        const backBtn = document.getElementById( "content-pane-back" );
+        if ( backBtn ) backBtn.disabled = this._contentPaneHistory.length <= 1;
+    }
+
+    /**
+     * Apply the persisted split ratio to .left-column / .content-pane via
+     * inline flex-grow values. Called on init and after every drag-end.
+     * Geometry: leftColumn.flex-grow = ratio * 100, contentPane.flex-grow = (1 - ratio) * 100.
+     * Also updates --toolbar-left CSS variable so the section-toolbar
+     * re-centers over the (resized) pane column.
+     */
+    _applyPaneSplitRatio() {
+        const leftColumn = document.querySelector( ".left-column" );
+        const pane       = document.getElementById( "content-pane" );
+        if ( !leftColumn || !pane ) return;
+        const ratio = this._paneSplitRatio;
+        leftColumn.style.flexGrow = ( ratio * 100 ).toFixed( 2 );
+        leftColumn.style.flexBasis = "0";
+        pane.style.flexGrow        = ( ( 1 - ratio ) * 100 ).toFixed( 2 );
+        pane.style.flexBasis       = "0";
+        this._updateToolbarPosition();
+    }
+
+    /**
+     * Position the section-toolbar at top-center of the CONTENT AREA
+     * (the left column / container, NOT the right-side reading pane) via
+     * the --toolbar-center-x CSS variable. The left column spans from 0
+     * to `ratio * 100%` of viewport width; its center is at `ratio / 2 * 100%`.
+     * The CSS uses `transform: translateX(-50%)` to self-center the toolbar
+     * around the `left` coordinate, so JS pushes the bare percentage.
+     *
+     * In vertical mode, the variable is removed so the legacy
+     * `left: calc(50% - 500px - 60px)` rule takes effect.
+     */
+    _updateToolbarPosition() {
+        if ( this._layoutMode !== "horizontal" ) {
+            document.documentElement.style.removeProperty( "--toolbar-center-x" );
+            return;
+        }
+        const ratio = this._paneSplitRatio;
+        // Center of the LEFT column (content area), where the container lives.
+        const centerPct = ( ratio / 2 ) * 100;
+        document.documentElement.style.setProperty(
+            "--toolbar-center-x",
+            `${ centerPct.toFixed( 2 ) }%`
+        );
+    }
+
+    _initPaneSplitter() {
+        const splitter = document.getElementById( "content-pane-splitter" );
+        const shell    = document.querySelector( ".content-shell" );
+        if ( !splitter || !shell ) return;
+
+        let dragging = false;
+
+        const onMouseMove = ( ev ) => {
+            if ( !dragging ) return;
+            const rect = shell.getBoundingClientRect();
+            if ( rect.width <= 0 ) return;
+            let ratio = ( ev.clientX - rect.left ) / rect.width;
+            // Clamp to [0.30, 0.85] to keep both panes usable.
+            if ( ratio < 0.30 ) ratio = 0.30;
+            if ( ratio > 0.85 ) ratio = 0.85;
+            this._paneSplitRatio = ratio;
+            this._applyPaneSplitRatio();
+        };
+
+        const onMouseUp = () => {
+            if ( !dragging ) return;
+            dragging = false;
+            splitter.classList.remove( "dragging" );
+            document.body.classList.remove( "splitter-dragging" );
+            // Persist on drag-end (avoid hammering localStorage during drag).
+            try {
+                localStorage.setItem( this.PANE_SPLIT_RATIO_KEY, this._paneSplitRatio.toFixed( 4 ) );
+            } catch ( _ ) { /* Safari private-mode quota — degrade gracefully */ }
+            document.removeEventListener( "mousemove", onMouseMove );
+            document.removeEventListener( "mouseup", onMouseUp );
+        };
+
+        splitter.addEventListener( "mousedown", ( ev ) => {
+            ev.preventDefault();
+            dragging = true;
+            splitter.classList.add( "dragging" );
+            document.body.classList.add( "splitter-dragging" );
+            document.addEventListener( "mousemove", onMouseMove );
+            document.addEventListener( "mouseup", onMouseUp );
+        } );
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  Recent-Activity 3-axis filter — predicate, re-render, change handlers,
+    //  persona-dropdown population, empty-state copy.
+    //  Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * Filter predicate. Boolean AND across active axes; any axis at its
+     * default contributes no constraint.
+     *
+     * Kind values:
+     *   - "all"        → no constraint
+     *   - "heartbeats" → entry.metadata.kind === "heartbeat"
+     *   - "personas"   → entry.topic startsWith "dm-" AND metadata.kind !== "heartbeat"
+     *   - "broadcasts" → entry.topic === "broadcasts" OR "broadcast-acks"
+     *
+     * Direction interactions:
+     *   - "sender"    → entry.persona_name (lowercased) === selectedPersona
+     *   - "recipient" → entry.topic === "dm-" + topicSuffix(selectedPersona)
+     *                   (silent no-op when kind === "broadcasts" — broadcasts fan out)
+     *   - null        → no constraint
+     *
+     * Persona null cancels the Direction axis (cannot filter direction without a target).
+     */
+    _matchesActivityFilter( entry ) {
+        const filter        = this._commonsActivityFilter || { direction: null, kind: "all", persona: null };
+        const topic         = entry.topic || "";
+        const meta          = entry.metadata || {};
+        const personaName   = ( entry.persona_name || "" ).toLowerCase();
+        const kind          = filter.kind || "all";
+        const direction     = filter.direction;
+        const targetPersona = filter.persona;
+
+        // Kind axis
+        if ( kind === "heartbeats" ) {
+            if ( meta.kind !== "heartbeat" ) return false;
+        } else if ( kind === "personas" ) {
+            if ( !topic.startsWith( "dm-" ) ) return false;
+            if ( meta.kind === "heartbeat" ) return false;
+        } else if ( kind === "broadcasts" ) {
+            if ( topic !== "broadcasts" && topic !== "broadcast-acks" ) return false;
+        }
+        // kind === "all" → no constraint
+
+        // Direction × Persona — active only when both axes have a value
+        if ( direction && targetPersona ) {
+            if ( direction === "sender" ) {
+                if ( personaName !== targetPersona ) return false;
+            } else if ( direction === "recipient" ) {
+                // Silent no-op when kind === "broadcasts" (broadcasts fan out — no per-recipient topic)
+                if ( kind !== "broadcasts" ) {
+                    const topicSuffix = targetPersona.replace( /[^\w-]+/gu, "_" );
+                    if ( topic !== "dm-" + topicSuffix ) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Re-render the entries list from the raw cache, applying the active filter.
+     * Called on filter changes (instant client-side re-render, no server hit) AND
+     * on /api/commons/broadcast-history responses (initial load).
+     */
+    _renderAllCommonsEntries() {
+        const entriesEl = document.getElementById( "commons-recent-activity-entries" );
+        const emptyEl   = document.getElementById( "commons-recent-activity-empty" );
+        if ( !entriesEl ) return;
+
+        entriesEl.innerHTML = "";
+        let visibleCount = 0;
+        const raw = Array.isArray( this._commonsRawEntries ) ? this._commonsRawEntries : [ ];
+        for ( const entry of raw ) {
+            if ( this._matchesActivityFilter( entry ) ) {
+                entriesEl.appendChild( this._renderCommonsEntry( entry ) );
+                visibleCount += 1;
+            }
+        }
+        if ( emptyEl ) {
+            emptyEl.hidden = visibleCount > 0;
+            this._updateEmptyStateCopy();
+        }
+    }
+
+    /**
+     * Swap the empty-state copy between the time-window default and the
+     * filter-active variant. Filter-active = any axis off-default.
+     */
+    _updateEmptyStateCopy() {
+        const emptyEl = document.getElementById( "commons-recent-activity-empty" );
+        if ( !emptyEl ) return;
+        const f = this._commonsActivityFilter || {};
+        const anyFilterActive = !!f.direction || ( f.kind && f.kind !== "all" ) || !!f.persona;
+        emptyEl.innerHTML = anyFilterActive
+            ? "<em>No activity matches the current filter.</em>"
+            : "<em>No activity in window.</em>";
+    }
+
+    _setCommonsActivityDirection( value ) {
+        this._commonsActivityFilter.direction = value || null;
+        this._persistCommonsActivityFilter();
+        this._renderAllCommonsEntries();
+    }
+    _setCommonsActivityKind( value ) {
+        this._commonsActivityFilter.kind = value || "all";
+        this._persistCommonsActivityFilter();
+        this._renderAllCommonsEntries();
+    }
+    _setCommonsActivityPersona( value ) {
+        this._commonsActivityFilter.persona = ( value || "" ).toLowerCase() || null;
+        this._persistCommonsActivityFilter();
+        this._renderAllCommonsEntries();
+    }
+    _persistCommonsActivityFilter() {
+        try {
+            localStorage.setItem(
+                this.COMMONS_ACTIVITY_FILTER_KEY,
+                JSON.stringify( this._commonsActivityFilter )
+            );
+        } catch ( _ ) {
+            // Safari private-mode quota error — degrade gracefully to no-persistence.
+        }
+    }
+
+    /**
+     * Fetch the active voice-persona pool and rebuild the Persona dropdown's options.
+     * Sticky-when-valid: preserves the user's current selection if the persona is still
+     * in the refreshed pool; clears it (with write-through to filter state) otherwise.
+     * Wired to the augmented #commons-recent-activity-refresh click AND called once on init.
+     */
+    async _repopulatePersonaDropdown() {
+        const dropdown = document.getElementById( "commons-recent-activity-filter-persona" );
+        if ( !dropdown ) return;
+
+        // Resolve target value: prefer the dropdown's current value, but fall back to the
+        // persisted filter state for the initial-load case (dropdown is empty before populate).
+        const previousValue = dropdown.value || ( this._commonsActivityFilter.persona || "" );
+
+        try {
+            const resp = await this.authedFetch( "/api/cosa-voice/voice-persona/pool" );
+            if ( !resp.ok ) {
+                console.warn( `[COMMONS-ACTIVITY] persona-pool fetch failed: ${resp.status}` );
+                return;
+            }
+            const body     = await resp.json();
+            const sessions = body.active_sessions || [ ];
+            const pool     = body.pool || [ ];
+
+            // Build a name→pool-entry lookup for icon + display_name
+            const poolByName = {};
+            for ( const p of pool ) {
+                poolByName[ ( p.name || "" ).toLowerCase() ] = p;
+            }
+
+            // Rebuild dropdown options
+            dropdown.innerHTML = "";
+            const defaultOpt = document.createElement( "option" );
+            defaultOpt.value       = "";
+            defaultOpt.textContent = "Any persona";
+            dropdown.appendChild( defaultOpt );
+
+            const validValues = new Set();
+            for ( const s of sessions ) {
+                const lower = ( s.persona_name || "" ).toLowerCase();
+                if ( !lower ) continue;
+                validValues.add( lower );
+                const meta    = poolByName[ lower ] || {};
+                const icon    = meta.icon || "";
+                const display = meta.display_name || s.persona_name || lower;
+                const opt = document.createElement( "option" );
+                opt.value       = lower;
+                opt.textContent = icon ? `${icon} ${display}` : display;
+                dropdown.appendChild( opt );
+            }
+
+            // Sticky-when-valid: restore previous selection if still valid; clear otherwise.
+            if ( previousValue && validValues.has( previousValue ) ) {
+                dropdown.value = previousValue;
+            } else if ( previousValue ) {
+                // Stale selection — clear from filter state with write-through.
+                this._setCommonsActivityPersona( "" );
+            }
+        } catch ( err ) {
+            console.warn( `[COMMONS-ACTIVITY] persona-pool fetch exception: ${err}` );
+        }
     }
 
     /**
@@ -8780,6 +10816,224 @@ class NotificationsUI {
         const currentName = this.sessionNames[ sessionId ] || '';
         // Create voice-first edit modal instead of browser prompt
         this.showSessionNameEditModal( sessionId, currentName );
+    }
+
+    /**
+     * Toggle conversation mode for a session via the cosa-voice HTTP endpoint.
+     *
+     * The server bridge file is canonical. We POST the desired state, then update our
+     * local cache + widget eagerly for responsiveness; the WebSocket
+     * conversation_mode_changed broadcast that follows is the authoritative confirmation
+     * (it lands in handleConversationModeChanged() and reconciles).
+     *
+     * @param {string} sessionId - Per-session_id key (8-char hex from sender_id)
+     */
+    async toggleConversationMode( sessionId ) {
+        if ( !sessionId ) return;
+        // Default missing entries to LOUD (true) — matches createSenderCard default.
+        // No entry = LOUD; click flips to QUIET (false). Entry=false = QUIET; click flips to LOUD (true).
+        const current = ( sessionId in this.conversationModes )
+            ? !!this.conversationModes[ sessionId ]
+            : true;
+        const next    = !current;
+        try {
+            // 2026-05-14 evening: rewired from dead `/api/cosa-voice/conversation-mode/`
+            // (404'd silently) to the canonical `/api/cosa-voice/speakerphone/` endpoint
+            // used by cosa-voice MCP's enable_speakerphone() / disable_speakerphone() tools.
+            // The endpoint writes the bridge `speakerphone_on` flag and broadcasts a
+            // `speakerphone_changed` WS event (mapped to `conversation_mode_active` in the
+            // routing case at line ~5504 for backwards-compat with handleConversationModeChanged).
+            //
+            // 2026-05-14 fix: body field is `on` (NOT `active` — the legacy
+            // conversation-mode endpoint used `active`, but the canonical
+            // /speakerphone/ endpoint's Pydantic model requires `on`).
+            const response = await this.authedFetch(
+                `/api/cosa-voice/speakerphone/${encodeURIComponent( sessionId )}`,
+                {
+                    method  : 'POST',
+                    headers : { 'Content-Type': 'application/json' },
+                    body    : JSON.stringify( { on: next } )
+                }
+            );
+            if ( !response.ok ) {
+                const errText = await response.text().catch( () => '' );
+                this.error( `[CONVERSATION-MODE] toggle failed (${response.status}): ${errText}` );
+                return;
+            }
+            // Optimistic local update — WS broadcast will reaffirm
+            this._setConversationModeLocal( sessionId, next );
+
+            // UX expediter: when ENTERING conversation mode (not exiting),
+            // shift focus to the recording button. Clicking into conversation
+            // mode is a strong signal the user wants to speak; pre-focusing
+            // the mic shaves a step off "click toggle → click mic → speak".
+            if ( next ) {
+                const recBtn = document.getElementById( `cc-session-stt-${sessionId}` );
+                if ( recBtn ) recBtn.focus();
+            }
+        } catch ( e ) {
+            this.error( `[CONVERSATION-MODE] toggle exception: ${e}` );
+        }
+    }
+
+    /**
+     * Apply a conversation_mode_changed WebSocket envelope.
+     *
+     * Server-canonical state — overwrites localStorage cache + redraws all toggle widgets
+     * matching this session_id (multiple sender cards may share the session_id if the
+     * UI happens to render duplicates).
+     *
+     * @param {object} envelope - WebSocket message envelope:
+     *     { type, session_id, conversation_mode_active, timestamp }
+     */
+    handleConversationModeChanged( envelope ) {
+        const rawSessionId = envelope?.session_id;
+        const active       = !!envelope?.conversation_mode_active;
+        const displaced    = envelope?.displaced === true;
+        const displacedBy  = envelope?.displaced_by || null;
+        if ( !rawSessionId ) {
+            this.log( '[CONVERSATION-MODE] WS event missing session_id, ignoring' );
+            return;
+        }
+        // Normalize to 8-char prefix — the UI's data-session-id (set in
+        // createSenderCard via parseSenderId) is keyed by the 8-char form
+        // extracted from sender_id like "claude.code@lupin.deepily.ai#c7333045".
+        // Server-side displace events emit the FULL UUID read from the bridge
+        // file; without this normalization, downstream selector lookups
+        // .sender-conversation-mode-btn[data-session-id="<full-uuid>"] miss
+        // the actual button DOM, leaving the toggle icon stuck on the
+        // displaced session. (Bug surfaced 2026-04-28 during multi-session
+        // mutex testing.)
+        const sessionId = ( typeof rawSessionId === 'string' && rawSessionId.length > 8 )
+            ? rawSessionId.substring( 0, 8 )
+            : rawSessionId;
+        this._setConversationModeLocal( sessionId, active );
+
+        // Mutex side effect: when this session was displaced by another, pause
+        // any in-flight TTS so the user's audio focus doesn't trail behind
+        // the toggle they just made on the OTHER session. The user can resume
+        // manually via the global play or per-notification corner button.
+        if ( displaced && this.activeTTSItem && !this.isTTSPaused ) {
+            this.log( `[CONVERSATION-MODE] session ${sessionId} displaced by ${displacedBy} — pausing in-flight TTS` );
+            this.pauseTTS();
+        }
+
+        // Pin/unpin the active conversation pane in the notifications accordion
+        if ( active ) {
+            this._pinSenderCardForSession( sessionId );
+        } else {
+            this._unpinSenderCardForSession( sessionId );
+        }
+
+        // Strip-icon mic overlay must follow the same normalized session_id —
+        // the WS payload carries the full UUID but icons are keyed by the
+        // 8-char prefix. Without this the OFF transition silently misses the
+        // selector and the mic icon strands in the focus tray.
+        this._setStripIconConvMode( sessionId, active );
+
+        this.log( `[CONVERSATION-MODE] session ${sessionId} → ${active ? 'conversation' : 'notification'} mode (via WS${displaced ? ', displaced' : ''})` );
+    }
+
+    /**
+     * Pin the sender card whose session_id matches the given id to DOM index 0
+     * of #notifications-list, marking it with data-pinned-conv-mode="true" so
+     * the soft-glow CSS rule applies and the sort-respecting insertion logic
+     * keeps it at the top regardless of activity from other sessions.
+     *
+     * Unpins any previously-pinned card so the invariant "at most one pinned
+     * card at a time" holds (matches the server-side mutex).
+     *
+     * @param {string} sessionId - The session whose card should be pinned
+     */
+    _pinSenderCardForSession( sessionId ) {
+        if ( !sessionId ) return;
+
+        const container = document.getElementById( 'notifications-list' );
+        if ( !container ) return;
+
+        // Unpin any previously-pinned card belonging to a DIFFERENT session
+        // (server-side mutex guarantees only one is active at a time, but the
+        // UI reconciles defensively in case events arrive out of order).
+        const previouslyPinned = container.querySelectorAll( '.sender-card[data-pinned-conv-mode="true"]' );
+        previouslyPinned.forEach( card => {
+            if ( card.getAttribute( 'data-session-id' ) !== sessionId ) {
+                card.removeAttribute( 'data-pinned-conv-mode' );
+            }
+        } );
+
+        // Find the target card by session_id (data attribute set in createSenderCard).
+        const card = container.querySelector( `.sender-card[data-session-id="${sessionId}"]` );
+        if ( !card ) {
+            // Card may not exist yet (first notification for this session arrives
+            // later). When createSenderCard runs, it consults conversationModes
+            // and pins itself if active=true at insertion time.
+            this.log( `[CONVERSATION-MODE] _pinSenderCardForSession(${sessionId}) — no card yet, pin deferred to createSenderCard` );
+            return;
+        }
+
+        card.setAttribute( 'data-pinned-conv-mode', 'true' );
+        if ( container.firstChild !== card ) {
+            container.insertBefore( card, container.firstChild );
+        }
+    }
+
+    /**
+     * Remove the data-pinned-conv-mode attribute from the matching sender card,
+     * letting it resume normal activity-based sorting. Called on deactivate
+     * (active=false) and on displaced events.
+     *
+     * @param {string} sessionId - The session whose card should be unpinned
+     */
+    _unpinSenderCardForSession( sessionId ) {
+        if ( !sessionId ) return;
+        const container = document.getElementById( 'notifications-list' );
+        if ( !container ) return;
+        const card = container.querySelector(
+            `.sender-card[data-session-id="${sessionId}"][data-pinned-conv-mode="true"]`
+        );
+        if ( card ) {
+            card.removeAttribute( 'data-pinned-conv-mode' );
+        }
+    }
+
+    /**
+     * Update the local cache + DOM widget for a session's conversation mode.
+     * Internal helper — NOT a server write. Used by both optimistic toggle and WS sync.
+     *
+     * @param {string} sessionId - Session ID
+     * @param {boolean} active - Target state
+     */
+    _setConversationModeLocal( sessionId, active ) {
+        this.conversationModes[ sessionId ] = !!active;
+        try {
+            localStorage.setItem( this.CONVERSATION_MODES_KEY, JSON.stringify( this.conversationModes ) );
+        } catch ( e ) {
+            this.log( `[CONVERSATION-MODE] localStorage write failed (cache only): ${e}` );
+        }
+
+        // Redraw any matching toggle button(s). data-session-id selector matches both
+        // the sender-card itself and the per-session toggle button.
+        //
+        // 2026-05-14 evening: icon set is mode-aware (chorus vs solo). Per-session
+        // DND semantic — speakerphone (active=true) plays full TTS; quiet (active=false)
+        // demotes to medium priority with small ding only.
+        const isSolo = this.ttsInteractionMode === 'solo';
+        const buttons = document.querySelectorAll(
+            `.sender-conversation-mode-btn[data-session-id="${sessionId}"]`
+        );
+        buttons.forEach( btn => {
+            btn.textContent = isSolo
+                ? ( active ? '📞' : '🔔' )
+                : ( active ? '🔊' : '🤭' );
+            btn.title = isSolo
+                ? ( active
+                    ? 'Conversation mode ON — this session monopolizes TTS (click to release)'
+                    : 'Notification mode — no monopoly (click to claim TTS)' )
+                : ( active
+                    ? "Speakerphone — this session's notifications play full TTS at the slider fraction (click to switch to quiet ding-only mode)"
+                    : "Quiet — notifications still arrive in the list with a small ding, no TTS playback (click to switch back to speakerphone)" );
+            btn.classList.toggle( 'is-active', active );
+        } );
     }
 
     /**
@@ -9099,7 +11353,17 @@ class NotificationsUI {
             // Only move card during runtime updates, not during initial page load
             // (initial load relies on API sort order preserved via appendChild)
             if ( !isNewSender && !this.isInitialLoad ) {
-                this.moveSenderCardToTop( senderId );
+                // Skip the focus-tray unread-badge bump for entries that are
+                // not user-actionable arrivals from a peer:
+                //   - Progress-group entries (tool-call progress updates)
+                //   - Outgoing responses (the user's own reply to a question;
+                //     they already know they responded — counting it as a
+                //     "new notification" on the asking persona is a false
+                //     positive). Fix added 2026-05-21 per Rick's report.
+                // Card still moves to top in both cases so recency ordering
+                // reflects activity.
+                const isProgressGroup = !!notification.progress_group_id;
+                this.moveSenderCardToTop( senderId, { skipUnread: isProgressGroup || isResponse } );
             }
         }
 
@@ -9197,7 +11461,23 @@ class NotificationsUI {
         const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
 
-        if ( container && card && container.firstChild !== card ) {
+        if ( !container || !card ) return;
+
+        // Pinned-card invariant: never insert a non-pinned card above a pinned
+        // conversation-mode card. If a pinned card exists AND we're moving a
+        // DIFFERENT card, place it as the second child (immediately after the
+        // pinned card) instead of clobbering position 0.
+        const pinned = container.querySelector( '.sender-card[data-pinned-conv-mode="true"]' );
+        if ( pinned && pinned !== card ) {
+            const target = pinned.nextSibling;
+            if ( target !== card ) {
+                container.insertBefore( card, target );
+                this.log( `Moved ${senderId} card to position 1 (after pinned conversation card)` );
+            }
+            return;
+        }
+
+        if ( container.firstChild !== card ) {
             container.insertBefore( card, container.firstChild );
             this.log( `Moved ${senderId} card to top` );
         }
@@ -9239,6 +11519,30 @@ class NotificationsUI {
 
         // Build session display string (only if session_id present)
         // Session name is clickable for inline editing, gist button triggers LLM summary
+        //
+        // Per-session DND toggle (2026-05-14 evening):
+        // - `this.conversationModes` map tracks per-session speakerphone state
+        // - Entry value `true`  = LOUD  (full TTS playback at slider fraction)
+        // - Entry value `false` = QUIET (medium priority, small ding only, no TTS)
+        // - No entry            = LOUD  (default — Rick's chosen default-state)
+        // Icon set depends on `this.ttsInteractionMode`:
+        // - chorus: 🔊 (speakerphone) / 🤭 (quiet — hand-over-mouth = "shh")
+        // - solo:   📞 (conversation) / 🔔 (notification) — legacy iconography preserved
+        const speakerphoneOn = sessionId
+            ? ( sessionId in this.conversationModes ? !!this.conversationModes[ sessionId ] : true )
+            : true;
+        const isSolo = this.ttsInteractionMode === 'solo';
+        const conversationModeActive = speakerphoneOn;  // kept name for CSS class compatibility
+        const conversationModeIcon   = isSolo
+            ? ( speakerphoneOn ? '📞' : '🔔' )
+            : ( speakerphoneOn ? '🔊' : '🤭' );
+        const conversationModeTitle  = isSolo
+            ? ( speakerphoneOn
+                ? 'Conversation mode ON — this session monopolizes TTS (click to release)'
+                : 'Notification mode — no monopoly (click to claim TTS)' )
+            : ( speakerphoneOn
+                ? "Speakerphone — this session's notifications play full TTS at the slider fraction (click to switch to quiet ding-only mode)"
+                : "Quiet — notifications still arrive in the list with a small ding, no TTS playback (click to switch back to speakerphone)" );
         const sessionDisplay = sessionId
             ? `<span class="sender-session-id"
                      onclick="event.stopPropagation();">#${sessionId}</span><span class="sender-session-copy copy-btn"
@@ -9257,17 +11561,44 @@ class NotificationsUI {
         const activeClass = group?.isActive ? ' sender-card-active' : '';
         const activeTitle = group?.isActive ? 'Active session' : 'Inactive session';
 
+        // Voice persona badge: when this session has a per-session voice
+        // assigned, render a colored chip in the header so the user can
+        // visually identify which session is which (audio + visual cues).
+        // Returns '' when no persona is known — typically because the
+        // session predates the feature, the SessionStart hook's /allocate
+        // call failed (server falls back to Sam, the system default voice),
+        // or senderPersonaMap hasn't been hydrated yet for this sender.
+        // Live arrivals patch the DOM in place via _setPersonaBadgeOnCard.
+        const persona = this.getPersonaForSender( senderId );
+        const personaBadge = this._renderPersonaBadgeHTML( persona );
+
         const card = document.createElement( 'div' );
         // Card ID must escape # character in addition to @ and .
         card.id = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         card.className = `sender-card${activeClass}`;
         card.setAttribute( 'data-project', parsed.project );
         card.setAttribute( 'data-session-id', sessionId || '' );
+        card.setAttribute( 'data-sender-id', senderId );  // for focus-mode walker lookup
+
+        // Foundation: set --persona-color + --persona-color-rgb on the card
+        // root so Tier 1 (border + shadow) and Tier 2 (header gradient) CSS
+        // rules can apply persona color via var() — without these vars set,
+        // the rules fall back to their pre-theming defaults (grey/green).
+        // See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/02-theming-round1-design.md §2.1
+        if ( persona && persona.color ) {
+            card.style.setProperty( "--persona-color", persona.color );
+            const rgb = this._hexToRgb( persona.color );
+            if ( rgb ) card.style.setProperty( "--persona-color-rgb", rgb );
+        }
         // Build CC voice input row (only for claude.code sessions with a session ID)
         const isCCSession  = parsed.agentType === 'claude.code' && sessionId;
         const ccVoiceInput = isCCSession ? `
             <div class="cc-voice-input" data-session-hash="${sessionId}" data-sender-id="${senderId}">
                 <div class="cc-voice-input-row">
+                    <button type="button" class="sender-conversation-mode-btn${conversationModeActive ? ' is-active' : ''}"
+                            data-session-id="${sessionId}"
+                            onclick="event.stopPropagation(); window.notificationsUI.toggleConversationMode('${sessionId}')"
+                            title="${conversationModeTitle}">${conversationModeIcon}</button>
                     <button type="button" class="stt-button cc-session-stt"
                             id="cc-session-stt-${sessionId}"
                             title="Click to record (30s max, ESC to cancel)">🎤</button>
@@ -9287,6 +11618,7 @@ class NotificationsUI {
                 <span class="sender-project-name">${projectName}</span>
                 ${sessionDisplay}
                 <span class="sender-stats-group">
+                    ${personaBadge}
                     <span class="sender-new-count"></span>
                     <span class="sender-message-count">(0)</span>
                     <span class="sender-last-activity">Last: --</span>
@@ -9300,13 +11632,53 @@ class NotificationsUI {
             </div>
         `;
 
-        // Insert at top for runtime updates, append for initial load (preserves API sort order)
+        // If THIS card belongs to the active conversation-mode session, mark it
+        // pinned at insert time so the soft-glow CSS rule kicks in immediately
+        // and the sort-respecting insertion logic keeps it at the top. This
+        // covers the initial-page-load case where conversationModes is hydrated
+        // from localStorage and the session might already be active.
+        const shouldPin = sessionId && !!this.conversationModes[ sessionId ];
+        if ( shouldPin ) {
+            card.setAttribute( 'data-pinned-conv-mode', 'true' );
+        }
+
+        // Insert at top for runtime updates, append for initial load (preserves API sort order).
+        // Pinning invariant: a pinned card always lives at index 0; non-pinned
+        // cards inserted at "top" go to index 1 when a pinned card exists.
         if ( insertAtTop ) {
-            container.insertBefore( card, container.firstChild );
+            const pinned = container.querySelector( '.sender-card[data-pinned-conv-mode="true"]' );
+            if ( pinned && pinned !== card ) {
+                container.insertBefore( card, pinned.nextSibling );
+            } else {
+                container.insertBefore( card, container.firstChild );
+            }
         } else {
             container.appendChild( card );
         }
-        this.log( `Created sender card for ${projectName}${sessionId ? '#' + sessionId : ''} (${senderId})` );
+
+        // CC focus mode + selector strip hooks (Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md):
+        // 1. If focus mode is on and this isn't the focused session, hide the card.
+        // 2. If this is a CC session, register an icon in the strip.
+        // 3. If focus is on and this isn't focused, bump the unread badge so the
+        //    user gets peripheral awareness that a new session just appeared.
+        this._applyFocusHiddenToCard( card, senderId );
+        if ( isCCSession ) {
+            // insertAtTop drives BOTH the sender-card list ordering AND the
+            // strip ordering — initial-load passes false (preserve API
+            // order, newest-first), runtime passes true (newest leftmost).
+            this._addStripIcon( senderId, projectName, persona, sessionId, insertAtTop );
+            if ( this.ccFocusState.enabled
+                 && this.ccFocusState.focused_sender_id !== senderId ) {
+                const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+                if ( icon ) {
+                    this.ccStripUnreadCounts[ senderId ] = 1;
+                    icon.setAttribute( "data-unread", "true" );
+                    icon.setAttribute( "data-unread-count", "1" );
+                }
+            }
+        }
+
+        this.log( `Created sender card for ${projectName}${sessionId ? '#' + sessionId : ''} (${senderId})${shouldPin ? ' [PINNED conversation mode]' : ''}` );
     }
 
     /**
@@ -9520,6 +11892,78 @@ class NotificationsUI {
             `;
         }
 
+        // Corner pause button — appears in upper-right of the message bubble while
+        // its TTS is playing (gated by .tts-playing on the messageDiv, which is
+        // already toggled by start/stopTTSPlayingIndicator across the audio
+        // lifecycle). Click flips between pause and resume; the data-paused
+        // attribute carries the toggle state.
+        const cornerBtnId = notification.id || notification.id_hash || '';
+        if ( cornerBtnId && !isResponse ) {
+            const cornerBtn = document.createElement( 'button' );
+            cornerBtn.type      = 'button';
+            cornerBtn.className = 'notification-corner-pause-btn';
+            cornerBtn.dataset.notificationId = cornerBtnId;
+            cornerBtn.dataset.paused         = 'false';
+            cornerBtn.title       = 'Pause this notification\'s playback';
+            cornerBtn.textContent = '⏸';
+            cornerBtn.setAttribute( 'aria-label', 'Pause notification audio' );
+            cornerBtn.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();
+                const nid = cornerBtn.dataset.notificationId;
+                this.log( `[CORNER-PAUSE] click — nid=${nid}, isTTSPaused=${this.isTTSPaused}, activeTTSItem=${!!this.activeTTSItem}` );
+
+                // Route through the canonical pauseTTS()/resumeTTS() helpers —
+                // those handle BOTH playback modes (Web Audio API for instant
+                // mode, HTML Audio for reliable mode). The earlier attempt at
+                // calling this.currentAudio.pause() failed because instant mode
+                // produces audio via AudioContext + AudioBufferSource and the
+                // HTML5 Audio handle is a stale reference there. The global
+                // pause button uses these same helpers — corner button now
+                // mirrors that behavior so they stay in sync.
+                if ( this.isTTSPaused ) {
+                    this.resumeTTS();
+                } else {
+                    this.pauseTTS();
+                }
+
+                // Optimistic local UI update — the source of truth is
+                // this.isTTSPaused, which the helpers above just flipped.
+                if ( this.isTTSPaused ) {
+                    cornerBtn.dataset.paused = 'true';
+                    cornerBtn.textContent    = '▶';
+                    cornerBtn.title          = 'Resume this notification\'s playback';
+                    cornerBtn.setAttribute( 'aria-label', 'Resume notification audio' );
+                    messageDiv.classList.add( 'is-paused-current' );
+                } else {
+                    cornerBtn.dataset.paused = 'false';
+                    cornerBtn.textContent    = '⏸';
+                    cornerBtn.title          = 'Pause this notification\'s playback';
+                    cornerBtn.setAttribute( 'aria-label', 'Pause notification audio' );
+                    messageDiv.classList.remove( 'is-paused-current' );
+                }
+            } );
+            messageDiv.appendChild( cornerBtn );
+
+            // Corner STOP button — sibling to pause/resume. Stops the active
+            // TTS playback AND advances the queue, so the user can dismiss
+            // a TTS rendering they no longer want without first pausing.
+            // stopTTSAndAdvance() calls stopAudio() then onTTSPlaybackComplete()
+            // which clears activeTTSItem and shifts the next queued item.
+            const stopBtn = document.createElement( 'button' );
+            stopBtn.type      = 'button';
+            stopBtn.className = 'notification-corner-stop-btn';
+            stopBtn.dataset.notificationId = cornerBtnId;
+            stopBtn.title       = 'Stop this notification\'s playback and advance';
+            stopBtn.textContent = '⏹';
+            stopBtn.setAttribute( 'aria-label', 'Stop notification audio' );
+            stopBtn.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();
+                this.log( `[CORNER-STOP] click — nid=${stopBtn.dataset.notificationId}` );
+                this.stopTTSAndAdvance();
+            } );
+            messageDiv.appendChild( stopBtn );
+        }
+
         // Add to top (newest first)
         container.insertBefore( messageDiv, container.firstChild );
 
@@ -9705,8 +12149,11 @@ class NotificationsUI {
         if ( card ) {
             card.remove();
         }
+        // Strip icon must follow the card. If this was the focused
+        // session, _removeStripIcon auto-exits focus mode.
+        this._removeStripIcon( senderId );
         this.senderGroups.delete( senderId );
-        this.updateNotificationCount();
+        this.updateTotalNotificationsCount();
         this.log( `Removed sender card for ${senderId}` );
     }
 
@@ -9857,8 +12304,9 @@ class NotificationsUI {
             // Get list of senders with visible (non-hidden) notifications
             const sendersUrl = `/api/notifications/senders-visible/${encodeURIComponent( this.currentUserEmail )}`;
             const queryParams = new URLSearchParams();
-            if ( this.historyWindowHours ) {
-                queryParams.append( 'hours', this.historyWindowHours );
+            const effectiveHours = this.getEffectiveHoursForQuery();
+            if ( effectiveHours !== null ) {
+                queryParams.append( 'hours', effectiveHours );
             }
             if ( this.isAdmin && this.queueFilterMode === 'others' ) {
                 queryParams.append( 'exclude_own_jobs', 'true' );
@@ -9879,6 +12327,18 @@ class NotificationsUI {
 
             const senders = await sendersResponse.json();
             this.log( `Found ${senders.length} senders with visible history` );
+
+            // Layer B: pre-populate senderPersonaMap from the senders-visible
+            // response BEFORE createSenderCard runs. The server stamps voice_persona
+            // per sender via _voice_persona_for_sender_id; without this hydration
+            // step, a force-refreshed page would render every card without a badge
+            // until the first live notification arrives.
+            // See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md §10
+            for ( const senderInfo of senders ) {
+                if ( senderInfo.sender_id && senderInfo.voice_persona ) {
+                    this.senderPersonaMap.set( senderInfo.sender_id, senderInfo.voice_persona );
+                }
+            }
 
             // Load date-grouped conversation for each sender
             // Set flag so createSenderCard() appends (preserving API sort order) instead of prepending
@@ -9906,8 +12366,9 @@ class NotificationsUI {
             const baseUrl = `/api/notifications/conversation-by-date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}`;
             const params = new URLSearchParams();
 
-            if ( this.historyWindowHours ) {
-                params.append( 'hours', this.historyWindowHours );
+            const effectiveHours = this.getEffectiveHoursForQuery();
+            if ( effectiveHours !== null ) {
+                params.append( 'hours', effectiveHours );
             }
             if ( anchorTime ) {
                 params.append( 'anchor', anchorTime );
@@ -9960,8 +12421,27 @@ class NotificationsUI {
     }
 
     /**
+     * Resolve the active history window to a numeric hours value for backend queries.
+     * The 'today' sentinel is computed dynamically from the user's local midnight,
+     * so a notification from 12:01 AM today is included regardless of when the
+     * user picked "Today" — distinct from a fixed 24-hour rolling window.
+     *
+     * @returns {number|null} Numeric hours for the `hours` query param, or null
+     *   if no filter should be applied (sentinel maps to "All time").
+     */
+    getEffectiveHoursForQuery() {
+        if ( this.historyWindowHours === null ) return null;
+        if ( this.historyWindowHours === 'today' ) {
+            const now      = new Date();
+            const midnight = new Date( now.getFullYear(), now.getMonth(), now.getDate() );
+            return Math.max( 1, Math.ceil( ( now - midnight ) / 3600000 ) );
+        }
+        return this.historyWindowHours;
+    }
+
+    /**
      * Set the history window and reload conversations.
-     * @param {number|null} hours - Hours to look back, or null for all time
+     * @param {number|string|null} hours - Hours to look back, 'today' for since-midnight, or null for all time
      */
     async setHistoryWindow( hours ) {
         // Close dropdown menu first
@@ -9980,7 +12460,10 @@ class NotificationsUI {
         this.historyWindowHours = hours;
         localStorage.setItem( this.HISTORY_WINDOW_KEY, storageValue );
 
-        this.log( `History window set to: ${hours === null ? 'all time' : hours + ' hours'}` );
+        const logLabel = hours === null
+            ? 'all time'
+            : ( hours === 'today' ? `today (since local midnight, ~${this.getEffectiveHoursForQuery()}h)` : `${hours} hours` );
+        this.log( `History window set to: ${logLabel}` );
 
         // Update dropdown display
         this.updateHistoryWindowDisplay( hours );
@@ -10003,6 +12486,10 @@ class NotificationsUI {
             const cards = container.querySelectorAll( '.sender-card' );
             cards.forEach( card => card.remove() );
         }
+
+        // Strip icons mirror sender cards — wipe them too so a history-
+        // window change doesn't leave stranded icons in the focus tray.
+        this._clearAllStripIcons();
 
         this.updateTotalNotificationsCount();
     }
@@ -10038,7 +12525,6 @@ class NotificationsUI {
             || this.WINDOW_OPTIONS[0];
 
         dropdown.innerHTML = `
-            <span class="dropdown-label">History:</span>
             <button class="dropdown-display" onclick="event.stopPropagation(); window.notificationsUI.toggleHistoryDropdown()">
                 ${currentOption.label}
                 <span class="dropdown-arrow">▼</span>
@@ -10046,7 +12532,7 @@ class NotificationsUI {
             <div class="dropdown-menu" id="history-dropdown-menu">
                 ${this.WINDOW_OPTIONS.map( opt => `
                     <div class="dropdown-item ${opt.hours === this.historyWindowHours ? 'selected' : ''}"
-                         onclick="event.stopPropagation(); window.notificationsUI.setHistoryWindow(${opt.hours})">
+                         onclick="event.stopPropagation(); window.notificationsUI.setHistoryWindow(${JSON.stringify( opt.hours ).replace( /"/g, '&quot;' )})">
                         ${opt.label}
                     </div>
                 ` ).join( '' )}
@@ -10182,6 +12668,8 @@ class NotificationsUI {
         // Create list item with styling from original queue.html
         const listItem = document.createElement( "li" );
         listItem.id = notificationId;
+        // position:relative anchors the absolutely-positioned corner pause button.
+        listItem.style.position = "relative";
         listItem.style.marginBottom = "8px";
         listItem.style.padding = "5px";
         listItem.style.border = "1px solid transparent";
@@ -10221,10 +12709,14 @@ class NotificationsUI {
                           style="cursor: not-allowed; opacity: 0.4; transition: opacity 0.2s; font-size: 14px;" 
                           title="Stop notification audio" role="button" tabindex="-1" aria-label="Stop notification audio">⏹️</span>
                 </span>
-                <span class="delete-notification" data-notification-id="${notificationId}" 
-                      style="cursor: pointer; opacity: 0.6; transition: opacity 0.2s; font-size: 14px; color: #dc3545; margin-left: 4px;" 
+                <span class="delete-notification" data-notification-id="${notificationId}"
+                      style="cursor: pointer; opacity: 0.6; transition: opacity 0.2s; font-size: 14px; color: #dc3545; margin-left: 4px;"
                       title="Delete notification" role="button" tabindex="0" aria-label="Delete notification">🗑️</span>
             </div>
+            <button type="button" class="notification-corner-pause-btn"
+                    data-notification-id="${notificationId}"
+                    title="Pause this notification's playback"
+                    aria-label="Pause notification audio">⏸</button>
         `;
         
         // Store notification data for replay functionality
@@ -10243,8 +12735,9 @@ class NotificationsUI {
         const resumeButton = listItem.querySelector( '.audio-resume-btn' );
         const pauseButton = listItem.querySelector( '.audio-pause-btn' );
         const stopButton = listItem.querySelector( '.audio-stop-btn' );
+        const cornerPauseButton = listItem.querySelector( '.notification-corner-pause-btn' );
         const deleteButton = listItem.querySelector( '.delete-notification' );
-        
+
         if ( restartButton ) {
             this.addAudioControlListeners( restartButton, 'restart', notificationId );
         }
@@ -10256,6 +12749,19 @@ class NotificationsUI {
         }
         if ( stopButton ) {
             this.addAudioControlListeners( stopButton, 'stop', notificationId );
+        }
+        if ( cornerPauseButton ) {
+            // Corner pause button toggles between pause and resume based on the
+            // listItem's current paused-state class. CSS gates visibility to
+            // li.is-playing-current so the button only appears while audio is
+            // loaded; we just dispatch the right action here.
+            cornerPauseButton.addEventListener( 'click', ( e ) => {
+                e.stopPropagation();
+                const action = listItem.classList.contains( 'is-paused-current' )
+                    ? 'resume'
+                    : 'pause';
+                this.handleAudioControl( action, notificationId );
+            } );
         }
         
         if ( deleteButton ) {
@@ -10411,7 +12917,14 @@ class NotificationsUI {
         const resumeBtn = panel.querySelector( '.audio-resume-btn' );
         const pauseBtn = panel.querySelector( '.audio-pause-btn' );
         const stopBtn = panel.querySelector( '.audio-stop-btn' );
-        
+
+        // Mirror the same state machine onto the absolutely-positioned corner
+        // pause button on the parent <li>. CSS gates visibility to
+        // li.is-playing-current; the icon flips between ⏸ (playing) and ▶
+        // (paused) so the user can resume in place from a distance.
+        const listItem      = panel.closest( 'li' );
+        const cornerPauseBtn = listItem?.querySelector( '.notification-corner-pause-btn' );
+
         // Remove all existing state classes
         [restartBtn, resumeBtn, pauseBtn, stopBtn].forEach( btn => {
             if ( btn ) {
@@ -10430,8 +12943,17 @@ class NotificationsUI {
                 this.updateButtonVisualState( resumeBtn, false );
                 this.updateButtonVisualState( pauseBtn, false );
                 this.updateButtonVisualState( stopBtn, false );
+                // Corner pause button: hide and reset to ⏸ for next playback
+                if ( listItem ) {
+                    listItem.classList.remove( 'is-playing-current', 'is-paused-current' );
+                }
+                if ( cornerPauseBtn ) {
+                    cornerPauseBtn.textContent = '⏸';
+                    cornerPauseBtn.title       = 'Pause this notification\'s playback';
+                    cornerPauseBtn.setAttribute( 'aria-label', 'Pause notification audio' );
+                }
                 break;
-                
+
             case 'playing':
                 // [⏮️ disabled] [▶️ disabled] [⏸️ enabled] [⏹️ enabled]
                 restartBtn?.classList.add( 'audio-control-disabled' );
@@ -10442,8 +12964,18 @@ class NotificationsUI {
                 this.updateButtonVisualState( resumeBtn, false );
                 this.updateButtonVisualState( pauseBtn, true );
                 this.updateButtonVisualState( stopBtn, true );
+                // Corner pause button: visible (playing), shows ⏸
+                if ( listItem ) {
+                    listItem.classList.add( 'is-playing-current' );
+                    listItem.classList.remove( 'is-paused-current' );
+                }
+                if ( cornerPauseBtn ) {
+                    cornerPauseBtn.textContent = '⏸';
+                    cornerPauseBtn.title       = 'Pause this notification\'s playback';
+                    cornerPauseBtn.setAttribute( 'aria-label', 'Pause notification audio' );
+                }
                 break;
-                
+
             case 'paused':
                 // [⏮️ enabled] [▶️ enabled] [⏸️ disabled] [⏹️ enabled]
                 restartBtn?.classList.add( 'audio-control-enabled' );
@@ -10454,6 +12986,15 @@ class NotificationsUI {
                 this.updateButtonVisualState( resumeBtn, true );
                 this.updateButtonVisualState( pauseBtn, false );
                 this.updateButtonVisualState( stopBtn, true );
+                // Corner pause button: visible (paused), shows ▶
+                if ( listItem ) {
+                    listItem.classList.add( 'is-playing-current', 'is-paused-current' );
+                }
+                if ( cornerPauseBtn ) {
+                    cornerPauseBtn.textContent = '▶';
+                    cornerPauseBtn.title       = 'Resume this notification\'s playback';
+                    cornerPauseBtn.setAttribute( 'aria-label', 'Resume notification audio' );
+                }
                 break;
         }
     }
@@ -10669,6 +13210,10 @@ class NotificationsUI {
             card.remove();
         }
 
+        // Remove the corresponding strip icon. If this session was the
+        // focused one, _removeStripIcon auto-exits focus mode.
+        this._removeStripIcon( senderId );
+
         // Remove from local state
         this.senderGroups.delete( senderId );
 
@@ -10725,8 +13270,9 @@ class NotificationsUI {
         // 4. Call bulk delete endpoint with current filter
         try {
             const params = new URLSearchParams();
-            if ( this.historyWindowHours !== null ) {
-                params.append( 'hours', this.historyWindowHours );
+            const effectiveHours = this.getEffectiveHoursForQuery();
+            if ( effectiveHours !== null ) {
+                params.append( 'hours', effectiveHours );
             }
             if ( this.isAdmin && this.queueFilterMode === 'others' ) {
                 params.append( 'exclude_own_jobs', 'true' );
@@ -10760,6 +13306,9 @@ class NotificationsUI {
         if ( notificationsList ) {
             notificationsList.innerHTML = '';
         }
+
+        // 6a. Wipe the focus-tray strip icons too — they mirror cards.
+        this._clearAllStripIcons();
 
         // 7. Update counter to zero
         const counter = document.getElementById( "notifications-count" );
@@ -11553,10 +14102,16 @@ class NotificationsUI {
         card.id = `action-required-minimized-${notification.id}`;
         card.dataset.notificationId = notification.id;
 
+        // Persona badge — right-aligned by sitting between the flex-grow message
+        // and the timeout. Read voice_persona directly off the persisted envelope
+        // so refresh-restored cards render correctly without map dependency.
+        const personaBadge = this._renderPersonaBadgeHTML( notification.voice_persona );
+
         card.innerHTML = `
             <div class="minimized-position">#${queuePosition}</div>
             <div class="minimized-icon">${typeIcon}</div>
             <div class="minimized-message">${truncatedMessage}</div>
+            ${personaBadge}
             <div class="minimized-timeout">${timeoutDisplay}</div>
         `;
 
@@ -11624,21 +14179,283 @@ class NotificationsUI {
      *
      * @param {object} item - TTS queue item: {id, type, notification, ttsText, addedAt}
      */
-    addToTTSQueue( item ) {
-        if ( item.type === 'action-required' ) {
-            // Priority: Insert at front (but after other action-required items)
-            const insertIndex = this.ttsQueue.findIndex( q => q.type !== 'action-required' );
-            if ( insertIndex === -1 ) {
-                this.ttsQueue.push( item );  // All are action-required, add to end
-            } else {
-                this.ttsQueue.splice( insertIndex, 0, item );  // Insert before first non-priority
+    /**
+     * Truncate `text` to roughly `fraction` of its length, extending forward
+     * from the fraction mark to the next natural boundary.
+     *
+     * Algorithm (2026-05-22 — replaces the old sentence-count splitter):
+     *   1. targetPos = ceil( text.length * fraction ) — the character index of
+     *      the desired fraction (e.g. 25% of the message).
+     *   2. Scan FORWARD from targetPos for the first boundary:
+     *        - '\n' newline       — always a boundary. THE TWIST: a list item
+     *                               ends at a newline even with no sentence
+     *                               punctuation, so a newline-separated
+     *                               technical list is cut cleanly instead of
+     *                               read whole.
+     *        - em/en-dash         — always a boundary.
+     *        - '.', '!', '?', ';' — a boundary ONLY when the next char is
+     *                               whitespace or end-of-string. This rejects
+     *                               the internal periods in "3.14", "v0.1.7",
+     *                               "file.py" (followed by a digit/letter).
+     *   3. Cut inclusive of the marker character.
+     *   4. No boundary found → fall back to the next word boundary after
+     *      targetPos, so the preview is never silently expanded to 100%.
+     *
+     * Hyphen-minus '-' is deliberately NOT a boundary — it is ubiquitous
+     * inside compound words and file names (bug-fix-queue, end-to-end) and
+     * would shred list items mid-term.
+     *
+     * Common abbreviations (Mr., e.g., a.m., etc.) are pre-masked with a
+     * length-preserving U+0001 placeholder so their periods never become
+     * false boundaries; the placeholder is restored after slicing. Masking is
+     * length-preserving, so every character index stays valid.
+     *
+     * See: src/rnd/v0.1.7/2026.05.22-tts-limiter-boundary-scan.md
+     *
+     * @param   {string} text     - the full TTS message
+     * @param   {number} fraction - desired fraction in (0, 1)
+     * @returns {string} the truncated, trimmed preview slice
+     */
+    _truncateAtBoundary( text, fraction ) {
+        if ( !text || typeof text !== 'string' ) return '';
+        if ( fraction >= 1 ) return text.trim();
+
+        // Pre-mask common abbreviations so their periods don't become false
+        // boundaries. The placeholder is U+0001 (SOH control char) — never
+        // appears in real TTS text. Masking is length-preserving ("Mr." and
+        // its masked form are the same length), so character indices stay valid.
+        const ABBREVIATIONS = [
+            // Personal titles
+            "Mr.", "Mrs.", "Ms.", "Mx.", "Dr.", "Prof.", "Sr.", "Jr.", "Rev.",
+            // Geographic
+            "St.", "Mt.", "Ft.", "Ave.", "Blvd.", "Rd.",
+            // Discourse
+            "vs.", "e.g.", "i.e.", "etc.", "viz.", "cf.", "No.",
+            // Time
+            "a.m.", "p.m.", "A.M.", "P.M."
+        ];
+        const ABBR_MASK = "";
+
+        let masked = text;
+        ABBREVIATIONS.forEach( abbr => {
+            masked = masked.split( abbr ).join( abbr.replace( /\./g, ABBR_MASK ) );
+        } );
+
+        const targetPos = Math.ceil( masked.length * fraction );
+
+        // Forward scan from the fraction mark for the first boundary.
+        const SENTENCE_TERMINALS = ".!?;";
+        const DASHES             = "—–";   // em-dash, en-dash (NOT hyphen-minus '-')
+        let cut = -1;
+        for ( let i = targetPos; i < masked.length; i++ ) {
+            const ch   = masked[ i ];
+            const next = masked[ i + 1 ];            // undefined at end-of-string
+            if ( ch === "\n" || DASHES.includes( ch ) ) {
+                cut = i;
+                break;
             }
-            this.log( `TTS queue: Added action-required item at priority position, queue length: ${this.ttsQueue.length}` );
-        } else {
-            // Fire-and-forget: Add to back
-            this.ttsQueue.push( item );
-            this.log( `TTS queue: Added fire-and-forget item at back, queue length: ${this.ttsQueue.length}` );
+            if ( SENTENCE_TERMINALS.includes( ch ) && ( next === undefined || /\s/.test( next ) ) ) {
+                cut = i;
+                break;
+            }
         }
+
+        let slice;
+        if ( cut !== -1 ) {
+            slice = masked.slice( 0, cut + 1 );
+        } else {
+            // No natural boundary after the fraction mark — fall back to the
+            // next word boundary so the verbosity cut is still honored and the
+            // preview never silently expands back to the full message.
+            const ws = masked.indexOf( " ", targetPos );
+            slice = ( ws === -1 ) ? masked : masked.slice( 0, ws );
+        }
+
+        // Restore the masked abbreviation periods, then trim edge whitespace.
+        return slice.split( ABBR_MASK ).join( "." ).trim();
+    }
+
+    /**
+     * Inline self-test for _truncateAtBoundary. Runs only when this.debug is
+     * truthy. Logs `[TTS-SELFTEST] N/N passed` on success or fails loudly via
+     * console.assert with the offending case. Intended to fire once at init().
+     *
+     * Covers the 2026-05-22 boundary-scan rewrite:
+     *   - newline boundary for punctuation-free technical lists (the twist)
+     *   - sentence-terminal boundary in plain prose
+     *   - decimal / version internal periods are NOT false boundaries
+     *   - em-dash IS a boundary; hyphen-minus is NOT
+     *   - abbreviation periods (Mr.) are NOT false boundaries
+     *   - no-boundary run-on falls back to a word boundary
+     *   - fraction >= 1 returns the whole text
+     */
+    _tts_quick_self_test() {
+        if ( !this.debug ) return;
+
+        const list = "Affected modules below:\nrunning_fifo_queue\ntodo_fifo_queue\nqueue_consumer\nagentic_job_factory\napi_resource_manager";
+
+        const cases = [
+            {
+                name   : "Newline boundary — punctuation-free list cuts at a newline",
+                input  : list,
+                frac   : 0.25,
+                expect : ( got ) => got === "Affected modules below:\nrunning_fifo_queue"
+            },
+            {
+                name   : "Sentence terminal — prose cuts at a period",
+                input  : "First sentence here. Second sentence here. Third sentence here. Fourth one here.",
+                frac   : 0.25,
+                expect : ( got ) => got.endsWith( "." ) && got.length < 80
+            },
+            {
+                name   : "Decimal is not a false boundary",
+                input  : "The value of pi is 3.14159 and it matters here. Next part follows after now.",
+                frac   : 0.25,
+                expect : ( got ) => got.includes( "3.14159" )
+            },
+            {
+                name   : "Em-dash is a boundary",
+                input  : "Alpha beta gamma delta — epsilon zeta eta theta iota kappa lambda mu now.",
+                frac   : 0.25,
+                expect : ( got ) => got.endsWith( "—" )
+            },
+            {
+                name   : "Hyphen-minus is NOT a boundary",
+                input  : "The bug-fix-queue and end-to-end pipeline ran fine. Second sentence here now.",
+                frac   : 0.1,
+                expect : ( got ) => got.indexOf( "-" ) !== -1 && got.endsWith( "." )
+            },
+            {
+                name   : "Abbreviation period is not a false boundary",
+                input  : "Mr. Radio reviewed the plan. Then the team shipped it after lunch today.",
+                frac   : 0.1,
+                expect : ( got ) => got.startsWith( "Mr. Radio" )
+            },
+            {
+                name   : "No-boundary run-on falls back to a word boundary",
+                input  : "one two three four five six seven eight nine ten eleven twelve thirteen",
+                frac   : 0.25,
+                expect : ( got ) => got.split( " " ).length >= 2 && got.length < 30 && !/\s$/.test( got )
+            },
+            {
+                name   : "Fraction >= 1 returns the whole text",
+                input  : "Alpha. Beta. Gamma.",
+                frac   : 1,
+                expect : ( got ) => got === "Alpha. Beta. Gamma."
+            }
+        ];
+
+        let passed = 0;
+        let failed = 0;
+        cases.forEach( ( c, idx ) => {
+            const got = this._truncateAtBoundary( c.input, c.frac );
+            const ok  = c.expect( got );
+            if ( ok ) {
+                passed += 1;
+            } else {
+                failed += 1;
+                console.assert( false, `[TTS-SELFTEST] Case ${idx + 1} "${c.name}" FAILED. Got:`, JSON.stringify( got ) );
+            }
+        } );
+
+        if ( failed === 0 ) {
+            this.log( `[TTS-SELFTEST] ${passed}/${cases.length} passed` );
+        } else {
+            this.log( `[TTS-SELFTEST] ${passed}/${cases.length} passed, ${failed} FAILED — see console.assert output above` );
+        }
+    }
+
+    /**
+     * Compute the preview slice for a TTS queue item.
+     *
+     * Mutates the item in-place by adding two fields:
+     *   - previewText: text to send for playback (may equal ttsText)
+     *   - stage:       "full" | "preview" | "skip"
+     *
+     * stage values:
+     *   - "full"    — play the entire ttsText (slider at 100%, opt-out, or short message)
+     *   - "preview" — play the boundary-scan slice (slider at 25/50/75%, message long enough to truncate)
+     *   - "skip"    — slider at 0%, no TTS dispatch; handled upstream in activateNextTTS
+     *
+     * Opt-out (stage = "full"):
+     *   - this.ttsPreviewEnabled is false
+     *   - this.ttsPreviewFraction >= 1 (slider at 100%)
+     *   - item.ttsText.length < this.ttsPreviewMinChars (too short to bother)
+     *   - the boundary scan consumes the whole message
+     *
+     * 2026-05-14 evening: preview-and-pause was superseded by preview-and-advance.
+     * `remainderText` is no longer populated — the preview is the only audio that
+     * plays. Runtime slider in `#cc-session-strip` controls the fraction.
+     *
+     * 2026-05-22: sentence-count truncation replaced by a character-position
+     * forward-scan — see _truncateAtBoundary and
+     * src/rnd/v0.1.7/2026.05.22-tts-limiter-boundary-scan.md.
+     *
+     * Logs cost-savings telemetry (per Q10) when a preview cut happens.
+     */
+    _computeTTSPreview( item ) {
+        const text = item.ttsText || '';
+
+        // Slider at 0%: skip TTS entirely. The notification still appears in
+        // the visible list, but no audio dispatches for this item.
+        if ( this.ttsPreviewFraction === 0 ) {
+            item.previewText = '';
+            item.stage       = 'skip';
+            return item;
+        }
+
+        // Opt-out paths — play the message in full:
+        //   - feature disabled
+        //   - slider at 100% (fraction >= 1) — nothing to truncate
+        //   - message too short to be worth truncating
+        if ( !this.ttsPreviewEnabled
+             || this.ttsPreviewFraction >= 1
+             || text.length < this.ttsPreviewMinChars ) {
+            item.previewText = text;
+            item.stage       = 'full';
+            return item;
+        }
+
+        // Character-position boundary scan (2026-05-22 — replaces the old
+        // sentence-count splitter). See _truncateAtBoundary.
+        const previewText = this._truncateAtBoundary( text, this.ttsPreviewFraction );
+
+        if ( previewText.length >= text.trim().length ) {
+            // The forward scan reached the end of the message — play in full.
+            item.previewText = text;
+            item.stage       = 'full';
+            return item;
+        }
+
+        item.previewText = previewText;
+        item.stage       = 'preview';
+
+        // Cost-savings telemetry (browser console only — Q10 chose local-only)
+        this.ttsCostSavings = this.ttsCostSavings || { saved: 0, total: 0, previewsFired: 0 };
+        this.ttsCostSavings.total += text.length;
+        this.ttsCostSavings.saved += ( text.length - item.previewText.length );
+        this.ttsCostSavings.previewsFired += 1;
+        const pct = ( 100 * this.ttsCostSavings.saved / this.ttsCostSavings.total ).toFixed( 1 );
+        this.log( `[TTS-COST] Preview: ${item.previewText.length}/${text.length} chars (saved ${text.length - item.previewText.length}). Session: ${this.ttsCostSavings.saved}/${this.ttsCostSavings.total} (${pct}%)` );
+
+        return item;
+    }
+
+    addToTTSQueue( item ) {
+        // Compute preview split before queueing (Q1 — client-side only).
+        // Sets item.previewText, item.stage in-place.
+        this._computeTTSPreview( item );
+
+        // 2026-05-14 evening — strict FIFO. Every item pushes to the back of the
+        // queue regardless of type. The previous priority-displacement of
+        // action-required items broke the user's "hear messages in arrival order"
+        // mental model. With preview-and-advance (no pause), action-required
+        // items aren't more urgent for audio — they're equally bite-sized — so
+        // chronological order wins. The visible action-required CARD still
+        // renders in the action-required section immediately on WS arrival
+        // (separate render path); only the TTS audio order is FIFO.
+        this.ttsQueue.push( item );
+        this.log( `TTS queue: Added ${item.type} item to back, queue length: ${this.ttsQueue.length}` );
 
         // Update UI
         this.updateTTSQueueSection();
@@ -11693,6 +14510,29 @@ class NotificationsUI {
             minimized.remove();
         }
 
+        // Phase 2 (2026-05-14 evening): slider at 0% → stage === 'skip' → no
+        // audio dispatch. Clear the pending-TTS visual state and advance the
+        // queue immediately. The notification card stays visible in the list
+        // (per the decouple fix from earlier today).
+        if ( item.stage === 'skip' ) {
+            this.log( `TTS queue: Skipping audio dispatch for ${item.id} (slider at 0%)` );
+            const panel = document.querySelector( `.audio-control-panel[data-notification-id="${item.id}"]` );
+            if ( panel ) {
+                const listItem = panel.closest( 'li' );
+                if ( listItem ) {
+                    listItem.classList.remove( 'is-tts-pending' );
+                }
+            }
+            this.activeTTSItem = null;
+            this.updateTTSQueuePositions();
+            this.updateTTSQueueSection();
+            this.saveTTSQueueState();
+            // 50ms timeout prevents synchronous infinite-loop if the entire
+            // queue is skip-stage.
+            setTimeout( () => this.activateNextTTS(), 50 );
+            return;
+        }
+
         // Handle differently based on type
         if ( item.type === 'action-required' ) {
             // Action-required: Show active card in TTS queue (response UI is elsewhere)
@@ -11704,11 +14544,17 @@ class NotificationsUI {
             this.log( `TTS queue: Playing job notification (already in job card): ${item.id}` );
             this.currentNotificationId = item.id;
         } else {
-            // Fire-and-forget: NOW add to project card (was waiting in TTS queue)
-            this.log( `Moving fire-and-forget to project card: ${item.id}` );
-            this.addNotificationToSenderGroup( item.notification, false );
-            this.updateTotalNotificationsCount();
-            // No active card in TTS queue - message now visible in project card
+            // Fire-and-forget: card was already rendered to project card on WS arrival
+            // (2026-05-14 decouple — see handleNotificationUpdate). Just clear the
+            // pending-TTS visual state so the regular playing state can apply.
+            this.log( `TTS queue: Engaging fire-and-forget audio for ${item.id}` );
+            const panel = document.querySelector( `.audio-control-panel[data-notification-id="${item.id}"]` );
+            if ( panel ) {
+                const listItem = panel.closest( 'li' );
+                if ( listItem ) {
+                    listItem.classList.remove( 'is-tts-pending' );
+                }
+            }
             this.currentNotificationId = item.id;
         }
 
@@ -11721,8 +14567,28 @@ class NotificationsUI {
         // Persist queue state (item was removed from queue)
         this.saveTTSQueueState();
 
-        // Start TTS playback
-        this.playTTS( item.ttsText, this.getCurrentTTSMode() ).catch( error => {
+        // Start TTS playback. Pull voice_id directly off the persisted notification
+        // envelope first (server stamps voice_persona via _voice_persona_for_sender_id) —
+        // strictly more reliable than the senderPersonaMap path because it doesn't
+        // depend on the map being hydrated at activation time, which fails for
+        // localStorage-restored action-required notifications and for any sender
+        // that hasn't yet been hit by Layer B's senders-visible pre-hydration.
+        // Falls back to map lookup, then to server-default (Sam).
+        const ttsVoiceId = ( item.notification && item.notification.voice_persona && item.notification.voice_persona.voice_id )
+            || this.getVoiceIdForSender( item.notification && item.notification.sender_id );
+        // Preview routing (2026-05-14 evening — preview-and-advance, no remainder):
+        // stage === "preview" plays the previewText slice and advances on completion.
+        // stage === "full" plays the entire ttsText (slider at 100%, or short message
+        // below ttsPreviewMinChars, or feature disabled).
+        // stage === "skip" is handled upstream in activateNextTTS and never reaches here.
+        let textToPlay;
+        if ( item.stage === 'preview' ) {
+            textToPlay = item.previewText || item.ttsText;
+        } else {
+            textToPlay = item.ttsText;
+        }
+
+        this.playTTS( textToPlay, this.getCurrentTTSMode(), ttsVoiceId ).catch( error => {
             this.error( 'TTS queue: Playback failed:', error );
             this.onTTSPlaybackComplete();  // Move to next item even on error
         } );
@@ -12067,6 +14933,13 @@ class NotificationsUI {
 
         this.log( 'TTS queue: Playback complete' );
 
+        // 2026-05-14 evening — preview-and-pause SUPERSEDED by preview-and-advance.
+        // When the preview slice finishes playing, we fall through to the normal
+        // queue-advance path (below). No auto-pause, no remainder playback, no
+        // resume button state. The slider in #cc-session-strip controls the
+        // preview fraction at arrival time; once the slice is played, we're done
+        // with that item from the audio side.
+
         // Capture item info BEFORE clearing (needed for focus mode check)
         const justCompletedItem = this.activeTTSItem;
         const wasActionRequired = justCompletedItem?.type === 'action-required';
@@ -12131,6 +15004,8 @@ class NotificationsUI {
      */
     stopTTSAndAdvance() {
         this.log( 'TTS queue: User requested stop' );
+        // 2026-05-14 evening — preview-and-pause superseded. No remainder to drop,
+        // no _ttsPausedAfterPreview flag to clear. Stop the audio and advance.
         this.stopAudio();
         this.onTTSPlaybackComplete();
     }
@@ -12297,6 +15172,10 @@ class NotificationsUI {
             return;
         }
 
+        // 2026-05-14 evening — preview-and-pause superseded by preview-and-advance.
+        // No preview-remainder branch here. resumeTTS just resumes the suspended
+        // audio context (instant mode) or the paused HTML audio element.
+
         this.log( 'TTS Resume: User resuming playback' );
 
         // Resume Web Audio (instant mode)
@@ -12362,18 +15241,20 @@ class NotificationsUI {
      */
     saveTTSQueueState() {
         try {
+            // 2026-05-14 evening — preview-and-pause superseded. No preview-paused
+            // snapshot to serialize. Only persist the queue + focus-mode state.
             if ( this.ttsQueue.length === 0 && !this.ttsFocusModeActive && !this.isTTSPaused ) {
                 localStorage.removeItem( this.TTS_QUEUE_KEY );
                 return;
             }
 
             const queueState = {
-                queue                   : this.ttsQueue,
-                focusModeActive         : this.ttsFocusModeActive,
-                focusModeNotificationId : this.focusModeNotificationId,
-                focusModeEnteredAt      : this.focusModeEnteredAt || null,
-                focusModeTimeoutMs      : this.focusModeTimeoutMs || null,
-                isTTSPaused             : this.isTTSPaused
+                queue                    : this.ttsQueue,
+                focusModeActive          : this.ttsFocusModeActive,
+                focusModeNotificationId  : this.focusModeNotificationId,
+                focusModeEnteredAt       : this.focusModeEnteredAt || null,
+                focusModeTimeoutMs       : this.focusModeTimeoutMs || null,
+                isTTSPaused              : this.isTTSPaused
             };
 
             localStorage.setItem( this.TTS_QUEUE_KEY, JSON.stringify( queueState ) );
@@ -12401,8 +15282,10 @@ class NotificationsUI {
             this.focusModeNotificationId = parsed.focusModeNotificationId || null;
             this.focusModeEnteredAt = parsed.focusModeEnteredAt || null;
             this.focusModeTimeoutMs = parsed.focusModeTimeoutMs || null;
-            // NOTE: Don't restore isTTSPaused - page refresh resets audio context,
-            // so we should auto-resume playback. User can pause again if needed.
+
+            // 2026-05-14 evening — preview-and-pause superseded by preview-and-advance.
+            // No preview-paused-item to restore. Page refresh resets the audio
+            // context, so we always clear isTTSPaused and auto-resume playback.
             this.isTTSPaused = false;
 
             this.log( `Restored ${this.ttsQueue.length} TTS queue item(s), focusMode: ${this.ttsFocusModeActive} (paused state reset on refresh)` );
@@ -12561,6 +15444,9 @@ class NotificationsUI {
                     <button class="response-button no ${noClass}" data-notification-id="${notification.id}" data-response="no">
                         ✗ No <span class="keyboard-hint">(N)</span>
                     </button>
+                    <button class="response-button neither" data-notification-id="${notification.id}" data-response="neither" title="Neither — the question itself needs re-framing">
+                        ⊘ Neither
+                    </button>
                 </div>
                 <div class="yes-no-comment-hint" data-notification-id="${notification.id}">
                     ${notification.display_qualifier_widget ? 'You may comment on your answer here if you wish' : 'Press C to add comment'}
@@ -12613,6 +15499,20 @@ class NotificationsUI {
             ? `<span class="mc-project-badge">[${project}]</span> `
             : '';
 
+        // Persona badge — read voice_persona straight off the persisted notification
+        // envelope (server stamps it via _voice_persona_for_sender_id). This avoids
+        // any race between map hydration and action-required restore on refresh.
+        // Right-aligned via insertion as the first child of .action-required-timer-controls
+        // (the existing flex right-cluster).
+        const personaBadge = this._renderPersonaBadgeHTML( notification.voice_persona );
+
+        // Abstract indicator — escape hatch from the inline 200px-capped
+        // .action-required-abstract block. Click delegation in initAbstractTooltip
+        // (~line 8319) opens the tier-sized .abstract-tooltip popup.
+        const abstractIndicatorHTML = ( notification.abstract && notification.abstract.trim().length > 0 )
+            ? `<span class="abstract-indicator" data-abstract="${encodeURIComponent( notification.abstract )}" title="View full abstract">📋</span>`
+            : '';
+
         card.innerHTML = `
             <div class="action-required-header">
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
@@ -12620,6 +15520,8 @@ class NotificationsUI {
                 </button>
                 <div class="action-required-title">${projectBadge}${notification.title || notification.message}</div>
                 <div class="action-required-timer-controls">
+                    ${abstractIndicatorHTML}
+                    ${personaBadge}
                     <button class="action-required-pause-btn" id="pause-btn-${notification.id}" title="Pause timer and audio (P)">
                         \u23F8\uFE0F
                     </button>
@@ -13549,11 +16451,15 @@ class NotificationsUI {
         state.isResponded = true;
 
         // Stop TTS immediately if this notification is currently playing
-        // User already answered — don't keep reading the question
+        // User already answered — don't keep reading the question.
+        // Use stopTTSAndAdvance() so that if we're auto-paused after preview
+        // (action-required items now preview-and-pause as of 2026-05-14),
+        // the remainder is dropped and the queue advances. Calling stopAudio +
+        // onTTSPlaybackComplete directly would short-circuit on the
+        // isTTSPaused guard and stall the queue.
         if ( this.activeTTSItem?.id === notificationId ) {
             this.log( `Stopping TTS — user responded to currently-playing notification ${notificationId}` );
-            this.stopAudio();
-            this.onTTSPlaybackComplete();
+            this.stopTTSAndAdvance();
         }
 
         // Disable buttons to prevent double-submit
@@ -14919,14 +17825,37 @@ class NotificationsUI {
 
     /**
      * Move a sender card to the top of the notifications list.
+     * Respects the pinned conversation-mode card if one exists — non-pinned
+     * cards land at position 1 instead of 0 in that case.
      * @param {string} senderId - Sender ID
+     * @param {object} [options]
+     * @param {boolean} [options.skipUnread=false] — Forwarded to
+     *   _promoteStripIcon. Set true for noisy in-place updates (progress-
+     *   group entries) that shouldn't bump the focus-tray unread badge.
      */
-    moveSenderCardToTop( senderId ) {
+    moveSenderCardToTop( senderId, options = {} ) {
+        // Synchronize the strip's recency ordering with the stack's
+        // recency ordering: leftmost icon = most recently updated. Also
+        // bumps the unread badge for non-focused sessions when focus is on
+        // (unless caller passed skipUnread for tool-call progress noise).
+        this._markStripIconActivity( senderId, options );
+
         const container = document.getElementById( 'notifications-list' );
         const cardId = `sender-card-${senderId.replace( /[@.#]/g, '-' )}`;
         const card = document.getElementById( cardId );
 
-        if ( container && card && container.firstChild !== card ) {
+        if ( !container || !card ) return;
+
+        const pinned = container.querySelector( '.sender-card[data-pinned-conv-mode="true"]' );
+        if ( pinned && pinned !== card ) {
+            const target = pinned.nextSibling;
+            if ( target !== card ) {
+                container.insertBefore( card, target );
+            }
+            return;
+        }
+
+        if ( container.firstChild !== card ) {
             container.insertBefore( card, container.firstChild );
         }
     }

@@ -224,21 +224,25 @@ class TestErrorHandling:
     def test_error_sets_failed_status( self, basic_job ):
         """When _execute() raises, status should be 'failed'."""
         with patch.object( basic_job, "_execute", new_callable=AsyncMock, side_effect=RuntimeError( "test error" ) ):
-            basic_job.do_all()
-            assert basic_job.state == JobState.FAILED
+            with pytest.raises( RuntimeError, match="test error" ):
+                basic_job.do_all()
+        assert basic_job.state == JobState.FAILED
 
     def test_error_stores_message( self, basic_job ):
         """When _execute() raises, error attribute should contain the message."""
         with patch.object( basic_job, "_execute", new_callable=AsyncMock, side_effect=ValueError( "something broke" ) ):
-            basic_job.do_all()
-            assert basic_job.error == "something broke"
+            with pytest.raises( ValueError, match="something broke" ):
+                basic_job.do_all()
+        assert basic_job.error == "something broke"
 
     def test_error_sets_answer_conversational( self, basic_job ):
         """When _execute() raises, answer_conversational should contain the error."""
         with patch.object( basic_job, "_execute", new_callable=AsyncMock, side_effect=RuntimeError( "oops" ) ):
-            result = basic_job.do_all()
-            assert "failed" in result.lower()
-            assert "oops" in result
+            with pytest.raises( RuntimeError, match="oops" ):
+                basic_job.do_all()
+        assert basic_job.answer_conversational is not None
+        assert "failed" in basic_job.answer_conversational.lower()
+        assert "oops" in basic_job.answer_conversational
 
 
 # ===========================================================================

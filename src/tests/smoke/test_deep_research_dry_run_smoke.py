@@ -30,7 +30,7 @@ import cosa.utils.util as cu
 
 
 BASE_URL = "http://localhost:7999"
-MAX_POLL_SECONDS = 30
+MAX_POLL_SECONDS = 90
 POLL_INTERVAL = 2
 
 
