@@ -1,0 +1,426 @@
+#!/usr/bin/env python3
+"""
+Unit tests for src/lupin_mcp/session_spawner.py — the manager-spawned headless
+reviewer orchestration. All subprocess side effects are injected via a fake
+runner; manifests live in a tmp dir. Target: 100% line + branch coverage.
+
+See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+# Bootstrap
+_src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
+if _src_path not in sys.path:
+    sys.path.insert( 0, _src_path )
+
+from lupin_mcp.session_spawner import (
+    render_task_prompt,
+    build_spawn_argv,
+    spawn_sessions,
+    dismiss_sessions,
+    list_spawned_sessions,
+    reap_stale_spawned,
+    resolve_manager_identity,
+    resolve_spawn_config,
+    default_runner,
+    quick_smoke_test,
+    _manifest_path,
+    _read_manifest,
+    _write_manifest,
+    _slug,
+    DEFAULT_SPAWN_CAP,
+)
+
+
+class _FakeConfigMgr:
+    """ConfigurationManager test double: returns configured values or default."""
+    def __init__( self, values=None ):
+        self.values = values or {}
+    def get( self, key, default=None, return_type="string", silent=False ):
+        return self.values.get( key, default )
+
+
+# ── Fake runner ───────────────────────────────────────────────────────────────
+
+class _Result:
+    def __init__( self, returncode=0, stdout="", stderr="" ):
+        self.returncode = returncode
+        self.stdout     = stdout
+        self.stderr     = stderr
+
+
+class FakeRunner:
+    """Records (argv, env) calls; returns a configurable returncode."""
+    def __init__( self, returncode=0 ):
+        self.returncode = returncode
+        self.calls      = []
+
+    def __call__( self, argv, env=None ):
+        self.calls.append( ( argv, env ) )
+        return _Result( returncode=self.returncode )
+
+
+# ── render_task_prompt ────────────────────────────────────────────────────────
+
+class TestRenderTaskPrompt:
+    def test_token_substitution( self ):
+        assert render_task_prompt( "Review {section} as {role}",
+                                   { "section": "A", "role": "reviewer" } ) == "Review A as reviewer"
+
+    def test_none_tokens_ok( self ):
+        assert render_task_prompt( "plain text", None ) == "plain text"
+
+    def test_unknown_placeholder_left_intact( self ):
+        assert render_task_prompt( "keep {unknown}", { "x": "1" } ) == "keep {unknown}"
+
+    def test_non_string_value_coerced( self ):
+        assert render_task_prompt( "n={index}", { "index": 3 } ) == "n=3"
+
+    def test_memento_appended_task_leads( self ):
+        # Append semantics (Rick 2026-05-28): task leads, memento trails as reference.
+        out = render_task_prompt( "do the work", {}, seed_memento="I authored this plan." )
+        assert out.startswith( "do the work" )
+        assert "Prior context" in out
+        assert out.rstrip().endswith( "I authored this plan." )
+
+    def test_blank_memento_ignored( self ):
+        assert render_task_prompt( "task", {}, seed_memento="   " ) == "task"
+        assert render_task_prompt( "task", {}, seed_memento=None ) == "task"
+
+
+# ── build_spawn_argv ──────────────────────────────────────────────────────────
+
+class TestBuildSpawnArgv:
+    def test_basic( self ):
+        argv = build_spawn_argv( "/s.sh", "sess-1", "do it" )
+        assert argv == [ "bash", "/s.sh", "--headless", "sess-1", "--prompt", "do it" ]
+
+    def test_dry_run_flag( self ):
+        argv = build_spawn_argv( "/s.sh", "sess-1", "do it", dry_run=True )
+        assert "--dry-run" in argv and argv.index( "--dry-run" ) < argv.index( "sess-1" )
+
+    def test_claude_args_inserted_before_prompt( self ):
+        argv = build_spawn_argv( "/s.sh", "sess-1", "brief", claude_args=[ "--resume" ] )
+        assert argv == [ "bash", "/s.sh", "--headless", "sess-1", "--resume", "--prompt", "brief" ]
+
+
+# ── default_runner (real subprocess, trivial commands) ────────────────────────
+
+class TestDefaultRunner:
+    def test_zero_exit_no_env( self ):
+        r = default_runner( [ "true" ] )
+        assert r.returncode == 0
+
+    def test_nonzero_exit( self ):
+        r = default_runner( [ "false" ] )
+        assert r.returncode == 1
+
+    def test_env_merge_branch( self ):
+        # env != None exercises the {**os.environ, **env} merge branch
+        r = default_runner( [ "sh", "-c", 'test "$COSA_TEST_VAR" = "yes"' ],
+                            env={ "COSA_TEST_VAR": "yes" } )
+        assert r.returncode == 0
+
+
+# ── manifest helpers ──────────────────────────────────────────────────────────
+
+class TestManifestHelpers:
+    def test_manifest_path_sanitizes( self, tmp_path ):
+        p = _manifest_path( "abc/../weird id!", session_dir=tmp_path )
+        assert p.parent == tmp_path
+        assert p.name.startswith( "spawned-" ) and p.name.endswith( ".json" )
+        assert "/" not in p.name and "!" not in p.name
+
+    def test_read_missing_returns_empty( self, tmp_path ):
+        assert _read_manifest( tmp_path / "nope.json" ) == []
+
+    def test_read_corrupt_returns_empty( self, tmp_path ):
+        bad = tmp_path / "bad.json"
+        bad.write_text( "{not json" )
+        assert _read_manifest( bad ) == []
+
+    def test_read_non_list_returns_empty( self, tmp_path ):
+        obj = tmp_path / "obj.json"
+        obj.write_text( '{"a": 1}' )
+        assert _read_manifest( obj ) == []
+
+    def test_read_valid_list( self, tmp_path ):
+        good = tmp_path / "good.json"
+        good.write_text( '[{"session_name": "x"}]' )
+        assert _read_manifest( good ) == [ { "session_name": "x" } ]
+
+    def test_write_then_read_roundtrip( self, tmp_path ):
+        p = tmp_path / "sub" / "m.json"
+        assert _write_manifest( p, [ { "session_name": "y" } ] ) is True
+        assert _read_manifest( p ) == [ { "session_name": "y" } ]
+
+    def test_write_oserror_returns_false( self, tmp_path ):
+        # Make the parent path a FILE so mkdir(parents=True) raises OSError
+        blocker = tmp_path / "blocker"
+        blocker.write_text( "i am a file" )
+        p = blocker / "x.json"
+        assert _write_manifest( p, [] ) is False
+
+
+# ── _slug ─────────────────────────────────────────────────────────────────────
+
+class TestSlug:
+    def test_basic_lowercase( self ):
+        assert _slug( "Tiberius" ) == "tiberius"
+
+    def test_special_chars_collapsed( self ):
+        assert _slug( "Mr. Radio!" ) == "mr-radio"
+
+    def test_empty_becomes_anon( self ):
+        assert _slug( "" ) == "anon"
+        assert _slug( "###" ) == "anon"
+
+
+# ── spawn_sessions ────────────────────────────────────────────────────────────
+
+class TestSpawnSessions:
+    def test_cap_too_low_raises( self, tmp_path ):
+        with pytest.raises( ValueError ):
+            spawn_sessions( 0, "t", "mgr", script_path="x", runner=FakeRunner(), session_dir=tmp_path )
+
+    def test_cap_exceeded_raises( self, tmp_path ):
+        with pytest.raises( ValueError ):
+            spawn_sessions( 99, "t", "mgr", script_path="x", spawn_cap=8,
+                            runner=FakeRunner(), session_dir=tmp_path )
+
+    def test_happy_path_persists_and_keys_on_persona( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 3, "Review {section} as {role}", "sid-0da4",
+                              script_path="/s.sh", manager_persona="Tiberius",
+                              role="reviewer", tokens={ "section": "A" },
+                              runner=runner, session_dir=tmp_path )
+        assert res[ "collection_topic" ] == "dm-tiberius"
+        assert res[ "manager_persona" ] == "Tiberius"
+        assert res[ "requested" ] == 3
+        assert [ s[ "session_name" ] for s in res[ "spawned" ] ] == [
+            "cc-reviewer-tiberius-1", "cc-reviewer-tiberius-2", "cc-reviewer-tiberius-3"
+        ]
+        # env carries lineage + headless markers
+        _argv, env = runner.calls[ 0 ]
+        assert env[ "COSA_VOICE_SPAWNED_BY" ] == "sid-0da4"
+        assert env[ "COSA_VOICE_HEADLESS" ]   == "1"
+        assert env[ "COSA_VOICE_ROLE" ]       == "reviewer"
+        # manifest persisted with 3 entries
+        manifest = _read_manifest( _manifest_path( "sid-0da4", tmp_path ) )
+        assert len( manifest ) == 3
+
+    def test_persona_fallback_to_session_id( self, tmp_path ):
+        # manager_persona omitted → topic keys on the session_id slug
+        res = spawn_sessions( 1, "t", "Mgr-XYZ", script_path="x",
+                              runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "collection_topic" ] == "dm-mgr-xyz"
+
+    def test_failed_spawn_not_persisted( self, tmp_path ):
+        runner = FakeRunner( returncode=1 )  # every spawn "fails"
+        res = spawn_sessions( 2, "t", "sid-fail", script_path="x",
+                              runner=runner, session_dir=tmp_path )
+        assert all( s[ "status" ] == "failed" for s in res[ "spawned" ] )
+        # no successful spawns → manifest never written
+        assert not _manifest_path( "sid-fail", tmp_path ).exists()
+
+    def test_dry_run_does_not_persist( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 2, "t", "sid-dry", script_path="x", dry_run=True,
+                              runner=runner, session_dir=tmp_path )
+        assert res[ "dry_run" ] is True
+        assert "--dry-run" in runner.calls[ 0 ][ 0 ]
+        assert not _manifest_path( "sid-dry", tmp_path ).exists()
+
+    def test_append_to_existing_manifest( self, tmp_path ):
+        runner = FakeRunner()
+        spawn_sessions( 1, "t", "sid-a", script_path="x", manager_persona="Rio",
+                        runner=runner, session_dir=tmp_path )
+        spawn_sessions( 1, "t", "sid-a", script_path="x", manager_persona="Rio",
+                        runner=runner, session_dir=tmp_path )
+        assert len( _read_manifest( _manifest_path( "sid-a", tmp_path ) ) ) == 2
+
+    def test_role_in_session_name( self, tmp_path ):
+        res = spawn_sessions( 1, "t", "sid-x", script_path="x", manager_persona="Tiberius",
+                              role="author", runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-tiberius-1"
+
+    def test_no_collision_across_roles( self, tmp_path ):
+        # 3 reviewers then 1 author for the same manager → author does NOT clash
+        # with reviewer #1 (role is in the name).
+        runner = FakeRunner()
+        spawn_sessions( 3, "t", "sid-c", script_path="x", manager_persona="Rio",
+                        role="reviewer", runner=runner, session_dir=tmp_path )
+        author = spawn_sessions( 1, "t", "sid-c", script_path="x", manager_persona="Rio",
+                                 role="author", runner=runner, session_dir=tmp_path )
+        assert author[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-rio-1"
+        names = [ r[ "session_name" ] for r in _read_manifest( _manifest_path( "sid-c", tmp_path ) ) ]
+        assert names == [ "cc-reviewer-rio-1", "cc-reviewer-rio-2", "cc-reviewer-rio-3", "cc-author-rio-1" ]
+
+    def test_lowest_free_index_across_batches( self, tmp_path ):
+        runner = FakeRunner()
+        spawn_sessions( 3, "t", "sid-b", script_path="x", manager_persona="Rio", runner=runner, session_dir=tmp_path )
+        batch2 = spawn_sessions( 2, "t", "sid-b", script_path="x", manager_persona="Rio", runner=runner, session_dir=tmp_path )
+        assert [ s[ "session_name" ] for s in batch2[ "spawned" ] ] == [ "cc-reviewer-rio-4", "cc-reviewer-rio-5" ]
+
+    def test_index_token_reflects_assigned_number( self, tmp_path ):
+        # After a batch of 3, the next batch's {index} token = 4, not 1
+        runner = FakeRunner()
+        spawn_sessions( 3, "t", "sid-i", script_path="x", manager_persona="Rio", runner=runner, session_dir=tmp_path )
+        # render uses {index}; confirm via the rendered prompt reaching the script arg
+        spawn_sessions( 1, "msg #{index}", "sid-i", script_path="x", manager_persona="Rio",
+                        runner=runner, session_dir=tmp_path )
+        # the 5th call argv (index 4 of sid-i) carries "msg #4"
+        last_argv = runner.calls[ -1 ][ 0 ]
+        assert "msg #4" in last_argv
+
+
+# ── dismiss_sessions ──────────────────────────────────────────────────────────
+
+class TestDismissSessions:
+    def _seed( self, tmp_path, names ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": n, "requested_role": "reviewer" } for n in names ] )
+
+    def test_dismiss_explicit_subset_rewrites_manifest( self, tmp_path ):
+        self._seed( tmp_path, [ "a", "b", "c" ] )
+        runner = FakeRunner( returncode=0 )
+        res = dismiss_sessions( "mgr", session_names=[ "a" ], reason="done",
+                                runner=runner, session_dir=tmp_path )
+        assert res[ "dismissed" ][ 0 ] == { "session_name": "a", "status": "killed" }
+        assert sorted( res[ "remaining" ] ) == [ "b", "c" ]
+        assert runner.calls[ 0 ][ 0 ] == [ "tmux", "kill-session", "-t", "a" ]
+        assert len( _read_manifest( _manifest_path( "mgr", tmp_path ) ) ) == 2
+
+    def test_dismiss_all_deletes_manifest( self, tmp_path ):
+        self._seed( tmp_path, [ "a", "b" ] )
+        res = dismiss_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "remaining" ] == []
+        assert not _manifest_path( "mgr", tmp_path ).exists()
+
+    def test_already_gone_status( self, tmp_path ):
+        self._seed( tmp_path, [ "a" ] )
+        res = dismiss_sessions( "mgr", runner=FakeRunner( returncode=1 ), session_dir=tmp_path )
+        assert res[ "dismissed" ][ 0 ][ "status" ] == "already_gone"
+
+    def test_dismiss_with_no_manifest_unlink_noop( self, tmp_path ):
+        # No manifest exists → targets empty → remaining empty → unlink misses (caught)
+        res = dismiss_sessions( "ghost", runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "dismissed" ] == [] and res[ "remaining" ] == []
+
+    def test_write_memento_and_reason_echoed( self, tmp_path ):
+        self._seed( tmp_path, [ "a" ] )
+        res = dismiss_sessions( "mgr", reason="cascade complete", write_memento=False,
+                                runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "reason" ] == "cascade complete" and res[ "write_memento" ] is False
+
+
+# ── list_spawned_sessions ─────────────────────────────────────────────────────
+
+class TestListSpawnedSessions:
+    def test_empty_when_no_manifest( self, tmp_path ):
+        res = list_spawned_sessions( "nobody", runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "count" ] == 0 and res[ "sessions" ] == []
+
+    def test_live_and_dead( self, tmp_path ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": "a", "requested_role": "author" },
+                           { "session_name": "b" } ] )
+        # returncode 0 → all live
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path )
+        assert res[ "count" ] == 2
+        assert res[ "sessions" ][ 0 ] == { "session_name": "a", "requested_role": "author",
+                                           "status": "live", "alive": True }
+        # default requested_role when missing
+        assert res[ "sessions" ][ 1 ][ "requested_role" ] == "reviewer"
+
+    def test_dead_status( self, tmp_path ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ), [ { "session_name": "a" } ] )
+        res = list_spawned_sessions( "mgr", runner=FakeRunner( returncode=1 ), session_dir=tmp_path )
+        assert res[ "sessions" ][ 0 ][ "status" ] == "dead" and res[ "sessions" ][ 0 ][ "alive" ] is False
+
+
+# ── module smoke body ─────────────────────────────────────────────────────────
+
+class TestModuleSmoke:
+    def test_quick_smoke_test_runs_clean( self ):
+        quick_smoke_test()
+
+
+def test_default_spawn_cap_constant():
+    assert DEFAULT_SPAWN_CAP == 8
+
+
+# ── reap_stale_spawned ────────────────────────────────────────────────────────
+
+class TestReapStaleSpawned:
+    def _seed( self, tmp_path, names ):
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": n, "requested_role": "reviewer" } for n in names ] )
+
+    def test_none_stale_no_side_effects( self, tmp_path ):
+        self._seed( tmp_path, [ "a", "b" ] )
+        runner = FakeRunner()
+        res = reap_stale_spawned( "mgr", is_stale=lambda n: False, runner=runner, session_dir=tmp_path )
+        assert res[ "reaped" ] == []
+        assert sorted( res[ "remaining" ] ) == [ "a", "b" ]
+        assert runner.calls == []  # no tmux touched
+        assert len( _read_manifest( _manifest_path( "mgr", tmp_path ) ) ) == 2  # manifest intact
+
+    def test_some_stale_reaped( self, tmp_path ):
+        self._seed( tmp_path, [ "a", "b", "c" ] )
+        runner = FakeRunner( returncode=0 )
+        res = reap_stale_spawned( "mgr", is_stale=lambda n: n in ( "a", "c" ),
+                                  reason="idle", runner=runner, session_dir=tmp_path )
+        assert sorted( res[ "reaped" ] ) == [ "a", "c" ]
+        assert res[ "remaining" ] == [ "b" ]
+        # only b remains in the manifest
+        assert [ r[ "session_name" ] for r in _read_manifest( _manifest_path( "mgr", tmp_path ) ) ] == [ "b" ]
+
+
+# ── resolve_manager_identity ──────────────────────────────────────────────────
+
+class TestResolveManagerIdentity:
+    def test_none_meta_uses_fallback( self ):
+        sid, persona = resolve_manager_identity( None, fallback_session_id="fb" )
+        assert sid == "fb" and persona is None
+
+    def test_prefers_stable_session_id_and_persona_name( self ):
+        meta = { "stable_session_id": "stable-1", "session_id": "trans-2",
+                 "voice_persona": { "name": "Tiberius", "display_name": "Tiberius" } }
+        sid, persona = resolve_manager_identity( meta )
+        assert sid == "stable-1" and persona == "Tiberius"
+
+    def test_falls_back_to_session_id_and_display_name( self ):
+        meta = { "session_id": "trans-2", "voice_persona": { "display_name": "Mr. Radio" } }
+        sid, persona = resolve_manager_identity( meta )
+        assert sid == "trans-2" and persona == "Mr. Radio"
+
+    def test_missing_persona_block( self ):
+        sid, persona = resolve_manager_identity( { "session_id": "s" } )
+        assert sid == "s" and persona is None
+
+
+# ── resolve_spawn_config ──────────────────────────────────────────────────────
+
+class TestResolveSpawnConfig:
+    def test_defaults_when_none( self ):
+        cfg = resolve_spawn_config( None )
+        assert cfg == { "spawn_cap": 8, "ack_timeout_seconds": 120, "write_memento_default": True }
+
+    def test_reads_from_config_mgr( self ):
+        mgr = _FakeConfigMgr( {
+            "cc session spawn max reviewers"                 : 5,
+            "cc session spawn reviewer ack timeout seconds"  : 90,
+            "cc session spawn write memento default"         : False,
+        } )
+        cfg = resolve_spawn_config( mgr )
+        assert cfg == { "spawn_cap": 5, "ack_timeout_seconds": 90, "write_memento_default": False }
+
+    def test_missing_keys_fall_back_to_defaults( self ):
+        cfg = resolve_spawn_config( _FakeConfigMgr( {} ) )
+        assert cfg[ "spawn_cap" ] == 8 and cfg[ "ack_timeout_seconds" ] == 120

@@ -1,5 +1,14 @@
 # TODO
 
+## 🌅 MORNING (2026-05-29) — LIVE cascade demo: Manager-Spawned Reviewers (Rick wants to see it in action)
+
+Feature **v1 is feature-complete + live-validated** (spawn-1-reap-1 passed; collision-hardened). Rick asked to run the full cast live in the morning (off-peak 12am–9am EDT ✓).
+
+- [ ] **[LUPIN]** Restart the cosa-voice MCP subprocess FIRST — the running one cached the pre-fix `session_spawner` during dry-runs, so the role-in-name / lowest-free-index collision fix isn't live in it yet.
+- [ ] **[LUPIN]** Run a LIVE manager-spawned cascade: `spawn_sessions(3, role="reviewer", ...)` then `spawn_sessions(1, role="author", ...)` → confirm 4 distinct sessions boot (`cc-reviewer-tiberius-1/2/3`, `cc-author-tiberius-1`), each headless + speakerphone-off + own persona, posting to `dm-tiberius`; exercise `list_spawned_sessions`; then `dismiss_sessions` and confirm clean reap.
+- [ ] **[LUPIN]** Optional next: wire `expected_ack_deadline` into the spawn result (María's §3.3 swap); derive reviewer tmux `name_prefix`/role surfaces if cosmetics matter.
+- Design doc: `src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md` · Runbook (María): `planning-is-prompting/workflow/plan-review-cascaded-on-demand-spawn.md`
+
 ## 🟢 PHASE 7A CASCADE-COMPLETE — Run 4 closed 2026-05-20 03:30 UTC (Manager: Tiberius 🌑, session `387b9201`)
 
 **Status**: Phase 7a Telemetry is implementer-handoff-ready. All 4 cap surfaces closed (Stage 1 + 2 + 3 + Step 9 light-review). 57% net cap utilization; 50%+ headroom preserved across every cap surface. Zero T3/T4 escalations.

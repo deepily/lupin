@@ -779,6 +779,23 @@ def main():
             "tmux_session"      : tmux_session,
         }
 
+        # Manager-spawned headless reviewer tagging (2026-05-28). When this
+        # session was launched by the cosa-voice spawn_sessions MCP tool, the
+        # spawn script forwards COSA_VOICE_SPAWNED_BY / COSA_VOICE_HEADLESS /
+        # COSA_VOICE_ROLE into the tmux env. Record lineage + mark headless, and
+        # start the session speakerphone-OFF so its (rare, stray) notify() isn't
+        # spoken — reviewers normally communicate via commons text, and un-muting
+        # one is just enable_speakerphone on its session_id. Fully env-gated:
+        # zero effect on normal interactive sessions (the block only runs when
+        # COSA_VOICE_SPAWNED_BY is present).
+        # See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
+        _spawned_by = os.environ.get( "COSA_VOICE_SPAWNED_BY" )
+        if _spawned_by:
+            session_data[ "spawned_by" ]      = _spawned_by
+            session_data[ "headless" ]        = os.environ.get( "COSA_VOICE_HEADLESS", "" ) == "1"
+            session_data[ "role" ]            = os.environ.get( "COSA_VOICE_ROLE", "reviewer" )
+            session_data[ "speakerphone_on" ] = False
+
         # Carry voice_persona forward across ANY context reset (/clear,
         # /compact, resume, --continue double-fire) so the user keeps the same
         # allocated voice. Without this, the SessionStart that follows the reset

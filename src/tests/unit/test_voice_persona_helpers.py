@@ -30,7 +30,10 @@ from cosa.rest.voice_persona_helpers import (
     borrowed_persona_for_sid,
     allocate_persona_for_session,
     load_overflow_persona_from_config,
-    display_name_for
+    display_name_for,
+    _lowest_free_extra_n,
+    _make_extra_persona,
+    quick_smoke_test
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_voice_persona, set_voice_persona, find_active_voice_persona_sessions,
@@ -492,6 +495,14 @@ class TestLoadOverflowPersonaFromConfig:
         assert sam[ "color" ]        == "#00BCD4"
         assert sam[ "overflow" ]     is True
 
+    def test_returns_none_when_overflow_name_blank( self ):
+        # Setting `overflow name` to whitespace disables the overflow slot.
+        mgr = MagicMock()
+        mgr.get = lambda key, default=None, silent=False, return_type="string": (
+            "   " if key == "cc session voice persona overflow name" else default
+        )
+        assert load_overflow_persona_from_config( mgr ) is None
+
 
 # ── pick_unallocated_persona with overflow=Sam ───────────────────────────────
 
@@ -529,13 +540,25 @@ class TestPickUnallocatedPersonaOverflow:
         # overflow flag is False or absent on regular pool picks
         assert chosen.get( "overflow", False ) is False
 
-    def test_multiple_sams_allowed_on_repeated_exhaustion( self ):
-        # Five sessions all draw with pool fully occupied → all five get Sam
+    def test_first_overflow_verbatim_then_extra_n( self ):
+        # Option A (2026-05-28): the FIRST overflow (overflow name not yet
+        # occupied) gets Sam verbatim; once Sam is occupied, subsequent
+        # concurrent overflows spill to numbered Extra-N identities. Simulate
+        # the bridge recording each prior allocation by growing occupied_names.
         all_names = { p[ "name" ] for p in POOL_6 }
-        for i in range( 5 ):
-            chosen = pick_unallocated_persona( POOL_6, all_names, f"sid-{i}", overflow_persona=self.SAM )
-            assert chosen[ "name" ]     == "sam"
-            assert chosen[ "overflow" ] is True
+
+        first = pick_unallocated_persona( POOL_6, all_names, "sid-0", overflow_persona=self.SAM )
+        assert first[ "name" ] == "sam" and first[ "overflow" ] is True
+
+        occupied = all_names | { "sam" }
+        second   = pick_unallocated_persona( POOL_6, occupied, "sid-1", overflow_persona=self.SAM )
+        assert second[ "name" ]     == "extra 1"
+        assert second[ "voice_id" ] == self.SAM[ "voice_id" ]   # shares Sam's voice
+        assert second[ "overflow" ] is True
+
+        occupied |= { "extra 1" }
+        third     = pick_unallocated_persona( POOL_6, occupied, "sid-2", overflow_persona=self.SAM )
+        assert third[ "name" ] == "extra 2"
 
     def test_overflow_none_falls_back_to_legacy_borrow( self ):
         # When Sam is unconfigured, the legacy hash-borrow path still works.
@@ -554,6 +577,213 @@ class TestPickUnallocatedPersonaOverflow:
         chosen[ "polluted" ] = True
         assert "polluted" not in self.SAM, "Overflow source dict was mutated by caller"
         assert self.SAM == original_overflow
+
+
+# ── Extra-N overflow identities (Option A, 2026-05-28) ───────────────────────
+
+class TestLowestFreeExtraN:
+    """
+    _lowest_free_extra_n picks the smallest N≥1 whose "extra N" name is unused,
+    reusing gaps so a dead Extra session's number is reclaimed.
+    """
+
+    def test_empty_returns_one( self ):
+        assert _lowest_free_extra_n( set() ) == 1
+
+    def test_skips_occupied_low( self ):
+        assert _lowest_free_extra_n( { "extra 1" } )            == 2
+        assert _lowest_free_extra_n( { "extra 1", "extra 2" } ) == 3
+
+    def test_reuses_gap( self ):
+        # extra 1 free though extra 2 taken → reuse 1, do not skip to 3
+        assert _lowest_free_extra_n( { "extra 2" } )                       == 1
+        assert _lowest_free_extra_n( { "extra 2", "extra 3" } )            == 1
+        assert _lowest_free_extra_n( { "arnold", "extra 1", "extra 3" } )  == 2
+
+    def test_ignores_non_extra_names( self ):
+        assert _lowest_free_extra_n( { "maria", "arnold", "Tiberius" } ) == 1
+
+
+class TestMakeExtraPersona:
+    """
+    _make_extra_persona builds a uniquified Extra-N dict that shares the base
+    overflow voice/icon but carries a distinct name/display_name/color.
+    """
+
+    BASE = {
+        "name"     : "arnold",
+        "voice_id" : "v_arnold",
+        "icon"     : "🪨",
+        "color"    : "#FFD600",
+        "profile"  : "gravelly male",
+        "overflow" : True
+    }
+    PALETTE = [ "#4527A0", "#6A1B9A", "#9C27B0" ]
+
+    def test_shape_and_shared_voice_icon( self ):
+        e = _make_extra_persona( self.BASE, 1, self.PALETTE )
+        assert e[ "name" ]         == "extra 1"
+        assert e[ "display_name" ] == "Extra 1"
+        assert e[ "voice_id" ]     == "v_arnold"   # shared voice
+        assert e[ "icon" ]         == "🪨"          # shared icon
+        assert e[ "color" ]        == "#4527A0"     # palette[0]
+        assert e[ "overflow" ]     is True
+        assert e[ "borrowed" ]     is False
+
+    def test_color_cycles_modulo_palette( self ):
+        # n=4 with a 3-color palette → index (4-1)%3 = 0
+        assert _make_extra_persona( self.BASE, 4, self.PALETTE )[ "color" ] == "#4527A0"
+        assert _make_extra_persona( self.BASE, 5, self.PALETTE )[ "color" ] == "#6A1B9A"
+
+    def test_empty_palette_inherits_base_color( self ):
+        assert _make_extra_persona( self.BASE, 1, None )[ "color" ]  == "#FFD600"
+        assert _make_extra_persona( self.BASE, 2, [] )[ "color" ]    == "#FFD600"
+
+    def test_does_not_alias_base( self ):
+        e = _make_extra_persona( self.BASE, 1, self.PALETTE )
+        e[ "polluted" ] = True
+        assert "polluted" not in self.BASE
+
+
+class TestPickUnallocatedPersonaExtraN:
+    """
+    End-to-end pick semantics for Option A: pool exhausted →
+    Arnold-verbatim-first, then numbered Extras sharing Arnold's voice.
+    """
+
+    ARNOLD = {
+        "name"     : "arnold",
+        "display_name" : "Arnold",
+        "voice_id" : "v_arnold",
+        "icon"     : "🪨",
+        "color"    : "#FFD600",
+        "profile"  : "gravelly male",
+        "overflow" : True
+    }
+    PALETTE = [ "#4527A0", "#6A1B9A", "#9C27B0" ]
+
+    def _full( self ):
+        return { p[ "name" ] for p in POOL_6 }
+
+    def test_arnold_verbatim_when_free( self ):
+        chosen = pick_unallocated_persona( POOL_6, self._full(), "sid",
+                                           overflow_persona=self.ARNOLD, extra_colors=self.PALETTE )
+        assert chosen[ "name" ] == "arnold" and chosen[ "borrowed" ] is False
+
+    def test_extra_1_when_arnold_occupied( self ):
+        occupied = self._full() | { "arnold" }
+        chosen   = pick_unallocated_persona( POOL_6, occupied, "sid",
+                                             overflow_persona=self.ARNOLD, extra_colors=self.PALETTE )
+        assert chosen[ "name" ]     == "extra 1"
+        assert chosen[ "color" ]    == "#4527A0"
+        assert chosen[ "voice_id" ] == "v_arnold"
+        assert chosen[ "overflow" ] is True
+
+    def test_extra_2_when_arnold_and_extra_1_occupied( self ):
+        occupied = self._full() | { "arnold", "extra 1" }
+        chosen   = pick_unallocated_persona( POOL_6, occupied, "sid",
+                                             overflow_persona=self.ARNOLD, extra_colors=self.PALETTE )
+        assert chosen[ "name" ] == "extra 2" and chosen[ "color" ] == "#6A1B9A"
+
+    def test_gap_reuse( self ):
+        # arnold + extra 2 occupied, extra 1 free → extra 1
+        occupied = self._full() | { "arnold", "extra 2" }
+        chosen   = pick_unallocated_persona( POOL_6, occupied, "sid",
+                                             overflow_persona=self.ARNOLD, extra_colors=self.PALETTE )
+        assert chosen[ "name" ] == "extra 1"
+
+    def test_empty_palette_extra_inherits_arnold_color( self ):
+        occupied = self._full() | { "arnold" }
+        chosen   = pick_unallocated_persona( POOL_6, occupied, "sid",
+                                             overflow_persona=self.ARNOLD, extra_colors=None )
+        assert chosen[ "name" ] == "extra 1" and chosen[ "color" ] == self.ARNOLD[ "color" ]
+
+
+class TestExtraColorsGreenRule:
+    """
+    Codifies feedback_no_green_in_persona_pool for the shipped Extra-N palette:
+    every color must have green RGB < 30% AND green not in the top two channels.
+    """
+
+    # Must stay in lockstep with `cc session voice persona extra colors` in
+    # lupin-app.ini. If you change the shipped palette, change it here too.
+    SHIPPED_PALETTE = [ "#4527A0", "#6A1B9A", "#9C27B0", "#AD1457", "#C2185B", "#7B1FA2" ]
+
+    @staticmethod
+    def _rgb( hex_color ):
+        h = hex_color.lstrip( "#" )
+        return int( h[0:2], 16 ), int( h[2:4], 16 ), int( h[4:6], 16 )
+
+    def test_every_color_satisfies_green_rule( self ):
+        for hex_color in self.SHIPPED_PALETTE:
+            r, g, b = self._rgb( hex_color )
+            assert g / 255.0 < 0.30, f"{hex_color}: green {g} ≥ 30% of 255"
+            # green must be STRICTLY the lowest channel → never in the top two
+            assert g < r and g < b, \
+                f"{hex_color}: green {g} is not strictly lowest (r={r}, g={g}, b={b})"
+
+
+class TestModuleSmoke:
+    """Exercises the module's inline quick_smoke_test() body under pytest."""
+
+    def test_quick_smoke_test_runs_clean( self ):
+        # Self-contained: asserts internally, reseeds random, prints progress.
+        quick_smoke_test()
+
+
+# ── allocate_persona_for_session — Extra-N end-to-end ────────────────────────
+
+class TestAllocatePersonaExtraN:
+    """
+    Full composition through allocate_persona_for_session: pool + overflow
+    (arnold) all occupied via bridges → an Extra-N persona is returned, with
+    the palette color read from config and `assigned_at` stamped.
+    """
+
+    def _mock_mgr_with_overflow( self ):
+        mgr = MagicMock()
+        config_values = {
+            "cc session voice persona pool"            : "maria, mr radio, Rachel, Tiberius, Rio",
+            "cc session voice persona overflow name"   : "arnold",
+            "cc session voice persona arnold voice id" : "v_arnold",
+            "cc session voice persona arnold icon"     : "🪨",
+            "cc session voice persona arnold color"    : "#FFD600",
+            "cc session voice persona arnold profile"  : "gravelly male",
+            "cc session voice persona extra colors"    : "#4527A0, #6A1B9A, #9C27B0",
+            "cc session voice persona maria voice id"    : "v_maria",
+            "cc session voice persona mr radio voice id" : "v_mrnpr",
+            "cc session voice persona Rachel voice id"   : "v_rachel",
+            "cc session voice persona Tiberius voice id" : "v_tiberius",
+            "cc session voice persona Rio voice id"      : "v_domi",
+        }
+        def get( key, default=None, silent=False, return_type="string" ):
+            if key in config_values:
+                return config_values[ key ]
+            return default
+        mgr.get = get
+        return mgr
+
+    def test_extra_n_allocated_end_to_end( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            # Occupy the 5-name pool + arnold + extra 1 → next free is extra 2
+            for i, name in enumerate( [ "maria", "mr radio", "Rachel", "Tiberius", "Rio", "arnold", "extra 1" ] ):
+                _write_bridge(
+                    sessions_dir, os.getpid() + i,
+                    _bridge_with_persona( f"sid{i}aaa-aaaa-bbbb-cccc-dddddddddddd", name )
+                )
+            mgr = self._mock_mgr_with_overflow()
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=False ):
+                result = allocate_persona_for_session( mgr, "newsid12-aaaa-bbbb-cccc-dddddddddddd" )
+
+            assert result is not None
+            assert result[ "name" ]     == "extra 2"
+            assert result[ "color" ]    == "#6A1B9A"      # palette[1], read from config
+            assert result[ "voice_id" ] == "v_arnold"     # shares Arnold's voice
+            assert result[ "overflow" ] is True
+            assert "assigned_at" in result and result[ "assigned_at" ].endswith( "+00:00" )
 
 
 # ── find_active_voice_persona_sessions — mtime TTL guard ─────────────────────

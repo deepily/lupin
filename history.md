@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.05.28 - Session 0da441e6 (Tiberius 🌑) | Extra-N overflow personas + Manager-Spawned Headless Reviewer Sessions
+
+**Two features shipped (Lupin-parent commit; CoSA submodule + INI managed separately).**
+
+**Extra-N overflow personas** — generalized the single-Arnold pool-exhaustion overflow into numbered "Extra N" identities (lowest-free index, gap-reusing, distinct colors, shared overflow voice), fixing the latent 2+-overflow collision. Allocator logic lives in CoSA `voice_persona_helpers.py` (submodule, managed separately); INI keys landed via parallel commit `908bf21` (Rio); tests + design doc in this commit. Note: the no-green color rule was retired by `908bf21` mid-flight — `TestExtraColorsGreenRule` reconciliation is TODO-tracked (the test passes; my palette is green-lowest regardless).
+
+**Manager-Spawned Headless Reviewer Sessions** — a manager persona can spin up N headless Claude-Code + tmux reviewer sessions on demand via cosa-voice MCP tools `spawn_sessions` / `dismiss_sessions` / `list_spawned_sessions`, automating the manual reviewer-launch step of the cascaded plan-review workflow. New `session_spawner.py` (render/build/spawn/dismiss/list + idle-TTL reap + manifest lineage — **52 tests, 100% line+branch**); `--headless` detach path + venv provision on `start-cc-with-tmux.sh`; env-gated `register_session.py` tagging (`spawned_by`/`headless`/`role` + `speakerphone_on=False`); 3 thin `@mcp.tool` wrappers. **TTS-silence reuses the existing speakerphone primitive** — no parallel mute machinery built. **Live spawn-1-reap-1 E2E passed** and caught two real integration bugs (tmux env-forwarding; role/index name collision), both fixed. Cross-session co-design with María (operator runbook landed in planning-is-prompting). Decision record: `src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md`.
+
+**Files Modified** (this commit, Lupin-parent): `src/scripts/start-cc-with-tmux.sh`, `src/lupin_mcp/session_spawner.py` (new), `src/lupin_mcp/cosa_voice_mcp.py`, `src/lupin_cli/claude_code/hooks/register_session.py`, `src/tests/unit/test_spawn_sessions.py` (new), `src/tests/unit/test_voice_persona_helpers.py`, `src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md` (new), `src/rnd/v0.1.7/2026.05.28-extra-n-overflow-personas.md` (new), `TODO.md`, `history.md`.
+
+**Managed separately**: CoSA submodule `src/cosa/rest/voice_persona_helpers.py` (Extra-N allocator). Already committed by parallel session `908bf21`: `lupin-app.ini` + splainer (Extra-N color palette + spawn keys, swept in).
+
+---
+
 ### 2026.05.28 - Session a507b1a5 (Rio ⚡) | Voice persona config: Tiberius icon + 2 new personas + retire no-green color rule
 
 **Accomplishments**:

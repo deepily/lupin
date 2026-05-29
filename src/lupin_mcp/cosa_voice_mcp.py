@@ -1923,6 +1923,136 @@ def request_persona( name: str ) -> dict:
 
 
 # ============================================================================
+# Manager-Spawned Reviewer Sessions (host-side tmux spawn)
+# ============================================================================
+#
+# Thin @mcp.tool wrappers over session_spawner. The cosa-voice MCP server runs
+# HOST-side (stdio subprocess of `claude`), so it — and only it — can launch
+# host tmux sessions; a container REST endpoint physically cannot. The testable
+# orchestration lives in session_spawner (100% unit-covered); these wrappers
+# only resolve the manager's identity + config and delegate.
+#
+# See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
+
+def _spawn_script_path() -> str:  # pragma: no cover  # trivial path join; exercised live, not in units
+    return os.path.join( os.environ.get( "LUPIN_ROOT", "" ), "src", "scripts", "start-cc-with-tmux.sh" )
+
+
+def _spawn_config_mgr():  # pragma: no cover  # constructs a real ConfigurationManager; logic lives in resolve_spawn_config
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        return ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+    except Exception as e:
+        logger.warning( f"[spawn] ConfigurationManager unavailable; using defaults. Reason: {e}" )
+        return None
+
+
+@mcp.tool
+def spawn_sessions(
+    count              : int,
+    task_prompt        : str,
+    role               : str = "reviewer",
+    project            : str = "lupin",
+    persona_preference = None,
+    seed_memento       = None,
+    dry_run            : bool = False
+) -> dict:
+    """
+    **[SPAWN — host-side; launches real Claude Code sessions]** Spin up `count`
+    headless reviewer sessions on this (the manager's) behalf.
+
+    Each child boots as a real interactive `claude` in a detached tmux session,
+    fires SessionStart (so it gets its own voice persona — Extra-N when the named
+    pool is exhausted), and reads `task_prompt` as its initial brief. Lineage is
+    recorded against this manager's session so `dismiss_sessions` /
+    `list_spawned_sessions` can find them. Results flow back over the existing
+    commons DM threading: instruct children in `task_prompt` to post findings to
+    the returned `collection_topic` (`dm-{your-persona}`).
+
+    Cost/throttle: each child consumes Max-plan OAuth and shares the rolling
+    window — schedule non-interactive cascades off-peak (post-midnight).
+
+    Args:
+        count: number of reviewers (1..INI `cc session spawn max reviewers`)
+        task_prompt: brief template; tokens {role} {manager_session_id} {index}
+            are auto-substituted, plus any you reference and supply downstream
+        role: reviewer | author | observer | manager (templated into the brief)
+        project: child project (sets cwd / CLAUDE.md)
+        persona_preference: str | list — request specific personas (predictable-
+            fail honored by the child's SessionStart, not silently re-allocated)
+        seed_memento: path/ref to a prior memento; restores author continuity
+        dry_run: build + print the spawn commands without launching
+
+    Returns:
+        dict: { spawned:[{session_name, requested_role, status, ...}],
+                manager_persona, collection_topic, ... } or {status:"error",...}
+    """
+    _wait_for_sender_id()
+    from lupin_mcp import session_spawner
+    sid, persona = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
+    cfg          = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
+    try:
+        return session_spawner.spawn_sessions(
+            count, task_prompt, sid,
+            script_path        = _spawn_script_path(),
+            manager_persona    = persona,
+            role               = role,
+            project            = project,
+            persona_preference = persona_preference,
+            seed_memento       = seed_memento,
+            spawn_cap          = cfg[ "spawn_cap" ],
+            dry_run            = dry_run
+        )
+    except ValueError as e:
+        return { "status": "error", "reason": str( e ) }
+
+
+@mcp.tool
+def dismiss_sessions( session_names=None, reason: str = "", write_memento=None ) -> dict:
+    """
+    **[REAP — host-side]** Tear down reviewer sessions THIS manager spawned.
+
+    Kills each target's tmux session (idempotent) and drops it from the lineage
+    manifest, freeing its Extra-N/pool persona slot. With `session_names=None`,
+    reaps ALL sessions this manager spawned.
+
+    `write_memento` (defaults to the INI `cc session spawn write memento default`)
+    signals that each child should be given a chance to write a memento (to
+    `io/mementos/<persona>-<timestamp>.md`) before kill, so its specialization
+    survives a future re-spawn (pass that path back as `seed_memento`).
+
+    Args:
+        session_names: explicit tmux session names, or None = all mine
+        reason: recorded teardown reason
+        write_memento: None → use INI default; else explicit bool
+
+    Returns:
+        dict: { dismissed:[{session_name, status}], remaining, ... }
+    """
+    _wait_for_sender_id()
+    from lupin_mcp import session_spawner
+    sid, _ = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
+    cfg    = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
+    wm     = cfg[ "write_memento_default" ] if write_memento is None else write_memento
+    return session_spawner.dismiss_sessions( sid, session_names=session_names, reason=reason, write_memento=wm )
+
+
+@mcp.tool
+def list_spawned_sessions() -> dict:
+    """
+    **[READ — host-side]** List the reviewer sessions THIS manager spawned, each
+    with live/dead status probed from tmux.
+
+    Returns:
+        dict: { sessions:[{session_name, requested_role, status, alive}], count, ... }
+    """
+    _wait_for_sender_id()
+    from lupin_mcp import session_spawner
+    sid, _ = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
+    return session_spawner.list_spawned_sessions( sid )
+
+
+# ============================================================================
 # Commons Tools (Phase 1 — file-based inter-session blackboard)
 # ============================================================================
 #
