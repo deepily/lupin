@@ -788,6 +788,11 @@ class TestEmbeddingProviderHttpPath:
         provider = EmbeddingProvider( debug=False )
         # Patch _http_api_key on the class so all instances see the mock
         EmbeddingProvider._http_api_key = staticmethod( lambda: api_key )
+        # Force the FastAPI /api/embeddings branch: with no model-server URL
+        # resolvable, _resolve_http_target() falls through to the FastAPI path
+        # this class is explicitly exercising. (The ambient INI/env may set a
+        # model-server URL, which would otherwise route to /embeddings.)
+        EmbeddingProvider._resolve_model_server_url = staticmethod( lambda: None )
         return provider
 
     @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
@@ -887,6 +892,8 @@ class TestEmbeddingProviderDynamicUrl:
         from cosa.memory.embedding_provider import EmbeddingProvider
         provider = EmbeddingProvider( debug=False )
         EmbeddingProvider._http_api_key = staticmethod( lambda: api_key )
+        # Force the FastAPI /api/embeddings branch (see TestEmbeddingProviderHttpPath).
+        EmbeddingProvider._resolve_model_server_url = staticmethod( lambda: None )
         return provider
 
     @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )
@@ -952,6 +959,8 @@ class TestEmbeddingProviderBatchHttpPath:
         from cosa.memory.embedding_provider import EmbeddingProvider
         provider = EmbeddingProvider( debug=False )
         EmbeddingProvider._http_api_key = staticmethod( lambda: api_key )
+        # Force the FastAPI /api/embeddings branch (see TestEmbeddingProviderHttpPath).
+        EmbeddingProvider._resolve_model_server_url = staticmethod( lambda: None )
         return provider
 
     @patch( "cosa.memory.embedding_provider.ConfigurationManager", return_value=_make_fake_config() )

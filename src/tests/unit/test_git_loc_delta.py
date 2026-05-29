@@ -170,8 +170,8 @@ def test_csv_long_shape_is_stable_across_file_types():
         path_a = os.path.join( td, "a.csv" )
         path_b = os.path.join( td, "b.csv" )
 
-        rows_a = write_csv( by_type_a, path=path_a )
-        rows_b = write_csv( by_type_b, path=path_b )
+        rows_a = write_csv( by_type_a, path=path_a, repo="repo-a" )
+        rows_b = write_csv( by_type_b, path=path_b, repo="repo-b" )
 
         assert rows_a == 2
         assert rows_b == 3
@@ -201,7 +201,7 @@ def test_csv_empty_input_produces_header_only():
     """
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join( td, "empty.csv" )
-        rows = write_csv( {}, path=path )
+        rows = write_csv( {}, path=path, repo="test-repo" )
 
         assert rows == 0
         df = pd.read_csv( path )
@@ -226,16 +226,19 @@ def test_default_csv_path_branch_mode_resolves_under_target_repo_not_lupin():
     project, the test pyramid MUST include an invocation pointing OUTSIDE
     the project tree.
     """
-    from cosa.repo.run_git_loc_delta import _default_csv_path
+    from cosa.repo.run_git_loc_delta import _default_csv_path, _resolve_target_root, _resolve_repo_name
 
     with tempfile.TemporaryDirectory() as td:
         sibling = os.path.join( td, "fake-sibling-repo" )
         os.makedirs( sibling )
 
+        target_root = _resolve_target_root( sibling )
+        repo_name   = _resolve_repo_name( None, target_root )
         path = _default_csv_path(
-            mode      = "branch",
-            repo_path = sibling,
-            branch    = "wip-feature-x",
+            mode        = "branch",
+            target_root = target_root,
+            repo_name   = repo_name,
+            branch      = "wip-feature-x",
         )
 
         # Must land INSIDE the target repo's tree
@@ -261,16 +264,19 @@ def test_default_csv_path_today_mode_also_target_aware():
     Same cross-target principle as the branch-mode test; this locks the
     archival-snapshot path against the same regression.
     """
-    from cosa.repo.run_git_loc_delta import _default_csv_path
+    from cosa.repo.run_git_loc_delta import _default_csv_path, _resolve_target_root, _resolve_repo_name
 
     with tempfile.TemporaryDirectory() as td:
         sibling = os.path.join( td, "another-sibling" )
         os.makedirs( sibling )
 
+        target_root = _resolve_target_root( sibling )
+        repo_name   = _resolve_repo_name( None, target_root )
         path = _default_csv_path(
-            mode      = "today",
-            repo_path = sibling,
-            branch    = None,
+            mode        = "today",
+            target_root = target_root,
+            repo_name   = repo_name,
+            branch      = None,
         )
 
         assert path.startswith( sibling + os.sep ), (
@@ -291,18 +297,21 @@ def test_default_csv_path_same_tree_still_lands_under_lupin():
     with `repo_path="."` from within the Lupin tree should still land at
     `{LUPIN_ROOT}/io/git-loc-delta/...` — same as before the fix.
     """
-    from cosa.repo.run_git_loc_delta import _default_csv_path
+    from cosa.repo.run_git_loc_delta import _default_csv_path, _resolve_target_root, _resolve_repo_name
 
+    target_root = _resolve_target_root( "." )
+    repo_name   = _resolve_repo_name( None, target_root )
     path = _default_csv_path(
-        mode      = "branch",
-        repo_path = ".",
-        branch    = "wip-test",
+        mode        = "branch",
+        target_root = target_root,
+        repo_name   = repo_name,
+        branch      = "wip-test",
     )
 
-    lupin_root = cu.get_project_root()
-    # Path must start with an absolute path that equals or is under the
-    # current cwd's resolution (which in this test is one of the Lupin paths)
+    # In-tree resolution: "." resolves to the Lupin repo root, so the default
+    # path must land under that target_root (same as before the cross-target fix).
     assert os.path.isabs( path )
+    assert path.startswith( target_root + os.sep )
     assert path.endswith( "-wip-test-loc-delta.csv" )
 
 
