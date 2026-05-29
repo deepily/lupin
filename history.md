@@ -2,6 +2,22 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.05.29 - Session 5496cbb6 (Krishna 🦚) | v0.1.7→main PR + CoSA→Lupin merge analysis + Phase A local-venv relocation
+
+**Three arcs on branch `wip-v0.1.8-2026.05.29-preparing-for-gcp-deployment`: shipped the v0.1.7 PR, researched the CoSA mono-repo merge, and executed the local dev-venv relocation (Phase A).**
+
+**v0.1.7 → main PR.** Ran the branch-PR-and-merge workflow: README "What's New in v0.1.7" headline block + version-history entry + version bump; repaired 9 stale unit tests (git_loc_delta v1.1 API drift + embedding model-server-carveout isolation — both stale-test-vs-correct-source, source untouched); rode Tiberius's pgvector TODO note. Dev gates green (unit 5034/0, WS smoke 50/50). PR #17 squash-merged to main; created this v0.1.8 branch and **kept** the v0.1.7 local branch per Rick.
+
+**CoSA→Lupin mono-repo merge — research + plan (Phase B, GATED, NOT executed).** Two multi-agent research workflows (~1.19M tokens) → verdict: folding CoSA into Lupin is the correct end-state (zero external consumers verified on-disk+SSH, 52 reverse-imports CoSA→host, no packaging/version-pin, lockstep releases), but execute gated/staged via history-preserving `git subtree` **after v0.1.8 ships**, on a dedicated branch, behind an authenticated-operator PR/branch-protection check + pushing the 2 unpushed CoSA branches. Corrected a doctrine premise: `src/cosa` is **NOT a submodule** — it's a gitignored independent nested repo (no `.gitmodules`, no gitlink). Full analysis + weighted pros/cons: `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md`.
+
+**Phase A — local dev-venv relocation (DONE, 3 commits, green).** Replaced the stale miniconda `src/cosa/.venv` (py3.11, 367-pkg cruft) with a clean root `.venv` (py3.13) built from the container's `uv.lock` **minus** three native packages the host can't build and nothing host-side imports (pyaudio, flash-attn, autoawq) + the `en_core_web_sm` model. Rick's directive: mirror the container, no old artifacts. CUDA honored — torch `2.6.0+cu124` runs on driver 535 via Minor Version Compatibility (`cuda_available=True`); the historical doom-loop was a container-only `cuda-compat-12-4` forward-compat shim (already purged). **Production Dockerfile deliberately UNTOUCHED** (zero container blast radius). Repointed **ALL 14 venv refs across 11 scripts** — a full repo sweep that caught 4 `src/tests/run-*.sh` runners the recon had missed — and added reproducible `src/scripts/build-local-venv.sh`. Verified on the new venv: unit **5034 passed / 0 failed**; WebSocket smoke **50/50**.
+
+**Commits (this session, on `wip-v0.1.8`, LOCAL + UNPUSHED):** `bf97e1a` (gitignore guard), `eda7caf` (openapi-to-md dep), `6cdcb7b` (script repoints + builder). Old `src/cosa/.venv` kept as fallback. Push awaits Rick's explicit go.
+
+**Files** (this checkpoint commit): `history.md`, `TODO.md`, `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md` (new). (The Phase A code landed in the 3 commits above.)
+
+---
+
 ### 2026.05.29 - Session c9c582b7 (Tiberius 👑) | LanceDB rebuild + ~303GB disk reclaim + pgvector migration analysis
 
 **Disk-reclamation campaign (~303GB freed), a corrupted-table rebuild, and a deferred pgvector analysis. On branch `wip-v0.1.8-2026.05.29-preparing-for-gcp-deployment`.**

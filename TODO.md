@@ -19,6 +19,18 @@ Feature **v1 is feature-complete + live-validated** (spawn-1-reap-1 passed; coll
 
 Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`).
 
+## 🧬 NEW (2026-05-29) — CoSA→Lupin mono-repo merge + local-venv relocation (Krishna 🦚, session `5496cbb6`)
+
+**Phase A (local dev-venv relocation) is DONE** — commits `bf97e1a`, `eda7caf`, `6cdcb7b` on `wip-v0.1.8` (LOCAL + UNPUSHED). New root `.venv` (py3.13) mirrors the container's locked set minus pyaudio/flash-attn/autoawq (native, host-unbuildable, zero host-side imports); unit 5034/0 + WS smoke 50/50 on it; old `src/cosa/.venv` kept as fallback; production Dockerfile untouched. Full plan + weighted pros/cons: `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md`.
+
+- [ ] **[LUPIN]** Push the 3 Phase-A commits to `origin/wip-v0.1.8` (awaiting Rick's explicit "push").
+- [ ] **[LUPIN]** Container parity (no action — just expect it): the next `lupin:1.0.0` rebuild picks up `openapi-to-md` (now in root `pyproject.toml`/`uv.lock`).
+- [ ] **[LUPIN]** **Phase B — CoSA→Lupin git fold (GATED: after v0.1.8 ships; dedicated branch off main; NEVER on the deploy branch).** Decisions needed from Rick: (1) timing (after v0.1.8 — rec); (2) approach `git subtree` (rec, history-preserving) vs `git-filter-repo`; (3) the 2 truly-unpushed CoSA branches (`wip-v0.0.4-…-refactoring-agent-objects` [10 commits], `wip-v0.0.6-…-post-claude-push-fiasco` [1]) — push first or bless disposable; (4) coverage policy — does merged CoSA inherit the Lupin-wide 100% gate (rec: forward-going + backfill task); (5) authenticated-operator check of open PRs / branch-protection on `deepily/cosa` (gh is 401 locally; SSH confirms branches+tags only). **Settled:** namespace PRESERVE (`cosa.*` unchanged, files stay at `src/cosa/`); GCS stays container-only; venv = lean subset (option b).
+- [ ] **[LUPIN]** Doctrine scrub (Phase B, separate reviewable change): project `CLAUDE.md` blocks (GIT REPOSITORY MANAGEMENT / PROJECT STRUCTURE / IGNORE SUB-REPO HISTORIES), delete 2 feedback memories + MEMORY.md index lines, retire the `nested-repo-management` skill, **swap-not-delete** the CoSA example in PIP `session-end.md`/`INSTALLATION-GUIDE.md`, discriminate the ~37/41 false-positive cosa/cosa-voice grep hits, archive `src/cosa/history.md` under `history/` (don't concat).
+- [ ] **[LUPIN]** When the Phase-B namespace/coverage/identity decisions land, ping María 🌸 (PIP) — she's holding her planning-is-prompting workflow pass on the merge shape (axis-1 PRESERVE already given; axis-2 coverage is the open one).
+
+Filed 2026-05-29 by Krishna 🦚 (session `5496cbb6`).
+
 ## 🔬 POST-PR (2026-05-29) — Revisit: LanceDB → PostgreSQL/pgvector migration analysis
 
 Tiberius 👑 ran a multi-agent research workflow (`wkiwwi4u4`) on moving semantic-similarity storage off LanceDB. **Verdict: the 81GB "bloat" is stale, uncompacted version history in ONE append-only log table** (`input_and_output_tbl`: 81G `_versions/`, only ~898MB live `data/`) — a missing-compaction-cron problem, NOT a vector-engine problem. The "migrate to fix the disk" premise was **refuted** adversarially. At Lupin's scale (tens of thousands of 768-dim vectors, single node) pgvector vs LanceDB query perf is a wash (both sub-10ms).
