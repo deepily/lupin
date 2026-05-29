@@ -41,16 +41,24 @@
 
 ---
 
-## 🎨 NEW — Tiberius persona emoji contrast fix: 🌑 → 👑 (filed 2026-05-21 by Rachel 🕊️, session `e13fed4f`)
+## ✅ DONE 2026-05-28 — Tiberius persona emoji contrast fix: 🌑 → 👑 (Rio ⚡, session `a507b1a5`)
 
-**Context**: Rick flagged that Tiberius's persona badge renders as a dark blob. The icon `🌑` (U+1F311 new moon — a near-black filled disc) sits on color `#3F51B5` (Material Indigo 500), giving near-zero contrast. Rick ratified the replacement `👑` (crown) via cosa-voice `ask_multiple_choice` on 2026-05-21 — high-contrast gold-on-indigo, and it reinforces the Roman-Emperor namesake. Investigated read-only from CoSA session `e13fed4f`; INI lines 920-923 confirmed as the culprit.
+**Context**: Rick flagged that Tiberius's persona badge renders as a dark blob. The icon `🌑` (U+1F311 new moon — a near-black filled disc) sits on color `#3F51B5` (Material Indigo 500), giving near-zero contrast. Rick ratified the replacement `👑` (crown) — high-contrast gold-on-indigo, and it reinforces the Roman-Emperor namesake.
 
-**The change** (2 paired lines, config-only — no code):
+**The change** (config-only — no code):
 
-- [ ] **[LUPIN]** `src/conf/lupin-app.ini` (~line 921): `cc session voice persona Tiberius icon` — change `🌑` to `👑`
-- [ ] **[LUPIN]** `src/conf/lupin-app-splainer.ini` (~line 328): update the paired splainer entry — `Default: 👑.` plus a note that it changed from `🌑` on 2026-05-22 for the dark-on-dark contrast fix (per the every-INI-key-needs-a-splainer mandate)
+- [x] **[LUPIN]** `src/conf/lupin-app.ini`: `cc session voice persona Tiberius icon` — changed `🌑` → `👑`
+- [x] **[LUPIN]** `src/conf/lupin-app-splainer.ini`: paired splainer entry updated to `Default: 👑.` + change note
 
-**Ownership note**: this TODO entry was written by a CoSA-context session (`e13fed4f`, Rachel 🕊️) under Rick's explicit voice authorization to cross the CoSA→Lupin boundary *for this TODO file only*. The INI edit itself remains a Lupin-context task — natural owner is Tiberius 🌑 (it is literally his own persona icon, and his session runs in Lupin context) or any Lupin-context session.
+---
+
+## 🎨 NEW — Retire-no-green-color-rule sweep: deferred references (filed 2026-05-28 by Rio ⚡, session `a507b1a5`)
+
+**Context**: Rick retired the no-green persona-color rule on 2026-05-28 ("no longer in effect, remove all references"). Active config + auto-memory were cleaned this session. The following references remain and were deferred for parallel-session-safety / historical-record reasons:
+
+- [ ] **[LUPIN]** `src/tests/unit/test_voice_persona_helpers.py` — `TestExtraColorsGreenRule` class (lines ~702-717) enforces the retired rule. **NOT touched this session: file was being modified by a parallel session.** A Lupin-context session that owns this file should remove the class (extra-colors palette currently still passes it by legacy coincidence, so it isn't red — just dead).
+- [ ] **[LUPIN-COSA]** `src/cosa/rest/voice_persona_helpers.py` (lines ~301, ~423, ~513) — docstrings/comments say "Green-rule-compliant palette". Trim the green-rule wording in a CoSA-context session (per [[lupin-only-never-cosa]] — edit only from CoSA context).
+- [ ] **[LUPIN]** ~18 dated R&D docs under `src/rnd/v0.1.7/` reference the rule. Mostly point-in-time historical records — recommend leaving as-is, but the current/active `2026.05.28-extra-n-overflow-personas.md` may warrant a note that the rule is retired. Rick to confirm whether historical docs should be swept.
 
 ---
 
