@@ -9,6 +9,16 @@ Feature **v1 is feature-complete + live-validated** (spawn-1-reap-1 passed; coll
 - [ ] **[LUPIN]** Optional next: wire `expected_ack_deadline` into the spawn result (María's §3.3 swap); derive reviewer tmux `name_prefix`/role surfaces if cosmetics matter.
 - Design doc: `src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md` · Runbook (María): `planning-is-prompting/workflow/plan-review-cascaded-on-demand-spawn.md`
 
+## 🔬 POST-PR (2026-05-29) — Revisit: LanceDB → PostgreSQL/pgvector migration analysis
+
+Tiberius 👑 ran a multi-agent research workflow (`wkiwwi4u4`) on moving semantic-similarity storage off LanceDB. **Verdict: the 81GB "bloat" is stale, uncompacted version history in ONE append-only log table** (`input_and_output_tbl`: 81G `_versions/`, only ~898MB live `data/`) — a missing-compaction-cron problem, NOT a vector-engine problem. The "migrate to fix the disk" premise was **refuted** adversarially. At Lupin's scale (tens of thousands of 768-dim vectors, single node) pgvector vs LanceDB query perf is a wash (both sub-10ms).
+
+- [ ] **[LUPIN]** After this PR merges, serialize the parked draft → `src/rnd/v0.1.7/2026.05.29-lancedb-to-postgresql-pgvector-migration-analysis.md` (currently held at `~/lancedb-pgvector-analysis-DRAFT.md`, outside the repo during the PR per Rick's instruction).
+- [ ] **[LUPIN]** **Phase 0 (do regardless of migrate/stay decision):** run `src/scripts/cleanup_lupin_lancedb.py` (wraps `Table.optimize(cleanup_older_than=…)`) to reclaim ~98% of the 81GB, then **schedule** it so the append-log never regrows. It has never been wired into any scheduler. Precedent: the same table was 43GB on 2026-04-27.
+- [ ] **[LUPIN]** Only THEN decide the pgvector migration on consolidation/ACID merits alone (Postgres already deployed as `lupin-postgres`, but ships only `uuid-ossp` — pgvector extension not yet installed). If migrating: move only the ~165MB of genuine vector tables, leave the append-log behind, use the `snapshot_manager` abstraction as the cutover seam.
+
+Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`). Full draft + 6 adversarial verdicts in the parked file.
+
 ## 🟢 PHASE 7A CASCADE-COMPLETE — Run 4 closed 2026-05-20 03:30 UTC (Manager: Tiberius 🌑, session `387b9201`)
 
 **Status**: Phase 7a Telemetry is implementer-handoff-ready. All 4 cap surfaces closed (Stage 1 + 2 + 3 + Step 9 light-review). 57% net cap utilization; 50%+ headroom preserved across every cap surface. Zero T3/T4 escalations.
