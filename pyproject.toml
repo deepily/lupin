@@ -96,6 +96,11 @@ dependencies = [
   "pandas>=2.2,<3",
   "pyperclip>=1.9,<2",
   "tabulate>=0.9,<1",
+  "openapi-to-md==0.1.0b2",               # provides `openapi-to-markdown` + `api2md` console
+                                          # scripts used by src/scripts/generate-api-docs.sh.
+                                          # Was only ever in the old miniconda venv; exact-pinned
+                                          # (beta — no stable release) so uv resolves it without a
+                                          # global --prerelease flag.
 
   # --- Build helpers (kept in main env; flash-attn build needs ninja+packaging) ---
   "wheel",

@@ -2057,6 +2057,7 @@ dependencies = [
     { name = "lxml" },
     { name = "ninja" },
     { name = "openai" },
+    { name = "openapi-to-md" },
     { name = "packaging" },
     { name = "pandas" },
     { name = "passlib" },
@@ -2117,6 +2118,7 @@ requires-dist = [
     { name = "lxml", specifier = ">=5,<6" },
     { name = "ninja" },
     { name = "openai", specifier = ">=1.50,<2" },
+    { name = "openapi-to-md", specifier = "==0.1.0b2" },
     { name = "packaging" },
     { name = "pandas", specifier = ">=2.2,<3" },
     { name = "passlib", specifier = "==1.7.4" },
@@ -2704,6 +2706,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/02/2e/58d83848dd1a79cb92ed8e63f6ba901ca282c5f09d04af9423ec26c56fd7/openapi_pydantic-0.5.1.tar.gz", hash = "sha256:ff6835af6bde7a459fb93eb93bb92b8749b754fc6e51b2f1590a19dc3005ee0d", size = 60892, upload-time = "2025-01-08T19:29:27.083Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/cf/03675d8bd8ecbf4445504d8071adab19f5f993676795708e36402ab38263/openapi_pydantic-0.5.1-py3-none-any.whl", hash = "sha256:a3a09ef4586f5bd760a8df7f43028b60cafb6d9f61de2acba9574766255ab146", size = 96381, upload-time = "2025-01-08T19:29:25.275Z" },
+]
+
+[[package]]
+name = "openapi-to-md"
+version = "0.1.0b2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "jinja2" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/05/63/b5a5db0d78f3c9504b9233ac29cdd5dc1181639d6d896aa451f47daf73af/openapi_to_md-0.1.0b2.tar.gz", hash = "sha256:45478c80e3b462497bb9dbf5dad7ff2230ac3653904d36e8ee9c7615a8117097", size = 5280, upload-time = "2025-07-08T13:07:33.856Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/da/3234d86255d44ba5ca4a886b9d7eddfe31c6042172cfc4de894ffd04b81e/openapi_to_md-0.1.0b2-py3-none-any.whl", hash = "sha256:20a6a289c23e431c8d3db3fd1f6b68ccedb36820ef34a075322dee083b4dec56", size = 7774, upload-time = "2025-07-08T13:07:30.151Z" },
 ]
 
 [[package]]
