@@ -4,8 +4,10 @@ src/temp
 src/tmp/
 tmp
 
-# Skip CoSA repo
-src/cosa
+# CoSA folded into the Lupin mono-repo (2026-05-29) — its files are now tracked
+# here. Keep its host-only venv out of the tree (belt-and-suspenders; src/cosa's
+# own nested .gitignore also excludes .venv).
+src/cosa/.venv/
 
 # Skip the usual OS X artifacts and noise
 .DS_Store

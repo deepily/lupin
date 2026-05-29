@@ -1,0 +1,237 @@
+# Branch Analyzer Default Configuration
+#
+# This file defines the default configuration for the COSA Branch Analyzer tool.
+# Users can override these settings by providing a custom configuration file
+# using the --config command-line argument.
+#
+# All settings in this file are optional. If not specified, the analyzer will
+# use these defaults.
+
+# ============================================================================
+# Git Settings
+# ============================================================================
+git:
+  # Default base branch for comparisons (typically main or master)
+  default_base_branch: main
+
+  # Default head branch for comparisons (HEAD = current branch)
+  default_head_branch: HEAD
+
+  # Git diff algorithm to use
+  # Options: myers, minimal, patience, histogram
+  # histogram is generally fastest for large diffs
+  diff_algorithm: histogram
+
+  # Additional git diff options (advanced users)
+  # Example: ['--ignore-all-space', '--ignore-blank-lines']
+  extra_diff_options: []
+
+
+# ============================================================================
+# File Type Mappings
+# ============================================================================
+file_types:
+  # Map file extensions to category names
+  # These categories are used for grouping statistics
+  extensions:
+    # Python
+    '.py': python
+    '.pyx': python
+    '.pyi': python
+
+    # JavaScript/TypeScript
+    '.js': javascript
+    '.jsx': javascript
+    '.mjs': javascript
+    '.ts': typescript
+    '.tsx': typescript
+
+    # Web Technologies
+    '.html': html
+    '.htm': html
+    '.css': css
+    '.scss': css
+    '.sass': css
+    '.less': css
+
+    # Shell Scripts
+    '.sh': shell
+    '.bash': shell
+    '.zsh': shell
+    '.fish': shell
+
+    # Configuration Files
+    '.ini': config
+    '.conf': config
+    '.cfg': config
+    '.yaml': config
+    '.yml': config
+    '.toml': config
+    '.json': json
+    '.jsonl': json
+
+    # Documentation
+    '.md': markdown
+    '.rst': markdown
+    '.txt': text
+
+    # SQL
+    '.sql': sql
+
+    # XML
+    '.xml': xml
+    '.xsl': xml
+    '.xsd': xml
+
+    # Binary Files
+    '.db': binary
+    '.sqlite': binary
+    '.sqlite3': binary
+    '.pyc': binary
+    '.pyo': binary
+
+    # Other
+    '.gitignore': other
+    '.env': other
+
+
+# ============================================================================
+# Analysis Settings
+# ============================================================================
+analysis:
+  # Separate code lines from comments/docstrings for supported languages
+  separate_code_comments: true
+
+  # Track docstrings separately from regular comments (Python)
+  track_docstrings: true
+
+  # Track blank/empty lines in statistics
+  track_blank_lines: false
+
+  # Enable multiline comment detection (JavaScript, CSS)
+  multiline_comment_detection: true
+
+  # Languages to analyze for code vs comment separation
+  # Must have corresponding classifier in line_classifier.py
+  supported_languages:
+    - python
+    - javascript
+    - typescript
+
+
+# ============================================================================
+# Output Settings
+# ============================================================================
+output:
+  # Default output format
+  # Options: console, json, markdown
+  default_format: console
+
+  # Enable color output in console mode (requires colorama or termcolor)
+  color_output: true
+
+  # Show percentages in addition to absolute numbers
+  show_percentages: true
+
+  # Number of decimal places for percentages
+  decimal_places: 1
+
+  # Show file counts by type (in addition to line counts)
+  show_file_counts: true
+
+  # Sort file types by total changes (descending)
+  sort_by_total_changes: true
+
+
+# ============================================================================
+# Formatting Settings (Console Output)
+# ============================================================================
+formatting:
+  # Column widths for tabular output
+  column_widths:
+    file_type: 15
+    counts: 10
+    net_change: 12
+
+  # Characters for formatting output
+  border_char: "="
+  separator_char: "-"
+
+  # Number formatting
+  use_thousands_separator: true
+  thousands_separator: ","
+
+  # Section headers
+  show_section_borders: true
+  section_border_width: 80
+
+
+# ============================================================================
+# JSON Output Settings
+# ============================================================================
+json_output:
+  # Pretty print JSON output
+  pretty: true
+
+  # Indentation for pretty printing
+  indent: 2
+
+  # Include metadata (timestamp, config, git refs)
+  include_metadata: true
+
+  # Sort keys alphabetically
+  sort_keys: false
+
+
+# ============================================================================
+# Markdown Output Settings
+# ============================================================================
+markdown_output:
+  # Use GitHub-flavored markdown
+  github_flavored: true
+
+  # Include table of contents
+  include_toc: true
+
+  # Maximum TOC depth
+  toc_depth: 3
+
+  # Use code fences for statistics tables
+  use_code_fences: false
+
+  # Include timestamp in report
+  include_timestamp: true
+
+
+# ============================================================================
+# Performance Settings
+# ============================================================================
+performance:
+  # Maximum diff size in lines before warning
+  max_diff_lines: 100000
+
+  # Timeout for git commands (seconds)
+  git_timeout: 60
+
+  # Buffer size for reading git output
+  buffer_size: 8192
+
+
+# ============================================================================
+# Debug and Logging Settings
+# ============================================================================
+debug:
+  # Show debug output
+  enabled: false
+
+  # Show verbose output (more detailed than debug)
+  verbose: false
+
+  # Log git commands before execution
+  log_git_commands: false
+
+  # Log parsing progress (for large diffs)
+  log_parsing_progress: false
+
+  # Progress update interval (lines)
+  progress_interval: 10000

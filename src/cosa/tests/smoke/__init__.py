@@ -1,0 +1,1 @@
+# CoSA Framework Smoke Test Suite

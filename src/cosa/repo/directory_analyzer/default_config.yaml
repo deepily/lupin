@@ -1,0 +1,396 @@
+# Directory Analyzer Default Configuration
+#
+# This file defines the default configuration for the COSA Directory Analyzer tool.
+# Users can override these settings by providing a custom configuration file
+# using the --config command-line argument.
+#
+# All settings in this file are optional. If not specified, the analyzer will
+# use these defaults.
+
+# ============================================================================
+# Directory Scanning Settings
+# ============================================================================
+directory:
+  # Directories to exclude from analysis (exact name matching)
+  exclude_dirs:
+    - .git
+    - __pycache__
+    - .venv
+    - venv
+    - node_modules
+    - .mypy_cache
+    - .pytest_cache
+    - .ruff_cache
+    - .tox
+    - .nox
+    - dist
+    - build
+    - .eggs
+    - .egg-info
+    - .idea
+    - .vscode
+    - .cache
+    - .coverage
+    - htmlcov
+    - .hypothesis
+    - .benchmarks
+
+    # SDK/Framework directories
+    - flutter
+    - .dart_tool
+
+    # Generated/Output directories
+    - io
+
+    # Training data directories
+    - ephemera
+
+    # Database directories
+    - "*.lancedb"
+    - "*.lancedb.backup*"
+    - long-term-memory
+
+  # File patterns to exclude (glob patterns)
+  exclude_files:
+    - "*.pyc"
+    - "*.pyo"
+    - "*.pyd"
+    - "*.so"
+    - "*.dll"
+    - "*.dylib"
+    - ".DS_Store"
+    - "Thumbs.db"
+    - "*.egg-info"
+    - "*.egg"
+    - "*.whl"
+    - "*.tar.gz"
+    - "*.zip"
+
+  # Maximum file size to read (bytes) - skip larger files
+  # 1MB default - prevents memory issues with large data files
+  max_file_size: 1048576
+
+  # Follow symlinks when scanning
+  follow_symlinks: false
+
+  # File encodings to try (in order) when reading files
+  encodings:
+    - utf-8
+    - utf-8-sig
+    - latin-1
+    - cp1252
+
+
+# ============================================================================
+# File Type Mappings
+# ============================================================================
+file_types:
+  # Map file extensions to category names
+  # These categories are used for grouping statistics
+  extensions:
+    # Python
+    '.py': python
+    '.pyx': python
+    '.pyi': python
+
+    # JavaScript/TypeScript
+    '.js': javascript
+    '.jsx': javascript
+    '.mjs': javascript
+    '.cjs': javascript
+    '.ts': typescript
+    '.tsx': typescript
+
+    # Dart/Flutter
+    '.dart': dart
+
+    # Web Technologies
+    '.html': html
+    '.htm': html
+    '.css': css
+    '.scss': css
+    '.sass': css
+    '.less': css
+    '.vue': vue
+    '.svelte': svelte
+
+    # Shell Scripts
+    '.sh': shell
+    '.bash': shell
+    '.zsh': shell
+    '.fish': shell
+
+    # Configuration Files
+    '.ini': config
+    '.conf': config
+    '.cfg': config
+    '.yaml': config
+    '.yml': config
+    '.toml': config
+    '.json': json
+    '.jsonl': json
+
+    # Documentation
+    '.md': markdown
+    '.rst': markdown
+    '.txt': text
+
+    # SQL
+    '.sql': sql
+
+    # XML
+    '.xml': xml
+    '.xsl': xml
+    '.xsd': xml
+
+    # Java/JVM
+    '.java': java
+    '.kt': kotlin
+    '.kts': kotlin
+    '.scala': scala
+    '.groovy': groovy
+
+    # C/C++
+    '.c': c
+    '.h': c
+    '.cpp': cpp
+    '.hpp': cpp
+    '.cc': cpp
+    '.cxx': cpp
+
+    # Go
+    '.go': go
+
+    # Rust
+    '.rs': rust
+
+    # Ruby
+    '.rb': ruby
+    '.erb': ruby
+
+    # PHP
+    '.php': php
+
+    # Swift
+    '.swift': swift
+
+    # Objective-C
+    '.m': objc
+    '.mm': objc
+
+    # C#
+    '.cs': csharp
+
+    # R
+    '.r': r
+    '.R': r
+
+    # Lua
+    '.lua': lua
+
+    # Perl
+    '.pl': perl
+    '.pm': perl
+
+    # Haskell
+    '.hs': haskell
+
+    # Elixir/Erlang
+    '.ex': elixir
+    '.exs': elixir
+    '.erl': erlang
+
+    # Binary Files (skip reading)
+    '.db': binary
+    '.sqlite': binary
+    '.sqlite3': binary
+    '.lance': binary
+    '.manifest': binary
+    '.txn': binary
+    '.pyc': binary
+    '.pyo': binary
+    '.class': binary
+    '.jar': binary
+    '.war': binary
+    '.ear': binary
+    '.exe': binary
+    '.dll': binary
+    '.so': binary
+    '.dylib': binary
+    '.png': binary
+    '.jpg': binary
+    '.jpeg': binary
+    '.gif': binary
+    '.ico': binary
+    '.svg': binary
+    '.webp': binary
+    '.mp3': binary
+    '.mp4': binary
+    '.wav': binary
+    '.ogg': binary
+    '.pdf': binary
+    '.doc': binary
+    '.docx': binary
+    '.xls': binary
+    '.xlsx': binary
+    '.ppt': binary
+    '.pptx': binary
+    '.zip': binary
+    '.tar': binary
+    '.gz': binary
+    '.bz2': binary
+    '.rar': binary
+    '.7z': binary
+    '.woff': binary
+    '.woff2': binary
+    '.ttf': binary
+    '.otf': binary
+    '.eot': binary
+
+    # Other
+    '.gitignore': other
+    '.dockerignore': other
+    '.env': other
+    '.env.example': other
+    'Makefile': other
+    'Dockerfile': other
+
+
+# ============================================================================
+# Analysis Settings
+# ============================================================================
+analysis:
+  # Separate code lines from comments/docstrings for supported languages
+  separate_code_comments: true
+
+  # Track docstrings separately from regular comments (Python)
+  track_docstrings: true
+
+  # Track blank/empty lines in statistics
+  track_blank_lines: false
+
+  # Enable multiline comment detection (JavaScript, CSS)
+  multiline_comment_detection: true
+
+  # Languages to analyze for code vs comment separation
+  # Must have corresponding classifier in line_classifier.py
+  supported_languages:
+    - python
+    - javascript
+    - typescript
+
+
+# ============================================================================
+# Output Settings
+# ============================================================================
+output:
+  # Default output format
+  # Options: console, json, markdown
+  default_format: console
+
+  # Enable color output in console mode
+  color_output: true
+
+  # Show percentages in addition to absolute numbers
+  show_percentages: true
+
+  # Number of decimal places for percentages
+  decimal_places: 1
+
+  # Show file counts by type (in addition to line counts)
+  show_file_counts: true
+
+  # Sort file types by total lines (descending)
+  sort_by_total: true
+
+
+# ============================================================================
+# Formatting Settings (Console Output)
+# ============================================================================
+formatting:
+  # Column widths for tabular output
+  column_widths:
+    file_type: 18
+    lines: 12
+    files: 8
+    percent: 8
+
+  # Characters for formatting output
+  border_char: "="
+  separator_char: "-"
+
+  # Number formatting
+  use_thousands_separator: true
+  thousands_separator: ","
+
+  # Section headers
+  show_section_borders: true
+  section_border_width: 80
+
+
+# ============================================================================
+# JSON Output Settings
+# ============================================================================
+json_output:
+  # Pretty print JSON output
+  pretty: true
+
+  # Indentation for pretty printing
+  indent: 2
+
+  # Include metadata (timestamp, config)
+  include_metadata: true
+
+  # Sort keys alphabetically
+  sort_keys: false
+
+
+# ============================================================================
+# Markdown Output Settings
+# ============================================================================
+markdown_output:
+  # Use GitHub-flavored markdown
+  github_flavored: true
+
+  # Include table of contents
+  include_toc: true
+
+  # Maximum TOC depth
+  toc_depth: 3
+
+  # Use code fences for statistics tables
+  use_code_fences: false
+
+  # Include timestamp in report
+  include_timestamp: true
+
+
+# ============================================================================
+# Performance Settings
+# ============================================================================
+performance:
+  # Maximum files to scan before warning
+  max_files: 100000
+
+  # Progress update interval (files)
+  progress_interval: 1000
+
+  # Buffer size for reading files
+  buffer_size: 8192
+
+
+# ============================================================================
+# Debug and Logging Settings
+# ============================================================================
+debug:
+  # Show debug output
+  enabled: false
+
+  # Show verbose output (more detailed than debug)
+  verbose: false
+
+  # Log files being skipped
+  log_skipped_files: false
+
+  # Log progress during scan
+  log_scan_progress: false

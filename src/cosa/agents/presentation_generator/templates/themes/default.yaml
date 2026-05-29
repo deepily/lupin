@@ -1,0 +1,32 @@
+theme:
+  name        : "default"
+  description : "Clean, professional default theme"
+  marp_theme  : "default"
+  marp_class  : ""
+
+  colors:
+    primary         : "#2563EB"
+    secondary       : "#1E40AF"
+    accent          : "#F59E0B"
+    background      : "#FFFFFF"
+    text            : "#1F2937"
+    code_background : "#F3F4F6"
+
+  fonts:
+    heading : "Inter"
+    body    : "Inter"
+    code    : "JetBrains Mono"
+
+  layout:
+    title_alignment   : "center"
+    bullet_style      : "dash"
+    code_block_theme  : "github"
+    paginate          : true
+    header_template   : ""
+    footer_template   : "{speaker} | {date}"
+
+  branding:
+    logo_path     : null
+    logo_position : "bottom-right"
+    footer_text   : null
+    watermark     : null
