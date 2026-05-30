@@ -65,7 +65,7 @@ from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 # Import routers
 from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
-from cosa.rest.job_persistence import mark_interrupted_jobs
+from cosa.rest.job_persistence import mark_interrupted_jobs, record_server_available
 
 # Suppress noisy LanceDB warnings
 import logging
@@ -275,10 +275,17 @@ async def clock_loop():
                         user_info.append( f"{session_id}→{user_id}" )
                     print( f"[CLOCK] Session→User mapping: {', '.join( user_info )}" )
             
+            # Heartbeat: stamp server-available for downtime-aware scheduled-job
+            # catch-up. Run off-thread so the sync DB write never blocks the loop.
+            try:
+                await asyncio.to_thread( record_server_available )
+            except Exception as e:
+                if app_debug: print( f"[CLOCK] server-available heartbeat failed: {e}" )
+
             # Wait 1 minute before next update
             sleep_time = 60
             await asyncio.sleep( sleep_time )
-            
+
         except asyncio.CancelledError:
             print( "[CLOCK] Clock loop cancelled" )
             break
@@ -522,8 +529,10 @@ async def lifespan( app: FastAPI ):
         counts = mark_interrupted_jobs()
         total_interrupted = counts.get( "running", 0 ) + counts.get( "pending_interrupted", 0 )
         preserved         = counts.get( "pending_preserved", 0 )
-        if total_interrupted > 0 or preserved > 0:
-            print( f"[CJ-PERSIST] Startup recovery: {total_interrupted} interrupted, {preserved} scheduled preserved" )
+        catchup           = counts.get( "pending_catchup", 0 )
+        if total_interrupted > 0 or preserved > 0 or catchup > 0:
+            print( f"[CJ-PERSIST] Startup recovery: {total_interrupted} interrupted, "
+                   f"{preserved} future-scheduled preserved, {catchup} downtime-missed caught up" )
         else:
             print( "[CJ-PERSIST] No interrupted or scheduled jobs found" )
     except Exception as e:
@@ -830,6 +839,13 @@ async def lifespan( app: FastAPI ):
     
     # Shutdown
     print( f"FastAPI shutdown at {datetime.now()}" )
+
+    # Clean-shutdown marker: exact last-available stamp (the 60s heartbeat covers hard kills)
+    try:
+        record_server_available()
+        print( "[CJ-PERSIST] Recorded clean-shutdown last-available marker" )
+    except Exception as e:
+        print( f"[WARN] shutdown last-available marker failed: {e}" )
     
     # Cancel and cleanup background clock task
     if clock_task:

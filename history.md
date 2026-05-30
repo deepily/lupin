@@ -2,6 +2,22 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.05.29 - Session c9c582b7 (Tiberius 👑) | Scheduled-job missed-window catch-up (durable across bounces)
+
+**Closed the missed-window gap in scheduled-job restoration: a job whose `scheduled_at` passes WHILE the server is down is now caught up on restart instead of dropped as INTERRUPTED.** On the post-fold mono-repo (`wip-v0.1.8`); cosa-side code committed via the fold (`0a01da3`), parent wiring committed here.
+
+**Finding:** the core scheduled-job persistence + restore-on-boot ALREADY EXISTED (`mark_interrupted_jobs` → `get_restorable_jobs` → `main.py` re-enqueue). The only real gap was past-due-during-downtime jobs being marked INTERRUPTED.
+
+**Design (Rick-ratified):** record when the server was last available and compute the EXACT downtime window rather than guess a grace interval. Recording = 60s clock-loop heartbeat + clean-shutdown marker (heartbeat survives hard kills). `mark_interrupted_jobs()` now preserves PENDING jobs whose `scheduled_at` ∈ `[last_available, now]` for an immediate catch-up run; `get_restorable_jobs()` re-enqueues them unchanged; the consumer fires them (`scheduled_at <= now`).
+
+**Verified:** live `:7999` bounce → clean boot, recovery sweep ran, heartbeat stamped `server_lifecycle` at startup. 40/40 unit tests (logic + lifecycle + catch-up branches), 100% coverage on changed lines.
+
+**Files** (parent commit): `src/fastapi_app/main.py` (heartbeat in `clock_loop` + shutdown marker + recovery logging), `src/migrations/versions/e9f0a1b2c3d4_add_server_lifecycle_table.py` (new), `src/tests/unit/test_job_restoration.py` (+24 tests), `src/rnd/v0.1.8/2026.05.29-scheduled-job-bounce-survival.md` (new), `history.md`, `TODO.md`. cosa-side (committed via fold `0a01da3`): `src/cosa/rest/job_persistence.py` (record/get/`_is_within_downtime` + catch-up branch), `src/cosa/rest/postgres_models.py` (`ServerLifecycle`). Migration applied to `lupin_db_dev`.
+
+**Remaining:** full real schedule→bounce-straddle→catch-up E2E (Rick-assigned, in progress).
+
+---
+
 ### 2026.05.29 - Session 5496cbb6 (Krishna 🦚) | v0.1.7→main PR + CoSA→Lupin merge analysis + Phase A local-venv relocation
 
 **Three arcs on branch `wip-v0.1.8-2026.05.29-preparing-for-gcp-deployment`: shipped the v0.1.7 PR, researched the CoSA mono-repo merge, and executed the local dev-venv relocation (Phase A).**
