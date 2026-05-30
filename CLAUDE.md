@@ -141,14 +141,13 @@ Example:
   - `/src/fastapi_app/main.py`: Main FastAPI server entry point
   - `/src/cosa/rest/routers/`: API endpoint routers
 - `/src/cosa/`: Contains the CoSA (Collection of Small Agents) framework
-  - **IMPORTANT**: `/src/cosa/` is a separate Git repository (git@github.com:deepily/cosa.git)
-  - This directory employs the Git submodule/subtree pattern
-  - CoSA has its own README.md and CLAUDE.md files
-  - When working with CoSA code, be aware that changes may need to be committed to both repositories
-  - **CRITICAL FOR CLAUDE**: Never attempt to manage the git state of the CoSA repository when working
-    within the Lupin project. Do not offer to stage, commit, or push changes to the CoSA
-    repository. Only manage git operations for the parent Lupin repository.
-  - **Note**: See "GIT REPOSITORY MANAGEMENT" section for complete nested repository handling
+  - **Folded into the Lupin mono-repo (2026-05-29)**: `src/cosa/` is now a regular
+    in-tree directory tracked by the Lupin repository — it is **no longer a separate
+    git repo/submodule**. Manage its files AND its git operations exactly like any
+    other Lupin source (stage/commit/push normally). The former CoSA repo's full
+    history is preserved off-tree at `/mnt/DATA02/cosa-git-archive-2026.05.29/`.
+  - CoSA retains its own README.md and CLAUDE.md (historical; the submodule guidance
+    inside `src/cosa/CLAUDE.md` is superseded by this mono-repo state).
 - `/src/cosa/agents/`: Agent implementations (math, calendar, etc.)
 - `/src/cosa/app/`: Core application components
 - `/src/cosa/memory/`: Data persistence and memory management
@@ -196,8 +195,8 @@ Example:
 - **ARCHIVE ACCESS**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
 - **IGNORE SUB-REPO HISTORIES**: Do NOT read these sub-repository history files as they are managed separately:
   - `src/lupin-plugin-firefox/history.md` (Firefox plugin sub-repo)
-  - `src/cosa/history.md` (CoSA framework sub-repo)  
   - `src/lupin-mobile/history.md` (Mobile app sub-repo)
+  - (`src/cosa/history.md` is **no longer** a sub-repo history — CoSA folded into the mono-repo 2026-05-29; it is now a normal in-tree doc.)
 
 ## PROJECT SHORT NAMES
 - This repo's SHORT_PROJECT_PREFIX is [LUPIN]
@@ -225,19 +224,16 @@ Example:
 
 **Nested Repositories** (DO NOT manage from parent context):
 
-1. **CoSA Framework**
-   - **Location**: `/src/cosa/`
-   - **Remote**: git@github.com:deepily/cosa.git
-   - **Pattern**: Git submodule/subtree
-   - **Docs**: Has own README.md and CLAUDE.md
-   - **Management**: Must commit to CoSA repo separately when working in CoSA context
+> **CoSA was folded into the Lupin mono-repo (2026-05-29)** and is **no longer a
+> nested repo** — manage `src/cosa/` as normal in-tree Lupin source. Only the two
+> repos below remain nested/separately-managed.
 
-2. **Firefox Plugin**
+1. **Firefox Plugin**
    - **Location**: `/src/lupin-plugin-firefox/`
    - **Management**: Separate repository, managed independently
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
-3. **Mobile App**
+2. **Mobile App**
    - **Location**: `/src/lupin-mobile/`
    - **Management**: Separate repository, managed independently
    - **History**: Has own history.md (DO NOT read from Lupin context)
@@ -256,7 +252,6 @@ The `/plan-session-end` workflow has been configured with nested repository awar
 **What you'll see**:
 ```
 ⚠️ Detected changes in nested repositories:
-• /src/cosa/ (3 modified files)
 • /src/lupin-mobile/ (1 new file)
 
 These are separate Git repositories and will not be included in this commit.
@@ -278,11 +273,6 @@ find . -name ".git" -type d | grep -v "^./.git$"
 ```
 
 ### Working in Nested Repositories
-
-**When working in CoSA** (`cd src/cosa/`):
-- Read `/src/cosa/CLAUDE.md` for CoSA-specific guidance
-- Use CoSA's own session management
-- Commit to CoSA repository separately
 
 **When working in Firefox Plugin** (`cd src/lupin-plugin-firefox/`):
 - Manage as independent project

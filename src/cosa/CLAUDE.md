@@ -3,6 +3,14 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## IMPORTANT: Repository Context
+
+> **SUPERSEDED 2026-05-29 — CoSA was folded into the Lupin mono-repo.** `src/cosa/`
+> is now a regular in-tree directory of the Lupin repository; it is **no longer a
+> separate git subproject/submodule**. Manage it as normal Lupin source — the Lupin
+> repo is the only git repo. The former CoSA repo's history is preserved off-tree at
+> `/mnt/DATA02/cosa-git-archive-2026.05.29/`. The historical submodule guidance below
+> is retained for reference only and **no longer applies**.
+
 - This COSA repo is a git subproject/submodule contained within the parent "Lupin" project
 - When working within the COSA directory, only manage this repository (not the parent project)
 - Do not stage, commit, or push changes to the parent repository from here
