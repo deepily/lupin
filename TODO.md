@@ -1,5 +1,19 @@
 # TODO
 
+## 🔴 TOP PRIORITY (2026-05-30) — CoSA 100%-coverage grandfathering ramp gate (one-week deadline)
+
+**Filed by Tiberius 👑 (session `ac012bd2`) per Rick's 2026-05-30 voice instruction** ("include the one-week ramp-up gate for all migrated CoSA source code to 100% coverage as a top priority"). This formalizes the `coverage inherits + grandfathering-ramp` decision that was ratified during the 2026-05-29 mono-repo fold (commit `0a01da3`) but never written as an actionable, time-boxed item — it was buried in the DONE block below.
+
+**The gate**: the 621 CoSA files folded in as first-class Lupin source (`src/cosa/`) now inherit the **Lupin-wide 100% coverage mandate** (line + branch + function — see `feedback_100pct_coverage_multiplexer.md`, scope-expanded 2026-05-16). A grandfathering ramp was granted so the fold wasn't blocked on instant 100%. **Deadline: 2026-06-05** (one week from the 2026-05-29 fold).
+
+- [ ] **[LUPIN]** Baseline-measure current coverage across all migrated `src/cosa/` modules (pytest `--cov=cosa --cov-report` line+branch+function) — produce the gap list (files < 100%).
+- [ ] **[LUPIN]** Triage the gap list into (a) reachable lines needing tests, (b) genuinely-unreachable defensive branches needing same-line `# pragma: no cover` + reason.
+- [ ] **[LUPIN]** Write/extend tests to close every reachable gap; land same-line-reasoned pragmas on the rest. Report tabular per-module pass/coverage.
+- [ ] **[LUPIN]** Wire a CI/pre-merge `--cov-fail-under=100` (or equivalent) gate over `src/cosa/` so the ramp can't silently regress after the deadline.
+- [ ] **[LUPIN]** On completion: flip the grandfathering note in `feedback_100pct_coverage_multiplexer.md` from "cosa inherits with ramp" to "cosa fully gated", and update the CLAUDE.md coverage section.
+
+**Excludes** (per the standing mandate): sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts. CoSA is in-scope as of the fold.
+
 ## 🌅 MORNING (2026-05-29) — LIVE cascade demo: Manager-Spawned Reviewers (Rick wants to see it in action)
 
 Feature **v1 is feature-complete + live-validated** (spawn-1-reap-1 passed; collision-hardened). Rick asked to run the full cast live in the morning (off-peak 12am–9am EDT ✓).
@@ -24,7 +38,7 @@ Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`).
 
 **Phase A (local dev-venv relocation) is DONE** — commits `bf97e1a`, `eda7caf`, `6cdcb7b` on `wip-v0.1.8` (LOCAL + UNPUSHED). New root `.venv` (py3.13) mirrors the container's locked set minus pyaudio/flash-attn/autoawq (native, host-unbuildable, zero host-side imports); unit 5034/0 + WS smoke 50/50 on it; old `src/cosa/.venv` kept as fallback; production Dockerfile untouched. Full plan + weighted pros/cons: `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md`.
 
-- [ ] **[LUPIN]** Push `wip-v0.1.8` (all 8 commits: venv + fold + scrub + Tiberius's durable-job/LanceDB) — **Rick assigned the push to Tiberius** (after backups) per the 2026-05-29 EOD broadcast. My commits are all in.
+- [x] **[LUPIN]** ✅ **DONE 2026-05-29** — Pushed `wip-v0.1.8` (all 8 commits: venv + fold + scrub + Tiberius's durable-job/LanceDB). Verified 2026-05-30: origin synced at `2240bf6`, 0 ahead / 0 behind.
 - [ ] **[LUPIN]** Container parity (no action — just expect it): the next `lupin:1.0.0` rebuild picks up `openapi-to-md` (now in root `pyproject.toml`/`uv.lock`).
 - [x] **[LUPIN]** **Phase B — CoSA→Lupin git fold — DONE** (commit `0a01da3`, flatten, directly on `wip-v0.1.8`): 621 cosa files folded as first-class Lupin source; `src/cosa/.git` **MOVED** (not deleted) → `/mnt/DATA02/cosa-git-archive-2026.05.29/` (full history + 42 branches preserved, reversible); unit 5058/0 + WS smoke 50/50 on the folded tree. Decisions ratified by Rick: flatten · move-aside-not-delete · directly-on-branch (not deferred — it's a GCP prerequisite) · coverage inherits+grandfathering-ramp · namespace PRESERVE · GCS container-only · venv lean subset.
 - [x] **[LUPIN]** **Doctrine scrub — DONE** (commit `6bac0bc`): `CLAUDE.md` de-submodule'd (cosa dropped from nested-repos list; firefox/mobile kept); `src/cosa/CLAUDE.md` SUPERSEDED banner; deleted 2 obsolete CoSA-separation memories + their MEMORY.md index lines; flipped the coverage memory to cosa-inherits-the-100%-gate; removed the newline-named junk file; María shipped the PIP-side doctrine (`bbcd865`).
@@ -38,7 +52,7 @@ Filed 2026-05-29 by Krishna 🦚 (session `5496cbb6`).
 Tiberius 👑 ran a multi-agent research workflow (`wkiwwi4u4`) on moving semantic-similarity storage off LanceDB. **Verdict: the 81GB "bloat" is stale, uncompacted version history in ONE append-only log table** (`input_and_output_tbl`: 81G `_versions/`, only ~898MB live `data/`) — a missing-compaction-cron problem, NOT a vector-engine problem. The "migrate to fix the disk" premise was **refuted** adversarially. At Lupin's scale (tens of thousands of 768-dim vectors, single node) pgvector vs LanceDB query perf is a wash (both sub-10ms).
 
 - [ ] **[LUPIN]** After this PR merges, serialize the parked draft → `src/rnd/v0.1.7/2026.05.29-lancedb-to-postgresql-pgvector-migration-analysis.md` (currently held at `~/lancedb-pgvector-analysis-DRAFT.md`, outside the repo during the PR per Rick's instruction).
-- [ ] **[LUPIN]** **Phase 0 (do regardless of migrate/stay decision):** run `src/scripts/cleanup_lupin_lancedb.py` (wraps `Table.optimize(cleanup_older_than=…)`) to reclaim ~98% of the 81GB, then **schedule** it so the append-log never regrows. It has never been wired into any scheduler. Precedent: the same table was 43GB on 2026-04-27.
+- [x] **[LUPIN]** ✅ **DONE 2026-05-29** — Phase 0 disk reclaim complete: the `input_and_output_tbl` rebuild reclaimed ~81GB (82GB→679MB) via `src/scripts/rebuild_lancedb_table.py`. (The recurring-compaction *scheduling* half — wiring it into a cron so the append-log never regrows — remains tracked above under the durable scheduled-job entry, "First durable client: the recurring LanceDB compaction routine.")
 - [ ] **[LUPIN]** Only THEN decide the pgvector migration on consolidation/ACID merits alone (Postgres already deployed as `lupin-postgres`, but ships only `uuid-ossp` — pgvector extension not yet installed). If migrating: move only the ~165MB of genuine vector tables, leave the append-log behind, use the `snapshot_manager` abstraction as the cutover seam.
 
 Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`). Full draft + 6 adversarial verdicts in the parked file.

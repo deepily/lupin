@@ -2,6 +2,18 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.05.30 - Session ac012bd2 (Tiberius 👑) | CLAUDE.md perf-trim under 40k + TODO triage
+
+**Cleared the project `CLAUDE.md` performance warning (40.3k > 40.0k) and triaged the TODO list. On branch `wip-v0.1.8-2026.05.29-preparing-for-gcp-deployment`.**
+
+**`CLAUDE.md` trim — 40,311 → 33,278 chars (−7,033; ~6.7k headroom under 40k), zero doctrine lost.** Three sections, dedupe + de-staling only: (1) `100% COVERAGE MANDATE` — was titled "MULTIPLEXER TYPESCRIPT" and still listed Python/`src/cosa` as *out of scope* (stale since the mandate went Lupin-wide 2026-05-16 and CoSA folded in 2026-05-29); rewrote to current Lupin-wide scope with a pointer to the auto-memory + origin doc. (2) `TESTING` (5.7k→~1.6k) — collapsed verbose per-suite bullets + duplicate command block + stale counts into one suite table + the `--bg` mandate + doc pointers. (3) `PR MERGE REQUIREMENTS` (3.2k→~1.5k) — compressed to the ordered gate sequence + final-gate rationale + failure rule + anti-patterns. `TESTING VENUES` (canonical rubric) + `TEST CREDENTIALS` left untouched; the trimmed sections now reference the rubric instead of restating it. (María 🌸 independently handled the *global* `~/.claude/CLAUDE.md` 40k warning — clean split confirmed via DM, no overlap.)
+
+**TODO triage.** Added a new 🔴 TOP-PRIORITY entry formalizing the **CoSA 100%-coverage grandfathering-ramp gate** (deadline 2026-06-05) — it previously existed only as a ratified decision buried in a DONE block, never as an actionable item. Marked two items done per Rick: the **wip-v0.1.8 push** (verified origin synced at `2240bf6`, 0 ahead/0 behind) and the **LanceDB Phase 0 disk reclaim** (~81GB freed via the 2026-05-29 rebuild; the recurring-compaction *scheduling* half stays tracked under the durable scheduled-job entry).
+
+**Files**: `CLAUDE.md`, `TODO.md`, `history.md`.
+
+---
+
 ### 2026.05.29 - Session 5496cbb6 (Krishna 🦚) | CoSA→Lupin mono-repo FOLD landed + post-fold doctrine scrub
 
 **The CoSA framework is now folded into the Lupin mono-repo — the hard prerequisite for the GCP deployment push.** Builds on this session's earlier Phase-A venv relocation (entry further below).
