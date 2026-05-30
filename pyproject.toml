@@ -150,3 +150,37 @@ torchaudio  = { index = "pytorch-cu124" }
 # torch in /opt/venv. uv ensures torch (and the other build deps) install
 # before flash-attn so the unisolated build sees them.
 no-build-isolation-package = ["flash-attn"]
+
+# ============================================================================
+# Coverage — Tier-0 denominator for the CoSA 100%-coverage campaign
+#
+# Ratified by Rick via interactive walk-through (D2, 2026-05-30). Establishes
+# the blessed denominator that reproduces the 45.3% line / 34.8% branch unit
+# baseline (raw `--cov=cosa` reads 26.9% only because it counts test files +
+# inline scaffolding + GPU-only training code as production source).
+#
+# Authority: src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/00-campaign-plan.md (D2)
+#            src/rnd/v0.1.8/2026.05.30-cosa-100pct-coverage-baseline.md §7
+#
+# Scaffolding NOTE: the `exclude_also` blocks below are a temporary measure.
+# `quick_smoke_test()` / `__main__` blocks carry real assertions; the campaign
+# harvests them into real pytest, then deletes the block. Retire each regex
+# once all such blocks are migrated (D2 harvest -> migrate -> delete pipeline).
+# ============================================================================
+[tool.coverage.run]
+branch = true
+source = [ "cosa" ]
+omit   = [
+    "*/cosa/tests/*",               # CoSA's own test suites — test code, not a coverage denominator
+    "*/cosa/agents/*/tests/*",      # per-agent test suites (podcast_generator, io_models)
+    "*/test_*.py",                  # individual test modules
+    "*/cosa/agents/*/__main__.py",  # CLI entrypoints — glue, run only via `python -m`
+    "*/cosa/training/*",            # GPU + user-run-only; untestable in CI per never-grab-GPU mandate
+]
+
+[tool.coverage.report]
+# exclude_also APPENDS to defaults (keeps `# pragma: no cover` working)
+exclude_also = [
+    "def quick_smoke_test",         # house-style inline smoke block; never runs under pytest
+    "if __name__ == .__main__.:",   # inline main guards inside regular modules
+]
