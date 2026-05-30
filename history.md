@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.05.29 - Session 5496cbb6 (Krishna 🦚) | CoSA→Lupin mono-repo FOLD landed + post-fold doctrine scrub
+
+**The CoSA framework is now folded into the Lupin mono-repo — the hard prerequisite for the GCP deployment push.** Builds on this session's earlier Phase-A venv relocation (entry further below).
+
+**Mono-repo fold (flatten)** — `0a01da3`. `src/cosa/` (621 files) is now first-class tracked Lupin source, no longer a gitignored nested repo. Mechanics: **MOVED** `src/cosa/.git` aside (NOT deleted) to `/mnt/DATA02/cosa-git-archive-2026.05.29/` — full CoSA history + 42 branches preserved, fully reversible; removed the `src/cosa` `.gitignore` blanket + added a `src/cosa/.venv/` guard; `git add src/cosa`. Imports unchanged (`cosa.*`, PYTHONPATH=src). Validated on the folded tree: **unit 5058/0, WS smoke 50/50**. Decisions (Rick-ratified): flatten · move-aside-not-delete · directly on `wip-v0.1.8` · coverage = cosa **inherits** the 100% gate with an immediate grandfathering ramp (Tiberius owns the Lupin-side impl).
+
+**Post-fold doctrine scrub** — `6bac0bc`. Removed the "src/cosa is a separate repo / submodule / never-manage-CoSA-git" doctrine from `CLAUDE.md` (CoSA dropped from the nested-repos list; Firefox + Mobile kept); SUPERSEDED banner on `src/cosa/CLAUDE.md`; removed the hazardous newline-named junk file `src/cosa/tests/smoke/infrastructure/<|system|>…` (preserved in the `.git` archive). Out-of-repo (user config): deleted the 2 obsolete CoSA-separation memories + flipped the coverage memory to cosa-inherits-the-gate. María updated the PIP-side doctrine (`bbcd865`). **Flagged residual**: the `nested-repo-management` skill (no locatable file — likely plugin-managed; needs CoSA dropped, Firefox/Mobile kept) + 2 minor stale memory bodies.
+
+**Full analysis/plan**: `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md`.
+
+**Files** (this milestone): `.gitignore`, `CLAUDE.md`, `src/cosa/CLAUDE.md`, 621 `src/cosa/*` files (fold), `history.md`, `TODO.md`. (Out-of-repo: memory files.)
+
+---
+
 ### 2026.05.29 - Session c9c582b7 (Tiberius 👑) | Scheduled-job missed-window catch-up (durable across bounces)
 
 **Closed the missed-window gap in scheduled-job restoration: a job whose `scheduled_at` passes WHILE the server is down is now caught up on restart instead of dropped as INTERRUPTED.** On the post-fold mono-repo (`wip-v0.1.8`); cosa-side code committed via the fold (`0a01da3`), parent wiring committed here.
