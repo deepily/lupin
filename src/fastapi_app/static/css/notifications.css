@@ -2400,6 +2400,23 @@
             background-color: #fafafa;
         }
 
+        /* Focus-mode height boost: when CC session focus mode is ON the strip
+         * toggle carries data-focus-active="true" (see _enterFocusMode /
+         * _exitFocusMode in notifications.js) and every sender card except the
+         * focused one is hidden via data-focus-hidden. Give the single focused
+         * card 50% more scroll height in its per-date message lists (250px →
+         * 375px) so more of the in-focus conversation is readable. The real
+         * scrollable region is .date-accordion-messages (createSenderCard builds
+         * .sender-card-dates → .date-accordion → .date-accordion-messages; the
+         * legacy .sender-card-messages class is not produced by any render path).
+         * Non-focus mode keeps the 250px default (the toggle is "false"/absent,
+         * so body:has() does not match). The focus toggle is not a DOM ancestor
+         * of the cards, so :has() bridges from it to the focused card's lists. */
+        body:has( #cc-strip-toggle[data-focus-active="true"] )
+            .sender-card:not( [data-focus-hidden] ) .date-accordion-messages {
+            max-height: 375px;
+        }
+
         .sender-message {
             position: relative;  /* For pseudo-element positioning */
             display: flex;

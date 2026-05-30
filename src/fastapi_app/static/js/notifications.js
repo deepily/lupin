@@ -10107,9 +10107,29 @@ class NotificationsUI {
         // --persona-color on the row.
         // Measure overflow after layout; show toggle only when content actually
         // exceeds the clamp. Empty / very-short bodies stay clean (no toggle).
+        // Reveal the toggle only when the rendered content actually overflows
+        // the 2-line clamp. The naive single-rAF measure is unreliable when the
+        // entry is rendered while the Recent Activity section is collapsed
+        // (#commons-recent-activity-body.collapsed → display:none) or otherwise
+        // unlaid-out: scrollHeight/clientHeight both read 0, so the toggle would
+        // stay permanently hidden and the (clamped) content unreadable with no
+        // way to expand it. System broadcasts hit this most because they arrive
+        // via WebSocket while the panel is closed. Fix: measure on the next
+        // frame, and if the content has no layout yet, watch it with a
+        // ResizeObserver and re-measure once it gains a non-zero height (e.g.
+        // the user expands the section), then disconnect.
+        const revealToggleIfOverflowing = () => {
+            if ( content.clientHeight === 0 ) return false;   // not laid out yet — cannot measure
+            if ( content.scrollHeight > content.clientHeight + 1 ) toggle.hidden = false;
+            return true;   // measured (whether or not it overflowed)
+        };
         requestAnimationFrame( () => {
-            const overflows = content.scrollHeight > content.clientHeight + 1;
-            if ( overflows ) toggle.hidden = false;
+            if ( revealToggleIfOverflowing() ) return;
+            if ( typeof ResizeObserver === "undefined" ) return;
+            const ro = new ResizeObserver( () => {
+                if ( revealToggleIfOverflowing() ) ro.disconnect();
+            } );
+            ro.observe( content );
         } );
 
         row.appendChild( body );

@@ -274,6 +274,67 @@ class TestFocusMode:
         )
         assert visible_cards == 2
 
+    def test_focused_card_messages_get_height_boost( self, notifications_page_with_strip ):
+        """
+        Focus-mode height boost (2026-05-30, Speedy 🌿): the focused card's
+        per-date message lists (.date-accordion-messages — the real scrollable
+        region built by createSenderCard → createDateAccordion) grow 50%
+        (250px → 375px) while focus mode is ON, and revert to 250px when focus
+        mode is OFF. Driven purely by the
+        body:has(#cc-strip-toggle[data-focus-active="true"]) :has() rule in
+        notifications.css — no JS attribute on the card itself.
+        """
+        page     = notifications_page_with_strip
+        sender_a = "claude.code@lupin.deepily.ai#cccc5555"
+        sender_b = "claude.code@lupin.deepily.ai#dddd6666"
+
+        card_a = _inject_cc_sender_card( page, sender_a )
+        _inject_cc_sender_card( page, sender_b )
+
+        # The scrollable region only exists once a date accordion is present.
+        # Seed one in each card so .date-accordion-messages is in the DOM
+        # regardless of which card focus mode lands on.
+        for sid in ( sender_a, sender_b ):
+            page.evaluate(
+                "( sid ) => window.notificationsUI.createDateAccordion( sid, '2026-05-30' )",
+                sid
+            )
+        page.wait_for_timeout( 50 )
+
+        def _messages_max_height( card_id ):
+            return page.evaluate(
+                """( cardId ) => {
+                    const card = document.getElementById( cardId );
+                    const msgs = card.querySelector( '.date-accordion-messages' );
+                    return msgs ? getComputedStyle( msgs ).maxHeight : null;
+                }""",
+                card_id
+            )
+
+        # Before focus mode: default 250px.
+        assert _messages_max_height( card_a ) == "250px", \
+            "Outside focus mode the card keeps the 250px default"
+
+        _click_strip_toggle( page )  # enter focus
+
+        # The single visible (focused) card now gets the +50% boost.
+        focused_id = page.evaluate(
+            """() => {
+                const card = Array.from(
+                    document.querySelectorAll( '#notifications-list .sender-card' )
+                ).find( c => !c.hasAttribute( 'data-focus-hidden' ) );
+                return card ? card.id : null;
+            }"""
+        )
+        assert focused_id is not None, "Exactly one focused card must be visible"
+        assert _messages_max_height( focused_id ) == "375px", \
+            "Focused card message lists must grow to 375px (250px + 50%) in focus mode"
+
+        _click_strip_toggle( page )  # exit focus
+
+        assert _messages_max_height( card_a ) == "250px", \
+            "Exiting focus mode reverts the card to the 250px default"
+
     def test_clicking_different_strip_icon_switches_focus( self, notifications_page_with_strip ):
         page     = notifications_page_with_strip
         sender_a = "claude.code@lupin.deepily.ai#aaaa5555"
