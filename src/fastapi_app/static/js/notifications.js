@@ -10232,6 +10232,16 @@ class NotificationsUI {
             } );
         }
 
+        // Reading Pane "bust out" button — pops the current content into a
+        // separate window, then closes the pane (which re-centers the layout).
+        const bustBtn = document.getElementById( "content-pane-bustout" );
+        if ( bustBtn ) {
+            bustBtn.addEventListener( "click", ( ev ) => {
+                ev.stopPropagation();
+                this._bustOutContentPane();
+            } );
+        }
+
         // Doc-link click interception (horizontal mode only). Document-level
         // delegation catches anchors that resolve to /app/docs?path=... —
         // both bare relative form AND absolute http://localhost:port/ form.
@@ -10353,6 +10363,8 @@ class NotificationsUI {
         if ( shell ) shell.classList.add( "pane-open" );
         if ( titleEl ) titleEl.textContent = title || "";
         if ( backBtn ) backBtn.disabled = this._contentPaneHistory.length <= 1;
+        // Pane just opened → left column shrank; re-center the toolbar over it.
+        this._updateToolbarPosition();
     }
 
     _renderContentPaneEntry( entry ) {
@@ -10395,6 +10407,64 @@ class NotificationsUI {
         // Deactivate the 2-pane split — container returns to centered layout.
         if ( shell ) shell.classList.remove( "pane-open" );
         this._contentPaneHistory = [];
+        // Container is full-width again → re-center the toolbar at 50%.
+        this._updateToolbarPosition();
+    }
+
+    /**
+     * "Bust out" the pane's CURRENT content into a new browser TAB (next to the
+     * current tab), then close the pane. Closing restores the centered
+     * full-width layout and re-centers the toolbar (via _closeContentPane →
+     * _updateToolbarPosition).
+     *
+     *   - doc      → payload is a /app/docs?path=… URL; open it directly. The
+     *                tab is same-origin, so it shares localStorage (JWT) and
+     *                loads the full doc-viewer.
+     *   - abstract → payload is markdown with no URL; open a blank same-origin
+     *                tab and write the rendered (DOMPurify-sanitized) HTML plus
+     *                the base stylesheet.
+     *
+     * If the open is blocked (window.open returns null) the pane is left open
+     * so the content isn't lost.
+     */
+    _bustOutContentPane() {
+        const entry = this._contentPaneHistory[ this._contentPaneHistory.length - 1 ];
+        if ( !entry ) return;
+
+        // Open in a new TAB next to the current one: pass NO window features, so
+        // the browser opens a tab rather than a positioned pop-up window. We
+        // also do NOT pass "noopener" — that would null the returned reference,
+        // which we need both to write the abstract HTML and to decide whether to
+        // collapse the pane below.
+        let win = null;
+
+        if ( entry.type === "doc" ) {
+            win = window.open( this._normalizeDocLinkHref( entry.payload ), "_blank" );
+        } else if ( entry.type === "abstract" ) {
+            win = window.open( "", "_blank" );
+            if ( win ) {
+                // Escape the title at the substitution boundary (it lands in
+                // <title>, outside DOMPurify's reach). Body HTML is sanitized by
+                // renderMarkdown's DOMPurify pass.
+                const safeTitle = ( entry.title || "Abstract" ).replace(
+                    /[&<>"]/g,
+                    ( c ) => ( { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ c ] )
+                );
+                win.document.open();
+                win.document.write(
+                    "<!DOCTYPE html><html><head><meta charset=\"utf-8\">" +
+                    "<title>" + safeTitle + "</title>" +
+                    "<link rel=\"stylesheet\" href=\"/static/css/lupin-base.css\">" +
+                    "<style>body{max-width:900px;margin:0 auto;padding:24px 28px;" +
+                    "font-size:14px;line-height:1.6;color:#212529;}</style>" +
+                    "</head><body>" + this.renderMarkdown( entry.payload ) + "</body></html>"
+                );
+                win.document.close();
+            }
+        }
+
+        // Only collapse the pane if the pop-up actually opened.
+        if ( win ) this._closeContentPane();
     }
 
     _backContentPane() {
@@ -10431,12 +10501,20 @@ class NotificationsUI {
     }
 
     /**
-     * Position the section-toolbar at top-center of the CONTENT AREA
-     * (the left column / container, NOT the right-side reading pane) via
-     * the --toolbar-center-x CSS variable. The left column spans from 0
-     * to `ratio * 100%` of viewport width; its center is at `ratio / 2 * 100%`.
-     * The CSS uses `transform: translateX(-50%)` to self-center the toolbar
-     * around the `left` coordinate, so JS pushes the bare percentage.
+     * Position the section-toolbar at top-center of the CONTAINER via the
+     * --toolbar-center-x CSS variable. The CSS uses
+     * `transform: translateX(-50%)` to self-center the toolbar around the
+     * `left` coordinate, so JS pushes the bare percentage.
+     *
+     * Pane-state matters: the .content-shell only becomes a flex-row split
+     * (left column shrinks to `ratio` of the viewport) when the Reading Pane
+     * is OPEN (.pane-open). With the pane CLOSED — the default after a toggle
+     * to horizontal — the shell stays block-layout and the container spans the
+     * full width, centered at 50%. So:
+     *   - pane open   → container center = left-column center = `ratio/2 * 100%`
+     *   - pane closed → container center = 50%
+     * Using the split ratio unconditionally parked the toolbar at ~33% (half of
+     * the 0.667 default) even with the pane closed, skewing it wildly left.
      *
      * In vertical mode, the variable is removed so the legacy
      * `left: calc(50% - 500px - 60px)` rule takes effect.
@@ -10446,9 +10524,11 @@ class NotificationsUI {
             document.documentElement.style.removeProperty( "--toolbar-center-x" );
             return;
         }
-        const ratio = this._paneSplitRatio;
-        // Center of the LEFT column (content area), where the container lives.
-        const centerPct = ( ratio / 2 ) * 100;
+        const shell     = document.querySelector( ".content-shell" );
+        const paneOpen   = !!shell && shell.classList.contains( "pane-open" );
+        // Pane closed → full-width container centered at 50%.
+        // Pane open   → left column spans `ratio` of the width; its center is ratio/2.
+        const centerPct = paneOpen ? ( this._paneSplitRatio / 2 ) * 100 : 50;
         document.documentElement.style.setProperty(
             "--toolbar-center-x",
             `${ centerPct.toFixed( 2 ) }%`

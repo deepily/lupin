@@ -278,8 +278,8 @@ class TestFocusMode:
         """
         Focus-mode height boost (2026-05-30, Speedy 🌿): the focused card's
         per-date message lists (.date-accordion-messages — the real scrollable
-        region built by createSenderCard → createDateAccordion) grow 50%
-        (250px → 375px) while focus mode is ON, and revert to 250px when focus
+        region built by createSenderCard → createDateAccordion) DOUBLE
+        (250px → 500px) while focus mode is ON, and revert to 250px when focus
         mode is OFF. Driven purely by the
         body:has(#cc-strip-toggle[data-focus-active="true"]) :has() rule in
         notifications.css — no JS attribute on the card itself.
@@ -327,8 +327,8 @@ class TestFocusMode:
             }"""
         )
         assert focused_id is not None, "Exactly one focused card must be visible"
-        assert _messages_max_height( focused_id ) == "375px", \
-            "Focused card message lists must grow to 375px (250px + 50%) in focus mode"
+        assert _messages_max_height( focused_id ) == "500px", \
+            "Focused card message lists must double to 500px (250px × 2) in focus mode"
 
         _click_strip_toggle( page )  # exit focus
 

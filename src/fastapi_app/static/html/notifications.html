@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>Notifications</title>
     <link rel="stylesheet" href="/static/css/lupin-base.css">
-    <link rel="stylesheet" href="/static/css/notifications.css?v=20260530a">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=20260530c">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260512a">
 </head>
@@ -1116,6 +1116,11 @@
                     title="Back to previous content"
                     disabled>←</button>
             <span class="content-pane-title" id="content-pane-title"></span>
+            <button class="content-pane-bustout"
+                    id="content-pane-bustout"
+                    data-testid="notifications-content-pane-bustout"
+                    type="button"
+                    title="Open in new tab">⤢</button>
             <button class="content-pane-close"
                     id="content-pane-close"
                     data-testid="notifications-content-pane-close"
@@ -1138,7 +1143,7 @@
     <script src="/static/js/tts-audio-cache.js"></script>
     <script src="/static/js/job-completion-cache.js"></script>
     <script src="/static/js/audio-recorder.js"></script>
-    <script src="/static/js/notifications.js?v=20260522a"></script>
+    <script src="/static/js/notifications.js?v=20260530d"></script>
     <script src="/static/js/broadcast-panel.js?v=20260512a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

@@ -2404,8 +2404,8 @@
          * toggle carries data-focus-active="true" (see _enterFocusMode /
          * _exitFocusMode in notifications.js) and every sender card except the
          * focused one is hidden via data-focus-hidden. Give the single focused
-         * card 50% more scroll height in its per-date message lists (250px →
-         * 375px) so more of the in-focus conversation is readable. The real
+         * card DOUBLE the scroll height in its per-date message lists (250px →
+         * 500px) so more of the in-focus conversation is readable. The real
          * scrollable region is .date-accordion-messages (createSenderCard builds
          * .sender-card-dates → .date-accordion → .date-accordion-messages; the
          * legacy .sender-card-messages class is not produced by any render path).
@@ -2414,7 +2414,7 @@
          * of the cards, so :has() bridges from it to the focused card's lists. */
         body:has( #cc-strip-toggle[data-focus-active="true"] )
             .sender-card:not( [data-focus-hidden] ) .date-accordion-messages {
-            max-height: 375px;
+            max-height: 500px;
         }
 
         .sender-message {
@@ -5518,6 +5518,7 @@ body[data-layout-mode="horizontal"] .layout-mode-btn {
     z-index        : 5;
 }
 .content-pane-back,
+.content-pane-bustout,
 .content-pane-close {
     background    : transparent;
     border        : 1px solid #ced4da;
@@ -5533,6 +5534,7 @@ body[data-layout-mode="horizontal"] .layout-mode-btn {
     cursor : not-allowed;
 }
 .content-pane-back:hover:not(:disabled),
+.content-pane-bustout:hover,
 .content-pane-close:hover {
     background-color: rgba( 0, 0, 0, 0.04 );
 }
@@ -5547,6 +5549,7 @@ body[data-layout-mode="horizontal"] .layout-mode-btn {
 }
 .content-pane-body {
     flex            : 1;
+    min-height      : 0;                      /* flexbox: let flex:1 resolve a real height (instead of min-content) so the iframe's height:100% fills the pane and scrolls rather than overflowing */
     padding         : 18px 22px 22px 22px;   /* generous gutters; extra right-padding clears the scrollbar */
     overflow-y      : auto;
     scrollbar-gutter: stable;                /* reserve scrollbar space so content never jumps when it appears */
@@ -5559,6 +5562,13 @@ body[data-layout-mode="horizontal"] .layout-mode-btn {
     height : 100%;
     border : 0;
     display: block;
+}
+
+/* When the pane body holds a doc iframe, drop the text gutter so the document
+   (the doc-viewer has its own internal chrome/padding) fills the ENTIRE reading
+   area edge-to-edge. The gutter stays for abstract (markdown) content. */
+.content-pane-body:has( iframe ) {
+    padding: 0;
 }
 
 /* ---- Horizontal mode + pane-open activates the two-pane split ----
@@ -5624,7 +5634,13 @@ body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane {
     position      : sticky;
     top           : 100px;
     align-self    : flex-start;
-    max-height    : calc( 100vh - 100px );
+    /* DEFINITE height (not just max-height) so the flex:1 body and the iframe's
+       height:100% have a resolved height to measure against. With only
+       max-height + align-self:flex-start the pane was content-sized
+       (indefinite), collapsing the iframe to its ~150px intrinsic size — the
+       "postage stamp". Tracks the viewport via vh, so it resizes on window
+       resize; width tracks the splitter via flex. 2026-05-30 fix. */
+    height        : calc( 100vh - 100px );
     overflow-y    : auto;
 }
 /* Section-toolbar in horizontal mode: horizontal ROW of buttons (each button

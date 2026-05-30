@@ -980,7 +980,16 @@ async def add_security_headers( request: Request, call_next ):
     response = await call_next( request )
 
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    # X-Frame-Options: DENY everywhere EXCEPT the document-viewer page, which is
+    # intentionally embedded SAME-ORIGIN in the notifications Reading Pane iframe
+    # (master-detail layout, 2026-05-21). DENY blocks ALL framing — even
+    # same-origin — which surfaced as Chrome's "localhost refused to connect"
+    # inside the pane when following a doc-link. SAMEORIGIN still blocks
+    # cross-origin clickjacking (only this same app can frame the viewer).
+    if request.url.path == "/app/docs":
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
