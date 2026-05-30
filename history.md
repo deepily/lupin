@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.05.30 - Session 657452e9 (Sam 🎙️) | GCP deployment: survey → straw-man plan → Cloud-Run-vs-GCE comparison → decisions locked → prod-wording scrub (checkpoint)
+
+**Drove the GCP-deployment planning arc end-to-end on `wip-v0.1.8`; mid-session checkpoint (not pushed).** Three R&D docs created under `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`: (1) an 11-agent architecture-survey + readiness assessment; (2) a 2,400-line section-by-section **straw-man provisioning & deployment plan** (14-agent author→critic→assemble workflow; three blocking contradictions reconciled — Alembic-not-on-startup, the 2026-06-15 Agent-SDK $200 credit ceiling, the Milestone-1 HTTPS-LB cost line); (3) a fact-checked **Cloud Run-GPU vs GCE g2-standard-8+L4 + Claude-Code-hosting** comparison (verdict: the VM wins on cost, fit, and CC — same L4 silicon, opposite execution model; you can't SSH into Cloud Run).
+
+**Strategic decisions resolved with Rick** (cosa-voice `ask_multiple_choice` walkthrough): single GCE g2-standard-8 + L4 VM · CC OAuth = setup-token in Secret Manager + a refresh mechanism · CC consolidated onto the GPU VM · exclude-keys+rotate+verify-history · reuse sandbox project · Terraform+bash · no staging · on-demand (credit-covered, tracked as real $). **Milestone 1 re-scoped: local-dev → GCP-_test_ migration, NOT production.** Then scrubbed the now-misleading "production" wording across the plan (33 targeted edits via a focused sub-agent; future-prod refs + load-bearing code literals preserved; a new `LUPIN_ENV`-tension OPEN ITEM noted).
+
+**Files** (this checkpoint): `src/rnd/v0.1.8/2026.05.30-gcp-deployment/` (3 new docs) + `history.md` + `TODO.md`. **Deferred:** `src/rnd/README.md` index links (multi-session conflict — committed later). New auto-memory: `feedback_track_gcp_costs_as_real_money`.
+
+---
+
 ### 2026.05.30 - Session ac012bd2 (Tiberius 👑) | CoSA 100%-coverage campaign — fully planned, evidence-gathered, staged for off-peak grind
 
 **Planned + staged the CoSA 100%-coverage grandfathering-ramp campaign end-to-end; gathered combined-coverage evidence; authored a cold-start runbook. The overnight fleet grind itself is deferred to the off-peak window. On `wip-v0.1.8`.**

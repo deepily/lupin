@@ -1,5 +1,23 @@
 # TODO
 
+## 🚀 ACTIVE (2026-05-30) — GCP deployment: local-dev → GCP-TEST migration (Milestone 1)
+
+**Sam 🎙️ (session 657452e9).** Arc complete through planning + decisions: survey → straw-man plan → Cloud Run vs GCE comparison → all strategic decisions resolved with Rick → "production" wording scrubbed. Docs in `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`. **Mid-session checkpoint committed (NOT pushed).**
+
+**Milestone-1 scope (Rick-confirmed):** prove the **local-dev → GCP-_test_ migration** process. NOT production (that's a later, easy GCP→GCP horizontal clone).
+
+**Decisions locked:** D2 single GCE g2-standard-8 + L4 VM · D1 CC OAuth = setup-token in Secret Manager (+ a token-**refresh** mechanism for CC's occasional forced re-auth) · CC **consolidated** onto the GPU VM · D8 exclude keys from image + rotate + verify history · D3 **reuse sandbox project** for now · IaC = Terraform + bash · **no staging tier** · on-demand cost (credit-covered, **tracked as real $**). Auto-settled by the VM choice: D6 single-instance · D7 image-slim deferred · D9 self-hosted Whisper · D5 vLLM via Cloud VPN.
+
+**Resume here (next session):**
+- [ ] **[LUPIN]** Pick the start point: **Phase 0** (credential-gated validation — needs Rick's sandbox `gcloud` access) OR **Phase 1** (pre-deploy hygiene — no GCP needed: `LUPIN_ROOT` fix, exclude+rotate keys, parameterize the four `cloud-run-*.sh` scripts).
+- [ ] **[LUPIN]** **OPEN ITEM — `LUPIN_ENV` tension** (surfaced by the test re-scope): the cloud path is gated on literal `LUPIN_ENV == "production"`, but M1 is a *test* env selecting `[Lupin: Testing-GCS]` → either reuse the `production` value as the cloud-profile trigger, or extend the code so `testing` is cloud-backed. Resolve before cutover (plan §7.1.3 note).
+- [ ] **[LUPIN]** Phase-0 validation in the sandbox project: region + L4 quota, existing `-test` buckets / Cloud SQL PG16, existing secrets, IAM/Workload-Identity.
+- [ ] **[LUPIN]** Implement the D1 **token-refresh mechanism** (re-mint setup-token → update Secret Manager version → VM reloads; SSH `claude login` manual fallback).
+- [ ] **[LUPIN]** Review agent-flagged plan lines §9 WS1 (~1759/1768) — `model server local mode` config-block wording in the future-GKE phase (left as future-prod per the scrub rules; revisit if M1-VM execution should read as the cloud-backed block).
+- [ ] **[LUPIN]** Commit `src/rnd/README.md` GCP index links later — **deferred from this checkpoint** (multi-session conflict file; my links persist in the working tree).
+
+Full plan + §1 Decision Ledger + resolved-decisions callout: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.05.30-gcp-deployment-provisioning-plan.md`. Survey + Cloud-Run-vs-GCE comparison in the same dir.
+
 ## 🔴 TOP PRIORITY (2026-05-30) — CoSA 100%-coverage grandfathering ramp gate (one-week deadline)
 
 **Filed by Tiberius 👑 (session `ac012bd2`) per Rick's 2026-05-30 voice instruction** ("include the one-week ramp-up gate for all migrated CoSA source code to 100% coverage as a top priority"). This formalizes the `coverage inherits + grandfathering-ramp` decision that was ratified during the 2026-05-29 mono-repo fold (commit `0a01da3`) but never written as an actionable, time-boxed item — it was buried in the DONE block below.
