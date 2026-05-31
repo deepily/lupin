@@ -236,7 +236,7 @@ class SolutionSnapshotManagerFactory:
             if not config["path"]:
                 raise KeyError( "Configuration key 'solution snapshots file based path' not found" )
                 
-        elif manager_type == ManagerType.LANCEDB:
+        elif manager_type == ManagerType.LANCEDB:  # pragma: no branch - ManagerType is a 2-value enum (FILE_BASED/LANCEDB), validated upstream; not-FILE_BASED implies LANCEDB, so the elif-False arc is unreachable
             # Read storage backend configuration
             storage_backend = config_mgr.get( "storage backend", default="development" )
 
