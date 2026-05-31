@@ -1425,9 +1425,11 @@ class PodcastOrchestratorAgent:
                     file_type = "script",
                     language  = language,
                 )
-                # Store for future reference (English only)
-                if language == "en":
-                    self._original_script_path = output_path
+                # Store for future reference. This first-save branch is reached only
+                # on the English path (the `if language != "en":` arm above consumes
+                # every non-en case), so the prior `if language == "en":` guard here
+                # was redundant/dead and has been removed.
+                self._original_script_path = output_path
 
             # Ensure directory exists
             output_dir = os.path.dirname( output_path )
