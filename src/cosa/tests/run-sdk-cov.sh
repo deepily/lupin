@@ -24,6 +24,14 @@
 #   Test-only; touches no production code; makes no real LLM/SDK/network calls
 #   (the pre-import is a pure module import, zero spend).
 #
+#   It ALSO pre-warms scipy (from scipy.stats import beta; import scipy.optimize),
+#   guarded by try/except. swe_team's engineering_strategy (Thompson sampling)
+#   does `from scipy.stats import beta`, and scipy.optimize's LAZY submodule load
+#   (scipy.optimize._highspy._core...) fails under the cov tracer with a
+#   ModuleNotFoundError — the SAME tracer-x-lazy-loading class as the pydantic
+#   issue above. Pre-warming in the parent process fixes it. The guard keeps the
+#   runner working for non-scipy packages.
+#
 # USAGE
 #   src/cosa/tests/run-sdk-cov.sh <any pytest args>
 #
@@ -49,6 +57,11 @@ fi
 
 exec env PYTHONPATH="$REPO_ROOT/src:${PYTHONPATH:-}" "$VENV_PY" -c '
 import claude_agent_sdk  # noqa: F401  pre-warm pydantic generic-model cache before cov tracer
+try:
+    from scipy.stats import beta  # noqa: F401  pre-warm scipy.optimize lazy submodules before cov tracer
+    import scipy.optimize         # noqa: F401  (swe_team engineering_strategy Thompson sampling; same tracer x lazy-load class as the SDK issue)
+except ImportError:
+    pass  # scipy is optional; only swe_team needs it, and the cosa venv has it installed
 import sys, pytest
 sys.exit( pytest.main( sys.argv[1:] ) )
 ' "$@"
