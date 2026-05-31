@@ -196,7 +196,7 @@ def _guess_affected_files(
         parts = classname.split( "." )
         # Drop the class name (last part) and convert module path to file path
         module_parts = parts[ :-1 ] if parts[ -1 ][ 0 ].isupper() else parts
-        if module_parts:
+        if module_parts:  # pragma: no branch - false arc unreachable: the line-195 guard ("." in classname) ensures split(".") yields >=2 parts, so module_parts (parts[:-1] when last is a ClassName, else parts) always has >=1 element
             test_file = "/".join( module_parts ) + ".py"
             files.append( test_file )
 
