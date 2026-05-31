@@ -271,8 +271,8 @@ class TestSolutionSnapshotManager( unittest.TestCase ):
             # Create new snapshot to add
             new_snapshot = self._create_mock_snapshot( "New question?" )
             
-            # Test adding snapshot
-            manager.add_snapshot( new_snapshot )
+            # Test adding snapshot (real API is save_snapshot — upsert semantics)
+            manager.save_snapshot( new_snapshot )
             
             # Verify snapshot added to index
             self.assertIn( "New question?", manager._snapshots_by_question )

@@ -1,18 +1,31 @@
 """
-Unit tests for Normalizer with comprehensive mocking.
+Unit tests for Normalizer against its real (spaCy-backed) production contract.
 
 Tests the Normalizer class including:
-- Punctuation removal fix validation (CRITICAL)
-- Lemmatization behavior
-- Text preprocessing and tokenization
-- Edge cases and error conditions
+- Singleton behavior
+- Contraction expansion (apostrophe + STT no-apostrophe variants, case-insensitive)
+- Filler-word removal
+- Math-operator preservation + spacing
+- Lowercasing, punctuation removal, empty/whitespace handling
+- Batch normalization
 
-Zero external dependencies - all operations mocked for isolated testing.
+Rewritten 2026-05-30 (CoSA coverage campaign, memory group). The legacy file was
+written against a fictional contract:
+  - it called Normalizer( debug=..., verbose=... ) but the real __init__ takes NO
+    params (it is a config-reading singleton)
+  - it asserted stop-word filtering, which the real normalize() does NOT do (it
+    filters fillers + punctuation only)
+  - it asserted lemmatization outputs ("is" → "be") that the current model does not
+    produce ("What time is it?" → "what time is it")
+  - its mock-token assertions were hollow (they only verified the mock matched the
+    test's own expectation, not real behavior)
+
+This rewrite exercises the REAL Normalizer + real spaCy model, asserting on
+deterministic, model-stable behaviors (verified live 2026-05-30 in the cosa venv).
 """
 
 import unittest
-from unittest.mock import Mock, MagicMock, patch, call
-from typing import List, Dict, Any, Optional
+from typing import List
 
 # Import test infrastructure
 import sys
@@ -30,13 +43,13 @@ class TestNormalizer( unittest.TestCase ):
     Comprehensive unit tests for Normalizer class.
 
     Requires:
-        - MockManager for external dependency mocking
-        - UnitTestUtilities for common test patterns
+        - spaCy + en_core_web_sm available in the cosa venv
+        - ConfigurationManager available (LUPIN_CONFIG_MGR_CLI_ARGS)
 
     Ensures:
-        - All Normalizer functionality tested in isolation
-        - Punctuation fix validation (critical search failure resolution)
-        - Edge cases and error conditions validated
+        - Real normalization behavior validated (no hollow mocks)
+        - Contraction / filler / math / case handling covered
+        - Singleton identity preserved
     """
 
     def setUp( self ):
@@ -44,494 +57,210 @@ class TestNormalizer( unittest.TestCase ):
         Setup for each test method.
 
         Ensures:
-            - Clean state for each test
-            - Mock manager is available
+            - A working (real) Normalizer singleton is available
         """
-        self.mock_manager = MockManager()
+        self.mock_manager   = MockManager()
         self.test_utilities = UnitTestUtilities()
+        self.normalizer     = Normalizer()
 
     def tearDown( self ):
         """
         Cleanup after each test method.
 
         Ensures:
-            - All mocks are reset
+            - Mocks reset (singleton intentionally preserved — it IS the contract)
         """
         self.mock_manager.reset_mocks()
 
-    def test_punctuation_removal_fix( self ):
+    def test_singleton_identity( self ):
         """
-        Test that punctuation preservation is completely removed (CRITICAL).
-
-        This test validates the critical fix for "What time is it?" search failure
-        where punctuation preservation caused exact match failures.
+        Test that Normalizer is a singleton.
 
         Ensures:
-            - "What time is it?" → "what time is it" (no punctuation)
-            - Contractions and punctuation properly handled
-            - Multiple punctuation marks removed
-            - No sentence-ending preservation
+            - Two constructions return the same instance
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            # Mock spaCy model and pipeline
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        self.assertIs( Normalizer(), Normalizer() )
+        self.assertIs( self.normalizer, Normalizer() )
 
-            # Mock document and tokens for "What time is it?"
-            mock_doc = Mock()
-            mock_tokens = []
-
-            # Token: "What"
-            token_what = Mock()
-            token_what.is_punct = False
-            token_what.is_stop = False
-            token_what.pos_ = 'NOUN'
-            token_what.lemma_ = 'what'
-            token_what.text = 'what'
-            mock_tokens.append( token_what )
-
-            # Token: "time"
-            token_time = Mock()
-            token_time.is_punct = False
-            token_time.is_stop = False
-            token_time.pos_ = 'NOUN'
-            token_time.lemma_ = 'time'
-            token_time.text = 'time'
-            mock_tokens.append( token_time )
-
-            # Token: "is"
-            token_is = Mock()
-            token_is.is_punct = False
-            token_is.is_stop = False
-            token_is.pos_ = 'VERB'
-            token_is.lemma_ = 'be'
-            token_is.text = 'is'
-            mock_tokens.append( token_is )
-
-            # Token: "it"
-            token_it = Mock()
-            token_it.is_punct = False
-            token_it.is_stop = False
-            token_it.pos_ = 'PRON'
-            token_it.lemma_ = 'it'
-            token_it.text = 'it'
-            mock_tokens.append( token_it )
-
-            # Token: "?" (punctuation - should be ignored)
-            token_punct = Mock()
-            token_punct.is_punct = True
-            token_punct.is_stop = False
-            token_punct.pos_ = 'PUNCT'
-            token_punct.text = '?'
-            mock_tokens.append( token_punct )
-
-            mock_doc.__iter__ = Mock( return_value=iter( mock_tokens ) )
-            mock_doc.sents = [Mock()]
-            mock_doc.sents[0].__iter__ = Mock( return_value=iter( mock_tokens ) )
-            mock_nlp.return_value = mock_doc
-
-            normalizer = Normalizer( debug=False, verbose=False )
-
-            # Critical test cases that were failing before fix
-            result = normalizer.normalize( "What time is it?" )
-            expected = "what time be it"  # Note: lemmatization changes "is" to "be"
-
-            self.assertEqual( result, expected,
-                           f"Punctuation not properly removed: 'What time is it?' → '{result}' (expected: '{expected}')" )
-
-    def test_punctuation_removal_comprehensive( self ):
+    def test_initialization_attributes( self ):
         """
-        Test comprehensive punctuation removal scenarios.
+        Test Normalizer initialization wired the spaCy pipeline + flags.
 
         Ensures:
-            - Various punctuation types are removed
-            - Contractions are expanded
-            - Multiple punctuation marks handled
-            - No preservation of sentence-ending punctuation
+            - nlp pipeline loaded
+            - debug/verbose flags present
+            - _initialized latch set
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        self.assertIsNotNone( self.normalizer.nlp )
+        self.assertTrue( hasattr( self.normalizer, "debug" ) )
+        self.assertTrue( hasattr( self.normalizer, "verbose" ) )
+        self.assertTrue( self.normalizer._initialized )
 
-            normalizer = Normalizer( debug=False, verbose=False )
-
-            # Test cases for punctuation removal
-            test_cases = [
-                ( "Hello, world!", ["hello", "world"] ),
-                ( "What's happening?", ["what", "be", "happen"] ),  # Contraction expanded
-                ( "Yes, it is.", ["yes", "it", "be"] ),
-                ( "Really?! Amazing!!!", ["really", "amazing"] ),
-                ( "user@example.com", ["user", "example", "com"] ),
-            ]
-
-            for input_text, expected_tokens in test_cases:
-                # Mock the spaCy processing for each test case
-                mock_doc = Mock()
-                mock_tokens = []
-
-                for token_text in expected_tokens:
-                    token = Mock()
-                    token.is_punct = False
-                    token.is_stop = False
-                    token.pos_ = 'NOUN'  # Simplified for testing
-                    token.lemma_ = token_text
-                    token.text = token_text
-                    mock_tokens.append( token )
-
-                # Add punctuation tokens that should be ignored
-                for punct in ",.!?@":
-                    if punct in input_text:
-                        punct_token = Mock()
-                        punct_token.is_punct = True
-                        punct_token.text = punct
-                        mock_tokens.append( punct_token )
-
-                mock_doc.__iter__ = Mock( return_value=iter( mock_tokens ) )
-                mock_doc.sents = [Mock()]
-                mock_doc.sents[0].__iter__ = Mock( return_value=iter( mock_tokens ) )
-                mock_nlp.return_value = mock_doc
-
-                result = normalizer.normalize( input_text )
-                expected = " ".join( expected_tokens )
-
-                self.assertEqual( result, expected,
-                               f"Punctuation removal failed for '{input_text}': got '{result}', expected '{expected}'" )
-
-    def test_lemmatization_behavior( self ):
+    def test_normalize_empty_string( self ):
         """
-        Test lemmatization behavior for different parts of speech.
+        Test normalize on an empty string.
 
         Ensures:
-            - Verbs are lemmatized correctly
-            - Nouns are lemmatized correctly
-            - Function words use original form
-            - POS-based lemmatization logic works
+            - Empty string returns empty string
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        self.assertEqual( self.normalizer.normalize( "" ), "" )
 
-            # Test lemmatization with different POS tags
-            test_cases = [
-                # (text, pos, lemma, expected_output)
-                ( "running", "VERB", "run", "run" ),
-                ( "cats", "NOUN", "cat", "cat" ),
-                ( "better", "ADJ", "good", "good" ),
-                ( "quickly", "ADV", "quickly", "quickly" ),
-                ( "the", "DET", "the", "the" ),  # Function word - uses original
-            ]
-
-            normalizer = Normalizer( debug=False, verbose=False )
-
-            for text, pos, lemma, expected in test_cases:
-                mock_doc = Mock()
-                token = Mock()
-                token.is_punct = False
-                token.is_stop = False
-                token.pos_ = pos
-                token.lemma_ = lemma
-                token.text = text
-
-                mock_doc.__iter__ = Mock( return_value=iter( [token] ) )
-                mock_doc.sents = [Mock()]
-                mock_doc.sents[0].__iter__ = Mock( return_value=iter( [token] ) )
-                mock_nlp.return_value = mock_doc
-
-                result = normalizer.normalize( text )
-
-                self.assertEqual( result, expected,
-                               f"Lemmatization failed for '{text}' ({pos}): got '{result}', expected '{expected}'" )
-
-    def test_stop_word_handling( self ):
+    def test_normalize_whitespace_only( self ):
         """
-        Test stop word filtering behavior.
+        Test normalize on a whitespace-only string.
 
         Ensures:
-            - Stop words are filtered out appropriately
-            - Content words are preserved
-            - Stop word detection works correctly
+            - Whitespace-only input returns empty string
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        self.assertEqual( self.normalizer.normalize( "   " ), "" )
 
-            normalizer = Normalizer( debug=False, verbose=False )
-
-            # Mock tokens: content words and stop words
-            content_token = Mock()
-            content_token.is_punct = False
-            content_token.is_stop = False
-            content_token.pos_ = 'NOUN'
-            content_token.lemma_ = 'apple'
-            content_token.text = 'apple'
-
-            stop_token = Mock()
-            stop_token.is_punct = False
-            stop_token.is_stop = True
-            stop_token.pos_ = 'DET'
-            stop_token.lemma_ = 'the'
-            stop_token.text = 'the'
-
-            mock_doc = Mock()
-            mock_doc.__iter__ = Mock( return_value=iter( [stop_token, content_token] ) )
-            mock_doc.sents = [Mock()]
-            mock_doc.sents[0].__iter__ = Mock( return_value=iter( [stop_token, content_token] ) )
-            mock_nlp.return_value = mock_doc
-
-            result = normalizer.normalize( "the apple" )
-
-            # Should only include content word, not stop word
-            self.assertEqual( result, "apple",
-                           f"Stop word filtering failed: got '{result}', expected 'apple'" )
-
-    def test_empty_and_edge_cases( self ):
+    def test_normalize_lowercases( self ):
         """
-        Test edge cases and error conditions.
+        Test normalize lowercases its output.
 
         Ensures:
-            - Empty strings handled gracefully
-            - Whitespace-only strings handled
-            - Very long strings processed correctly
-            - Invalid input handled without crashes
+            - No uppercase characters survive normalization
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        result = self.normalizer.normalize( "HELLO World" )
+        self.assertEqual( result, result.lower() )
+        self.assertNotEqual( result, "" )
 
-            normalizer = Normalizer( debug=False, verbose=False )
-
-            # Empty document case
-            mock_doc_empty = Mock()
-            mock_doc_empty.__iter__ = Mock( return_value=iter( [] ) )
-            mock_doc_empty.sents = []
-            mock_nlp.return_value = mock_doc_empty
-
-            # Test empty string
-            result = normalizer.normalize( "" )
-            self.assertEqual( result, "", "Empty string should return empty string" )
-
-            # Test whitespace-only string
-            result = normalizer.normalize( "   " )
-            self.assertEqual( result, "", "Whitespace-only string should return empty string" )
-
-            # Test string with only punctuation
-            result = normalizer.normalize( "?!@#$" )
-            self.assertEqual( result, "", "Punctuation-only string should return empty string" )
-
-    def test_case_normalization( self ):
+    def test_normalize_removes_filler_words( self ):
         """
-        Test case normalization behavior.
+        Test normalize strips filler words.
 
         Ensures:
-            - All text is converted to lowercase
-            - Mixed case inputs handled correctly
-            - Case normalization works with other processing
+            - 'um' / 'uh' fillers do not survive
+            - Content words remain
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        result = self.normalizer.normalize( "um uh I want pizza" )
+        tokens = result.split()
+        self.assertNotIn( "um", tokens )
+        self.assertNotIn( "uh", tokens )
+        self.assertIn( "want", tokens )
+        self.assertIn( "pizza", tokens )
 
-            normalizer = Normalizer( debug=False, verbose=False )
-
-            # Mock token that preserves case information
-            token = Mock()
-            token.is_punct = False
-            token.is_stop = False
-            token.pos_ = 'NOUN'
-            token.lemma_ = 'hello'  # spaCy should return lowercase lemma
-            token.text = 'Hello'
-
-            mock_doc = Mock()
-            mock_doc.__iter__ = Mock( return_value=iter( [token] ) )
-            mock_doc.sents = [Mock()]
-            mock_doc.sents[0].__iter__ = Mock( return_value=iter( [token] ) )
-            mock_nlp.return_value = mock_doc
-
-            result = normalizer.normalize( "HELLO" )
-
-            self.assertEqual( result, "hello",
-                           f"Case normalization failed: got '{result}', expected 'hello'" )
-
-    def test_critical_search_failure_scenarios( self ):
+    def test_normalize_preserves_math_operators_with_spacing( self ):
         """
-        Test specific scenarios that caused the original search failure.
-
-        This test validates the exact scenarios that were failing in the
-        three-level architecture implementation.
+        Test normalize preserves math operators and spaces them.
 
         Ensures:
-            - "What time is it?" search works correctly
-            - Punctuation variations are normalized consistently
-            - Database queries will find exact matches
+            - '2+2' becomes '2 + 2' (operators carry semantic meaning in queries)
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        result = self.normalizer.normalize( "what is 2+2" )
+        self.assertIn( "2 + 2", result )
 
-            normalizer = Normalizer( debug=False, verbose=False )
-
-            # The exact scenarios that were causing search failures
-            critical_test_cases = [
-                # Original failing case
-                ( "What time is it?", "what time be it" ),
-                # Variations that should normalize to same result
-                ( "What time is it", "what time be it" ),
-                ( "what time is it?", "what time be it" ),
-                ( "what time is it", "what time be it" ),
-                # Similar time-related queries
-                ( "What's the time?", "what be the time" ),
-                ( "Tell me the time", "tell me the time" ),
-            ]
-
-            for input_query, expected_normalized in critical_test_cases:
-                # Mock appropriate tokens for each query
-                if "what time" in input_query.lower():
-                    tokens = self._create_time_query_tokens( input_query )
-                else:
-                    tokens = self._create_generic_tokens( input_query )
-
-                mock_doc = Mock()
-                mock_doc.__iter__ = Mock( return_value=iter( tokens ) )
-                mock_doc.sents = [Mock()]
-                mock_doc.sents[0].__iter__ = Mock( return_value=iter( tokens ) )
-                mock_nlp.return_value = mock_doc
-
-                result = normalizer.normalize( input_query )
-
-                self.assertEqual( result, expected_normalized,
-                               f"Critical search failure case: '{input_query}' → '{result}' (expected: '{expected_normalized}')" )
-
-    def _create_time_query_tokens( self, query ):
-        """Helper method to create mock tokens for time-related queries."""
-        tokens = []
-        words = query.lower().replace( "?", "" ).replace( "'s", "" ).split()
-
-        for word in words:
-            if word in ["what", "what's"]:
-                token = Mock()
-                token.is_punct = False
-                token.is_stop = False
-                token.pos_ = 'PRON'
-                token.lemma_ = 'what'
-                token.text = 'what'
-                tokens.append( token )
-            elif word == "time":
-                token = Mock()
-                token.is_punct = False
-                token.is_stop = False
-                token.pos_ = 'NOUN'
-                token.lemma_ = 'time'
-                token.text = 'time'
-                tokens.append( token )
-            elif word in ["is", "be"]:
-                token = Mock()
-                token.is_punct = False
-                token.is_stop = False
-                token.pos_ = 'VERB'
-                token.lemma_ = 'be'
-                token.text = word
-                tokens.append( token )
-            elif word == "it":
-                token = Mock()
-                token.is_punct = False
-                token.is_stop = False
-                token.pos_ = 'PRON'
-                token.lemma_ = 'it'
-                token.text = 'it'
-                tokens.append( token )
-            elif word == "the":
-                token = Mock()
-                token.is_punct = False
-                token.is_stop = False
-                token.pos_ = 'DET'
-                token.lemma_ = 'the'
-                token.text = 'the'
-                tokens.append( token )
-            elif word in ["tell", "me"]:
-                token = Mock()
-                token.is_punct = False
-                token.is_stop = False
-                token.pos_ = 'VERB' if word == "tell" else 'PRON'
-                token.lemma_ = word
-                token.text = word
-                tokens.append( token )
-
-        return tokens
-
-    def _create_generic_tokens( self, text ):
-        """Helper method to create mock tokens for generic text."""
-        tokens = []
-        words = text.lower().replace( "?", "" ).replace( "!", "" ).split()
-
-        for word in words:
-            token = Mock()
-            token.is_punct = False
-            token.is_stop = False
-            token.pos_ = 'NOUN'
-            token.lemma_ = word
-            token.text = word
-            tokens.append( token )
-
-        return tokens
-
-    def test_initialization( self ):
+    def test_normalize_time_query_punctuation_removed( self ):
         """
-        Test Normalizer initialization.
+        Test the canonical 'What time is it?' query normalizes deterministically.
 
         Ensures:
-            - Normalizer initializes correctly with default parameters
-            - Debug and verbose flags are handled properly
-            - spaCy model is loaded correctly
+            - Trailing '?' removed
+            - Result is the stable lowercased token sequence
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        result = self.normalizer.normalize( "What time is it?" )
+        self.assertEqual( result, "what time is it" )
 
-            # Test default initialization
-            normalizer = Normalizer()
-            self.assertIsNotNone( normalizer )
-            mock_spacy.assert_called_with( "en_core_web_sm" )
-
-            # Test with debug and verbose flags
-            normalizer_debug = Normalizer( debug=True, verbose=True )
-            self.assertIsNotNone( normalizer_debug )
-
-    def test_performance_characteristics( self ):
+    def test_normalize_punctuation_stripped( self ):
         """
-        Test performance-related characteristics.
+        Test normalize removes ordinary punctuation while keeping words.
 
         Ensures:
-            - Normalizer handles reasonable text lengths efficiently
-            - No memory leaks in token processing
-            - Consistent behavior across multiple calls
+            - Commas / exclamation marks dropped
+            - Content words preserved
         """
-        with patch( 'cosa.memory.normalizer.spacy.load' ) as mock_spacy:
-            mock_nlp = Mock()
-            mock_spacy.return_value = mock_nlp
+        result = self.normalizer.normalize( "Hello, world!" )
+        self.assertNotIn( ",", result )
+        self.assertNotIn( "!", result )
+        self.assertIn( "hello", result )
+        self.assertIn( "world", result )
 
-            normalizer = Normalizer( debug=False, verbose=False )
+    def test_normalize_consistency( self ):
+        """
+        Test normalize is deterministic for the same input.
 
-            # Mock for consistent results
-            mock_doc = Mock()
-            token = Mock()
-            token.is_punct = False
-            token.is_stop = False
-            token.pos_ = 'NOUN'
-            token.lemma_ = 'test'
-            token.text = 'test'
+        Ensures:
+            - Two identical calls produce identical output
+        """
+        text = "Tell me the current weather"
+        self.assertEqual( self.normalizer.normalize( text ), self.normalizer.normalize( text ) )
 
-            mock_doc.__iter__ = Mock( return_value=iter( [token] ) )
-            mock_doc.sents = [Mock()]
-            mock_doc.sents[0].__iter__ = Mock( return_value=iter( [token] ) )
-            mock_nlp.return_value = mock_doc
+    def test_expand_contractions_apostrophe( self ):
+        """
+        Test contraction expansion for apostrophe forms.
 
-            # Test multiple calls produce consistent results
-            text = "Test consistency"
-            result1 = normalizer.normalize( text )
-            result2 = normalizer.normalize( text )
+        Ensures:
+            - "don't" → "do not"; "can't" → "cannot"; "it's" → "it is"
+        """
+        self.assertEqual( self.normalizer.expand_contractions( "don't" ), "do not" )
+        self.assertEqual( self.normalizer.expand_contractions( "can't" ), "cannot" )
+        self.assertEqual( self.normalizer.expand_contractions( "it's" ), "it is" )
 
-            self.assertEqual( result1, result2,
-                           "Normalizer should produce consistent results for same input" )
+    def test_expand_contractions_stt_variants( self ):
+        """
+        Test contraction expansion for STT (no-apostrophe) variants.
+
+        Ensures:
+            - "dont" → "do not"; "whats" → "what is"; "youre" → "you are"
+        """
+        self.assertEqual( self.normalizer.expand_contractions( "dont" ), "do not" )
+        self.assertEqual( self.normalizer.expand_contractions( "whats" ), "what is" )
+        self.assertEqual( self.normalizer.expand_contractions( "youre" ), "you are" )
+
+    def test_expand_contractions_case_insensitive( self ):
+        """
+        Test contraction expansion is case-insensitive.
+
+        Ensures:
+            - "Don't" and "WON'T" expand regardless of case
+        """
+        self.assertEqual( self.normalizer.expand_contractions( "Don't" ), "do not" )
+        self.assertEqual( self.normalizer.expand_contractions( "WON'T" ), "will not" )
+
+    def test_expand_contractions_within_sentence( self ):
+        """
+        Test contraction expansion within a larger sentence (word-boundary safe).
+
+        Ensures:
+            - Only whole-word contractions expanded, surrounding words preserved
+        """
+        result = self.normalizer.expand_contractions( "I won't go" )
+        self.assertIn( "will not", result )
+        self.assertIn( "go", result )
+
+    def test_remove_filler_words_method( self ):
+        """
+        Test remove_filler_words on a real spaCy Doc.
+
+        Ensures:
+            - Filler tokens removed, content tokens preserved
+            - Returns a list of tokens
+        """
+        doc    = self.normalizer.nlp( "um hello there" )
+        tokens = self.normalizer.remove_filler_words( doc )
+        texts  = [ t.text for t in tokens ]
+        self.assertNotIn( "um", texts )
+        self.assertIn( "hello", texts )
+
+    def test_normalize_batch( self ):
+        """
+        Test normalize_batch processes multiple texts.
+
+        Ensures:
+            - Returns a list of the same length as the input
+            - Each element is a string
+            - Deterministic across calls
+        """
+        texts   = [ "Hello there", "what time is it", "tell me a joke" ]
+        results = self.normalizer.normalize_batch( texts )
+
+        self.assertIsInstance( results, list )
+        self.assertEqual( len( results ), len( texts ) )
+        for r in results:
+            self.assertIsInstance( r, str )
+
+        # Deterministic
+        self.assertEqual( results, self.normalizer.normalize_batch( texts ) )
 
 
 if __name__ == "__main__":

@@ -1,19 +1,35 @@
 """
 Unit tests for CanonicalSynonymsTable with comprehensive mocking.
 
-Tests the CanonicalSynonymsTable class including:
-- Exact verbatim and normalized matching
-- Synonym addition with uniqueness constraints
-- Usage statistics tracking
-- Duplicate detection and error handling
-- Table schema validation
+Tests the CanonicalSynonymsTable class against its CURRENT production contract:
+- Initialization (validate-dimensions + open-or-create chain)
+- add_synonym( snapshot_id, question_verbatim, confidence_score, source ) — generates
+  normalized/gist + three-level embeddings internally, dedup via find_exact_verbatim
+- find_exact_verbatim / find_exact_normalized / find_exact_gist — pandas exact-match
+  lookups via table.to_pandas()
+- delete_by_snapshot_id — count + delete
+- get_statistics — aggregate counts/usage/confidence
 
-Zero external dependencies - all operations mocked for isolated testing.
+Zero external dependencies - lancedb, ConfigurationManager, Normalizer, and
+EmbeddingManager are all mocked for isolated testing.
+
+Rewritten 2026-05-30 (CoSA coverage campaign, memory group). The legacy file was
+auto-generated against a fictional API (get_usage_stats / update_usage_count /
+validation_method+embeddings params / search().where() lookups / _ensure_table_exists)
+that does not exist in production; it has been replaced wholesale with tests that
+exercise the real methods.
+
+RULING (manager, 2026-05-30): CanonicalSynonymsTable.__init__ is FAIL-FAST on a
+lancedb.connect failure — there is no try/except around the connect, so the
+constructor RAISES. test_init_database_failure_is_fail_fast asserts assertRaises,
+NOT graceful degradation.
 """
 
 import unittest
 from unittest.mock import Mock, MagicMock, patch, call
 from typing import List, Dict, Any, Optional
+
+import pandas as pd
 
 # Import test infrastructure
 import sys
@@ -36,9 +52,8 @@ class TestCanonicalSynonymsTable( unittest.TestCase ):
 
     Ensures:
         - All CanonicalSynonymsTable functionality tested in isolation
-        - Exact matching behavior validated
-        - Uniqueness constraints tested
-        - Usage statistics properly tracked
+        - Exact-match lookups validated against the pandas-based implementation
+        - add/delete/statistics behavior tested
     """
 
     def setUp( self ):
@@ -49,8 +64,9 @@ class TestCanonicalSynonymsTable( unittest.TestCase ):
             - Clean state for each test
             - Mock manager is available
         """
-        self.mock_manager = MockManager()
+        self.mock_manager   = MockManager()
         self.test_utilities = UnitTestUtilities()
+        self.embedding_dim  = 768
 
     def tearDown( self ):
         """
@@ -61,512 +77,393 @@ class TestCanonicalSynonymsTable( unittest.TestCase ):
         """
         self.mock_manager.reset_mocks()
 
-    def test_find_exact_verbatim_matching( self ):
+    def _build_table( self, table_mock=None, table_exists=True ):
         """
-        Test find_exact_verbatim with matching queries.
+        Construct a CanonicalSynonymsTable with the full __init__ dependency chain mocked.
 
-        This validates that exact verbatim matching works correctly
-        for the hierarchical search system.
+        Patches (module-bound, where used): lancedb, ConfigurationManager, Normalizer,
+        EmbeddingManager, and du.get_project_root.
 
-        Ensures:
-            - Exact matches found correctly
-            - Case sensitivity handled appropriately
-            - Correct snapshot IDs returned
-            - Non-matches return None
+        Args:
+            table_mock   : optional pre-built Mock for the lancedb table
+            table_exists : if True, db.table_names() reports the table (open path);
+                           if False, reports empty (create path)
+
+        Returns:
+            Tuple of (table_instance, mocks_dict)
         """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
+        mock_config = Mock()
+        mock_config.get.side_effect = lambda key, default=None, return_type=None: {
+            "embedding dimensions"     : "768",
+            "path to database wo root" : "/test/db",
+        }.get( key, default )
 
-            # Mock LanceDB table with exact verbatim match
-            mock_table = Mock()
-            mock_search = Mock()
-            mock_search.where.return_value.limit.return_value.to_list.return_value = [
-                {
-                    "id": "synonym_1",
-                    "snapshot_id": "exact_match_snapshot_id",
-                    "question_verbatim": "What time is it?",
-                    "question_normalized": "what time be it",
-                    "question_gist": "time query",
-                    "usage_count": 5,
-                    "last_matched": "2025-09-28T15:30:00"
-                }
-            ]
-            mock_table.search.return_value = mock_search
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
+        mock_normalizer = Mock()
+        mock_normalizer.normalize.side_effect = lambda q: q.lower()
 
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
+        mock_embedding_mgr = Mock()
+        mock_embedding_mgr.generate_embedding.return_value = [ 0.1 ] * self.embedding_dim
 
-            # Test exact verbatim match
-            result = synonyms_table.find_exact_verbatim( "What time is it?" )
+        mock_db    = Mock()
+        the_table  = table_mock if table_mock is not None else Mock()
+        mock_db.table_names.return_value  = [ "canonical_synonyms" ] if table_exists else []
+        mock_db.open_table.return_value   = the_table
+        mock_db.create_table.return_value = the_table
+        # Schema dims match config → _validate_embedding_dimensions is a no-op (no drop)
+        the_table.schema.field.return_value.type.list_size = self.embedding_dim
 
-            # Verify search performed correctly
-            mock_search.where.assert_called()
-            where_call = mock_search.where.call_args[0][0]
-            self.assertIn( "What time is it?", str( where_call ) )
+        with patch( "cosa.memory.canonical_synonyms_table.lancedb" ) as mock_lancedb, \
+             patch( "cosa.memory.canonical_synonyms_table.ConfigurationManager", return_value=mock_config ), \
+             patch( "cosa.memory.canonical_synonyms_table.Normalizer", return_value=mock_normalizer ), \
+             patch( "cosa.memory.canonical_synonyms_table.EmbeddingManager", return_value=mock_embedding_mgr ), \
+             patch( "cosa.memory.canonical_synonyms_table.du.get_project_root", return_value="/root" ):
 
-            # Verify correct result
-            self.assertEqual( result, "exact_match_snapshot_id" )
-
-    def test_find_exact_verbatim_non_matching( self ):
-        """
-        Test find_exact_verbatim with non-matching queries.
-
-        Ensures:
-            - Non-matching queries return None
-            - Search performed but no results found
-            - Error handling for empty results
-        """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
-
-            # Mock LanceDB table with no matches
-            mock_table = Mock()
-            mock_search = Mock()
-            mock_search.where.return_value.limit.return_value.to_list.return_value = []
-            mock_table.search.return_value = mock_search
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test non-matching query
-            result = synonyms_table.find_exact_verbatim( "Unknown query" )
-
-            # Verify search performed
-            mock_search.where.assert_called()
-
-            # Verify no result returned
-            self.assertIsNone( result )
-
-    def test_find_exact_normalized_case_insensitive( self ):
-        """
-        Test find_exact_normalized with case-insensitive matching.
-
-        This validates the normalized matching functionality
-        used in the hierarchical search.
-
-        Ensures:
-            - Normalized queries matched correctly
-            - Case insensitivity handled
-            - Multiple matches handled appropriately
-        """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
-
-            # Mock LanceDB table with normalized match
-            mock_table = Mock()
-            mock_search = Mock()
-            mock_search.where.return_value.limit.return_value.to_list.return_value = [
-                {
-                    "id": "synonym_2",
-                    "snapshot_id": "normalized_match_snapshot_id",
-                    "question_verbatim": "What time is it?",
-                    "question_normalized": "what time be it",
-                    "question_gist": "time query",
-                    "usage_count": 3,
-                    "last_matched": "2025-09-28T15:25:00"
-                }
-            ]
-            mock_table.search.return_value = mock_search
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test normalized match
-            result = synonyms_table.find_exact_normalized( "what time be it" )
-
-            # Verify search performed correctly
-            mock_search.where.assert_called()
-
-            # Verify correct result
-            self.assertEqual( result, "normalized_match_snapshot_id" )
-
-    def test_add_synonym_with_uniqueness_constraint( self ):
-        """
-        Test add_synonym with uniqueness constraint validation.
-
-        This validates that duplicate verbatim questions are
-        properly detected and handled.
-
-        Ensures:
-            - New synonyms added successfully
-            - Uniqueness constraints enforced
-            - Duplicate detection works correctly
-            - Error handling for constraint violations
-        """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
-
-            mock_table = Mock()
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test adding new synonym
-            result = synonyms_table.add_synonym(
-                snapshot_id="new_snapshot_id",
-                question_verbatim="How is the weather?",
-                question_normalized="how be the weather",
-                question_gist="weather inquiry",
-                confidence_score=95.0,
-                validation_method="user_confirmed"
-            )
-
-            # Verify add operation called
-            mock_table.add.assert_called_once()
-
-            # Verify the data structure passed to add
-            add_call_args = mock_table.add.call_args[0][0]
-            synonym_record = add_call_args[0]
-
-            self.assertEqual( synonym_record["snapshot_id"], "new_snapshot_id" )
-            self.assertEqual( synonym_record["question_verbatim"], "How is the weather?" )
-            self.assertEqual( synonym_record["question_normalized"], "how be the weather" )
-            self.assertEqual( synonym_record["question_gist"], "weather inquiry" )
-            self.assertEqual( synonym_record["confidence_score"], 95.0 )
-            self.assertEqual( synonym_record["validation_method"], "user_confirmed" )
-
-            # Verify success
-            self.assertTrue( result )
-
-    def test_add_synonym_duplicate_detection( self ):
-        """
-        Test add_synonym duplicate detection and error handling.
-
-        Ensures:
-            - Duplicate verbatim questions detected
-            - Appropriate error handling for duplicates
-            - Database constraint violations handled gracefully
-        """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
-
-            # Mock database constraint violation
-            mock_table = Mock()
-            mock_table.add.side_effect = Exception( "Duplicate key constraint violation" )
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test adding duplicate synonym
-            result = synonyms_table.add_synonym(
-                snapshot_id="duplicate_snapshot_id",
-                question_verbatim="What time is it?",  # Already exists
-                question_normalized="what time be it",
-                question_gist="time query",
-                confidence_score=100.0,
-                validation_method="auto_validated"
-            )
-
-            # Verify failure handled gracefully
-            self.assertFalse( result )
-
-    def test_get_usage_stats_functionality( self ):
-        """
-        Test get_usage_stats functionality.
-
-        This validates that usage statistics are properly
-        calculated and returned for synonym management.
-
-        Ensures:
-            - Usage statistics calculated correctly
-            - Aggregations performed properly
-            - Multiple synonyms handled
-            - Empty data handled gracefully
-        """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
-
-            # Mock LanceDB table with usage data
-            mock_table = Mock()
-            mock_search = Mock()
-            mock_search.to_list.return_value = [
-                {
-                    "id": "synonym_1",
-                    "snapshot_id": "snapshot_1",
-                    "question_verbatim": "What time is it?",
-                    "usage_count": 10,
-                    "confidence_score": 100.0,
-                    "validation_method": "user_confirmed"
-                },
-                {
-                    "id": "synonym_2",
-                    "snapshot_id": "snapshot_2",
-                    "question_verbatim": "What's the weather?",
-                    "usage_count": 5,
-                    "confidence_score": 85.0,
-                    "validation_method": "auto_validated"
-                }
-            ]
-            mock_table.search.return_value = mock_search
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test usage statistics
-            stats = synonyms_table.get_usage_stats()
-
-            # Verify expected statistics
-            expected_stats = {
-                "total_synonyms": 2,
-                "total_usage": 15,
-                "average_usage": 7.5,
-                "most_used_question": "What time is it?",
-                "highest_usage_count": 10,
-                "confidence_distribution": {
-                    "high_confidence": 1,     # >= 95.0
-                    "medium_confidence": 1,   # 80.0-94.9
-                    "low_confidence": 0       # < 80.0
-                },
-                "validation_methods": {
-                    "user_confirmed": 1,
-                    "auto_validated": 1
-                }
-            }
-
-            self.assertEqual( stats, expected_stats )
-
-    def test_get_usage_stats_empty_data( self ):
-        """
-        Test get_usage_stats with empty data.
-
-        Ensures:
-            - Empty datasets handled gracefully
-            - Appropriate default values returned
-            - No division by zero errors
-        """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
-
-            # Mock LanceDB table with no data
-            mock_table = Mock()
-            mock_search = Mock()
-            mock_search.to_list.return_value = []
-            mock_table.search.return_value = mock_search
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test empty statistics
-            stats = synonyms_table.get_usage_stats()
-
-            expected_empty_stats = {
-                "total_synonyms": 0,
-                "total_usage": 0,
-                "average_usage": 0.0,
-                "most_used_question": None,
-                "highest_usage_count": 0,
-                "confidence_distribution": {
-                    "high_confidence": 0,
-                    "medium_confidence": 0,
-                    "low_confidence": 0
-                },
-                "validation_methods": {}
-            }
-
-            self.assertEqual( stats, expected_empty_stats )
-
-    def test_table_schema_validation( self ):
-        """
-        Test table creation and schema validation.
-
-        Ensures:
-            - Table created with correct schema
-            - All required fields included
-            - Data types specified correctly
-            - Indexes created appropriately
-        """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ), \
-             patch( 'cosa.memory.canonical_synonyms_table.pa' ) as mock_pa:
-
-            # Mock PyArrow schema
-            mock_schema = Mock()
-            mock_pa.schema.return_value = mock_schema
-
-            mock_db = Mock()
             mock_lancedb.connect.return_value = mock_db
+            table = CanonicalSynonymsTable( debug=False, verbose=False )
 
-            # Test table creation
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
+        mocks = {
+            "table"         : the_table,
+            "db"            : mock_db,
+            "normalizer"    : mock_normalizer,
+            "embedding_mgr" : mock_embedding_mgr,
+            "config"        : mock_config,
+        }
+        return table, mocks
 
-            # Verify schema creation with correct fields
-            mock_pa.schema.assert_called_once()
-            schema_call_args = mock_pa.schema.call_args[0][0]
-
-            # Verify all required fields are in schema
-            field_names = [field.call_args[0][0] for field in schema_call_args]
-
-            required_fields = [
-                "id", "snapshot_id", "question_verbatim", "question_normalized",
-                "question_gist", "embedding_verbatim", "embedding_normalized",
-                "embedding_gist", "confidence_score", "validation_method",
-                "usage_count", "last_matched", "created_date", "created_by", "is_active"
-            ]
-
-            for required_field in required_fields:
-                self.assertIn( required_field, field_names,
-                             f"Required field '{required_field}' missing from schema" )
-
-    def test_update_usage_count( self ):
+    def test_initialization_opens_existing_table( self ):
         """
-        Test usage count update functionality.
-
-        This validates that usage statistics are updated
-        when synonyms are matched during search.
+        Test initialization when the table already exists.
 
         Ensures:
-            - Usage count incremented correctly
-            - Last matched timestamp updated
-            - Database updates performed
+            - ConfigurationManager consulted for embedding dimensions
+            - lancedb table opened (not created)
+            - _canonical_synonyms_table wired to the opened table
         """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
+        table, mocks = self._build_table( table_exists=True )
 
-            mock_table = Mock()
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
+        mocks["config"].get.assert_any_call( "embedding dimensions", default="768" )
+        mocks["db"].open_table.assert_any_call( "canonical_synonyms" )
+        mocks["db"].create_table.assert_not_called()
+        self.assertIs( table._canonical_synonyms_table, mocks["table"] )
+        self.assertFalse( table.debug )
+        self.assertFalse( table.verbose )
 
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test usage count update
-            result = synonyms_table.update_usage_count( "synonym_id_123" )
-
-            # Verify update operation called
-            mock_table.update.assert_called_once()
-
-            # Verify success
-            self.assertTrue( result )
-
-    def test_error_handling_database_failures( self ):
+    def test_initialization_creates_table_when_missing( self ):
         """
-        Test error handling for database failures.
+        Test initialization when the table does not yet exist.
 
         Ensures:
-            - Database connection errors handled gracefully
-            - Search failures don't crash operations
-            - Add failures handled appropriately
-            - Update failures handled correctly
+            - db.create_table invoked with the canonical_synonyms name
+            - FTS indexes created on the new table
         """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
+        table, mocks = self._build_table( table_exists=False )
 
-            # Test database connection failure
+        mocks["db"].create_table.assert_called_once()
+        create_args, create_kwargs = mocks["db"].create_table.call_args
+        self.assertEqual( create_args[0], "canonical_synonyms" )
+        self.assertEqual( create_kwargs.get( "mode" ), "overwrite" )
+        # FTS indexes created on the three question levels
+        self.assertGreaterEqual( mocks["table"].create_fts_index.call_count, 3 )
+
+    def test_init_database_failure_is_fail_fast( self ):
+        """
+        Test that a lancedb.connect failure propagates from __init__ (FAIL-FAST).
+
+        Per manager ruling 2026-05-30: __init__ has no try/except around the
+        connect, so a connection error RAISES rather than degrading gracefully.
+
+        Ensures:
+            - Constructing the table raises when lancedb.connect fails
+        """
+        mock_config = Mock()
+        mock_config.get.side_effect = lambda key, default=None, return_type=None: {
+            "embedding dimensions"     : "768",
+            "path to database wo root" : "/test/db",
+        }.get( key, default )
+
+        with patch( "cosa.memory.canonical_synonyms_table.lancedb" ) as mock_lancedb, \
+             patch( "cosa.memory.canonical_synonyms_table.ConfigurationManager", return_value=mock_config ), \
+             patch( "cosa.memory.canonical_synonyms_table.Normalizer", return_value=Mock() ), \
+             patch( "cosa.memory.canonical_synonyms_table.EmbeddingManager", return_value=Mock() ), \
+             patch( "cosa.memory.canonical_synonyms_table.du.get_project_root", return_value="/root" ):
+
             mock_lancedb.connect.side_effect = Exception( "Database connection failed" )
 
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
+            with self.assertRaises( Exception ):
+                CanonicalSynonymsTable( debug=False, verbose=False )
 
-            # Test search with database error
-            result = synonyms_table.find_exact_verbatim( "test query" )
-            self.assertIsNone( result )
-
-            # Test add with database error
-            result = synonyms_table.add_synonym(
-                snapshot_id="test_id",
-                question_verbatim="test question",
-                question_normalized="test question",
-                question_gist="test",
-                confidence_score=90.0,
-                validation_method="test"
-            )
-            self.assertFalse( result )
-
-    def test_case_sensitivity_handling( self ):
+    def test_find_exact_verbatim_match( self ):
         """
-        Test case sensitivity handling in searches.
+        Test find_exact_verbatim returns the snapshot_id on an exact match.
 
         Ensures:
-            - Verbatim searches are case-sensitive
-            - Normalized searches handle case appropriately
-            - Consistent behavior across operations
+            - Verbatim column filtered via pandas
+            - Matching row's snapshot_id returned
         """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
+        table, mocks = self._build_table()
 
-            mock_table = Mock()
-            mock_search = Mock()
-
-            # Mock case-sensitive verbatim match
-            mock_search.where.return_value.limit.return_value.to_list.return_value = []
-            mock_table.search.return_value = mock_search
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test case sensitivity
-            result1 = synonyms_table.find_exact_verbatim( "What Time Is It?" )
-            result2 = synonyms_table.find_exact_verbatim( "what time is it?" )
-
-            # Verify both searches performed (different cases)
-            self.assertEqual( mock_search.where.call_count, 2 )
-
-            # Both should return None since no matches mocked
-            self.assertIsNone( result1 )
-            self.assertIsNone( result2 )
-
-    def test_embedding_integration( self ):
-        """
-        Test embedding integration functionality.
-
-        Ensures:
-            - Embeddings stored correctly
-            - Three-level embeddings handled
-            - Large embedding vectors supported
-        """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
-
-            mock_table = Mock()
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            synonyms_table = CanonicalSynonymsTable( debug=False, verbose=False )
-
-            # Test with embeddings
-            test_embeddings = {
-                'verbatim': [0.1] * 1536,
-                'normalized': [0.2] * 1536,
-                'gist': [0.3] * 1536
+        mocks["table"].to_pandas.return_value = pd.DataFrame( [
+            {
+                "question_verbatim"   : "What time is it?",
+                "question_normalized" : "what time is it?",
+                "question_gist"       : "what time is it?",
+                "snapshot_id"         : "snap_verbatim",
             }
+        ] )
 
-            result = synonyms_table.add_synonym(
-                snapshot_id="embedding_test_id",
-                question_verbatim="Test with embeddings",
-                question_normalized="test with embeddings",
-                question_gist="embedding test",
-                confidence_score=88.0,
-                validation_method="auto_validated",
-                embeddings=test_embeddings
-            )
+        result = table.find_exact_verbatim( "What time is it?" )
+        self.assertEqual( result, "snap_verbatim" )
 
-            # Verify embeddings included in add call
-            mock_table.add.assert_called_once()
-            add_call_args = mock_table.add.call_args[0][0]
-            synonym_record = add_call_args[0]
-
-            self.assertEqual( len( synonym_record["embedding_verbatim"] ), 1536 )
-            self.assertEqual( len( synonym_record["embedding_normalized"] ), 1536 )
-            self.assertEqual( len( synonym_record["embedding_gist"] ), 1536 )
-
-    def test_initialization_parameters( self ):
+    def test_find_exact_verbatim_no_match( self ):
         """
-        Test CanonicalSynonymsTable initialization.
+        Test find_exact_verbatim returns None when no row matches.
 
         Ensures:
-            - Initialization with default parameters works
-            - Debug and verbose flags handled
-            - Configuration integration working
+            - Empty filter result yields None
         """
-        with patch( 'cosa.memory.canonical_synonyms_table.lancedb' ), \
-             patch( 'cosa.memory.canonical_synonyms_table.ConfigurationManager' ):
+        table, mocks = self._build_table()
+        mocks["table"].to_pandas.return_value = pd.DataFrame(
+            columns=[ "question_verbatim", "question_normalized", "question_gist", "snapshot_id" ]
+        )
 
-            # Test default initialization
-            synonyms_default = CanonicalSynonymsTable()
-            self.assertIsNotNone( synonyms_default )
+        result = table.find_exact_verbatim( "Unknown query" )
+        self.assertIsNone( result )
 
-            # Test with debug and verbose
-            synonyms_debug = CanonicalSynonymsTable( debug=True, verbose=True )
-            self.assertIsNotNone( synonyms_debug )
+    def test_find_exact_verbatim_exception_returns_none( self ):
+        """
+        Test find_exact_verbatim swallows errors and returns None.
 
-            # Verify initialization completed without errors
-            self.assertTrue( hasattr( synonyms_default, '_ensure_table_exists' ) )
+        Ensures:
+            - to_pandas failure is caught (the find_* methods ARE try/except-wrapped,
+              unlike __init__)
+            - None returned on error
+        """
+        table, mocks = self._build_table()
+        mocks["table"].to_pandas.side_effect = Exception( "boom" )
+
+        result = table.find_exact_verbatim( "anything" )
+        self.assertIsNone( result )
+
+    def test_find_exact_normalized_match( self ):
+        """
+        Test find_exact_normalized returns snapshot_id on a normalized match.
+
+        Ensures:
+            - Normalized column filtered via pandas
+            - Matching row's snapshot_id returned
+        """
+        table, mocks = self._build_table()
+        mocks["table"].to_pandas.return_value = pd.DataFrame( [
+            {
+                "question_verbatim"   : "What time is it?",
+                "question_normalized" : "what time be it",
+                "question_gist"       : "time query",
+                "snapshot_id"         : "snap_normalized",
+            }
+        ] )
+
+        result = table.find_exact_normalized( "what time be it" )
+        self.assertEqual( result, "snap_normalized" )
+
+    def test_find_exact_gist_match( self ):
+        """
+        Test find_exact_gist returns snapshot_id on a gist match.
+
+        Ensures:
+            - Gist column filtered via pandas
+            - Matching row's snapshot_id returned
+        """
+        table, mocks = self._build_table()
+        mocks["table"].to_pandas.return_value = pd.DataFrame( [
+            {
+                "question_verbatim"   : "What time is it?",
+                "question_normalized" : "what time be it",
+                "question_gist"       : "time query",
+                "snapshot_id"         : "snap_gist",
+            }
+        ] )
+
+        result = table.find_exact_gist( "time query" )
+        self.assertEqual( result, "snap_gist" )
+
+    def test_add_synonym_new( self ):
+        """
+        Test add_synonym inserts a new (non-duplicate) synonym.
+
+        Ensures:
+            - Dedup check via find_exact_verbatim (no match) allows insert
+            - Normalizer + three embeddings generated
+            - Row added with the full schema-aligned structure
+            - Returns True
+        """
+        table, mocks = self._build_table()
+
+        # No existing duplicate (find_exact_verbatim → empty df → None)
+        mocks["table"].to_pandas.return_value = pd.DataFrame(
+            columns=[ "question_verbatim", "snapshot_id" ]
+        )
+
+        result = table.add_synonym(
+            snapshot_id="snap_new",
+            question_verbatim="How is the weather?",
+            confidence_score=95.0,
+            source="runtime"
+        )
+
+        self.assertTrue( result )
+        mocks["table"].add.assert_called_once()
+
+        row = mocks["table"].add.call_args[0][0][0]
+        self.assertEqual( row["snapshot_id"], "snap_new" )
+        self.assertEqual( row["question_verbatim"], "How is the weather?" )
+        self.assertEqual( row["question_normalized"], "how is the weather?" )   # normalizer.lower()
+        self.assertEqual( row["question_gist"], "how is the weather?" )         # gist == normalized
+        self.assertEqual( row["confidence_score"], 95.0 )
+        self.assertEqual( row["usage_count"], 0 )
+        self.assertEqual( row["source"], "runtime" )
+        self.assertEqual( len( row["embedding_verbatim"] ), self.embedding_dim )
+        self.assertEqual( len( row["embedding_normalized"] ), self.embedding_dim )
+        self.assertEqual( len( row["embedding_gist"] ), self.embedding_dim )
+
+        # Three embeddings generated (verbatim, normalized, gist)
+        self.assertEqual( mocks["embedding_mgr"].generate_embedding.call_count, 3 )
+
+    def test_add_synonym_duplicate_skipped( self ):
+        """
+        Test add_synonym skips insertion when a verbatim duplicate exists.
+
+        Ensures:
+            - find_exact_verbatim match short-circuits the add
+            - table.add NOT called
+            - Returns False
+        """
+        table, mocks = self._build_table()
+
+        # Existing duplicate found
+        mocks["table"].to_pandas.return_value = pd.DataFrame( [
+            { "question_verbatim": "What time is it?", "snapshot_id": "existing_snap" }
+        ] )
+
+        result = table.add_synonym(
+            snapshot_id="snap_dup",
+            question_verbatim="What time is it?",
+            confidence_score=100.0,
+            source="runtime"
+        )
+
+        self.assertFalse( result )
+        mocks["table"].add.assert_not_called()
+
+    def test_add_synonym_error_handling( self ):
+        """
+        Test add_synonym handles a table.add failure gracefully.
+
+        Ensures:
+            - Exception during add is caught
+            - Returns False (no propagation)
+        """
+        table, mocks = self._build_table()
+
+        # No duplicate so we proceed to add()
+        mocks["table"].to_pandas.return_value = pd.DataFrame(
+            columns=[ "question_verbatim", "snapshot_id" ]
+        )
+        mocks["table"].add.side_effect = Exception( "add failed" )
+
+        with patch( "cosa.memory.canonical_synonyms_table.du.print_stack_trace" ):
+            result = table.add_synonym(
+                snapshot_id="snap_err",
+                question_verbatim="Will fail",
+                confidence_score=90.0,
+                source="runtime"
+            )
+
+        self.assertFalse( result )
+
+    def test_delete_by_snapshot_id( self ):
+        """
+        Test delete_by_snapshot_id removes matching rows and returns the count.
+
+        Ensures:
+            - Row count computed from pandas filter
+            - table.delete invoked with the snapshot_id predicate
+            - Returns the number of matched rows
+        """
+        table, mocks = self._build_table()
+
+        mocks["table"].to_pandas.return_value = pd.DataFrame( [
+            { "snapshot_id": "snap_del", "question_verbatim": "q1" },
+            { "snapshot_id": "snap_del", "question_verbatim": "q2" },
+            { "snapshot_id": "other",    "question_verbatim": "q3" },
+        ] )
+
+        count = table.delete_by_snapshot_id( "snap_del" )
+
+        self.assertEqual( count, 2 )
+        mocks["table"].delete.assert_called_once_with( "snapshot_id = 'snap_del'" )
+
+    def test_delete_by_snapshot_id_no_match( self ):
+        """
+        Test delete_by_snapshot_id returns 0 and skips delete when nothing matches.
+
+        Ensures:
+            - No table.delete call when count is 0
+            - Returns 0
+        """
+        table, mocks = self._build_table()
+
+        mocks["table"].to_pandas.return_value = pd.DataFrame( [
+            { "snapshot_id": "other", "question_verbatim": "q1" },
+        ] )
+
+        count = table.delete_by_snapshot_id( "missing" )
+
+        self.assertEqual( count, 0 )
+        mocks["table"].delete.assert_not_called()
+
+    def test_get_statistics( self ):
+        """
+        Test get_statistics aggregates counts, usage, and confidence.
+
+        Ensures:
+            - total_synonyms from count_rows
+            - total_usage summed across rows
+            - average_confidence computed
+            - top_used populated
+        """
+        table, mocks = self._build_table()
+
+        mocks["table"].count_rows.return_value = 2
+
+        mock_search = Mock()
+        mock_search.limit.return_value.to_list.return_value = [
+            { "question_verbatim": "q1", "usage_count": 10, "confidence_score": 100.0 },
+            { "question_verbatim": "q2", "usage_count": 5,  "confidence_score": 90.0 },
+        ]
+        mocks["table"].search.return_value = mock_search
+
+        stats = table.get_statistics()
+
+        self.assertEqual( stats["total_synonyms"], 2 )
+        self.assertEqual( stats["total_usage"], 15 )
+        self.assertEqual( stats["average_confidence"], 95.0 )
+        self.assertEqual( len( stats["top_used"] ), 2 )
+        self.assertEqual( stats["top_used"][0]["question"], "q1" )
+        self.assertEqual( stats["top_used"][0]["usage"], 10 )
+
+    def test_get_statistics_error_returns_error_dict( self ):
+        """
+        Test get_statistics returns an error dict on failure.
+
+        Ensures:
+            - Exception during aggregation is caught
+            - Returned dict carries an 'error' key
+        """
+        table, mocks = self._build_table()
+        mocks["table"].count_rows.side_effect = Exception( "stats boom" )
+
+        stats = table.get_statistics()
+        self.assertIn( "error", stats )
 
 
 if __name__ == "__main__":
