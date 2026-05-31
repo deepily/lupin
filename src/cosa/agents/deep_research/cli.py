@@ -20,6 +20,7 @@ Features:
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 import uuid
@@ -37,6 +38,8 @@ from . import voice_io
 from . import search_cache
 
 from cosa.config.configuration_manager import ConfigurationManager
+
+logger = logging.getLogger( __name__ )
 
 # Import anthropic for RateLimitError handling
 if ANTHROPIC_AVAILABLE:
