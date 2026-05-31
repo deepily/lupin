@@ -276,7 +276,7 @@ class PodcastScript( BaseModel ):
             if match:
                 try:
                     revision_count = int( match.group( 1 ) )
-                except ValueError:
+                except ValueError:  # pragma: no cover - the (\d+) regex match guarantees an int-parseable string; this ValueError arm is unreachable
                     pass
                 continue
 

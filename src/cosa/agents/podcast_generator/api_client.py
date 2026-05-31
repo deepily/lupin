@@ -22,7 +22,7 @@ try:
     import anthropic
     from anthropic import AsyncAnthropic
     ANTHROPIC_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - anthropic SDK is installed in the canonical test/prod venv; this optional-dependency fallback is unreachable here
     ANTHROPIC_AVAILABLE = False
     AsyncAnthropic = None
 

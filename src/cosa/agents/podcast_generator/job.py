@@ -351,7 +351,7 @@ class PodcastGeneratorJob( AgenticJobBase ):
                 lines.append( f"**Script**: {script_link}" )
             if audio_links:
                 lines.append( f"**Audio**: {audio_links}" )
-            if self.cost_summary:
+            if self.cost_summary:  # pragma: no branch - cost_summary is set unconditionally (3-key dict) earlier, so it is always truthy here; the False arc is unreachable
                 total_cost = self.cost_summary.get( "total_cost_usd", 0.0 )
                 lines.append( f"**Cost**: ${total_cost:.4f}" )
             lines.append( f"**Duration**: {elapsed_sec}s" )
