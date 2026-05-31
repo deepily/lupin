@@ -295,6 +295,19 @@ def test_job_type_and_id_prefix():
     assert job.id_hash.startswith( "hp-" )
 
 
+def test_cost_summary_present_and_none():
+    """
+    The poker is a pure supervisor (no LLM calls) but MUST expose a
+    cost_summary attribute = None — the get-queue/done serializer
+    (queues.py: job.cost_summary) reads it on every completed agentic job.
+    Regression for the AttributeError that 500'd /api/get-queue/done once a
+    completed poker reached the done queue.
+    """
+    job = _make_job()
+    assert hasattr( job, "cost_summary" )
+    assert job.cost_summary is None
+
+
 def test_satisfies_queueable_job_protocol():
     assert is_queueable_job( _make_job() )
 

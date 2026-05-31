@@ -220,6 +220,14 @@ class HeartbeatPokerJob( AgenticJobBase ):
         self._tick_count      : int                          = 0
         self._dms_escalations : int                          = 0
 
+        # --- unified job interface (required by queues.py done-card serializer) ---
+        # The poker is a pure supervisor: it makes NO LLM calls, so it has no cost
+        # to summarize. None is permanent here (cf. podcast/swe_team, which set a
+        # dict after their LLM work). Without this attribute, the get-queue/done
+        # serializer (queues.py: job.cost_summary) raises AttributeError once a
+        # completed poker reaches the done queue.
+        self.cost_summary = None
+
     @property
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI."""

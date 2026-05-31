@@ -44,7 +44,10 @@ class JobState( str, Enum ):
 
 VALID_TRANSITIONS = {
     JobState.PENDING     : frozenset( { JobState.QUEUED, JobState.SCHEDULED, JobState.PAUSED } ),
-    JobState.QUEUED      : frozenset( { JobState.RUNNING, JobState.PAUSED, JobState.SCHEDULED, JobState.CANCELLED } ),
+    # QUEUED → FAILED: agentic-job construction can fail AFTER the job is queued
+    # (todo_fifo_queue.push_job_agentic error path) — a queued-but-never-run job
+    # whose build fails is a failure (→ dead queue), not a user cancellation.
+    JobState.QUEUED      : frozenset( { JobState.RUNNING, JobState.PAUSED, JobState.SCHEDULED, JobState.CANCELLED, JobState.FAILED } ),
     JobState.SCHEDULED   : frozenset( { JobState.QUEUED, JobState.PAUSED, JobState.CANCELLED } ),
     JobState.PAUSED      : frozenset( { JobState.QUEUED, JobState.SCHEDULED, JobState.CANCELLED } ),
     JobState.RUNNING     : frozenset( { JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED, JobState.INTERRUPTED, JobState.STALLED } ),

@@ -103,6 +103,10 @@ class TestValidTransitions:
         ( JobState.QUEUED, JobState.PAUSED ),
         ( JobState.QUEUED, JobState.SCHEDULED ),
         ( JobState.QUEUED, JobState.CANCELLED ),
+        # QUEUED → FAILED: agentic-job construction can fail after the job is
+        # queued (todo_fifo_queue.push_job_agentic error path); a queued-but-
+        # never-run job whose build fails goes straight to the dead queue.
+        ( JobState.QUEUED, JobState.FAILED ),
         # SCHEDULED exits
         ( JobState.SCHEDULED, JobState.QUEUED ),
         ( JobState.SCHEDULED, JobState.PAUSED ),
