@@ -188,7 +188,7 @@ class DirectoryStatisticsCollector:
                         percentages['docstring'] = 100.0 * docstring / total
                     else:
                         percentages['docstring'] = 0.0
-                else:
+                else:  # pragma: no cover - record_line (line 102) always increments ['total'] before any category, and by_language is populated only there, so total>=1 whenever lang is present
                     percentages = { 'code': 0.0, 'comment': 0.0, 'docstring': 0.0 }
 
                 language_details[lang] = {

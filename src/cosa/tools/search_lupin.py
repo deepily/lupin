@@ -5,7 +5,7 @@ Purpose: provide a simple vendor-neutral interface to the KagiSearch and/or othe
 """
 
 from cosa.tools.search_kagi import KagiSearch
-from cosa.agents.v000.raw_output_formatter import RawOutputFormatter
+from cosa.agents.raw_output_formatter import RawOutputFormatter
 
 import cosa.utils.util as du
 from typing import Optional, Union, Any

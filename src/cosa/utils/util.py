@@ -460,7 +460,7 @@ def get_file_as_dictionary(path: str, lower_case: bool = False, omit_comments: b
     lines_as_dict = {}
 
     # Delete the first and last type symbols if they're there
-    pipe_regex = re.compile("^\||\|$")
+    pipe_regex = re.compile( r"^\||\|$" )
 
     for line in lines:
 

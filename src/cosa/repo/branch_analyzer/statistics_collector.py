@@ -158,16 +158,16 @@ class StatisticsCollector:
                 docstring = stats.get( 'docstring', 0 )
                 removed = stats['removed']
 
-                total_added = code + comment + docstring
-                net = total_added - removed
+                lang_total_added = code + comment + docstring
+                net = lang_total_added - removed
 
                 # Calculate percentages
                 percentages = {}
-                if total_added > 0:
-                    percentages['code'] = 100.0 * code / total_added
-                    percentages['comment'] = 100.0 * comment / total_added
+                if lang_total_added > 0:
+                    percentages['code'] = 100.0 * code / lang_total_added
+                    percentages['comment'] = 100.0 * comment / lang_total_added
                     if docstring > 0:
-                        percentages['docstring'] = 100.0 * docstring / total_added
+                        percentages['docstring'] = 100.0 * docstring / lang_total_added
                 else:
                     percentages = { 'code': 0.0, 'comment': 0.0, 'docstring': 0.0 }
 
@@ -176,7 +176,7 @@ class StatisticsCollector:
                     'comment'     : comment,
                     'docstring'   : docstring,
                     'removed'     : removed,
-                    'total_added' : total_added,
+                    'total_added' : lang_total_added,
                     'net'         : net,
                     'percentages' : percentages
                 }

@@ -188,7 +188,7 @@ class LineClassifier:
             if count >= 2:
                 # Single-line docstring (e.g., """docstring""")
                 return ( 'docstring', state )
-            elif count == 1:
+            elif count == 1:  # pragma: no branch - line 178 guarantees delimiter in stripped, so count>=1; count==0 fall-through is unreachable
                 # Start of multiline docstring
                 state['in_docstring'] = True
                 state['docstring_delimiter'] = delimiter
@@ -243,7 +243,7 @@ class LineClassifier:
                 # Start of multiline block comment
                 state['in_block_comment'] = True
                 return ( 'comment', state )
-            elif stripped.startswith( '*' ):
+            elif stripped.startswith( '*' ):  # pragma: no branch - entry guard (line 237) requires startswith('/*') or startswith('*'); reaching the fall-through needs both false, a contradiction
                 # Likely continuation of block comment
                 # (Conservative: treat as comment if starts with *)
                 return ( 'comment', state )

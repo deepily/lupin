@@ -62,6 +62,7 @@ Understanding HEAD:
 
 import sys
 import argparse
+from pathlib import Path
 
 from cosa.repo.branch_analyzer import BranchChangeAnalyzer, BranchAnalyzerError
 

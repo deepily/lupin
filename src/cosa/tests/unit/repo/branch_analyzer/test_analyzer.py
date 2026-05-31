@@ -148,23 +148,14 @@ class TestAnalyze:
         assert py[ "removed" ] == 1
         assert "markdown" not in stats[ "language_details" ]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "PROD BUG (statistics_collector.get_summary): the overall "
-            "`total_added` (sum across all file types) is overwritten by the "
-            "`total_added = code + comment + docstring` reassignment inside the "
-            "per-language loop, so overall.total_added is corrupted whenever a "
-            "supported-language file is mixed with any other-type addition. "
-            "Here 2 python + 1 markdown should report overall.total_added == 3 "
-            "but reports 2. Escalated to Tiberius; remove this xfail once the "
-            "prod bug is fixed (test asserts the CORRECT value)."
-        ),
-    )
     def test_overall_total_added_counts_all_file_types( self, patched_git ):
         """
-        Ensures (CORRECT behaviour, currently failing due to the documented
-        prod bug):
+        PROD BUG FIXED (2026-05-31): the per-language loop in
+        statistics_collector.get_summary used to reassign a bare `total_added`,
+        clobbering the overall sum-across-all-file-types. Renamed the loop-local
+        to `lang_total_added`; overall.total_added is now correct.
+
+        Ensures:
             - overall.total_added equals the sum of adds across ALL file types
               (2 python + 1 markdown == 3)
         """
