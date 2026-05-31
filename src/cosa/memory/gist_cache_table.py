@@ -462,7 +462,7 @@ class GistCacheTable:
             if self.debug:
                 print( f"⚠ clear_cache() not implemented - would delete {self._gist_cache_tbl.count_rows()} entries" )
         except Exception as e:
-            if self.debug:
+            if self.debug:  # pragma: no branch - except is only reachable via the debug-gated count_rows() above, so self.debug is always True here
                 print( f"⚠ Error clearing cache: {e}" )
 
 
