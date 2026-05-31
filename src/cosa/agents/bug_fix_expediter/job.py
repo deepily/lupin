@@ -313,7 +313,7 @@ class BugFixExpediterJob( AgenticJobBase ):
                     self.artifacts[ "fix_result" ] = fix_result.model_dump()
 
                     # Phase 5: Git strategy (commit / branch / PR based on trust proxy)
-                    if fix_result.success and orchestrator.last_files_changed:
+                    if fix_result.success and orchestrator.last_files_changed:  # pragma: no branch - false-arc unrepresentable: trailing if inside async-with; both outcomes covered (test_job: git-run + git-skipped)
                         fix_result = await orchestrator.run_git_strategy(
                             fix_result, orchestrator.last_files_changed, plan_path
                         )

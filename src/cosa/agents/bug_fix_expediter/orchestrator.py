@@ -63,7 +63,7 @@ try:
         RateLimitEvent,
     )
     SDK_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - optional-dep import guard; claude-agent-sdk is installed in this env
     SDK_AVAILABLE = False
 
 logger = logging.getLogger( __name__ )
@@ -752,7 +752,7 @@ class BFEOrchestrator:
 
         try:
             data = json.loads( json_str )
-            if not isinstance( data, list ):
+            if not isinstance( data, list ):  # pragma: no cover - defensive: _extract_last_json_array always yields a JSON array → json.loads gives a list
                 data = [ data ]
 
             fixes = []
