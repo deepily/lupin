@@ -70,8 +70,8 @@ class AgentBase( RunnableCode, abc.ABC ):
         Raises:
             - NotImplementedError (must be implemented by subclasses)
         """
-        pass
-    
+        pass  # pragma: no cover - shadowed duplicate abstractmethod (re-declared identically at the second definition below); this binding is unreachable. Flagged to Tiberius as a prod smell to de-duplicate.
+
     def __init__( self, df_path_key: Optional[str]=None, question: str="", question_gist: str="", last_question_asked: str="", push_counter: int=-1, routing_command: Optional[str]=None, user_id: str="ricardo_felipe_ruiz_6bdc", user_email: str="", session_id: str="", debug: bool=False, verbose: bool=False, auto_debug: bool=False, inject_bugs: bool=False ) -> None:
         """
         Initialize a base agent with configuration and state.
