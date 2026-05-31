@@ -176,8 +176,8 @@ class LlmClient:
             runtime_settings = ModelSettings( **generation_args )
             async with self.model.run_stream( prompt, model_settings=runtime_settings ) as result:
                 # Stream text as deltas
+                counter = 0
                 async for chunk in result.stream_text( delta=True ):
-                    counter = 0
                     if self.debug and self.verbose:
                         print( chunk, end="", flush=True )
                     else:
@@ -326,59 +326,50 @@ class LlmClient:
             # Can run directly with a new event loop
             return run_in_new_loop()
     
-    # def _format_duration( self, seconds: float ) -> str:
-    #     """
-    #     Format a duration in seconds to a readable string.
-    #
-    #     Requires:
-    #         - seconds: A float representing seconds
-    #
-    #     Ensures:
-    #         - Returns a formatted string in milliseconds
-    #
-    #     Returns:
-    #         - String in the format "XXXms"
-    #     """
-    #     # return f"{seconds:.3f}" if seconds > 1 else f"{seconds * 1000:.3f} ms"
-    #     return f"{int( seconds * 1000 )}ms"
-    #
-    # def _print_metadata( self, prompt_tokens: int, completion_tokens: int, duration: Optional[ float ] ):
-    #     """
-    #     Print performance metadata about an LLM request.
-    #
-    #     This method calculates and displays key metrics about the LLM interaction,
-    #     including token counts, duration, and tokens per second.
-    #
-    #     Requires:
-    #         - prompt_tokens: Integer count of tokens in the prompt
-    #         - completion_tokens: Integer count of tokens in the completion
-    #         - duration: Float representing seconds taken, or None
-    #
-    #     Ensures:
-    #         - Calculates total tokens and tokens per second
-    #         - Formats duration appropriately
-    #         - Displays a formatted summary of metrics
-    #
-    #     TODO:
-    #         - Add cost estimation based on token usage and model pricing
-    #         - Implement more detailed performance metrics
-    #         - Add optional logging to file for performance tracking
-    #         - Fix potential division by zero issues in TPS calculation
-    #         - Support different output formats (JSON, CSV, etc.)
-    #     """
-    #
-    #     total_tokens = prompt_tokens + completion_tokens
-    #     tps = completion_tokens / duration if (duration and duration > 0) else float( 'inf' )
-    #     duration_str = self._format_duration( duration ) if duration is not None else "N/A"
-    #
-    #     du.print_banner( "📊 Stream Summary", prepend_nl=True )
-    #     print( f"🧠 Model              : {self.model_name}" )
-    #     print( f"⏱️ Duration           : {duration_str}" )
-    #     print( f"🔢 Prompt tokens      : {prompt_tokens}" )
-    #     print( f"💬 Completion tokens  : {completion_tokens}" )
-    #     print( f"🧮 Total tokens       : {total_tokens}" )
-    #     print( f"⚡ Tokens/sec          : {tps:.2f}" )
-    #     print( "=" * 40 )
+    def _format_duration( self, seconds: float ) -> str:
+        """
+        Format a duration in seconds to a readable string.
+
+        Requires:
+            - seconds: A float representing seconds
+
+        Ensures:
+            - Returns a formatted string in milliseconds
+
+        Returns:
+            - String in the format "XXXms"
+        """
+        return f"{int( seconds * 1000 )}ms"
+
+    def _print_metadata( self, prompt_tokens: int, completion_tokens: int, duration: Optional[ float ] ):
+        """
+        Print performance metadata about an LLM request.
+
+        This method calculates and displays key metrics about the LLM interaction,
+        including token counts, duration, and tokens per second.
+
+        Requires:
+            - prompt_tokens: Integer count of tokens in the prompt
+            - completion_tokens: Integer count of tokens in the completion
+            - duration: Float representing seconds taken, or None
+
+        Ensures:
+            - Calculates total tokens and tokens per second
+            - Formats duration appropriately
+            - Displays a formatted summary of metrics
+        """
+        total_tokens = prompt_tokens + completion_tokens
+        tps          = completion_tokens / duration if ( duration and duration > 0 ) else float( 'inf' )
+        duration_str = self._format_duration( duration ) if duration is not None else "N/A"
+
+        du.print_banner( "📊 Stream Summary", prepend_nl=True )
+        print( f"🧠 Model              : {self.model_name}" )
+        print( f"⏱️ Duration           : {duration_str}" )
+        print( f"🔢 Prompt tokens      : {prompt_tokens}" )
+        print( f"💬 Completion tokens  : {completion_tokens}" )
+        print( f"🧮 Total tokens       : {total_tokens}" )
+        print( f"⚡ Tokens/sec          : {tps:.2f}" )
+        print( "=" * 40 )
 
 
 def quick_smoke_test():
