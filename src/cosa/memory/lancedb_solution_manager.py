@@ -1368,7 +1368,7 @@ class LanceDBSolutionManager( SolutionSnapshotManagerInterface ):
             # Point 1: Query embedding validation
             if self.debug and self.verbose:
                 print( f"[SIMILARITY-DEBUG] Query text: '{du.truncate_string( question, 80 )}'" )
-                if query_embedding:
+                if query_embedding:  # pragma: no branch - always truthy here: the `if not query_embedding: return []` guard above (line ~1361) precludes the False arc
                     print( f"[SIMILARITY-DEBUG] Query embedding: {len( query_embedding )} dims, first 5 values: {query_embedding[:5]}" )
                     # Check if embedding is all zeros
                     is_zeros = all( v == 0.0 for v in query_embedding[:100] )
