@@ -58,7 +58,7 @@ try:
         RateLimitEvent,
     )
     SDK_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - optional-dep import guard; claude_agent_sdk is installed in this env, so the False fallback never runs
     SDK_AVAILABLE = False
 
 logger = logging.getLogger( __name__ )
@@ -921,7 +921,7 @@ Keep your response concise (3-5 sentences). Output ONLY the analysis, no preambl
                     # --- Coder-Tester Verification Loop ---
                     verify_group_id = f"pg-{uuid.uuid4().hex[ :8 ]}"
                     verification_iteration = 0
-                    while verification_iteration < MAX_VERIFICATION_ITERATIONS:
+                    while verification_iteration < MAX_VERIFICATION_ITERATIONS:  # pragma: no branch - loop always exits via break (verify-pass / redelegate-fail / max-iteration escalation), so the condition-false exit is unreachable
                         verification_iteration += 1
                         self.state[ "total_verification_iterations" ] += 1
 
@@ -1015,6 +1015,7 @@ Keep your response concise (3-5 sentences). Output ONLY the analysis, no preambl
                                 confidence    = 0.0,
                             )
                             self.state[ "delegation_results" ][ -1 ] = result
+                            results[ -1 ] = result   # keep the local summary list in sync with state — was left as the stale SUCCESS object, so an abandoned task was over-counted in the completed-X/N summary
                             progress_log.log(
                                 f"Task {i + 1} verification exhausted: {spec.title}",
                                 role="lead",
