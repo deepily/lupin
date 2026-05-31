@@ -405,6 +405,98 @@ class TestGistNormalizer( unittest.TestCase ):
             # Verify result matches expected
             self.assertEqual( result, case["normalized"] )
 
+    def _create_mocked_with_flags( self, debug=False, verbose=False ):
+        """
+        Helper: build a GistNormalizer with mocked components and explicit flags.
+
+        Args:
+            debug   : forwarded to the constructor (drives debug-only trace branches)
+            verbose : forwarded to the constructor (drives verbose-only trace branches)
+
+        Returns:
+            Tuple of (gist_normalizer, mocks_dict).
+        """
+        mock_gister     = Mock()
+        mock_normalizer = Mock()
+
+        with patch( "cosa.memory.gist_normalizer.Gister", return_value=mock_gister ), \
+             patch( "cosa.memory.gist_normalizer.Normalizer", return_value=mock_normalizer ), \
+             patch( "builtins.print" ):
+            gn = GistNormalizer( debug=debug, verbose=verbose )
+
+        return gn, { "gister": mock_gister, "normalizer": mock_normalizer }
+
+    def test_new_double_checked_lock_returns_existing_on_race( self ):
+        """
+        Test __new__ returns the existing instance when it appears during locking.
+
+        Simulates the double-checked-locking race: the outer None-check passes, a
+        competing creation populates _instance while the lock is acquired, so the
+        inner None-check is False and the pre-existing instance is returned.
+
+        Ensures:
+            - The inner-check False arm is exercised (no second construction)
+            - The pre-populated instance is returned unchanged
+        """
+        saved_lock = GistNormalizer._lock
+
+        sentinel = Mock()
+        sentinel._initialized = True   # __init__ early-returns on this latch
+
+        class _RacingLock:
+            def __enter__( self_inner ):
+                GistNormalizer._instance = sentinel   # competitor "wins" mid-acquire
+                return self_inner
+            def __exit__( self_inner, *exc ):
+                return False
+
+        GistNormalizer._instance = None
+        GistNormalizer._lock     = _RacingLock()
+        try:
+            result = GistNormalizer()
+            self.assertIs( result, sentinel )
+        finally:
+            GistNormalizer._lock = saved_lock
+            # tearDown resets _instance to None
+
+    def test_get_normalized_gist_debug_verbose_traces( self ):
+        """
+        Test get_normalized_gist exercises its debug + verbose trace branches.
+
+        Ensures:
+            - debug+verbose runs the "Processing text" banner + input echo + result banner
+            - debug runs the "Extracted gist" line
+            - The gister → normalizer pipeline still returns the normalized gist
+        """
+        gn, mocks = self._create_mocked_with_flags( debug=True, verbose=True )
+        mocks["gister"].get_gist.return_value     = "extracted gist"
+        mocks["normalizer"].normalize.return_value = "normalized gist"
+
+        with patch( "builtins.print" ):
+            result = gn.get_normalized_gist( "a verbose voice transcription here" )
+
+        self.assertEqual( result, "normalized gist" )
+        mocks["gister"].get_gist.assert_called_once_with( "a verbose voice transcription here" )
+        mocks["normalizer"].normalize.assert_called_once_with( "extracted gist" )
+
+    def test_process_batch_verbose_trace( self ):
+        """
+        Test process_batch exercises its verbose banner branch.
+
+        Ensures:
+            - verbose runs the "Batch processing N texts" banner
+            - Per-text gist extraction + batch normalization still flow through
+        """
+        gn, mocks = self._create_mocked_with_flags( debug=True, verbose=True )
+        mocks["gister"].get_gist.side_effect           = [ "g1", "g2" ]
+        mocks["normalizer"].normalize_batch.return_value = [ "n1", "n2" ]
+
+        with patch( "builtins.print" ):
+            results = gn.process_batch( [ "t1", "t2" ] )
+
+        self.assertEqual( results, [ "n1", "n2" ] )
+        mocks["normalizer"].normalize_batch.assert_called_once_with( [ "g1", "g2" ] )
+
 
 def isolated_unit_test():
     """
