@@ -729,6 +729,178 @@ class TestInputAndOutputTable( unittest.TestCase ):
             # Verify async behavior (thread created)
             self.assertEqual( len( created_threads ), 1 )
 
+    # ------------------------------------------------------------------ #
+    # Completion coverage (Tiberius 👑, 2026-05-31): create path, validate
+    # branches, async provided-embedding branches, KNN fallback + debug
+    # block, truncation warnings, init_tbl.
+    # ------------------------------------------------------------------ #
+
+    def _make_io( self, table_names=None, list_size=768, debug=False, verbose=False ):
+        """Flexible builder: control table presence (create vs open) + schema dim."""
+        if table_names is None: table_names = [ "input_and_output_tbl" ]
+        mock_config_mgr              = Mock()
+        mock_embedding_mgr           = Mock()
+        mock_embedding_provider      = Mock()
+        mock_question_embeddings_tbl = Mock()
+        mock_db                      = Mock()
+        mock_table                   = Mock()
+        config_values = {
+            "embedding dimensions"               : "768",
+            "solution snapshots lancedb nprobes" : 20,
+            "path to database wo root"           : "/test/db",
+            "debug text truncation length"       : 48,
+            "async embedding generation"         : False,
+        }
+        mock_config_mgr.get.side_effect = lambda key, default=None, return_type=None: config_values.get( key, default )
+        mock_embedding_provider.generate_embedding.return_value = self.test_embedding
+        mock_question_embeddings_tbl.get_embedding.return_value = self.test_embedding
+        mock_question_embeddings_tbl.has.return_value           = False
+        mock_db.table_names.return_value                    = table_names
+        mock_db.open_table.return_value                     = mock_table
+        mock_db.create_table.return_value                   = mock_table
+        mock_table.schema.field.return_value.type.list_size = list_size
+        mock_table.count_rows.return_value                  = 100
+        mocks = {
+            "config_mgr"              : mock_config_mgr,
+            "embedding_provider"      : mock_embedding_provider,
+            "question_embeddings_tbl" : mock_question_embeddings_tbl,
+            "db"                      : mock_db,
+            "table"                   : mock_table,
+        }
+        with patch( "cosa.memory.input_and_output_table.ConfigurationManager", return_value=mock_config_mgr ), \
+             patch( "cosa.memory.input_and_output_table.EmbeddingManager", return_value=mock_embedding_mgr ), \
+             patch( "cosa.memory.input_and_output_table.get_embedding_provider", return_value=mock_embedding_provider ), \
+             patch( "cosa.memory.input_and_output_table.QuestionEmbeddingsTable", return_value=mock_question_embeddings_tbl ), \
+             patch( "cosa.memory.input_and_output_table.lancedb.connect", return_value=mock_db ), \
+             patch( "cosa.memory.input_and_output_table.du.get_project_root", return_value="/project/root" ), \
+             patch( "builtins.print" ):
+            table = InputAndOutputTable( debug=debug, verbose=verbose )
+        return table, mocks
+
+    def test_validate_absent_then_create_path( self ):
+        # table_names=[] → _validate early-returns AND _create_table_if_needed builds
+        # the schema + 5 FTS indexes (debug prints on).
+        table, mocks = self._make_io( table_names=[ ], debug=True )
+        mocks[ "db" ].create_table.assert_called_once()
+        self.assertEqual( mocks[ "table" ].create_fts_index.call_count, 5 )
+
+    def test_create_path_no_debug_skips_debug_prints( self ):
+        # debug=False create path exercises the False arc of the create-path debug guards.
+        table, mocks = self._make_io( table_names=[ ], debug=False )
+        mocks[ "db" ].create_table.assert_called_once()
+
+    def test_validate_dimension_mismatch_drops_table( self ):
+        # Existing table whose embedding dim != config → _validate drops it.
+        table, mocks = self._make_io( list_size=999 )
+        mocks[ "db" ].drop_table.assert_called_once_with( "input_and_output_tbl" )
+
+    def _run_async_target( self, table, mocks, **insert_kwargs ):
+        """Insert in async mode and execute the captured daemon-thread target."""
+        captured = [ ]
+
+        class MockThread:
+            def __init__( self, target=None, daemon=None ):
+                captured.append( target )
+                self.daemon = daemon
+            def start( self ):
+                pass
+
+        with patch( "cosa.memory.input_and_output_table.Stopwatch" ), \
+             patch( "cosa.memory.input_and_output_table.threading.Thread", MockThread ):
+            table.insert_io_row( async_embedding=True, **insert_kwargs )
+            captured[ 0 ]()      # run the thread body synchronously
+        return mocks[ "table" ].add
+
+    def test_async_input_embedding_provided_output_generated( self ):
+        # input embedding provided (else-branch), output missing → generated; debug
+        # dims block runs. Covers the provided-input + debug-dimensions branches.
+        table, mocks = self._make_io( debug=True )
+        add = self._run_async_target(
+            table, mocks,
+            input_type="x", input="q", input_embedding=[ 0.5 ] * 768,
+            output_raw="r", output_final="out", output_final_embedding=[ ],
+        )
+        row = add.call_args[ 0 ][ 0 ][ 0 ]
+        self.assertEqual( row[ "input_embedding" ], [ 0.5 ] * 768 )
+
+    def test_async_output_embedding_provided_input_generated( self ):
+        # output embedding provided (else-branch), input missing → generated.
+        table, mocks = self._make_io()
+        add = self._run_async_target(
+            table, mocks,
+            input_type="x", input="q", input_embedding=[ ],
+            output_raw="r", output_final="out", output_final_embedding=[ 0.7 ] * 768,
+        )
+        row = add.call_args[ 0 ][ 0 ][ 0 ]
+        self.assertEqual( row[ "output_final_embedding" ], [ 0.7 ] * 768 )
+
+    def _wire_knn_chain( self, mocks, to_list_result=None, to_list_raises=None, to_pandas_records=None ):
+        chain = Mock()
+        mocks[ "table" ].search.return_value = chain
+        sel = chain.metric.return_value.nprobes.return_value.limit.return_value.select.return_value
+        if to_list_raises is not None:
+            sel.to_list.side_effect = to_list_raises
+        else:
+            sel.to_list.return_value = to_list_result
+        if to_pandas_records is not None:
+            sel.to_pandas.return_value.to_dict.return_value = to_pandas_records
+        return sel
+
+    def test_get_knn_falls_back_to_pandas_on_attribute_error( self ):
+        # to_list() raising AttributeError → to_pandas().to_dict('records') fallback.
+        table, mocks = self._make_io()
+        records = [ { "input": "a", "output_final": "b" } ]
+        self._wire_knn_chain( mocks, to_list_raises=AttributeError( "no to_list" ), to_pandas_records=records )
+        with patch( "cosa.memory.input_and_output_table.Stopwatch" ):
+            result = table.get_knn_by_input( "q", k=3 )
+        self.assertEqual( result, records )
+
+    def test_get_knn_debug_block_with_embedding_field( self ):
+        # debug+verbose with input_embedding present → comparison-printing block.
+        table, mocks = self._make_io( debug=True, verbose=True )
+        self._wire_knn_chain( mocks, to_list_result=[
+            { "input": "a", "output_final": "b", "input_embedding": self.test_embedding },
+        ] )
+        with patch( "cosa.memory.input_and_output_table.Stopwatch" ):
+            result = table.get_knn_by_input( "q", k=3 )
+        self.assertEqual( len( result ), 1 )
+
+    def test_get_knn_debug_block_without_embedding_field( self ):
+        # debug+verbose but result lacks input_embedding → the "NOT found" else-branch.
+        table, mocks = self._make_io( debug=True, verbose=True )
+        self._wire_knn_chain( mocks, to_list_result=[ { "input": "a", "output_final": "b" } ] )
+        with patch( "cosa.memory.input_and_output_table.Stopwatch" ):
+            result = table.get_knn_by_input( "q", k=3 )
+        self.assertEqual( len( result ), 1 )
+
+    def test_get_io_stats_truncation_warning( self ):
+        # row_count == max_rows → truncation warning branch.
+        import pandas as pd
+        table, mocks = self._make_io()
+        df = pd.DataFrame( { "input_type": [ "a", "a", "b" ] } )
+        mocks[ "table" ].search.return_value.select.return_value.limit.return_value.to_pandas.return_value = df
+        with patch( "cosa.memory.input_and_output_table.Stopwatch" ), patch( "builtins.print" ):
+            stats = table.get_io_stats_by_input_type( max_rows=3 )
+        self.assertEqual( stats, { "a": 2, "b": 1 } )
+
+    def test_get_all_qnr_truncation_warning( self ):
+        # row_count == max_rows → truncation warning branch.
+        table, mocks = self._make_io()
+        chain = mocks[ "table" ].search.return_value.where.return_value.limit.return_value.select.return_value
+        chain.to_list.return_value = [ { "input": "a" }, { "input": "b" } ]
+        with patch( "cosa.memory.input_and_output_table.Stopwatch" ), patch( "builtins.print" ) as mp:
+            result = table.get_all_qnr( max_rows=2 )
+        self.assertEqual( len( result ), 2 )
+        self.assertTrue( any( "WARNING" in str( c ) for c in mp.call_args_list ) )
+
+    def test_init_tbl_creates_schema_and_indexes( self ):
+        # init_tbl() builds schema, create_table, and the 5 FTS indexes.
+        table, mocks = self._make_io()
+        with patch( "cosa.memory.input_and_output_table.du.print_banner" ), patch( "builtins.print" ):
+            table.init_tbl()
+        mocks[ "db" ].create_table.assert_called_with( "input_and_output_tbl", schema=ANY, mode="overwrite" )
+        self.assertEqual( mocks[ "table" ].create_fts_index.call_count, 5 )
+
 
 def isolated_unit_test():
     """
