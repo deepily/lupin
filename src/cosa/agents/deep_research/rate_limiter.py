@@ -222,7 +222,7 @@ class WebSearchRateLimiter:
                 if current_tokens - cumulative <= target_tokens:
                     return max( 0, ( record.timestamp + self.window_seconds ) - now )
 
-            return 0
+            return 0  # pragma: no cover - unreachable: current_tokens == sum(_records), so the loop's final iteration has current_tokens-cumulative == 0 <= target_tokens (>0 here) and always returns at the line above
 
     def estimate_total_time( self, num_calls: int, tokens_per_call: int = 83_000 ) -> float:
         """
@@ -298,7 +298,7 @@ class WebSearchRateLimiter:
                 return 0
 
             # Over limit - find how long until enough records expire
-            if not self._records:
+            if not self._records:  # pragma: no cover - unreachable: being over-limit (tokens_in_window >= tokens_per_minute) implies _records is non-empty, since tokens_in_window == sum(_records) and tokens_per_minute > 0
                 return 0
 
             # Calculate how many tokens need to expire to get under limit
@@ -314,8 +314,8 @@ class WebSearchRateLimiter:
                     return max( 0, time_until_expires )
 
             # Fallback: wait for all records to expire (shouldn't reach here)
-            last_record = self._records[ -1 ]
-            return max( 0, ( last_record.timestamp + self.window_seconds ) - now )
+            last_record = self._records[ -1 ]  # pragma: no cover - unreachable: the loop's final iteration has cumulative_tokens == sum(_records) >= tokens_to_remove (== sum - limit + 1, with limit >= 1) and always returns inside the loop
+            return max( 0, ( last_record.timestamp + self.window_seconds ) - now )  # pragma: no cover - unreachable fallback paired with the line above
 
     def _get_window_tokens( self ) -> int:
         """Get sum of tokens in current window (must hold lock)."""
