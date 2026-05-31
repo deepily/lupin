@@ -244,7 +244,7 @@ class D2Renderer( VisualRenderer ):
                     started = True
                 if started:
                     d2_lines.append( line )
-            if d2_lines:
+            if d2_lines:  # pragma: no branch - false arc unreachable: reaching here requires "->" in response_content (guard at line 237), which guarantees at least one line sets started=True and is appended, so d2_lines is always non-empty
                 return "\n".join( d2_lines ).strip()
 
         return None

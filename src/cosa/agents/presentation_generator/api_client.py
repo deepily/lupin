@@ -22,7 +22,7 @@ try:
     import anthropic
     from anthropic import AsyncAnthropic
     ANTHROPIC_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - optional-dep import guard; anthropic is installed in this env, so this fallback is unreachable
     ANTHROPIC_AVAILABLE = False
     AsyncAnthropic = None
 

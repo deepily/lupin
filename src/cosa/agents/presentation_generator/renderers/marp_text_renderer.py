@@ -184,7 +184,7 @@ class MarpTextRenderer:
 
         # CSS style block
         css = MarpTextRenderer._generate_css( theme_config )
-        if css:
+        if css:  # pragma: no branch - false arc unreachable: _generate_css always returns a non-empty CSS string (hardcoded section/h1/h2 rules built from .get-defaulted colors + fonts)
             lines.append( "style: |" )
             for css_line in css.split( "\n" ):
                 lines.append( f"  {css_line}" )
