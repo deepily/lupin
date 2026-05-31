@@ -180,6 +180,170 @@ class TestGenerateEmbedding( _Base ):
         self.assertEqual( result, [] )
 
 
+def _build_ex( config_values, normalized_gist="normalized text", debug=False, verbose=False,
+               file_dict=None, file_raises=False ):
+    """Like _build but with debug/verbose + control over the dictionary-file load."""
+    EmbeddingManager._instance = None
+    cfg        = _cfg( config_values )
+    cache      = Mock()
+    normalizer = Mock()
+    normalizer.get_normalized_gist.return_value = normalized_gist
+    gfad_kwargs = ( { "side_effect": RuntimeError( "dict file missing" ) } if file_raises
+                    else { "return_value": file_dict if file_dict is not None else {} } )
+    with patch( "cosa.memory.embedding_manager.ConfigurationManager", return_value=cfg ), \
+         patch( "cosa.memory.embedding_manager.EmbeddingCacheTable", return_value=cache ), \
+         patch( "cosa.memory.embedding_manager.GistNormalizer", return_value=normalizer ), \
+         patch( "cosa.utils.util.get_project_root", return_value="/test" ), \
+         patch( "cosa.utils.util.get_file_as_dictionary", **gfad_kwargs ), \
+         patch( "cosa.memory.embedding_manager.du.print_stack_trace" ), \
+         patch( "builtins.print" ):
+        mgr = EmbeddingManager( debug=debug, verbose=verbose )
+    return mgr, cfg, cache, normalizer
+
+
+class TestInitAndLoadBranches( _Base ):
+    """__new__ double-checked lock + _load_reverse_mappings debug/exception arcs."""
+
+    def test_double_checked_lock_returns_instance_set_under_lock( self ):
+        # Simulate another thread setting _instance between the outer check and the
+        # lock acquisition: the inner `if _instance is None` takes its False arc.
+        sentinel = object.__new__( EmbeddingManager )
+        sentinel._initialized = True
+
+        class Gate:
+            def __enter__( self ):
+                EmbeddingManager._instance = sentinel
+                return self
+            def __exit__( self, *a ):
+                return False
+
+        EmbeddingManager._instance = None
+        EmbeddingManager._lock     = Gate()
+        result = EmbeddingManager()
+        self.assertIs( result, sentinel )
+
+    def test_load_reverse_mappings_debug_prints( self ):
+        mgr, *_ = _build_ex( {}, debug=True, file_dict={ "and": "&" } )
+        self.assertEqual( mgr._reverse_punctuation, { "&": "and" } )
+
+    def test_load_reverse_mappings_exception_falls_back_to_empty( self ):
+        mgr, *_ = _build_ex( {}, debug=True, file_raises=True )
+        self.assertEqual( mgr._reverse_punctuation, {} )
+        self.assertEqual( mgr._reverse_numbers, {} )
+        self.assertEqual( mgr._reverse_domains, {} )
+
+
+class TestNormalizeBranches( _Base ):
+    """normalize_text_for_cache expansion loops + debug + exception arcs."""
+
+    def test_explicit_expand_applies_reverse_maps( self ):
+        mgr, *_ = _build_ex( {}, normalized_gist="2 + 2 .com", debug=True, verbose=True )
+        # Each map mixes a present token (replaced) with an absent one (loop-continues).
+        mgr._reverse_punctuation = { "+": "plus", " ": "space", "@": "at" }   # space skipped, @ absent
+        mgr._reverse_numbers     = { "2": "two", "9": "nine" }                # 9 absent
+        mgr._reverse_domains     = { ".com": "dot com", ".org": "dot org" }   # .org absent
+        with patch( "builtins.print" ):
+            result = mgr.normalize_text_for_cache( "2 + 2 .com", expand_symbols_to_words=True )
+        self.assertIn( "plus", result )
+        self.assertIn( "two", result )
+
+    def test_debug_verbose_prints_normalization( self ):
+        mgr, *_ = _build_ex( { "expand symbols to words": False }, debug=True, verbose=True )
+        with patch( "builtins.print" ):
+            result = mgr.normalize_text_for_cache( "hello" )
+        self.assertEqual( result, "normalized text" )
+
+    def test_normalization_exception_returns_lowered_text( self ):
+        mgr, _, _, normalizer = _build_ex( {}, debug=True, verbose=True )
+        normalizer.get_normalized_gist.side_effect = RuntimeError( "spaCy down" )
+        with patch( "cosa.memory.embedding_manager.du.print_stack_trace" ), patch( "builtins.print" ):
+            result = mgr.normalize_text_for_cache( "MixedCase" )
+        self.assertEqual( result, "mixedcase" )
+
+
+class TestGenerateEmbeddingBranches( _Base ):
+    """generate_embedding debug prints + NotFoundError handler arcs."""
+
+    _MODEL_CFG = {
+        "expand symbols to words": False,
+        "embedding model name": "text-embedding-3-small",
+        "embedding dimensions": "768",
+    }
+
+    def test_debug_verbose_cache_miss_success_prints( self ):
+        mgr, _, cache, _ = _build_ex( self._MODEL_CFG, debug=True, verbose=True )
+        cache.get_cached_embedding.return_value = None
+        response = Mock(); response.data = [ Mock( embedding=[ 0.1, 0.2 ] ) ]
+        with patch( "cosa.utils.util.get_api_key", return_value="sk-test" ), \
+             patch( "openai.OpenAI" ) as cls, patch( "builtins.print" ):
+            cls.return_value.embeddings.create.return_value = response
+            result = mgr.generate_embedding( "Hello!" )
+        self.assertEqual( result, [ 0.1, 0.2 ] )
+
+    def test_debug_verbose_cache_hit_prints( self ):
+        mgr, _, cache, _ = _build_ex( { "expand symbols to words": False }, debug=True, verbose=True )
+        cache.get_cached_embedding.return_value = [ 0.9 ]
+        with patch( "builtins.print" ):
+            result = mgr.generate_embedding( "Hello!" )
+        self.assertEqual( result, [ 0.9 ] )
+
+    def test_debug_verbose_exact_key_no_normalize( self ):
+        mgr, _, cache, _ = _build_ex( { "expand symbols to words": False }, debug=True, verbose=True )
+        cache.get_cached_embedding.return_value = [ 0.5 ]
+        with patch( "builtins.print" ):
+            result = mgr.generate_embedding( "Hello!", normalize_for_cache=False )
+        cache.get_cached_embedding.assert_called_once_with( "Hello!" )
+        self.assertEqual( result, [ 0.5 ] )
+
+    def test_not_found_error_returns_empty( self ):
+        mgr, _, cache, _ = _build_ex( self._MODEL_CFG )
+        cache.get_cached_embedding.return_value = None
+
+        class FakeNotFound( Exception ):
+            pass
+
+        with patch( "openai.NotFoundError", FakeNotFound ), \
+             patch( "cosa.utils.util.get_api_key", return_value="sk-test" ), \
+             patch( "openai.OpenAI" ) as cls, patch( "builtins.print" ):
+            cls.return_value.embeddings.create.side_effect = FakeNotFound( "404" )
+            result = mgr.generate_embedding( "Hello!" )
+        self.assertEqual( result, [ ] )
+
+    def test_not_found_error_config_reread_failure( self ):
+        # In the NotFound handler the model re-read can itself fail → "[UNKNOWN...]".
+        EmbeddingManager._instance = None
+        state = { "n": 0 }
+
+        def cfg_get( key, default=None, **kw ):
+            if key == "embedding model name":
+                state[ "n" ] += 1
+                if state[ "n" ] >= 2:
+                    raise RuntimeError( "config gone" )
+                return "text-embedding-3-small"
+            return { "expand symbols to words": False, "embedding dimensions": "768" }.get( key, default )
+
+        cfg = Mock(); cfg.get.side_effect = cfg_get
+        cache = Mock(); cache.get_cached_embedding.return_value = None
+        normalizer = Mock(); normalizer.get_normalized_gist.return_value = "n"
+
+        class FakeNotFound( Exception ):
+            pass
+
+        with patch( "cosa.memory.embedding_manager.ConfigurationManager", return_value=cfg ), \
+             patch( "cosa.memory.embedding_manager.EmbeddingCacheTable", return_value=cache ), \
+             patch( "cosa.memory.embedding_manager.GistNormalizer", return_value=normalizer ), \
+             patch( "cosa.utils.util.get_project_root", return_value="/test" ), \
+             patch( "cosa.utils.util.get_file_as_dictionary", return_value={} ), \
+             patch( "builtins.print" ):
+            mgr = EmbeddingManager( debug=False )
+            with patch( "openai.NotFoundError", FakeNotFound ), \
+                 patch( "cosa.utils.util.get_api_key", return_value="sk-test" ), \
+                 patch( "openai.OpenAI" ) as cls:
+                cls.return_value.embeddings.create.side_effect = FakeNotFound( "404" )
+                result = mgr.generate_embedding( "Hello!" )
+        self.assertEqual( result, [ ] )
+
+
 class TestConvenienceFunctions( _Base ):
     """get_embedding_manager + module-level generate_embedding."""
 
