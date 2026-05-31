@@ -2,6 +2,22 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.05.30 - Session fb0bc8a5 (Speedy 🌿) | Notifications-UI polish: focus-card height, broadcast toggle, master-detail reading pane, persona rename
+
+**A voice-driven UI-polish session on `wip-v0.1.8` — three commits, each verified on `:7999`; not pushed.** Parallel-session-safe throughout (the GCP session 657452e9 + coverage session own `README.md`/`TODO.md`/untracked GCP+coverage docs — deliberately EXCLUDED from every commit; my README doc-links left in the working tree for those sessions to carry).
+
+**Commit `23d3726`** — focus-mode sender-card height (+50%) + the broadcast `commons-activity-entry` "Show more" toggle. Toggle root cause: a one-shot `requestAnimationFrame` overflow check measured 0×0 while the Recent Activity panel was collapsed (`display:none`) — system broadcasts arriving via WebSocket while it was closed never revealed the toggle; fixed with a `ResizeObserver` re-measure. Focus boost first targeted the orphaned `.sender-card-messages` class (no render path produces it) → repointed to the real `.date-accordion-messages` scroll region.
+
+**Commit `585283d`** — voice-persona pool rename Speedy → Cheech ("as in Cheech & Chong"; label-only — voice id/icon/color/profile preserved). Live session stays Speedy (rename affects future allocations, not the running bridge). New auto-memory `reference_hot_config_reload` (Rick's dev env hot-reloads `lupin-app.ini` — no `:7999` bounce needed for INI-only changes).
+
+**Commit `cd6cc99`** — master-detail Reading Pane cluster: (1) layout-mode toolbar centering (was pane-blind `ratio/2`≈33% → 50% when pane closed, re-centers on open/close); (2) reading-pane iframe "localhost refused to connect" diagnosed as global `X-Frame-Options: DENY` blocking same-origin framing → `SAMEORIGIN` for `/app/docs` only, `DENY` elsewhere (verified live via header probe); (3) iframe "postage stamp" = indefinite `.content-pane` height (only `max-height` + `align-self:flex-start`) → definite `calc(100vh-100px)` + `.content-pane-body` `min-height:0` + `:has(iframe)` edge-to-edge padding; (4) new "bust out" header button (⤢) → opens the pane's current content in a new browser tab (doc URL / rendered abstract), then closes the pane + re-centers; (5) focus boost bumped +50% → DOUBLED (250→500px).
+
+**Tests:** new `test_layout_mode_toolbar_centering.py` (centering + iframe-fill + bust-out E2E), `test_doc_viewer_iframe_embedding.py` (X-Frame smoke — **3/3 passed live on `:7999`**), plus updated assertions in `test_cc_session_strip_and_focus.py` + `test_commons_activity_toggle.py`. Full E2E (`:8000`, scheduled) to run before any merge.
+
+**Files:** `src/fastapi_app/main.py`, `static/html/notifications.html`, `static/css/notifications.css`, `static/js/notifications.js`, `src/conf/lupin-app.ini` + `-splainer.ini`, 3 e2e/smoke test files. **R&D docs:** `2026.05.30-notifications-ui-focus-height-and-broadcast-toggle.md` + `2026.05.30-master-detail-reading-pane-fixes.md`. **New auto-memory:** `reference_hot_config_reload`.
+
+---
+
 ### 2026.05.30 - Session 657452e9 (Sam 🎙️) | GCP deployment: survey → straw-man plan → Cloud-Run-vs-GCE comparison → decisions locked → prod-wording scrub (checkpoint)
 
 **Drove the GCP-deployment planning arc end-to-end on `wip-v0.1.8`; mid-session checkpoint (not pushed).** Three R&D docs created under `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`: (1) an 11-agent architecture-survey + readiness assessment; (2) a 2,400-line section-by-section **straw-man provisioning & deployment plan** (14-agent author→critic→assemble workflow; three blocking contradictions reconciled — Alembic-not-on-startup, the 2026-06-15 Agent-SDK $200 credit ceiling, the Milestone-1 HTTPS-LB cost line); (3) a fact-checked **Cloud Run-GPU vs GCE g2-standard-8+L4 + Claude-Code-hosting** comparison (verdict: the VM wins on cost, fit, and CC — same L4 silicon, opposite execution model; you can't SSH into Cloud Run).
