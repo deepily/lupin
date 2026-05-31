@@ -449,7 +449,7 @@ class SweTeamJob( AgenticJobBase ):
                 repo = ProxyDecisionRepository( db_session )
 
                 for i in range( num_phases ):
-                    if i >= len( self.DRY_RUN_PHASE_QUESTIONS ):
+                    if i >= len( self.DRY_RUN_PHASE_QUESTIONS ):  # pragma: no cover - defensive list-drift guard, dead as written: num_phases is capped at len(DRY_RUN_PHASE_LABELS) and both phase lists are length 10, so i never reaches len(DRY_RUN_PHASE_QUESTIONS)
                         continue
                     phase_q = self.DRY_RUN_PHASE_QUESTIONS[ i ]
                     if phase_q is None:
