@@ -392,7 +392,7 @@ class PresentationOrchestratorAgent:
 
         # Read file in thread pool (non-blocking)
         try:
-            content = await asyncio.to_thread( self._read_file, path )
+            content = await asyncio.to_thread( self._read_file_or_raise, path )
         except FileNotFoundError:
             logger.error( f"Source document not found: {path}" )
             await voice_io.notify( f"Error: Source document not found — {os.path.basename( path )}", priority="urgent" )
@@ -436,7 +436,7 @@ class PresentationOrchestratorAgent:
         return content
 
     @staticmethod
-    def _read_file( path: str ) -> str:
+    def _read_file_or_raise( path: str ) -> str:
         """
         Read a file and return its contents.
 
@@ -1218,7 +1218,7 @@ class PresentationOrchestratorAgent:
         try:
             # Read current Marp file
             loop = asyncio.get_event_loop()
-            marp_content = await loop.run_in_executor( None, self._read_file, marp_path )
+            marp_content = await loop.run_in_executor( None, self._read_file_or_none, marp_path )
             if marp_content is None:
                 logger.warning( f"Phase 7: Could not read Marp file: {marp_path}" )
                 return
@@ -1341,7 +1341,7 @@ class PresentationOrchestratorAgent:
         return registry
 
     @staticmethod
-    def _read_file( file_path: str ) -> Optional[ str ]:
+    def _read_file_or_none( file_path: str ) -> Optional[ str ]:
         """
         Read file content from disk.
 
@@ -1877,13 +1877,23 @@ class PresentationOrchestratorAgent:
         )
 
         try:
-            response = await voice_io.present_choices(
-                question = f"Gate 4: {visuals_rendered} visuals rendered. Approve?",
-                choices  = [ "Approve", "Cancel" ],
+            result = await voice_io.present_choices(
+                questions=[ {
+                    "question"    : f"Gate 4: {visuals_rendered} visual{'s' if visuals_rendered != 1 else ''} rendered. Approve?",
+                    "header"      : "Visual Review",
+                    "multiSelect" : False,
+                    "options"     : [
+                        { "label": "Approve", "description": "Proceed to delivery" },
+                        { "label": "Cancel",  "description": "Stop presentation generation" },
+                    ]
+                } ],
+                title    = "Gate 4: Visual Review",
                 abstract = summary,
             )
 
-            if response and "cancel" in response.lower():
+            answer = result.get( "answers", {} ).get( "Visual Review", "Approve" )
+
+            if answer == "Cancel":
                 await voice_io.notify( "Presentation cancelled at Gate 4.", priority="medium" )
                 return False
 
