@@ -636,7 +636,7 @@ class SolutionSnapshot( RunnableCode ):
         # Original method logic continues (keeping functionality for now)
         # TODO: decide what we're going to exclude from serialization, and why or why not!
         # Right now I'm just doing this for the sake of expediency as I'm playing with class inheritance for agents
-        fields_to_exclude = [ "prompt_response", "prompt_response_dict", "code_response_dict", "phind_tgi_url", "config_mgr", "_embedding_mgr", "_embedding_provider", "websocket_id", "user_id", "user_email" ]
+        fields_to_exclude = [ "prompt_response", "prompt_response_dict", "code_response_dict", "phind_tgi_url", "config_mgr", "_embedding_mgr", "_embedding_provider", "_normalizer", "websocket_id", "user_id", "user_email" ]
         data = { field: value for field, value in self.__dict__.items() if field not in fields_to_exclude }
         return json.dumps( data )
         

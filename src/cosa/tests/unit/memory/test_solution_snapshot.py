@@ -379,30 +379,17 @@ class TestCopyAndSerialization( unittest.TestCase ):
             dup = snap.get_copy( user_email="new@example.com" )
         self.assertEqual( dup.user_email, "new@example.com" )
 
-    def test_to_jsons_currently_raises_on_unserializable_normalizer( self ):
+    def test_to_jsons_excludes_normalizer_and_sensitive_fields( self ):
         """
-        Pin the CURRENT (buggy) to_jsons() contract: it RAISES TypeError.
+        to_jsons() serializes cleanly, excluding the unserializable/sensitive fields.
 
-        to_jsons()'s fields_to_exclude list (solution_snapshot.py:639) omits
-        '_normalizer' — a Normalizer instance set unconditionally in __init__
-        (line 217). json.dumps() therefore hits an unserializable object and
-        raises. The sibling embedding objects ARE excluded; _normalizer was
-        added later without updating the list. Reported to Tiberius (he owns the
-        prod fix). See the @expectedFailure tripwire below for the correct contract.
-        """
-        with _embed_mocked():
-            snap = SolutionSnapshot( question="serialize me", debug=False )
-            with self.assertRaises( TypeError ):
-                snap.to_jsons()
-
-    @unittest.expectedFailure
-    def test_to_jsons_should_exclude_normalizer_TRIPWIRE( self ):
-        """
-        TRIPWIRE (expectedFailure): the CORRECT to_jsons() contract.
-
-        Once Tiberius adds '_normalizer' to fields_to_exclude in
-        solution_snapshot.py:639, this starts passing (xpass) and flags that the
-        bug is fixed. Until then it fails (raises TypeError), which is expected.
+        Was an armed expectedFailure TRIPWIRE: to_jsons()'s fields_to_exclude list
+        (solution_snapshot.py:639) omitted '_normalizer' — a Normalizer instance set
+        unconditionally in __init__ — so json.dumps() hit an unserializable object
+        and raised TypeError, making the whole (deprecated) method unusable. The
+        sibling embedding objects were excluded; _normalizer was added later without
+        updating the list. Bug fixed 2026-05-31 (added '_normalizer' to the list);
+        decorator removed, this now asserts the correct serialize contract.
         """
         import json as _json
         with _embed_mocked():
