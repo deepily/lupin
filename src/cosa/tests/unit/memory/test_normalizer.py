@@ -26,6 +26,8 @@ deterministic, model-stable behaviors (verified live 2026-05-30 in the cosa venv
 
 import unittest
 from typing import List
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 # Import test infrastructure
 import sys
@@ -261,6 +263,215 @@ class TestNormalizer( unittest.TestCase ):
 
         # Deterministic
         self.assertEqual( results, self.normalizer.normalize_batch( texts ) )
+
+    # ------------------------------------------------------------------ #
+    # __new__ double-checked-locking race + __init__ pipeline branches.   #
+    # These reset the singleton and restore the REAL instance in finally  #
+    # so the shared spaCy-backed singleton survives for sibling tests.    #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _tok( text, pos="X", is_punct=False, lemma=None ):
+        """Build a lightweight spaCy-token stand-in for branch-level tests."""
+        return SimpleNamespace(
+            text     = text,
+            lemma_   = lemma if lemma is not None else text,
+            pos_     = pos,
+            is_punct = is_punct,
+        )
+
+    def test_new_double_checked_lock_returns_existing_on_race( self ):
+        """
+        Test __new__ returns the existing instance when it appears during locking.
+
+        Simulates the double-checked-locking race: the outer None-check passes, then
+        a competing creation populates _instance while the lock is being acquired, so
+        the inner None-check is False and the existing instance is returned.
+
+        Ensures:
+            - The inner-check False arm is exercised (no second construction)
+            - The pre-populated instance is returned unchanged
+        """
+        saved_inst = Normalizer._instance
+        saved_lock = Normalizer._lock
+
+        sentinel = Mock()
+        sentinel._initialized = True   # __init__ early-returns on this latch
+
+        class _RacingLock:
+            def __enter__( self_inner ):
+                Normalizer._instance = sentinel   # competitor "wins" mid-acquire
+                return self_inner
+            def __exit__( self_inner, *exc ):
+                return False
+
+        Normalizer._instance = None
+        Normalizer._lock     = _RacingLock()
+        try:
+            result = Normalizer()
+            self.assertIs( result, sentinel )
+        finally:
+            Normalizer._instance = saved_inst
+            Normalizer._lock     = saved_lock
+
+    def _build_with_pipe_names( self, pipe_names ):
+        """
+        Construct a fresh Normalizer with spaCy + config mocked and a given pipeline.
+
+        Resets the singleton, patches spacy.load to return a fake nlp whose
+        pipe_names is the supplied list, then restores the real singleton.
+
+        Returns:
+            The constructed (fake-nlp) Normalizer instance.
+        """
+        saved_inst = Normalizer._instance
+        Normalizer._instance = None
+
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None, return_type=None: {
+            "app debug"        : False,
+            "app verbose"      : False,
+            "spacy model name" : "en_core_web_sm",
+        }.get( key, default )
+
+        fake_nlp = Mock()
+        fake_nlp.pipe_names = pipe_names
+
+        try:
+            with patch( "cosa.memory.normalizer.ConfigurationManager", return_value=cfg ), \
+                 patch( "cosa.memory.normalizer.spacy" ) as mock_spacy:
+                mock_spacy.load.return_value = fake_nlp
+                inst = Normalizer()
+            return inst, fake_nlp
+        finally:
+            Normalizer._instance = saved_inst
+
+    def test_init_disables_textcat_when_present( self ):
+        """
+        Test __init__ adds 'textcat' (but not 'ner') to the disable list when present.
+
+        Ensures:
+            - The no-'ner' branch is taken
+            - 'textcat' is appended and disable_pipes invoked with it
+        """
+        inst, fake_nlp = self._build_with_pipe_names( [ "tok2vec", "textcat" ] )
+
+        fake_nlp.disable_pipes.assert_called_once_with( [ "textcat" ] )
+
+    def test_init_skips_disable_when_no_target_components( self ):
+        """
+        Test __init__ skips disable_pipes when neither 'ner' nor 'textcat' is present.
+
+        Ensures:
+            - The empty-disable-list branch is taken (disable_pipes NOT called)
+            - _initialized latch is still set
+        """
+        inst, fake_nlp = self._build_with_pipe_names( [ "tok2vec", "lemmatizer" ] )
+
+        fake_nlp.disable_pipes.assert_not_called()
+        self.assertTrue( inst._initialized )
+
+    def test_init_missing_model_raises_runtime_error( self ):
+        """
+        Test __init__ converts a spaCy OSError into a helpful RuntimeError.
+
+        Ensures:
+            - An OSError from spacy.load is re-raised as RuntimeError with install hint
+        """
+        saved_inst = Normalizer._instance
+        Normalizer._instance = None
+
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None, return_type=None: {
+            "app debug"        : False,
+            "app verbose"      : False,
+            "spacy model name" : "en_core_web_sm",
+        }.get( key, default )
+
+        try:
+            with patch( "cosa.memory.normalizer.ConfigurationManager", return_value=cfg ), \
+                 patch( "cosa.memory.normalizer.spacy" ) as mock_spacy:
+                mock_spacy.load.side_effect = OSError( "model not found" )
+                with self.assertRaises( RuntimeError ):
+                    Normalizer()
+        finally:
+            Normalizer._instance = saved_inst
+
+    # ------------------------------------------------------------------ #
+    # remove_filler_words debug trace + normalize / normalize_batch       #
+    # token-iteration branches, driven by a swapped fake nlp (restored).  #
+    # ------------------------------------------------------------------ #
+
+    def test_remove_filler_words_debug_trace( self ):
+        """
+        Test remove_filler_words logs removed fillers under debug+verbose.
+
+        Ensures:
+            - With debug+verbose the filler-removal print branch is exercised
+            - Filler tokens are dropped; content tokens are kept
+        """
+        saved_debug   = self.normalizer.debug
+        saved_verbose = self.normalizer.verbose
+        self.normalizer.debug   = True
+        self.normalizer.verbose = True
+        try:
+            doc    = [ self._tok( "um" ), self._tok( "hello" ) ]
+            kept   = self.normalizer.remove_filler_words( doc )
+            texts  = [ t.text for t in kept ]
+            self.assertEqual( texts, [ "hello" ] )
+        finally:
+            self.normalizer.debug   = saved_debug
+            self.normalizer.verbose = saved_verbose
+
+    def test_normalize_skips_empty_sentence( self ):
+        """
+        Test normalize drops a sentence that yields no surviving tokens.
+
+        Drives a fake doc whose only sentence is a lone (non-math) punctuation token,
+        so should_keep is False for every token and the sentence is not appended.
+
+        Ensures:
+            - An all-filtered sentence contributes nothing → empty result
+        """
+        fake_doc = SimpleNamespace( sents=[ [ self._tok( ".", is_punct=True ) ] ] )
+
+        saved_nlp = self.normalizer.nlp
+        self.normalizer.nlp = Mock( return_value=fake_doc )
+        try:
+            self.assertEqual( self.normalizer.normalize( "anything here" ), "" )
+        finally:
+            self.normalizer.nlp = saved_nlp
+
+    def test_normalize_batch_punctuation_and_empty_sentence( self ):
+        """
+        Test normalize_batch appends sentence-final punctuation and skips empty sentences.
+
+        Drives a fake piped doc with three sentences:
+          - an empty sentence (lone comma → neither kept nor a '.!?' terminator)
+          - a content sentence ending in '.' (terminator appended to the last token)
+          - a sentence STARTING with '.' (terminator seen while sent_tokens is empty →
+            the no-tokens-yet arm is taken and the terminator is dropped)
+
+        Ensures:
+            - The empty sentence is skipped (no contribution)
+            - A trailing terminator is glued onto the final content token
+            - A leading terminator with no preceding token is dropped, not glued
+        """
+        empty_sent     = [ self._tok( ",", is_punct=True ) ]
+        content_sent   = [ self._tok( "hello", pos="NOUN", lemma="hello" ),
+                           self._tok( ".", is_punct=True ) ]
+        leading_punct  = [ self._tok( ".", is_punct=True ),
+                           self._tok( "world", pos="NOUN", lemma="world" ) ]
+        fake_doc       = SimpleNamespace( sents=[ empty_sent, content_sent, leading_punct ] )
+
+        saved_nlp = self.normalizer.nlp
+        self.normalizer.nlp = Mock()
+        self.normalizer.nlp.pipe.return_value = [ fake_doc ]
+        try:
+            results = self.normalizer.normalize_batch( [ "ignored input" ] )
+            self.assertEqual( results, [ "hello. world" ] )
+        finally:
+            self.normalizer.nlp = saved_nlp
 
 
 if __name__ == "__main__":
