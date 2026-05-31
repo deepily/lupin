@@ -206,7 +206,9 @@ class CostTracker:
                 if current_total + cost_usd > self.budget_limit_usd:
                     raise BudgetExceededError(
                         f"Budget limit ${self.budget_limit_usd:.2f} would be exceeded. "
-                        f"Current: ${current_total:.4f}, This call: ${cost_usd:.4f}"
+                        f"Current: ${current_total:.4f}, This call: ${cost_usd:.4f}",
+                        current_cost = current_total + cost_usd,
+                        budget_limit = self.budget_limit_usd,
                     )
 
             self._records.append( record )
@@ -370,8 +372,18 @@ class CostTracker:
 
 
 class BudgetExceededError( Exception ):
-    """Raised when a budget limit would be exceeded."""
-    pass
+    """
+    Raised when a budget limit would be exceeded.
+
+    Carries current_cost + budget_limit so handlers can report the overage —
+    e.g. deep_research/job.py's budget-exceeded voice notification formats
+    "${current_cost} spent of ${budget_limit} limit". (Sibling agents'
+    budget errors carry the same two attributes.)
+    """
+    def __init__( self, message: str, current_cost: float=0.0, budget_limit: float=0.0 ):
+        super().__init__( message )
+        self.current_cost = current_cost
+        self.budget_limit = budget_limit
 
 
 def quick_smoke_test():

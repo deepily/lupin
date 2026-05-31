@@ -77,8 +77,12 @@ class TestRecordUsage( unittest.TestCase ):
 
     def test_budget_exceeded_raises( self ):
         t = CostTracker( "s", budget_limit_usd=0.01 )
-        with self.assertRaises( BudgetExceededError ):
+        with self.assertRaises( BudgetExceededError ) as cm:
             t.record_usage( "claude-opus-4-5", 1_000_000, 1_000_000 )   # ~$30 ≫ $0.01
+        # The error carries the overage details the job-layer handler formats
+        # ("${current_cost} spent of ${budget_limit} limit").
+        self.assertEqual( cm.exception.budget_limit, 0.01 )
+        self.assertGreater( cm.exception.current_cost, 0.01 )   # projected total exceeds the limit
 
     def test_budget_accumulates_across_calls( self ):
         t = CostTracker( "s", budget_limit_usd=0.02 )
