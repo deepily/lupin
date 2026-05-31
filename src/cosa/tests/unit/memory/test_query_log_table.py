@@ -30,7 +30,7 @@ def _cfg():
     return m
 
 
-def _make_table( debug=False ):
+def _make_table( debug=False, verbose=False ):
     """Build a QueryLogTable with config + lancedb mocked; return (table, mock_table)."""
     mock_db = MagicMock()
     mock_db.table_names.return_value = [ "query_log" ]      # open (not create) path
@@ -39,8 +39,95 @@ def _make_table( debug=False ):
     with patch( "cosa.memory.query_log_table.ConfigurationManager", return_value=_cfg() ), \
          patch( "cosa.memory.query_log_table.lancedb.connect", return_value=mock_db ), \
          patch( "builtins.print" ):
-        table = QueryLogTable( debug=debug )
+        table = QueryLogTable( debug=debug, verbose=verbose )
     return table, mock_table
+
+
+def _make_table_create( debug=False, fts_fail=False ):
+    """Build via the CREATE path (table absent → _validate early-returns + create_table)."""
+    mock_db = MagicMock()
+    mock_db.table_names.return_value = [ ]                  # absent → create path
+    mock_created = MagicMock()
+    mock_db.create_table.return_value = mock_created
+    if fts_fail:
+        mock_created.create_fts_index.side_effect = RuntimeError( "no fts" )
+    with patch( "cosa.memory.query_log_table.ConfigurationManager", return_value=_cfg() ), \
+         patch( "cosa.memory.query_log_table.lancedb.connect", return_value=mock_db ), \
+         patch( "builtins.print" ):
+        table = QueryLogTable( debug=debug )
+    return table, mock_db, mock_created
+
+
+class TestInit( unittest.TestCase ):
+    """__init__ + _validate_embedding_dimensions + _create_table_if_needed branches."""
+
+    def test_create_path_builds_schema_and_fts( self ):
+        # Table absent → validate early-return, create_table, FTS indexes (debug on).
+        table, mock_db, mock_created = _make_table_create( debug=True )
+        mock_db.create_table.assert_called_once()
+        self.assertEqual( mock_created.create_fts_index.call_count, 2 )
+        self.assertIs( table._query_log_table, mock_created )
+
+    def test_create_path_swallows_fts_index_failure( self ):
+        # create_fts_index raising is caught (debug branch) — table still built.
+        table, mock_db, mock_created = _make_table_create( debug=True, fts_fail=True )
+        self.assertIs( table._query_log_table, mock_created )
+
+    def test_create_path_no_debug_skips_debug_prints( self ):
+        # debug=False create path exercises the False arc of every create-path debug guard.
+        table, mock_db, mock_created = _make_table_create( debug=False )
+        mock_db.create_table.assert_called_once()
+        self.assertIs( table._query_log_table, mock_created )
+
+    def test_create_path_fts_failure_no_debug( self ):
+        # FTS failure + debug=False: the except branch's debug guard takes its False arc.
+        table, mock_db, mock_created = _make_table_create( debug=False, fts_fail=True )
+        self.assertIs( table._query_log_table, mock_created )
+
+    def test_validate_returns_when_dimensions_match( self ):
+        # Existing table whose embedding dim == config dim → validate returns without drop.
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = [ "query_log" ]
+        mock_table = MagicMock()
+        mock_db.open_table.return_value = mock_table
+        mock_table.schema.field.return_value.type.list_size = 768   # matches _cfg default
+        with patch( "cosa.memory.query_log_table.ConfigurationManager", return_value=_cfg() ), \
+             patch( "cosa.memory.query_log_table.lancedb.connect", return_value=mock_db ), \
+             patch( "builtins.print" ):
+            QueryLogTable( debug=True )
+        mock_db.drop_table.assert_not_called()
+
+    def test_verbose_reports_row_count( self ):
+        # verbose=True hits the "Opened ... rows" print branch (count_rows queried).
+        table, mock_table = _make_table( verbose=True )
+        mock_table.count_rows.assert_called()
+
+
+class TestDebugBranches( unittest.TestCase ):
+    """debug=True timing/print branches in log_query + getters."""
+
+    def test_log_query_debug_times_success( self ):
+        table, mock_table = _make_table( debug=True )
+        qid = table.log_query( "v", "n", "g", "user-1" )
+        self.assertNotEqual( qid, "" )
+
+    def test_log_query_debug_times_error( self ):
+        table, mock_table = _make_table( debug=True )
+        mock_table.add.side_effect = RuntimeError( "db down" )
+        with patch( "cosa.memory.query_log_table.du.print_stack_trace" ):
+            self.assertEqual( table.log_query( "v", "n", "g", "user-1" ), "" )
+
+    def test_get_recent_queries_debug_error_prints( self ):
+        table, mock_table = _make_table( debug=True )
+        mock_table.search.side_effect = RuntimeError( "boom" )
+        self.assertEqual( table.get_recent_queries(), [ ] )
+
+    def test_get_cache_hit_stats_debug_error_prints( self ):
+        table, mock_table = _make_table( debug=True )
+        mock_table.search.side_effect = RuntimeError( "boom" )
+        self.assertEqual(
+            table.get_cache_hit_stats(), { "verbatim": 0.0, "normalized": 0.0 }
+        )
 
 
 class TestLogQuery( unittest.TestCase ):
