@@ -20,6 +20,13 @@
 
 **Two rules you must never break:** (a) **never edit production logic** to move coverage — tests + `[tool.coverage]` config + removal-of-migrated-test-code ONLY; (b) **`:8000` (the integration/E2E server) is mutated only under Rick's DIRECT word** — a peer relay does NOT authorize it (§12).
 
+> **⚠️ CANONICAL INTERPRETER (added 2026-05-30, live-discovered by the fleet).** Run ALL pytest/coverage via the **cosa venv (Python 3.11 / pytest 9.0.2)**, NOT the lupin `.venv` (Python 3.13 / pytest 8.4.2). The 3.13 venv's pytest 8.4.2 throws `INTERNALERROR: 'tuple' object has no attribute 'value'` (`_pytest/unittest.py:382`) the instant ANY `unittest.TestCase` test fails — it silently MASKS every red, so a "green" run there is meaningless. Canonical green-gate / coverage invocation:
+> ```bash
+> PYTHONPATH=src src/cosa/.venv/bin/python -m pytest src/tests/unit/ src/cosa/tests/unit/ -q
+> PYTHONPATH=src src/cosa/.venv/bin/python -m pytest src/cosa/tests/unit/ --cov=cosa.<group> --cov-report=term-missing -q
+> ```
+> **Also: "5,471 tests collected, 0 errors" is COLLECTION, not green.** Under the cosa venv the legacy baseline is heavily RED (memory alone = 91 failed / 24 passed as of 2026-05-30) — assertion-drift / stale mocks from before the mono-repo fold. Treat baseline reds as **repair targets** (fix the stale test to match the documented contract — NEVER rewrite an assertion to ratify buggy prod output; escalate genuine prod bugs to the manager per §11). A green baseline must precede coverage-add for a group.
+
 ---
 
 ## 1. Goal & methodology
