@@ -149,6 +149,19 @@ class FileBasedSolutionManager( SolutionSnapshotManagerInterface ):
 
         # Initialization complete, no return value needed
     
+    def save_snapshot( self, snapshot: SolutionSnapshot ) -> bool:
+        """
+        Persist a snapshot (the interface-required method name).
+
+        Requires:
+            - Manager is initialized; snapshot is a valid SolutionSnapshot
+
+        Ensures:
+            - Delegates to add_snapshot() (the file-based manager's implementation)
+            - Returns True if successful
+        """
+        return self.add_snapshot( snapshot )
+
     def add_snapshot( self, snapshot: SolutionSnapshot ) -> bool:
         """
         Add snapshot to file-based storage.
@@ -226,7 +239,7 @@ class FileBasedSolutionManager( SolutionSnapshotManagerInterface ):
 
         try:
             # Search through all snapshots for matching id_hash
-            for snapshot in self.solution_snapshots:
+            for snapshot in self._snapshots_by_question.values():
                 if snapshot.id_hash == snapshot_id:
                     if self.debug:
                         print( f"Found snapshot {snapshot_id}: {snapshot.question[:50]}..." )
