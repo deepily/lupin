@@ -81,7 +81,7 @@ class ClaudeCodeJob( AgenticJobBase ):
         if cls._config_defaults_loaded:
             return
         try:
-            from cosa.app.configuration_manager import ConfigurationManager
+            from cosa.config.configuration_manager import ConfigurationManager
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             cls._default_max_turns = config_mgr.get( "claude code job max turns default", default=50, return_type="int" )
             cls._default_timeout   = config_mgr.get( "claude code job timeout seconds default", default=3600, return_type="int" )
