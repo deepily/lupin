@@ -1,9 +1,17 @@
 # 06 — Tiberius Manager Rehydration Memento
 
 > **Purpose:** rehydrate the CoSA 100%-Coverage Campaign **manager** (Tiberius 👑) into a
-> fresh session and resume exactly where the prior session left off. Read this FIRST,
-> then the two author handoffs (`04-mr-radio-lane-handoff.md`, `05-rio-deep-research-handoff.md`)
-> and the overnight debrief (`03-overnight-grind-debrief.md`).
+> fresh session and resume exactly where the prior session left off.
+>
+> **READING ORDER ON REHYDRATION:**
+> 1. **`02-cold-start-runbook.md` ← THE ORIGINAL RUNBOOK** — the canonical standalone execution
+>    doc (goal, tiers, the exact heartbeat-poker invocation/run-config, gates, revert, contingencies).
+>    A cold manager + fresh workers run the whole campaign from it. **Start here.**
+> 2. **This memento** (`06`) — the *current* state + the doctrine/lessons accumulated since the runbook
+>    (the 10 bugs, the dismiss-tool bug + tmux workaround, dismiss-on-completion, what's left).
+> 3. `00-campaign-plan.md` — the ratified decisions (D1–D8).
+> 4. The author handoffs: `04-mr-radio-lane-handoff.md`, `05-rio-deep-research-handoff.md`,
+>    and the overnight debrief `03-overnight-grind-debrief.md` (the prior manager memento).
 >
 > Written 2026-05-31 at the natural stand-down point of the agents-tier campaign.
 
@@ -147,7 +155,8 @@
 1. Phase A MCP startup (fetch cosa-voice schemas, `get_session_info` — your persona resolves to
    **Tiberius**; do NOT assume an icon, let `get_session_info` confirm it), then
    `set_session_topic("CoSA coverage — backlog + cleanup")`.
-2. Read this memento + `04`/`05` handoffs + `03` debrief. `git log --oneline -30` to see banked packages.
+2. Read **`02-cold-start-runbook.md` (the original runbook)** first, then this memento + `00-campaign-plan.md`
+   + the `04`/`05` handoffs + `03` debrief. `git log --oneline -30` to see the banked packages.
 3. Inventory remaining uncovered cosa code tree-wide (not just agents/).
 4. Spawn **Krishna** (reviewer) + **1–2 fresh authors** (`spawn_sessions`, role=author). Seed authors with
    the relevant handoff doc via `seed_memento`. Apply ALL doctrine above.
