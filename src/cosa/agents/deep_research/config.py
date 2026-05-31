@@ -157,7 +157,7 @@ class ResearchConfig:
                 return_type = "boolean"
             elif field_type == "int" or field_type is int:
                 return_type = "int"
-            elif field_type == "float" or field_type is float:
+            elif field_type == "float" or field_type is float:  # pragma: no cover - no float-typed ResearchConfig field + fixed key_map of the 23 real fields; this defensive coercion arm is unreachable
                 return_type = "float"
             else:
                 return_type = "string"
