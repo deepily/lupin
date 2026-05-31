@@ -47,6 +47,88 @@ def _wire_scan( mock_table, pylist ):
     mock_table.to_lance.return_value.scanner.return_value.to_table.return_value.to_pylist.return_value = pylist
 
 
+def _make_open( debug=False, list_size=768, corrupted=False, count_raises=False ):
+    """Build via the OPEN path (table present). Returns (table, mock_db, mock_table)."""
+    mock_db = MagicMock()
+    mock_db.table_names.return_value = [ "embedding_cache_tbl" ]   # open (not create) path
+    mock_table = MagicMock()
+    mock_db.open_table.return_value = mock_table
+    mock_db.create_table.return_value = MagicMock()               # for corruption-recreate
+    mock_table.schema.field.return_value.type.list_size = list_size
+    probe = mock_table.to_lance.return_value.scanner.return_value.to_table.return_value.to_pylist
+    if corrupted:
+        probe.side_effect = RuntimeError( "lance: data fragment not found" )
+    else:
+        probe.return_value = [ ]                                  # healthy
+    if count_raises:
+        mock_table.count_rows.side_effect = RuntimeError( "count boom" )
+    with patch( "cosa.memory.embedding_cache_table.ConfigurationManager", return_value=_cfg() ), \
+         patch( "cosa.memory.embedding_cache_table.lancedb.connect", return_value=mock_db ), \
+         patch( "builtins.print" ):
+        table = EmbeddingCacheTable( debug=debug )
+    return table, mock_db, mock_table
+
+
+class TestInitPaths( unittest.TestCase ):
+    """__init__ create/open/corruption + _validate + _is_table_corrupted + init_tbl."""
+
+    def test_create_path_debug_prints( self ):
+        # debug=True create path hits the create-path debug prints (57, 157, 168-169).
+        table, mock_table = _make_table( debug=True )
+        self.assertIsNotNone( table._embedding_cache_tbl )
+
+    def test_count_rows_failure_warns( self ):
+        # count_rows raising is caught + warned, not propagated (72-73).
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = [ ]
+        mock_created = MagicMock()
+        mock_created.count_rows.side_effect = RuntimeError( "count boom" )
+        mock_db.create_table.return_value = mock_created
+        with patch( "cosa.memory.embedding_cache_table.ConfigurationManager", return_value=_cfg() ), \
+             patch( "cosa.memory.embedding_cache_table.lancedb.connect", return_value=mock_db ), \
+             patch( "builtins.print" ):
+            table = EmbeddingCacheTable()                         # must not raise
+        self.assertIs( table._embedding_cache_tbl, mock_created )
+
+    def test_open_path_healthy_table( self ):
+        # Open path, dims match, probe healthy → no drop, no recreate.
+        table, mock_db, mock_table = _make_open()
+        mock_db.open_table.assert_called_with( "embedding_cache_tbl" )
+        mock_db.drop_table.assert_not_called()
+
+    def test_open_path_corrupted_recreates( self ):
+        # Corruption probe raises a lance "not found" → drop + recreate.
+        table, mock_db, mock_table = _make_open( corrupted=True )
+        mock_db.drop_table.assert_called_once_with( "embedding_cache_tbl" )
+        mock_db.create_table.assert_called_once()
+
+    def test_validate_drops_on_dimension_mismatch( self ):
+        # Existing table whose embedding dim != config → _validate drops it (132-137).
+        table, mock_db, mock_table = _make_open( list_size=999 )
+        mock_db.drop_table.assert_called_with( "embedding_cache_tbl" )
+
+    def test_is_table_corrupted_reraises_unexpected_error( self ):
+        # A non-lance/non-"not found" error is re-raised, not swallowed (104-105).
+        table, mock_db, mock_table = _make_open()
+        mock_table.to_lance.return_value.scanner.return_value.to_table.return_value.to_pylist.side_effect = \
+            RuntimeError( "permission denied" )
+        with self.assertRaises( RuntimeError ):
+            table._is_table_corrupted()
+
+    def test_init_tbl_creates_schema_and_index( self ):
+        # init_tbl() connects, creates the table + FTS index, prints row count (284-301).
+        table, _ = _make_table()
+        mock_db2 = MagicMock()
+        mock_new = MagicMock()
+        mock_db2.create_table.return_value = mock_new
+        with patch( "cosa.memory.embedding_cache_table.lancedb.connect", return_value=mock_db2 ), \
+             patch( "cosa.memory.embedding_cache_table.du.print_banner" ), \
+             patch( "builtins.print" ):
+            table.init_tbl()
+        mock_db2.create_table.assert_called_once()
+        mock_new.create_fts_index.assert_called_once()
+
+
 class TestHasCachedEmbedding( unittest.TestCase ):
     """has_cached_embedding() — scan filter, escape, error fallback."""
 
