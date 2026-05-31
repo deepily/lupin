@@ -1,538 +1,173 @@
 """
-Unit tests for LanceDBSolutionManager with comprehensive mocking.
+Unit tests for cosa.memory.lancedb_solution_manager.LanceDBSolutionManager.
 
-Tests the LanceDBSolutionManager class including:
-- Hierarchical search implementation (CRITICAL)
-- Early exit behavior for exact matches
-- CanonicalSynonymsTable integration
-- get_snapshot_by_id functionality
-- Error handling and edge cases
+REWRITTEN 2026-05-31 by Sam 🎙️ (memory takeover, CoSA coverage campaign) — the
+prior tests targeted a stale API: they constructed the manager with no `config`
+(now required), patched module-level `CanonicalSynonymsTable` / `Normalizer`
+(those are LOCAL imports inside get_snapshots_by_question, lazily bound to the
+`_canonical_synonyms` / `_normalizer` instance attrs), and asserted a bare-
+snapshot return shape (the method actually returns `[(score, snapshot)]` tuples
+behind an `is_initialized()` gate, raising ValueError on empty input).
 
-Zero external dependencies - all operations mocked for isolated testing.
+These tests drive the CURRENT hierarchical search (Level 1 verbatim → Level 2
+normalized → Level 4 similarity) by injecting mock collaborators directly onto
+the instance — legitimate unit isolation, not over-mocking of the unit under
+test. Construction deps (QuestionEmbeddingsTable, db-path resolution) are mocked
+so no real LanceDB/embedding I/O occurs. Reviewed by Mr. Radio (no self-audit).
 """
-
-import unittest
-from unittest.mock import Mock, MagicMock, patch, call
-from typing import List, Dict, Any, Optional
-
-# Import test infrastructure
-import sys
 import os
-sys.path.append( os.path.join( os.path.dirname( __file__ ), "..", "infrastructure" ) )
-from mock_manager import MockManager
-from unit_test_utilities import UnitTestUtilities
+import unittest
+from unittest.mock import Mock, MagicMock, patch
 
-# Import the module under test
 from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
-from cosa.memory.solution_snapshot import SolutionSnapshot
 
 
-class TestLanceDBSolutionManager( unittest.TestCase ):
+_CONFIG = { "table_name": "test_solutions", "db_path": "/tmp/__sam_lancedb_test__", "storage backend": "local" }
+
+
+def _make_manager( debug=False, verbose=False ):
     """
-    Comprehensive unit tests for LanceDBSolutionManager class.
-
-    Requires:
-        - MockManager for external dependency mocking
-        - UnitTestUtilities for common test patterns
-
-    Ensures:
-        - All LanceDBSolutionManager functionality tested in isolation
-        - Hierarchical search behavior validated (CRITICAL)
-        - Early exit behavior confirmed
-        - CanonicalSynonymsTable integration tested
+    Construct a LanceDBSolutionManager with its construction-time deps mocked
+    (QuestionEmbeddingsTable + db-path resolution), then mark it initialized
+    with a mock table so the search/retrieval gates pass.
     """
-
-    def setUp( self ):
-        """
-        Setup for each test method.
-
-        Ensures:
-            - Clean state for each test
-            - Mock manager is available
-        """
-        self.mock_manager = MockManager()
-        self.test_utilities = UnitTestUtilities()
-
-    def tearDown( self ):
-        """
-        Cleanup after each test method.
-
-        Ensures:
-            - All mocks are reset
-        """
-        self.mock_manager.reset_mocks()
-
-    def test_hierarchical_search_early_exit_verbatim( self ):
-        """
-        Test that hierarchical search exits early on exact verbatim matches (CRITICAL).
-
-        This validates that the search doesn't continue to expensive similarity
-        search when exact matches are found at level 1 (verbatim).
-
-        Ensures:
-            - Exact verbatim match found immediately
-            - No normalized or similarity search attempted
-            - Correct snapshot returned
-            - Performance optimization through early exit
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            # Mock CanonicalSynonymsTable to return exact verbatim match
-            mock_canonical = Mock()
-            mock_canonical.find_exact_verbatim.return_value = "test_snapshot_id"
-
-            # Mock Normalizer (should not be called for verbatim match)
-            mock_normalizer = Mock()
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-            manager._canonical_synonyms = mock_canonical
-            manager._normalizer = mock_normalizer
-
-            # Mock get_snapshot_by_id to return test snapshot
-            test_snapshot = SolutionSnapshot(
-                question="What time is it?",
-                answer="It is 3:00 PM"
-            )
-            manager.get_snapshot_by_id = Mock( return_value=test_snapshot )
-
-            # Test exact verbatim match (should exit at level 1)
-            result = manager.get_snapshots_by_question( "What time is it?" )
-
-            # Verify early exit - verbatim search called
-            mock_canonical.find_exact_verbatim.assert_called_once_with( "What time is it?" )
-
-            # Verify early exit - normalized search NOT called
-            mock_canonical.find_exact_normalized.assert_not_called()
-            mock_normalizer.normalize.assert_not_called()
-
-            # Verify correct snapshot returned
-            self.assertEqual( len( result ), 1 )
-            self.assertEqual( result[0].question, "What time is it?" )
-
-    def test_hierarchical_search_early_exit_normalized( self ):
-        """
-        Test that hierarchical search exits early on exact normalized matches.
-
-        This validates that the search exits at level 2 when normalized
-        match is found, without proceeding to gist or similarity search.
-
-        Ensures:
-            - Verbatim search attempted first (returns None)
-            - Normalized search finds match and exits
-            - No gist or similarity search attempted
-            - Correct snapshot returned
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            # Mock CanonicalSynonymsTable behavior
-            mock_canonical = Mock()
-            mock_canonical.find_exact_verbatim.return_value = None  # No verbatim match
-            mock_canonical.find_exact_normalized.return_value = "test_snapshot_id_2"  # Normalized match
-
-            # Mock Normalizer
-            mock_normalizer = Mock()
-            mock_normalizer.normalize.return_value = "what time be it"
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-            manager._canonical_synonyms = mock_canonical
-            manager._normalizer = mock_normalizer
-
-            # Mock get_snapshot_by_id
-            test_snapshot = SolutionSnapshot(
-                question="what time be it",
-                answer="It is 3:00 PM"
-            )
-            manager.get_snapshot_by_id = Mock( return_value=test_snapshot )
-
-            # Test normalized match (should exit at level 2)
-            result = manager.get_snapshots_by_question( "What time is it?" )
-
-            # Verify search progression
-            mock_canonical.find_exact_verbatim.assert_called_once_with( "What time is it?" )
-            mock_normalizer.normalize.assert_called_once_with( "What time is it?" )
-            mock_canonical.find_exact_normalized.assert_called_once_with( "what time be it" )
-
-            # Verify early exit - no gist or similarity search
-            self.assertFalse( hasattr( mock_canonical, 'find_exact_gist' ) or
-                            getattr( mock_canonical, 'find_exact_gist', Mock() ).called )
-
-            # Verify correct result
-            self.assertEqual( len( result ), 1 )
-            self.assertEqual( result[0].question, "what time be it" )
-
-    def test_hierarchical_search_fallback_to_similarity( self ):
-        """
-        Test hierarchical search falls back to similarity when no exact matches found.
-
-        This validates the complete search hierarchy when exact matches fail
-        at all levels, ensuring similarity search is used as final fallback.
-
-        Ensures:
-            - All exact match levels attempted in order
-            - Similarity search called only after exact matches fail
-            - Correct similarity results returned
-            - Search progression follows hierarchy
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            # Mock CanonicalSynonymsTable - no exact matches
-            mock_canonical = Mock()
-            mock_canonical.find_exact_verbatim.return_value = None
-            mock_canonical.find_exact_normalized.return_value = None
-
-            # Mock Normalizer
-            mock_normalizer = Mock()
-            mock_normalizer.normalize.return_value = "what time be it"
-
-            # Mock LanceDB table for similarity search
-            mock_table = Mock()
-            mock_search = Mock()
-            mock_search.limit.return_value = mock_search
-            mock_search.to_list.return_value = [
-                {
-                    "id": "similarity_match_id",
-                    "question": "what time be it",
-                    "answer": "It is 3:00 PM",
-                    "_distance": 0.1
-                }
-            ]
-            mock_table.search.return_value = mock_search
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-            manager._canonical_synonyms = mock_canonical
-            manager._normalizer = mock_normalizer
-
-            # Mock embedding generation
-            manager._generate_embedding = Mock( return_value=[0.1, 0.2, 0.3] )
-
-            # Test similarity fallback
-            result = manager.get_snapshots_by_question( "What time is it?" )
-
-            # Verify complete search hierarchy attempted
-            mock_canonical.find_exact_verbatim.assert_called_once_with( "What time is it?" )
-            mock_normalizer.normalize.assert_called_once_with( "What time is it?" )
-            mock_canonical.find_exact_normalized.assert_called_once_with( "what time be it" )
-
-            # Verify similarity search called as fallback
-            mock_table.search.assert_called_once()
-
-            # Verify result from similarity search
-            self.assertEqual( len( result ), 1 )
-            self.assertIn( "time", result[0].question.lower() )
-
-    def test_get_snapshot_by_id( self ):
-        """
-        Test get_snapshot_by_id functionality.
-
-        This validates the direct snapshot retrieval functionality
-        that was added as part of the three-level architecture.
-
-        Ensures:
-            - Snapshot retrieved by ID correctly
-            - LanceDB query constructed properly
-            - Result parsed and returned as SolutionSnapshot
-            - Error handling for non-existent IDs
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            # Mock LanceDB table and query
-            mock_table = Mock()
-            mock_table.search.return_value.where.return_value.limit.return_value.to_list.return_value = [
-                {
-                    "id": "test_snapshot_id",
-                    "question": "What time is it?",
-                    "question_normalized": "what time be it",
-                    "answer": "It is 3:00 PM",
-                    "code": [],
-                    "thoughts": "Simple time query"
-                }
-            ]
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-
-            # Test snapshot retrieval
-            result = manager.get_snapshot_by_id( "test_snapshot_id" )
-
-            # Verify LanceDB query
-            mock_table.search.assert_called_once()
-
-            # Verify correct snapshot returned
-            self.assertIsNotNone( result )
-            self.assertEqual( result.question, "What time is it?" )
-            self.assertEqual( result.answer, "It is 3:00 PM" )
-
-    def test_get_snapshot_by_id_not_found( self ):
-        """
-        Test get_snapshot_by_id with non-existent ID.
-
-        Ensures:
-            - Returns None for non-existent snapshot ID
-            - No errors thrown for missing snapshots
-            - Proper error handling
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            # Mock LanceDB table - no results
-            mock_table = Mock()
-            mock_table.search.return_value.where.return_value.limit.return_value.to_list.return_value = []
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-
-            # Test non-existent snapshot
-            result = manager.get_snapshot_by_id( "non_existent_id" )
-
-            # Verify None returned
-            self.assertIsNone( result )
-
-    def test_canonical_synonyms_integration( self ):
-        """
-        Test CanonicalSynonymsTable integration.
-
-        This validates that the LanceDBSolutionManager properly
-        integrates with CanonicalSynonymsTable for exact matching.
-
-        Ensures:
-            - CanonicalSynonymsTable initialized correctly
-            - Integration methods called with correct parameters
-            - Error handling for CanonicalSynonymsTable failures
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.CanonicalSynonymsTable' ) as mock_cst_class:
-
-            # Mock CanonicalSynonymsTable instantiation
-            mock_canonical = Mock()
-            mock_cst_class.return_value = mock_canonical
-            mock_canonical.find_exact_verbatim.return_value = None
-            mock_canonical.find_exact_normalized.return_value = None
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-
-            # Trigger initialization by calling search
-            manager.get_snapshots_by_question( "test query" )
-
-            # Verify CanonicalSynonymsTable initialized
-            mock_cst_class.assert_called_once()
-
-            # Verify integration methods called
-            mock_canonical.find_exact_verbatim.assert_called_once_with( "test query" )
-
-    def test_normalizer_integration( self ):
-        """
-        Test Normalizer integration.
-
-        This validates that the LanceDBSolutionManager properly
-        integrates with the Normalizer for text processing.
-
-        Ensures:
-            - Normalizer initialized correctly
-            - Normalization called when needed
-            - Error handling for normalization failures
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.Normalizer' ) as mock_norm_class:
-
-            # Mock Normalizer
-            mock_normalizer = Mock()
-            mock_norm_class.return_value = mock_normalizer
-            mock_normalizer.normalize.return_value = "normalized query"
-
-            # Mock CanonicalSynonymsTable - no verbatim match to trigger normalization
-            mock_canonical = Mock()
-            mock_canonical.find_exact_verbatim.return_value = None
-            mock_canonical.find_exact_normalized.return_value = None
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-            manager._canonical_synonyms = mock_canonical
-
-            # Trigger normalization
-            manager.get_snapshots_by_question( "What time is it?" )
-
-            # Verify Normalizer initialized and called
-            mock_norm_class.assert_called_once()
-            mock_normalizer.normalize.assert_called_once_with( "What time is it?" )
-
-    def test_error_handling( self ):
-        """
-        Test error handling in various scenarios.
-
-        Ensures:
-            - Database connection errors handled gracefully
-            - CanonicalSynonymsTable errors don't crash search
-            - Normalizer errors handled appropriately
-            - Invalid inputs handled correctly
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            # Test database connection error
-            mock_lancedb.connect.side_effect = Exception( "Database connection failed" )
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-
-            # Should handle database errors gracefully
-            result = manager.get_snapshots_by_question( "test query" )
-            self.assertEqual( result, [] )
-
-    def test_empty_and_invalid_queries( self ):
-        """
-        Test handling of empty and invalid queries.
-
-        Ensures:
-            - Empty strings handled gracefully
-            - None values handled appropriately
-            - Whitespace-only queries processed correctly
-            - Very long queries handled without errors
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-
-            # Test empty string
-            result = manager.get_snapshots_by_question( "" )
-            self.assertEqual( result, [] )
-
-            # Test None value
-            result = manager.get_snapshots_by_question( None )
-            self.assertEqual( result, [] )
-
-            # Test whitespace-only
-            result = manager.get_snapshots_by_question( "   " )
-            self.assertEqual( result, [] )
-
-    def test_performance_optimization_early_exits( self ):
-        """
-        Test that early exits provide performance optimization.
-
-        This validates that the hierarchical search actually provides
-        performance benefits by avoiding expensive operations when
-        exact matches are found early.
-
-        Ensures:
-            - Verbatim match avoids all other processing
-            - Normalized match avoids similarity search
-            - Early exits minimize computational overhead
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            # Mock CanonicalSynonymsTable for verbatim match
-            mock_canonical = Mock()
-            mock_canonical.find_exact_verbatim.return_value = "fast_match_id"
-
-            # Mock expensive operations that should be avoided
-            mock_normalizer = Mock()
-            mock_embedding_gen = Mock()
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-            manager._canonical_synonyms = mock_canonical
-            manager._normalizer = mock_normalizer
-            manager._generate_embedding = mock_embedding_gen
-
-            # Mock get_snapshot_by_id
-            test_snapshot = SolutionSnapshot(
-                question="What time is it?",
-                answer="It is 3:00 PM"
-            )
-            manager.get_snapshot_by_id = Mock( return_value=test_snapshot )
-
-            # Test early exit optimization
-            result = manager.get_snapshots_by_question( "What time is it?" )
-
-            # Verify expensive operations were avoided
-            mock_normalizer.normalize.assert_not_called()
-            mock_embedding_gen.assert_not_called()
-
-            # Verify result still correct
-            self.assertEqual( len( result ), 1 )
-            self.assertEqual( result[0].question, "What time is it?" )
-
-    def test_search_ordering_and_limits( self ):
-        """
-        Test search result ordering and limits.
-
-        Ensures:
-            - Results returned in correct order
-            - Search limits respected
-            - Multiple results handled correctly
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ) as mock_lancedb, \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ):
-
-            # Mock multiple similarity results
-            mock_table = Mock()
-            mock_search = Mock()
-            mock_search.limit.return_value = mock_search
-            mock_search.to_list.return_value = [
-                {"id": "result1", "question": "time query 1", "_distance": 0.1},
-                {"id": "result2", "question": "time query 2", "_distance": 0.2},
-                {"id": "result3", "question": "time query 3", "_distance": 0.3}
-            ]
-            mock_table.search.return_value = mock_search
-            mock_lancedb.connect.return_value.open_table.return_value = mock_table
-
-            # Mock no exact matches to force similarity search
-            mock_canonical = Mock()
-            mock_canonical.find_exact_verbatim.return_value = None
-            mock_canonical.find_exact_normalized.return_value = None
-
-            mock_normalizer = Mock()
-            mock_normalizer.normalize.return_value = "normalized query"
-
-            manager = LanceDBSolutionManager( debug=False, verbose=False )
-            manager._canonical_synonyms = mock_canonical
-            manager._normalizer = mock_normalizer
-            manager._generate_embedding = Mock( return_value=[0.1, 0.2, 0.3] )
-
-            # Test multiple results
-            result = manager.get_snapshots_by_question( "time query" )
-
-            # Verify search limit applied
-            mock_search.limit.assert_called()
-
-            # Verify multiple results returned
-            self.assertGreaterEqual( len( result ), 1 )
-
-    def test_debug_and_verbose_output( self ):
-        """
-        Test debug and verbose output functionality.
-
-        Ensures:
-            - Debug mode produces appropriate output
-            - Verbose mode provides detailed information
-            - Output doesn't interfere with functionality
-        """
-        with patch( 'cosa.memory.lancedb_solution_manager.lancedb' ), \
-             patch( 'cosa.memory.lancedb_solution_manager.ConfigurationManager' ), \
-             patch( 'builtins.print' ) as mock_print:
-
-            manager = LanceDBSolutionManager( debug=True, verbose=True )
-
-            # Mock minimal setup to avoid errors
-            mock_canonical = Mock()
-            mock_canonical.find_exact_verbatim.return_value = None
-            mock_canonical.find_exact_normalized.return_value = None
-            manager._canonical_synonyms = mock_canonical
-
-            mock_normalizer = Mock()
-            mock_normalizer.normalize.return_value = "test"
-            manager._normalizer = mock_normalizer
-
-            # Test debug output
-            result = manager.get_snapshots_by_question( "test query" )
-
-            # Verify debug output was produced (print called)
-            self.assertTrue( mock_print.called )
+    with patch( "cosa.memory.lancedb_solution_manager.QuestionEmbeddingsTable" ), \
+         patch.object( LanceDBSolutionManager, "_resolve_db_path", return_value=_CONFIG[ "db_path" ] ):
+        mgr = LanceDBSolutionManager( _CONFIG, debug=debug, verbose=verbose )
+    mgr._initialized = True
+    mgr.is_initialized = Mock( return_value=True )
+    mgr._table = MagicMock()
+    return mgr
+
+
+class TestHierarchicalSearch( unittest.TestCase ):
+    """get_snapshots_by_question — Level 1/2/4 hierarchy + early exits."""
+
+    def test_level1_verbatim_early_exit( self ):
+        """A Level-1 verbatim hit returns [(100.0, snapshot)] and skips normalize/Level-2."""
+        mgr = _make_manager()
+        canonical = Mock()
+        canonical.find_exact_verbatim.return_value = "snap_id_1"
+        normalizer = Mock()
+        mgr._canonical_synonyms = canonical
+        mgr._normalizer = normalizer
+
+        snap = Mock( question="What time is it?" )
+        mgr.get_snapshot_by_id = Mock( return_value=snap )
+
+        result = mgr.get_snapshots_by_question( "What time is it?" )
+
+        canonical.find_exact_verbatim.assert_called_once_with( "What time is it?" )
+        normalizer.normalize.assert_not_called()                 # early exit before Level 2
+        canonical.find_exact_normalized.assert_not_called()
+        self.assertEqual( result, [ ( 100.0, snap ) ] )
+
+    def test_level2_normalized_early_exit( self ):
+        """No verbatim hit → normalize → Level-2 normalized hit returns [(100.0, snapshot)]."""
+        mgr = _make_manager()
+        canonical = Mock()
+        canonical.find_exact_verbatim.return_value = None
+        canonical.find_exact_normalized.return_value = "snap_id_2"
+        normalizer = Mock()
+        normalizer.normalize.return_value = "what time be it"
+        mgr._canonical_synonyms = canonical
+        mgr._normalizer = normalizer
+
+        snap = Mock( question="what time be it" )
+        mgr.get_snapshot_by_id = Mock( return_value=snap )
+
+        result = mgr.get_snapshots_by_question( "What time is it?" )
+
+        canonical.find_exact_verbatim.assert_called_once_with( "What time is it?" )
+        normalizer.normalize.assert_called_once_with( "What time is it?" )
+        canonical.find_exact_normalized.assert_called_once_with( "what time be it" )
+        self.assertEqual( result, [ ( 100.0, snap ) ] )
+
+    def test_level1_ghost_snapshot_auto_heals( self ):
+        """A Level-1 synonym pointing at a missing snapshot triggers delete_by_snapshot_id."""
+        mgr = _make_manager()
+        canonical = Mock()
+        canonical.find_exact_verbatim.return_value = "ghost_id"
+        canonical.find_exact_normalized.return_value = None
+        normalizer = Mock()
+        normalizer.normalize.return_value = "norm"
+        mgr._canonical_synonyms = canonical
+        mgr._normalizer = normalizer
+        mgr.get_snapshot_by_id = Mock( return_value=None )       # ghost: id resolves to nothing
+
+        mgr.get_snapshots_by_question( "ghost question" )
+
+        canonical.delete_by_snapshot_id.assert_any_call( "ghost_id" )
+
+    def test_local_cache_exact_match( self ):
+        """A verbatim hit in the in-memory cache returns [(100.0, snapshot)] via _record_to_snapshot."""
+        mgr = _make_manager()
+        mgr._canonical_synonyms = False                          # unavailable → skip Levels 1/2
+        mgr._normalizer = False
+        mgr._question_lookup = { "cached q": "id_hash_9" }
+        mgr._id_lookup = { "id_hash_9": { "stub": "record" } }
+        snap = Mock( question="cached q" )
+        mgr._record_to_snapshot = Mock( return_value=snap )
+
+        result = mgr.get_snapshots_by_question( "cached q" )
+
+        mgr._record_to_snapshot.assert_called_once_with( { "stub": "record" } )
+        self.assertEqual( result, [ ( 100.0, snap ) ] )
+
+
+class TestGuards( unittest.TestCase ):
+    """Initialization + input-validation gates."""
+
+    def test_not_initialized_raises_runtime_error( self ):
+        mgr = _make_manager()
+        mgr.is_initialized = Mock( return_value=False )
+        with self.assertRaises( RuntimeError ):
+            mgr.get_snapshots_by_question( "anything" )
+
+    def test_empty_question_raises_value_error( self ):
+        mgr = _make_manager()
+        with self.assertRaises( ValueError ):
+            mgr.get_snapshots_by_question( "" )
+
+    def test_none_question_raises_value_error( self ):
+        mgr = _make_manager()
+        with self.assertRaises( ValueError ):
+            mgr.get_snapshots_by_question( None )
+
+    def test_out_of_range_threshold_raises_value_error( self ):
+        mgr = _make_manager()
+        with self.assertRaises( ValueError ):
+            mgr.get_snapshots_by_question( "q", threshold_question=150.0 )
+
+
+class TestGetSnapshotById( unittest.TestCase ):
+    """get_snapshot_by_id — query, not-found, not-initialized, error."""
+
+    def test_returns_snapshot_when_found( self ):
+        mgr = _make_manager()
+        record = { "id_hash": "abc", "question": "Q?", "answer": "A" }
+        mgr._table.search.return_value.where.return_value.limit.return_value.to_list.return_value = [ record ]
+        snap = Mock( question="Q?" )
+        mgr._record_to_snapshot = Mock( return_value=snap )
+
+        result = mgr.get_snapshot_by_id( "abc" )
+        self.assertIs( result, snap )
+        mgr._record_to_snapshot.assert_called_once_with( record )
+
+    def test_returns_none_when_not_found( self ):
+        mgr = _make_manager()
+        mgr._table.search.return_value.where.return_value.limit.return_value.to_list.return_value = []
+        self.assertIsNone( mgr.get_snapshot_by_id( "missing" ) )
+
+    def test_returns_none_when_not_initialized( self ):
+        mgr = _make_manager()
+        mgr._initialized = False
+        self.assertIsNone( mgr.get_snapshot_by_id( "abc" ) )
+
+    def test_returns_none_on_query_error( self ):
+        mgr = _make_manager()
+        mgr._table.search.side_effect = RuntimeError( "lancedb boom" )
+        self.assertIsNone( mgr.get_snapshot_by_id( "abc" ) )
 
 
 if __name__ == "__main__":
