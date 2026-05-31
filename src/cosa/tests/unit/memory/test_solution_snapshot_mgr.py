@@ -495,21 +495,22 @@ class TestManagerCoverageCompletion( unittest.TestCase ):
             result = mgr.delete_snapshot( "ghost q" )
         self.assertFalse( result )
 
-    @unittest.expectedFailure
-    def test_delete_snapshot_should_remove_from_index_TRIPWIRE( self ):
+    def test_delete_snapshot_removes_from_index( self ):
         """
-        TRIPWIRE (expectedFailure): the CORRECT delete_snapshot contract.
+        delete_snapshot actually removes the snapshot from the in-memory index.
 
-        delete_snapshot returns True at solution_snapshot_mgr.py:305 BEFORE the
-        `del self._snapshots_by_question[question]` at line 307 — so lines 306-308
-        are dead code and the snapshot is NEVER removed from the index. Reported
-        to Tiberius (he owns the prod fix: reorder the return AFTER the del, or
-        drop the dead lines). When fixed, this xpasses.
+        Was an armed expectedFailure TRIPWIRE: delete_snapshot returned True at
+        solution_snapshot_mgr.py:305 BEFORE the `del self._snapshots_by_question[
+        question]` — so the del + its prints were dead code and the snapshot was
+        NEVER removed from the index (the deprecated method appeared to succeed
+        while leaving a stale entry). Bug fixed 2026-05-31 (reordered the return
+        AFTER the del); decorator removed, this now asserts the entry is gone.
         """
         snap = _mk_snap( "del q" )
         with _manager_ctx( snapshots=[ snap ] ) as ( mgr, _ ):
-            mgr.delete_snapshot( "del q", delete_file=False )
-            self.assertNotIn( "del q", mgr._snapshots_by_question )   # currently still present → fails
+            result = mgr.delete_snapshot( "del q", delete_file=False )
+            self.assertNotIn( "del q", mgr._snapshots_by_question )
+        self.assertTrue( result )
 
     # ---- _get_snapshots_by_question_similarity -----------------------------
 

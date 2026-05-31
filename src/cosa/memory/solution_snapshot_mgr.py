@@ -302,10 +302,10 @@ class SolutionSnapshotManager:
                 snapshot = self._snapshots_by_question[ question ]
                 snapshot.delete_file()
                 print( "Done!" )
-            return True
             print( f"Deleting snapshot from manager [{question}]...", end="" )
             del self._snapshots_by_question[ question ]
             print( "Done!" )
+            return True
         else:
             print( f"Snapshot with question [{question}] does not exist!" )
             return False
