@@ -144,11 +144,28 @@ class TestCreateLancedbManager( unittest.TestCase ):
                     { "db_path": "/db", "table_name": "t" }, False, False
                 )
 
-    def test_missing_keys_raises( self ):
+    def test_missing_table_name_raises( self ):
+        """db_path present but table_name absent → KeyError (table_name always required)."""
         mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
         with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
             with self.assertRaises( KeyError ):
                 SolutionSnapshotManagerFactory._create_lancedb_manager( { "db_path": "/db" }, False, False )
+
+    def test_gcs_uri_as_location_success( self ):
+        """A gcs config (gcs_uri instead of db_path) builds the manager — the bug-#2 fix."""
+        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
+        with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
+            result = SolutionSnapshotManagerFactory._create_lancedb_manager(
+                { "gcs_uri": "gs://bucket/db", "table_name": "t" }, False, False
+            )
+        self.assertIs( result, created )
+
+    def test_missing_location_raises( self ):
+        """table_name present but NEITHER db_path nor gcs_uri → KeyError (no storage location)."""
+        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
+        with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
+            with self.assertRaises( KeyError ):
+                SolutionSnapshotManagerFactory._create_lancedb_manager( { "table_name": "t" }, False, False )
 
 
 class TestGetAvailableTypes( unittest.TestCase ):
@@ -226,38 +243,15 @@ class TestCreateFromConfigManager( unittest.TestCase ):
         with self.assertRaises( KeyError ):
             SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
 
-    def test_lancedb_gcs_currently_raises_keyerror( self ):
+    def test_lancedb_gcs_success( self ):
         """
-        Pin the CURRENT (buggy) gcs path: it RAISES KeyError.
+        A fully-valid gcs config builds the manager (bug #2 fixed 2026-05-31).
 
         create_from_config_manager's gcs branch builds a config carrying
-        'gcs_uri' + 'table_name' but NO 'db_path'. It then delegates to
-        create_manager → _create_lancedb_manager, whose required_keys are
-        ['db_path', 'table_name'] (solution_manager_factory.py:162). 'db_path'
-        is absent for gcs → KeyError. So a fully-valid gcs config can never
-        build a manager via this path. Reported to Tiberius (he owns the fix:
-        _create_lancedb_manager must accept gcs configs — require gcs_uri OR
-        db_path, not db_path unconditionally). See TRIPWIRE below for the
-        correct contract.
-        """
-        cfg = self._cfg( {
-            "solution snapshots manager type"      : "lancedb",
-            "storage backend"                      : "gcs",
-            "solution snapshots lancedb table"     : "snaps",
-            "solution snapshots lancedb gcs uri"   : "gs://bucket/db",
-        } )
-        mod, cls, created = _fake_module( _LANCE_MOD, "LanceDBSolutionManager" )
-        with patch.dict( sys.modules, { _LANCE_MOD: mod } ):
-            with self.assertRaises( KeyError ):
-                SolutionSnapshotManagerFactory.create_from_config_manager( cfg )
-
-    @unittest.expectedFailure
-    def test_lancedb_gcs_should_build_manager_TRIPWIRE( self ):
-        """
-        TRIPWIRE (expectedFailure): the CORRECT gcs contract.
-
-        Once _create_lancedb_manager accepts gcs configs (db_path OR gcs_uri),
-        a valid gcs config builds the manager and this xpasses.
+        'gcs_uri' + 'table_name' (no 'db_path'); _create_lancedb_manager now
+        accepts a gcs_uri OR a db_path as the storage location, so the gcs path
+        builds end-to-end. (Was an armed expectedFailure TRIPWIRE asserting this
+        correct contract while the prod bug stood; de-armed on the fix.)
         """
         cfg = self._cfg( {
             "solution snapshots manager type"      : "lancedb",

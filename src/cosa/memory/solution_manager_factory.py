@@ -142,9 +142,10 @@ class SolutionSnapshotManagerFactory:
         Create LanceDB solution snapshot manager.
         
         Requires:
-            - config["db_path"] contains valid database path
             - config["table_name"] contains table name
-            
+            - config carries a storage location: config["db_path"] (local backend)
+              OR config["gcs_uri"] (gcs backend)
+
         Ensures:
             - Returns LanceDBSolutionManager instance
             - Manager configured with provided database settings
@@ -158,12 +159,17 @@ class SolutionSnapshotManagerFactory:
         except ImportError as e:
             raise ImportError( f"LanceDBSolutionManager not available: {e}" )
         
-        # Validate required configuration
-        required_keys = ["db_path", "table_name"]
-        missing_keys = [key for key in required_keys if key not in config]
+        # Validate required configuration. table_name is always required; the
+        # storage location may be a local db_path OR a gcs_uri. gcs configs carry
+        # gcs_uri (not db_path) — see create_from_config_manager's gcs branch — so
+        # requiring db_path unconditionally would make every valid gcs config
+        # unbuildable.
+        missing_keys = [ key for key in [ "table_name" ] if key not in config ]
+        if "db_path" not in config and "gcs_uri" not in config:
+            missing_keys.append( "db_path|gcs_uri" )
         if missing_keys:
             raise KeyError( f"Missing required config keys for lancedb manager: {missing_keys}" )
-        
+
         return LanceDBSolutionManager( config, debug, verbose )
     
     @staticmethod
