@@ -60,7 +60,7 @@ try:
     from cosa.agents.swe_team.hooks import build_can_use_tool, post_tool_hook, wrap_prompt_for_streaming
     from cosa.agents.swe_team.test_runner import run_pytest
     SAFETY_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - optional-dep import guard; swe_team safety primitives installed in this env
     SAFETY_AVAILABLE = False
 
 # Claude Agent SDK imports — graceful fallback for environments without SDK
@@ -75,7 +75,7 @@ try:
         RateLimitEvent,
     )
     SDK_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover - optional-dep import guard; claude_agent_sdk installed in this env
     SDK_AVAILABLE = False
 
 logger = logging.getLogger( __name__ )
@@ -928,23 +928,6 @@ class TFEOrchestrator:
                         except json.JSONDecodeError:
                             break
 
-        return None
-
-    @staticmethod
-    def _extract_last_json_array( text: str ) -> Optional[ str ]:
-        """Walk backward from the last `]` to find a matching `[`."""
-        close_idx = text.rfind( "]" )
-        if close_idx == -1:
-            return None
-
-        depth = 0
-        for i in range( close_idx, -1, -1 ):
-            if text[ i ] == "]":
-                depth += 1
-            elif text[ i ] == "[":
-                depth -= 1
-                if depth == 0:
-                    return text[ i : close_idx + 1 ]
         return None
 
     def _write_multi_cluster_plan_doc( self, proposals: list[ TFEProposedFix ] ) -> str:
