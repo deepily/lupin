@@ -173,7 +173,11 @@ source = [ "cosa" ]
 omit   = [
     "*/cosa/tests/*",               # CoSA's own test suites — test code, not a coverage denominator
     "*/cosa/agents/*/tests/*",      # per-agent test suites (podcast_generator, io_models)
-    "*/test_*.py",                  # individual test modules
+    # NOTE: a broad "*/test_*.py" was REMOVED 2026-05-31 — it was redundant (real test
+    # files already omitted by the two tests-dir globs above) and was HIDING three real
+    # prod modules from the 100% mandate: swe_team/test_runner.py, rest/routers/test_suite.py,
+    # rest/test_suite_completion_watchdog.py. Those are production code that runs/manages
+    # test suites — they must be measured, not omitted by an over-broad filename glob.
     "*/cosa/agents/*/__main__.py",  # CLI entrypoints — glue, run only via `python -m`
     "*/cosa/training/*",            # GPU + user-run-only; untestable in CI per never-grab-GPU mandate
 ]
