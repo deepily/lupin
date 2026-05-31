@@ -503,7 +503,7 @@ class CanonicalSynonymsTable:
                 print( f"Usage stats update for: '{du.truncate_string( question_verbatim )}'" )
 
         except Exception as e:
-            if self.debug:
+            if self.debug:  # pragma: no branch - except is only reachable via the debug-gated truncate_string() above, so self.debug is always True here
                 print( f"Error updating usage stats: {e}" )
 
     def get_statistics( self ) -> Dict[str, Any]:
