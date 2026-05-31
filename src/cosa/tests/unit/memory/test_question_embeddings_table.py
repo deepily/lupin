@@ -179,5 +179,37 @@ class TestDebugTiming( unittest.TestCase ):
         sw.print.assert_called_once_with( "Done!", use_millis=True )
 
 
+class TestValidateDimensions( unittest.TestCase ):
+    """
+    _validate_embedding_dimensions when the table ALREADY exists: a dim-match is
+    a no-op (table reused), a dim-mismatch drops the table for recreation.
+    Also exercises the _create_table_if_needed 'table exists → skip' arc.
+    """
+
+    def _build( self, list_size ):
+        cfg = Mock()
+        cfg.get.side_effect = _cfg_get
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = [ "question_embeddings_tbl" ]   # table exists
+        mock_table = MagicMock()
+        mock_table.schema.field.return_value.type.list_size = list_size
+        mock_db.open_table.return_value = mock_table
+        with patch( "cosa.memory.question_embeddings_table.ConfigurationManager", return_value=cfg ), \
+             patch( "cosa.memory.question_embeddings_table.EmbeddingManager" ), \
+             patch( "cosa.memory.question_embeddings_table.get_embedding_provider", return_value=Mock() ), \
+             patch( "cosa.memory.question_embeddings_table.lancedb.connect", return_value=mock_db ), \
+             patch( "builtins.print" ):
+            QuestionEmbeddingsTable()
+        return mock_db
+
+    def test_matching_dim_does_not_drop( self ):
+        mock_db = self._build( list_size=768 )           # matches config (768)
+        mock_db.drop_table.assert_not_called()
+
+    def test_mismatched_dim_drops_table( self ):
+        mock_db = self._build( list_size=512 )           # != 768 → drop for recreation
+        mock_db.drop_table.assert_called_once_with( "question_embeddings_tbl" )
+
+
 if __name__ == "__main__":
     unittest.main()
