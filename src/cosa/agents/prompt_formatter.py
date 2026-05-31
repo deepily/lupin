@@ -299,8 +299,8 @@ class PromptFormatter:
         # Create the parent directory if it doesn't exist
         os.makedirs( os.path.dirname( template_path ), exist_ok=True )
         
-        # Write the template to disk
-        du.write_string_to_file( content, template_path )
+        # Write the template to disk ( util signature is write_string_to_file( path, string ) )
+        du.write_string_to_file( template_path, content )
         
         if self.debug: print( f"Creating default template: {template_path} ... Done!" )
         

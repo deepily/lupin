@@ -330,9 +330,9 @@ class TestPromptFormatter( unittest.TestCase ):
         Ensures:
             - A missing known-name template triggers default creation + returns content
 
-        The write boundary (du.write_string_to_file) is mocked because the production
-        call at prompt_formatter.py:303 swaps its args (bug flagged to Tiberius); the
-        tripwire below asserts the correct contract.
+        The write boundary (du.write_string_to_file) is mocked to keep the unit
+        filesystem-free; the real-write contract is covered by
+        test_create_default_template_writes_content_to_path.
         """
         f, _ = self._make()
         path = os.path.join( self.tmpdir, "instruction-completion-default.txt" )
@@ -357,8 +357,8 @@ class TestPromptFormatter( unittest.TestCase ):
             - instruction-completion / special-token-default / phi- / llama- names
               each yield placeholder-bearing content and call the write boundary
 
-        The write boundary is mocked (prod arg-swap bug:303); the tripwire below
-        asserts the real-write contract.
+        The write boundary is mocked to keep the unit filesystem-free; the
+        real-write contract is covered by the dedicated write test below.
         """
         f, _ = self._make( debug=True )
         cases = [
@@ -390,28 +390,26 @@ class TestPromptFormatter( unittest.TestCase ):
         with self.assertRaises( ValueError ):
             f._create_default_template( path )
 
-    @unittest.expectedFailure
-    def test_TRIPWIRE_create_default_template_writes_content_to_path( self ):
+    def test_create_default_template_writes_content_to_path( self ):
         """
-        TRIPWIRE (prod bug) — _create_default_template must write `content` to `template_path`.
+        _create_default_template writes `content` to `template_path` (real write).
 
-        prompt_formatter.py:303 calls `du.write_string_to_file( content, template_path )`
-        but the util signature is write_string_to_file( path, string ) — the args are
-        SWAPPED. With a real write, the content (which contains '/') is treated as the
-        path and the call raises FileNotFoundError, so nothing lands at template_path.
-
-        This test asserts the CORRECT contract (the file at template_path holds the
-        template content) and is marked expectedFailure; it will start PASSING — and
-        should then have the decorator removed — once Tiberius fixes line 303 to
-        `du.write_string_to_file( template_path, content )`. Flagged via dm-tiberius
-        (question_id 27a555d7), 2026-05-31.
+        Was an armed expectedFailure TRIPWIRE: prompt_formatter.py:303 called
+        `du.write_string_to_file( content, template_path )` while the util signature
+        is write_string_to_file( path, string ) — the args were SWAPPED, so a real
+        write treated the content (containing '/') as the path and raised
+        FileNotFoundError, landing nothing at template_path. Bug fixed 2026-05-31
+        (line 303 → `write_string_to_file( template_path, content )`); decorator
+        removed, this now asserts the correct contract against a real on-disk write.
         """
         f, _ = self._make()
         path = os.path.join( self.tmpdir, "instruction-completion-default.txt" )
 
-        content = f._create_default_template( path )   # raises today (arg-swap bug)
+        content = f._create_default_template( path )
 
         self.assertTrue( os.path.exists( path ) )
+        with open( path ) as fh:
+            self.assertEqual( fh.read(), content )
         self.assertEqual( du.get_file_as_string( path ), content )
 
     # ------------------------------------------------------------------ #
