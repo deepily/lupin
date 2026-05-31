@@ -15,6 +15,7 @@ and external service calls are mocked for isolated testing.
 
 import unittest
 from unittest.mock import Mock, MagicMock, patch, call, mock_open
+from contextlib import contextmanager
 import time
 import os
 from typing import List, Dict, Any, Optional
@@ -393,6 +394,260 @@ class TestSolutionSnapshotManager( unittest.TestCase ):
             
             # Verify debug prints were called (hard to test exact content, but can verify calls made)
             self.assertGreater( mock_print.call_count, 0 )
+
+
+def _mk_snap( question, q_emb=None, syn_q=None, syn_g=None ):
+    """Build a mock SolutionSnapshot with the attributes the manager reads."""
+    snap = Mock()
+    snap.question                  = question
+    snap.question_gist             = question
+    snap.question_embedding        = q_emb if q_emb is not None else [ 1.0, 0.0 ]
+    snap.non_synonymous_questions  = []
+    snap.synonymous_questions      = syn_q if syn_q is not None else OrderedDict( [ ( question, 100.0 ) ] )
+    snap.synonymous_question_gists = syn_g if syn_g is not None else OrderedDict( [ ( question, 100.0 ) ] )
+    snap.code                      = [ "" ]
+    return snap
+
+
+@contextmanager
+def _manager_ctx( snapshots=(), debug=False, verbose=False, q_table=None ):
+    """
+    Construct a SolutionSnapshotManager with the full dependency chain mocked.
+
+    Normalizer is mocked to an IDENTITY function so question strings round-trip
+    predictably; EmbeddingManager / QuestionEmbeddingsTable / from_json_file /
+    os.listdir / du print helpers are all mocked. The manager is yielded WITHIN
+    the patch context so method-call-time prints stay suppressed too.
+    """
+    snaps      = list( snapshots )
+    files      = [ f"snap_{i}.json" for i in range( len( snaps ) ) ]
+    q_tbl      = q_table if q_table is not None else Mock()
+    normalizer = Mock()
+    normalizer.normalize.side_effect = lambda q: q
+
+    with patch( "cosa.memory.solution_snapshot_mgr.EmbeddingManager" ) as mock_em, \
+         patch( "cosa.memory.solution_snapshot_mgr.QuestionEmbeddingsTable", return_value=q_tbl ), \
+         patch( "cosa.memory.solution_snapshot_mgr.Normalizer", return_value=normalizer ), \
+         patch( "os.listdir", return_value=files ), \
+         patch( "cosa.memory.solution_snapshot_mgr.ss.SolutionSnapshot.from_json_file", side_effect=snaps ), \
+         patch( "cosa.memory.solution_snapshot_mgr.du.print_banner" ), \
+         patch( "cosa.memory.solution_snapshot_mgr.du.print_list" ), \
+         patch( "builtins.print" ):
+        mgr = SolutionSnapshotManager( path="/test/snapshots", debug=debug, verbose=verbose )
+        yield mgr, { "em": mock_em, "q_table": q_tbl, "normalizer": normalizer }
+
+
+class TestManagerCoverageCompletion( unittest.TestCase ):
+    """
+    Completion-tier tests driving the manager's remaining reachable lines to 100%:
+    load-failure handling, delete_snapshot, the two similarity searches, the
+    multi-branch get_snapshots_by_question dispatch, and __str__.
+    """
+
+    # ---- load-failure path -------------------------------------------------
+
+    def test_load_snapshots_handles_failed_file( self ):
+        """A from_json_file failure is caught, logged (debug), and tallied in failed_files."""
+        good = _mk_snap( "good q" )
+        with patch( "cosa.memory.solution_snapshot_mgr.EmbeddingManager" ), \
+             patch( "cosa.memory.solution_snapshot_mgr.QuestionEmbeddingsTable" ), \
+             patch( "cosa.memory.solution_snapshot_mgr.Normalizer" ), \
+             patch( "os.listdir", return_value=[ "good.json", "bad.json" ] ), \
+             patch( "cosa.memory.solution_snapshot_mgr.ss.SolutionSnapshot.from_json_file",
+                    side_effect=[ good, Exception( "corrupt file" ) ] ), \
+             patch( "cosa.memory.solution_snapshot_mgr.du.print_banner" ), \
+             patch( "cosa.memory.solution_snapshot_mgr.du.print_list" ), \
+             patch( "builtins.print" ):
+            mgr = SolutionSnapshotManager( path="/test", debug=True )
+        self.assertIn( "good q", mgr._snapshots_by_question )       # good one survived
+        self.assertEqual( len( mgr._snapshots_by_question ), 1 )    # bad one skipped
+
+    # ---- __str__ -----------------------------------------------------------
+
+    def test_str_representation( self ):
+        """__str__ reports the loaded count and path."""
+        with _manager_ctx( snapshots=[ _mk_snap( "q" ) ] ) as ( mgr, _ ):
+            text = str( mgr )
+        self.assertIn( "snapshots by question loaded from", text )
+        self.assertIn( "[1]", text )
+
+    # ---- delete_snapshot ---------------------------------------------------
+
+    def test_delete_snapshot_with_file_deletion( self ):
+        """Existing question + delete_file=True → snapshot.delete_file() called, returns True."""
+        snap = _mk_snap( "del q" )
+        with _manager_ctx( snapshots=[ snap ] ) as ( mgr, _ ):
+            result = mgr.delete_snapshot( "del q", delete_file=True )
+        self.assertTrue( result )
+        snap.delete_file.assert_called_once()
+
+    def test_delete_snapshot_without_file_deletion( self ):
+        """Existing question + delete_file=False → returns True, no file deletion."""
+        snap = _mk_snap( "del q" )
+        with _manager_ctx( snapshots=[ snap ] ) as ( mgr, _ ):
+            result = mgr.delete_snapshot( "del q", delete_file=False )
+        self.assertTrue( result )
+        snap.delete_file.assert_not_called()
+
+    def test_delete_snapshot_not_found( self ):
+        """Missing question → prints not-found message and returns False."""
+        with _manager_ctx( snapshots=[] ) as ( mgr, _ ):
+            result = mgr.delete_snapshot( "ghost q" )
+        self.assertFalse( result )
+
+    @unittest.expectedFailure
+    def test_delete_snapshot_should_remove_from_index_TRIPWIRE( self ):
+        """
+        TRIPWIRE (expectedFailure): the CORRECT delete_snapshot contract.
+
+        delete_snapshot returns True at solution_snapshot_mgr.py:305 BEFORE the
+        `del self._snapshots_by_question[question]` at line 307 — so lines 306-308
+        are dead code and the snapshot is NEVER removed from the index. Reported
+        to Tiberius (he owns the prod fix: reorder the return AFTER the del, or
+        drop the dead lines). When fixed, this xpasses.
+        """
+        snap = _mk_snap( "del q" )
+        with _manager_ctx( snapshots=[ snap ] ) as ( mgr, _ ):
+            mgr.delete_snapshot( "del q", delete_file=False )
+            self.assertNotIn( "del q", mgr._snapshots_by_question )   # currently still present → fails
+
+    # ---- _get_snapshots_by_question_similarity -----------------------------
+
+    def test_similarity_generate_blacklist_and_match( self ):
+        """
+        has()==False → generate+cache; blacklisted snapshot skipped; similar one
+        kept, dissimilar dropped. debug+verbose exercises every log branch.
+        """
+        similar     = _mk_snap( "similar q",     q_emb=[ 1.0, 0.0 ] )
+        dissimilar  = _mk_snap( "dissimilar q",  q_emb=[ 0.0, 1.0 ] )
+        blacklisted = _mk_snap( "blacklisted q", q_emb=[ 1.0, 0.0 ] )
+        blacklisted.non_synonymous_questions = [ "query q" ]
+
+        q_table = Mock()
+        q_table.has.return_value = False
+        with _manager_ctx( snapshots=[ similar, dissimilar, blacklisted ],
+                           debug=True, verbose=True, q_table=q_table ) as ( mgr, mocks ):
+            mocks[ "em" ].return_value.generate_embedding.return_value = [ 1.0, 0.0 ]
+            result = mgr._get_snapshots_by_question_similarity( "query q" )
+
+        self.assertEqual( len( result ), 1 )
+        self.assertIs( result[ 0 ][ 1 ], similar )
+        q_table.add_embedding.assert_called_once()                 # generated + cached
+
+    def test_similarity_cached_embedding_no_matches( self ):
+        """has()==True → reuse cached embedding; no snapshot clears threshold → empty."""
+        dissimilar = _mk_snap( "dissimilar q", q_emb=[ 0.0, 1.0 ] )
+        q_table = Mock()
+        q_table.has.return_value         = True
+        q_table.get_embedding.return_value = [ 1.0, 0.0 ]
+        with _manager_ctx( snapshots=[ dissimilar ], q_table=q_table ) as ( mgr, _ ):
+            result = mgr._get_snapshots_by_question_similarity( "query q" )
+        self.assertEqual( result, [] )
+        q_table.get_embedding.assert_called_once_with( "query q" )
+
+    # ---- get_snapshots_by_code_similarity ----------------------------------
+
+    def test_code_similarity_debug_verbose_unlimited( self ):
+        """debug+verbose, limit=-1 → above-threshold kept, below dropped, all returned."""
+        above = _mk_snap( "above q" )
+        above.get_code_similarity.return_value = 90.0
+        above.code = [ "line a" ]
+        below = _mk_snap( "below q" )
+        below.get_code_similarity.return_value = 50.0
+        exemplar = _mk_snap( "exemplar q" )
+        exemplar.code = [ "exemplar code" ]
+
+        with _manager_ctx( snapshots=[ above, below ], debug=True, verbose=True ) as ( mgr, _ ):
+            result = mgr.get_snapshots_by_code_similarity( exemplar, threshold=85.0, limit=-1 )
+
+        self.assertEqual( len( result ), 1 )
+        self.assertIs( result[ 0 ][ 1 ], above )
+
+    def test_code_similarity_limit_truncates( self ):
+        """limit > 0 → result truncated to the limit (else branch)."""
+        s1 = _mk_snap( "s1" ); s1.get_code_similarity.return_value = 95.0; s1.code = [ "a" ]
+        s2 = _mk_snap( "s2" ); s2.get_code_similarity.return_value = 90.0; s2.code = [ "b" ]
+        exemplar = _mk_snap( "ex" ); exemplar.code = [ "c" ]
+
+        with _manager_ctx( snapshots=[ s1, s2 ] ) as ( mgr, _ ):
+            result = mgr.get_snapshots_by_code_similarity( exemplar, threshold=85.0, limit=1 )
+        self.assertEqual( len( result ), 1 )
+
+    # ---- get_snapshots_by_question (dispatch branches) ---------------------
+
+    def test_get_by_question_exact_match( self ):
+        """Exact question hit → 100.0 score, debug logs the found list."""
+        snap = _mk_snap( "exact q" )
+        with _manager_ctx( snapshots=[ snap ] ) as ( mgr, _ ):
+            result = mgr.get_snapshots_by_question( "exact q", debug=True )
+        self.assertEqual( result[ 0 ][ 0 ], 100.0 )
+        self.assertIs( result[ 0 ][ 1 ], snap )
+
+    def test_get_by_question_synonymous_match( self ):
+        """Synonymous-question hit (score >= threshold) returns the parent snapshot."""
+        snap = _mk_snap( "main q", syn_q=OrderedDict( [ ( "main q", 100.0 ), ( "syn q", 95.0 ) ] ) )
+        with _manager_ctx( snapshots=[ snap ] ) as ( mgr, _ ):
+            result = mgr.get_snapshots_by_question( "syn q", threshold_question=90.0 )
+        self.assertEqual( result[ 0 ][ 0 ], 95.0 )
+        self.assertIs( result[ 0 ][ 1 ], snap )
+
+    def test_get_by_question_gist_match_with_escape( self ):
+        """Gist hit (score >= threshold_gist); question_gist is single-quote escaped first."""
+        snap = _mk_snap( "main q", syn_g=OrderedDict( [ ( "the gist", 92.0 ) ] ) )
+        with _manager_ctx( snapshots=[ snap ] ) as ( mgr, _ ):
+            result = mgr.get_snapshots_by_question(
+                "unknown q", question_gist="the gist", threshold_gist=90.0
+            )
+        self.assertEqual( result[ 0 ][ 0 ], 92.0 )
+        self.assertIs( result[ 0 ][ 1 ], snap )
+
+    def test_get_by_question_no_match_falls_to_similarity( self ):
+        """No exact/synonym/gist hit → delegates to similarity search (empty here)."""
+        snap = _mk_snap( "main q", q_emb=[ 0.0, 1.0 ] )
+        q_table = Mock()
+        q_table.has.return_value           = True
+        q_table.get_embedding.return_value = [ 1.0, 0.0 ]
+        with _manager_ctx( snapshots=[ snap ], q_table=q_table ) as ( mgr, _ ):
+            result = mgr.get_snapshots_by_question( "nomatch q", debug=True )
+        self.assertEqual( result, [] )
+
+    # ---- debug=False branch arms (silent paths) ----------------------------
+
+    def test_load_failure_silent_when_debug_off( self ):
+        """from_json_file failure with debug=False → the silent except arm (125->118)."""
+        good = _mk_snap( "good q" )
+        with patch( "cosa.memory.solution_snapshot_mgr.EmbeddingManager" ), \
+             patch( "cosa.memory.solution_snapshot_mgr.QuestionEmbeddingsTable" ), \
+             patch( "cosa.memory.solution_snapshot_mgr.Normalizer" ), \
+             patch( "os.listdir", return_value=[ "good.json", "bad.json" ] ), \
+             patch( "cosa.memory.solution_snapshot_mgr.ss.SolutionSnapshot.from_json_file",
+                    side_effect=[ good, Exception( "corrupt file" ) ] ), \
+             patch( "cosa.memory.solution_snapshot_mgr.du.print_banner" ), \
+             patch( "cosa.memory.solution_snapshot_mgr.du.print_list" ), \
+             patch( "builtins.print" ):
+            mgr = SolutionSnapshotManager( path="/test", debug=False )
+        self.assertEqual( len( mgr._snapshots_by_question ), 1 )
+
+    def test_similarity_blacklist_silent_when_debug_off( self ):
+        """Blacklisted snapshot with debug=False → silent skip arm (347->351)."""
+        blacklisted = _mk_snap( "blacklisted q", q_emb=[ 1.0, 0.0 ] )
+        blacklisted.non_synonymous_questions = [ "query q" ]
+        q_table = Mock()
+        q_table.has.return_value = False
+        with _manager_ctx( snapshots=[ blacklisted ], debug=False, q_table=q_table ) as ( mgr, mocks ):
+            mocks[ "em" ].return_value.generate_embedding.return_value = [ 1.0, 0.0 ]
+            result = mgr._get_snapshots_by_question_similarity( "query q" )
+        self.assertEqual( result, [] )                             # only snapshot was blacklisted
+
+    def test_code_similarity_below_threshold_silent_when_debug_off( self ):
+        """Below-threshold snapshot with debug=False → silent else arm (412->400)."""
+        below = _mk_snap( "below q" )
+        below.get_code_similarity.return_value = 50.0
+        below.code = [ "x" ]
+        exemplar = _mk_snap( "ex q" ); exemplar.code = [ "y" ]
+        with _manager_ctx( snapshots=[ below ], debug=False ) as ( mgr, _ ):
+            result = mgr.get_snapshots_by_code_similarity( exemplar, threshold=85.0, limit=-1 )
+        self.assertEqual( result, [] )
 
 
 def isolated_unit_test():
