@@ -41,7 +41,7 @@ import sys
 import time
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import ValidationError
 from fastmcp import FastMCP
@@ -2008,7 +2008,7 @@ def spawn_sessions(
 
 
 @mcp.tool
-def dismiss_sessions( session_names=None, reason: str = "", write_memento=None ) -> dict:
+def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str = "", write_memento: Optional[ bool ] = None ) -> dict:
     """
     **[REAP — host-side]** Tear down reviewer sessions THIS manager spawned.
 

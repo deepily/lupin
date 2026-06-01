@@ -6,6 +6,8 @@ runner; manifests live in a tmp dir. Target: 100% line + branch coverage.
 
 See: src/rnd/v0.1.7/2026.05.28-manager-spawned-reviewers.md
 """
+import asyncio
+import importlib
 import json
 import os
 import sys
@@ -424,3 +426,141 @@ class TestResolveSpawnConfig:
     def test_missing_keys_fall_back_to_defaults( self ):
         cfg = resolve_spawn_config( _FakeConfigMgr( {} ) )
         assert cfg[ "spawn_cap" ] == 8 and cfg[ "ack_timeout_seconds" ] == 120
+
+
+# ── MCP-WRAPPER LAYER: dismiss_sessions param-typing regression (2026-06-01) ──
+#
+# Bug (live, 2026-05-31): the @mcp.tool wrapper cosa_voice_mcp.dismiss_sessions
+# declared `session_names=None` and `write_memento=None` WITHOUT type
+# annotations. FastMCP builds each tool's JSON input-schema from the function's
+# type hints, so untyped params emitted a schema entry with NO `type` field. An
+# MCP client then had no array/boolean contract: a passed list arrived
+# stringified (the inner `for name in targets:` loop char-iterated it, "killing"
+# tmux sessions "c","c","-",...) and `write_memento=False` arrived as the string
+# "false". The inner-fn tests above never caught this because they call
+# session_spawner.dismiss_sessions directly, bypassing the @mcp.tool schema layer.
+#
+# Fix: annotate the wrapper `session_names: Optional[List[str]]` +
+# `write_memento: Optional[bool]` so FastMCP emits array/boolean and coerces
+# correctly. These tests are the durable lock: (a)/(b) assert the regenerated
+# schema; (c)-(e) drive FastMCP's own deserialization (the path a direct Python
+# call cannot reproduce, since Python never stringifies a list).
+# Delegated fix — DM brief from Tiberius (session b8a9f332), 2026-06-01.
+
+
+@pytest.fixture( scope="module" )
+def cv_mcp():
+    """
+    Import the cosa-voice MCP module that holds the @mcp.tool wrappers.
+
+    Ensures:
+        - returns the imported `lupin_mcp.cosa_voice_mcp` module object
+        - import is side-effect-tolerant: module-level `_validate_repo_account`
+          never raises (it logs + returns) and the session-id watcher is a
+          daemon thread, so it does not block pytest teardown
+    """
+    return importlib.import_module( "lupin_mcp.cosa_voice_mcp" )
+
+
+def _type_options( prop_schema ):
+    """
+    Collect the JSON-schema `type` tokens a property allows, flattening `anyOf`.
+
+    Requires:
+        - prop_schema is a dict (a single JSON-schema property node)
+
+    Ensures:
+        - returns a set of type strings drawn from the node's own `type` plus
+          every `anyOf` branch's `type` (e.g. an Optional[List[str]] node yields
+          {"array", "null"})
+    """
+    opts = set()
+    if "type" in prop_schema:
+        opts.add( prop_schema[ "type" ] )
+    for branch in prop_schema.get( "anyOf", [] ):
+        if "type" in branch:
+            opts.add( branch[ "type" ] )
+    return opts
+
+
+class TestDismissSessionsWrapperSchema:
+    """(a)/(b): the regenerated tool schema must type the params (regression lock)."""
+
+    def test_session_names_schema_is_array_of_strings( self, cv_mcp ):
+        sn = cv_mcp.dismiss_sessions.parameters[ "properties" ][ "session_names" ]
+        assert "array" in _type_options( sn ), f"session_names must allow array, got {sn}"
+        array_branch = sn if sn.get( "type" ) == "array" else next(
+            b for b in sn.get( "anyOf", [] ) if b.get( "type" ) == "array"
+        )
+        assert array_branch[ "items" ][ "type" ] == "string", \
+            f"session_names items must be strings, got {array_branch}"
+
+    def test_write_memento_schema_is_boolean( self, cv_mcp ):
+        wm = cv_mcp.dismiss_sessions.parameters[ "properties" ][ "write_memento" ]
+        assert "boolean" in _type_options( wm ), f"write_memento must allow boolean, got {wm}"
+
+    def test_reason_schema_unchanged_string( self, cv_mcp ):
+        # Control: the already-typed sibling param stays a plain string.
+        reason = cv_mcp.dismiss_sessions.parameters[ "properties" ][ "reason" ]
+        assert reason[ "type" ] == "string"
+
+
+class TestDismissSessionsWrapperCoercion:
+    """(c)-(d): drive FastMCP's deserialization; list/bool must survive intact."""
+
+    def _patch_wrapper_deps( self, cv_mcp, monkeypatch, captured, write_memento_default=True ):
+        """
+        Stub the wrapper's host-side collaborators so the only behavior under
+        test is FastMCP arg-coercion + the wrapper's write_memento ternary.
+        The inner `session_spawner.dismiss_sessions` is replaced by a spy that
+        records exactly what it received.
+        """
+        import lupin_mcp.session_spawner as ss
+
+        def _spy_dismiss( manager_session_id, *, session_names=None, reason="", write_memento=True, **_kw ):
+            captured[ "manager" ]       = manager_session_id
+            captured[ "session_names" ] = session_names
+            captured[ "reason" ]        = reason
+            captured[ "write_memento" ] = write_memento
+            return { "dismissed": [], "remaining": [], "manager_session_id": manager_session_id }
+
+        monkeypatch.setattr( cv_mcp, "_wait_for_sender_id", lambda: "sender" )
+        monkeypatch.setattr( cv_mcp, "_get_cc_metadata",   lambda: { "session_id": "abc12345" } )
+        monkeypatch.setattr( cv_mcp, "_spawn_config_mgr",  lambda: None )
+        monkeypatch.setattr( ss, "resolve_manager_identity",
+                             lambda meta, fallback_session_id=None: ( "mgr-sid", "Krishna" ) )
+        monkeypatch.setattr( ss, "resolve_spawn_config",
+                             lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
+                                           "write_memento_default": write_memento_default } )
+        monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
+
+    def test_list_arg_arrives_as_list_not_chars( self, cv_mcp, monkeypatch ):
+        """A two-item list must reach the inner fn as a real list — NOT char-iterated."""
+        captured = {}
+        self._patch_wrapper_deps( cv_mcp, monkeypatch, captured )
+        asyncio.run( cv_mcp.dismiss_sessions.run(
+            { "session_names": [ "alpha", "beta" ], "write_memento": False, "reason": "cleanup" }
+        ) )
+        assert isinstance( captured[ "session_names" ], list )
+        assert captured[ "session_names" ] == [ "alpha", "beta" ]   # not ['a','l','p','h','a',...]
+        assert captured[ "reason" ] == "cleanup"
+
+    def test_write_memento_false_stays_bool_not_string( self, cv_mcp, monkeypatch ):
+        """write_memento=False must reach the inner fn as bool False, NOT the string 'false'."""
+        captured = {}
+        self._patch_wrapper_deps( cv_mcp, monkeypatch, captured )
+        asyncio.run( cv_mcp.dismiss_sessions.run(
+            { "session_names": [ "x" ], "write_memento": False }
+        ) )
+        assert captured[ "write_memento" ] is False                 # explicit-value ternary arm
+
+    def test_none_session_names_and_ini_default_write_memento( self, cv_mcp, monkeypatch ):
+        """
+        Omitting both args: session_names → None (inner reaps all), and
+        write_memento → the INI default (the `write_memento is None` ternary arm).
+        """
+        captured = {}
+        self._patch_wrapper_deps( cv_mcp, monkeypatch, captured, write_memento_default=True )
+        asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
+        assert captured[ "session_names" ] is None
+        assert captured[ "write_memento" ] is True                  # came from cfg default, not "false"
