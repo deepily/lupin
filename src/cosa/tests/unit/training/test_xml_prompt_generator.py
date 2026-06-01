@@ -72,12 +72,36 @@ class TestXmlPromptGenerator( unittest.TestCase ):
     def tearDown( self ):
         """
         Cleanup after each test method.
-        
+
         Ensures:
             - All mocks are reset
         """
         self.mock_manager.reset_mocks()
-    
+
+    def _mock_command_loading( self ):
+        """
+        Returns a patch.multiple context that makes the JSON-config command
+        getters inert ( each returns {} ), so the constructor performs no real
+        file I/O and never triggers _test_command_paths during __init__.
+
+        Requires:
+            - XmlPromptGenerator exposes the six private command-dictionary getters
+
+        Ensures:
+            - Returns an unentered patch.multiple context manager
+            - Under it, construction loads empty command dictionaries
+            - _test_command_paths is NOT invoked during construction
+        """
+        return patch.multiple(
+            XmlPromptGenerator,
+            _get_compound_vox_commands                    = MagicMock( return_value={} ),
+            _get_simple_vox_commands                      = MagicMock( return_value={} ),
+            _get_compound_agent_router_commands           = MagicMock( return_value={} ),
+            _get_simple_agent_router_commands             = MagicMock( return_value={} ),
+            _get_agentic_job_commands                     = MagicMock( return_value={} ),
+            _get_compound_agent_function_mapping_commands = MagicMock( return_value={} ),
+        )
+
     def test_initialization_success( self ):
         """
         Test successful XmlPromptGenerator initialization.
@@ -88,15 +112,18 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Loads interjections and salutations
             - Validates command paths
         """
-        with patch( 'cosa.training.xml_prompt_generator.du.get_project_root' ) as mock_root, \
-             patch.object( XmlPromptGenerator, '_test_command_paths' ) as mock_test_paths, \
+        # Live contract: __init__ loads command dictionaries from JSON config files
+        # ( open + json.load ) and validates their paths via _test_command_paths.
+        # Mock the file I/O so the real getters run and exercise the path-test seam.
+        with patch.object( XmlPromptGenerator, '_test_command_paths' ) as mock_test_paths, \
              patch.object( XmlPromptGenerator, 'get_interjections' ) as mock_get_interjections, \
-             patch.object( XmlPromptGenerator, 'get_salutations' ) as mock_get_salutations:
-            
-            mock_root.return_value = "/default/path"
+             patch.object( XmlPromptGenerator, 'get_salutations' ) as mock_get_salutations, \
+             patch( 'builtins.open', mock_open( read_data="{}" ) ), \
+             patch( 'json.load', return_value={} ):
+
             mock_get_interjections.return_value = self.test_interjections
             mock_get_salutations.return_value = self.test_salutations
-            
+
             generator = XmlPromptGenerator(
                 path_prefix=self.test_path_prefix,
                 debug=True,
@@ -131,19 +158,22 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Uses default values for optional parameters
             - Default path prefix is used
         """
-        with patch( 'cosa.training.xml_prompt_generator.du.get_project_root' ) as mock_root, \
-             patch.object( XmlPromptGenerator, '_test_command_paths' ), \
+        with patch.object( XmlPromptGenerator, '_test_command_paths' ), \
              patch.object( XmlPromptGenerator, 'get_interjections' ) as mock_get_interjections, \
-             patch.object( XmlPromptGenerator, 'get_salutations' ) as mock_get_salutations:
-            
-            mock_root.return_value = "/default/path"
+             patch.object( XmlPromptGenerator, 'get_salutations' ) as mock_get_salutations, \
+             patch( 'builtins.open', mock_open( read_data="{}" ) ), \
+             patch( 'json.load', return_value={} ):
+
             mock_get_interjections.return_value = []
             mock_get_salutations.return_value = []
-            
+
             generator = XmlPromptGenerator()
-            
-            # Verify default values
-            self.assertEqual( generator.path_prefix, "/default/path" )
+
+            # Live contract: the default path_prefix is `du.get_project_root()` evaluated
+            # at function-DEFINITION time ( eager default ), so it is bound once at import
+            # and cannot be overridden by patching get_project_root after import. Assert
+            # against that captured default rather than a runtime-patched value.
+            self.assertEqual( generator.path_prefix, XmlPromptGenerator.__init__.__defaults__[ 0 ] )
             self.assertFalse( generator.debug )
             self.assertFalse( generator.verbose )
             self.assertFalse( generator.silent )
@@ -162,10 +192,13 @@ class TestXmlPromptGenerator( unittest.TestCase ):
              patch.object( XmlPromptGenerator, 'get_salutations' ):
             
             mock_get_file.return_value = ["wow", "hey", "oh", "hmm"]
-            
+
             generator = XmlPromptGenerator()
+            # __init__ itself calls get_interjections() ( line 62 ), so reset the mock
+            # to isolate the explicit call we are exercising here.
+            mock_get_file.reset_mock()
             result = generator.get_interjections()
-            
+
             # Verify file loading
             mock_get_file.assert_called_once()
             call_args = mock_get_file.call_args[0][0]
@@ -207,25 +240,33 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Generates salutations with names
             - Returns requested number of salutations
         """
-        with patch( 'cosa.training.xml_prompt_generator.du.get_file_as_list' ) as mock_get_file, \
-             patch.object( XmlPromptGenerator, '_test_command_paths' ), \
-             patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch( 'random.choice' ) as mock_choice:
-            
-            mock_get_file.return_value = ["Computer1", "Computer2", "Computer3"]
-            mock_choice.side_effect = ["Computer1", "Computer2"]  # For two calls
-            
-            generator = XmlPromptGenerator()
+        # Live contract: get_salutations reads TWO placeholder files ( receptionist
+        # names, then receptionist salutations ) and substitutes the COMPUTER_NAME
+        # placeholder with a randomly-chosen name.
+        with self._mock_command_loading(), \
+             patch( 'cosa.training.xml_prompt_generator.du.get_file_as_list' ) as mock_get_file, \
+             patch.object( XmlPromptGenerator, 'get_interjections', return_value=[] ), \
+             patch( 'random.choice', return_value="Alice" ):
+
+            def fake_get_file( path, **kwargs ):
+                # Names file vs salutations file are distinguished by filename.
+                return [ "Alice", "Bob" ] if "names" in path else [ "hello COMPUTER_NAME", "hi COMPUTER_NAME" ]
+
+            # Function side_effect is reusable, so the __init__ call to get_salutations
+            # consumes it harmlessly; reset only the call counters before the explicit call.
+            mock_get_file.side_effect = fake_get_file
+
+            generator = XmlPromptGenerator( path_prefix="/test/path" )
+            mock_get_file.reset_mock()
+
             result = generator.get_salutations( requested_length=2 )
-            
-            # Verify file loading
-            mock_get_file.assert_called_once()
-            call_args = mock_get_file.call_args[0][0]
-            self.assertIn( "computer-names", call_args )
-            
-            # Verify result
-            self.assertEqual( len( result ), 2 )
-            self.assertTrue( all( "Computer" in item for item in result ) )
+
+            # Verify both placeholder files were read, salutations file last
+            self.assertEqual( mock_get_file.call_count, 2 )
+            self.assertIn( "receptionist-salutations", mock_get_file.call_args[0][0] )
+
+            # Verify result: COMPUTER_NAME substituted with the chosen name
+            self.assertEqual( result, [ "hello Alice", "hi Alice" ] )
     
     def test_insert_interjection_success( self ):
         """
@@ -276,18 +317,20 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             
             mock_choice.return_value = "hey"
             mock_randint.return_value = 0
-            
+
             # Mock get_interjections to return specific list
             with patch.object( XmlPromptGenerator, 'get_interjections' ) as mock_get_interjections:
                 mock_get_interjections.return_value = ["hey", "wow"]
-                
+
                 generator = XmlPromptGenerator()
                 result = generator.insert_interjection( "test text" )
-                
-                # Verify interjection was used
+
+                # Verify interjection was used. Live contract: when inserted at
+                # index 0 the interjection is Capitalized, so "hey" -> "Hey".
                 chosen_interjection, modified_text = result
                 self.assertEqual( chosen_interjection, "hey" )
-                self.assertIn( "hey", modified_text )
+                self.assertIn( "Hey", modified_text )
+                self.assertTrue( modified_text.startswith( "Hey" ) )
     
     def test_prepend_salutation_success( self ):
         """
@@ -328,27 +371,28 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Returns correct template for known names
             - Templates are properly formatted
         """
-        with patch.object( XmlPromptGenerator, '_test_command_paths' ), \
-             patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch.object( XmlPromptGenerator, 'get_salutations' ):
-            
-            generator = XmlPromptGenerator()
-            
-            # Test known template names
-            template_names = [
-                "vox_cmd_instruction_template",
-                "agent_router_instruction_template"
+        # Live contract: get_prompt_template accepts only "vox command" or
+        # "agent router" and returns a fully-formatted, de-indented prompt string
+        # embedding the appropriate command-block markup.
+        with self._mock_command_loading(), \
+             patch.object( XmlPromptGenerator, 'get_interjections', return_value=[] ), \
+             patch.object( XmlPromptGenerator, 'get_salutations', return_value=[] ):
+
+            generator = XmlPromptGenerator( path_prefix="/test/path" )
+
+            cases = [
+                ( "vox command",  "<browser-commands>" ),
+                ( "agent router", "<agent-routing-commands>" ),
             ]
-            
-            for name in template_names:
+
+            for name, command_block in cases:
                 with self.subTest( template_name=name ):
-                    # Set a mock template
-                    setattr( generator, name, f"Mock template for {name}" )
-                    
                     result = generator.get_prompt_template( name )
-                    
-                    self.assertEqual( result, f"Mock template for {name}" )
+
                     self.assertIsInstance( result, str )
+                    self.assertIn( command_block, result )
+                    self.assertIn( "### Instruction:", result )
+                    self.assertIn( "### Response:", result )
     
     def test_get_prompt_template_unknown( self ):
         """
@@ -358,17 +402,18 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Raises ValueError for unknown template names
             - Provides descriptive error message
         """
-        with patch.object( XmlPromptGenerator, '_test_command_paths' ), \
-             patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch.object( XmlPromptGenerator, 'get_salutations' ):
-            
-            generator = XmlPromptGenerator()
-            
+        with self._mock_command_loading(), \
+             patch.object( XmlPromptGenerator, 'get_interjections', return_value=[] ), \
+             patch.object( XmlPromptGenerator, 'get_salutations', return_value=[] ):
+
+            generator = XmlPromptGenerator( path_prefix="/test/path" )
+
             with self.assertRaises( ValueError ) as context:
                 generator.get_prompt_template( "unknown_template" )
-            
+
+            # Live contract: message reads "Unknown prompt template name [...]"
             error_message = str( context.exception )
-            self.assertIn( "Unknown template name", error_message )
+            self.assertIn( "Unknown prompt template name", error_message )
             self.assertIn( "unknown_template", error_message )
     
     def test_get_prompt_instruction_format( self ):
@@ -399,95 +444,74 @@ class TestXmlPromptGenerator( unittest.TestCase ):
     
     def test_get_prompt_with_output( self ):
         """
-        Test prompt generation with output.
-        
+        Test prompt generation when an output argument is supplied.
+
+        Live contract note: get_prompt accepts an `output` parameter but the
+        current implementation does NOT incorporate it into the returned prompt
+        ( the body never references `output`; all production callers pass "" ).
+        This test pins the actual behaviour — the output text is NOT embedded —
+        and is flagged as a vestigial-parameter smell for manager review.
+
         Ensures:
-            - Includes output section when provided
-            - Formats all sections correctly
+            - Returns a formatted prompt with instruction + input embedded
+            - The "### Response:" trailer is always present
+            - The supplied output is NOT embedded ( vestigial parameter )
         """
-        with patch.object( XmlPromptGenerator, '_test_command_paths' ), \
-             patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch.object( XmlPromptGenerator, 'get_salutations' ):
-            
-            generator = XmlPromptGenerator()
-            
+        with self._mock_command_loading(), \
+             patch.object( XmlPromptGenerator, 'get_interjections', return_value=[] ), \
+             patch.object( XmlPromptGenerator, 'get_salutations', return_value=[] ):
+
+            generator = XmlPromptGenerator( path_prefix="/test/path" )
+
             instruction = "Test instruction"
             input_text = "Test input"
             output = "Test output"
-            
+
             result = generator.get_prompt( instruction, input_text, output )
-            
+
             # Verify format
             self.assertIsInstance( result, str )
             self.assertIn( instruction, result )
             self.assertIn( input_text, result )
-            self.assertIn( output, result )
             self.assertIn( "### Response:", result )
+            # Vestigial-parameter contract: output is accepted but not embedded
+            self.assertNotIn( output, result )
     
     def test_get_prompt_without_output( self ):
         """
-        Test prompt generation without output.
-        
+        Test prompt generation without an output argument.
+
+        Live contract: _get_prompt_instruction_format ALWAYS appends a trailing
+        "### Response:" section, whether or not output is supplied — so the
+        trailer is present even in the no-output case.
+
         Ensures:
-            - Omits output section when not provided
-            - Formats instruction and input correctly
+            - Returns a formatted prompt with instruction + input embedded
+            - The "### Response:" trailer is present ( always emitted )
         """
-        with patch.object( XmlPromptGenerator, '_test_command_paths' ), \
-             patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch.object( XmlPromptGenerator, 'get_salutations' ):
-            
-            generator = XmlPromptGenerator()
-            
+        with self._mock_command_loading(), \
+             patch.object( XmlPromptGenerator, 'get_interjections', return_value=[] ), \
+             patch.object( XmlPromptGenerator, 'get_salutations', return_value=[] ):
+
+            generator = XmlPromptGenerator( path_prefix="/test/path" )
+
             instruction = "Test instruction"
             input_text = "Test input"
-            
+
             result = generator.get_prompt( instruction, input_text )
-            
+
             # Verify format
             self.assertIsInstance( result, str )
             self.assertIn( instruction, result )
             self.assertIn( input_text, result )
-            self.assertNotIn( "### Response:", result )
+            self.assertIn( "### Response:", result )
     
-    def test_format_gpt_message( self ):
-        """
-        Test GPT message formatting.
-        
-        Ensures:
-            - Creates proper GPT message structure
-            - Includes all required fields
-            - Uses correct roles
-        """
-        with patch.object( XmlPromptGenerator, '_test_command_paths' ), \
-             patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch.object( XmlPromptGenerator, 'get_salutations' ):
-            
-            generator = XmlPromptGenerator()
-            # Mock the output template
-            generator.common_output_template = Mock()
-            generator.common_output_template.format.return_value = "formatted_output"
-            
-            result = generator.format_gpt_message(
-                "test_instruction",
-                "test_voice_command",
-                "test_command",
-                "test_args"
-            )
-            
-            # Verify structure
-            self.assertIsInstance( result, dict )
-            self.assertIn( "messages", result )
-            self.assertEqual( len( result["messages"] ), 3 )
-            
-            # Verify message roles and content
-            messages = result["messages"]
-            self.assertEqual( messages[0]["role"], "system" )
-            self.assertEqual( messages[0]["content"], "test_instruction" )
-            self.assertEqual( messages[1]["role"], "user" )
-            self.assertEqual( messages[1]["content"], "test_voice_command" )
-            self.assertEqual( messages[2]["role"], "assistant" )
-            self.assertEqual( messages[2]["content"], "formatted_output" )
-    
+    # NOTE: test_format_gpt_message was REMOVED ( 2026-06-01, Rio ⚡ WAVE-2 training lane ).
+    # It exercised XmlPromptGenerator.format_gpt_message, a method that has NEVER existed
+    # in the tracked production source ( `git log -S format_gpt_message` on the prod file
+    # returns nothing; zero non-test references repo-wide ). With no live contract to bind,
+    # the stale test is deleted rather than rewritten.
+
     def test_serialize_prompt( self ):
         """
         Test prompt serialization to file.
@@ -496,21 +520,23 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Writes prompt to specified file
             - Handles file operations correctly
         """
-        with patch.object( XmlPromptGenerator, '_test_command_paths' ), \
-             patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch.object( XmlPromptGenerator, 'get_salutations' ), \
-             patch( 'builtins.open', mock_open() ) as mock_file:
-            
-            generator = XmlPromptGenerator()
-            
+        # Live contract: serialize_prompt writes via du.write_string_to_file( path, prompt )
+        # where path = self.path_prefix + prompt_path ( NOT a bare open(path,"w") ).
+        with self._mock_command_loading(), \
+             patch.object( XmlPromptGenerator, 'get_interjections', return_value=[] ), \
+             patch.object( XmlPromptGenerator, 'get_salutations', return_value=[] ), \
+             patch( 'cosa.training.xml_prompt_generator.du.write_string_to_file' ) as mock_write, \
+             patch( 'cosa.training.xml_prompt_generator.du.print_banner' ):
+
+            generator = XmlPromptGenerator( path_prefix="/test/path" )
+
             test_prompt = "This is a test prompt"
             test_path = "/path/to/prompt.txt"
-            
+
             generator.serialize_prompt( test_prompt, test_path )
-            
-            # Verify file operations
-            mock_file.assert_called_once_with( test_path, "w" )
-            mock_file().write.assert_called_once_with( test_prompt )
+
+            # Verify the write goes to path_prefix-joined path with the prompt body
+            mock_write.assert_called_once_with( "/test/path/path/to/prompt.txt", test_prompt )
     
     def test_serialize_prompts( self ):
         """
@@ -554,19 +580,24 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Validates all command paths exist
             - Prints status when not silent
         """
-        with patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch.object( XmlPromptGenerator, 'get_salutations' ), \
+        # Make construction inert ( command getters mocked ) so os.path.exists is
+        # exercised ONLY by the explicit _test_command_paths call below, not by __init__.
+        with self._mock_command_loading(), \
+             patch.object( XmlPromptGenerator, 'get_interjections', return_value=[] ), \
+             patch.object( XmlPromptGenerator, 'get_salutations', return_value=[] ), \
              patch( 'os.path.exists' ) as mock_exists, \
              patch( 'builtins.print' ) as mock_print:
-            
+
             mock_exists.return_value = True
-            
+
             generator = XmlPromptGenerator( debug=True, silent=False )
+            mock_exists.reset_mock()
+            mock_print.reset_mock()
             generator._test_command_paths( self.test_commands )
-            
-            # Verify path checking
+
+            # Verify path checking: one existence check per command
             self.assertEqual( mock_exists.call_count, len( self.test_commands ) )
-            
+
             # Verify debug output
             self.assertGreater( mock_print.call_count, 0 )
     
@@ -578,14 +609,17 @@ class TestXmlPromptGenerator( unittest.TestCase ):
             - Raises exception for missing files
             - Provides descriptive error message
         """
-        with patch.object( XmlPromptGenerator, 'get_interjections' ), \
-             patch.object( XmlPromptGenerator, 'get_salutations' ), \
+        # Make construction inert ( command getters mocked ) so the missing-file
+        # exception is raised by the explicit call, not during __init__ validation.
+        with self._mock_command_loading(), \
+             patch.object( XmlPromptGenerator, 'get_interjections', return_value=[] ), \
+             patch.object( XmlPromptGenerator, 'get_salutations', return_value=[] ), \
              patch( 'os.path.exists' ) as mock_exists:
-            
+
             mock_exists.return_value = False
-            
-            generator = XmlPromptGenerator()
-            
+
+            generator = XmlPromptGenerator( path_prefix="/test/path" )
+
             with self.assertRaises( Exception ) as context:
                 generator._test_command_paths( self.test_commands )
             
@@ -644,7 +678,6 @@ def isolated_unit_test():
             'test_insert_interjection_success',
             'test_prepend_salutation_success',
             'test_get_prompt_instruction_format',
-            'test_format_gpt_message',
             'test_serialize_prompts',
             'test_error_handling_file_operations'
         ]

@@ -142,7 +142,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - Returns properly structured configuration dictionary
             - Contains all required configuration sections
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             # Create mock module with all required config attributes
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
@@ -200,7 +200,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - Propagates import errors from missing modules
             - Handles module import failures gracefully
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             import_error = ImportError( "No module named 'test_module'" )
             mock_import.side_effect = import_error
             
@@ -220,7 +220,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - Parameter types are correct
             - Values are within expected ranges
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
             mock_module.lora_config = self.sample_config["lora_config"]
@@ -258,7 +258,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - Parameter types are correct
             - Target modules are properly specified
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
             mock_module.lora_config = self.sample_config["lora_config"]
@@ -300,7 +300,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - Padding configuration is properly structured
             - Parameter types are correct
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
             mock_module.lora_config = self.sample_config["lora_config"]
@@ -339,7 +339,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - Prompt template is properly formatted
             - Last tag function is callable
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
             mock_module.lora_config = self.sample_config["lora_config"]
@@ -376,7 +376,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - No missing configuration sections
             - All configurations follow same structure
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             # Create mock module with all required config attributes
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
@@ -405,7 +405,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - Handles missing configuration attributes gracefully
             - Provides appropriate error messages
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             # Create mock module missing some config attributes
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
@@ -430,7 +430,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - Package parameter is set correctly
             - Module resolution works for all models
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
             mock_module.lora_config = self.sample_config["lora_config"]
@@ -459,7 +459,7 @@ class TestModelConfigurations( unittest.TestCase ):
             - No data corruption during loading process
             - Consistent data types across loads
         """
-        with patch( 'cosa.training.conf.import_module' ) as mock_import:
+        with patch( 'cosa.training.conf.model_config_loader.import_module' ) as mock_import:
             mock_module = Mock()
             mock_module.fine_tune_config = self.sample_config["fine_tune_config"]
             mock_module.lora_config = self.sample_config["lora_config"]
