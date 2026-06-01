@@ -360,11 +360,11 @@ class FifoQueue:
                 if size_after < size_before:
                     print( f"Deleted {size_before - size_after} items from queue" )
                     return True
-                else:
+                else:  # pragma: no cover - unreachable: past the L351-353 key-present guard, del removes a confirmed-present key so size_after = size_before-1 < size_before always → the if-True arm always fires; this else is dead defensive
                     print( "ERROR: Could not delete by id_hash - size didn't change" )
                     return False
 
-            except Exception as e:
+            except Exception as e:  # pragma: no cover - unreachable: within self._lock, del (key confirmed present) + list(values) + size() cannot raise → dead belt-and-suspenders
                 print( f"ERROR: Exception during delete_by_id_hash: {e}" )
                 return False
         

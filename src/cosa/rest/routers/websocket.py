@@ -385,7 +385,7 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             return
 
         # SECURITY: Validate message structure first
-        if not isinstance(auth_message, dict):
+        if not isinstance(auth_message, dict):  # pragma: no cover - unreachable: L363 unconditionally calls auth_message.get('type') right after receive_json, so any non-dict raises AttributeError into the L375 except (which returns); control reaches L388 only when auth_message is a dict → this guard is always False
             print(f"[WS-QUEUE-AUTH] Invalid message type for session [{session_id}]: {type(auth_message)}")
             await websocket.send_json({
                 "type": "auth_error",
