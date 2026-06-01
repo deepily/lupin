@@ -833,7 +833,7 @@ async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketMana
             
     except Exception as e:
         print(f"[TTS-HYBRID] General error: {e}")
-        if websocket:
+        if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L773-775)
             try:
                 await websocket.send_json({
                     "type": "error", 
@@ -936,8 +936,9 @@ async def stream_tts_elevenlabs(
         print( f"{msg}" )
         print( f"[TTS-ELEVENLABS] <<<<" )
         
-        # Get app_verbose from main module (same pattern as other dependencies)
+        # Get app_debug / app_verbose from main module (same pattern as other dependencies)
         import fastapi_app.main as main_module
+        app_debug   = main_module.app_debug
         app_verbose = main_module.app_verbose
         
         if app_verbose:
@@ -1122,7 +1123,7 @@ Speed            : {speed:.2f}"""
             
     except websockets.exceptions.ConnectionClosed:
         print(f"[TTS-ELEVENLABS] ElevenLabs WebSocket connection closed")
-        if websocket:
+        if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L895-897)
             try:
                 await websocket.send_json({
                     "type": "error",
@@ -1135,7 +1136,7 @@ Speed            : {speed:.2f}"""
                 
     except Exception as e:
         print(f"[TTS-ELEVENLABS] Error: {e}")
-        if websocket:
+        if websocket:  # pragma: no branch  # unreachable False arc: falsy websocket already returned at the top guard (L895-897)
             try:
                 await websocket.send_json({
                     "type": "error",
