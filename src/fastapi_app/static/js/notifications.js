@@ -3500,6 +3500,44 @@ class NotificationsUI {
     }
 
     /**
+     * Insert transcribed text into a text input / textarea at the caret.
+     *
+     * Replaces only the currently-highlighted range (if any); otherwise
+     * inserts at the caret without disturbing surrounding text. The caret is
+     * left immediately after the inserted text so the user can keep typing or
+     * dictate again to append. When the element exposes no caret position
+     * (e.g. it was never focused), the text is appended to the end rather than
+     * overwriting the whole field.
+     *
+     * @param {HTMLInputElement|HTMLTextAreaElement} inputElement - target field
+     * @param {string} text - transcription to insert
+     */
+    _insertTranscriptionText( inputElement, text ) {
+        const existing = inputElement.value;
+        let start = inputElement.selectionStart;
+        let end   = inputElement.selectionEnd;
+
+        // Some elements expose no caret (e.g. never focused, or input types
+        // that don't support text selection). In that case append to the end
+        // rather than overwriting, and skip caret positioning below since
+        // setSelectionRange would throw on such elements.
+        const hasCaret = ( start !== null && start !== undefined );
+        if ( !hasCaret ) {
+            start = existing.length;
+            end   = existing.length;
+        }
+
+        inputElement.value = existing.slice( 0, start ) + text + existing.slice( end );
+
+        inputElement.focus();
+        if ( hasCaret ) {
+            // Place the caret immediately after the inserted text.
+            const caret = start + text.length;
+            inputElement.setSelectionRange( caret, caret );
+        }
+    }
+
+    /**
      * Generic STT button click handler for job submission cards.
      * Reuses the existing recording infrastructure.
      *
@@ -3659,10 +3697,10 @@ class NotificationsUI {
                         onTranscription: ( text ) => {
                             self.ui.log( `Transcription received for ${contextId}: "${text}"` );
 
-                            // Fill text input
-                            inputElement.value = text;
-                            inputElement.focus();
-                            inputElement.select();
+                            // Insert at the caret, replacing only highlighted text.
+                            // `self` is the recordingManager; the helper lives on
+                            // the NotificationsUI instance reachable via `self.ui`.
+                            self.ui._insertTranscriptionText( inputElement, text );
 
                             // Trigger input event for validation
                             inputElement.dispatchEvent( new Event( 'input', { bubbles: true } ) );

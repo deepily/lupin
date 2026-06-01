@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.01 - Session 78c4780f (Krishna 🦚) | STT recording button: select-all+overwrite → insert-at-caret
+
+**Voice-driven fix on `wip-v0.1.8` (checkpoint, not pushed).** Changed the notifications-client recording button so transcribed text is **inserted at the caret** instead of selecting-all + overwriting the whole field; a highlighted range is still replaced (the one intentional overwrite case), and the caret lands after the inserted text so repeated dictation appends. Extracted the logic into a reusable `_insertTranscriptionText( inputElement, text )` helper on `NotificationsUI` — all 8 STT contexts (qa, cc-prompt, research, podcast, swe, presentation, broadcast, session-rename) funnel through the one `onTranscription` callback, so the fix is universal.
+
+**Runtime bug caught + fixed live:** first cut called the helper as `self._insertTranscriptionText`, but in that callback `self` is the `recordingManager` object literal, not the page controller — `not a function` at runtime. Corrected to `self.ui._insertTranscriptionText` (`recordingManager.ui` is the `NotificationsUI` instance, same `self.ui` already used for logging). Rick confirmed working in the browser.
+
+**Tests** (`src/tests/e2e_ui/test_stt_insert_at_cursor.py`, new — 8 Playwright cases): empty/start/mid/end insert, highlighted-replace, full-select-replace, null-caret append fallback, plus a **wiring-chain guard** (`recordingManager.ui === notificationsUI` + helper resolves) added specifically because the direct-helper tests would NOT have caught the `self` binding bug. Verified `node --check` + `py_compile`; full E2E deferred to a scheduled `:8000` slot. **Files:** `static/js/notifications.js`, new e2e test.
+
+---
+
 ### 2026.06.01 - Session 3047b30f (Tiberius 👑) | CoSA coverage Run-2: zombie reap → fleet recovery → 3 agent packages @ 100% + prod bug #11
 
 **Ran the CoSA 100%-coverage Run-2 fleet end-to-end as manager; 10 test-only commits banked on `wip-v0.1.8`, pushed at Rick's session-end go (66 commits total to remote — the whole held campaign).** Opened by reaping **11 zombie `cc_notification_listener` orphans** (sessions whose parent CC/tmux died but whose detached ppid=1 listener kept polling — the PG-6 worker-shutdown bug; raw `tmux kill-session` + the bugged `dismiss_sessions` both leave them). Only the 2 with a live `claude` parent (María, me) were legit.
