@@ -400,7 +400,7 @@ class TodoFifoQueue( FifoQueue ):
                 reason = "Question cannot be empty"
             elif len( question ) > 1000:
                 reason = "Question too long (max 1000 characters)"
-            elif question.lower().startswith( "invalid" ):
+            elif question.lower().startswith( "invalid" ):  # pragma: no branch - mirror of _is_fit's startswith-invalid false-condition (L329); the block is entered only when _is_fit is False, and not-empty + not->1000 above force this True → the elif False arc (a 4th rejection reason) is unreachable
                 reason = "Question contains invalid content"
                 
             self._notify_rejection( question, websocket_id, reason )
@@ -620,7 +620,7 @@ class TodoFifoQueue( FifoQueue ):
             needs_llm_routing = True
 
         # Route through LLM if no cache match or user declined confirmation
-        if needs_llm_routing:
+        if needs_llm_routing:  # pragma: no branch - always True here: every non-returning path sets it True (L590 declined / L617 below-threshold / L620 no-snapshots); all cache-hit paths (L538/587/612) return before this → the False arc is unreachable
 
             print( "Routing through LLM (no cache match or user declined)..." )
             
@@ -714,7 +714,7 @@ class TodoFifoQueue( FifoQueue ):
             elif command in ( "agent router go to automatic", "agent router go to automatic routing mode" ):
                 previous_mode = self.clear_user_mode( user_id )
                 if previous_mode:
-                    msg = f"Switching back to automatic routing mode. Was in {previous_mode} mode."
+                    msg = f"Switching back to automatic routing mode. Was in {previous_mode} mode."  # pragma: no cover - unreachable: previous_mode is always falsy here. set_user_mode (L248-249) rejects modes not in MODE_TO_AGENT/AGENTIC_MODE_MAP, so a truthy user_mode is always map-routed (L643/650); the LLM "automatic" command only arises in the L658 else (user_mode None) → clear_user_mode (L715) returns None
                 else:
                     msg = "Automatic routing is already active."
                 print( f"[AUTO-ROUTE] User {user_id} returning to automatic routing (was: {previous_mode})" )
