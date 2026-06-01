@@ -292,7 +292,7 @@ class NotificationResponder:
                 self.stats[ "script_matcher_used" ] += 1
             elif strategy_name == "rules":
                 self.stats[ "rules_used" ] += 1
-            elif strategy_name == "llm":
+            elif strategy_name == "llm":  # pragma: no branch  # exhaustive strategy_name dispatch — answer-non-None ⟹ strategy_name in {script_matcher,rules,llm}; 291/293 False ⟹ always "llm"
                 self.stats[ "llm_used" ] += 1
 
             display_answer = answer if isinstance( answer, str ) else json.dumps( answer )[ :100 ]

@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""
+Unit tests for cosa.agents.notification_proxy.responder.NotificationResponder.
+
+The three response strategies (ExpediterRuleStrategy, LlmScriptMatcherStrategy,
+LLMFallbackStrategy), resolve_script_path, the cosa.utils.util helpers, the
+script-file open(), and requests.post are ALL boundary-mocked → no LLM, no
+network, no disk, zero API spend. Async handlers are driven via asyncio.run.
+"""
+
+import asyncio
+import json
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+
+import requests
+
+import cosa.agents.notification_proxy.responder as rr
+from cosa.agents.notification_proxy.responder import NotificationResponder
+from cosa.agents.notification_proxy.config import DEFAULT_ACCEPTED_SENDERS
+
+EXPEDITER = DEFAULT_ACCEPTED_SENDERS[ 0 ]
+
+
+def _make_responder(
+    strategy           = "auto",
+    debug              = False,
+    verbose            = False,
+    dry_run            = False,
+    script_init_raises = False,
+    script_load_raises = False,
+    sender_ids         = None,
+):
+    """Construct a NotificationResponder with all collaborators mocked."""
+    rule_mock   = MagicMock()
+    script_mock = MagicMock()
+    llm_mock    = MagicMock()
+    llm_mock.respond = AsyncMock( return_value=None )
+
+    cu_mock = MagicMock()
+    cu_mock.get_project_root.return_value = "/root"
+
+    open_mock = mock_open( read_data=json.dumps( { "sender_ids": sender_ids or [ EXPEDITER ] } ) )
+    if script_load_raises:
+        open_mock.side_effect = OSError( "no script" )
+
+    if script_init_raises:
+        script_cls = MagicMock( side_effect=RuntimeError( "script init boom" ) )
+    else:
+        script_cls = MagicMock( return_value=script_mock )
+
+    with patch.object( rr, "resolve_script_path", return_value="/s.json" ), \
+         patch.object( rr, "cu", cu_mock ), \
+         patch( "builtins.open", open_mock ), \
+         patch.object( rr, "ExpediterRuleStrategy", return_value=rule_mock ), \
+         patch.object( rr, "LlmScriptMatcherStrategy", script_cls ), \
+         patch.object( rr, "LLMFallbackStrategy", return_value=llm_mock ):
+        r = NotificationResponder(
+            profile_name = "deep_research",
+            strategy     = strategy,
+            dry_run      = dry_run,
+            debug        = debug,
+            verbose      = verbose,
+        )
+    return r, rule_mock, script_mock, llm_mock
+
+
+def _notif( **over ):
+    base = {
+        "id_hash"            : "n-123",
+        "response_requested" : True,
+        "response_type"      : "open_ended",
+        "message"            : "what topic?",
+        "title"              : "Missing: query",
+        "sender_id"          : EXPEDITER,
+    }
+    base.update( over )
+    return base
+
+
+class TestInit:
+
+    def test_auto_creates_all_strategies( self ):
+        r, rule, script, llm = _make_responder( strategy="auto", debug=True )
+        assert r.rule_strategy   is rule
+        assert r.script_strategy is script
+        assert r.llm_strategy    is llm
+        assert r.stats[ "notifications_received" ] == 0
+
+    def test_rules_mode_skips_script_strategy( self ):
+        r, _, _, _ = _make_responder( strategy="rules" )
+        assert r.script_strategy is None
+
+    def test_script_load_failure_falls_back_to_default_senders( self ):
+        r, _, _, _ = _make_responder( script_load_raises=True, debug=True )
+        # constructed without raising — accepted_senders defaulted internally
+        assert r.rule_strategy is not None
+
+    def test_script_strategy_init_failure_sets_none( self ):
+        r, _, _, _ = _make_responder( strategy="llm_script", script_init_raises=True )
+        assert r.script_strategy is None
+
+
+class TestHandleEvent:
+
+    def test_dispatches_notification_update( self ):
+        r, rule, script, llm = _make_responder()
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = False
+        llm.can_handle.return_value    = False
+        asyncio.run( r.handle_event( "notification_queue_update", _notif() ) )
+        assert r.stats[ "notifications_received" ] == 1
+
+    def test_job_state_transition_verbose( self ):
+        r, _, _, _ = _make_responder( verbose=True )
+        asyncio.run( r.handle_event( "job_state_transition",
+                                     { "job_id": "j", "from_queue": "todo", "to_queue": "run" } ) )
+
+    def test_other_event_verbose( self ):
+        r, _, _, _ = _make_responder( verbose=True )
+        asyncio.run( r.handle_event( "sys_ping", {} ) )
+
+    def test_other_event_non_verbose_noop( self ):
+        r, _, _, _ = _make_responder( verbose=False )
+        asyncio.run( r.handle_event( "sys_ping", {} ) )
+
+    def test_job_state_transition_non_verbose( self ):
+        """job_state_transition with verbose=False → inner if-False → exits quietly."""
+        r, _, _, _ = _make_responder( verbose=False )
+        asyncio.run( r.handle_event( "job_state_transition", { "job_id": "j" } ) )
+
+
+class TestHandleNotificationUpdate:
+
+    def _run( self, r, event ):
+        asyncio.run( r._handle_notification_update( event ) )
+
+    def test_skips_when_no_response_requested( self ):
+        r, _, _, _ = _make_responder( verbose=True )
+        self._run( r, _notif( response_requested=False ) )
+        assert r.stats[ "skipped" ] == 1
+
+    def test_error_when_no_notification_id( self ):
+        r, rule, script, llm = _make_responder()
+        self._run( r, _notif( id_hash=None, notification_id=None, id=None ) )
+        assert r.stats[ "errors" ] == 1
+
+    def test_nested_notification_payload_and_tier3_display( self ):
+        r, rule, script, llm = _make_responder( debug=True, verbose=True )
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = True
+        rule.respond.return_value      = "academic"
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: { "status": "ok", "message": "done" } ) ):
+            self._run( r, { "notification": _notif( abstract="ctx" ) } )
+        assert r.stats[ "responses_sent" ] == 1
+        assert r.stats[ "rules_used" ] == 1
+
+    def test_tier2_display_debug_only( self ):
+        r, rule, script, llm = _make_responder( debug=True, verbose=False )
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = True
+        rule.respond.return_value      = "academic"
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
+            self._run( r, _notif() )
+        assert r.stats[ "rules_used" ] == 1
+
+    def test_dry_run_yes_no_sends_no( self ):
+        r, _, _, _ = _make_responder( dry_run=True, verbose=True )
+        captured = {}
+        def fake_post( url, **kw ):
+            captured[ "value" ] = kw[ "json" ][ "response_value" ]
+            return MagicMock( status_code=200, json=lambda: {} )
+        with patch.object( rr.requests, "post", side_effect=fake_post ):
+            self._run( r, _notif( response_type="yes_no" ) )
+        assert captured[ "value" ] == "no"
+        assert r.stats[ "skipped" ] == 1
+
+    def test_dry_run_other_sends_cancel_non_verbose( self ):
+        r, _, _, _ = _make_responder( dry_run=True, verbose=False )
+        captured = {}
+        def fake_post( url, **kw ):
+            captured[ "value" ] = kw[ "json" ][ "response_value" ]
+            return MagicMock( status_code=200, json=lambda: {} )
+        with patch.object( rr.requests, "post", side_effect=fake_post ):
+            self._run( r, _notif( response_type="open_ended" ) )
+        assert captured[ "value" ] == "cancel"
+
+    def test_script_matcher_wins( self ):
+        r, rule, script, llm = _make_responder( debug=True )
+        script.can_handle.return_value = True
+        script.respond.return_value    = "from-script"
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
+            self._run( r, _notif() )
+        assert r.stats[ "script_matcher_used" ] == 1
+
+    def test_script_can_handle_but_returns_none_falls_through_to_rules( self ):
+        r, rule, script, llm = _make_responder()
+        script.can_handle.return_value = True
+        script.respond.return_value    = None
+        rule.can_handle.return_value   = True
+        rule.respond.return_value      = "from-rules"
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
+            self._run( r, _notif() )
+        assert r.stats[ "rules_used" ] == 1
+
+    def test_llm_fallback_wins_with_dict_answer( self ):
+        r, rule, script, llm = _make_responder( debug=True, verbose=True )
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = False
+        llm.can_handle.return_value    = True
+        llm.respond = AsyncMock( return_value={ "answers": { "a": "b" } } )   # dict → json.dumps display path
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: {} ) ):
+            self._run( r, _notif() )
+        assert r.stats[ "llm_used" ] == 1
+
+    def test_no_strategy_answers_skips( self ):
+        r, rule, script, llm = _make_responder()
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = False
+        llm.can_handle.return_value    = False
+        self._run( r, _notif() )
+        assert r.stats[ "skipped" ] == 1
+
+    def test_rule_can_handle_but_returns_none( self ):
+        """rule.can_handle True but respond None → answer stays None (272->276 arc)."""
+        r, rule, script, llm = _make_responder()
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = True
+        rule.respond.return_value      = None
+        llm.can_handle.return_value    = False
+        self._run( r, _notif() )
+        assert r.stats[ "skipped" ] == 1
+
+    def test_llm_can_handle_but_returns_none( self ):
+        """llm.can_handle True but respond None → answer stays None (278->281 arc)."""
+        r, rule, script, llm = _make_responder()
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = False
+        llm.can_handle.return_value    = True
+        llm.respond = AsyncMock( return_value=None )
+        self._run( r, _notif() )
+        assert r.stats[ "skipped" ] == 1
+
+    def test_submit_failure_counts_error( self ):
+        r, rule, script, llm = _make_responder()
+        script.can_handle.return_value = False
+        rule.can_handle.return_value   = True
+        rule.respond.return_value      = "academic"
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=500, text="err" ) ):
+            self._run( r, _notif() )
+        assert r.stats[ "errors" ] == 1
+
+
+class TestSubmitResponse:
+
+    def test_success_verbose( self ):
+        r, _, _, _ = _make_responder( verbose=True )
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200, json=lambda: { "status": "ok", "message": "m" } ) ):
+            assert r._submit_response( "n1", "yes" ) is True
+
+    def test_success_non_verbose( self ):
+        r, _, _, _ = _make_responder( verbose=False )
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=200 ) ):
+            assert r._submit_response( "n1", "yes" ) is True
+
+    def test_non_200_returns_false( self ):
+        r, _, _, _ = _make_responder()
+        with patch.object( rr.requests, "post", return_value=MagicMock( status_code=403, text="nope" ) ):
+            assert r._submit_response( "n1", "yes" ) is False
+
+    def test_connection_error_returns_false( self ):
+        r, _, _, _ = _make_responder()
+        with patch.object( rr.requests, "post", side_effect=requests.ConnectionError() ):
+            assert r._submit_response( "n1", "yes" ) is False
+
+    def test_timeout_returns_false( self ):
+        r, _, _, _ = _make_responder()
+        with patch.object( rr.requests, "post", side_effect=requests.Timeout() ):
+            assert r._submit_response( "n1", "yes" ) is False
+
+    def test_generic_exception_returns_false( self ):
+        r, _, _, _ = _make_responder()
+        with patch.object( rr.requests, "post", side_effect=ValueError( "weird" ) ):
+            assert r._submit_response( "n1", "yes" ) is False
+
+
+class TestPrintStats:
+
+    def test_print_stats_runs( self ):
+        r, _, _, _ = _make_responder()
+        r.print_stats()   # smoke — exercises the stats-formatting loop
