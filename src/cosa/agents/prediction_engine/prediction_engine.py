@@ -987,7 +987,7 @@ class PredictionEngine:
         """
         if self._llm_client is None:
             try:
-                from cosa.agents.llm_client import LlmClientFactory
+                from cosa.agents.llm_client_factory import LlmClientFactory
                 factory          = LlmClientFactory()
                 self._llm_client = factory.get_client( self._llm_spec_key, debug=self.debug )
             except Exception as e:
