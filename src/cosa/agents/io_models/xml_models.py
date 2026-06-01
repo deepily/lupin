@@ -1627,7 +1627,7 @@ class BugInjectionResponse( BaseXMLModel ):
         Raises:
             ValueError: If bug code is empty or invalid
         """
-        if not isinstance( v, str ):
+        if not isinstance( v, str ):  # pragma: no cover - field_validator(mode=after) always receives a Pydantic-coerced str; a non-str value raises ValidationError before this guard
             raise ValueError( "Bug code must be a string" )
         
         cleaned = v.strip()
@@ -2640,7 +2640,7 @@ class ConfirmationResponse( BaseXMLModel ):
         base_xml = super().to_xml()
         
         # Add documentation comment showing all valid options (for any decision value)
-        if "</response>" in base_xml:
+        if "</response>" in base_xml:  # pragma: no branch - super().to_xml() uses default root_tag='response', so '</response>' is always present; the else-arc is unreachable
             base_xml = base_xml.replace(
                 "</response>",
                 """</response>

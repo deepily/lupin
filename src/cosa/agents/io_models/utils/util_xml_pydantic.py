@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, ValidationError, ConfigDict
 
 try:
     import xmltodict
-except ImportError:
+except ImportError:  # pragma: no cover - xmltodict is a hard dependency; this ImportError guard is unreachable when installed
     raise ImportError( "xmltodict is required. Install with: pip install xmltodict" )
 
 import cosa.utils.util as du
