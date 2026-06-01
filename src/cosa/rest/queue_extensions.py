@@ -44,7 +44,7 @@ class UserJobTracker:
         if cls._instance is None:
             with cls._lock:
                 # Double-check locking pattern
-                if cls._instance is None:
+                if cls._instance is None:  # pragma: no branch - double-check-lock inner guard unreachable single-threaded (outer None-check + lock already held)
                     cls._instance = super().__new__( cls )
                     # Initialize instance attributes
                     cls._instance._initialized = False
@@ -69,7 +69,7 @@ class UserJobTracker:
             return
 
         with self._lock:
-            if not self._initialized:
+            if not self._initialized:  # pragma: no branch - double-check-lock inner init-guard unreachable single-threaded (outer guard returns early if initialized)
                 # Map job_id to user_id (forward index for remove_job cleanup)
                 self.job_to_user: Dict[str, str] = {}
                 # Map user_id to list of job_ids (reverse index for queue filtering)
