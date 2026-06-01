@@ -202,21 +202,23 @@ class TestIterativeDebuggingFactoryIntegration:
         self.factory = XmlParserFactory( self.config_mgr )
     
     def test_factory_dynamic_model_selection( self ):
-        """Test factory dynamically selects correct model based on XML tag names."""
-        
-        # Test minimalist mode tag selection
-        strategy = self.factory.get_parser_strategy( "agent router go to debugger" )
-        assert strategy.get_strategy_name() == "structured_v2"
-        
-        # Test dynamic model selection for minimalist mode
+        """
+        The factory's Pydantic parser dynamically selects the debugging model from XML tag names.
+
+        ( Repaired 2026-05-31: get_parser_strategy()/get_strategy_name() were REMOVED in the
+        Session-116 refactor; the dynamic-selection logic now lives on the single PydanticXmlParser
+        accessed via factory._parser. The meaningful assertion — tag-driven model selection — is
+        preserved against the current API. )
+        """
+        parser = self.factory._parser
+
+        # minimalist-mode tags → minimalist model
         minimalist_tags = [ "thoughts", "line-number", "one-line-of-code", "success" ]
-        model_class = strategy._get_debugging_model( minimalist_tags )
-        assert model_class == IterativeDebuggingMinimalistResponse
-        
-        # Test dynamic model selection for full mode  
+        assert parser._get_debugging_model( minimalist_tags ) is IterativeDebuggingMinimalistResponse
+
+        # full-mode tags → full model
         full_tags = [ "thoughts", "code", "example", "returns", "explanation" ]
-        model_class = strategy._get_debugging_model( full_tags )
-        assert model_class == IterativeDebuggingFullResponse
+        assert parser._get_debugging_model( full_tags ) is IterativeDebuggingFullResponse
     
     def test_factory_minimalist_debugging_parsing( self ):
         """Test factory parsing of minimalist debugging XML responses."""

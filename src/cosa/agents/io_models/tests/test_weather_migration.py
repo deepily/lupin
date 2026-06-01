@@ -141,12 +141,15 @@ class TestWeatherFactoryIntegration:
         self.factory = XmlParserFactory( self.config_mgr )
     
     def test_factory_strategy_selection( self ):
-        """Test factory selects correct strategy for WeatherAgent."""
-        
-        strategy = self.factory.get_parser_strategy( "agent router go to weather" )
-        
-        # Should use structured_v2 strategy per configuration
-        assert strategy.get_strategy_name() == "structured_v2"
+        """
+        Factory maps the weather command to its Pydantic model.
+
+        ( Repaired 2026-05-31: get_parser_strategy()/get_strategy_name() were REMOVED in the
+        Session-116 Pydantic-only refactor — see xml_parser_factory.py header. The current
+        contract is the command→model map on the single PydanticXmlParser. )
+        """
+        parser = self.factory._parser
+        assert parser.agent_model_map[ "agent router go to weather" ] is WeatherResponse
     
     def test_factory_weather_parsing( self ):
         """Test factory parsing of weather XML responses."""

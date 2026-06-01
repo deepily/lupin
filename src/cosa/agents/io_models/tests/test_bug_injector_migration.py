@@ -37,20 +37,33 @@ class TestBugInjectionResponse:
         assert response.bug == "print('Injected debug statement')"
     
     def test_bug_injection_response_validation( self ):
-        """Test BugInjectionResponse field validation."""
-        
-        # Test line_number validation
+        """
+        Test BugInjectionResponse field validation against the CURRENT contract.
+
+        validate_line_number ( prod ) rejects v == 0 and v < -1, but EXPLICITLY allows
+        -1 as the documented "invalid response" sentinel ( see is_valid_response() ).
+        ( Repaired 2026-05-31: the legacy assertion that -1 must raise predated the
+        sentinel contract — stale test, not a prod bug. )
+        """
+
+        # line_number == 0 is rejected ( lines are 1-based )
         try:
-            BugInjectionResponse( line_number=0, bug="test" )  # Should be positive
+            BugInjectionResponse( line_number=0, bug="test" )
             assert False, "Should have raised validation error for line_number=0"
         except ValueError:
             pass  # Expected
-            
+
+        # line_number < -1 is rejected
         try:
-            BugInjectionResponse( line_number=-1, bug="test" )  # Should be positive
-            assert False, "Should have raised validation error for line_number=-1"
+            BugInjectionResponse( line_number=-2, bug="test" )
+            assert False, "Should have raised validation error for line_number=-2"
         except ValueError:
             pass  # Expected
+
+        # line_number == -1 is the documented "invalid response" sentinel → VALID
+        sentinel = BugInjectionResponse( line_number=-1, bug="test" )
+        assert sentinel.line_number == -1
+        assert sentinel.is_valid_response() is False
     
     def test_bug_injection_response_from_xml( self ):
         """Test BugInjectionResponse.from_xml() parsing."""
@@ -126,12 +139,15 @@ class TestBugInjectorFactoryIntegration:
         self.factory = XmlParserFactory( self.config_mgr )
     
     def test_factory_strategy_selection( self ):
-        """Test factory selects correct strategy for BugInjector."""
-        
-        strategy = self.factory.get_parser_strategy( "agent router go to bug injector" )
-        
-        # Should use structured_v2 strategy per configuration
-        assert strategy.get_strategy_name() == "structured_v2"
+        """
+        Factory maps the bug-injector command to its Pydantic model.
+
+        ( Repaired 2026-05-31: get_parser_strategy()/get_strategy_name() were REMOVED in the
+        Session-116 Pydantic-only refactor — see xml_parser_factory.py header. The current
+        contract is the command→model map on the single PydanticXmlParser. )
+        """
+        parser = self.factory._parser
+        assert parser.agent_model_map[ "agent router go to bug injector" ] is BugInjectionResponse
     
     def test_factory_bug_injection_parsing( self ):
         """Test factory parsing of BugInjector XML responses."""
@@ -189,21 +205,26 @@ class TestBugInjectorFactoryIntegration:
             pass  # Expected validation error
     
     def test_factory_empty_bug_handling( self ):
-        """Test factory handling of empty bug field."""
-        
+        """
+        Empty <bug> is rejected BY DESIGN.
+
+        ( Repaired 2026-05-31: validate_bug_code raises "Bug code cannot be empty" — the legacy
+        assertion that empty bug yields "" predated that contract. Stale test, not a prod bug. )
+        """
         xml_empty_bug = '''<response>
             <line-number>5</line-number>
             <bug></bug>
         </response>'''
-        
-        result = self.factory.parse_agent_response(
-            xml_empty_bug,
-            "agent router go to bug injector",
-            [ "line-number", "bug" ]
-        )
-        
-        assert result[ "line_number" ] == 5
-        assert result[ "bug" ] == ""  # Empty string is valid
+
+        try:
+            self.factory.parse_agent_response(
+                xml_empty_bug,
+                "agent router go to bug injector",
+                [ "line-number", "bug" ]
+            )
+            assert False, "Should have raised a validation error for empty bug"
+        except Exception:
+            pass  # Expected: empty bug code is invalid
 
 
 class TestBugInjectorMigrationIntegration:

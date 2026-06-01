@@ -207,7 +207,7 @@ class BaseXMLModel( BaseModel ):
             elif len( xml_dict ) == 1:
                 # Single root element - use it regardless of name
                 model_data = list( xml_dict.values() )[0]
-            else:
+            else:  # pragma: no cover  -- xmltodict yields exactly ONE root for valid XML (empirically verified: empty/whitespace/multi-root/text all raise ExpatError before here); len(xml_dict)!=1 unreachable, the elif always catches
                 # Multiple root elements or no response wrapper
                 model_data = xml_dict
             
