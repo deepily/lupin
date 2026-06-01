@@ -96,7 +96,7 @@ def system_id_to_display_name( system_id: str ) -> str:
     if parts:
         first_name = parts[0]
         return first_name.capitalize()
-    return system_id
+    return system_id  # pragma: no cover - str.split() always returns at least one element, so the `if parts:` guard is always True and this fallback is unreachable
 
 
 def validate_system_id( system_id: str ) -> bool:
