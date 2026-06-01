@@ -275,7 +275,7 @@ async def allocate_voice_persona_endpoint(
             swap_from = existing.get( "name" ) if existing else None
 
             ok = set_voice_persona( session_id, persona )
-            if not ok:
+            if not ok:  # pragma: no branch - async-with __aexit__ trailing-if artifact: last stmt in the requested-path branch inside the `async with` lock, so the ok=True false-arc exit (278->346) routes through the implicit __aexit__ and is not a markable bytecode edge though the swap-success path is exercised; both arms (swap-success + 500) are tested
                 raise HTTPException( status_code=500, detail=f"Bridge write failed for session_id={session_id}" )
 
         else:

@@ -251,7 +251,7 @@ async def set_speakerphone_endpoint(
                 # Now activate ours inside the same critical section so no parallel
                 # request can sneak in between displace and activate.
                 ok = set_speakerphone( session_id, body.on )
-                if not ok:
+                if not ok:  # pragma: no branch - async-with __aexit__ trailing-if artifact: last stmt in the SOLO `async with _speakerphone_lock` body, so the ok=True false-arc exit (254->270) routes through the implicit __aexit__ lock-release and is not a markable bytecode edge though the success path is exercised; both write arms (success + 500) are tested
                     raise HTTPException( status_code=500, detail=f"Bridge write failed for session_id={session_id}" )
         else:
             # CHORUS mode: no Lock, no scan. Multiple sessions can be active.
