@@ -2,6 +2,24 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.01 - Session 3047b30f (Tiberius 👑) | CoSA coverage Run-2: zombie reap → fleet recovery → 3 agent packages @ 100% + prod bug #11
+
+**Ran the CoSA 100%-coverage Run-2 fleet end-to-end as manager; 10 test-only commits banked on `wip-v0.1.8`, pushed at Rick's session-end go (66 commits total to remote — the whole held campaign).** Opened by reaping **11 zombie `cc_notification_listener` orphans** (sessions whose parent CC/tmux died but whose detached ppid=1 listener kept polling — the PG-6 worker-shutdown bug; raw `tmux kill-session` + the bugged `dismiss_sessions` both leave them). Only the 2 with a live `claude` parent (María, me) were legit.
+
+**Fleet arc:** started solo-sequential (María authoring); Rick course-corrected (3 broadcasts) back to the runbook fleet topology. Spawned a reviewer (seat "Krishna" → voice Mr. Radio 🦉) + 3 authors (Tiffany 💍 / Cheech 🦚 / Rachel 🕊️). Diagnosed an **intermittent spawned-session read fault** — file reads AND tool output occasionally truncate/garble then recover on retry; does NOT corrupt pytest `--cov` numbers — the root of the session's confabulation cluster. Fix in practice: retry-before-report, never fabricate. (Root launch-config cause still open per Rick's debug directive.)
+
+**3 complete agent packages @ genuine 100%** (manager disk-verify → Mr. Radio independent re-measure + line-by-line audit → surgical single-file commits, every batch): **notification_proxy** (12 mod, 801/0/236, 173 tests, `67c0222`), **prediction_engine** (7 mod, 766/0/268, 237 tests, `fb679dd`+`d722396`), **decision_proxy** (18 mod, 830/0/214, 240 tests, B1–B6 `9a02f6e`→`8964e72`). ~650 tests, **zero API spend** (firewalled key never read; LanceDB/vLLM/scipy/embeddings all boundary-mocked).
+
+**Prod bug #11** (silent dead-tier, same family as #10): `prediction_engine.py:990` imported `LlmClientFactory` from `cosa.agents.llm_client` (no such symbol) → ImportError bare-except-swallowed → `_get_llm_client` always None → Tier-2 LLM synthesis of open-ended prediction **dead in prod**. Rachel tripwired (xfail-strict + pin, never pragma'd a bug-blocked line); I fixed the import + completed the de-arm (incl. retiring the now-false tombstone comments per Mr. Radio's catch — a doctrine refinement), reviewer-ratified (`d722396`).
+
+**2 ratified pragmas:** `responder.py:295` no-branch (exhaustive strategy dispatch, committed) + `util_xml_pydantic.py:210` no-cover (multi-root `else` unreachable — empirically proven: xmltodict raises ExpatError on every non-single-root input; held with io_models wave-2). **The zero-trust gate caught 5+ confabulations + a surgical-staging trap — nothing fabricated reached a commit.** All 3 authors honest-stopped after their packages.
+
+**Wave-2 deferred (handoff docs written, idle fleet reaped at stand-down):** io_models remainder (xml_models 79%→100% + watchdog) + rest/ 37 stale-mock repairs (a possible queues-auth regression flagged for tripwire) — `07-rachel-io-models-watchdog-handoff.md` + `07-rest-stale-mock-repair-handoff.md`. io_models partial WIP (green baseline restored + utils + 6/16 xml_models classes, ungated) committed separately as labeled WAVE-2 WIP.
+
+**Run-2 commits (10):** `ce9087e 9a02f6e fb679dd 67c0222 8e72f61 d722396 762e301 2312e5e 50baada 8964e72`.
+
+---
+
 ### 2026.05.30 - Session fb0bc8a5 (Speedy 🌿) | Notifications-UI polish: focus-card height, broadcast toggle, master-detail reading pane, persona rename
 
 **A voice-driven UI-polish session on `wip-v0.1.8` — three commits, each verified on `:7999`; not pushed.** Parallel-session-safe throughout (the GCP session 657452e9 + coverage session own `README.md`/`TODO.md`/untracked GCP+coverage docs — deliberately EXCLUDED from every commit; my README doc-links left in the working tree for those sessions to carry).
