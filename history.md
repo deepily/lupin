@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.01 - Session 78c4780f (Krishna 🦚) | TTS preview-fraction slider: 25% → 12.5% increments
+
+**Voice-driven follow-on fix on `wip-v0.1.8` (checkpoint, not pushed).** Changed the TTS preview-fraction slider in the Claude Code Notifications accordion header to step in **12.5% increments** (nine stops: 0 / 12.5 / 25 / 37.5 / 50 / 62.5 / 75 / 87.5 / 100) instead of 25% (five stops). The slider default stays 25% — only granularity changed.
+
+**Three coordinated edits:** (1) `notifications.html` — `step="25"` → `step="12.5"` + expanded the tick `<datalist>` from 5 to 9 options. (2) `notifications.js` — the `input` handler used `parseInt`, which would truncate `12.5` → `12`; switched to `parseFloat`. Also dropped the `Math.round` in the init-seed (it would round 12.5 → 13, off-step) and now reads the browser-snapped slider value back so the label always matches the thumb. (3) new `TestTTSFractionSlider` class in `test_tts_controls.py` (5 cases): step attr, nine ticks, half-step round-trip (regression guard against the parseInt bug), integer-stop no-regression.
+
+**E2E verified on `:8000`:** `-k TestTTSFractionSlider` → **5 passed / 0 failed**; the companion STT suite re-ran **8 passed / 0 failed** (13/13 green, sequential). An earlier 11:23 run reported 0 tests — traced to a *submission* bug (quoted multi-word `-k` shattered by the endpoint's whitespace-split of `pytest_args`, exit=4), not a code defect; fixed via single-token `-k` runs. Lesson added to auto-memory `feedback_test_suite_submit_field_pytest_args`.
+
+---
+
 ### 2026.06.01 - Session 78c4780f (Krishna 🦚) | STT recording button: select-all+overwrite → insert-at-caret
 
 **Voice-driven fix on `wip-v0.1.8` (checkpoint, not pushed).** Changed the notifications-client recording button so transcribed text is **inserted at the caret** instead of selecting-all + overwriting the whole field; a highlighted range is still replaced (the one intentional overwrite case), and the caret lands after the inserted text so repeated dictation appends. Extracted the logic into a reusable `_insertTranscriptionText( inputElement, text )` helper on `NotificationsUI` — all 8 STT contexts (qa, cc-prompt, research, podcast, swe, presentation, broadcast, session-rename) funnel through the one `onTranscription` callback, so the fix is universal.

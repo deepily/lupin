@@ -1588,19 +1588,25 @@ class NotificationsUI {
     
     setupEventListeners() {
         // TTS preview-fraction slider (added 2026-05-14 evening).
-        // Five stops (0/25/50/75/100). Drives `this.ttsPreviewFraction` at runtime;
-        // persists override in localStorage. INI default seeds it on first load.
+        // Nine stops (0/12.5/25/37.5/50/62.5/75/87.5/100) — 12.5% increments.
+        // Drives `this.ttsPreviewFraction` at runtime; persists override in
+        // localStorage. INI default seeds it on first load.
         const fractionSlider = document.getElementById( 'cc-tts-fraction-slider' );
         const fractionLabel  = document.getElementById( 'cc-tts-fraction-value' );
         if ( fractionSlider && fractionLabel ) {
             // Seed slider DOM from current runtime fraction (INI default OR
             // localStorage override applied during config-fetch path above).
-            const initPercent = Math.round( ( this.ttsPreviewFraction || 0 ) * 100 );
-            fractionSlider.value = String( initPercent );
+            // No rounding: 12.5% stops are off-integer, so we assign the raw
+            // percent and read back the browser-snapped value for the label so
+            // the text always matches the thumb position.
+            fractionSlider.value = String( ( this.ttsPreviewFraction || 0 ) * 100 );
+            const initPercent = parseFloat( fractionSlider.value );
             fractionLabel.textContent = `${initPercent}%`;
 
             fractionSlider.addEventListener( 'input', ( e ) => {
-                const pct      = parseInt( e.target.value, 10 );
+                // parseFloat (not parseInt) — step values like 12.5 / 37.5 must
+                // not be truncated to 12 / 37.
+                const pct      = parseFloat( e.target.value );
                 const fraction = pct / 100;
                 this.ttsPreviewFraction = fraction;
                 fractionLabel.textContent = `${pct}%`;
