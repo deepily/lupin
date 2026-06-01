@@ -33,6 +33,23 @@ from cosa.rest.routers.notifications import router, notify_user, get_user_notifi
 from cosa.rest.routers.notifications import get_notification_queue, get_websocket_manager, get_local_timestamp
 
 
+def _patch_fastapi_main( mock_main ):
+    """
+    Robustly patch `fastapi_app.main` for direct-call unit tests.
+
+    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
+    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    package is cached by an earlier test in the suite, patching only the
+    submodule entry is silently ignored — the test passes in isolation but fails
+    under full-suite ordering. Overriding BOTH the package object and the
+    submodule entry makes the import resolve to mock_main regardless of prior
+    import state. Returns a patch.dict context manager (restores on exit).
+    """
+    pkg = Mock()
+    pkg.main = mock_main
+    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+
+
 class TestNotificationsRouter( unittest.TestCase ):
     """
     Comprehensive unit tests for notification management router endpoints.
@@ -135,67 +152,118 @@ class TestNotificationsRouter( unittest.TestCase ):
         mock_ws_manager = Mock()
         mock_ws_manager.is_user_connected = Mock(return_value=is_connected)
         mock_ws_manager.get_user_connection_count = Mock(return_value=connection_count)
-        
+
         # emit_to_user is async, so create an AsyncMock for it
         mock_ws_manager.emit_to_user = AsyncMock(return_value=message_sent)
-        
+
+        # Live notify_user reads these as real dicts (connected diagnostics +
+        # offline diagnostics iterate them); Mock auto-attrs would break iteration.
+        mock_ws_manager.user_sessions      = {}
+        mock_ws_manager.active_connections = {}
+        mock_ws_manager.user_to_email      = {}
+
+        # Cross-user CC-listener fallback helper (offline + job_id path).
+        mock_ws_manager.emit_to_user_or_listener_sync = Mock( return_value={ "listener_delivered": message_sent } )
+
         return mock_ws_manager
-    
-    def test_notify_user_success_delivered( self ):
+
+    async def _call_notify_user( self, notification_queue, ws_manager, **overrides ):
         """
-        Test notification sending success case with user connected.
-        
+        Invoke the live notify_user with a complete, safe kwarg set.
+
+        Why every param is passed explicitly: notify_user is a FastAPI endpoint
+        whose parameters default to Query(...)/FieldInfo objects. Calling it
+        DIRECTLY (unit test, no FastAPI resolution) leaves those defaults as
+        FieldInfo instances — which are truthy and would corrupt branches like
+        `if response_requested:`, `if response_options:` (json.loads on a
+        FieldInfo), and the idempotency block. Passing concrete values models
+        what FastAPI would inject.
+
+        Auth note: authenticated_user_id is supplied directly here (the live
+        require_api_key_or_jwt dependency would inject it in production).
+        """
+        kwargs = dict(
+            authenticated_user_id    = "svc-account",
+            message                  = self.test_message,
+            type                     = self.test_type,
+            priority                 = self.test_priority,
+            target_user              = self.test_user_email,
+            response_requested       = False,
+            response_type            = None,
+            timeout_seconds          = 120,
+            response_default         = None,
+            title                    = None,
+            sender_id                = None,
+            response_options         = None,
+            abstract                 = None,
+            job_id                   = None,
+            queue_name               = None,
+            suppress_ding            = False,
+            progress_group_id        = None,
+            prediction_hint_override = None,
+            display_qualifier_widget = False,
+            session_name             = None,
+            idempotency_key          = None,
+            notification_queue       = notification_queue,
+            ws_manager               = ws_manager,
+        )
+        kwargs.update( overrides )
+        return await notify_user( **kwargs )
+    
+    def test_notify_user_connected_queued( self ):
+        """
+        Test fire-and-forget notification when the target user is connected.
+
+        Live contract (re-architected): auth is the require_api_key_or_jwt
+        dependency (no api_key param); the email→system-id step is
+        get_user_by_email (NOT the retired email_to_system_id); delivery is via
+        the FIFO notification queue (push_notification), NOT a synchronous
+        emit_to_user. A connected user yields status "queued" (the old
+        "delivered" status is retired). PostgreSQL persistence is best-effort
+        (wrapped in try/except) — get_db is patched to fail so the unit test
+        stays DB-free; the non-fatal except keeps the path on the FIFO branch.
+
         Ensures:
-            - Validates API key, message, type, and priority
-            - Converts email to system ID
-            - Adds notification to queue
-            - Delivers via WebSocket to connected user
-            - Returns delivered status with details
+            - get_user_by_email resolves the target email → system id
+            - push_notification is invoked with the live source/user_id contract
+            - Connection state is checked via the ws_manager
+            - Returns status "queued" with target + connection metadata
         """
         async def run_test():
             mock_notification_queue = self._create_mock_notification_queue()
-            mock_ws_manager = self._create_mock_websocket_manager( 
-                is_connected=True, connection_count=2, message_sent=True 
+            mock_ws_manager = self._create_mock_websocket_manager(
+                is_connected=True, connection_count=2, message_sent=True
             )
-            
-            with patch( 'cosa.rest.routers.notifications.email_to_system_id', return_value=self.test_user_system_id ) as mock_email_to_id, \
-                 patch( 'cosa.rest.routers.notifications.get_local_timestamp', return_value=self.test_timestamp ) as mock_timestamp, \
-                 patch( 'builtins.print' ) as mock_print:
-                
-                result = await notify_user(
-                    message=self.test_message,
-                    type=self.test_type,
-                    priority=self.test_priority,
-                    target_user=self.test_user_email,
-                    api_key=self.test_api_key,
-                    notification_queue=mock_notification_queue,
-                    ws_manager=mock_ws_manager
-                )
-                
-                # Verify email to system ID conversion
-                mock_email_to_id.assert_called_once_with( self.test_user_email )
-                
-                # Verify notification added to queue
-                mock_notification_queue.push_notification.assert_called_once_with(
-                    message=self.test_message,
-                    type=self.test_type,
-                    priority=self.test_priority,
-                    source="claude_code",
-                    user_id=self.test_user_system_id
-                )
-                
-                # Verify WebSocket operations
+
+            with patch( 'cosa.rest.user_service.get_user_by_email', return_value={ "id": self.test_user_system_id } ) as mock_get_user, \
+                 patch( 'cosa.rest.routers.notifications.get_db', side_effect=Exception( "no db in unit test" ) ), \
+                 _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), \
+                 patch( 'builtins.print' ):
+
+                result = await self._call_notify_user( mock_notification_queue, mock_ws_manager )
+
+                # Email → system id resolution (live helper)
+                mock_get_user.assert_called_once_with( self.test_user_email )
+
+                # Notification pushed to the FIFO queue with the live contract
+                mock_notification_queue.push_notification.assert_called_once()
+                push_kwargs = mock_notification_queue.push_notification.call_args.kwargs
+                self.assertEqual( push_kwargs["message"], self.test_message )
+                self.assertEqual( push_kwargs["type"], self.test_type )
+                self.assertEqual( push_kwargs["priority"], self.test_priority )
+                self.assertEqual( push_kwargs["source"], "claude_code" )
+                self.assertEqual( push_kwargs["user_id"], self.test_user_system_id )
+
+                # Connection state checked
                 mock_ws_manager.is_user_connected.assert_called_once_with( self.test_user_system_id )
                 mock_ws_manager.get_user_connection_count.assert_called_once_with( self.test_user_system_id )
-                mock_ws_manager.emit_to_user.assert_called_once()
-                
-                # Verify response
-                self.assertEqual( result["status"], "delivered" )
+
+                # Live response shape
+                self.assertEqual( result["status"], "queued" )
                 self.assertEqual( result["target_user"], self.test_user_email )
                 self.assertEqual( result["target_system_id"], self.test_user_system_id )
                 self.assertEqual( result["connection_count"], 2 )
-                self.assertIn( "notification", result )
-        
+
         asyncio.run( run_test() )
     
     def test_notify_user_user_not_available( self ):
@@ -210,113 +278,108 @@ class TestNotificationsRouter( unittest.TestCase ):
         """
         async def run_test():
             mock_notification_queue = self._create_mock_notification_queue()
-            mock_ws_manager = self._create_mock_websocket_manager( 
-                is_connected=False, connection_count=0 
+            mock_ws_manager = self._create_mock_websocket_manager(
+                is_connected=False, connection_count=0
             )
-            
-            with patch( 'cosa.rest.routers.notifications.email_to_system_id', return_value=self.test_user_system_id ) as mock_email_to_id, \
-                 patch( 'cosa.rest.routers.notifications.get_local_timestamp', return_value=self.test_timestamp ), \
-                 patch( 'builtins.print' ) as mock_print:
-                
-                result = await notify_user(
-                    message=self.test_message,
-                    type=self.test_type,
-                    priority=self.test_priority,
-                    target_user=self.test_user_email,
-                    api_key=self.test_api_key,
-                    notification_queue=mock_notification_queue,
-                    ws_manager=mock_ws_manager
-                )
-                
-                # Verify user connection check
+
+            with patch( 'cosa.rest.user_service.get_user_by_email', return_value={ "id": self.test_user_system_id } ), \
+                 patch( 'cosa.rest.routers.notifications.get_db', side_effect=Exception( "no db in unit test" ) ), \
+                 _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), \
+                 patch( 'builtins.print' ):
+
+                # Offline + NO job_id → no cc-listener fallback → user_not_available
+                result = await self._call_notify_user( mock_notification_queue, mock_ws_manager, job_id=None )
+
                 mock_ws_manager.is_user_connected.assert_called_once_with( self.test_user_system_id )
                 mock_ws_manager.get_user_connection_count.assert_called_once_with( self.test_user_system_id )
-                
-                # Note: In the actual implementation, emit_to_user should not be called
-                # when user is not connected, but due to async mock complexities
-                # we'll verify the response status instead of mock call behavior
-                
-                # Verify response
+
+                # Offline returns before pushing to the FIFO queue
+                mock_notification_queue.push_notification.assert_not_called()
+
                 self.assertEqual( result["status"], "user_not_available" )
                 self.assertEqual( result["connection_count"], 0 )
                 self.assertIn( "not connected to queue UI", result["message"] )
-        
+
         asyncio.run( run_test() )
     
-    def test_notify_user_delivery_failed( self ):
+    def test_notify_user_offline_listener_fallback( self ):
         """
-        Test notification sending when WebSocket delivery fails.
-        
+        Test the offline cross-user CC-listener fallback path.
+
+        REPURPOSED (was test_notify_user_delivery_failed): the old synchronous
+        "delivery_failed" status no longer exists — fire-and-forget delivery is
+        now async via the FIFO queue, so a connected user always yields "queued"
+        (no sync emit success/fail). The genuinely-interesting live branch worth
+        covering is the OFFLINE + job_id path: when the target user is offline
+        but a job_id is supplied, notify_user delegates to
+        emit_to_user_or_listener_sync; if that delivers to a cc-listener-{job_id}
+        session, the status is "delivered_via_listener".
+
         Ensures:
-            - User is connected but message sending fails
-            - Returns delivery_failed status
-            - Logs failure message
+            - Offline user + job_id → emit_to_user_or_listener_sync consulted
+            - listener_delivered=True → status "delivered_via_listener"
+            - Response carries the cc-listener delivery path + session
         """
         async def run_test():
             mock_notification_queue = self._create_mock_notification_queue()
-            mock_ws_manager = self._create_mock_websocket_manager( 
-                is_connected=True, connection_count=1, message_sent=False 
+            # Offline, but the listener helper reports a successful delivery.
+            mock_ws_manager = self._create_mock_websocket_manager(
+                is_connected=False, connection_count=0, message_sent=True
             )
-            
-            with patch( 'cosa.rest.routers.notifications.email_to_system_id', return_value=self.test_user_system_id ), \
-                 patch( 'cosa.rest.routers.notifications.get_local_timestamp', return_value=self.test_timestamp ), \
-                 patch( 'builtins.print' ) as mock_print:
-                
-                result = await notify_user(
-                    message=self.test_message,
-                    type=self.test_type,
-                    priority=self.test_priority,
-                    target_user=self.test_user_email,
-                    api_key=self.test_api_key,
-                    notification_queue=mock_notification_queue,
-                    ws_manager=mock_ws_manager
+
+            with patch( 'cosa.rest.user_service.get_user_by_email', return_value={ "id": self.test_user_system_id } ), \
+                 patch( 'cosa.rest.routers.notifications.get_db', side_effect=Exception( "no db in unit test" ) ), \
+                 _patch_fastapi_main( Mock( app_debug=False, app_verbose=False ) ), \
+                 patch( 'builtins.print' ):
+
+                result = await self._call_notify_user(
+                    mock_notification_queue, mock_ws_manager, job_id="dr-a1b2c3d4"
                 )
-                
-                # Verify WebSocket emission attempted
-                mock_ws_manager.emit_to_user.assert_called_once()
-                
-                # Verify response
-                self.assertEqual( result["status"], "delivery_failed" )
-                self.assertIn( "Failed to deliver", result["message"] )
-        
-        asyncio.run( run_test() )
-    
-    def test_notify_user_invalid_api_key( self ):
-        """
-        Test notification sending with invalid API key.
-        
-        Ensures:
-            - Raises HTTPException with 401 status
-            - Logs invalid API key attempt
-            - Does not process notification
-        """
-        async def run_test():
-            from fastapi import HTTPException
-            
-            mock_notification_queue = self._create_mock_notification_queue()
-            mock_ws_manager = self._create_mock_websocket_manager()
-            
-            with patch( 'builtins.print' ) as mock_print:
-                with self.assertRaises( HTTPException ) as context:
-                    await notify_user(
-                        message=self.test_message,
-                        type=self.test_type,
-                        priority=self.test_priority,
-                        target_user=self.test_user_email,
-                        api_key="invalid_key",
-                        notification_queue=mock_notification_queue,
-                        ws_manager=mock_ws_manager
-                    )
-                
-                # Verify HTTPException details
-                self.assertEqual( context.exception.status_code, 401 )
-                self.assertEqual( str( context.exception.detail ), "Invalid API key" )
-                
-                # Verify no queue operations performed
+
+                # Listener fallback consulted; FIFO push skipped (offline)
+                mock_ws_manager.emit_to_user_or_listener_sync.assert_called_once()
                 mock_notification_queue.push_notification.assert_not_called()
-        
+
+                self.assertEqual( result["status"], "delivered_via_listener" )
+                self.assertEqual( result["delivery_path"], "cc-listener" )
+                self.assertEqual( result["listener_session"], "cc-listener-dr-a1b2c3d4" )
+
         asyncio.run( run_test() )
     
+    def test_notify_user_auth_delegated_to_dependency( self ):
+        """
+        Test that notify_user's auth contract moved to a FastAPI dependency.
+
+        REPURPOSED (was test_notify_user_invalid_api_key): the in-function
+        "Invalid API key → 401" check is RETIRED. Authentication is now enforced
+        by the require_api_key_or_jwt FastAPI dependency, surfaced as the FIRST
+        parameter `authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)]`.
+        There is no longer an `api_key` parameter to validate in-function — so a
+        bad-key 401 cannot originate here. This signature-contract test pins the
+        migration and acts as a resurrection guard against re-adding in-function
+        auth.
+
+        Ensures:
+            - notify_user exposes `authenticated_user_id` (the dependency seam)
+            - notify_user no longer exposes an `api_key` parameter
+            - The dependency is wired to require_api_key_or_jwt
+        """
+        import inspect
+        from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+
+        sig = inspect.signature( notify_user )
+        params = sig.parameters
+
+        self.assertIn( "authenticated_user_id", params )
+        self.assertNotIn( "api_key", params )
+
+        # The first parameter carries the auth dependency (Annotated metadata
+        # includes a Depends(require_api_key_or_jwt) marker).
+        auth_param = params["authenticated_user_id"]
+        annotated_meta = getattr( auth_param.annotation, "__metadata__", () )
+        depends_markers = [ m for m in annotated_meta if getattr( m, "dependency", None ) is require_api_key_or_jwt ]
+        self.assertEqual( len( depends_markers ), 1 )
+
     def test_notify_user_invalid_type( self ):
         """
         Test notification sending with invalid type.
@@ -332,16 +395,10 @@ class TestNotificationsRouter( unittest.TestCase ):
             mock_ws_manager = self._create_mock_websocket_manager()
             
             with self.assertRaises( HTTPException ) as context:
-                await notify_user(
-                    message=self.test_message,
-                    type="invalid_type",
-                    priority=self.test_priority,
-                    target_user=self.test_user_email,
-                    api_key=self.test_api_key,
-                    notification_queue=mock_notification_queue,
-                    ws_manager=mock_ws_manager
+                await self._call_notify_user(
+                    mock_notification_queue, mock_ws_manager, type="invalid_type"
                 )
-            
+
             # Verify HTTPException details
             self.assertEqual( context.exception.status_code, 400 )
             self.assertIn( "Invalid notification type", str( context.exception.detail ) )
@@ -364,16 +421,10 @@ class TestNotificationsRouter( unittest.TestCase ):
             mock_ws_manager = self._create_mock_websocket_manager()
             
             with self.assertRaises( HTTPException ) as context:
-                await notify_user(
-                    message=self.test_message,
-                    type=self.test_type,
-                    priority="invalid_priority",
-                    target_user=self.test_user_email,
-                    api_key=self.test_api_key,
-                    notification_queue=mock_notification_queue,
-                    ws_manager=mock_ws_manager
+                await self._call_notify_user(
+                    mock_notification_queue, mock_ws_manager, priority="invalid_priority"
                 )
-            
+
             # Verify HTTPException details
             self.assertEqual( context.exception.status_code, 400 )
             self.assertIn( "Invalid priority", str( context.exception.detail ) )
@@ -395,35 +446,25 @@ class TestNotificationsRouter( unittest.TestCase ):
             mock_notification_queue = self._create_mock_notification_queue()
             mock_ws_manager = self._create_mock_websocket_manager()
             
+            # Live validation message changed: "Please provide a message to send"
+            # (was "Message cannot be empty").
             # Test empty message
             with self.assertRaises( HTTPException ) as context:
-                await notify_user(
-                    message="",
-                    type=self.test_type,
-                    priority=self.test_priority,
-                    target_user=self.test_user_email,
-                    api_key=self.test_api_key,
-                    notification_queue=mock_notification_queue,
-                    ws_manager=mock_ws_manager
+                await self._call_notify_user(
+                    mock_notification_queue, mock_ws_manager, message=""
                 )
-            
+
             self.assertEqual( context.exception.status_code, 400 )
-            self.assertEqual( str( context.exception.detail ), "Message cannot be empty" )
-            
+            self.assertEqual( str( context.exception.detail ), "Please provide a message to send" )
+
             # Test whitespace-only message
             with self.assertRaises( HTTPException ) as context:
-                await notify_user(
-                    message="   ",
-                    type=self.test_type,
-                    priority=self.test_priority,
-                    target_user=self.test_user_email,
-                    api_key=self.test_api_key,
-                    notification_queue=mock_notification_queue,
-                    ws_manager=mock_ws_manager
+                await self._call_notify_user(
+                    mock_notification_queue, mock_ws_manager, message="   "
                 )
-            
+
             self.assertEqual( context.exception.status_code, 400 )
-            self.assertEqual( str( context.exception.detail ), "Message cannot be empty" )
+            self.assertEqual( str( context.exception.detail ), "Please provide a message to send" )
         
         asyncio.run( run_test() )
     
@@ -694,18 +735,16 @@ class TestNotificationsRouter( unittest.TestCase ):
             - Dependencies return correct attributes
         """
         # Test get_notification_queue dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.jobs_notification_queue = "mock_notification_queue"
-            
+        mock_main = Mock()
+        mock_main.jobs_notification_queue = "mock_notification_queue"
+        with _patch_fastapi_main( mock_main ):
             result = get_notification_queue()
             self.assertEqual( result, "mock_notification_queue" )
-        
+
         # Test get_websocket_manager dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.websocket_manager = "mock_websocket_manager"
-            
+        mock_main = Mock()
+        mock_main.websocket_manager = "mock_websocket_manager"
+        with _patch_fastapi_main( mock_main ):
             result = get_websocket_manager()
             self.assertEqual( result, "mock_websocket_manager" )
     
@@ -725,10 +764,10 @@ class TestNotificationsRouter( unittest.TestCase ):
         mock_main_module.config_mgr = mock_config_mgr
         mock_main_module.app_debug = False
         
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main_module } ), \
+        with _patch_fastapi_main( mock_main_module ), \
              patch( 'cosa.rest.routers.notifications.datetime' ) as mock_datetime, \
              patch( 'cosa.rest.routers.notifications.zoneinfo' ) as mock_zoneinfo:
-            
+
             mock_timezone = Mock()
             mock_zoneinfo.ZoneInfo.return_value = mock_timezone
             
@@ -765,11 +804,11 @@ class TestNotificationsRouter( unittest.TestCase ):
         mock_main_module.config_mgr = mock_config_mgr
         mock_main_module.app_debug = True
         
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main_module } ), \
+        with _patch_fastapi_main( mock_main_module ), \
              patch( 'cosa.rest.routers.notifications.datetime' ) as mock_datetime, \
              patch( 'cosa.rest.routers.notifications.zoneinfo' ) as mock_zoneinfo, \
              patch( 'builtins.print' ) as mock_print:
-            
+
             # Make zoneinfo raise exception
             mock_zoneinfo.ZoneInfo.side_effect = Exception( "Unknown timezone" )
             
@@ -833,10 +872,10 @@ def isolated_unit_test():
         
         # Add all test methods
         test_methods = [
-            'test_notify_user_success_delivered',
+            'test_notify_user_connected_queued',
             'test_notify_user_user_not_available',
-            'test_notify_user_delivery_failed',
-            'test_notify_user_invalid_api_key',
+            'test_notify_user_offline_listener_fallback',
+            'test_notify_user_auth_delegated_to_dependency',
             'test_notify_user_invalid_type',
             'test_notify_user_invalid_priority',
             'test_notify_user_empty_message',

@@ -34,6 +34,22 @@ from cosa.rest.routers.websocket import router, auth_test, websocket_audio_endpo
 from cosa.rest.routers.websocket import get_websocket_manager, get_active_tasks, get_app_debug
 
 
+def _patch_fastapi_main( mock_main ):
+    """
+    Robustly patch `fastapi_app.main` for direct-call unit tests.
+
+    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
+    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    package is cached by an earlier test, patching only the submodule entry is
+    silently ignored (passes in isolation, fails under full-suite ordering).
+    Overriding BOTH the package object and the submodule entry makes the import
+    resolve to mock_main regardless of prior import state.
+    """
+    pkg = Mock()
+    pkg.main = mock_main
+    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+
+
 class TestWebSocketRouter( unittest.TestCase ):
     """
     Comprehensive unit tests for WebSocket router endpoints.
@@ -152,13 +168,10 @@ class TestWebSocketRouter( unittest.TestCase ):
             - Response structure matches expected format
         """
         async def run_test():
-            with patch( 'cosa.rest.routers.websocket.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            # Live contract: timestamp comes from du.get_current_datetime_iso() (cosa.utils.util).
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ) as mock_dt_iso:
                 result = await auth_test( current_user=self.test_user )
-                
+
                 # Verify response structure
                 self.assertIsInstance( result, dict )
                 self.assertEqual( result["message"], "Authentication successful" )
@@ -166,10 +179,9 @@ class TestWebSocketRouter( unittest.TestCase ):
                 self.assertEqual( result["email"], self.test_user["email"] )
                 self.assertEqual( result["name"], self.test_user["name"] )
                 self.assertEqual( result["timestamp"], self.test_timestamp )
-                
-                # Verify datetime called
-                mock_datetime.now.assert_called_once()
-                mock_now.isoformat.assert_called_once()
+
+                # Verify timestamp helper called
+                mock_dt_iso.assert_called_once()
         
         asyncio.run( run_test() )
     
@@ -179,17 +191,25 @@ class TestWebSocketRouter( unittest.TestCase ):
         
         Ensures:
             - Returns True for properly formatted session IDs
-            - Accepts lowercase two-word format
+            - Accepts lowercase "adjective noun" browser format
+            - Accepts lowercase "prefix-hash" programmatic format (live contract:
+              e.g. 'cc-listener-72116632', 'special-chars')
             - Handles various valid combinations
         """
         valid_session_ids = [
+            # Format 1: "adjective noun" browser sessions
             "happy elephant",
-            "wise penguin", 
+            "wise penguin",
             "clever cat",
             "smart dog",
-            "bright star"
+            "bright star",
+            # Format 2: "prefix-hash" programmatic sessions (added when programmatic
+            # session IDs landed — pattern ^[a-z][a-z0-9]*-[a-z0-9-]{1,47}$)
+            "cc-listener-72116632",
+            "proxy-ratify",
+            "special-chars"
         ]
-        
+
         for session_id in valid_session_ids:
             with self.subTest( session_id=session_id ):
                 self.assertTrue( is_valid_session_id( session_id ) )
@@ -202,6 +222,8 @@ class TestWebSocketRouter( unittest.TestCase ):
             - Returns False for improperly formatted session IDs
             - Rejects empty strings, single words, multiple words
             - Rejects uppercase and numbers
+            - NOTE: "special-chars" is NO LONGER invalid — it matches the live
+              programmatic "prefix-hash" format (moved to the valid-cases test).
         """
         invalid_session_ids = [
             "",
@@ -209,7 +231,6 @@ class TestWebSocketRouter( unittest.TestCase ):
             "singleword",
             "too many words here",
             "with123 numbers",
-            "special-chars",
             "symbols@here"
         ]
         
@@ -236,7 +257,7 @@ class TestWebSocketRouter( unittest.TestCase ):
             from fastapi import WebSocketDisconnect
             mock_websocket.receive_text.side_effect = WebSocketDisconnect()
             
-            with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main } ), \
+            with _patch_fastapi_main( mock_main ), \
                  patch( 'builtins.print' ) as mock_print:
                 
                 try:
@@ -272,7 +293,7 @@ class TestWebSocketRouter( unittest.TestCase ):
             
             invalid_session_id = "invalid session id format"
             
-            with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main } ), \
+            with _patch_fastapi_main( mock_main ), \
                  patch( 'builtins.print' ) as mock_print:
                 
                 await websocket_audio_endpoint(
@@ -289,46 +310,50 @@ class TestWebSocketRouter( unittest.TestCase ):
     
     def test_websocket_audio_endpoint_with_active_task_cleanup( self ):
         """
-        Test WebSocket audio endpoint with active task cleanup.
-        
+        Test WebSocket audio endpoint cancels + awaits + removes the active
+        streaming task on disconnect.
+
+        Live contract (finally block): when an active streaming task exists for
+        the session, the endpoint calls task.cancel(), then `await`s the task
+        (swallowing asyncio.CancelledError), then deletes the active_tasks entry.
+        A bare AsyncMock instance cannot satisfy `await task` (not awaitable), so
+        the task must be a real cancellable asyncio task.
+
         Ensures:
-            - WebSocket endpoint handles task cleanup scenarios
-            - Does not crash when active tasks exist
+            - The active streaming task for the session is cancelled
+            - The task is awaited (CancelledError swallowed) and removed from active_tasks
+            - The endpoint completes without raising
         """
         async def run_test():
             mock_websocket = self._create_mock_websocket()
             mock_websocket_manager = self._create_mock_websocket_manager()
-            
-            # Create mock active task
-            mock_task = AsyncMock()
-            mock_task.cancel = Mock()
-            mock_active_tasks = { self.test_session_id: mock_task }
-            
-            mock_main = self._create_mock_main_module( 
+
+            # A real cancellable, awaitable task (the live finally awaits it).
+            async def _never():
+                await asyncio.sleep( 3600 )
+            real_task = asyncio.ensure_future( _never() )
+            active_tasks = { self.test_session_id: real_task }
+
+            mock_main = self._create_mock_main_module(
                 websocket_manager=mock_websocket_manager,
-                active_tasks=mock_active_tasks
+                active_tasks=active_tasks
             )
-            
+
             from fastapi import WebSocketDisconnect
             mock_websocket.receive_text.side_effect = WebSocketDisconnect()
-            
-            with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main } ), \
-                 patch( 'builtins.print' ) as mock_print:
-                
-                # Test that the endpoint runs without crashing
-                try:
-                    await websocket_audio_endpoint(
-                        websocket=mock_websocket,
-                        session_id=self.test_session_id
-                    )
-                    # If we get here without exception, the test passes
-                    test_passed = True
-                except Exception as e:
-                    print( f"Unexpected exception: {e}" )
-                    test_passed = False
-                
-                self.assertTrue( test_passed, "WebSocket endpoint should handle task cleanup gracefully" )
-        
+
+            with _patch_fastapi_main( mock_main ), \
+                 patch( 'builtins.print' ):
+
+                await websocket_audio_endpoint(
+                    websocket=mock_websocket,
+                    session_id=self.test_session_id
+                )
+
+            # Cleanup path executed: task cancelled and removed from the registry
+            self.assertTrue( real_task.cancelled() )
+            self.assertNotIn( self.test_session_id, active_tasks )
+
         asyncio.run( run_test() )
     
     def test_websocket_queue_endpoint_valid_auth( self ):
@@ -355,7 +380,7 @@ class TestWebSocketRouter( unittest.TestCase ):
             from fastapi import WebSocketDisconnect
             mock_websocket.receive_text.side_effect = WebSocketDisconnect()
             
-            with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main } ), \
+            with _patch_fastapi_main( mock_main ), \
                  patch( 'cosa.rest.auth.verify_firebase_token' ) as mock_verify, \
                  patch( 'builtins.print' ) as mock_print:
                 
@@ -395,7 +420,7 @@ class TestWebSocketRouter( unittest.TestCase ):
             
             mock_websocket.receive_json.return_value = invalid_auth_message
             
-            with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main } ), \
+            with _patch_fastapi_main( mock_main ), \
                  patch( 'builtins.print' ) as mock_print:
                 
                 # Test that the endpoint handles invalid auth gracefully
@@ -430,7 +455,7 @@ class TestWebSocketRouter( unittest.TestCase ):
             
             mock_websocket.receive_json.return_value = self.test_auth_message
             
-            with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main } ), \
+            with _patch_fastapi_main( mock_main ), \
                  patch( 'cosa.rest.auth.verify_firebase_token' ) as mock_verify, \
                  patch( 'builtins.print' ) as mock_print:
                 
@@ -472,15 +497,11 @@ class TestWebSocketRouter( unittest.TestCase ):
                 None  # This will cause an exception and break the loop
             ]
             
-            with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main } ), \
+            with _patch_fastapi_main( mock_main ), \
                  patch( 'cosa.rest.auth.verify_firebase_token', return_value=self.test_user ), \
-                 patch( 'cosa.rest.routers.websocket.datetime' ) as mock_datetime, \
+                 patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ), \
                  patch( 'builtins.print' ) as mock_print:
-                
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+
                 await websocket_queue_endpoint(
                     websocket=mock_websocket,
                     session_id=self.test_session_id
@@ -502,27 +523,22 @@ class TestWebSocketRouter( unittest.TestCase ):
             - Dependencies return correct attributes
         """
         # Test get_websocket_manager dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.websocket_manager = "mock_websocket_manager"
-            
-            result = get_websocket_manager()
-            self.assertEqual( result, "mock_websocket_manager" )
-        
+        mock_main = Mock()
+        mock_main.websocket_manager = "mock_websocket_manager"
+        with _patch_fastapi_main( mock_main ):
+            self.assertEqual( get_websocket_manager(), "mock_websocket_manager" )
+
         # Test get_active_tasks dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.active_tasks = {"test": "task"}
-            
-            result = get_active_tasks()
-            self.assertEqual( result, {"test": "task"} )
-        
+        mock_main = Mock()
+        mock_main.active_tasks = {"test": "task"}
+        with _patch_fastapi_main( mock_main ):
+            self.assertEqual( get_active_tasks(), {"test": "task"} )
+
         # Test get_app_debug dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.app_debug = True
-            mock_main.app_verbose = False
-            
+        mock_main = Mock()
+        mock_main.app_debug = True
+        mock_main.app_verbose = False
+        with _patch_fastapi_main( mock_main ):
             debug, verbose = get_app_debug()
             self.assertTrue( debug )
             self.assertFalse( verbose )

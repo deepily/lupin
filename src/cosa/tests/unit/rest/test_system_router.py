@@ -33,6 +33,22 @@ from unit_test_utilities import UnitTestUtilities
 from cosa.rest.routers.system import router, health_check, health, init, get_session_id, auth_test, get_websocket_sessions
 
 
+def _patch_fastapi_main( mock_main ):
+    """
+    Robustly patch `fastapi_app.main` for direct-call unit tests.
+
+    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
+    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    package is cached by an earlier test, patching only the submodule entry is
+    silently ignored (passes in isolation, fails under full-suite ordering).
+    Overriding BOTH the package object and the submodule entry makes the import
+    resolve to mock_main regardless of prior import state.
+    """
+    pkg = Mock()
+    pkg.main = mock_main
+    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+
+
 class TestSystemRouter( unittest.TestCase ):
     """
     Comprehensive unit tests for system router endpoints.
@@ -89,23 +105,20 @@ class TestSystemRouter( unittest.TestCase ):
         """
         # Create an async test function
         async def run_test():
-            with patch( 'cosa.rest.routers.system.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            # Live contract: timestamps come from du.get_current_datetime_iso() (cosa.utils.util),
+            # NOT datetime.now().isoformat() — patch the utility helper at its source.
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ) as mock_dt_iso:
                 result = await health_check()
-                
+
                 # Verify response structure
                 self.assertIsInstance( result, dict )
                 self.assertEqual( result["status"], "healthy" )
                 self.assertEqual( result["service"], "lupin-fastapi" )
                 self.assertEqual( result["timestamp"], self.test_timestamp )
                 self.assertEqual( result["version"], "0.1.0" )
-                
-                # Verify datetime called
-                mock_datetime.now.assert_called_once()
-                mock_now.isoformat.assert_called_once()
+
+                # Verify timestamp helper called
+                mock_dt_iso.assert_called_once()
         
         # Run the async test
         asyncio.run( run_test() )
@@ -121,13 +134,9 @@ class TestSystemRouter( unittest.TestCase ):
             - Response is minimal for high-frequency checks
         """
         async def run_test():
-            with patch( 'cosa.rest.routers.system.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
                 result = await health()
-                
+
                 # Verify response structure
                 self.assertIsInstance( result, dict )
                 self.assertEqual( result["status"], "ok" )
@@ -141,48 +150,53 @@ class TestSystemRouter( unittest.TestCase ):
     def test_init_endpoint_success( self ):
         """
         Test configuration refresh endpoint (/api/init) success case.
-        
+
+        Live contract (re-architected): /api/init reinitializes the SINGLETON
+        ConfigurationManager via cosa.rest.dependencies.config.get_config_manager()
+        (no throwaway construction), calls config_mgr.init() in place, flushes all
+        registered caches via cosa.config.cache_registry.invalidate_all(), and
+        eagerly rebuilds the PredictionEngine.
+
         Ensures:
-            - Creates new ConfigurationManager instance
+            - Fetches the singleton config manager (does NOT construct a new one)
+            - With no config_block_id, calls config_mgr.init() with no args
             - Prints configuration with brackets
-            - Reloads solution snapshots if available
-            - Returns success status with confirmation message
+            - Flushes all caches via invalidate_all()
+            - Eagerly rebuilds the PredictionEngine
+            - Returns success status with live response shape (config_block_id,
+              database_url, caches_invalidated, timestamp)
         """
         async def run_test():
-            # Mock the main module and its components
-            mock_main_module = Mock()
-            mock_snapshot_mgr = Mock()
-            mock_main_module.snapshot_mgr = mock_snapshot_mgr
-            
             mock_config_mgr = Mock()
-            
-            with patch( 'cosa.rest.routers.system.datetime' ) as mock_datetime, \
-                 patch( 'cosa.rest.routers.system.ConfigurationManager', return_value=mock_config_mgr ) as mock_config_class, \
-                 patch( 'builtins.print' ) as mock_print:
-                
-                # Mock the dynamic import that happens inside the init function
-                # Use patch.dict to mock the specific module in sys.modules
-                with patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main_module } ):
-                    mock_now = Mock()
-                    mock_now.isoformat.return_value = self.test_timestamp
-                    mock_datetime.now.return_value = mock_now
-                    
-                    result = await init()
-                    
-                    # Verify ConfigurationManager created with correct env var
-                    mock_config_class.assert_called_once_with( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-                    
-                    # Verify configuration printed with brackets
-                    mock_config_mgr.print_configuration.assert_called_once_with( brackets=True )
-                    
-                    # Verify snapshot manager reload called
-                    mock_snapshot_mgr.load_snapshots.assert_called_once()
-                    
-                    # Verify success response
-                    self.assertEqual( result["status"], "success" )
-                    self.assertEqual( result["message"], "Configuration refreshed and snapshots reloaded" )
-                    self.assertEqual( result["timestamp"], self.test_timestamp )
-        
+            mock_config_mgr.config_block_id = "Lupin: Development"
+
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ), \
+                 patch( 'cosa.rest.dependencies.config.get_config_manager', return_value=mock_config_mgr ) as mock_get_cfg, \
+                 patch( 'cosa.config.cache_registry.invalidate_all', return_value=3 ) as mock_invalidate, \
+                 patch( 'cosa.agents.prediction_engine.prediction_engine.get_prediction_engine' ) as mock_get_pe, \
+                 patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ), \
+                 patch( 'builtins.print' ):
+
+                result = await init()
+
+                # Singleton fetched, NOT constructed
+                mock_get_cfg.assert_called_once()
+                # No config_block_id → in-place re-init with no args
+                mock_config_mgr.init.assert_called_once_with()
+                # Configuration printed with brackets
+                mock_config_mgr.print_configuration.assert_called_once_with( brackets=True )
+                # All caches flushed via the registry
+                mock_invalidate.assert_called_once()
+                # PredictionEngine eagerly rebuilt with the singleton config
+                mock_get_pe.assert_called_once_with( config_mgr=mock_config_mgr )
+
+                # Success response shape (live contract)
+                self.assertEqual( result["status"], "success" )
+                self.assertEqual( result["config_block_id"], "Lupin: Development" )
+                self.assertEqual( result["database_url"], "(unchanged)" )
+                self.assertEqual( result["caches_invalidated"], 3 )
+                self.assertEqual( result["timestamp"], self.test_timestamp )
+
         asyncio.run( run_test() )
     
     def test_init_endpoint_error( self ):
@@ -195,21 +209,15 @@ class TestSystemRouter( unittest.TestCase ):
             - Includes timestamp in error response
         """
         async def run_test():
-            with patch( 'cosa.rest.routers.system.datetime' ) as mock_datetime, \
-                 patch( 'cosa.rest.routers.system.ConfigurationManager' ) as mock_config_class, \
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ), \
+                 patch( 'cosa.rest.dependencies.config.get_config_manager', side_effect=Exception( "Config file not found" ) ), \
                  patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ):
-                
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
-                # Make ConfigurationManager raise an exception
-                mock_config_class.side_effect = Exception( "Config file not found" )
-                
+
                 result = await init()
-                
-                # Verify error response
+
+                # Verify error response (live contract: "Init failed: <msg>")
                 self.assertEqual( result["status"], "error" )
+                self.assertIn( "Init failed", result["message"] )
                 self.assertIn( "Config file not found", result["message"] )
                 self.assertEqual( result["timestamp"], self.test_timestamp )
         
@@ -229,13 +237,9 @@ class TestSystemRouter( unittest.TestCase ):
             mock_id_generator = Mock()
             mock_id_generator.get_id.return_value = self.test_session_id
             
-            with patch( 'cosa.rest.routers.system.datetime' ) as mock_datetime, \
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ), \
                  patch( 'builtins.print' ) as mock_print:
-                
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+
                 result = await get_session_id( mock_id_generator )
                 
                 # Verify ID generator called
@@ -261,11 +265,7 @@ class TestSystemRouter( unittest.TestCase ):
             - Contains timestamp for verification
         """
         async def run_test():
-            with patch( 'cosa.rest.routers.system.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
                 result = await auth_test( self.test_user )
                 
                 # Verify response structure
@@ -300,13 +300,9 @@ class TestSystemRouter( unittest.TestCase ):
             mock_main_module = Mock()
             mock_main_module.websocket_manager = mock_websocket_manager
             
-            with patch( 'cosa.rest.routers.system.datetime' ) as mock_datetime, \
-                 patch.dict( 'sys.modules', { 'fastapi_app.main': mock_main_module } ):
-                
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ), \
+                 _patch_fastapi_main( mock_main_module ):
+
                 result = await get_websocket_sessions( self.test_user )
                 
                 # Verify WebSocketManager called
@@ -381,11 +377,7 @@ class TestSystemRouter( unittest.TestCase ):
         """
         async def run_test():
             # Test that endpoints are async and return serializable data
-            with patch( 'cosa.rest.routers.system.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
                 # Test health check
                 result = await health_check()
                 self.assertIsInstance( result, dict )

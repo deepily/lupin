@@ -36,6 +36,22 @@ from cosa.rest.routers.websocket_admin import get_websocket_session, disconnect_
 from cosa.rest.routers.websocket_admin import get_websocket_manager
 
 
+def _patch_fastapi_main( mock_main ):
+    """
+    Robustly patch `fastapi_app.main` for direct-call unit tests.
+
+    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
+    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    package is cached by an earlier test, patching only the submodule entry is
+    silently ignored (passes in isolation, fails under full-suite ordering).
+    Overriding BOTH the package object and the submodule entry makes the import
+    resolve to mock_main regardless of prior import state.
+    """
+    pkg = Mock()
+    pkg.main = mock_main
+    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+
+
 class TestWebSocketAdminRouter( unittest.TestCase ):
     """
     Comprehensive unit tests for WebSocket admin router endpoints.
@@ -137,11 +153,9 @@ class TestWebSocketAdminRouter( unittest.TestCase ):
         async def run_test():
             mock_websocket_manager = self._create_mock_websocket_manager()
             
-            with patch( 'cosa.rest.routers.websocket_admin.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            # Live contract: timestamps come from du.get_current_datetime_iso() (cosa.utils.util).
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
+
                 result = await get_websocket_sessions(
                     current_user=self.test_user,
                     websocket_manager=mock_websocket_manager
@@ -170,11 +184,9 @@ class TestWebSocketAdminRouter( unittest.TestCase ):
         async def run_test():
             mock_websocket_manager = self._create_mock_websocket_manager()
             
-            with patch( 'cosa.rest.routers.websocket_admin.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            # Live contract: timestamps come from du.get_current_datetime_iso() (cosa.utils.util).
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
+
                 result = await get_websocket_stats(
                     current_user=self.test_user,
                     websocket_manager=mock_websocket_manager
@@ -205,11 +217,9 @@ class TestWebSocketAdminRouter( unittest.TestCase ):
             mock_websocket_manager = self._create_mock_websocket_manager()
             max_age_hours = 48
             
-            with patch( 'cosa.rest.routers.websocket_admin.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            # Live contract: timestamps come from du.get_current_datetime_iso() (cosa.utils.util).
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
+
                 result = await cleanup_websocket_sessions(
                     max_age_hours=max_age_hours,
                     current_user=self.test_user,
@@ -322,11 +332,9 @@ class TestWebSocketAdminRouter( unittest.TestCase ):
             mock_websocket_manager = self._create_mock_websocket_manager()
             mock_websocket_manager.is_connected.return_value = True
             
-            with patch( 'cosa.rest.routers.websocket_admin.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            # Live contract: timestamps come from du.get_current_datetime_iso() (cosa.utils.util).
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
+
                 result = await disconnect_websocket_session(
                     session_id=self.test_session_id,
                     current_user=self.test_user,
@@ -387,11 +395,9 @@ class TestWebSocketAdminRouter( unittest.TestCase ):
             mock_websocket_manager = self._create_mock_websocket_manager()
             policy_enabled = True
             
-            with patch( 'cosa.rest.routers.websocket_admin.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            # Live contract: timestamps come from du.get_current_datetime_iso() (cosa.utils.util).
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
+
                 result = await update_single_session_policy(
                     enabled=policy_enabled,
                     current_user=self.test_user,
@@ -419,11 +425,9 @@ class TestWebSocketAdminRouter( unittest.TestCase ):
         async def run_test():
             mock_websocket_manager = self._create_mock_websocket_manager()
             
-            with patch( 'cosa.rest.routers.websocket_admin.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            # Live contract: timestamps come from du.get_current_datetime_iso() (cosa.utils.util).
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
+
                 result = await get_available_events(
                     current_user=self.test_user,
                     websocket_manager=mock_websocket_manager
@@ -445,10 +449,9 @@ class TestWebSocketAdminRouter( unittest.TestCase ):
             - Returns proper attributes from main module
         """
         # Test get_websocket_manager dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.websocket_manager = "mock_websocket_manager"
-            
+        mock_main = Mock()
+        mock_main.websocket_manager = "mock_websocket_manager"
+        with _patch_fastapi_main( mock_main ):
             result = get_websocket_manager()
             self.assertEqual( result, "mock_websocket_manager" )
     

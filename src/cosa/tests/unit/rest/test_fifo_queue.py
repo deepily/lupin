@@ -433,31 +433,41 @@ class TestFifoQueue( unittest.TestCase ):
     
     def test_websocket_emission( self ):
         """
-        Test WebSocket auto-emission functionality.
-        
+        Test base FifoQueue.push() does NOT auto-emit WebSocket updates.
+
+        Live contract (refactor): auto-emission was REMOVED from the base
+        FifoQueue. _emit_queue_update now lives ONLY on NotificationFifoQueue
+        (src/cosa/rest/notification_fifo_queue.py). The base FifoQueue still
+        accepts websocket_mgr/emit_enabled for subclass use, but base push()
+        only enqueues — it never calls websocket_mgr.emit, and the base class
+        exposes no _emit_queue_update method.
+
         Ensures:
-            - WebSocket emit called when enabled
-            - Correct event name and data passed
-            - No emission when disabled or no manager
+            - The base class has NO _emit_queue_update method
+              (resurrection guard: flags any re-introduction of base emission)
+            - push() enqueues without calling websocket_mgr.emit (enabled path)
+            - push() with emit_enabled=False still enqueues, still no emit
+            - push() with no websocket manager enqueues and emits nothing
         """
-        # Test with emission enabled
+        # Base class has no emission method — emission is a NotificationFifoQueue concern.
+        self.assertFalse( hasattr( FifoQueue, "_emit_queue_update" ) )
+
+        # Emission-enabled construction: push() must NOT call emit on the manager.
         queue, mocks = self._create_mocked_fifo_queue( with_websocket=True )
-        
-        with patch.object( queue, '_emit_queue_update' ) as mock_emit:
-            queue.push( self.test_job )
-            mock_emit.assert_called_once()
-        
-        # Test with emission disabled - method is still called but won't emit
+        queue.push( self.test_job )
+        self.assertEqual( queue.size(), 1 )
+        mocks["websocket_mgr"].emit.assert_not_called()
+
+        # emit_enabled=False path: still enqueues, still no emission.
         queue.emit_enabled = False
-        with patch.object( queue, '_emit_queue_update' ) as mock_emit:
-            queue.push( self.test_job2 )
-            mock_emit.assert_called_once()  # Method called but won't emit due to emit_enabled=False
-        
-        # Test queue without WebSocket manager - emit is still called but doesn't do anything
+        queue.push( self.test_job2 )
+        self.assertEqual( queue.size(), 2 )
+        mocks["websocket_mgr"].emit.assert_not_called()
+
+        # No WebSocket manager: push() enqueues and emits nothing.
         queue_no_ws, _ = self._create_mocked_fifo_queue( with_websocket=False )
-        with patch.object( queue_no_ws, '_emit_queue_update' ) as mock_emit:
-            queue_no_ws.push( self.test_job )
-            mock_emit.assert_called_once()  # Method is called but won't emit due to missing websocket_mgr
+        queue_no_ws.push( self.test_job )
+        self.assertEqual( queue_no_ws.size(), 1 )
 
 
 def isolated_unit_test():

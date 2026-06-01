@@ -32,6 +32,22 @@ from cosa.rest.routers.queues import router, push, get_queue, reset_queues
 from cosa.rest.routers.queues import get_todo_queue, get_running_queue, get_done_queue, get_dead_queue, get_notification_queue
 
 
+def _patch_fastapi_main( mock_main ):
+    """
+    Robustly patch `fastapi_app.main` for direct-call unit tests.
+
+    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
+    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    package is cached by an earlier test, patching only the submodule entry is
+    silently ignored (passes in isolation, fails under full-suite ordering).
+    Overriding BOTH the package object and the submodule entry makes the import
+    resolve to mock_main regardless of prior import state.
+    """
+    pkg = Mock()
+    pkg.main = mock_main
+    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+
+
 class TestQueuesRouter( unittest.TestCase ):
     """
     Comprehensive unit tests for queue management router endpoints.
@@ -103,9 +119,45 @@ class TestQueuesRouter( unittest.TestCase ):
         mock_queue.get_html_list.return_value = html_jobs
         mock_queue.push_job.return_value = { "id_hash": "generated_hash", "status": "queued" }
         mock_queue.clear.return_value = None
-        
+
         return mock_queue
-    
+
+    def _make_mock_job( self, id_hash="job1", user_id="test_user_123" ):
+        """
+        Build a non-agentic mock job exposing the unified-interface attributes
+        the live get_queue handler reads when building *_jobs_metadata for the
+        todo/run/done/dead buckets.
+
+        Live contract: get_queue no longer returns HTML strings — it builds a
+        structured metadata dict per job from these attributes. isinstance(job,
+        AgenticJobBase) is False for a plain Mock, so the agentic-only artifact
+        fields collapse to None (exercising the non-agentic branch).
+
+        Returns:
+            Mock job with concrete (JSON-serializable) attribute values.
+        """
+        from cosa.rest.job_state import JobState
+        job = Mock()
+        job.id_hash               = id_hash
+        job.last_question_asked   = "What is 2 + 2?"
+        job.answer                = "4"
+        job.answer_conversational = "It's 4."
+        job.run_date              = "2025-08-05T11:00:00"
+        job.created_date          = "2025-08-05T10:00:00"
+        job.user_id               = user_id
+        job.user_email            = "test@example.com"
+        job.session_id            = "happy-elephant"
+        job.job_type              = "agent router go to math"
+        job.state                 = JobState.COMPLETED
+        job.started_at            = None
+        job.completed_at          = None
+        job.error                 = None
+        job.scheduled_at          = None
+        job.monopolize            = False
+        job.is_cache_hit          = False
+        return job
+
+
     def test_push_endpoint_success( self ):
         """
         Test queue job push endpoint success case.
@@ -117,34 +169,49 @@ class TestQueuesRouter( unittest.TestCase ):
             - Logs push operation for debugging
         """
         async def run_test():
+            # Live contract: push( request, current_user, todo_queue ). The body
+            # (question + websocket_id) arrives as JSON via request.json(); auth
+            # supplies user_id + user_email; push_job is invoked with 4 args
+            # (question, websocket_id, user_id, user_email) via asyncio.to_thread.
             mock_todo_queue = self._create_mock_queue()
-            
+            mock_todo_queue.push_job.return_value = { "job_id": "generated_hash", "message": "queued ok" }
+
+            mock_request = Mock()
+            mock_request.json = AsyncMock( return_value={
+                "question"     : self.test_question,
+                "websocket_id" : self.test_websocket_id
+            } )
+
             with patch( 'builtins.print' ) as mock_print:
-                result = await push( 
-                    question=self.test_question,
-                    websocket_id=self.test_websocket_id,
+                result = await push(
+                    request=mock_request,
                     current_user=self.test_user,
                     todo_queue=mock_todo_queue
                 )
-                
-                # Verify queue push called with correct parameters
-                mock_todo_queue.push_job.assert_called_once_with( 
-                    self.test_question, 
-                    self.test_websocket_id, 
-                    self.test_user["uid"] 
+
+                # Verify queue push called with the live 4-arg signature
+                mock_todo_queue.push_job.assert_called_once_with(
+                    self.test_question,
+                    self.test_websocket_id,
+                    self.test_user["uid"],
+                    self.test_user["email"]
                 )
-                
-                # Verify logging
-                expected_log = f"[API] /api/push called - question: '{self.test_question}', websocket_id: {self.test_websocket_id}, user_id: {self.test_user['uid']}"
-                mock_print.assert_called_once_with( expected_log )
-                
-                # Verify response format
+
+                # Verify the call log line (now includes user_email)
+                expected_log = (
+                    f"[API] /api/push called - question: '{self.test_question}', "
+                    f"websocket_id: {self.test_websocket_id}, user_id: {self.test_user['uid']}, "
+                    f"user_email: {self.test_user['email']}"
+                )
+                mock_print.assert_any_call( expected_log )
+
+                # Verify response format (live shape: status/websocket_id/user_id/job_id/result)
                 self.assertEqual( result["status"], "queued" )
                 self.assertEqual( result["websocket_id"], self.test_websocket_id )
                 self.assertEqual( result["user_id"], self.test_user["uid"] )
-                self.assertIn( "result", result )
-                self.assertEqual( result["result"]["id_hash"], "generated_hash" )
-        
+                self.assertEqual( result["job_id"], "generated_hash" )
+                self.assertEqual( result["result"], "queued ok" )
+
         asyncio.run( run_test() )
     
     def test_get_queue_todo_endpoint( self ):
@@ -158,34 +225,43 @@ class TestQueuesRouter( unittest.TestCase ):
             - Response format matches expected structure
         """
         async def run_test():
+            # Live contract: get_queue authorizes the filter (regular user, no
+            # filter → own jobs), fetches via queue.get_jobs_for_user(uid), and
+            # returns structured "<queue>_jobs_metadata" (HTML output retired).
             mock_todo_queue = self._create_mock_queue()
+            mock_todo_queue.get_jobs_for_user.return_value = [
+                self._make_mock_job( id_hash="job1" ),
+                self._make_mock_job( id_hash="job2" )
+            ]
             mock_running_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_done_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_dead_queue = self._create_mock_queue( size=0, html_jobs=[] )
-            
+
             result = await get_queue(
                 queue_name="todo",
                 current_user=self.test_user,
+                user_filter=None,   # direct-call: Query() default is a FieldInfo, not None
                 todo_queue=mock_todo_queue,
                 running_queue=mock_running_queue,
                 done_queue=mock_done_queue,
                 dead_queue=mock_dead_queue
             )
-            
-            # Verify todo queue called with descending order
-            mock_todo_queue.get_html_list.assert_called_once_with( descending=True )
-            
-            # Verify response structure
-            self.assertIn( "todo_jobs", result )
-            todo_jobs = result["todo_jobs"]
-            
-            # Verify user context added to jobs
-            for job in todo_jobs:
-                self.assertIn( f"[user: {self.test_user['uid']}]", job )
-            
-            # Verify job count matches
-            self.assertEqual( len( todo_jobs ), len( self.test_html_jobs ) )
-        
+
+            # Regular user, no filter → scoped to own jobs
+            mock_todo_queue.get_jobs_for_user.assert_called_once_with( self.test_user["uid"] )
+
+            # Live structured response
+            self.assertIn( "todo_jobs_metadata", result )
+            metadata = result["todo_jobs_metadata"]
+            self.assertEqual( len( metadata ), 2 )
+            self.assertEqual( result["filtered_by"], self.test_user["uid"] )
+            self.assertEqual( result["total_jobs"], 2 )
+            self.assertFalse( result["is_admin_view"] )
+            for job_data in metadata:
+                self.assertEqual( job_data["user_id"], self.test_user["uid"] )
+                self.assertIn( "question_text", job_data )
+                self.assertIn( "status", job_data )
+
         asyncio.run( run_test() )
     
     def test_get_queue_running_endpoint( self ):
@@ -199,34 +275,37 @@ class TestQueuesRouter( unittest.TestCase ):
             - Response format matches expected structure
         """
         async def run_test():
+            # Live contract: run bucket uses ascending order (no reverse) and the
+            # same get_jobs_for_user → run_jobs_metadata structured path.
             mock_todo_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_running_queue = self._create_mock_queue()
+            mock_running_queue.get_jobs_for_user.return_value = [
+                self._make_mock_job( id_hash="run1" ),
+                self._make_mock_job( id_hash="run2" )
+            ]
             mock_done_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_dead_queue = self._create_mock_queue( size=0, html_jobs=[] )
-            
+
             result = await get_queue(
                 queue_name="run",
                 current_user=self.test_user,
+                user_filter=None,   # direct-call: Query() default is a FieldInfo, not None
                 todo_queue=mock_todo_queue,
                 running_queue=mock_running_queue,
                 done_queue=mock_done_queue,
                 dead_queue=mock_dead_queue
             )
-            
-            # Verify running queue called without descending (default ascending)
-            mock_running_queue.get_html_list.assert_called_once_with()
-            
-            # Verify response structure
-            self.assertIn( "run_jobs", result )
-            run_jobs = result["run_jobs"]
-            
-            # Verify user context added to jobs
-            for job in run_jobs:
-                self.assertIn( f"[user: {self.test_user['uid']}]", job )
-            
-            # Verify job count matches
-            self.assertEqual( len( run_jobs ), len( self.test_html_jobs ) )
-        
+
+            mock_running_queue.get_jobs_for_user.assert_called_once_with( self.test_user["uid"] )
+
+            self.assertIn( "run_jobs_metadata", result )
+            metadata = result["run_jobs_metadata"]
+            self.assertEqual( len( metadata ), 2 )
+            self.assertEqual( result["filtered_by"], self.test_user["uid"] )
+            self.assertEqual( result["total_jobs"], 2 )
+            for job_data in metadata:
+                self.assertEqual( job_data["user_id"], self.test_user["uid"] )
+
         asyncio.run( run_test() )
     
     def test_get_queue_done_endpoint( self ):
@@ -240,34 +319,43 @@ class TestQueuesRouter( unittest.TestCase ):
             - Response format matches expected structure
         """
         async def run_test():
+            # Live contract: the done bucket builds rich metadata and bulk-counts
+            # notifications via _count_interactions_for_jobs (a DB call) — patched
+            # to {} here to keep the test boundary-isolated (zero DB).
             mock_todo_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_running_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_done_queue = self._create_mock_queue()
+            mock_done_queue.get_jobs_for_user.return_value = [
+                self._make_mock_job( id_hash="done1" ),
+                self._make_mock_job( id_hash="done2" )
+            ]
             mock_dead_queue = self._create_mock_queue( size=0, html_jobs=[] )
-            
-            result = await get_queue(
-                queue_name="done",
-                current_user=self.test_user,
-                todo_queue=mock_todo_queue,
-                running_queue=mock_running_queue,
-                done_queue=mock_done_queue,
-                dead_queue=mock_dead_queue
-            )
-            
-            # Verify done queue called with descending order
-            mock_done_queue.get_html_list.assert_called_once_with( descending=True )
-            
-            # Verify response structure
-            self.assertIn( "done_jobs", result )
-            done_jobs = result["done_jobs"]
-            
-            # Verify user context added to jobs
-            for job in done_jobs:
-                self.assertIn( f"[user: {self.test_user['uid']}]", job )
-            
-            # Verify job count matches
-            self.assertEqual( len( done_jobs ), len( self.test_html_jobs ) )
-        
+
+            with patch( 'cosa.rest.routers.queues._count_interactions_for_jobs', return_value={} ) as mock_counts:
+                result = await get_queue(
+                    queue_name="done",
+                    current_user=self.test_user,
+                    user_filter=None,
+                    todo_queue=mock_todo_queue,
+                    running_queue=mock_running_queue,
+                    done_queue=mock_done_queue,
+                    dead_queue=mock_dead_queue
+                )
+
+            mock_done_queue.get_jobs_for_user.assert_called_once_with( self.test_user["uid"] )
+            mock_counts.assert_called_once()
+
+            self.assertIn( "done_jobs_metadata", result )
+            metadata = result["done_jobs_metadata"]
+            self.assertEqual( len( metadata ), 2 )
+            self.assertEqual( result["filtered_by"], self.test_user["uid"] )
+            self.assertEqual( result["total_jobs"], 2 )
+            for job_data in metadata:
+                self.assertEqual( job_data["user_id"], self.test_user["uid"] )
+                # Non-agentic job → agentic-only artifact fields collapse to None
+                self.assertIsNone( job_data["report_path"] )
+                self.assertFalse( job_data["has_interactions"] )  # empty counts
+
         asyncio.run( run_test() )
     
     def test_get_queue_dead_endpoint( self ):
@@ -281,34 +369,41 @@ class TestQueuesRouter( unittest.TestCase ):
             - Response format matches expected structure
         """
         async def run_test():
+            # Live contract: the dead bucket mirrors the done bucket — rich
+            # metadata + _count_interactions_for_jobs (DB) patched to {}.
             mock_todo_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_running_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_done_queue = self._create_mock_queue( size=0, html_jobs=[] )
             mock_dead_queue = self._create_mock_queue()
-            
-            result = await get_queue(
-                queue_name="dead",
-                current_user=self.test_user,
-                todo_queue=mock_todo_queue,
-                running_queue=mock_running_queue,
-                done_queue=mock_done_queue,
-                dead_queue=mock_dead_queue
-            )
-            
-            # Verify dead queue called with descending order
-            mock_dead_queue.get_html_list.assert_called_once_with( descending=True )
-            
-            # Verify response structure
-            self.assertIn( "dead_jobs", result )
-            dead_jobs = result["dead_jobs"]
-            
-            # Verify user context added to jobs
-            for job in dead_jobs:
-                self.assertIn( f"[user: {self.test_user['uid']}]", job )
-            
-            # Verify job count matches
-            self.assertEqual( len( dead_jobs ), len( self.test_html_jobs ) )
-        
+            mock_dead_queue.get_jobs_for_user.return_value = [
+                self._make_mock_job( id_hash="dead1" ),
+                self._make_mock_job( id_hash="dead2" )
+            ]
+
+            with patch( 'cosa.rest.routers.queues._count_interactions_for_jobs', return_value={} ) as mock_counts:
+                result = await get_queue(
+                    queue_name="dead",
+                    current_user=self.test_user,
+                    user_filter=None,
+                    todo_queue=mock_todo_queue,
+                    running_queue=mock_running_queue,
+                    done_queue=mock_done_queue,
+                    dead_queue=mock_dead_queue
+                )
+
+            mock_dead_queue.get_jobs_for_user.assert_called_once_with( self.test_user["uid"] )
+            mock_counts.assert_called_once()
+
+            self.assertIn( "dead_jobs_metadata", result )
+            metadata = result["dead_jobs_metadata"]
+            self.assertEqual( len( metadata ), 2 )
+            self.assertEqual( result["filtered_by"], self.test_user["uid"] )
+            self.assertEqual( result["total_jobs"], 2 )
+            for job_data in metadata:
+                self.assertEqual( job_data["user_id"], self.test_user["uid"] )
+                # Dead bucket surfaces partial artifacts; non-agentic → plan_path None
+                self.assertIsNone( job_data["plan_path"] )
+
         asyncio.run( run_test() )
     
     def test_get_queue_invalid_name( self ):
@@ -332,6 +427,7 @@ class TestQueuesRouter( unittest.TestCase ):
                 await get_queue(
                     queue_name="invalid_queue",
                     current_user=self.test_user,
+                    user_filter=None,
                     todo_queue=mock_todo_queue,
                     running_queue=mock_running_queue,
                     done_queue=mock_done_queue,
@@ -344,6 +440,82 @@ class TestQueuesRouter( unittest.TestCase ):
         
         asyncio.run( run_test() )
     
+    def test_get_queue_cross_user_filter_forbidden( self ):
+        """
+        Test get_queue rejects a regular user filtering for ANOTHER user's jobs.
+
+        Live contract (queue_auth.authorize_queue_filter, commit 98ab965
+        "Production Authentication System"): a non-admin user passing a
+        user_filter that is neither None nor their own uid gets HTTP 403. This
+        is an INTENTIONAL per-user authorization contract, not a regression —
+        it is documented in the authorization matrix in queue_auth.py.
+
+        Ensures:
+            - Regular user + cross-user filter → HTTPException 403
+            - The queue is never consulted (authorization fails first)
+        """
+        async def run_test():
+            from fastapi import HTTPException
+
+            mock_todo_queue = self._create_mock_queue()
+            mock_running_queue = self._create_mock_queue()
+            mock_done_queue = self._create_mock_queue()
+            mock_dead_queue = self._create_mock_queue()
+
+            with self.assertRaises( HTTPException ) as context:
+                await get_queue(
+                    queue_name="todo",
+                    current_user=self.test_user,          # no "admin" role
+                    user_filter="some_other_user_id",     # cross-user request
+                    todo_queue=mock_todo_queue,
+                    running_queue=mock_running_queue,
+                    done_queue=mock_done_queue,
+                    dead_queue=mock_dead_queue
+                )
+
+            self.assertEqual( context.exception.status_code, 403 )
+            self.assertIn( "Cannot access other users' jobs", str( context.exception.detail ) )
+            # Authorization fails before any queue read
+            mock_todo_queue.get_jobs_for_user.assert_not_called()
+
+        asyncio.run( run_test() )
+
+    def test_get_queue_matching_user_filter_allowed( self ):
+        """
+        Test get_queue allows a regular user filtering for THEIR OWN uid.
+
+        Live contract: a non-admin passing user_filter == own uid is authorized
+        (the matching-user arm of the documented matrix) and is_admin_view is
+        True only because user_filter is not None (admin status is still False).
+
+        Ensures:
+            - Regular user + own-uid filter → 200 with own jobs
+            - get_jobs_for_user called with the user's own uid
+        """
+        async def run_test():
+            mock_todo_queue = self._create_mock_queue()
+            mock_todo_queue.get_jobs_for_user.return_value = [ self._make_mock_job() ]
+            mock_running_queue = self._create_mock_queue()
+            mock_done_queue = self._create_mock_queue()
+            mock_dead_queue = self._create_mock_queue()
+
+            result = await get_queue(
+                queue_name="todo",
+                current_user=self.test_user,
+                user_filter=self.test_user["uid"],   # own uid — allowed
+                todo_queue=mock_todo_queue,
+                running_queue=mock_running_queue,
+                done_queue=mock_done_queue,
+                dead_queue=mock_dead_queue
+            )
+
+            mock_todo_queue.get_jobs_for_user.assert_called_once_with( self.test_user["uid"] )
+            self.assertEqual( result["filtered_by"], self.test_user["uid"] )
+            # user_filter is not None but user is not admin → is_admin_view False
+            self.assertFalse( result["is_admin_view"] )
+
+        asyncio.run( run_test() )
+
     def test_reset_queues_success( self ):
         """
         Test queue reset endpoint success case.
@@ -362,13 +534,11 @@ class TestQueuesRouter( unittest.TestCase ):
             mock_dead_queue = self._create_mock_queue( size=1 )
             mock_notification_queue = self._create_mock_queue( size=3 )
             
-            with patch( 'cosa.rest.routers.queues.datetime' ) as mock_datetime, \
+            # Live contract: reset_queues stamps cu.get_current_datetime_iso()
+            # (cu = cosa.utils.util), not datetime.now().isoformat().
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ), \
                  patch( 'builtins.print' ) as mock_print:
-                
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+
                 result = await reset_queues(
                     current_user=self.test_user,
                     todo_queue=mock_todo_queue,
@@ -466,44 +636,34 @@ class TestQueuesRouter( unittest.TestCase ):
             - Import errors are properly handled
         """
         # Test get_todo_queue dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.jobs_todo_queue = "mock_todo_queue"
-            
-            result = get_todo_queue()
-            self.assertEqual( result, "mock_todo_queue" )
-        
+        mock_main = Mock()
+        mock_main.jobs_todo_queue = "mock_todo_queue"
+        with _patch_fastapi_main( mock_main ):
+            self.assertEqual( get_todo_queue(), "mock_todo_queue" )
+
         # Test get_running_queue dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.jobs_run_queue = "mock_running_queue"
-            
-            result = get_running_queue()
-            self.assertEqual( result, "mock_running_queue" )
-        
+        mock_main = Mock()
+        mock_main.jobs_run_queue = "mock_running_queue"
+        with _patch_fastapi_main( mock_main ):
+            self.assertEqual( get_running_queue(), "mock_running_queue" )
+
         # Test get_done_queue dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.jobs_done_queue = "mock_done_queue"
-            
-            result = get_done_queue()
-            self.assertEqual( result, "mock_done_queue" )
-        
+        mock_main = Mock()
+        mock_main.jobs_done_queue = "mock_done_queue"
+        with _patch_fastapi_main( mock_main ):
+            self.assertEqual( get_done_queue(), "mock_done_queue" )
+
         # Test get_dead_queue dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.jobs_dead_queue = "mock_dead_queue"
-            
-            result = get_dead_queue()
-            self.assertEqual( result, "mock_dead_queue" )
-        
+        mock_main = Mock()
+        mock_main.jobs_dead_queue = "mock_dead_queue"
+        with _patch_fastapi_main( mock_main ):
+            self.assertEqual( get_dead_queue(), "mock_dead_queue" )
+
         # Test get_notification_queue dependency
-        with patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ) as mock_modules:
-            mock_main = mock_modules['fastapi_app.main']
-            mock_main.jobs_notification_queue = "mock_notification_queue"
-            
-            result = get_notification_queue()
-            self.assertEqual( result, "mock_notification_queue" )
+        mock_main = Mock()
+        mock_main.jobs_notification_queue = "mock_notification_queue"
+        with _patch_fastapi_main( mock_main ):
+            self.assertEqual( get_notification_queue(), "mock_notification_queue" )
     
     def test_router_configuration( self ):
         """
@@ -536,33 +696,36 @@ class TestQueuesRouter( unittest.TestCase ):
         """
         async def run_test():
             mock_queue = self._create_mock_queue()
-            
-            # Test push endpoint async pattern
+            mock_queue.get_jobs_for_user.return_value = [ self._make_mock_job() ]
+            mock_queue.push_job.return_value = { "job_id": "h", "message": "ok" }
+
+            # Test push endpoint async pattern (live Request-based signature)
+            mock_request = Mock()
+            mock_request.json = AsyncMock( return_value={
+                "question"     : self.test_question,
+                "websocket_id" : self.test_websocket_id
+            } )
             result = await push(
-                question=self.test_question,
-                websocket_id=self.test_websocket_id,
+                request=mock_request,
                 current_user=self.test_user,
                 todo_queue=mock_queue
             )
             self.assertIsInstance( result, dict )
-            
-            # Test get_queue endpoint async pattern
+
+            # Test get_queue endpoint async pattern (structured metadata)
             result = await get_queue(
                 queue_name="todo",
                 current_user=self.test_user,
+                user_filter=None,
                 todo_queue=mock_queue,
                 running_queue=mock_queue,
                 done_queue=mock_queue,
                 dead_queue=mock_queue
             )
             self.assertIsInstance( result, dict )
-            
+
             # Test reset_queues endpoint async pattern
-            with patch( 'cosa.rest.routers.queues.datetime' ) as mock_datetime:
-                mock_now = Mock()
-                mock_now.isoformat.return_value = self.test_timestamp
-                mock_datetime.now.return_value = mock_now
-                
+            with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ):
                 result = await reset_queues(
                     current_user=self.test_user,
                     todo_queue=mock_queue,
