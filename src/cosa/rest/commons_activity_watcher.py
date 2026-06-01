@@ -184,7 +184,7 @@ class CommonsActivityWatcher( CommonsTopicWatcher ):
             self._last_seen_ts is None or latest_ts_pre_dedupe > self._last_seen_ts
         ):
             self._last_seen_ts = latest_ts_pre_dedupe
-        elif latest_ts is not None and latest_ts != self._last_seen_ts:
+        elif latest_ts is not None and latest_ts != self._last_seen_ts:  # pragma: no cover - unreachable: commons_store guarantees non-None ts (mandatory header regex orphan-drops non-matching blocks; read(since=) sorts/compares ts so None would TypeError) and the since-filter is exclusive, so when entries exist latest_ts_pre_dedupe > cursor (or cursor is None) → the L183 if always fires; an empty tick early-returns at L135 — the elif can never be reached
             self._last_seen_ts = latest_ts
 
         return dispatched
