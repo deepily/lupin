@@ -215,7 +215,7 @@ async def get_docs_file(
 
     project_name, rel_path = decoded_path.split( "/", 1 )
 
-    if not project_name:
+    if not project_name:  # pragma: no cover - unreachable: decoded_path is lstrip('/')'d (L192), guarded non-empty (L195) and guaranteed to contain '/' (L210), so its first char is non-slash → split('/',1)[0] is always a non-empty pre-slash segment → project_name is always truthy
         raise HTTPException(
             status_code = 400,
             detail      = "Empty project prefix"
