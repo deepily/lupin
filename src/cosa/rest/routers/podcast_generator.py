@@ -350,7 +350,7 @@ async def match_research_docs( user_email: str, description: str, debug: bool = 
             if fuzzy_name_hits:
                 best_name = fuzzy_name_hits[ 0 ]
                 # Find the corresponding relative path
-                for rel_path in all_rel_paths:
+                for rel_path in all_rel_paths:  # pragma: no branch - loop always breaks: best_name (L351) comes from get_close_matches(all_basenames) so by difflib's contract it is a member of all_basenames = [basename(p) for p in all_rel_paths]; some rel_path therefore matches at L354 → break (L356) always fires → natural exhaustion (353->324) is unreachable. The L350 `if fuzzy_name_hits:` guard rules out the empty-list [0] IndexError.
                     if os.path.basename( rel_path ) == best_name:
                         if debug: print( f"[match_research_docs] Fuzzy name match: '{m}' → '{best_name}'" )
                         valid_matches.append( { "filename": best_name, "relative_path": rel_path } )
