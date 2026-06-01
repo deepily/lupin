@@ -121,7 +121,7 @@ def start_todo_producer_run_consumer_thread( todo_queue: Any, running_queue: Any
                     if not todo_queue.consumer_running:
                         break
 
-                if job:
+                if job:  # pragma: no branch - L124 is reached only when consumer_running stayed True at L121 (via the job-found break at L93), so job is always truthy here; the falsy arc back to the outer loop is unreachable
                     # Monopolize placeholder (no-op in serial mode)
                     # When Hybrid Fast Lane adds ThreadPoolExecutor, this will wait for
                     # running_queue to drain before processing the monopolize job.
