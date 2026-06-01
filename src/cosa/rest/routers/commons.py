@@ -1126,19 +1126,19 @@ def execute_unregister_question(
 # ─── Dependency-injection accessors ─────────────────────────────────────────
 
 
-def get_notification_queue():   # pragma: no cover
+def get_notification_queue():
     """DI: return the singleton NotificationFifoQueue from main module."""
     import fastapi_app.main as main_module
     return main_module.jobs_notification_queue
 
 
-def _require_initialized():   # pragma: no cover
+def _require_initialized():
     """Raise if commons singletons not yet wired (step 8 wires them at app startup)."""
     if _commons_store is None or _commons_rate_limiter is None or _commons_ack_watcher is None:
         raise HTTPException( status_code=503, detail="commons subsystem not initialized" )
 
 
-def _require_question_watcher():   # pragma: no cover
+def _require_question_watcher():
     """Raise if the Phase 3 question watcher hasn't been wired yet."""
     if _commons_question_watcher is None:
         raise HTTPException( status_code=503, detail="commons question watcher not initialized" )

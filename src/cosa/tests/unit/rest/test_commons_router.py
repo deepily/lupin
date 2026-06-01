@@ -25,10 +25,13 @@ injected as callables. No real network / DB / filesystem (temp files only for
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 import uuid
 from unittest.mock import MagicMock, patch
+
+from fastapi import HTTPException
 
 import cosa.rest.routers.commons as commons
 from cosa.rest.routers.commons import (
@@ -36,6 +39,9 @@ from cosa.rest.routers.commons import (
     RegisterQuestionRequest,
     RecipientResolutionError,
     init_commons_state,
+    get_notification_queue,
+    _require_initialized,
+    _require_question_watcher,
     _body_contains_reminder_framing,
     validate_broadcast_body,
     validate_broadcast_id,
@@ -99,6 +105,59 @@ class TestInitCommonsState( unittest.TestCase ):
     def test_question_watcher_defaults_to_none( self ):
         init_commons_state( MagicMock(), MagicMock(), MagicMock(), 600 )
         self.assertIsNone( commons._commons_question_watcher )
+
+
+# ── DI accessors + readiness guards ─────────────────────────────────────────────
+
+
+class TestAccessorsAndGuards( unittest.TestCase ):
+    """`get_notification_queue` + `_require_initialized` + `_require_question_watcher`."""
+
+    def setUp( self ):
+        self._snapshot = (
+            commons._commons_store,
+            commons._commons_rate_limiter,
+            commons._commons_ack_watcher,
+            commons._commons_question_watcher,
+        )
+        self.addCleanup( self._restore )
+
+    def _restore( self ):
+        ( commons._commons_store,
+          commons._commons_rate_limiter,
+          commons._commons_ack_watcher,
+          commons._commons_question_watcher ) = self._snapshot
+
+    def test_get_notification_queue( self ):
+        mock_main = MagicMock()
+        mock_main.jobs_notification_queue = "NQ"
+        pkg = MagicMock(); pkg.main = mock_main
+        with patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } ):
+            self.assertEqual( get_notification_queue(), "NQ" )
+
+    def test_require_initialized_passes_when_all_wired( self ):
+        commons._commons_store        = MagicMock()
+        commons._commons_rate_limiter = MagicMock()
+        commons._commons_ack_watcher  = MagicMock()
+        _require_initialized()  # no raise
+
+    def test_require_initialized_raises_503_when_missing( self ):
+        commons._commons_store        = None
+        commons._commons_rate_limiter = MagicMock()
+        commons._commons_ack_watcher  = MagicMock()
+        with self.assertRaises( HTTPException ) as c:
+            _require_initialized()
+        self.assertEqual( c.exception.status_code, 503 )
+
+    def test_require_question_watcher_passes_when_wired( self ):
+        commons._commons_question_watcher = MagicMock()
+        _require_question_watcher()  # no raise
+
+    def test_require_question_watcher_raises_503_when_none( self ):
+        commons._commons_question_watcher = None
+        with self.assertRaises( HTTPException ) as c:
+            _require_question_watcher()
+        self.assertEqual( c.exception.status_code, 503 )
 
 
 # ── validation helpers ─────────────────────────────────────────────────────────
