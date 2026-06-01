@@ -283,7 +283,7 @@ class RunningFifoQueue( FifoQueue ):
             # ('running_job = job') that landed for Bug 2A/2B but missed this
             # exception branch. Repro: 2026-04-28 ts-1c41e064 killed at 17:53.
             failed_job = job
-            if failed_job:
+            if failed_job:  # pragma: no branch - False->exit arc unreachable: failed_job = job (L285) is the same param the L205-207 `if not running_job: return` guard already proved truthy (running_job = job at L203, job never reassigned), so any exception reaching this except has job truthy → the True arc always fires; only a pathological stateful __bool__ flipping mid-do_all could differ, which is not a designed contract
                 # OOS-4 Finding C (2026-04-29 Phase 4): route through the
                 # canonical `_transition_to_dead` primitive instead of the
                 # ~50-line inline duplicate that was here pre-refactor. The
