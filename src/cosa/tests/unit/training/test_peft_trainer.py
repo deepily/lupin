@@ -304,67 +304,64 @@ class TestPeftTrainer( unittest.TestCase ):
             - Executes training process
             - Saves model after training
         """
+        # Live contract: fine_tune loads model+tokenizer, builds peft/training args, gets
+        # data, constructs SFTTrainer, prints pre/post stats, trains, then resolves the last
+        # checkpoint dir and prints it via du.print_simple_file_list. It does NOT call
+        # prepare_model_for_kbit_training ( commented out in prod ) and does NOT call
+        # save_model. Mock the extra stats/print seams; _get_last_checkpoint_dir -> None means
+        # du.print_simple_file_list( None ) must be mocked ( else os.stat( None ) -> TypeError ).
         with patch( 'cosa.training.peft_trainer.du.print_banner' ), \
              patch( 'builtins.print' ), \
+             patch( 'cosa.training.peft_trainer.du.print_simple_file_list' ), \
              patch.object( PeftTrainer, '_load_model_and_tokenizer' ) as mock_load_model, \
              patch.object( PeftTrainer, '_get_peft_config' ) as mock_get_peft, \
              patch.object( PeftTrainer, '_get_test_train_data' ) as mock_get_data, \
              patch.object( PeftTrainer, '_get_training_args' ) as mock_get_args, \
              patch.object( PeftTrainer, '_get_last_checkpoint_dir' ) as mock_get_checkpoint, \
-             patch.object( PeftTrainer, 'save_model' ) as mock_save, \
-             patch.object( PeftTrainer, '_print_trainable_parameters' ) as mock_print_params, \
-             patch( 'cosa.training.peft_trainer.SFTTrainer' ) as mock_sft_trainer, \
-             patch( 'cosa.training.peft_trainer.prepare_model_for_kbit_training' ) as mock_prepare_model:
-            
+             patch.object( PeftTrainer, '_print_trainable_parameters' ), \
+             patch.object( PeftTrainer, '_print_stats_pre' ), \
+             patch.object( PeftTrainer, '_print_stats_post' ), \
+             patch( 'cosa.training.peft_trainer.SFTTrainer' ) as mock_sft_trainer:
+
             # Setup mocks
             mock_peft_config = Mock()
             mock_get_peft.return_value = mock_peft_config
-            
+
             mock_datasets = {"train": self.mock_dataset, "test": self.mock_dataset}
             mock_get_data.return_value = mock_datasets
-            
+
             mock_training_args = Mock()
             mock_training_args.output_dir = "/tmp/output"
             mock_get_args.return_value = mock_training_args
-            
+
             mock_get_checkpoint.return_value = None
-            
-            mock_prepared_model = Mock()
-            mock_prepare_model.return_value = mock_prepared_model
-            
+
             mock_trainer_instance = Mock()
             mock_sft_trainer.return_value = mock_trainer_instance
-            
-            trainer = PeftTrainer( 
+
+            trainer = PeftTrainer(
                 model_hf_id=self.test_model_hf_id,
                 model_name=self.test_model_name,
                 test_train_path=self.test_train_path
             )
-            # Setup trainer with proper attributes for save_model
-            trainer.trainer = self.mock_trainer
             trainer.model = self.mock_model
-            trainer.output_dir = self.test_output_dir
-            
-            # Mock model.save_pretrained method
-            self.mock_model.save_pretrained = Mock()
-            
+
             # Execute fine-tuning
-            trainer.fine_tune( batch_size=8, gradient_accumulation_steps=4 )
-            
+            result = trainer.fine_tune( batch_size=8, gradient_accumulation_steps=4 )
+
             # Verify workflow steps
             mock_load_model.assert_called_once()
             mock_get_peft.assert_called_once()
             mock_get_data.assert_called_once()
             mock_get_args.assert_called_once()
-            
-            # Verify model preparation
-            mock_prepare_model.assert_called_once()
-            
-            # Verify training executed
+
+            # Verify SFTTrainer was constructed and training executed
+            mock_sft_trainer.assert_called_once()
             mock_trainer_instance.train.assert_called_once()
-            
-            # Verify model saved
-            mock_save.assert_called_once()
+
+            # Live contract: returns the ( mocked-None ) last checkpoint dir; output_dir set
+            self.assertIsNone( result )
+            self.assertEqual( trainer.output_dir, "/tmp/output" )
     
     def test_save_model_success( self ):
         """
@@ -388,21 +385,27 @@ class TestPeftTrainer( unittest.TestCase ):
             mock_get_date.return_value = "2025-08-05"
             mock_get_time.return_value = "15-53"
             
-            trainer = PeftTrainer( 
+            trainer = PeftTrainer(
                 model_hf_id=self.test_model_hf_id,
                 model_name=self.test_model_name,
                 test_train_path=self.test_train_path
             )
             trainer.trainer = self.mock_trainer
             trainer.output_dir = self.test_output_dir
-            
+            # Live contract: save_model() calls BOTH self.model.save_pretrained and
+            # self.tokenizer.save_pretrained — the prior test omitted these assignments,
+            # so self.model was None -> AttributeError. Wire them up.
+            trainer.model = self.mock_model
+            trainer.tokenizer = self.mock_tokenizer
+
             trainer.save_model()
-            
+
             # Verify directory creation (path will include timestamp)
             mock_makedirs.assert_called_once()
-            
-            # Verify model save_pretrained was called
+
+            # Verify model + tokenizer save_pretrained were called
             self.mock_model.save_pretrained.assert_called_once()
+            self.mock_tokenizer.save_pretrained.assert_called_once()
     
     def test_load_and_merge_adapter_success( self ):
         """
@@ -496,97 +499,86 @@ class TestPeftTrainer( unittest.TestCase ):
             - Calculates prompt statistics
             - Returns statistics dictionary
         """
+        # Live contract ( rewritten ): get_training_prompt_stats loads model+tokenizer, reads
+        # the train JSONL via pd.read_json ( NOT _get_test_train_data ), and for each row builds
+        # a prompt via self.get_prompt then tokenizes it ( tokenizer( prompt, return_tensors="pt" ).to( device ) ).
+        # It returns a TUPLE ( token_stats, word_stats ), each a dict of min/max/mean — NOT a
+        # single dict with total_prompts/avg_tokens.
         with patch( 'cosa.training.peft_trainer.du.print_banner' ), \
              patch( 'builtins.print' ), \
              patch.object( PeftTrainer, '_load_model_and_tokenizer' ) as mock_load_model, \
-             patch.object( PeftTrainer, '_get_test_train_data' ) as mock_get_data:
-            
-            # Mock training data with sample prompts
-            mock_train_dataset = Mock()
-            mock_train_dataset.__iter__ = Mock( return_value=iter([
-                {"instruction": "Test instruction 1", "input": "", "output": "Response 1"},
-                {"instruction": "Test instruction 2", "input": "Input", "output": "Response 2"}
+             patch.object( PeftTrainer, 'get_prompt' ) as mock_get_prompt, \
+             patch( 'cosa.training.peft_trainer.pd.read_json' ) as mock_read_json:
+
+            # Two rows -> two prompts. get_prompt returns a deterministic 3-word string.
+            mock_get_prompt.return_value = "alpha beta gamma"
+
+            mock_df = Mock()
+            mock_df.itertuples = Mock( return_value=iter([
+                Mock( instruction="Test 1", input="",      output="Response 1" ),
+                Mock( instruction="Test 2", input="Input", output="Response 2" )
             ]) )
-            mock_train_dataset.__len__ = Mock( return_value=2 )
-            
-            mock_get_data.return_value = {"train": mock_train_dataset}
-            
-            trainer = PeftTrainer( 
+            mock_read_json.return_value = mock_df
+
+            trainer = PeftTrainer(
                 model_hf_id=self.test_model_hf_id,
                 model_name=self.test_model_name,
                 test_train_path=self.test_train_path
             )
+
+            # tokenizer( prompt, return_tensors="pt" ).to( device ) -> { "input_ids": [[ 5 tokens ]] }
+            mock_tokens = Mock()
+            mock_tokens.to = Mock( return_value={ "input_ids": [ [ 1, 2, 3, 4, 5 ] ] } )
+            self.mock_tokenizer.return_value = mock_tokens
             trainer.tokenizer = self.mock_tokenizer
-            
-            # Mock tokenizer encoding
-            self.mock_tokenizer.encode.side_effect = [
-                [1, 2, 3, 4, 5],  # 5 tokens for first prompt
-                [1, 2, 3, 4, 5, 6, 7]  # 7 tokens for second prompt
-            ]
-            
-            # Mock file system operations to avoid real file reading
-            with patch( 'cosa.training.peft_trainer.pd.read_json' ) as mock_read_json:
-                mock_df = Mock()
-                mock_df.__len__ = Mock( return_value=2 )
-                mock_df.itertuples = Mock( return_value=iter([
-                    Mock( instruction="Test 1", input="", output="Response 1" ),
-                    Mock( instruction="Test 2", input="Input", output="Response 2" )
-                ]) )
-                mock_read_json.return_value = mock_df
-                
-                # Mock tokenizer behavior for stats calculation
-                trainer.tokenizer = self.mock_tokenizer
-                mock_tokens = Mock()
-                mock_tokens.to = Mock( return_value={"input_ids": [[1, 2, 3, 4, 5]]} )
-                self.mock_tokenizer.return_value = mock_tokens
-                
-                stats = trainer.get_training_prompt_stats()
-            
-            # Verify model loading
+
+            token_stats, word_stats = trainer.get_training_prompt_stats()
+
+            # Verify model loading + data read
             mock_load_model.assert_called_once()
-            
-            # Verify data loading
-            mock_get_data.assert_called_once_with( sample_size=1.0 )
-            
-            # Verify statistics returned
-            self.assertIsInstance( stats, dict )
-            self.assertIn( "total_prompts", stats )
-            self.assertIn( "avg_tokens", stats )
+            mock_read_json.assert_called_once()
+
+            # Live contract: two dicts of min/max/mean. 5 tokens/prompt, 3 words/prompt.
+            self.assertEqual( token_stats, { "min": 5, "max": 5, "mean": 5.0 } )
+            self.assertEqual( word_stats,  { "min": 3, "max": 3, "mean": 3.0 } )
     
-    def test_cli_interface_success( self ):
+    def test_cli_argument_parsing( self ):
         """
-        Test successful CLI interface execution.
-        
+        Test CLI argument parsing via parse_arguments().
+
+        Live contract: the __main__ CLI was rewritten to argparse ( flags --model,
+        --model-name, --test-train-path, ... ) routed through the standalone
+        parse_arguments() function, and the pipeline is GPU/privilege-gated. The prior
+        test asserted a positional/keyword PeftTrainer(...) signature that no longer
+        exists AND never executed the CLI ( it was a no-op assertTrue(True) followed by a
+        dead assertion ). We instead unit-test the one safely-isolatable CLI unit —
+        argument parsing — without executing the training pipeline.
+
         Ensures:
-            - Parses command line arguments correctly
-            - Creates PeftTrainer with CLI parameters
-            - Executes training pipeline
+            - parse_arguments() reads --model / --model-name / --test-train-path
+            - store_true flags default to False when absent
         """
+        import cosa.training.peft_trainer as ptmod
+
         test_args = [
-            "peft_trainer.py", 
-            self.test_model_hf_id, 
-            self.test_model_name, 
-            self.test_train_path
+            "peft_trainer.py",
+            "--model",           self.test_model_hf_id,
+            "--model-name",      self.test_model_name,
+            "--test-train-path", self.test_train_path,
         ]
-        
-        with patch( 'sys.argv', test_args ), \
-             patch( 'cosa.training.peft_trainer.PeftTrainer' ) as mock_trainer_class:
-            
-            mock_trainer = Mock()
-            mock_trainer_class.return_value = mock_trainer
-            
-            # Simplified CLI test - just verify no exceptions during import
-            # The actual CLI execution has too many dependencies to mock properly
-            self.assertTrue( True )  # Pass this test
-            
-            # Verify trainer creation
-            mock_trainer_class.assert_called_once_with(
-                model_hf_id=self.test_model_hf_id,
-                model_name=self.test_model_name,
-                test_train_path=self.test_train_path,
-                debug=False,
-                verbose=False
-            )
+
+        with patch( 'sys.argv', test_args ):
+            args = ptmod.parse_arguments()
+
+            # Positional values parsed onto the expected attributes
+            self.assertEqual( args.model, self.test_model_hf_id )
+            self.assertEqual( args.model_name, self.test_model_name )
+            self.assertEqual( args.test_train_path, self.test_train_path )
+
+            # store_true flags default False when not supplied
+            self.assertFalse( args.debug )
+            self.assertFalse( args.verbose )
+            self.assertFalse( args.nuclear_kill_button )
 
 
 def isolated_unit_test():

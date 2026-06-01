@@ -258,39 +258,33 @@ class TestHuggingFaceDownloader( unittest.TestCase ):
             - Creates downloader with environment token
             - Calls download_model with repo_id argument
         """
+        # The prior approach ( `from cosa.training.hf_downloader import __main__` ) raised
+        # ImportError — there is no __main__ symbol. Run the real __main__ block via
+        # runpy.run_path( run_name="__main__" ) with the HF network boundaries mocked
+        # ( login + snapshot_download ) so no real download/auth occurs. We assert on the
+        # observable behaviour ( login( token ) + snapshot_download( repo_id ) ) since the
+        # real HuggingFaceDownloader class — not a mock — runs inside run_path.
+        import runpy
+        import cosa.training.hf_downloader as hfmod
+
         test_args = ["hf_downloader.py", self.test_repo_id]
-        
+
         with patch( 'sys.argv', test_args ), \
              patch( 'os.getenv' ) as mock_getenv, \
-             patch( 'cosa.training.hf_downloader.HuggingFaceDownloader' ) as mock_downloader_class, \
-             patch( 'sys.exit' ) as mock_exit:
-            
-            # Mock environment variables
-            def getenv_side_effect( key ):
-                if key == "HF_HOME":
-                    return self.test_hf_home
-                elif key == "HF_TOKEN":
-                    return self.test_hf_token
-                return None
-            
-            mock_getenv.side_effect = getenv_side_effect
-            
-            # Mock downloader instance
-            mock_downloader = Mock()
-            mock_downloader_class.return_value = mock_downloader
-            
-            # Import and run main
-            from cosa.training.hf_downloader import __main__
-            
-            # Verify environment variable checks
-            expected_calls = [call( "HF_HOME" ), call( "HF_TOKEN" )]
-            mock_getenv.assert_has_calls( expected_calls, any_order=True )
-            
-            # Verify downloader creation
-            mock_downloader_class.assert_called_once_with( token=self.test_hf_token )
-            
-            # Verify download call
-            mock_downloader.download_model.assert_called_once_with( self.test_repo_id )
+             patch( 'huggingface_hub.login' ) as mock_login, \
+             patch( 'huggingface_hub.snapshot_download' ) as mock_snapshot:
+
+            mock_getenv.side_effect = lambda key: {
+                "HF_HOME" : self.test_hf_home,
+                "HF_TOKEN": self.test_hf_token,
+            }.get( key )
+            mock_snapshot.return_value = "/local/model/path"
+
+            runpy.run_path( hfmod.__file__, run_name="__main__" )
+
+            # Authenticated with the env token, then downloaded the requested repo
+            mock_login.assert_called_once_with( token=self.test_hf_token )
+            mock_snapshot.assert_called_once_with( repo_id=self.test_repo_id )
     
     def test_main_cli_missing_arguments( self ):
         """
@@ -301,20 +295,22 @@ class TestHuggingFaceDownloader( unittest.TestCase ):
             - Prints usage message for incorrect arguments
             - Exits with error code 1
         """
+        # Run the real __main__ via runpy ( the prior exec()-with-test-globals never set
+        # __name__ == "__main__", so the block never ran ). With one arg, the CLI prints
+        # usage and sys.exit( 1 ) -> SystemExit, which runpy propagates.
+        import runpy
+        import cosa.training.hf_downloader as hfmod
+
         test_args = ["hf_downloader.py"]  # Missing repo_id
-        
+
         with patch( 'sys.argv', test_args ), \
-             patch( 'builtins.print' ) as mock_print, \
-             patch( 'sys.exit' ) as mock_exit:
-            
-            # Import and run main (would execute __main__ block)
-            # We need to trigger the main execution
-            exec( compile( open( "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/training/hf_downloader.py" ).read(), 
-                          "hf_downloader.py", "exec" ) )
-            
-            # Verify usage message
-            mock_print.assert_called_with( "Usage: python hf_downloader.py <repo_id>" )
-            mock_exit.assert_called_with( 1 )
+             patch( 'builtins.print' ) as mock_print:
+
+            with self.assertRaises( SystemExit ) as ctx:
+                runpy.run_path( hfmod.__file__, run_name="__main__" )
+
+            self.assertEqual( ctx.exception.code, 1 )
+            mock_print.assert_any_call( "Usage: python hf_downloader.py <repo_id>" )
     
     def test_main_cli_missing_hf_home( self ):
         """
@@ -325,30 +321,26 @@ class TestHuggingFaceDownloader( unittest.TestCase ):
             - Prints descriptive error message
             - Exits with error code 1
         """
+        # Run the real __main__ via runpy with HF_HOME unset -> usage error + sys.exit( 1 ).
+        import runpy
+        import cosa.training.hf_downloader as hfmod
+
         test_args = ["hf_downloader.py", self.test_repo_id]
-        
+
         with patch( 'sys.argv', test_args ), \
              patch( 'os.getenv' ) as mock_getenv, \
-             patch( 'builtins.print' ) as mock_print, \
-             patch( 'sys.exit' ) as mock_exit:
-            
-            # Mock missing HF_HOME
-            def getenv_side_effect( key ):
-                if key == "HF_HOME":
-                    return None
-                elif key == "HF_TOKEN":
-                    return self.test_hf_token
-                return None
-            
-            mock_getenv.side_effect = getenv_side_effect
-            
-            # Execute main block
-            exec( compile( open( "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/training/hf_downloader.py" ).read(), 
-                          "hf_downloader.py", "exec" ) )
-            
-            # Verify error message
-            mock_print.assert_called_with( "Please set the HF_HOME environment variable to the directory where you want to download models" )
-            mock_exit.assert_called_with( 1 )
+             patch( 'builtins.print' ) as mock_print:
+
+            # HF_HOME missing, HF_TOKEN present
+            mock_getenv.side_effect = lambda key: None if key == "HF_HOME" else (
+                self.test_hf_token if key == "HF_TOKEN" else None
+            )
+
+            with self.assertRaises( SystemExit ) as ctx:
+                runpy.run_path( hfmod.__file__, run_name="__main__" )
+
+            self.assertEqual( ctx.exception.code, 1 )
+            mock_print.assert_any_call( "Please set the HF_HOME environment variable to the directory where you want to download models" )
     
     def test_main_cli_missing_hf_token( self ):
         """
@@ -359,30 +351,27 @@ class TestHuggingFaceDownloader( unittest.TestCase ):
             - Prints descriptive error message
             - Exits with error code 1
         """
+        # Run the real __main__ via runpy with HF_HOME set but HF_TOKEN unset ->
+        # token error + sys.exit( 1 ).
+        import runpy
+        import cosa.training.hf_downloader as hfmod
+
         test_args = ["hf_downloader.py", self.test_repo_id]
-        
+
         with patch( 'sys.argv', test_args ), \
              patch( 'os.getenv' ) as mock_getenv, \
-             patch( 'builtins.print' ) as mock_print, \
-             patch( 'sys.exit' ) as mock_exit:
-            
-            # Mock missing HF_TOKEN
-            def getenv_side_effect( key ):
-                if key == "HF_HOME":
-                    return self.test_hf_home
-                elif key == "HF_TOKEN":
-                    return None
-                return None
-            
-            mock_getenv.side_effect = getenv_side_effect
-            
-            # Execute main block
-            exec( compile( open( "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/training/hf_downloader.py" ).read(), 
-                          "hf_downloader.py", "exec" ) )
-            
-            # Verify error message
-            mock_print.assert_called_with( "Please set the HF_TOKEN environment variable with your Hugging Face API token" )
-            mock_exit.assert_called_with( 1 )
+             patch( 'builtins.print' ) as mock_print:
+
+            # HF_HOME present, HF_TOKEN missing
+            mock_getenv.side_effect = lambda key: self.test_hf_home if key == "HF_HOME" else (
+                None if key == "HF_TOKEN" else None
+            )
+
+            with self.assertRaises( SystemExit ) as ctx:
+                runpy.run_path( hfmod.__file__, run_name="__main__" )
+
+            self.assertEqual( ctx.exception.code, 1 )
+            mock_print.assert_any_call( "Please set the HF_TOKEN environment variable with your Hugging Face API token" )
     
     def test_huggingface_hub_integration( self ):
         """

@@ -271,73 +271,45 @@ class TestXmlCoordinator( unittest.TestCase ):
             self.mock_response_validator.validate_responses.assert_called_once_with( self.mock_dataframe )
             self.assertEqual( result, self.mock_dataframe )
     
-    def test_get_6_empty_lists( self ):
+    def test_get_5_empty_lists( self ):
         """
         Test helper method for getting empty lists.
-        
+
+        Live contract: the helper was renamed _get_6_empty_lists -> _get_5_empty_lists
+        and now returns a 5-tuple ( instructions, inputs, outputs, prompts, commands );
+        the 6th list disappeared together with the removed GPT-message feature.
+
         Ensures:
-            - Returns tuple of 6 lists
+            - Returns tuple of 5 lists
             - All lists are empty
             - Lists are separate objects
         """
         with patch( 'cosa.training.xml_coordinator.XmlPromptGenerator' ), \
              patch( 'cosa.training.xml_coordinator.XmlResponseValidator' ):
-            
+
             coordinator = XmlCoordinator( init_prompt_templates=False )
-            
-            result = coordinator._get_6_empty_lists()
-            
+
+            result = coordinator._get_5_empty_lists()
+
             # Verify structure
             self.assertIsInstance( result, tuple )
-            self.assertEqual( len( result ), 6 )
-            
+            self.assertEqual( len( result ), 5 )
+
             # Verify all are empty lists
             for item in result:
                 self.assertIsInstance( item, list )
                 self.assertEqual( len( item ), 0 )
-            
+
             # Verify they are separate objects
             result[0].append( "test" )
             self.assertEqual( len( result[1] ), 0 )
     
-    def test_get_gpt_messages_dict( self ):
-        """
-        Test GPT messages dictionary creation.
-        
-        Ensures:
-            - Creates properly formatted dictionary
-            - Contains messages with correct roles
-            - Uses provided parameters
-        """
-        with patch( 'cosa.training.xml_coordinator.XmlPromptGenerator' ) as mock_pg_class, \
-             patch( 'cosa.training.xml_coordinator.XmlResponseValidator' ):
-            
-            mock_pg_class.return_value = self.mock_prompt_generator
-            self.mock_prompt_generator.common_output_template.format.return_value = "formatted_output"
-            
-            coordinator = XmlCoordinator( init_prompt_templates=False )
-            
-            result = coordinator._get_gpt_messages_dict(
-                "test_instruction",
-                "test_voice_command", 
-                "test_compound_command",
-                "test_args"
-            )
-            
-            # Verify structure
-            self.assertIsInstance( result, dict )
-            self.assertIn( "messages", result )
-            self.assertEqual( len( result["messages"] ), 3 )
-            
-            # Verify messages content
-            messages = result["messages"]
-            self.assertEqual( messages[0]["role"], "system" )
-            self.assertEqual( messages[0]["content"], "test_instruction" )
-            self.assertEqual( messages[1]["role"], "user" )
-            self.assertEqual( messages[1]["content"], "test_voice_command" )
-            self.assertEqual( messages[2]["role"], "assistant" )
-            self.assertEqual( messages[2]["content"], "formatted_output" )
-    
+    # NOTE: test_get_gpt_messages_dict was REMOVED ( 2026-06-01, Rio ⚡ WAVE-2 training lane ).
+    # It exercised XmlCoordinator._get_gpt_messages_dict, part of the GPT-message training
+    # path that no longer exists in production ( zero refs to gpt_message/_get_gpt_messages_dict
+    # in xml_coordinator.py; the paired _get_6_empty_lists -> _get_5_empty_lists rename and the
+    # dropped gpt_message JSONL writes confirm the feature was retired ). No live contract → delete.
+
     def test_do_conditional_print( self ):
         """
         Test conditional printing functionality.
@@ -374,38 +346,44 @@ class TestXmlCoordinator( unittest.TestCase ):
             - Samples data correctly
             - Handles edge cases appropriately
         """
+        # Live contract ( refactored ): _prune_duplicates_and_sample drops duplicate
+        # 'input' rows, then — when rows_post >= sample_size — samples min( target, available )
+        # rows PER command and concatenates. Exercise with a real DataFrame ( the prior
+        # MagicMock model broke on `group_counts < sample_size_per_command`, since a bare
+        # MagicMock's comparison dunder returns NotImplemented -> TypeError ).
+        import pandas as pd
+
         with patch( 'cosa.training.xml_coordinator.XmlPromptGenerator' ), \
              patch( 'cosa.training.xml_coordinator.XmlResponseValidator' ), \
              patch( 'cosa.training.xml_coordinator.du.print_banner' ), \
              patch( 'builtins.print' ):
-            
-            # Create mock DataFrame with proper subscriptable behavior
-            mock_df = MagicMock()
-            mock_df.shape = [100, 5]  # 100 rows, 5 columns
-            mock_df.drop_duplicates.return_value = None
-            mock_df.groupby.return_value.sample.return_value = mock_df
-            
-            # Mock the command column access
-            mock_command_series = MagicMock()
-            mock_command_series.value_counts.return_value = MagicMock()
-            mock_df.__getitem__.return_value = mock_command_series
-            
+
+            # 5 unique inputs per command + one duplicate ( "a0" ) to exercise dedup.
+            df = pd.DataFrame( {
+                "command"     : [ "cmd_a" ] * 5 + [ "cmd_b" ] * 5 + [ "cmd_a" ],
+                "input"       : [ f"a{i}" for i in range( 5 ) ] + [ f"b{i}" for i in range( 5 ) ] + [ "a0" ],
+                "instruction" : [ "i" ] * 11,
+                "output"      : [ "o" ] * 11,
+                "prompt"      : [ "p" ] * 11,
+            } )
+
             coordinator = XmlCoordinator( init_prompt_templates=False )
-            
+
             result = coordinator._prune_duplicates_and_sample(
-                mock_df, 
-                sample_size=50, 
-                sample_size_per_command=10
+                df,
+                sample_size=4,
+                sample_size_per_command=3
             )
-            
-            # Verify duplicate removal
-            mock_df.drop_duplicates.assert_called_once_with( subset=["input"], inplace=True )
-            
-            # Verify sampling
-            mock_df.groupby.assert_called_once_with( "command" )
-            mock_df.groupby.return_value.sample.assert_called_once_with( 10, random_state=42 )
-            
-            self.assertEqual( result, mock_df )
+
+            # Duplicate 'input' removed -> no remaining duplicate inputs
+            self.assertEqual( int( result[ "input" ].duplicated().sum() ), 0 )
+
+            # rows_post ( 10 ) >= sample_size ( 4 ) -> per-command branch:
+            # min( 3, 5 ) = 3 rows per command -> 6 total
+            self.assertEqual( len( result ), 6 )
+            counts = result[ "command" ].value_counts()
+            self.assertEqual( counts[ "cmd_a" ], 3 )
+            self.assertEqual( counts[ "cmd_b" ], 3 )
     
     def test_generate_responses_coordination( self ):
         """
@@ -466,87 +444,88 @@ class TestXmlCoordinator( unittest.TestCase ):
             - Returns three DataFrames
             - Uses correct parameters
         """
+        # Live contract: get_train_test_validate_split samples sample_size rows, then
+        # performs TWO stratified sklearn splits ( train vs test+validate, then test vs
+        # validate ). The prior mock chain broke because the intermediate test_validate_df
+        # ( a bare Mock ) is subscripted via `df[stratify]` on the second split. Exercise
+        # with a real DataFrame + real sklearn so stratification is genuinely validated.
+        import pandas as pd
+
         with patch( 'cosa.training.xml_coordinator.XmlPromptGenerator' ), \
-             patch( 'cosa.training.xml_coordinator.XmlResponseValidator' ), \
-             patch( 'sklearn.model_selection.train_test_split' ) as mock_split:
-            
-            # Setup mock returns
-            mock_train = Mock()
-            mock_test_validate = Mock()
-            mock_test = Mock()
-            mock_validate = Mock()
-            
-            mock_split.side_effect = [
-                (mock_train, mock_test_validate),
-                (mock_test, mock_validate)
-            ]
-            
-            # Create mock DataFrame
-            mock_df = MagicMock()
-            mock_sampled = MagicMock()
-            # The method accesses mock_sampled[stratify] internally, so make it subscriptable
-            mock_sampled.__getitem__ = MagicMock()  
-            mock_df.__getitem__.return_value.sample.return_value.copy.return_value = mock_sampled
-            
+             patch( 'cosa.training.xml_coordinator.XmlResponseValidator' ):
+
+            df = pd.DataFrame( {
+                "command"     : [ "cmd_a" ] * 50 + [ "cmd_b" ] * 50,
+                "instruction" : [ "i" ] * 100,
+                "input"       : [ f"x{i}" for i in range( 100 ) ],
+                "output"      : [ "o" ] * 100,
+                "prompt"      : [ "p" ] * 100,
+            } )
+
             coordinator = XmlCoordinator( init_prompt_templates=False )
-            
-            result = coordinator.get_train_test_validate_split(
-                mock_df,
+
+            train_df, test_df, validate_df = coordinator.get_train_test_validate_split(
+                df,
                 sample_size=100,
                 test_size=0.2,
                 test_validate_size=0.5,
                 stratify="command"
             )
-            
-            # Verify sampling
-            mock_df.__getitem__.return_value.sample.assert_called_once_with( 100, random_state=42 )
-            
-            # Verify splits
-            self.assertEqual( len( mock_split.call_args_list ), 2 )
-            
-            # Verify return values
-            self.assertEqual( result, (mock_train, mock_test, mock_validate) )
+
+            # 100 -> train 80, ( test+validate ) 20 -> test 10, validate 10
+            self.assertEqual( len( train_df ), 80 )
+            self.assertEqual( len( test_df ), 10 )
+            self.assertEqual( len( validate_df ), 10 )
+            self.assertEqual( len( train_df ) + len( test_df ) + len( validate_df ), 100 )
+
+            # Stratification preserved: every split contains both commands
+            for split in ( train_df, test_df, validate_df ):
+                self.assertEqual( set( split[ "command" ].unique() ), { "cmd_a", "cmd_b" } )
     
     def test_write_ttv_split_to_jsonl( self ):
         """
         Test writing train/test/validate splits to JSONL files.
-        
+
+        Live contract: write_ttv_split_to_jsonl writes exactly THREE plain JSONL files
+        ( train/test/validate ), each via df.to_json( path, orient="records", lines=True )
+        followed by os.chmod( path, 0o666 ) -> 3 chmod calls. The GPT-specific
+        gpt_message.to_json files were retired with the GPT-message training path.
+
         Ensures:
-            - Writes all splits to appropriate files
-            - Sets correct file permissions
-            - Creates GPT-specific files
+            - Writes all three splits via to_json( orient="records", lines=True )
+            - Sets file permissions on each of the 3 files
+            - Does NOT write any GPT-specific files
         """
         with patch( 'cosa.training.xml_coordinator.XmlPromptGenerator' ), \
              patch( 'cosa.training.xml_coordinator.XmlResponseValidator' ), \
              patch( 'cosa.training.xml_coordinator.du.print_banner' ), \
              patch( 'builtins.print' ), \
              patch( 'cosa.training.xml_coordinator.os.chmod' ) as mock_chmod:
-            
+
             # Create mock DataFrames
             mock_train = Mock()
             mock_test = Mock()
             mock_validate = Mock()
-            
+
             mock_train.shape = [80, 6]
             mock_test.shape = [10, 6]
             mock_validate.shape = [10, 6]
-            
+
             coordinator = XmlCoordinator( path_prefix="/test", init_prompt_templates=False )
-            
+
             coordinator.write_ttv_split_to_jsonl( mock_train, mock_test, mock_validate )
-            
+
             # Verify file writing calls
-            mock_train.to_json.assert_called_once()
-            mock_test.to_json.assert_called_once()
-            mock_validate.to_json.assert_called_once()
-            
-            # Verify GPT file writing
-            mock_train.gpt_message.to_json.assert_called_once()
-            mock_test.gpt_message.to_json.assert_called_once()
-            mock_validate.gpt_message.to_json.assert_called_once()
-            
-            # Verify permissions set (6 files total)
-            self.assertEqual( mock_chmod.call_count, 6 )
+            for mock_df in ( mock_train, mock_test, mock_validate ):
+                mock_df.to_json.assert_called_once()
+                args, kwargs = mock_df.to_json.call_args
+                self.assertEqual( kwargs.get( "orient" ), "records" )
+                self.assertTrue( kwargs.get( "lines" ) )
+                # path is path_prefix-joined
+                self.assertTrue( args[0].startswith( "/test/" ) )
+
+            # Verify permissions set ( 3 plain JSONL files, no GPT files )
+            self.assertEqual( mock_chmod.call_count, 3 )
     
     def test_query_llm_tgi_coordination( self ):
         """
@@ -662,8 +641,7 @@ def isolated_unit_test():
             'test_reset_call_counter',
             'test_prompt_generator_delegation',
             'test_response_validator_delegation',
-            'test_get_6_empty_lists',
-            'test_get_gpt_messages_dict',
+            'test_get_5_empty_lists',
             'test_do_conditional_print',
             'test_prune_duplicates_and_sample',
             'test_generate_responses_coordination',

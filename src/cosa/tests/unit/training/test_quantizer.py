@@ -237,7 +237,9 @@ class TestQuantizer( unittest.TestCase ):
                 bits=8,
                 group_size=64,
                 sym=False,
-                enable_torch_compile=True
+                # Live contract: enable_torch_compile = ( bits <= 4 ); for 8-bit it is
+                # DISABLED due to the documented Triton/libdevice.pow bug in auto_round.
+                enable_torch_compile=False
             )
             
             # Verify configuration updates
@@ -485,15 +487,21 @@ class TestQuantizer( unittest.TestCase ):
             - Raises appropriate error when autoround not initialized
             - Provides descriptive error message
         """
+        # Live contract: save() builds the output path, creates the directory, THEN
+        # accesses self.autoround.save_quantized. Without quantize_model(), self.autoround
+        # was never assigned -> AttributeError. Patch os.path.exists=True so the real
+        # os.makedirs( "/path/..." ) is skipped ( else it raises PermissionError first,
+        # masking the AttributeError we are actually asserting ).
         with patch( 'cosa.training.quantizer.AutoModelForCausalLM.from_pretrained' ), \
              patch( 'cosa.training.quantizer.AutoTokenizer.from_pretrained' ), \
              patch( 'cosa.training.quantizer.torch' ), \
              patch( 'cosa.training.quantizer.du.get_current_date' ), \
-             patch( 'cosa.training.quantizer.du.get_current_time' ):
-            
+             patch( 'cosa.training.quantizer.du.get_current_time' ), \
+             patch( 'cosa.training.quantizer.os.path.exists', return_value=True ):
+
             quantizer = Quantizer( self.test_model_name )
             # Don't call quantize_model - autoround not initialized
-            
+
             with self.assertRaises( AttributeError ):
                 quantizer.save( self.test_output_dir )
     
@@ -507,26 +515,35 @@ class TestQuantizer( unittest.TestCase ):
             - Calls quantization and save methods
             - Handles optional bits parameter
         """
+        # The prior exec() approach ran with the TEST module's globals, so __name__ was
+        # never "__main__" and the CLI block never executed ( "Quantizer called 0 times" ).
+        # Use runpy.run_path( run_name="__main__" ) so the live __main__ dispatch runs, with
+        # the model/quantization boundaries mocked ( no GPU, no real model, no real auto_round ).
+        import runpy
+        import cosa.training.quantizer as qmod
+
         test_args = ["quantizer.py", self.test_model_name, self.test_output_dir, "8"]
-        
+
         with patch( 'sys.argv', test_args ), \
-             patch( 'cosa.training.quantizer.Quantizer' ) as mock_quantizer_class:
-            
-            mock_quantizer = Mock()
-            mock_quantizer_class.return_value = mock_quantizer
-            
-            # Execute main block
-            exec( compile( open( "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/training/quantizer.py" ).read(), 
-                          "quantizer.py", "exec" ) )
-            
-            # Verify quantizer creation
-            mock_quantizer_class.assert_called_once_with( self.test_model_name )
-            
-            # Verify quantization called with custom bits
-            mock_quantizer.quantize_model.assert_called_once_with( bits=8 )
-            
-            # Verify save called
-            mock_quantizer.save.assert_called_once_with( self.test_output_dir, include_model_name=True )
+             patch( 'transformers.AutoModelForCausalLM.from_pretrained', return_value=Mock() ), \
+             patch( 'transformers.AutoTokenizer.from_pretrained', return_value=Mock() ), \
+             patch( 'auto_round.AutoRound' ) as mock_autoround_class, \
+             patch( 'cosa.training.quantizer.os.path.exists', return_value=True ), \
+             patch( 'builtins.print' ):
+
+            mock_autoround = Mock()
+            mock_autoround_class.return_value = mock_autoround
+
+            runpy.run_path( qmod.__file__, run_name="__main__" )
+
+            # CLI parsed argv[3]="8" -> quantize_model( bits=8 ) -> AutoRound built once with bits=8
+            self.assertEqual( mock_autoround_class.call_count, 1 )
+            _, kwargs = mock_autoround_class.call_args
+            self.assertEqual( kwargs[ "bits" ], 8 )
+
+            # Pipeline ran end-to-end: quantize() then save_quantized()
+            mock_autoround.quantize.assert_called_once()
+            mock_autoround.save_quantized.assert_called_once()
     
     def test_cli_interface_default_bits( self ):
         """
@@ -536,20 +553,29 @@ class TestQuantizer( unittest.TestCase ):
             - Uses default bits value when not specified
             - Handles 3-argument case correctly
         """
+        # See test_cli_interface_success for why runpy.run_path( run_name="__main__" )
+        # replaces the broken exec() approach.
+        import runpy
+        import cosa.training.quantizer as qmod
+
         test_args = ["quantizer.py", self.test_model_name, self.test_output_dir]
-        
+
         with patch( 'sys.argv', test_args ), \
-             patch( 'cosa.training.quantizer.Quantizer' ) as mock_quantizer_class:
-            
-            mock_quantizer = Mock()
-            mock_quantizer_class.return_value = mock_quantizer
-            
-            # Execute main block
-            exec( compile( open( "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/training/quantizer.py" ).read(), 
-                          "quantizer.py", "exec" ) )
-            
-            # Verify quantization called with default bits
-            mock_quantizer.quantize_model.assert_called_once_with( bits=4 )
+             patch( 'transformers.AutoModelForCausalLM.from_pretrained', return_value=Mock() ), \
+             patch( 'transformers.AutoTokenizer.from_pretrained', return_value=Mock() ), \
+             patch( 'auto_round.AutoRound' ) as mock_autoround_class, \
+             patch( 'cosa.training.quantizer.os.path.exists', return_value=True ), \
+             patch( 'builtins.print' ):
+
+            mock_autoround = Mock()
+            mock_autoround_class.return_value = mock_autoround
+
+            runpy.run_path( qmod.__file__, run_name="__main__" )
+
+            # No bits argument ( len(argv)==3 ) -> CLI defaults to bits=4
+            self.assertEqual( mock_autoround_class.call_count, 1 )
+            _, kwargs = mock_autoround_class.call_args
+            self.assertEqual( kwargs[ "bits" ], 4 )
     
     def test_cli_interface_insufficient_arguments( self ):
         """
@@ -559,19 +585,23 @@ class TestQuantizer( unittest.TestCase ):
             - Prints usage message for insufficient arguments
             - Exits with error code 1
         """
+        # Live contract: with < 3 args ( and not the --smoke-test form ), the CLI prints
+        # the usage message and sys.exit( 1 ). sys.exit raises SystemExit, which halts the
+        # __main__ block ( and runpy propagates it ) before the argv[2] access.
+        import runpy
+        import cosa.training.quantizer as qmod
+
         test_args = ["quantizer.py", self.test_model_name]  # Missing save_to_path
-        
+
         with patch( 'sys.argv', test_args ), \
-             patch( 'builtins.print' ) as mock_print, \
-             patch( 'sys.exit' ) as mock_exit:
-            
-            # Execute main block
-            exec( compile( open( "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/cosa/training/quantizer.py" ).read(), 
-                          "quantizer.py", "exec" ) )
-            
-            # Verify usage message
-            mock_print.assert_called_with( "Usage: python quantizer.py <model_name> <save_to_path> <bits>" )
-            mock_exit.assert_called_with( 1 )
+             patch( 'builtins.print' ) as mock_print:
+
+            with self.assertRaises( SystemExit ) as ctx:
+                runpy.run_path( qmod.__file__, run_name="__main__" )
+
+            # Exit code 1 + usage message emitted
+            self.assertEqual( ctx.exception.code, 1 )
+            mock_print.assert_any_call( "Usage: python quantizer.py <model_name> <save_to_path> <bits>" )
 
 
 def isolated_unit_test():
