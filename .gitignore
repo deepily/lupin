@@ -66,6 +66,9 @@ src/conf/memory/**
 #skip the keys directory
 src/conf/keys/**
 
+# Per-developer GCP deploy config (copied from cloud-run.env.example)
+src/scripts/cloud-run.env
+
 # Skip the io directory (logs, outputs, etc.)
 io/
 

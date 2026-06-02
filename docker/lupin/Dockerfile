@@ -241,7 +241,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 # Runtime configuration
 # ----------------------------------------------------------------------------
 ENV LUPIN_ROOT=/var/lupin
-ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/var/lupin/src/conf/lupin-app.ini splainer_path=/var/lupin/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
 
 # ----------------------------------------------------------------------------
 # Application source code (most-volatile layers last for cache reuse).
@@ -264,7 +264,9 @@ COPY --chown=rruiz:rruiz src/conf/*.map   /var/lupin/src/conf/
 COPY --chown=rruiz:rruiz src/conf/*.json  /var/lupin/src/conf/
 COPY --chown=rruiz:rruiz src/conf/*.js    /var/lupin/src/conf/
 COPY --chown=rruiz:rruiz src/conf/auth    /var/lupin/src/conf/auth
-COPY --chown=rruiz:rruiz src/conf/keys    /var/lupin/src/conf/keys
+# NOTE: src/conf/keys is intentionally NOT copied (Phase-1 secret hygiene, D8).
+# Keys arrive at runtime via Secret Manager (see cloud-run-setup-secrets.sh).
+# The directory is also excluded from the build context in .dockerignore.
 COPY --chown=rruiz:rruiz src/conf/mcp     /var/lupin/src/conf/mcp
 COPY --chown=rruiz:rruiz src/conf/prompts /var/lupin/src/conf/prompts
 COPY --chown=rruiz:rruiz src/conf/tools   /var/lupin/src/conf/tools

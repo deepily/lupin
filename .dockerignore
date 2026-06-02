@@ -27,6 +27,11 @@ src/lupin-mobile/**
 src/ephemera/
 src/ephemera/**
 
+# Secret key files — NEVER baked into the image (Phase-1 secret hygiene, D8).
+# Keys arrive at runtime via Secret Manager; the Dockerfile COPY was removed.
+src/conf/keys/
+src/conf/keys/**
+
 # Python cache
 __pycache__
 *.pyc

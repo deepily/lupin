@@ -14,10 +14,9 @@
 
 set -e  # Exit on any error
 
-# Configuration
+# Configuration — PROJECT_ID / REGION from the shared resolver (fail-loud).
 SERVICE_URL="$1"
-PROJECT_ID="hello-world-foo-423219"
-REGION="us-central1"
+source "$( dirname "$0" )/cloud-run-config.sh"
 SERVICE_NAME="lupin"
 
 if [ -z "$SERVICE_URL" ]; then
@@ -156,7 +155,7 @@ else
     echo "Debugging:"
     echo "  1. View logs: gcloud run services logs read $SERVICE_NAME --region=$REGION --limit=100"
     echo "  2. Check service: gcloud run services describe $SERVICE_NAME --region=$REGION"
-    echo "  3. Test locally: docker run -p 8080:8080 gcr.io/$PROJECT_ID/lupin:latest"
+    echo "  3. Test locally: docker run -p 8080:8080 $REGISTRY/$PROJECT_ID/$AR_REPO/lupin:latest"
 fi
 echo ""
 

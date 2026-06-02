@@ -22,8 +22,9 @@
 
 set -e  # Exit on any error
 
-# Configuration
-PROJECT_ID="hello-world-foo-423219"
+# Configuration — PROJECT_ID / REGION / REGISTRY / AR_REPO from the shared
+# resolver, which fails loud if LUPIN_GCP_PROJECT_ID is unset.
+source "$( dirname "$0" )/cloud-run-config.sh"
 IMAGE_NAME="lupin"
 VERSION="${1:-latest}"
 DOCKERFILE="docker/lupin/Dockerfile"
@@ -47,14 +48,21 @@ fi
 echo "✓ Dockerfile found"
 echo ""
 
+# HARD GATE: abort the build if any secret is detected in the build context
+# (Phase-1 secret hygiene, D8). Must run BEFORE docker build so no image
+# carrying a plaintext key can ever be built or pushed.
+echo "[0/3] Secret-scan gate..."
+"$( dirname "$0" )/secret-scan-gate.sh" .
+echo ""
+
 # Build Docker image
 echo "[1/3] Building Docker image..."
-echo "Image tag: gcr.io/$PROJECT_ID/$IMAGE_NAME:$VERSION"
+echo "Image tag: $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$VERSION"
 echo ""
 
 docker build \
     -f $DOCKERFILE \
-    -t gcr.io/$PROJECT_ID/$IMAGE_NAME:$VERSION \
+    -t $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$VERSION \
     .
 
 echo ""
@@ -74,8 +82,8 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
 
     docker run -p 8080:8080 \
         -e PORT=8080 \
-        -e LUPIN_ROOT=/app \
-        gcr.io/$PROJECT_ID/$IMAGE_NAME:$VERSION
+        -e LUPIN_ROOT=/var/lupin \
+        $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$VERSION
 
     echo ""
 else
@@ -87,7 +95,7 @@ fi
 echo "[3/3] Pushing image to Google Container Registry..."
 echo ""
 
-docker push gcr.io/$PROJECT_ID/$IMAGE_NAME:$VERSION
+docker push $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$VERSION
 
 echo ""
 echo "✓ Image pushed successfully"
@@ -99,8 +107,8 @@ if [ "$VERSION" != "latest" ]; then
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo "Tagging as latest..."
-        docker tag gcr.io/$PROJECT_ID/$IMAGE_NAME:$VERSION gcr.io/$PROJECT_ID/$IMAGE_NAME:latest
-        docker push gcr.io/$PROJECT_ID/$IMAGE_NAME:latest
+        docker tag $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$VERSION $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:latest
+        docker push $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:latest
         echo "✓ Tagged and pushed as latest"
     fi
 fi
@@ -111,11 +119,11 @@ echo "  ✅ Build and push complete!"
 echo "================================================================"
 echo ""
 echo "Image details:"
-echo "  Registry: gcr.io"
+echo "  Registry: $REGISTRY"
 echo "  Project: $PROJECT_ID"
 echo "  Image: $IMAGE_NAME"
 echo "  Tag: $VERSION"
-echo "  Full path: gcr.io/$PROJECT_ID/$IMAGE_NAME:$VERSION"
+echo "  Full path: $REGISTRY/$PROJECT_ID/$AR_REPO/$IMAGE_NAME:$VERSION"
 echo ""
 echo "This image is MULTI-ENVIRONMENT CAPABLE and can be deployed to:"
 echo "  • Testing: ./src/scripts/cloud-run-deploy.sh $VERSION 8080 testing"

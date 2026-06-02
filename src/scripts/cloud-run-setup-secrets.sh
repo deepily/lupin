@@ -11,11 +11,10 @@
 
 set -e  # Exit on any error
 
-# Configuration
-PROJECT_ID="hello-world-foo-423219"
+# Configuration — PROJECT_ID / REGION from the shared resolver (fail-loud).
+source "$( dirname "$0" )/cloud-run-config.sh"
 SECRET_NAME="lupin-notification-api-key"
 KEY_FILE="src/conf/keys/notification-api-claude-code-dev"
-REGION="us-central1"
 
 echo "================================================================"
 echo "  Lupin Cloud Run - Secret Setup"

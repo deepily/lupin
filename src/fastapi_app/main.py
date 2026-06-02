@@ -45,6 +45,12 @@ src_path = os.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
+# Promote the weak "LUPIN_ROOT is set" guard above to a strong "LUPIN_ROOT is
+# valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
+# instead of cryptically later at config load. (No defensive fallback.)
+from fastapi_app.bootstrap_helpers import assert_lupin_root_valid
+assert_lupin_root_valid( lupin_root )
+
 # Reduce CUDA memory fragmentation (prevents periodic OOM on Whisper inference)
 os.environ.setdefault( "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True" )
 
