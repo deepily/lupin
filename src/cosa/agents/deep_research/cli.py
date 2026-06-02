@@ -32,7 +32,7 @@ import yaml
 from .config import ResearchConfig
 from .cost_tracker import CostTracker, BudgetExceededError
 from .api_client import ResearchAPIClient, ANTHROPIC_AVAILABLE, ENV_VAR_NAME, KEY_FILE_NAME
-from .orchestrator import ResearchOrchestratorAgent, OrchestratorState
+from .orchestrator import ResearchOrchestratorAgent, OrchestratorState  # noqa: F401 — reserved for Phase-3 orchestrator; unused here BY DESIGN (run_research uses a Phase-2 inline flow). Keep, do not strip. Ratified Rick 2026-06-01. See orchestrator.py module docstring.
 from . import cosa_interface
 from . import voice_io
 from . import search_cache

@@ -10,6 +10,17 @@ Design Pattern: Top-Level Orchestrator
 - Async execution for non-blocking queue behavior
 - Queryable state for external monitoring
 - Controllable via pause/resume/stop
+
+STATUS (2026-06-01): RESERVED FOR PHASE 3 — NOT YET WIRED INTO PRODUCTION.
+    The production entry point ``run_research()`` ( cli.py ) deliberately uses a
+    simplified Phase-2 inline flow and does NOT instantiate this orchestrator
+    ( see the explicit "doesn't use the full orchestrator" comment in run_research ).
+    This class is kept as intentional forward-investment for the Phase-3
+    full-orchestrator path — ratified KEEP (not delete) by Rick, 2026-06-01, after
+    an investigation confirmed zero production callers. Its ``cli.py`` import is
+    currently unused BY DESIGN. Do NOT delete as "dead code" and do NOT pragma its
+    lines as bug-blocked — re-confirm product intent before any removal. Its test
+    suites ( test_orchestrator_phases / _helpers / integration ) remain valid coverage.
 """
 
 import asyncio
