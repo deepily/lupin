@@ -789,6 +789,95 @@ mcp = FastMCP(
 )
 
 
+# ------------------------------------------------------------------------------
+# Spoken-brevity cap (caller-side TTS limit) — Rick 2026-06-02
+# ------------------------------------------------------------------------------
+# The spoken field (`message` / `question`) of the speaking tools is read aloud
+# via TTS; long bodies become a "wall of text" in the user's ear. Detail belongs
+# in the `abstract` parameter (rendered to the UI card, NEVER length-limited),
+# not in the spoken channel. This cap is enforced CALLER-SIDE in the MCP layer
+# ONLY — the notifications REST API stays unrestricted so agentic jobs / system
+# events can still send longer payloads when they genuinely need to.
+#
+# The cap VALUE lives in lupin-app.ini (`cosa voice spoken char cap`, default 500
+# ≈ 80 words) and is read via ConfigurationManager so it is TUNABLE AT RUNTIME:
+# re-read mtime-gated (so the hot path stays cheap) on the next call after the INI
+# changes — no MCP restart required. A spoken field over the cap is REJECTED unless
+# the caller sets override_size_limitation=True (long is opt-in-and-intentional).
+SPOKEN_CHAR_CAP_DEFAULT = 500
+_SPOKEN_CAP_INI_KEY     = "cosa voice spoken char cap"
+_spoken_cap_cache       = { "value": SPOKEN_CHAR_CAP_DEFAULT, "ini_mtime": None }
+
+
+def _get_spoken_char_cap():
+    """
+    Resolve the spoken-char cap from lupin-app.ini at call time (runtime-tunable).
+
+    Ensures:
+        - returns an int cap
+        - re-reads via ConfigurationManager (atomic _reset_singleton) ONLY when the
+          INI file mtime has changed since the last read — cheap on the hot path
+        - falls back to the last good value (else SPOKEN_CHAR_CAP_DEFAULT) on any error
+    """
+    try:
+        import os
+        import cosa.utils.util as cu
+        ini_path = cu.get_project_root() + "/src/conf/lupin-app.ini"
+        mtime    = os.path.getmtime( ini_path )
+        if mtime != _spoken_cap_cache[ "ini_mtime" ]:
+            from cosa.config.configuration_manager import ConfigurationManager
+            cm = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", _reset_singleton=True )
+            _spoken_cap_cache[ "value" ]     = cm.get( _SPOKEN_CAP_INI_KEY, default=SPOKEN_CHAR_CAP_DEFAULT, return_type="int", silent=True )
+            _spoken_cap_cache[ "ini_mtime" ] = mtime
+        return _spoken_cap_cache[ "value" ]
+    except Exception as e:
+        logger.warning( f"[brevity] cap read failed; using {_spoken_cap_cache.get( 'value', SPOKEN_CHAR_CAP_DEFAULT )}. Reason: {e}" )
+        return _spoken_cap_cache.get( "value", SPOKEN_CHAR_CAP_DEFAULT )
+
+
+def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" ):
+    """
+    Caller-side TTS spoken-length guard for the cosa-voice speaking tools.
+
+    Requires:
+        - spoken is either a str (the spoken field) OR a list of question dicts
+          (each optionally carrying a "question" str)
+        - override_size_limitation is a bool
+        - field is the parameter name (used only in the error message)
+
+    Ensures:
+        - returns None when override_size_limitation is True
+        - returns None when every spoken unit is <= the configured cap
+        - raises ValueError naming the over-cap unit + its measured length otherwise
+
+    Raises:
+        - ValueError if a spoken unit exceeds the configured cap and override is False
+    """
+    if override_size_limitation:
+        return
+
+    cap = _get_spoken_char_cap()
+
+    units = []
+    if isinstance( spoken, str ):
+        units.append( ( field, spoken ) )
+    elif isinstance( spoken, list ):
+        for i, q in enumerate( spoken ):
+            if isinstance( q, dict ) and isinstance( q.get( "question" ), str ):
+                units.append( ( f"{field}[{i}].question", q[ "question" ] ) )
+
+    for label, text in units:
+        n = len( text )
+        if n > cap:
+            raise ValueError(
+                f"Spoken `{label}` is {n} chars (cap {cap}). The spoken channel is "
+                f"read aloud via TTS — keep it to a headline plus one takeaway and "
+                f"move the detail into `abstract` (rendered to the UI card, not "
+                f"length-limited). To send a long spoken message deliberately, set "
+                f"override_size_limitation=True."
+            )
+
+
 @mcp.tool
 def converse(
     message: str,
@@ -798,7 +887,8 @@ def converse(
     priority: str = "medium",
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    override_size_limitation: bool = False
 ) -> str:
     """
     Speak to the user and wait for their voice/text response.
@@ -816,6 +906,9 @@ def converse(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
+        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+            and send a long spoken `message` KNOWINGLY. Default False — detail belongs
+            in `abstract` (not length-limited), not the spoken/TTS channel.
 
     Returns:
         User's response as text, or error/timeout message
@@ -826,6 +919,8 @@ def converse(
         converse("The tests are failing. Should I continue?", response_default="yes")
     """
     logger.debug( f"converse() called: {message[:50]}..." )
+
+    _enforce_spoken_brevity( message, override_size_limitation, field="message" )
 
     try:
         request = NotificationRequest(
@@ -1025,7 +1120,8 @@ def notify(
     job_id: Optional[ str ] = None,
     suppress_ding: bool = False,
     progress_group_id: Optional[ str ] = None,
-    session_name: Optional[ str ] = None
+    session_name: Optional[ str ] = None,
+    override_size_limitation: bool = False
 ) -> str:
     """
     Announce something to the user without waiting for response.
@@ -1045,6 +1141,9 @@ def notify(
             Notifications sharing this ID update a single element instead of appending new ones.
         session_name: Optional human-readable session name for UI header display.
             When set, updates the sender-session-name span in notification history card.
+        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+            and send a long spoken `message` KNOWINGLY. Default False — detail belongs
+            in `abstract` (not length-limited), not the spoken/TTS channel.
 
     Returns:
         Delivery status message
@@ -1055,6 +1154,8 @@ def notify(
         notify("Warning: deprecated API detected", notification_type="alert", priority="high")
         notify("Task complete", suppress_ding=True)  # TTS only, no ding
     """
+    _enforce_spoken_brevity( message, override_size_limitation, field="message" )
+
     return _notify_impl(
         message=message,
         notification_type=notification_type,
@@ -1074,7 +1175,8 @@ def ask_yes_no(
     timeout_seconds: int = 60,
     priority: str = "medium",
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    override_size_limitation: bool = False
 ) -> str:
     """
     Ask a yes/no question and get the user's response as a string.
@@ -1105,6 +1207,9 @@ def ask_yes_no(
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
+        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+            and send a long spoken `question` KNOWINGLY. Default False — detail belongs
+            in `abstract` (not length-limited), not the spoken/TTS channel.
 
     Returns:
         Annotated string: one of "yes", "no", "neither",
@@ -1117,6 +1222,8 @@ def ask_yes_no(
         # or signaling re-frame: "neither [comment: ambiguous which backups]"
     """
     logger.debug( f"ask_yes_no() called: {question[:50]}..." )
+
+    _enforce_spoken_brevity( question, override_size_limitation, field="question" )
 
     try:
         request = NotificationRequest(
@@ -1159,7 +1266,8 @@ def ask_multiple_choice(
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
     job_id: Optional[ str ] = None,
-    default: Optional[ dict ] = None
+    default: Optional[ dict ] = None,
+    override_size_limitation: bool = False
 ) -> dict:
     """
     Ask multiple-choice questions and get user's selection(s).
@@ -1194,6 +1302,9 @@ def ask_multiple_choice(
             return an error dict before the notification fires.
             Backward-compat: ``default=None`` preserves the legacy timeout
             return ``{"error": "timeout - no response received", "timeout": True}``.
+        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+            and send long spoken `question` text KNOWINGLY. Default False — detail
+            belongs in `abstract` (not length-limited), not the spoken/TTS channel.
 
     Returns:
         dict with answers keyed by header:
@@ -1241,6 +1352,8 @@ def ask_multiple_choice(
 
     if not questions or not isinstance( questions, list ):
         return { "error": "questions must be a non-empty list" }
+
+    _enforce_spoken_brevity( questions, override_size_limitation, field="questions" )
 
     # Build TTS-friendly message from questions
     tts_message = format_questions_for_tts( questions )
@@ -1387,7 +1500,8 @@ def ask_open_ended_batch(
     priority: str = "high",
     title: Optional[ str ] = None,
     abstract: Optional[ str ] = None,
-    job_id: Optional[ str ] = None
+    job_id: Optional[ str ] = None,
+    override_size_limitation: bool = False
 ) -> dict:
     """
     Ask multiple open-ended questions at once and get all answers as a dict.
@@ -1409,6 +1523,9 @@ def ask_open_ended_batch(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
+        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+            and send long spoken `question` text KNOWINGLY. Default False — detail
+            belongs in `abstract` (not length-limited), not the spoken/TTS channel.
 
     Returns:
         dict with answers keyed by header:
@@ -1431,6 +1548,8 @@ def ask_open_ended_batch(
 
     if not questions or not isinstance( questions, list ):
         return { "error": "questions must be a non-empty list" }
+
+    _enforce_spoken_brevity( questions, override_size_limitation, field="questions" )
 
     # Build TTS-friendly message from questions
     tts_message = format_open_ended_batch_for_tts( questions )

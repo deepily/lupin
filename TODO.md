@@ -1,5 +1,16 @@
 # TODO
 
+## 🟢 2026-06-02 (Tiberius 👑, session 1333e106) — Post-game consolidated + TTS cap shipped; next infra item pending Rick's pick
+
+**DONE today (checkpoint, NOT pushed):**
+- [x] **[LUPIN]** CoSA-campaign **post-game consolidated** with María 🌸 → `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/18-postgame-coordinated-for-rick.md` (3-list, descending: **P0** messaging-plane · **P1** completion-discipline · **P2** harvest + reap-fix · **P3** TTS-guard). María's planning-is-prompting framework companion cross-linked both ways. Corrected the "MCP saturation" → "shared :7999 + synchronous handlers" root cause before it shipped.
+- [x] **[LUPIN]** **TTS spoken-brevity cap** (implements post-game P3): caller-side cap in the cosa-voice MCP layer + `override_size_limitation: bool = False` on all 5 spoken tools; `cosa voice spoken char cap = 500` in lupin-app.ini, read via ConfigurationManager **mtime-gated → runtime-tunable** (verified live 500→333→500); 11/11 unit tests. R&D: `src/rnd/v0.1.8/2026.06.02-tts-spoken-brevity-cap.md`. **Activation needs one MCP restart.**
+
+**NEXT infra item — Rick choosing now:**
+- [ ] **[LUPIN]** **(rec) P2 reap-path fix** — repair `dismiss_sessions` (list-arg stringify bug) so tool-based reap works (currently SIGKILL-by-PID workaround only). Small, high-leverage; directly serves the harvest mandate Rick named ×2.
+- [ ] **[LUPIN]** **P0 messaging-coordination plane** — the big one: async/non-blocking :7999 notify/commons handlers · durable queue + ack · pull-able AFK inbox · backpressure/concurrency cap. Needs a design doc + Rick's decisions first.
+- [ ] **[LUPIN]** **prod-bug #11 fix + de-arm** (`prediction_engine.py` dead LLM-synthesis tier) — small, campaign U5, mine.
+
 ## 🚀 ACTIVE (2026-05-30) — GCP deployment: local-dev → GCP-TEST migration (Milestone 1)
 
 **Sam 🎙️ (session 657452e9).** Arc complete through planning + decisions: survey → straw-man plan → Cloud Run vs GCE comparison → all strategic decisions resolved with Rick → "production" wording scrubbed. Docs in `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`. **Mid-session checkpoint committed (NOT pushed).**

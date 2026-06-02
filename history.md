@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.02 - Session 1333e106 (Tiberius 👑) | CoSA-campaign post-game (coordinated) + TTS spoken-brevity cap (config-driven, runtime-tunable)
+
+**Two threads on `wip-v0.1.8` (checkpoint, not pushed).**
+
+**(1) CoSA-campaign post-game** — coordinated live with María 🌸 into one descending-priority deliverable `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/18-postgame-coordinated-for-rick.md` (went-well / didn't / improvements: **P0** messaging-coordination plane · **P1** completion-discipline · **P2** harvest-discipline + reap-path fix · **P3** TTS-brevity guard). Caught + corrected a would-be-confabulated root cause before it reached Rick: the messaging black-holes are **NOT "MCP saturation"** — disk-verified `claude mcp get cosa-voice` → **stdio per-session**; the real fault is the shared `:7999` + **synchronous** notify/commons handlers. María serializes the framework companion (planning-is-prompting); docs cross-link both directions. (The /tmp Sam default-error Rick heard = my sanctioned `claude mcp get` verify running from `/tmp` — harmless, owned, folded into both docs as a live P0 specimen.)
+
+**(2) TTS spoken-brevity cap** (implements post-game P3) — Rick: "you're killing me with walls of text in TTS." Added a caller-side cap enforced in the cosa-voice **MCP layer only** (notifications REST API untouched): new `override_size_limitation: bool = False` on all 5 spoken tools (notify/converse/ask_yes_no/ask_multiple_choice/ask_open_ended_batch); over-cap **REJECTS** (ValueError → model re-crafts) unless overridden; `abstract` never capped. Cap value `cosa voice spoken char cap = 500` in `lupin-app.ini`, read via ConfigurationManager **mtime-gated → runtime-tunable** (verified live 500→333→500, no restart). **11/11 unit tests green.** R&D: `src/rnd/v0.1.8/2026.06.02-tts-spoken-brevity-cap.md`. Activation needs one MCP restart (per-session stdio subprocess). **Files:** `src/lupin_mcp/cosa_voice_mcp.py`, `src/conf/lupin-app.ini` (+ `-splainer.ini`), `src/tests/unit/lupin_mcp/test_spoken_brevity_cap.py`, 2 R&D docs.
+
+---
+
 ### 2026.06.01 - Session b8a9f332 (Tiberius 👑) | CoSA rest/ → genuine 100% coverage (35 commits, HELD) + FM-17 catch
 
 **Ran the CoSA coverage campaign's rest/ completion as manager; 35 test-only commits on `wip-v0.1.8` (HELD — not pushed, per Rick).** Drove `cosa.rest` to **genuine 100%** (lines AND branches), tree-wide gate confirmed: `11053/0 stmts · 2958/0 branch · 2363 passed`, zero modules <100%.
