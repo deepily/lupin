@@ -1121,6 +1121,70 @@ async def submit_notification_response(
         print(f"[NOTIFY] ❌ Response submission error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Response submission failed: {str(e)}")
 
+def _project_undelivered_notification( n ) -> dict:
+    """Project a Notification ORM row to a JSON-safe dict for the undelivered inbox (lever D)."""
+    return {
+        "id"         : str( n.id ),
+        "sender_id"  : n.sender_id,
+        "title"      : n.title,
+        "message"    : n.message,
+        "abstract"   : n.abstract,
+        "type"       : n.type,
+        "priority"   : n.priority,
+        "state"      : n.state,
+        "job_id"     : n.job_id,
+        "created_at" : n.created_at.isoformat() if n.created_at else None,
+    }
+
+
+# NOTE: this static route MUST be registered BEFORE "/notifications/{user_id}" so
+# FastAPI does not capture "undelivered" as a {user_id} path parameter.
+@router.get(
+    "/notifications/undelivered",
+    summary     = "Get undelivered (missed) notifications",
+    description = "Pull-able AFK inbox (messaging-coordination plane, lever D): the authenticated user's notifications that never reached them (state created/queued) — what they missed while offline."
+)
+async def get_undelivered_notifications(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)],
+    limit: int = Query(100, description="Maximum undelivered notifications to return")
+):
+    """
+    Pull the authenticated user's undelivered (missed-while-offline) notifications.
+
+    Requires:
+        - a valid API key or Bearer JWT (authenticated_user_id is the recipient's system UUID)
+
+    Ensures:
+        - returns notifications in state 'created'/'queued' (never delivered), oldest-first
+        - shape: { status, undelivered_count, notifications, timestamp }
+
+    Raises:
+        - HTTPException 400 if authenticated_user_id is not a valid UUID
+        - HTTPException 500 on query failure
+    """
+    try:
+        recipient_uuid = uuid.UUID( authenticated_user_id )
+    except ( ValueError, AttributeError, TypeError ):
+        raise HTTPException( status_code=400, detail="authenticated user id is not a valid UUID" )
+
+    try:
+        with get_db() as session:
+            repo          = NotificationRepository( session )
+            items         = repo.get_undelivered_for_recipient( recipient_uuid, limit=limit )
+            notifications = [ _project_undelivered_notification( n ) for n in items ]
+        return {
+            "status"            : "success",
+            "undelivered_count" : len( notifications ),
+            "notifications"     : notifications,
+            "timestamp"         : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error getting undelivered for {authenticated_user_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to get undelivered notifications: {str( e )}" )
+
+
 @router.get(
     "/notifications/{user_id}",
     summary     = "Get user notifications",

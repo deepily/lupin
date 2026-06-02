@@ -878,6 +878,107 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
             )
 
 
+# ------------------------------------------------------------------------------
+# Durable notify outbox wiring (Phase 1 / lever A — messaging-coordination plane)
+# ------------------------------------------------------------------------------
+# On a FINAL notify send-failure, persist the request to an on-disk outbox and let
+# a background flusher retry it (reusing its idempotency_key, so the server de-dups)
+# until ack or TTL. Rides only local disk — no fleet, no messaging dependency.
+# Design: src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md (lever A1).
+import uuid as _uuid
+from lupin_mcp import notify_outbox as _notify_outbox
+
+_OUTBOX_DEFAULTS = { "enabled": True, "dir": "/io/notify-outbox", "flush_interval": 30, "ttl": 86400 }
+
+
+def _outbox_config():
+    """
+    Resolve outbox config from lupin-app.ini.
+
+    Ensures:
+        - returns a dict {enabled, dir, flush_interval, ttl}
+        - fails SAFE to _OUTBOX_DEFAULTS on any ConfigurationManager error
+    """
+    cfg = dict( _OUTBOX_DEFAULTS )
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        cm = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        cfg[ "enabled" ]        = cm.get( "notify outbox enabled",                 default=cfg[ "enabled" ],        return_type="boolean", silent=True )
+        cfg[ "dir" ]            = cm.get( "notify outbox dir",                     default=cfg[ "dir" ],            return_type="string",  silent=True )
+        cfg[ "flush_interval" ] = cm.get( "notify outbox flush interval seconds", default=cfg[ "flush_interval" ], return_type="int",     silent=True )
+        cfg[ "ttl" ]            = cm.get( "notify outbox ttl seconds",            default=cfg[ "ttl" ],            return_type="int",     silent=True )
+    except Exception as e:
+        logger.warning( f"[notify-outbox] config read failed; using defaults. Reason: {e}" )
+    return cfg
+
+
+def _outbox_dir_for_session( cfg ):
+    """Per-session spool dir: `<project_root><cfg.dir>/<session_id>`."""
+    import cosa.utils.util as cu
+    sid = ( SESSION_ID or "default" ).replace( "/", "_" )
+    return os.path.join( cu.get_project_root() + cfg[ "dir" ], sid )
+
+
+def _outbox_send_fn( payload ):
+    """
+    Re-deliver a spooled request payload.
+
+    Ensures:
+        - reconstructs AsyncNotificationRequest from the JSON payload and re-sends
+        - returns True iff the server acked; False on any failure (item stays spooled)
+    """
+    try:
+        req  = AsyncNotificationRequest.model_validate( payload )
+        resp = notify_user_async( request=req, debug=False )
+        return bool( resp.success )
+    except Exception:
+        return False
+
+
+def _spool_failed_notify( request ):
+    """
+    Persist a failed notify for durable retry + ensure the flusher is running.
+
+    Ensures:
+        - no-op returning False when the outbox is disabled in config
+        - spools the request and lazily starts the once-only flusher daemon
+        - NEVER raises — a spool error must not break the notify return path
+        - returns True iff the request was spooled
+    """
+    try:
+        cfg = _outbox_config()
+        if not cfg[ "enabled" ]:
+            return False
+        outbox_dir = _outbox_dir_for_session( cfg )
+        _notify_outbox.spool( request, outbox_dir )
+        _notify_outbox.start_flusher(
+            _outbox_send_fn, outbox_dir,
+            ttl_seconds=cfg[ "ttl" ], interval_seconds=cfg[ "flush_interval" ], logger=logger
+        )
+        return True
+    except Exception as e:
+        logger.warning( f"[notify-outbox] spool failed: {e}" )
+        return False
+
+
+def _outbox_has_backlog():
+    """
+    Drain-first gate: does this session's outbox currently hold spooled items?
+
+    Ensures:
+        - returns False when the outbox is disabled in config
+        - returns True iff at least one item is spooled for this session
+        - NEVER raises (a check error must not break the live send path)
+    """
+    try:
+        cfg = _outbox_config()
+        if not cfg[ "enabled" ]:
+            return False
+        return len( _notify_outbox.list_spooled( _outbox_dir_for_session( cfg ) ) ) > 0
+    except Exception:
+        return False
+
+
 @mcp.tool
 def converse(
     message: str,
@@ -1103,11 +1204,27 @@ def _notify_impl(
         logger.error( f"Validation error: {e}" )
         return f"[validation error: {e}]"
 
+    # Assign the idempotency key HERE (before send) so a durable-outbox retry
+    # reuses the SAME key → the server de-dups a maybe-already-delivered message.
+    if request.idempotency_key is None:
+        request = request.model_copy( update={ "idempotency_key": str( _uuid.uuid4() ) } )
+
+    # Drain-first ordering: if a backlog already exists for this session, queue
+    # behind it instead of sending live (preserves FIFO order during a degraded
+    # window). The fast live path resumes once the flusher drains the backlog.
+    if _outbox_has_backlog():
+        if _spool_failed_notify( request ):
+            return "Queued (ordered behind backlog)"
+        # spool disabled/failed → fall through to a live attempt
+
     response: AsyncNotificationResponse = notify_user_async( request=request, debug=False )
 
     if response.success:
         return f"Notification sent ({response.status})"
     else:
+        # Durable layer (lever A): persist for background retry instead of losing it.
+        if _spool_failed_notify( request ):
+            return f"Queued for durable retry ({response.message})"
         return f"Failed: {response.message}"
 
 

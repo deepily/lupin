@@ -99,6 +99,26 @@ def get_app_debug():
     import fastapi_app.main as main_module
     return main_module.app_debug, main_module.app_verbose
 
+def _compute_undelivered_count( user_id ) -> int:
+    """
+    Count the user's undelivered (missed-while-offline) notifications for the
+    auth_success "N missed" surfacing (messaging-coordination plane, lever D).
+
+    Ensures:
+        - returns the count of notifications in state created/queued for this user
+        - NEVER raises — returns 0 on any error (a count failure must not break auth)
+    """
+    try:
+        import uuid as _uuid
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.notification_repository import NotificationRepository
+        with get_db() as session:
+            repo = NotificationRepository( session )
+            return repo.count_undelivered_for_recipient( _uuid.UUID( str( user_id ) ) )
+    except Exception:
+        return 0
+
+
 def is_valid_session_id(session_id: str) -> bool:
     """
     Validate session ID format according to expected patterns.
@@ -464,11 +484,16 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             connection_count = websocket_manager.get_user_connection_count(user_id)
             print(f"[WS-QUEUE-AUTH] Connection verification: is_connected={is_connected}, connection_count={connection_count}")
 
+            # Lever D (messaging plane): surface how many notifications the user
+            # missed while offline, so the UI can show "N missed" on reconnect.
+            undelivered_count = _compute_undelivered_count( user_id )
+
             # Send auth success
             await websocket.send_json({
                 "type": "auth_success",
                 "user_id": user_id,
-                "session_id": session_id
+                "session_id": session_id,
+                "undelivered_count": undelivered_count
             })
 
         except TokenExpiredException:

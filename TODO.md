@@ -6,10 +6,44 @@
 - [x] **[LUPIN]** CoSA-campaign **post-game consolidated** with María 🌸 → `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/18-postgame-coordinated-for-rick.md` (3-list, descending: **P0** messaging-plane · **P1** completion-discipline · **P2** harvest + reap-fix · **P3** TTS-guard). María's planning-is-prompting framework companion cross-linked both ways. Corrected the "MCP saturation" → "shared :7999 + synchronous handlers" root cause before it shipped.
 - [x] **[LUPIN]** **TTS spoken-brevity cap** (implements post-game P3): caller-side cap in the cosa-voice MCP layer + `override_size_limitation: bool = False` on all 5 spoken tools; `cosa voice spoken char cap = 500` in lupin-app.ini, read via ConfigurationManager **mtime-gated → runtime-tunable** (verified live 500→333→500); 11/11 unit tests. R&D: `src/rnd/v0.1.8/2026.06.02-tts-spoken-brevity-cap.md`. **Activation needs one MCP restart.**
 
-**NEXT infra item — Rick choosing now:**
-- [ ] **[LUPIN]** **(rec) P2 reap-path fix** — repair `dismiss_sessions` (list-arg stringify bug) so tool-based reap works (currently SIGKILL-by-PID workaround only). Small, high-leverage; directly serves the harvest mandate Rick named ×2.
-- [ ] **[LUPIN]** **P0 messaging-coordination plane** — the big one: async/non-blocking :7999 notify/commons handlers · durable queue + ack · pull-able AFK inbox · backpressure/concurrency cap. Needs a design doc + Rick's decisions first.
-- [ ] **[LUPIN]** **prod-bug #11 fix + de-arm** (`prediction_engine.py` dead LLM-synthesis tier) — small, campaign U5, mine.
+**Progress (2026-06-02):**
+- [x] **[LUPIN]** ✅ **P2 reap-path** — verified live post-MCP-restart (`dismiss_sessions` list-arg reap works via `3488b43`; spawn→dismiss→empty roster). No re-implementation needed.
+- [~] **[LUPIN]** **P0 messaging-coordination plane** — DESIGN DOC done + in Rick's review: `src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md` (5 levers A–E; rec order A→D→B→C→E; no external broker this milestone). **Holding for Rick's lever/order decisions before any code.**
+
+**Finish-unfinished triage — Rick's 4 decisions (relayed via María 2026-06-02; recorded post-game §3.7 + framework §11):**
+- [ ] **[LUPIN]** **T1 — 403-queues (U4):** INVESTIGATE as a tripwire FIRST — possible real prod regression; root-cause before touching the ~37 `cosa/tests/unit/rest/` failures; do NOT test-fix a possible prod bug (G0.2). The other ~36 = routine stale-mock refresh.
+- [ ] **[LUPIN]** **T2 — prod-bug #11:** FIX NOW + de-arm the xfail + re-verify (`prediction_engine.py` dead LLM-synthesis tier; armed tripwire ⇒ correct behavior known ⇒ mandated, not gated).
+- [x] **[LUPIN]** **T3 — `ResearchOrchestratorAgent` (U7): KEEP + coverage-exclude** (Rick-decided; NOT deleted — closes the last Rick-only U-decision).
+- [ ] **[LUPIN]** **T4 — sequencing:** io_models (79→100) + `test_suite_completion_watchdog` SOLO now (fleet-free); **Agents Tier-2 long pole GATED on the messaging fix / WAVE-3** — NO pre-fix fleet spawn (would re-create FM-7).
+
+**Near-term solo lane (fleet-free, parallelizable with the messaging work):** prod-bug #11 · io_models · watchdog · 403-queues investigation.
+
+## Pending Decisions
+
+> Queue for `/plan-decide` (the **guided-decision-walkthrough** skill). One-line topics; the skill frames each live with pros/cons + a recommendation, descending priority. Detail lives in the linked design docs.
+
+**Messaging-coordination plane (P0)** — ✅ **ALL 7 RESOLVED 2026-06-02 via `/plan-decide`** (Rick ratified every recommendation). Source `src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md` (§ Ratified Decisions). Rulings in the Decisions Log below.
+- **Implementation queue (Rick-cleared):** Phase 1 = **lever A durable outbox** → then D pull-able inbox → B loop de-blocking → C express lane → E backpressure. In-process, no broker. Each phase independently shippable + 100%-covered.
+
+## Decisions Log
+
+> ADR-lite: `YYYY-MM-DD — decision → ruling. Why: …`. Appended by `/plan-decide` and ad-hoc.
+
+- 2026-06-02 — TTS spoken-cap location → enforce caller-side in the cosa-voice MCP layer, NOT the notifications REST API. Why: limit agent verbosity at the tool boundary; keep the shared delivery API free for jobs/system.
+- 2026-06-02 — TTS cap default + tunability → 500 chars in lupin-app.ini, ConfigurationManager mtime-gated (runtime-tunable). Why: Rick's call; adjustable without code edit or restart.
+- 2026-06-02 — Over-cap behavior → REJECT (raise), not truncate; `override_size_limitation=True` bypasses. Why: no silent content loss; long-is-opt-in-and-intentional.
+- 2026-06-02 — Reap path (`dismiss_sessions`) → already fixed at source (`3488b43`); verified live post-restart, not re-implemented. Why: typed-wrapper coercion fix was the whole bug.
+- 2026-06-02 — T1 403-queues → investigate as a tripwire first (no test-fix until root-caused). Why: possible real prod regression (G0.2).
+- 2026-06-02 — T2 prod-bug #11 → fix now + de-arm + re-verify. Why: armed tripwire ⇒ correct behavior known ⇒ mandated, not gated.
+- 2026-06-02 — T3 `ResearchOrchestratorAgent` → KEEP + coverage-exclude. Why: Rick knows its status; not dead.
+- 2026-06-02 — T4 Agents Tier-2 → gate on the messaging fix (no pre-fix fleet). Why: avoid re-creating FM-7.
+- 2026-06-02 — MP-Scope (messaging plane) → in-process, NO external broker this milestone. Why: pain is a ~5-session fleet, not internet-scale; avoid an ops dependency before GCP.
+- 2026-06-02 — MP-A client delivery → A1 durable outbox + retry/ack (idempotency_key). Why: converts transient slowness → delayed delivery instead of permanent loss.
+- 2026-06-02 — MP-D AFK recovery → D1 undelivered-inbox + on-return surfacing. Why: fixes FM-18 (the 4h-invisible miss); user can pull what was missed.
+- 2026-06-02 — MP-B server loop → B1 move blocking I/O off the event loop (hot handlers first). Why: stop inline file/DB I/O from starving the loop under fleet load.
+- 2026-06-02 — MP-C load isolation → C1 in-process express/priority lane for interactive notify/ask. Why: keep Rick's voice alive during a fleet storm.
+- 2026-06-02 — MP-E backpressure → E1 per-source cap + 429/retry-after. Why: shed excess fleet load gracefully; outbox honors retry-after.
+- 2026-06-02 — MP-Order rollout → A→D→B→C→E. Why: A+D first retire the silent-loss class at lowest risk; each phase independently shippable.
 
 ## 🚀 ACTIVE (2026-05-30) — GCP deployment: local-dev → GCP-TEST migration (Milestone 1)
 

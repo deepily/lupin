@@ -2646,6 +2646,9 @@ class NotificationsUI {
                     this.notificationState.userId = envelope.user_id;
                     this.wsDiag( `Notification state updated with server user ID: ${envelope.user_id}` );
 
+                    // Lever D (messaging plane): surface notifications missed while offline.
+                    this._surfaceMissedNotifications( envelope.undelivered_count || 0 );
+
                     // Load initial data now that we have the correct user ID
                     this.loadInitialData();
                     break;
@@ -13809,6 +13812,28 @@ class NotificationsUI {
         }
     }
     
+    // Lever D (messaging-coordination plane): show how many notifications the user
+    // missed while offline, surfaced from the auth_success `undelivered_count`.
+    // Returns the resolved count (testable). Updates #missed-status if present.
+    _surfaceMissedNotifications( count ) {
+        const n = Number( count ) || 0;
+        this.notificationState.undeliveredCount = n;
+        const el = document.getElementById( "missed-status" );
+        if ( el ) {
+            if ( n > 0 ) {
+                el.textContent = `${n} missed while away`;
+                el.style.display = "";
+                el.classList.add( "missed-visible" );
+            } else {
+                el.textContent = "";
+                el.style.display = "none";
+                el.classList.remove( "missed-visible" );
+            }
+        }
+        if ( n > 0 ) this.log( `[MISSED] ${n} notification(s) missed while offline` );
+        return n;
+    }
+
     updateStatus( elementId, status, type ) {
         const element = document.getElementById( elementId );
         if ( element ) {

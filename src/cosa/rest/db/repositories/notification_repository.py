@@ -316,6 +316,59 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.created_at.asc()
         ).all()
 
+    def get_undelivered_for_recipient( self, recipient_id: uuid.UUID, limit: int = 100 ) -> List[Notification]:
+        """
+        Get the recipient's UNDELIVERED notifications (the pull-able AFK inbox).
+
+        Lever D of the messaging-coordination plane (FM-18): a notification that
+        never reached the user — still in 'created'/'queued', never 'delivered' —
+        is what the user "missed" while offline. This is the durable, pull-able
+        record so a returning/AFK user can recover what a failed push dropped.
+
+        Requires:
+            - recipient_id: Valid user UUID
+
+        Ensures:
+            - Returns notifications with state in ('created', 'queued') ONLY
+              (excludes delivered / responded / expired)
+            - Excludes soft-deleted/archived rows (is_hidden = True)
+            - Ordered by created_at ascending (oldest-first — FIFO recovery)
+            - Honors limit
+
+        Returns:
+            List of undelivered Notification instances
+        """
+        return self.session.query( Notification ).filter(
+            Notification.recipient_id == recipient_id,
+            Notification.state.in_( [ 'created', 'queued' ] ),
+            Notification.is_hidden == False
+        ).order_by(
+            Notification.created_at.asc()
+        ).limit( limit ).all()
+
+    def count_undelivered_for_recipient( self, recipient_id: uuid.UUID ) -> int:
+        """
+        Count the recipient's UNDELIVERED notifications (lever D — accurate "N missed").
+
+        Unlike `get_undelivered_for_recipient` (which caps at `limit` for paging), this
+        is an UNBOUNDED count, so the auth_success "N missed" surfacing is not silently
+        capped at the page size.
+
+        Requires:
+            - recipient_id: Valid user UUID
+
+        Ensures:
+            - counts notifications in state 'created'/'queued', excluding is_hidden
+
+        Returns:
+            int — the undelivered count
+        """
+        return self.session.query( Notification ).filter(
+            Notification.recipient_id == recipient_id,
+            Notification.state.in_( [ 'created', 'queued' ] ),
+            Notification.is_hidden == False
+        ).count()
+
     def get_expired_notifications( self ) -> List[Notification]:
         """
         Get all notifications in 'delivered' state past their expires_at.
