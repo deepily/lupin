@@ -173,8 +173,16 @@ Use `spawn_sessions` to bring up the 3 author personas + 1 reviewer. Give each a
 ### 8.2 Wake / dispatch — PUSH, never blackboard (load-bearing)
 **Idle headless (spawned) sessions wake ONLY via push** — `commons_send_to(recipient=<persona>, body=...)`. A blackboard `commons_post` does **NOT** wake an idle session; it sits unread until that session happens to poll. This stranded a dispatch ~3h on 2026-05-30 (`feedback_waking_idle_spawned_sessions.md`). Every task hand-off and every nudge to an idle worker is a push-DM.
 
-### 8.3 Reap
-On stand-down (or when a worker's tier is done), `dismiss_sessions` to release it. Reap before the host accumulates phantom bridges.
+### 8.3 Reap — HARVEST-ON-UNPRODUCTIVE (mandate, not optional)
+Harvest a worker the MOMENT it stops contributing — honest-stopped, stalled, context-saturated, superseded by a fresh spawn, or done with its tier. Do NOT let idle/parked workers accumulate. **Leading-indicator ALARM:** when fresh spawns start landing on `extra-N` personas, the named persona pool is EXHAUSTED → harvest is overdue → reap before spawning more.
+
+**The reap + its known trap (learned 2026-06-01 — see `17-session-end-100pct-wrap-and-reap-explanation.md`):**
+- **Clean path:** `dismiss_sessions(session_names=None)` reaps ALL of this manager's spawns incl. their listeners (no zombies).
+- ⚠️ `dismiss_sessions(session_names=[...])` (targeted/list form) is **BUGGED** on the running server — the untyped FastMCP param char-iterates the list → every entry is one char → no-op. Fix committed (`3488b43`) but needs an MCP-server **RESTART** to go live. Until then targeted reap silently does nothing.
+- **tmux-kill workaround** (`tmux kill-session -t cc-<role>-<mgr>-N`) orphans the session's voice **listener** (PG-6 zombie) → you MUST also `kill` the matching `cc_notification_listener` proc (match by `--session-id`), and NEVER kill the live human / manager / steward listeners.
+- If no clean-reap is available, **escalate the MCP-restart to the user EARLY** — do NOT silently park-and-accumulate (2026-06-01: ~14 sessions gathered dust because the restart wasn't pushed for in time; my own miss).
+
+Reap before the host accumulates phantom bridges.
 
 ---
 
@@ -270,6 +278,10 @@ When in doubt about which bucket an action falls in, treat it as the higher bar 
 - `:7999` for unit/coverage; `:8000` only under Rick's **direct** authorization.
 - Test-only commits; per-batch green-gate + reviewer-gate.
 - All idle-worker coordination via **push-DM** (`commons_send_to`), never blackboard.
+- **HARVEST is a mandate, not cleanup** (§8.3): reap unproductive / idle / superseded / context-saturated workers IMMEDIATELY; `extra-N` personas appearing = pool-exhaustion alarm = harvest overdue.
+- **Mandated work is never user-gated** (`mandated-work-never-user-gated` memory): difficulty / lateness / size are NOT defer-triggers — finish in-scope work to conclusion. The user is gated ONLY for outward/irreversible acts (push), a real prod-behavior change, a genuine requirement ambiguity, or scope expansion. The early-stop valve trips only on a real prod bug (→ tripwire) or a true ambiguity (→ ask), never on complexity.
+- **NEVER surface push-readiness** (`never-surface-push-readiness` memory): don't ask "ready to push?", don't say "held for your push", don't offer it. The push is the user's ALONE at session-end; held commits stay held SILENTLY.
+- **Run the TREE-WIDE coverage gate before declaring "complete"** (`run-tree-wide-gate-before-coverage-complete` memory): assigned-lane 100% ≠ tree-wide 100% (FM-17: agent-pkg done ≠ its router-wrapper done). Read the full `--cov` TOTAL + every sub-100% row from the redirect log, not a grep-summary.
 
 ---
 
