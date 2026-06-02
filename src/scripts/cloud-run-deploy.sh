@@ -61,10 +61,12 @@ case "$ENVIRONMENT" in
     testing)
         CONFIG_BLOCK="Lupin:+Testing-GCS"
         LUPIN_ENV="testing"
+        CLOUD_BACKED="true"   # GCP test env runs on Cloud SQL + GCS
         ;;
     production)
         CONFIG_BLOCK="Lupin:+Production"
         LUPIN_ENV="production"
+        CLOUD_BACKED="true"
         ;;
     *)
         echo "❌ ERROR: Invalid environment '$ENVIRONMENT'"
@@ -120,7 +122,7 @@ echo "  • Image: $REGISTRY/$PROJECT_ID/$AR_REPO/lupin:$IMAGE_VERSION"
 echo "  • Port: $PORT"
 echo "  • Memory: $MEMORY, CPU: $CPU"
 echo "  • Secret mount: /secrets/notification-api-key"
-echo "  • Environment: LUPIN_ROOT=/var/lupin, LUPIN_ENV=$LUPIN_ENV"
+echo "  • Environment: LUPIN_ROOT=/var/lupin, LUPIN_ENV=$LUPIN_ENV, LUPIN_CLOUD_BACKED=$CLOUD_BACKED"
 echo "  • Config Block: $CONFIG_BLOCK"
 echo "  • ConfigManager Args: $CONFIG_MGR_ARGS"
 echo ""
@@ -138,7 +140,7 @@ gcloud run deploy $SERVICE_NAME \
     --min-instances=1 \
     --max-instances=1 \
     --set-secrets="/secrets/notification-api-key=$SECRET_NAME:latest" \
-    --set-env-vars="LUPIN_ROOT=/var/lupin,LUPIN_ENV=$LUPIN_ENV,LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_ARGS"
+    --set-env-vars="LUPIN_ROOT=/var/lupin,LUPIN_ENV=$LUPIN_ENV,LUPIN_CLOUD_BACKED=$CLOUD_BACKED,LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_ARGS"
 
 echo ""
 echo "✓ Deployment complete"

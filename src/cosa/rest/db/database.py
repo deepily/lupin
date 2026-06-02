@@ -26,14 +26,40 @@ from typing import Generator
 from cosa.rest.postgres_models import Base
 
 
+_CLOUD_BACKED_TRUTHY = ( "1", "true", "yes", "on" )
+
+
+def is_cloud_backed() -> bool:
+    """
+    Decide whether this deployment uses cloud-backed Postgres (Cloud SQL).
+
+    Cloud-backing is an explicit deployment property set via LUPIN_CLOUD_BACKED
+    — it is NEVER inferred from the environment NAME. The GCP test env and any
+    future production env opt in by setting the flag; local dev/test leave it
+    unset and run against local Postgres-in-Docker.
+
+    Requires:
+        - reads os.environ for LUPIN_CLOUD_BACKED
+
+    Ensures:
+        - returns True iff LUPIN_CLOUD_BACKED is a truthy token (1/true/yes/on,
+          case-insensitive); False for unset, blank, or any other value
+
+    Returns:
+        bool — True if the cloud (Cloud SQL) database path should be used
+    """
+    return os.environ.get( "LUPIN_CLOUD_BACKED", "" ).strip().lower() in _CLOUD_BACKED_TRUTHY
+
+
 def get_database_url() -> str:
     """
     Build PostgreSQL connection string based on environment.
 
     Requires:
         - LUPIN_ENV environment variable (dev/testing/production)
-        - For production: CLOUD_SQL_CONNECTION_NAME, DB_USER, DB_PASSWORD, DB_NAME
-        - For dev/testing: Uses localhost PostgreSQL-in-Docker
+        - Cloud-backed (LUPIN_CLOUD_BACKED truthy — see is_cloud_backed):
+          CLOUD_SQL_CONNECTION_NAME, DB_USER, DB_PASSWORD, DB_NAME
+        - Otherwise (local dev/testing): localhost PostgreSQL-in-Docker
 
     Ensures:
         - Returns valid PostgreSQL connection string
@@ -47,16 +73,18 @@ def get_database_url() -> str:
     """
     env = os.environ.get( "LUPIN_ENV", "development" ).lower()
 
-    if env == "production":
-        # Cloud SQL via Unix socket
+    if is_cloud_backed():
+        # Cloud SQL via Unix socket (any cloud-backed env: GCP test or production)
         instance = os.environ.get( "CLOUD_SQL_CONNECTION_NAME" )
         user = os.environ.get( "DB_USER", "lupin_app" )
         password = os.environ.get( "DB_PASSWORD" )
-        database = os.environ.get( "DB_NAME", "lupin_db_prod" )
+        # Default DB name follows the env when DB_NAME is not explicitly set.
+        default_db = "lupin_db_test" if env == "testing" else "lupin_db_prod"
+        database = os.environ.get( "DB_NAME", default_db )
 
         if not instance or not password:
             raise ValueError(
-                "Production environment requires CLOUD_SQL_CONNECTION_NAME and DB_PASSWORD"
+                "Cloud-backed environment requires CLOUD_SQL_CONNECTION_NAME and DB_PASSWORD"
             )
 
         # Unix socket connection for Cloud SQL
@@ -89,16 +117,16 @@ def get_pool_config() -> dict:
     Get connection pool configuration based on environment.
 
     Ensures:
-        - Production: Moderate pooling for Cloud SQL limits
+        - Cloud-backed (Cloud SQL): Moderate pooling for Cloud SQL limits
         - Development: Higher pooling for local Docker (no limits)
-        - Testing: No pooling (NullPool for test isolation)
+        - Local testing: No pooling (NullPool for test isolation)
 
     Returns:
         Dictionary of pool configuration parameters
     """
     env = os.environ.get( "LUPIN_ENV", "development" ).lower()
 
-    if env == "production":
+    if is_cloud_backed():
         # Conservative pooling for Cloud SQL (db-f1-micro supports 25 connections)
         return {
             "pool_size": 5,           # 5 persistent connections
