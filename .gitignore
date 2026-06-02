@@ -69,6 +69,15 @@ src/conf/keys/**
 # Per-developer GCP deploy config (copied from cloud-run.env.example)
 src/scripts/cloud-run.env
 
+# Terraform — local state, provider cache, and secret-bearing tfvars.
+# (.terraform.lock.hcl IS committed — it pins provider versions.)
+src/terraform/**/.terraform/
+src/terraform/**/*.tfstate
+src/terraform/**/*.tfstate.*
+src/terraform/**/terraform.tfvars
+src/terraform/**/*.auto.tfvars
+src/terraform/**/crash.log
+
 # Skip the io directory (logs, outputs, etc.)
 io/
 

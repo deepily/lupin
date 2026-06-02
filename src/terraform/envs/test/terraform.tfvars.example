@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (git-ignored) and fill in. NEVER commit real values.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+
+project_id     = "REPLACE-with-your-gcp-project-id" # e.g. the sandbox project, or a dedicated one
+region         = "us-central1"
+environment    = "test"
+create_buckets = false # Phase-0 V4: the -test buckets already exist → reuse. Set true to provision fresh.
