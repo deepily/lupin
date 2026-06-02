@@ -2,6 +2,18 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.01 - Session b8a9f332 (Tiberius 👑) | CoSA rest/ → genuine 100% coverage (35 commits, HELD) + FM-17 catch
+
+**Ran the CoSA coverage campaign's rest/ completion as manager; 35 test-only commits on `wip-v0.1.8` (HELD — not pushed, per Rick).** Drove `cosa.rest` to **genuine 100%** (lines AND branches), tree-wide gate confirmed: `11053/0 stmts · 2958/0 branch · 2363 passed`, zero modules <100%.
+
+**Arc:** assigned lanes landed 100% first (B6 rest-core, B7 15 modules, heavyweights multimodal_munger 432 + running_fifo_queue 576, commons/speech/decision_proxy, SDK agent packages, claude_code_queue). Then the **tree-wide gate caught FM-17** — "assigned-lane 100% ≠ tree-wide 100%": the campaign had conflated `cosa.agents.X` (done) with the `cosa.rest.routers.X` HTTP wrappers (missed) → cosa.rest was actually **91%** (I briefly over-claimed "rest complete", then self-corrected via the gate). María-ruled staged remainder wave (triage-first + early-valve) closed it: 6 SDK router-wrappers + middleware/api_key_auth + config + podcast_generator router + **websocket_manager** (final module) → 91%→100%.
+
+**Gate discipline:** 3-layer (author measure → manager disk re-measure in the cosa venv → independent reviewer re-verify → surgical-guard commit), zero-trust on all numbers, deep_research AGENT cli/orchestrator pair kept out of every commit. Pragmas all unreachable-only (read-the-contract-source proof; strip-experiment / adversarial-refute verified) OR the steward-ratified AC12 thin-route-handler grandfather (per-endpoint integration-coverage verified). websocket_manager (final) committed manager-verified + self-audited (reviewer push-channel FM-7-degraded; independent post-audit owed).
+
+**Live failure-modes surfaced (→ post-game):** FM-17 (agent-vs-router conflation), FM-18 (notify-on-AFK silent bounce → ~4h progress invisible to Rick), FM-7 (fleet-load → notify/TTS timeout), FM-11 (directed-push register_network_error), FM-19 (manufactured user-gate — parked in-scope mandated work as a "user decision" on difficulty; corrected: **difficulty ≠ defer**). Session-end record + the unharvested-workers explanation: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/17-session-end-100pct-wrap-and-reap-explanation.md`. Mementos 13–16 + post-game 08/09. PENDING: push (held), 2 ratifications, websocket post-audit, fleet reap (needs cosa-voice MCP restart), messaging-black-hole root-cause (Tiberius-assigned, before next batch).
+
+---
+
 ### 2026.06.01 - Session 78c4780f (Krishna 🦚) | TTS preview-fraction slider: 25% → 12.5% increments
 
 **Voice-driven follow-on fix on `wip-v0.1.8` (checkpoint, not pushed).** Changed the TTS preview-fraction slider in the Claude Code Notifications accordion header to step in **12.5% increments** (nine stops: 0 / 12.5 / 25 / 37.5 / 50 / 62.5 / 75 / 87.5 / 100) instead of 25% (five stops). The slider default stays 25% — only granularity changed.

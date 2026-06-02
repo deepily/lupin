@@ -28,6 +28,14 @@ Full plan + §1 Decision Ledger + resolved-decisions callout: `src/rnd/v0.1.8/20
 
 **▶ RESUME / NEXT ACTION (cold-start): the off-peak launch (tonight, post-midnight EDT) via the runbook's §15 cold-start checklist** — live-verify the poker (still PENDING) → land Tier-0 `[tool.coverage]` config → spawn 3 FRESH authors + 1 reviewer (cold-brief each from `02-cold-start-runbook.md`, disjoint Tier-1 module-groups) → grind (per-batch reviewer-gate + green-gate, test-only commits). Tiffany was reaped (fact-gathering done); fleet spawns fresh. Also schedule a clean un-instrumented :8000 E2E to validate 31 parallel-session E2E failures. **Execution doc: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/02-cold-start-runbook.md`.**
 
+**✅ 2026-06-01 UPDATE (Tiberius 👑, session b8a9f332) — `cosa.rest` now at GENUINE 100%.** Completed `src/cosa/rest/` to tree-wide 100% (`11053/0` lines · `2958/0` branch · 2363 passed) — 35 test-only commits, **HELD (not pushed)**. Caught FM-17 (agent-vs-router conflation) via the tree-wide gate + closed the remainder. Session record: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/17-session-end-100pct-wrap-and-reap-explanation.md`. Carried-forward items:
+- [ ] **[LUPIN]** **PUSH** the held CoSA-coverage commits to remote — awaiting Rick's explicit word (~130 commits local).
+- [ ] **[LUPIN]** **Ratify** (Rick): the AC12 thin-route-handler pragma grandfather precedent (per-endpoint integration-coverage verified) + the `speech.py` `app_debug` 1-line prod bug-fix (debug-only path).
+- [ ] **[LUPIN]** **websocket_manager** independent reviewer post-audit (committed manager-self-audited under FM-7; tree-wide gate is the 100% proof; post-audit owed).
+- [ ] **[LUPIN]** **Reap the spawned fleet** (~14 authors + 2 reviewers parked) — blocked on the **cosa-voice MCP restart** (makes the `dismiss_sessions` list-arg fix `3488b43` live; also restores FM-7 comms). See doc 17 § reap-explanation.
+- [ ] **[LUPIN]** **Messaging-black-hole ROOT-CAUSE** (Rick-assigned, BEFORE the next coverage batch): FM-7/11/15/18 = one unreliable coordination plane (no delivery-guarantee / load-isolation / pull-able fallback). Tiberius owns cosa-voice/commons infra debug; María codifies the synthesis + fix-space. **Do NOT spawn the next batch until hardened.**
+- [ ] **[LUPIN]** Broader cosa ramp continues — `rest/` done; remaining cosa subtrees (agents not-yet-100%, memory/app/tools/utils) per the 2026-06-05 ramp.
+
 - [ ] **[LUPIN]** Baseline-measure current coverage across all migrated `src/cosa/` modules (pytest `--cov=cosa --cov-report` line+branch+function) — produce the gap list (files < 100%).
 - [ ] **[LUPIN]** Triage the gap list into (a) reachable lines needing tests, (b) genuinely-unreachable defensive branches needing same-line `# pragma: no cover` + reason.
 - [ ] **[LUPIN]** Write/extend tests to close every reachable gap; land same-line-reasoned pragmas on the rest. Report tabular per-module pass/coverage.
