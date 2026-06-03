@@ -40,7 +40,7 @@ from cosa.rest.routers.notifications import (
     bulk_delete_notifications, get_senders_with_activity, get_sender_conversation,
     delete_sender_conversation, get_sender_conversation_by_date, soft_delete_by_date,
     get_sender_date_summaries, get_visible_senders, get_active_conversation,
-    get_project_sessions, generate_session_gist,
+    get_project_sessions, generate_session_gist, get_undelivered_notifications,
 )
 
 
@@ -280,6 +280,21 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
             with self.assertRaises( HTTPException ) as ctx:
                 await self._call( Mock(), _ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
+
+    async def test_backpressure_over_cap_429( self ):
+        """
+        Ensures a sender over the per-session notify cap is rejected with HTTP 429.
+
+        Ensures:
+            - check_notify_allowed returning ( False, retry ) raises HTTPException 429
+            - the Retry-After header is int( retry ) + 1 (lever-E backpressure contract)
+        """
+        with patch( "cosa.rest.notify_rate_limiter.check_notify_allowed", return_value=( False, 4.2 ) ), \
+             patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await self._call( Mock(), _ws_manager() )
+        self.assertEqual( ctx.exception.status_code, 429 )
+        self.assertEqual( ctx.exception.headers[ "Retry-After" ], "5" )
 
     # ---- fire-and-forget connected ----
     async def test_connected_queued_with_diag_and_persist_and_idempotency( self ):
@@ -1137,6 +1152,28 @@ class TestGenerateGist( unittest.IsolatedAsyncioTestCase ):
             with self.assertRaises( HTTPException ) as ctx:
                 await generate_session_gist( request_body={ "messages": [ "x" ], "abstracts": [] } )
         self.assertEqual( ctx.exception.status_code, 500 )
+
+
+# ===========================================================================
+# get_undelivered_notifications — HTTPException passthrough (lever-D inbox)
+# ===========================================================================
+class TestGetUndeliveredNotifications( unittest.IsolatedAsyncioTestCase ):
+    """Coverage for the get_undelivered_notifications HTTPException re-raise arm."""
+
+    async def test_http_exception_is_reraised_not_wrapped( self ):
+        """
+        Ensures an HTTPException raised inside the query block is re-raised verbatim.
+
+        The handler's `except HTTPException: raise` arm must propagate the original
+        status code (here 503) rather than masking it as a generic 500 via the
+        broad `except Exception` arm below it.
+        """
+        with patch.object( N, "_undelivered_max_age_hours",
+                           side_effect=HTTPException( status_code=503, detail="db unavailable" ) ), \
+             patch( "builtins.print" ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await get_undelivered_notifications( authenticated_user_id=UID_STR )
+        self.assertEqual( ctx.exception.status_code, 503 )       # re-raised verbatim, NOT wrapped to 500
 
 
 def isolated_unit_test():
