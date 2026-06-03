@@ -148,11 +148,18 @@ Example:
     history is preserved off-tree at `/mnt/DATA02/cosa-git-archive-2026.05.29/`.
   - CoSA retains its own README.md and CLAUDE.md (historical; the submodule guidance
     inside `src/cosa/CLAUDE.md` is superseded by this mono-repo state).
-- `/src/cosa/agents/`: Agent implementations (math, calendar, etc.)
-- `/src/cosa/app/`: Core application components
+- `/src/cosa/agents/`: Agent implementations (math, calendar, deep_research, podcast/presentation generators, BFE/TFE, etc.)
+- `/src/cosa/orchestration/`: Claude Code dispatch + CJ Flow task orchestration
+- `/src/cosa/rest/`: FastAPI routers, queues, and DB repositories (queue pipeline, notifications, auth)
+- `/src/cosa/config/`: ConfigurationManager + config cache registry
 - `/src/cosa/memory/`: Data persistence and memory management
+- `/src/cosa/crud_for_dataframes/`: DataFrame-backed CRUD agents and operations
+- `/src/cosa/repo/`: Codebase-analysis tools (branch + directory LoC analyzers)
+- `/src/cosa/training/`: Model-training utilities (PEFT trainer, HF downloader, quantizer)
 - `/src/cosa/tools/`: External integrations and tools
+- `/src/cosa/io/`: Input/output helpers
 - `/src/cosa/utils/`: Shared utility functions
+- `/src/cosa/docs/`, `/src/cosa/history/`, `/src/cosa/rnd/`, `/src/cosa/tests/`: documentation, history, R&D, and tests
 - `/src/lib/clients/`: Client interface implementations
 
 ## DEBUGGING
