@@ -12,12 +12,7 @@ output "artifact_registry_image_prefix" {
 
 output "runtime_sa_email" {
   value       = module.iam.runtime_sa_email
-  description = "VM runtime service account."
-}
-
-output "vm_external_ip" {
-  value       = module.gce_vm.external_ip
-  description = "Operator SSH/ingress IP for the Milestone-1 VM."
+  description = "Data-plane service account (integration follow-up: bind to the app's vm_sa instead)."
 }
 
 output "lancedb_bucket" {
@@ -26,6 +21,6 @@ output "lancedb_bucket" {
 }
 
 output "vpn_gateway_ip" {
-  value       = module.vpc_vpn.vpn_gateway_ip
+  value       = module.onprem_vpn.vpn_gateway_ip
   description = "GCP VPN gateway IP for on-prem peer config (empty unless enable_vpn)."
 }

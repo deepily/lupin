@@ -74,16 +74,15 @@ setup() {
   grep -q 'data.google_secret_manager_secret_version.db_password' "${MODULES}/cloud-sql-pg16/main.tf"
 }
 
-@test "gce-gpu-vm data disk is prevent_destroy" {
-  grep -q 'prevent_destroy = true' "${MODULES}/gce-gpu-vm/main.tf"
-}
+# NOTE: the GCE VM + VPC/subnet/NAT/SSH are now owned by the standalone
+# terraforming-vms app (its own repo + tests). Lupin keeps only the on-prem VPN.
 
-@test "gce-gpu-vm terminates on host maintenance (GPU requirement)" {
-  grep -q 'on_host_maintenance = "TERMINATE"' "${MODULES}/gce-gpu-vm/main.tf"
-}
-
-@test "gce-gpu-vm runs as runtime-sa, not default compute SA" {
-  grep -q 'email  = var.runtime_sa_email' "${MODULES}/gce-gpu-vm/main.tf"
+@test "onprem-vpn is fully gated on enable_vpn (creates nothing when false)" {
+  # Every resource in the module carries the enable_vpn count guard.
+  run bash -c "grep -cE '^resource' '${MODULES}/onprem-vpn/main.tf'"
+  res_count="$output"
+  run bash -c "grep -c 'var.enable_vpn ? 1 : 0' '${MODULES}/onprem-vpn/main.tf'"
+  [ "$output" -eq "$res_count" ]
 }
 
 @test "secret-manager creates no secret VERSIONS (values stay out-of-band)" {

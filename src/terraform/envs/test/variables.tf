@@ -9,10 +9,10 @@ variable "region" {
   default     = "us-central1"
 }
 
-variable "zone" {
+variable "app_vpc_self_link" {
   type        = string
-  description = "GCP zone for the GCE VM (L4 quota confirmed in us-central1-a, Phase-0 V3)."
-  default     = "us-central1-a"
+  description = "Self-link of the VPC created by the terraforming-vms app (the VM lives there). Supplied after the app provisions the VM; Cloud SQL private IP + the on-prem VPN attach to it. Empty default keeps `terraform validate` runnable before the app exists."
+  default     = ""
 }
 
 variable "environment" {
