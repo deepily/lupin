@@ -15,8 +15,46 @@ import types
 import unittest
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import cosa.agents.runtime_argument_expeditor.expeditor as ex_mod
 from cosa.agents.runtime_argument_expeditor.expeditor import RuntimeArgumentExpeditor
+
+
+# Submodules this file fakes via `patch.dict( sys.modules, {...} )`. patch.dict restores
+# the sys.modules ENTRY on exit, but the late `from <parent> import <child>` inside the
+# code-under-test ALSO sets the faked module as an attribute on its PARENT package — and
+# patch.dict does NOT restore that. `from <parent> import <child>` resolves via the parent
+# attribute, so the stale fake then shadows a later test's REAL import (notably
+# test_suite/test_job.py reading the real ConfigurationManager), producing order-dependent
+# failures. See src/conftest.py's _evict_real_fastapi_main_after_test for the same trap.
+_FAKED_SUBMODULES = (
+    "cosa.config.configuration_manager",
+    "cosa.agents.io_models.xml_models",
+    "cosa.agents.test_fix_expediter.resume_resolver",
+)
+
+
+@pytest.fixture( autouse=True )
+def _evict_faked_submodules_after_test():
+    """
+    Cross-file test-isolation guard (Gate-Zero Lesson A, 2026-06-03).
+
+    Requires:
+        - this module fakes the modules in _FAKED_SUBMODULES via patch.dict( sys.modules )
+
+    Ensures:
+        - after EVERY test, each faked submodule is evicted from sys.modules AND removed
+          as a parent-package attribute, so a later `from <parent> import <child>` in any
+          subsequently-collected test re-imports the REAL module instead of the stale fake
+    """
+    yield
+    for dotted in _FAKED_SUBMODULES:
+        sys.modules.pop( dotted, None )
+        parent_name, _, child = dotted.rpartition( "." )
+        parent = sys.modules.get( parent_name )
+        if parent is not None and hasattr( parent, child ):
+            delattr( parent, child )
 
 
 def _mk_expeditor( debug=False ):
