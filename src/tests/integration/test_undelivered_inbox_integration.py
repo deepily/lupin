@@ -115,13 +115,20 @@ def test_age_cap_excludes_stale_undelivered():
 
     fresh_id = "0000aaaa-0000-0000-0000-0000000000f1"
     stale_id = "0000aaaa-0000-0000-0000-0000000000f2"
-    probe    = ( "PROBE fresh", "PROBE stale" )
 
     with get_db() as session:
         row = session.execute( text( "SELECT id FROM users WHERE email = :e" ), { "e": _EMAIL } ).first()
         assert row is not None, f"test user {_EMAIL} not found"
         rid      = str( row[ 0 ] )
         rid_uuid = uuid.UUID( rid )
+        repo     = NotificationRepository( session )
+
+        # The shared test user carries a real undelivered backlog (100s of rows), and the
+        # getter is limit=100 oldest-first — so a freshly-inserted row sorts PAST the window
+        # and absolute get()-membership is unreliable. Assert on the UNBOUNDED count() deltas
+        # instead (immune to the limit window), plus stale-exclusion in the capped pull.
+        base_no_cap = repo.count_undelivered_for_recipient( rid_uuid )
+        base_capped = repo.count_undelivered_for_recipient( rid_uuid, max_age_hours=24 )
 
         try:
             session.execute( text(
@@ -132,15 +139,17 @@ def test_age_cap_excludes_stale_undelivered():
             ), { "fid": fresh_id, "sid": stale_id, "rid": rid } )
             session.commit()
 
-            repo          = NotificationRepository( session )
-            no_cap_msgs   = sorted( n.message for n in repo.get_undelivered_for_recipient( rid_uuid )                  if n.message in probe )
-            capped_msgs   = sorted( n.message for n in repo.get_undelivered_for_recipient( rid_uuid, max_age_hours=24 ) if n.message in probe )
-            no_cap_count  = repo.count_undelivered_for_recipient( rid_uuid )
-            capped_count  = repo.count_undelivered_for_recipient( rid_uuid, max_age_hours=24 )
+            no_cap_after = repo.count_undelivered_for_recipient( rid_uuid )
+            capped_after = repo.count_undelivered_for_recipient( rid_uuid, max_age_hours=24 )
+            capped_msgs  = [ n.message for n in repo.get_undelivered_for_recipient( rid_uuid, max_age_hours=24 ) ]
 
-            assert no_cap_msgs == [ "PROBE fresh", "PROBE stale" ], no_cap_msgs   # uncapped sees both
-            assert capped_msgs == [ "PROBE fresh" ], capped_msgs                  # cap excludes the stale row
-            assert no_cap_count >= capped_count + 1                               # dropping the cap re-adds >= the stale row
+            # Uncapped count rises by BOTH probes; capped count rises by ONLY the fresh one
+            # (the 48h-old stale probe is excluded by the 24h cap) — the structural guard.
+            assert no_cap_after - base_no_cap == 2, ( base_no_cap, no_cap_after )
+            assert capped_after - base_capped == 1, ( base_capped, capped_after )
+            # The 48h-old probe is filtered by the cap BEFORE the limit, so it can never
+            # appear in the capped pull regardless of backlog size.
+            assert "PROBE stale" not in capped_msgs, capped_msgs
         finally:
             session.execute( text( "DELETE FROM notifications WHERE id IN (:fid, :sid)" ), { "fid": fresh_id, "sid": stale_id } )
             session.commit()
