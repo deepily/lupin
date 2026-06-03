@@ -4,16 +4,14 @@ Unit tests for cosa/agents/test_suite/cosa_interface.py.
 The notification dispatch is boundary-mocked at the shared `_dispatcher` instance,
 so NO notification leaves the process. ZERO API spend.
 
-TRIPWIRE: `ask_yes_no` is a confirmed PROD BUG — it calls a nonexistent
-`_dispatcher.ask_yes_no` (the dispatcher only exposes `ask_confirmation`, with a
-different signature). Per campaign doctrine the bug is NOT fixed here: an
-xfail(strict=True) asserts the correct contract and a pin captures the current
-(raising) behavior. Manager owns the fix + de-arm.
+FIXED (2026-06-03, Rick-authorized): `ask_yes_no` previously called a nonexistent
+`_dispatcher.ask_yes_no` (AttributeError). It now delegates to the dispatcher's
+real `ask_confirmation` (-> bool) and translates the result into the "yes"/"no"
+string contract. The former xfail(strict=True) + AttributeError pin are removed;
+the tests below assert the corrected behavior on both boolean arms.
 """
 import asyncio
 from unittest.mock import AsyncMock, patch
-
-import pytest
 
 import cosa.agents.test_suite.cosa_interface as ci
 
@@ -60,22 +58,39 @@ def test_notify_progress_falls_back_to_module_session_name():
 
 
 # =========================================================================== #
-# ask_yes_no  — TRIPWIRE for a confirmed prod bug
+# ask_yes_no  — delegates to the dispatcher's ask_confirmation (bool -> str)
 # =========================================================================== #
-@pytest.mark.xfail(
-    strict = True,
-    reason = "PROD BUG: cosa_interface.ask_yes_no calls _dispatcher.ask_yes_no, which "
-             "does not exist on AgentNotificationDispatcher (only ask_confirmation, with a "
-             "different signature). Manager owns the fix + this xfail de-arm.",
-)
-def test_ask_yes_no_correct_contract_returns_yes_or_no():
-    # CORRECT contract: returns a 'yes'/'no' string without raising.
-    # Fails today (AttributeError) → recorded as xfail.
-    result = _run( ci.ask_yes_no( "Proceed?", default="no" ) )
-    assert result in ( "yes", "no" )
+def test_ask_yes_no_returns_yes_when_confirmed():
+    with patch.object( ci._dispatcher, "ask_confirmation", new=AsyncMock( return_value=True ) ) as m:
+        result = _run( ci.ask_yes_no( "Proceed?", default="no" ) )
+    m.assert_awaited_once()
+    assert result == "yes"
 
 
-def test_ask_yes_no_pin_current_behavior_raises_attributeerror():
-    # PIN of the CURRENT (buggy) behavior. Delete when the manager fixes ask_yes_no.
-    with pytest.raises( AttributeError, match="ask_yes_no" ):
-        _run( ci.ask_yes_no( "Proceed?" ) )
+def test_ask_yes_no_returns_no_when_declined():
+    with patch.object( ci._dispatcher, "ask_confirmation", new=AsyncMock( return_value=False ) ):
+        result = _run( ci.ask_yes_no( "Proceed?", default="no" ) )
+    assert result == "no"
+
+
+def test_ask_yes_no_sets_identity_and_forwards_args():
+    with patch.object( ci._dispatcher, "ask_confirmation", new=AsyncMock( return_value=True ) ) as m:
+        _run( ci.ask_yes_no(
+            "Q", default="yes", abstract="ctx", session_name="my-session", job_id="job-1"
+        ) )
+    # identity copied onto the dispatcher before dispatch (mirrors notify_progress)
+    assert ci._dispatcher.sender_id    == ci.SENDER_ID
+    assert ci._dispatcher.session_name == "my-session"
+    # supported args forwarded to ask_confirmation
+    kwargs = m.await_args[ 1 ]
+    assert kwargs[ "question" ] == "Q"
+    assert kwargs[ "default" ]  == "yes"
+    assert kwargs[ "abstract" ] == "ctx"
+    assert kwargs[ "job_id" ]   == "job-1"
+
+
+def test_ask_yes_no_falls_back_to_module_session_name():
+    with patch.object( ci, "SESSION_NAME", "module-session" ), \
+         patch.object( ci._dispatcher, "ask_confirmation", new=AsyncMock( return_value=False ) ):
+        _run( ci.ask_yes_no( "Q" ) )
+    assert ci._dispatcher.session_name == "module-session"

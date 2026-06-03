@@ -15,12 +15,12 @@ Isolation contract:
     - NO env leakage: LUPIN_ROOT is set/cleared via monkeypatch only.
     - ZERO API spend, ZERO network, ZERO server contact.
 
-TRIPWIRE (confirmed PROD BUG, NOT fixed here): `_run_interactive` reads
-`self.debug` (dispatcher.py:468) on a RateLimitEvent, but `ClaudeCodeDispatcher.
-__init__` never initializes `self.debug` → AttributeError. Per campaign doctrine
-the bug is NOT fixed: `test_run_interactive_rate_limit_event_is_prod_bug` PINS the
-current (raising→absorbed-as-failure) behavior; the manager owns the source fix
-(add a `debug` attr) + this pin's removal.
+FIXED (2026-06-03, Rick-authorized): `_run_interactive` reads `self.debug` on a
+RateLimitEvent (dispatcher.py:468). `ClaudeCodeDispatcher.__init__` now initializes
+`self.debug` (defaults False), so a RateLimitEvent is handled cleanly instead of
+raising AttributeError. The former `test_run_interactive_rate_limit_event_is_prod_bug`
+pin is removed; the two tests below exercise both `debug` arms (off = silent,
+on = emits a debug line).
 
 The quick_smoke_test() + `if __name__ == "__main__":` block is MARKED FOR DELETION
 (campaign-end consolidated cleanup); it is already coverage-excluded via the repo
@@ -520,19 +520,31 @@ def test_run_interactive_aenter_exception_before_session( lupin_root, patched_sd
     assert "ax" not in d.active_sessions
 
 
-def test_run_interactive_rate_limit_event_is_prod_bug( lupin_root, patched_sdk ):
-    """TRIPWIRE PIN: a RateLimitEvent hits `self.debug` (uninitialized) →
-    AttributeError absorbed by the broad except → failure naming 'debug'.
-
-    This documents dispatcher.py:468's confirmed prod bug (ClaudeCodeDispatcher
-    never sets self.debug). The manager owns the source fix + removing this pin.
-    """
+def test_run_interactive_rate_limit_event_debug_off_handled_cleanly( lupin_root, patched_sdk ):
+    """FIXED: a RateLimitEvent with debug off is handled without raising — the
+    stream simply yields no ResultMessage → clean 'No result received' failure
+    (NOT an AttributeError about 'debug')."""
     d = _make_dispatcher( on_message=lambda tid, m: None )
+    assert d.debug is False                                   # __init__ now initializes it
     patched_sdk.RESPONSE_BATCHES = [ [ _FakeRateLimitEvent( retry_after=7 ) ] ]
     res = asyncio.run( d._run_interactive( _bounded_task( id="rl", type=TaskType.INTERACTIVE ) ) )
     assert res.success is False
-    assert "debug" in res.error                               # AttributeError text
+    assert res.error == "No result received"                 # no AttributeError
     assert "rl" not in d.active_sessions
+
+
+def test_run_interactive_rate_limit_event_debug_on_logs( lupin_root, patched_sdk, capsys ):
+    """FIXED: with debug on, the RateLimitEvent branch emits a debug line
+    (covers the `if self.debug:` True arm at dispatcher.py:468)."""
+    d = ClaudeCodeDispatcher( on_message=lambda tid, m: None, debug=True )
+    patched_sdk.RESPONSE_BATCHES = [ [ _FakeRateLimitEvent( retry_after=7 ) ] ]
+    res = asyncio.run( d._run_interactive( _bounded_task( id="rl2", type=TaskType.INTERACTIVE ) ) )
+    assert res.success is False
+    assert res.error == "No result received"
+    out = capsys.readouterr().out
+    assert "Rate limited" in out
+    assert "retry_after=7" in out
+    assert "rl2" not in d.active_sessions
 
 
 # =========================================================================== #

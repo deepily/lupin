@@ -145,13 +145,17 @@ async def ask_yes_no(
     Returns:
         str: "yes" or "no"
     """
-    return await _dispatcher.ask_yes_no(
-        question     = question,
-        sender_id    = SENDER_ID,
-        target_user  = TARGET_USER,
-        default      = default,
-        abstract     = abstract,
-        session_name = session_name or SESSION_NAME,
-        job_id       = job_id,
-        queue_name   = queue_name
+    # AgentNotificationDispatcher exposes ask_confirmation (-> bool), not ask_yes_no.
+    # Copy identity onto the shared dispatcher (mirrors notify_progress above), then
+    # translate the boolean confirmation into this module's "yes"/"no" string contract.
+    # (queue_name has no confirmation-path routing on the dispatcher, so it is not forwarded.)
+    _dispatcher.sender_id    = SENDER_ID
+    _dispatcher.session_name = session_name or SESSION_NAME
+    _dispatcher.target_user  = TARGET_USER
+    approved = await _dispatcher.ask_confirmation(
+        question = question,
+        default  = default,
+        abstract = abstract,
+        job_id   = job_id
     )
+    return "yes" if approved else "no"

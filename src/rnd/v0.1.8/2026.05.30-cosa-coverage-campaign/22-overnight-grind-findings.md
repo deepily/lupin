@@ -24,7 +24,9 @@
 | `cosa.agents.test_suite/job.py` | sam | 0 → 100% (409 stmts, 110 br, 70 tests) | **RED — pollution, see §4** |
 | `cosa.agents.prediction_engine` | Rachel | in progress | **RED — pollution, see §4** |
 
-## 3. ⚠️ PROD BUG — found, tripwire-pinned, NOT fixed (your gate)
+## 3. ✅ PROD BUG — RESOLVED 2026-06-03 (Rick-authorized; was tripwire-pinned)
+
+> **RESOLVED** (Tiberius 👑 `1333e106`, 2026-06-03): `__init__` now takes `debug: bool = False` and sets `self.debug = debug`; the RateLimitEvent branch logs (debug on) or continues silently (debug off) instead of raising. Tripwire pin replaced by 2 tests covering both `debug` arms; `dispatcher.py` re-certified 100% (239 stmts / 86 branch / 0 miss). Full-tree gate green. Fix record: doc 25.
 
 **`src/cosa/orchestration/claude_code/dispatcher.py:468`** — `_run_interactive`'s `RateLimitEvent` branch reads `self.debug`, but `ClaudeCodeDispatcher.__init__` **never initializes `self.debug`** → `AttributeError` on any rate-limit during an interactive session. Currently swallowed by the broad `except Exception` at :505 → the interactive session **dies** ("object has no attribute 'debug'") instead of logging + continuing.
 

@@ -144,7 +144,8 @@ class ClaudeCodeDispatcher:
         self,
         mcp_config_path: str = None,
         mcp_server_path: str = None,
-        on_message: Optional[Callable[[str, Any], None]] = None
+        on_message: Optional[Callable[[str, Any], None]] = None,
+        debug: bool = False
     ):
         """
         Initialize dispatcher.
@@ -154,11 +155,13 @@ class ClaudeCodeDispatcher:
 
         Ensures:
             - Dispatcher configured with production MCP paths
+            - self.debug is initialized (gates interactive-mode debug logging)
 
         Args:
             mcp_config_path: Path to MCP configuration JSON (default: from LUPIN_ROOT)
             mcp_server_path: Path to MCP server Python script (default: from LUPIN_ROOT)
             on_message: Callback for streaming messages (interactive mode)
+            debug: Enable debug logging (e.g. RateLimitEvent notices in interactive sessions)
         """
         # Get LUPIN_ROOT - required for production paths
         lupin_root = os.environ.get( 'LUPIN_ROOT' )
@@ -183,7 +186,8 @@ class ClaudeCodeDispatcher:
 
         self.mcp_config_path = os.path.expanduser( mcp_config_path )
         self.mcp_server_path = mcp_server_path
-        self.on_message = on_message or self._default_message_handler
+        self.on_message      = on_message or self._default_message_handler
+        self.debug           = debug
         self.active_sessions: dict[str, Any] = {}  # task_id -> ClaudeSDKClient
 
     def _default_message_handler( self, task_id: str, message: Any ) -> None:
