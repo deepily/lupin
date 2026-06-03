@@ -1157,15 +1157,20 @@ async def get_active_sessions(   # pragma: no cover
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
 ) -> JSONResponse:
     _require_initialized()
-    sessions = filter_and_project_sessions(
-        raw_sessions                     = find_active_voice_persona_sessions(),
-        authenticated_user_id            = authenticated_user_id,
-        active_session_threshold_seconds = _active_session_threshold_seconds,
-        now_epoch                        = time.time(),
-        bridge_loader                    = _load_bridge_fields,
-        originator_session_id            = None,
-        include_originator               = True,
-    )
+    # FM-7 mitigation: the bridge-dir enumeration + per-bridge file reads are blocking
+    # I/O; run them OFF the event loop (asyncio.to_thread) so the commons-who flood
+    # can't stall the shared :7999 loop under fleet load. Mirrors broadcast (below).
+    def _collect_sessions():
+        return filter_and_project_sessions(
+            raw_sessions                     = find_active_voice_persona_sessions(),
+            authenticated_user_id            = authenticated_user_id,
+            active_session_threshold_seconds = _active_session_threshold_seconds,
+            now_epoch                        = time.time(),
+            bridge_loader                    = _load_bridge_fields,
+            originator_session_id            = None,
+            include_originator               = True,
+        )
+    sessions = await asyncio.to_thread( _collect_sessions )
     return JSONResponse( content={ "sessions": sessions } )
 
 
@@ -1239,41 +1244,46 @@ async def get_broadcast_history(   # pragma: no cover
     excluded_topics     = [ t.strip() for t in excluded_topics_raw.split( "," ) if t.strip() ]
     max_entries_ceiling = int( config_mgr.get( "commons traffic visibility max entries per response", return_type="int" ) )
 
-    # One-pass bridge enumeration: session_id → owner_user_id map. Used by BOTH
-    # the user-session resolver (for target_session_id attribution) AND the
-    # per-entry bridge_owner_lookup. Avoids walking the bridge dir twice.
-    bridge_owner_map: Dict[ str, Optional[ str ] ] = { }
-    for path, sid, _persona in find_active_voice_persona_sessions():
-        bridge = _load_bridge_fields( path )
-        if bridge is not None:
-            bridge_owner_map[ sid ] = bridge.get( "owner_user_id" )
+    # FM-7 mitigation: the one-pass bridge enumeration + the all-topics history read
+    # are blocking file I/O; run them OFF the event loop (asyncio.to_thread) so the
+    # Recent-Activity poll can't stall the shared :7999 loop. Mirrors broadcast (above).
+    def _collect_history():
+        # One-pass bridge enumeration: session_id → owner_user_id map. Used by BOTH
+        # the user-session resolver (for target_session_id attribution) AND the
+        # per-entry bridge_owner_lookup. Avoids walking the bridge dir twice.
+        bridge_owner_map: Dict[ str, Optional[ str ] ] = { }
+        for path, sid, _persona in find_active_voice_persona_sessions():
+            bridge = _load_bridge_fields( path )
+            if bridge is not None:
+                bridge_owner_map[ sid ] = bridge.get( "owner_user_id" )
 
-    def _user_session_ids():
-        # Same graceful-degradation pattern as filter_and_project_sessions:
-        # bridges with owner_user_id=None are treated as belonging to ANY user
-        # (un-stamped legacy bridges pass through).
-        return {
-            sid for sid, owner in bridge_owner_map.items()
-            if owner is None or owner == authenticated_user_id
-        }
+        def _user_session_ids():
+            # Same graceful-degradation pattern as filter_and_project_sessions:
+            # bridges with owner_user_id=None are treated as belonging to ANY user
+            # (un-stamped legacy bridges pass through).
+            return {
+                sid for sid, owner in bridge_owner_map.items()
+                if owner is None or owner == authenticated_user_id
+            }
 
-    def _bridge_owner_lookup( session_id ):
-        # Returns the bridge's owner_user_id, or None for both
-        # "session not in map" and "bridge has no owner_user_id".
-        return bridge_owner_map.get( session_id )
+        def _bridge_owner_lookup( session_id ):
+            # Returns the bridge's owner_user_id, or None for both
+            # "session not in map" and "bridge has no owner_user_id".
+            return bridge_owner_map.get( session_id )
 
-    result = execute_broadcast_history(
-        authenticated_user_id = authenticated_user_id,
-        store                 = _commons_store,
-        since_iso             = since,
-        hours                 = hours,
-        limit                 = limit,
-        excluded_topics       = excluded_topics,
-        max_entries_ceiling   = max_entries_ceiling,
-        user_session_ids_fn   = _user_session_ids,
-        bridge_owner_lookup   = _bridge_owner_lookup,
-    )
+        return execute_broadcast_history(
+            authenticated_user_id = authenticated_user_id,
+            store                 = _commons_store,
+            since_iso             = since,
+            hours                 = hours,
+            limit                 = limit,
+            excluded_topics       = excluded_topics,
+            max_entries_ceiling   = max_entries_ceiling,
+            user_session_ids_fn   = _user_session_ids,
+            bridge_owner_lookup   = _bridge_owner_lookup,
+        )
 
+    result = await asyncio.to_thread( _collect_history )
     return JSONResponse( content=result )
 
 
@@ -1288,7 +1298,11 @@ async def post_register_question(   # pragma: no cover
     notification_queue=Depends( get_notification_queue ),
 ) -> JSONResponse:
     _require_question_watcher()
-    result = execute_register_question(
+    # FM-7 mitigation: register-question resolves the recipient via bridge-dir
+    # enumeration + per-bridge reads (blocking I/O); run it OFF the event loop so the
+    # DM/ask push-registration flood can't stall the shared :7999 loop. Mirrors broadcast.
+    result = await asyncio.to_thread(
+        execute_register_question,
         authenticated_user_id            = authenticated_user_id,
         body                             = body,
         question_watcher                 = _commons_question_watcher,
