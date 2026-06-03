@@ -1,5 +1,35 @@
 # TODO
 
+## ✅🏁 2026-06-03 CoSA COVERAGE MARATHON — COMPLETE (Tiberius 👑, session 1333e106)
+
+**DONE:** `cosa` 100% line+branch+function tree-wide (412 files, 0 miss / 0 partial); 11 test-only commits HELD on `wip-v0.1.8` (`d75bb69`→`e70e02e`), Krishna 8/8 reviewer-clean, certified + steward-ratified. Full record: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/23-overnight-grind-certified-complete.md`.
+
+**🔁 RICK'S MORNING GATE (none blocked the marathon — all deferred-by-design):**
+- [ ] **[LUPIN]** PUSH the 11 held CoSA commits (Rick's call).
+- [ ] **[LUPIN]** PROD BUG (a): `dispatcher.py` uninitialized `self.debug` → AttributeError on interactive rate-limit. Fix: add `debug: bool = False` to `ClaudeCodeDispatcher.__init__`. Pinned, not fixed.
+- [ ] **[LUPIN]** PROD BUG (b) #12: `cosa_interface.ask_yes_no` → missing `_dispatcher.ask_yes_no` on AgentNotificationDispatcher. strict-xfail-pinned; fix method + de-arm xfail.
+- [ ] **[LUPIN]** Harvest-block deletions — superseded `quick_smoke_test`/`__main__` blocks (crud/job/orchestration) + redundant shallow legacy agent test files. One consolidated pass.
+- [ ] **[LUPIN]** Global hermetic-config autouse fixture (FM-21 systemic kill) — design + isolation-verify before landing, else defer (María's verified-or-deferred ruling).
+- [ ] **[LUPIN]** Stale CLAUDE.md §PROJECT STRUCTURE — `src/cosa/app/` no longer exists; correct it.
+- [ ] **[LUPIN]** io_files watch-note (doc 90) — candidate FM-22 (order/loop-state flakiness); promote only on recurrence WITH captured `--tb=long`.
+- [ ] **[LUPIN]** Optional: `:8000`-scheduled integration/E2E tier (all-tiers beyond unit) — needs Rick's slot.
+- [ ] **[LUPIN]** HYGIENE: `.claude-session.md` (412KB) + `TODO.md` (273KB) badly bloated — run dedicated size-management (todo-size-management skill + manifest prune).
+
+---
+
+## 🟣 2026-06-03 RETURN-TO (Mr. Radio 🦉, session c0aede3d) — GCP Milestone-1 infra is UP; finish the connecting steps + app deploy
+
+**✅ DONE this session (committed LOCAL, UNPUSHED):** Milestone-1 GCP TEST infrastructure **stood up & verified** — VM `lupin-host-test` with an **operational L4 GPU** (driver 535/CUDA 12.2; docker `--gpus all` smoke ✓) + full **data plane** (Cloud SQL private-IP PG16 `lupin_db_test`/`lupin_app`; 14 secrets; Artifact Registry `lupin-images`; IAM build-sa/runtime-sa; `dev-vpc` Service-Networking peering). Adopted the standalone `terraforming-vms` app for the VM (retired my `gce-gpu-vm`/`vpc-vpn` modules). Full record + commit list + connection name: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.02-terraforming-vms-reuse-and-integration.md` §9.
+
+**🔁 RETURN HERE NEXT (none blocking — these are the app-deploy connecting steps):**
+- [ ] **[LUPIN]** Bind data-plane IAM to the VM `vm_sa` (`lupin-host-test-sa@hello-world-foo-423219.iam.gserviceaccount.com`): per-bucket objectUser, per-secret accessor, cloudsql.client, AR reader (currently granted to `runtime-sa`).
+- [ ] **[LUPIN]** Seed the 12 empty provider-key secret versions from `src/conf/keys/` (anthropic/openai/groq/google/gemini/mistral/elevenlabs/kagi/hf/jwt/smtp×2). `lupin-db-password` + `lupin-notification-api-key` are already populated.
+- [ ] **[LUPIN]** Deploy Lupin to the VM: build/push image → `lupin-images`, IAP-SSH, `docker compose up` with `LUPIN_CLOUD_BACKED=true` + `CLOUD_SQL_CONNECTION_NAME=hello-world-foo-423219:us-central1:lupin-pg16-test`.
+- [ ] **[LUPIN]** ⚠️ **Re-enforce Secure Boot** + adopt a proper signed-driver GPU path — current Secure-Boot-OFF is a TEMPORARY exception (Rick 2026-06-02; integration doc §8). Re-enable: `gcloud resource-manager org-policies enable-enforce compute.requireShieldedVm --project=hello-world-foo-423219`.
+- [ ] **[LUPIN]** PUSH the held GCP commits (Lupin `baba032`→`32c0373`; `terraforming-vms` wip-2026.06.02-deploying-lupin-to-gcp: `9310741`, `7304dab`) — awaiting Rick's word.
+
+Filed 2026-06-03 by Mr. Radio 🦉 at Rick's request.
+
 ## 🔵 2026-06-03 FOLLOW-UP (Rachel 🕊️, session 624abe39) — tmux heartbeat / self-continuation for grind workers
 
 - [ ] **[LUPIN]** **Follow up on the tmux-heartbeat self-continuation design** → `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/20-tmux-heartbeat-self-continuation-design.md`. **Verdict**: the same `tmux send-keys` path that delivers Rick's voice messages can inject "keep going" as first-class input — no new poker needed; `_arm_idle_waiter` already IS the poker (just notifies Rick instead of nudging the worker). **Gate the poke on the Notification `idle_prompt` event** (safe-to-poke signal — fires when CC is parked at the prompt; its own output is discarded so it can't inject, only time). Pairs with `build_stop_block` (in-turn reflex, self-guarded) as the backstop. **6 open questions in the doc** — chiefly: (Q1) consecutive-poke ceiling/backoff, (Q2) work-pending signal source, (Q3) speakerphone posture for grind workers. Reconcile with the messaging-coordination plane (`2026.06.02-messaging-coordination-plane-design.md`) — may share infra. For Tiberius 👑 + María 🌸.

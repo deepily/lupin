@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.03 - Session 1333e106 (Tiberius 👑) | CoSA coverage marathon → certified 100% tree-wide (11 commits, HELD)
+
+**Ran the CoSA all-tiers coverage grind to completion as manager** (Rick's overnight directive, relayed via María since broadcasts rendered blank). Drove `cosa` to **certified 100% line+branch+function tree-wide**: 412 files, 38,447 stmts / 0 miss, 11,172 branches / 0 partial; full canonical gate **13,300 passed / 0 failed / 2 xfailed** (both xfails proven pre-existing, María git-verified — honest 100%, no masking). **11 test-only commits, all reviewer-gated (Krishna 8/8 batches, 0 hollow), HELD on `wip-v0.1.8` — not pushed.**
+
+**Fleet:** spawned 3 authors + 1 adversarial reviewer (Rachel / Cheech / sam + Krishna) on disjoint lanes; reaped clean at completion (0 orphans, 0 zombies, mementos written). The runbook's gap-estimates were largely **stale** — most of cosa was already covered; real remaining work was crud + agents-root + a handful of branches, not the projected ~12k lines.
+
+**Commits (`d75bb69` → `e70e02e`):** de-poison 15 legacy files (`sys.exit`→`pytest.skip`) · crud_for_dataframes (171) · io_models wired (215 relocated, 0 new) · FM-21 sys.modules pollution fix · prediction_engine (179) · orchestration (61) · cosa.rest (2 error-branch) · LLM-client trio (48) · test_suite/job.py (70) · agents/root tail (25) · last-branch durable companion.
+
+**Discipline:** green-before-commit (never into a flaky/red tree — the io_files flaky was resolved as an **evidenced non-repro**, not masked), no hollow tests, no skip/xfail-to-green, zero prod-logic edits. **2 prod bugs found + tripwire-pinned, NOT fixed (Rick's gate):** `dispatcher.py` uninitialized `self.debug` + `cosa_interface.ask_yes_no` → missing `_dispatcher.ask_yes_no` (Bug #12). Rick allow-listed `mcp__cosa-voice__spawn_sessions` (classifier had blocked the autonomous-spawn framing).
+
+**Docs:** `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/` — 22 (findings), 23 (certified-complete + morning-gate checklist), 90 (io_files non-repro watch-note). **Hygiene flag:** `.claude-session.md` (412KB) + `TODO.md` (273KB) badly bloated — need dedicated size-management.
+
+---
+
 ### 2026.06.02 - Session 1333e106 (Tiberius 👑) | CoSA-campaign post-game (coordinated) + TTS spoken-brevity cap (config-driven, runtime-tunable)
 
 **Two threads on `wip-v0.1.8` (checkpoint, not pushed).**
