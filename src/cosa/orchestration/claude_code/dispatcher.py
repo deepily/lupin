@@ -59,7 +59,7 @@ try:
         RateLimitEvent
     )
     SDK_AVAILABLE = True
-except ImportError:
+except ImportError:  # pragma: no cover  # optional-dep fallback; claude-agent-sdk is present in the test env, so this arc is unreachable here
     SDK_AVAILABLE = False
     print( "Warning: claude-agent-sdk not installed. Interactive mode unavailable.",
           file=__import__( 'sys' ).stderr )
