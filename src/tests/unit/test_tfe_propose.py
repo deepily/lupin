@@ -175,13 +175,11 @@ class TestParseProposalResult:
         assert len( result ) == 1
         assert result[ 0 ].title == "good"
 
-    def test_extract_last_json_array( self ):
-        text = 'prose [1, 2] more [{"key": "value"}] end'
-        extracted = TFEOrchestrator._extract_last_json_array( text )
-        assert extracted == '[{"key": "value"}]'
-
-    def test_extract_last_json_array_none( self ):
-        assert TFEOrchestrator._extract_last_json_array( "no brackets" ) is None
+    # NOTE (2026-06-03): the standalone `_extract_last_json_array` helper was removed
+    # when proposal parsing moved to `_parse_proposal_json` (handles clean JSON, fenced,
+    # prose-embedded arrays AND single objects). Its two unit tests were deleted as stale
+    # — the array-extraction path is now covered by the `TestParseProposalResult` cases
+    # above (`_parse_proposal_result` → `_parse_proposal_json`).
 
 
 # ─────────────────────────────────────────────────────────────────────────

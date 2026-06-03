@@ -110,6 +110,14 @@ def _make_job( recipients=None, clock=None, commons=None, **overrides ):
         user_id                  = "u",
         user_email               = "u@test.com",
         session_id               = "s",
+        # Default the notify seam to a no-op so unit tests NEVER emit REAL
+        # notifications to the live server. Without this, jobs built without an
+        # explicit notify_fn fall through to AgenticJobBase.notify_progress(),
+        # whose escalation / hard-cap alarms POST to /api/notify and flood the
+        # user with poker pings on every baseline run (2026-06-03 poker-flood
+        # incident). Tests asserting on notifications override this with a
+        # capturing fn (e.g. notify_fn=lambda msg, prio: notes.append( ... )).
+        notify_fn                = lambda msg, prio: None,
     )
     cfg.update( overrides )
     return HeartbeatPokerJob( **cfg )

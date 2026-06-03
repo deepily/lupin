@@ -22,14 +22,18 @@ from cosa.rest.db import database
 
 
 class TestGetDatabaseUrl( unittest.TestCase ):
-    def test_production_requires_instance_and_password( self ):
-        with patch.dict( os.environ, { "LUPIN_ENV": "production" }, clear=True ):
+    # Cloud-backing is gated by LUPIN_CLOUD_BACKED (commit d2118f0 — `is_cloud_backed()`),
+    # NEVER inferred from the env NAME. These tests set the flag explicitly; the env name
+    # only drives the default DB-name (lupin_db_prod vs lupin_db_test).
+    def test_cloud_backed_requires_instance_and_password( self ):
+        with patch.dict( os.environ, { "LUPIN_ENV": "production", "LUPIN_CLOUD_BACKED": "1" }, clear=True ):
             with self.assertRaises( ValueError ):
                 database.get_database_url()
 
-    def test_production_builds_unix_socket_url( self ):
+    def test_cloud_backed_builds_unix_socket_url( self ):
         env = {
             "LUPIN_ENV"                : "production",
+            "LUPIN_CLOUD_BACKED"       : "1",
             "CLOUD_SQL_CONNECTION_NAME": "proj:region:inst",
             "DB_PASSWORD"              : "secret",
         }
@@ -37,7 +41,7 @@ class TestGetDatabaseUrl( unittest.TestCase ):
             url = database.get_database_url()
         self.assertIn( "host=/cloudsql/proj:region:inst", url )
         self.assertIn( "lupin_app", url )       # default DB_USER
-        self.assertIn( "lupin_db_prod", url )   # default DB_NAME
+        self.assertIn( "lupin_db_prod", url )   # default DB_NAME (env=production)
 
     def test_testing_url( self ):
         with patch.dict( os.environ, { "LUPIN_ENV": "testing" }, clear=True ):
@@ -52,8 +56,9 @@ class TestGetDatabaseUrl( unittest.TestCase ):
 
 
 class TestGetPoolConfig( unittest.TestCase ):
-    def test_production_pooling( self ):
-        with patch.dict( os.environ, { "LUPIN_ENV": "production" }, clear=True ):
+    def test_cloud_backed_pooling( self ):
+        # Cloud-backed pooling (Cloud SQL limits) is gated by LUPIN_CLOUD_BACKED, not env name.
+        with patch.dict( os.environ, { "LUPIN_ENV": "production", "LUPIN_CLOUD_BACKED": "1" }, clear=True ):
             cfg = database.get_pool_config()
         self.assertEqual( cfg[ "pool_size" ], 5 )
         self.assertEqual( cfg[ "max_overflow" ], 10 )

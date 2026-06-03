@@ -11,6 +11,26 @@ import numpy as np
 from unittest.mock import Mock, patch, MagicMock, PropertyMock
 
 
+# Several tests below override `EmbeddingProvider._http_api_key` /
+# `_resolve_model_server_url` ON THE CLASS via raw assignment (so every instance
+# sees the mock — see `_build_provider_with_api_key`). Those assignments are NOT
+# self-restoring, so without the autouse fixture below they LEAK across files and
+# break `test_embedding_provider.py::TestUrlAndKeyResolvers` by suite run-order
+# (2026-06-03 Gate-Zero finding). Capture the real staticmethod descriptors at
+# import (clean state) so they can be restored after every test in this module.
+from cosa.memory.embedding_provider import EmbeddingProvider as _EP_FOR_RESTORE
+_ORIG_HTTP_API_KEY             = _EP_FOR_RESTORE.__dict__[ "_http_api_key" ]
+_ORIG_RESOLVE_MODEL_SERVER_URL = _EP_FOR_RESTORE.__dict__[ "_resolve_model_server_url" ]
+
+
+@pytest.fixture( autouse=True )
+def _restore_embedding_provider_class_methods():
+    """Undo any class-level override of the resolver methods after each test."""
+    yield
+    _EP_FOR_RESTORE._http_api_key             = _ORIG_HTTP_API_KEY
+    _EP_FOR_RESTORE._resolve_model_server_url = _ORIG_RESOLVE_MODEL_SERVER_URL
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
