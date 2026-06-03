@@ -1,600 +1,344 @@
 #!/usr/bin/env python3
 """
-Unit Tests: LLM Client Factory
+Unit tests for cosa/agents/llm_client_factory.py (LlmClientFactory + AgentWrapper).
 
-Comprehensive unit tests for the CoSA LlmClientFactory class with complete mocking
-of external dependencies including API calls, configuration, and client initialization.
-
-This test module validates:
-- LlmClientFactory singleton behavior and initialization
-- Client creation for different model types and vendors
-- Configuration loading and vendor-specific setup
-- API key management and environment variable handling
-- Error handling for unsupported vendors and missing configurations
-- Performance requirements for client creation
+Supersedes the legacy infra-framework test (which skipped at collection). All
+external dependencies are boundary-mocked at the llm_client_factory module:
+    - ConfigurationManager → _FakeConfigMgr (scripted exists()/get())
+    - ChatClient / CompletionClient → record-only stubs (no real Agent/LlmCompletion)
+    - du.get_api_key → fixed fake key
+    - asyncio.get_event_loop (AgentWrapper tests only) → controlled loop
+The singleton (_instance) is reset before each test. os.environ is isolated to a
+per-test copy so API-key writes never leak. ZERO API spend, ZERO network.
 """
-
+import asyncio
 import os
-import sys
+
 import pytest
-import tempfile
-from pathlib import Path
-from unittest.mock import patch, MagicMock
 
-# Import test infrastructure
-try:
-    from cosa.tests.unit.infrastructure.mock_manager import MockManager
-    from cosa.tests.unit.infrastructure.test_fixtures import CoSATestFixtures
-    from cosa.tests.unit.infrastructure.unit_test_utilities import UnitTestUtilities
-except ImportError as e:
-    print( f"Failed to import test infrastructure: {e}" )
-    pytest.skip( "legacy test-infra import unavailable under pytest collection; module skipped pending harvest (de-poison batch)", allow_module_level=True )
-
-# Import the modules under test
-try:
-    from cosa.agents.llm_client_factory import LlmClientFactory
-    from cosa.agents.base_llm_client import LlmClientInterface
-    from cosa.agents.chat_client import ChatClient
-    from cosa.agents.completion_client import CompletionClient
-except ImportError as e:
-    print( f"Failed to import LLM client modules: {e}" )
-    pytest.skip( "legacy test-infra import unavailable under pytest collection; module skipped pending harvest (de-poison batch)", allow_module_level=True )
+import cosa.agents.llm_client_factory as factory_mod
+from cosa.agents.llm_client_factory import LlmClientFactory
 
 
-class LlmClientFactoryUnitTests:
+# =========================================================================== #
+# Test doubles
+# =========================================================================== #
+class _FakeConfigMgr:
+    """Scripted ConfigurationManager: exists() + get() over a values dict."""
+    def __init__( self, exists_keys=None, values=None, **kw ):
+        self._exists = set( exists_keys or [] )
+        self._values = values or {}
+    def exists( self, key ):
+        return key in self._exists
+    def get( self, key, default=None, return_type=None, silent=False ):
+        return self._values.get( key, default )
+
+
+class _StubChat:
+    instances = []
+    def __init__( self, **kwargs ):
+        self.kwargs = kwargs
+        _StubChat.instances.append( self )
+
+
+class _StubCompletion:
+    instances = []
+    def __init__( self, **kwargs ):
+        self.kwargs = kwargs
+        _StubCompletion.instances.append( self )
+
+
+@pytest.fixture( autouse=True )
+def _reset_singleton( monkeypatch ):
+    """Reset the factory singleton + isolate env + stub clients/config/api-key."""
+    monkeypatch.setattr( LlmClientFactory, "_instance", None )
+    monkeypatch.setattr( os, "environ", dict( os.environ ) )
+    _StubChat.instances       = []
+    _StubCompletion.instances = []
+    monkeypatch.setattr( factory_mod, "ChatClient", _StubChat )
+    monkeypatch.setattr( factory_mod, "CompletionClient", _StubCompletion )
+    monkeypatch.setattr( factory_mod.du, "get_api_key", lambda name: f"key-for-{name}" )
+
+
+@pytest.fixture
+def make_factory( monkeypatch ):
+    def _build( exists_keys=None, values=None, **kw ):
+        cm = _FakeConfigMgr( exists_keys=exists_keys, values=values )
+        monkeypatch.setattr( factory_mod, "ConfigurationManager", lambda **k: cm )
+        return LlmClientFactory( **kw )
+    return _build
+
+
+# =========================================================================== #
+# singleton  /  __new__  /  __init__
+# =========================================================================== #
+def test_singleton_returns_same_instance( make_factory ):
+    """Repeated construction returns the same singleton object."""
+    f1 = make_factory()
+    f2 = LlmClientFactory()
+    assert f1 is f2
+
+
+def test_init_runs_only_once( make_factory ):
+    """__init__ is a no-op on the already-initialized singleton."""
+    f1 = make_factory()
+    original_cfg = f1.config_mgr
+    LlmClientFactory( debug=True )                            # second init → early return
+    assert f1.config_mgr is original_cfg
+
+
+def test_init_loads_vendor_config( make_factory ):
+    """__init__ populates vendor URL/env-var/default-param maps."""
+    f = make_factory()
+    assert f.VENDOR_URLS[ "openai" ] == "https://api.openai.com/v1"
+    assert f.VENDOR_API_ENV_VARS[ "openai" ] == "OPENAI_API_KEY"
+    assert f.VENDOR_API_ENV_VARS[ "vllm" ] is None            # local vendor → None
+    assert f.CLIENT_DEFAULT_PARAMS[ "temperature" ] == "0.7"
+
+
+# =========================================================================== #
+# _load_vendor_urls / _load_vendor_env_vars override paths
+# =========================================================================== #
+def test_vendor_maps_honor_ini_overrides( make_factory ):
+    """INI values override the hardcoded vendor URL + env-var defaults."""
+    f = make_factory( values={
+        "llm vendor url openai"     : "http://override/v1",
+        "llm vendor env var openai" : "MY_OPENAI_KEY",
+    } )
+    assert f.VENDOR_URLS[ "openai" ] == "http://override/v1"
+    assert f.VENDOR_API_ENV_VARS[ "openai" ] == "MY_OPENAI_KEY"
+
+
+# =========================================================================== #
+# get_client — config-key path
+# =========================================================================== #
+def test_get_client_unknown_key_delegates_to_vendor( make_factory, capsys ):
+    """A key absent from config routes to the vendor-specific path."""
+    f = make_factory()                                       # no exists keys
+    client = f.get_client( "groq:llama-3.3-70b" )
+    assert isinstance( client, _StubChat )
+    assert "not found in config_mgr" in capsys.readouterr().out
+
+
+def test_get_client_config_vllm_completion_mode( make_factory ):
+    """A vllm:// spec with a completion prompt_format builds a CompletionClient."""
+    f = make_factory(
+        exists_keys=[ "mymodel" ],
+        values={
+            "mymodel"        : "vllm://192.168.1.21:3001@Qwen/Qwen3-4B",
+            "mymodel_params" : { "prompt_format": "instruction_completion", "stream": False },
+            "model tokenizer map" : {},
+            "prompt format default" : "json_message",
+        },
+    )
+    client = f.get_client( "mymodel", debug=True, verbose=True )
+    assert isinstance( client, _StubCompletion )
+    assert client.kwargs[ "base_url" ] == "http://192.168.1.21:3001/v1/completions"
+    assert client.kwargs[ "model_name" ] == "Qwen/Qwen3-4B"
+
+
+def test_get_client_config_vllm_chat_mode( make_factory ):
+    """A vllm:// spec with a chat prompt_format builds a ChatClient with /v1."""
+    f = make_factory(
+        exists_keys=[ "mymodel" ],
+        values={
+            "mymodel"        : "vllm://host:3001@some-model",
+            "mymodel_params" : { "prompt_format": "json_message" },
+        },
+    )
+    client = f.get_client( "mymodel" )
+    assert isinstance( client, _StubChat )
+    assert client.kwargs[ "base_url" ] == "http://host:3001/v1"
+
+
+def test_get_client_config_plain_chat_model( make_factory ):
+    """A non-vllm spec builds a ChatClient using the raw model spec."""
+    f = make_factory(
+        exists_keys=[ "mymodel" ],
+        values={ "mymodel": "openai:gpt-4o", "mymodel_params": {} },
+    )
+    client = f.get_client( "mymodel" )
+    assert isinstance( client, _StubChat )
+    assert client.kwargs[ "model_name" ] == "openai:gpt-4o"
+
+
+# =========================================================================== #
+# _parse_model_descriptor
+# =========================================================================== #
+def test_parse_descriptor_colon( make_factory ):
+    """'vendor:model' splits on the colon, lowercasing the vendor."""
+    f = make_factory()
+    assert f._parse_model_descriptor( "Groq:Llama-3" ) == ( "groq", "Llama-3" )
+
+
+def test_parse_descriptor_legacy_deepily_prefix( make_factory ):
+    """'llm_deepily_*' maps to the deepily vendor."""
+    f = make_factory()
+    assert f._parse_model_descriptor( "llm_deepily_foo" ) == ( "deepily", "llm_deepily_foo" )
+
+
+def test_parse_descriptor_slash_unknown_vendor_defaults_vllm( make_factory ):
+    """A slash whose left side is not a vendor → vLLM, no warning."""
+    f = make_factory()
+    assert f._parse_model_descriptor( "Qwen/Qwen3-4B" ) == ( "vllm", "Qwen/Qwen3-4B" )
+
+
+def test_parse_descriptor_slash_known_vendor_warns( make_factory, capsys ):
+    """A slash whose left side IS a vendor → vLLM + a deprecation warning."""
+    f = make_factory()
+    result = f._parse_model_descriptor( "openai/gpt-4" )
+    assert result == ( "vllm", "openai/gpt-4" )
+    assert "DEPRECATION WARNING" in capsys.readouterr().out
+
+
+def test_parse_descriptor_plain_defaults_vllm( make_factory ):
+    """A bare name (no colon, no slash) defaults to vLLM."""
+    f = make_factory()
+    assert f._parse_model_descriptor( "plainmodel" ) == ( "vllm", "plainmodel" )
+
+
+# =========================================================================== #
+# _get_vendor_specific_client
+# =========================================================================== #
+def test_vendor_client_unsupported_raises( make_factory ):
+    """An unknown vendor raises ValueError."""
+    f = make_factory()
+    with pytest.raises( ValueError, match="Unsupported vendor" ):
+        f._get_vendor_specific_client( "nope:model" )
+
+
+def test_vendor_client_chat_env_key_from_environment( make_factory ):
+    """A chat vendor whose env-var is already set uses it (no get_api_key)."""
+    f = make_factory()
+    os.environ[ "OPENAI_API_KEY" ] = "env-key"
+    client = f._get_vendor_specific_client( "openai:gpt-4", debug=True )
+    assert isinstance( client, _StubChat )
+    assert client.kwargs[ "model_name" ] == "openai:gpt-4"
+    assert client.kwargs[ "api_key" ] == "env-key"
+
+
+def test_vendor_client_chat_env_key_via_get_api_key( make_factory ):
+    """A chat vendor with no env-var falls back to du.get_api_key."""
+    f = make_factory()
+    os.environ.pop( "ANTHROPIC_API_KEY", None )
+    client = f._get_vendor_specific_client( "anthropic:claude-3", debug=True )
+    assert client.kwargs[ "api_key" ] == "key-for-claude"     # from stubbed get_api_key
+    assert os.environ[ "ANTHROPIC_API_KEY" ] == "key-for-claude"
+
+
+def test_vendor_client_set_openai_env_compat( make_factory ):
+    """A vendor with set_openai_env=True also mirrors OPENAI_API_KEY/BASE_URL."""
+    f = make_factory()
+    os.environ.pop( "GROQ_API_KEY", None )
+    f._get_vendor_specific_client( "groq:llama-3", debug=True )
+    assert os.environ[ "OPENAI_API_KEY" ] == "key-for-groq"
+    assert os.environ[ "OPENAI_BASE_URL" ] == f.VENDOR_URLS[ "groq" ]
+
+
+def test_vendor_client_local_vllm_completion( make_factory ):
+    """A local vLLM vendor builds a CompletionClient with /completions appended."""
+    f = make_factory()
+    client = f._get_vendor_specific_client( "vllm:Qwen/Qwen3-4B", debug=True )
+    assert isinstance( client, _StubCompletion )
+    assert client.kwargs[ "base_url" ].endswith( "/completions" )
+    assert client.kwargs[ "prompt_format" ] == "instruction_completion"
+
+
+def test_vendor_client_nonlocal_completion_branch( make_factory, monkeypatch ):
+    """A (synthetic) non-local completion vendor exercises the api_key completion branch.
+
+    No such vendor ships in VENDOR_CONFIG today (vllm/deepily are the only completion
+    vendors and both take the local branch), so we inject one to drive the otherwise
+    unreachable non-local completion path — proving it constructs a CompletionClient
+    with the resolved api_key.
     """
-    Unit test suite for LlmClientFactory.
-    
-    Provides comprehensive testing of LLM client factory functionality including
-    singleton behavior, client creation, vendor configuration, and API integration
-    with complete external dependency mocking.
-    
-    Requires:
-        - MockManager for API and configuration mocking
-        - CoSATestFixtures for test data
-        - UnitTestUtilities for test helpers
-        
-    Ensures:
-        - All factory functionality is tested thoroughly
-        - No external dependencies or API calls
-        - Performance requirements are met
-        - Error conditions are handled properly
-    """
-    
-    def __init__( self, debug: bool = False ):
-        """
-        Initialize LlmClientFactory unit tests.
-        
-        Args:
-            debug: Enable debug output
-        """
-        self.debug = debug
-        self.mock_mgr = MockManager()
-        self.fixtures = CoSATestFixtures()
-        self.utils = UnitTestUtilities( debug=debug )
-        self.temp_files = []
-    
-    def test_singleton_behavior( self ) -> bool:
-        """
-        Test LlmClientFactory singleton pattern implementation.
-        
-        Ensures:
-            - Only one instance exists across multiple instantiations
-            - Singleton state is maintained correctly
-            - Initialization only occurs once
-            - Instance variables are shared across references
-            
-        Returns:
-            True if test passes
-        """
-        self.utils.print_test_banner( "Testing Singleton Behavior" )
-        
-        try:
-            # Mock all dependencies to isolate singleton testing
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class:
-                mock_config = self.mock_mgr.config_manager_mock( {
-                    "llm_default_model": "test_model",
-                    "api_timeout": 30
-                } ).__enter__()
-                mock_cm_class.return_value = mock_config
-                
-                # Test multiple instantiations return same object
-                factory1 = LlmClientFactory( debug=False, verbose=False )
-                factory2 = LlmClientFactory( debug=True, verbose=True )
-                factory3 = LlmClientFactory()
-                
-                # Test singleton identity
-                assert factory1 is factory2, "Factory instances should be identical (singleton)"
-                assert factory2 is factory3, "All factory instances should be identical"
-                assert factory1 is factory3, "First and third instances should be identical"
-                
-                # Test shared state
-                factory1.test_attribute = "test_value"
-                assert hasattr( factory2, 'test_attribute' ), "Singleton should share attributes"
-                assert factory2.test_attribute == "test_value", "Singleton attribute should be shared"
-                
-                self.utils.print_test_status( "Singleton identity test passed", "PASS" )
-            
-            # Test singleton persists across patch contexts
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class2:
-                mock_config2 = self.mock_mgr.config_manager_mock( {} ).__enter__()
-                mock_cm_class2.return_value = mock_config2
-                
-                factory4 = LlmClientFactory()
-                assert factory4 is factory1, "Singleton should persist across different contexts"
-                assert hasattr( factory4, 'test_attribute' ), "Singleton should retain attributes"
-                
-                self.utils.print_test_status( "Singleton persistence test passed", "PASS" )
-            
-            return True
-            
-        except Exception as e:
-            self.utils.print_test_status( f"Singleton behavior test failed: {e}", "FAIL" )
-            return False
-    
-    def test_factory_initialization( self ) -> bool:
-        """
-        Test LlmClientFactory initialization process.
-        
-        Ensures:
-            - Factory initializes with correct default parameters
-            - ConfigurationManager is created properly
-            - Debug and verbose flags are set correctly
-            - Initialization occurs only once per singleton
-            
-        Returns:
-            True if test passes
-        """
-        self.utils.print_test_banner( "Testing Factory Initialization" )
-        
-        try:
-            # Mock dependencies
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class:
-                mock_config = self.mock_mgr.config_manager_mock( {
-                    "default_timeout": 30,
-                    "max_retries": 3
-                } ).__enter__()
-                mock_cm_class.return_value = mock_config
-                
-                # Reset singleton for clean testing
-                LlmClientFactory._instance = None
-                
-                # Test initialization with parameters
-                factory = LlmClientFactory( debug=True, verbose=True )
-                
-                # Test initialization state
-                assert hasattr( factory, 'config_mgr' ), "Factory should have config_mgr attribute"
-                assert hasattr( factory, '_initialized' ), "Factory should have _initialized flag"
-                assert factory._initialized == True, "Factory should be marked as initialized"
-                assert factory.debug == True, "Debug flag should be set correctly"
-                assert factory.verbose == True, "Verbose flag should be set correctly"
-                
-                # Test configuration manager setup
-                assert factory.config_mgr == mock_config, "Should use mocked configuration manager"
-                
-                self.utils.print_test_status( "Basic initialization test passed", "PASS" )
-            
-            # Test that re-initialization doesn't occur
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class2:
-                mock_config2 = self.mock_mgr.config_manager_mock( {
-                    "different_config": "value"
-                } ).__enter__()
-                mock_cm_class2.return_value = mock_config2
-                
-                # Create another instance (should be same singleton)
-                factory2 = LlmClientFactory( debug=False, verbose=False )
-                
-                # Should still use original configuration
-                assert factory2.config_mgr == mock_config, "Should retain original config manager"
-                assert factory2.debug == True, "Should retain original debug setting"
-                assert factory2._initialized == True, "Should remain initialized"
-                
-                self.utils.print_test_status( "Re-initialization prevention test passed", "PASS" )
-            
-            return True
-            
-        except Exception as e:
-            self.utils.print_test_status( f"Factory initialization test failed: {e}", "FAIL" )
-            return False
-    
-    def test_model_descriptor_parsing( self ) -> bool:
-        """
-        Test model descriptor parsing functionality.
-        
-        Ensures:
-            - Various model descriptor formats are parsed correctly
-            - Vendor and model name extraction works properly
-            - Special cases (deepily, local models) are handled
-            - Invalid descriptors are handled gracefully
-            
-        Returns:
-            True if test passes
-        """
-        self.utils.print_test_banner( "Testing Model Descriptor Parsing" )
-        
-        try:
-            # Mock dependencies and create factory
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class:
-                mock_config = self.mock_mgr.config_manager_mock( {} ).__enter__()
-                mock_cm_class.return_value = mock_config
-                
-                LlmClientFactory._instance = None
-                factory = LlmClientFactory()
-                
-                # Test various model descriptor formats
-                test_cases = [
-                    # Format: "vendor:model" (colon is the ONLY vendor delimiter)
-                    ( "openai:gpt-4", ( "openai", "gpt-4" ) ),
-                    ( "groq:llama-3.1-8b-instant", ( "groq", "llama-3.1-8b-instant" ) ),
-                    ( "anthropic:claude-3-sonnet", ( "anthropic", "claude-3-sonnet" ) ),
-                    ( "Groq:llama-3.1-8b-instant", ( "groq", "llama-3.1-8b-instant" ) ),
-
-                    # HuggingFace org/model — slash is NEVER a vendor delimiter, always vLLM
-                    ( "Qwen/Qwen3-4B-Base", ( "vllm", "Qwen/Qwen3-4B-Base" ) ),
-                    ( "meta-llama/Llama-2-70b", ( "vllm", "meta-llama/Llama-2-70b" ) ),
-                    ( "Groq/llama-3.1-8b-instant", ( "vllm", "Groq/llama-3.1-8b-instant" ) ),
-                    ( "OpenAI/gpt-4", ( "vllm", "OpenAI/gpt-4" ) ),
-
-                    # Special deepily format
-                    ( "llm_deepily_ministral", ( "deepily", "llm_deepily_ministral" ) ),
-
-                    # Default to vllm for unknown formats
-                    ( "local-model-name", ( "vllm", "local-model-name" ) ),
-                    ( "some_model", ( "vllm", "some_model" ) )
-                ]
-                
-                for descriptor, expected in test_cases:
-                    result = factory._parse_model_descriptor( descriptor )
-                    assert result == expected, f"Parsing '{descriptor}' should yield {expected}, got {result}"
-                
-                self.utils.print_test_status( "Model descriptor parsing test passed", "PASS" )
-                
-                # Test edge cases (vendor is always lowercased for colon format)
-                edge_cases = [
-                    ( "", ( "vllm", "" ) ),  # Empty string
-                    ( "vendor:", ( "vendor", "" ) ),  # Empty model
-                    ( "Vendor:", ( "vendor", "" ) ),  # Empty model with uppercase vendor
-                    ( ":model", ( "", "model" ) ),  # Empty vendor
-                    ( "vendor:model:extra", ( "vendor", "model:extra" ) )  # Multiple colons
-                ]
-                
-                for descriptor, expected in edge_cases:
-                    result = factory._parse_model_descriptor( descriptor )
-                    assert result == expected, f"Edge case '{descriptor}' should yield {expected}, got {result}"
-                
-                self.utils.print_test_status( "Edge case parsing test passed", "PASS" )
-                
-            return True
-            
-        except Exception as e:
-            self.utils.print_test_status( f"Model descriptor parsing test failed: {e}", "FAIL" )
-            return False
-    
-    def test_vendor_configuration( self ) -> bool:
-        """
-        Test vendor configuration and client creation logic.
-        
-        Ensures:
-            - Vendor configurations are loaded correctly
-            - API keys are handled properly
-            - Base URLs are set correctly
-            - Environment variables are configured
-            
-        Returns:
-            True if test passes
-        """
-        self.utils.print_test_banner( "Testing Vendor Configuration" )
-        
-        try:
-            # Mock dependencies
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class, \
-                 patch( 'cosa.agents.llm_client_factory.du.get_api_key' ) as mock_get_api_key, \
-                 patch.dict( 'os.environ', {}, clear=True ):
-                
-                mock_config = self.mock_mgr.config_manager_mock( {} ).__enter__()
-                mock_cm_class.return_value = mock_config
-                mock_get_api_key.return_value = "test_api_key_123"
-                
-                LlmClientFactory._instance = None
-                factory = LlmClientFactory()
-                
-                # Test vendor configuration constants
-                assert "openai" in factory.VENDOR_URLS, "OpenAI should be in vendor URLs"
-                assert "groq" in factory.VENDOR_URLS, "Groq should be in vendor URLs"
-                assert "anthropic" in factory.VENDOR_URLS, "Anthropic should be in vendor URLs"
-                
-                assert "openai" in factory.VENDOR_CONFIG, "OpenAI should be in vendor config"
-                assert "groq" in factory.VENDOR_CONFIG, "Groq should be in vendor config"
-                
-                # Test vendor configuration structure
-                openai_config = factory.VENDOR_CONFIG[ "openai" ]
-                assert "env_var" in openai_config, "OpenAI config should have env_var"
-                assert "key_name" in openai_config, "OpenAI config should have key_name"
-                assert "client_type" in openai_config, "OpenAI config should have client_type"
-                
-                self.utils.print_test_status( "Vendor configuration structure test passed", "PASS" )
-                
-                # Test default parameters
-                assert "temperature" in factory.CLIENT_DEFAULT_PARAMS, "Should have default temperature"
-                assert "max_tokens" in factory.CLIENT_DEFAULT_PARAMS, "Should have default max_tokens"
-                
-                default_temp = factory.CLIENT_DEFAULT_PARAMS[ "temperature" ]
-                assert isinstance( default_temp, ( int, float ) ), "Temperature should be numeric"
-                assert 0.0 <= default_temp <= 2.0, "Temperature should be in valid range"
-                
-                self.utils.print_test_status( "Default parameters test passed", "PASS" )
-                
-            return True
-            
-        except Exception as e:
-            self.utils.print_test_status( f"Vendor configuration test failed: {e}", "FAIL" )
-            return False
-    
-    def test_client_creation_mocking( self ) -> bool:
-        """
-        Test client creation with comprehensive mocking.
-        
-        Ensures:
-            - ChatClient and CompletionClient creation works
-            - All external dependencies are properly mocked
-            - Client interfaces are implemented correctly
-            - Different vendor scenarios work
-            
-        Returns:
-            True if test passes
-        """
-        self.utils.print_test_banner( "Testing Client Creation with Mocking" )
-        
-        try:
-            # Since the configuration-based approach is complex, let's test vendor-specific creation
-            # which is simpler and more straightforward to mock
-            
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class, \
-                 patch( 'cosa.agents.llm_client_factory.ChatClient' ) as mock_chat_client, \
-                 patch( 'cosa.agents.llm_client_factory.CompletionClient' ) as mock_completion_client, \
-                 patch( 'cosa.agents.llm_client_factory.du.get_api_key' ) as mock_get_api_key, \
-                 patch.dict( 'os.environ', {}, clear=True ):
-                
-                # Set up basic mocks
-                mock_config = self.mock_mgr.config_manager_mock( {} ).__enter__()
-                mock_cm_class.return_value = mock_config
-                mock_get_api_key.return_value = "test_api_key"
-                
-                # Mock client instances
-                mock_chat_instance = MagicMock( spec=LlmClientInterface )
-                mock_completion_instance = MagicMock( spec=LlmClientInterface )
-                mock_chat_client.return_value = mock_chat_instance
-                mock_completion_client.return_value = mock_completion_instance
-                
-                LlmClientFactory._instance = None
-                factory = LlmClientFactory()
-                
-                # Test vendor-specific client creation (bypass config complexity)
-                mock_config.exists.return_value = False  # Force vendor-specific path
-                
-                client = factory.get_client( "openai:gpt-3.5-turbo" )
-                
-                # Should create vendor-specific ChatClient
-                assert mock_chat_client.called, "ChatClient should be created for OpenAI vendor"
-                assert client == mock_chat_instance, "Should return mocked chat client instance"
-                
-                self.utils.print_test_status( "Vendor-specific client creation test passed", "PASS" )
-                
-                # Test another vendor type
-                mock_chat_client.reset_mock()
-                client2 = factory.get_client( "groq:llama-3.1-8b-instant" )
-                
-                assert mock_chat_client.called, "ChatClient should be created for Groq vendor"
-                assert client2 == mock_chat_instance, "Should return chat client for Groq vendor"
-                
-                self.utils.print_test_status( "Multiple vendor client creation test passed", "PASS" )
-                
-            return True
-            
-        except Exception as e:
-            self.utils.print_test_status( f"Client creation mocking test failed: {e}", "FAIL" )
-            return False
-    
-    def test_error_handling( self ) -> bool:
-        """
-        Test error handling in LlmClientFactory.
-        
-        Ensures:
-            - Unsupported vendors raise appropriate errors
-            - Missing API keys are handled gracefully
-            - Invalid configurations are handled properly
-            - Error messages are informative
-            
-        Returns:
-            True if test passes
-        """
-        self.utils.print_test_banner( "Testing Error Handling" )
-        
-        try:
-            # Mock dependencies
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class, \
-                 patch( 'cosa.agents.llm_client_factory.du.get_api_key' ) as mock_get_api_key:
-                
-                mock_config = self.mock_mgr.config_manager_mock( {} ).__enter__()
-                mock_cm_class.return_value = mock_config
-                mock_config.exists.return_value = False
-                
-                LlmClientFactory._instance = None
-                factory = LlmClientFactory()
-                
-                # Test unsupported vendor
-                try:
-                    factory.get_client( "unsupported_vendor:some-model" )
-                    assert False, "Should raise ValueError for unsupported vendor"
-                except ValueError as e:
-                    assert "Unsupported vendor" in str( e ), "Error message should mention unsupported vendor"
-                
-                self.utils.print_test_status( "Unsupported vendor error test passed", "PASS" )
-                
-                # Test missing API key handling
-                mock_get_api_key.side_effect = Exception( "API key not found" )
-                
-                try:
-                    factory.get_client( "openai:gpt-4" )
-                    # Should handle API key error gracefully or raise informative error
-                except Exception as e:
-                    # Error should be informative
-                    assert len( str( e ) ) > 0, "Error message should not be empty"
-                
-                self.utils.print_test_status( "API key error handling test passed", "PASS" )
-                
-            return True
-            
-        except Exception as e:
-            self.utils.print_test_status( f"Error handling test failed: {e}", "FAIL" )
-            return False
-    
-    def test_performance_requirements( self ) -> bool:
-        """
-        Test LlmClientFactory performance requirements.
-        
-        Ensures:
-            - Client creation is fast enough
-            - Singleton access is performant
-            - Memory usage is reasonable
-            
-        Returns:
-            True if test passes
-        """
-        self.utils.print_test_banner( "Testing Performance Requirements" )
-        
-        try:
-            performance_targets = self.fixtures.get_performance_targets()
-            factory_timeout = performance_targets[ "timing_targets" ].get( "factory_operation", 0.1 )
-            
-            # Mock dependencies for performance testing
-            with patch( 'cosa.agents.llm_client_factory.ConfigurationManager' ) as mock_cm_class, \
-                 patch( 'cosa.agents.llm_client_factory.ChatClient' ) as mock_chat_client:
-                
-                mock_config = self.mock_mgr.config_manager_mock( {} ).__enter__()
-                mock_cm_class.return_value = mock_config
-                mock_config.exists.return_value = False
-                
-                mock_client_instance = MagicMock( spec=LlmClientInterface )
-                mock_chat_client.return_value = mock_client_instance
-                
-                # Test singleton creation performance
-                def singleton_creation_test():
-                    LlmClientFactory._instance = None
-                    factory = LlmClientFactory()
-                    return factory is not None
-                
-                success, duration, result = self.utils.assert_timing( singleton_creation_test, factory_timeout )
-                assert success, f"Singleton creation too slow: {duration}s"
-                assert result == True, "Singleton creation should return True"
-                
-                # Test multiple client creation performance
-                LlmClientFactory._instance = None
-                factory = LlmClientFactory()
-                
-                def multiple_clients_test():
-                    clients = []
-                    for i in range( 5 ):
-                        # Mock different vendor clients
-                        client = factory.get_client( f"openai:test-model-{i}" )
-                        clients.append( client )
-                    return len( clients )
-                
-                success, duration, result = self.utils.assert_timing( multiple_clients_test, factory_timeout * 5 )
-                assert success, f"Multiple client creation too slow: {duration}s"
-                assert result == 5, f"Should create 5 clients, got {result}"
-                
-                self.utils.print_test_status( f"Performance requirements met ({self.utils.format_duration( duration )})", "PASS" )
-                
-            return True
-            
-        except Exception as e:
-            self.utils.print_test_status( f"Performance requirements test failed: {e}", "FAIL" )
-            return False
-    
-    def run_all_tests( self ) -> tuple:
-        """
-        Run all LlmClientFactory unit tests.
-        
-        Returns:
-            Tuple of (success, duration, error_message)
-        """
-        start_time = self.utils.start_timer( "llm_client_factory_tests" )
-        
-        tests = [
-            self.test_singleton_behavior,
-            self.test_factory_initialization,
-            self.test_model_descriptor_parsing,
-            self.test_vendor_configuration,
-            self.test_client_creation_mocking,
-            self.test_error_handling,
-            self.test_performance_requirements
-        ]
-        
-        passed_tests = 0
-        failed_tests = 0
-        errors = []
-        
-        self.utils.print_test_banner( "LlmClientFactory Unit Test Suite", "=" )
-        
-        for test_func in tests:
-            try:
-                if test_func():
-                    passed_tests += 1
-                else:
-                    failed_tests += 1
-                    errors.append( f"{test_func.__name__} failed" )
-            except Exception as e:
-                failed_tests += 1
-                errors.append( f"{test_func.__name__} raised exception: {e}" )
-        
-        duration = self.utils.stop_timer( "llm_client_factory_tests" )
-        
-        # Print summary
-        self.utils.print_test_banner( "Test Results Summary" )
-        self.utils.print_test_status( f"Passed: {passed_tests}" )
-        self.utils.print_test_status( f"Failed: {failed_tests}" )
-        self.utils.print_test_status( f"Duration: {self.utils.format_duration( duration )}" )
-        
-        success = failed_tests == 0
-        error_message = "; ".join( errors ) if errors else ""
-        
-        return success, duration, error_message
-    
-    def cleanup( self ):
-        """Clean up any temporary files created during testing."""
-        self.utils.cleanup_temp_files( self.temp_files )
+    f = make_factory()
+    monkeypatch.setitem( f.VENDOR_CONFIG, "acme",
+                         { "env_var": "ACME_API_KEY", "key_name": "acme", "client_type": "completion" } )
+    f.VENDOR_URLS[ "acme" ] = "https://acme.example/v1"
+    os.environ.pop( "ACME_API_KEY", None )
+    client = f._get_vendor_specific_client( "acme:big-model", debug=True )
+    assert isinstance( client, _StubCompletion )
+    assert client.kwargs[ "api_key" ] == "key-for-acme"
+    assert client.kwargs[ "base_url" ] == "https://acme.example/v1"
 
 
-def isolated_unit_test():
-    """
-    Main unit test function for LlmClientFactory.
-    
-    This is the entry point called by the unit test runner to execute
-    all LlmClientFactory unit tests.
-    
-    Returns:
-        Tuple[bool, float, str]: (success, duration, error_message)
-    """
-    test_suite = None
-    
-    try:
-        test_suite = LlmClientFactoryUnitTests( debug=False )
-        success, duration, error_message = test_suite.run_all_tests()
-        return success, duration, error_message
-        
-    except Exception as e:
-        error_message = f"LlmClientFactory unit test suite failed to initialize: {str( e )}"
-        return False, 0.0, error_message
-        
-    finally:
-        if test_suite:
-            test_suite.cleanup()
+# =========================================================================== #
+# AgentWrapper
+# =========================================================================== #
+class _WrapResult:
+    def __init__( self, data ): self.data = data
 
 
-if __name__ == "__main__":
-    success, duration, error = isolated_unit_test()
-    status = "✅ PASS" if success else "❌ FAIL"
-    print( f"{status} LlmClientFactory unit tests completed in {duration:.2f}s" )
-    if error:
-        print( f"Errors: {error}" )
+class _FakeWrapAgent:
+    def __init__( self, result=None, raises=None ):
+        self._result = result
+        self._raises = raises
+    async def run( self, prompt, **kw ):
+        if self._raises is not None:
+            raise self._raises
+        return self._result
+
+
+def _patch_loop( monkeypatch, raise_get=False ):
+    """Control AgentWrapper's event-loop acquisition deterministically."""
+    if raise_get:
+        monkeypatch.setattr( factory_mod.asyncio, "get_event_loop",
+                             lambda: ( _ for _ in () ).throw( RuntimeError( "no loop" ) ) )
+    else:
+        loop = asyncio.new_event_loop()
+        monkeypatch.setattr( factory_mod.asyncio, "get_event_loop", lambda: loop )
+
+
+def test_agentwrapper_init_stores_agent():
+    """AgentWrapper stores its agent + debug flag."""
+    agent = _FakeWrapAgent( result="x" )
+    w = LlmClientFactory.AgentWrapper( agent, debug=True )
+    assert w.agent is agent and w.debug is True
+
+
+def test_agentwrapper_run_returns_data_attr( monkeypatch, capsys ):
+    """run() returns response.data when the response wraps it (debug echoes)."""
+    _patch_loop( monkeypatch )
+    w = LlmClientFactory.AgentWrapper( _FakeWrapAgent( result=_WrapResult( "wrapped" ) ), debug=True )
+    assert w.run( "hi" ) == "wrapped"
+    assert "AgentWrapper" in capsys.readouterr().out
+
+
+def test_agentwrapper_run_returns_response_when_no_data_attr( monkeypatch ):
+    """run() returns the response directly when it has no .data attribute."""
+    _patch_loop( monkeypatch )
+    w = LlmClientFactory.AgentWrapper( _FakeWrapAgent( result="plain" ) )
+    assert w.run( "hi" ) == "plain"
+
+
+def test_agentwrapper_run_creates_loop_when_none( monkeypatch ):
+    """When get_event_loop raises, run() creates a fresh loop and proceeds."""
+    _patch_loop( monkeypatch, raise_get=True )
+    created = {}
+    real_new = asyncio.new_event_loop
+    def _new():
+        loop = real_new(); created[ "loop" ] = loop; return loop
+    monkeypatch.setattr( factory_mod.asyncio, "new_event_loop", _new )
+    monkeypatch.setattr( factory_mod.asyncio, "set_event_loop", lambda loop: None )
+    w = LlmClientFactory.AgentWrapper( _FakeWrapAgent( result="made-loop" ) )
+    assert w.run( "hi" ) == "made-loop"
+    assert "loop" in created
+
+
+def test_agentwrapper_run_reraises_on_error( monkeypatch, capsys ):
+    """run() prints (debug) and re-raises exceptions from the agent."""
+    _patch_loop( monkeypatch )
+    w = LlmClientFactory.AgentWrapper( _FakeWrapAgent( raises=ValueError( "boom" ) ), debug=True )
+    with pytest.raises( ValueError, match="boom" ):
+        w.run( "hi" )
+    assert "Error in AgentWrapper.run" in capsys.readouterr().out
+
+
+def test_agentwrapper_run_reraises_quietly_when_no_debug( monkeypatch, capsys ):
+    """With debug=False, run() re-raises without printing the error (branch 377->379)."""
+    _patch_loop( monkeypatch )
+    w = LlmClientFactory.AgentWrapper( _FakeWrapAgent( raises=ValueError( "boom" ) ), debug=False )
+    with pytest.raises( ValueError, match="boom" ):
+        w.run( "hi" )
+    assert "Error in AgentWrapper.run" not in capsys.readouterr().out
