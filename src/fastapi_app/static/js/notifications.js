@@ -13830,8 +13830,37 @@ class NotificationsUI {
                 el.classList.remove( "missed-visible" );
             }
         }
+        // Reset button is visible only while there is a non-zero missed count to clear.
+        const resetBtn = document.getElementById( "missed-reset-button" );
+        if ( resetBtn ) resetBtn.style.display = n > 0 ? "" : "none";
         if ( n > 0 ) this.log( `[MISSED] ${n} notification(s) missed while offline` );
         return n;
+    }
+
+    // Reset (soft-dismiss) the "N missed while away" badge. Calls the dismiss endpoint
+    // which sets is_hidden=True on the user's undelivered notifications (state preserved),
+    // then zeroes the badge locally. Wired to the Reset button beside #missed-status.
+    async resetMissedNotifications() {
+        const n = this.notificationState.undeliveredCount || 0;
+        if ( n <= 0 ) return 0;
+        if ( !window.confirm( `Dismiss ${n} missed notification${n === 1 ? "" : "s"}? They stay in your history but the badge resets to zero.` ) ) {
+            return n;
+        }
+        try {
+            const response = await this.authedFetch( "/api/notifications/undelivered/dismiss", { method: "POST" } );
+            if ( !response.ok ) {
+                this.error( `[MISSED] Reset failed: HTTP ${response.status}` );
+                window.alert( "Could not reset missed notifications. Please try again." );
+                return n;
+            }
+            const data = await response.json();
+            this.log( `[MISSED] Reset dismissed ${data.dismissed_count} notification(s)` );
+            return this._surfaceMissedNotifications( data.undelivered_count || 0 );
+        } catch ( err ) {
+            this.error( `[MISSED] Reset error: ${err}` );
+            window.alert( "Could not reset missed notifications. Please try again." );
+            return n;
+        }
     }
 
     updateStatus( elementId, status, type ) {

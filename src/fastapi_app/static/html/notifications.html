@@ -1031,11 +1031,12 @@
                 <div class="status-item">
                     <strong>Missed:</strong>
                     <span id="missed-status" data-testid="notifications-missed-status" class="status-warning" style="display:none"></span>
+                    <button id="missed-reset-button" data-testid="notifications-missed-reset-btn" type="button" style="display:none; margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.notificationsUI.resetMissedNotifications()">Reset</button>
                 </div>
                 <div class="status-item">
                     <strong>User:</strong>
                     <span id="user-display">Loading...</span>
-                    <button id="logout-button" data-testid="notifications-logout-btn" type="button" style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.freshQueueUI.logout()">Logout</button>
+                    <button id="logout-button" data-testid="notifications-logout-btn" type="button" style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.notificationsUI.logout()">Logout</button>
                 </div>
                 <div class="status-item">
                     <strong>Sessions:</strong>

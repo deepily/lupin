@@ -1240,6 +1240,59 @@ async def get_undelivered_notifications(
         raise HTTPException( status_code=500, detail=f"Failed to get undelivered notifications: {str( e )}" )
 
 
+@router.post(
+    "/notifications/undelivered/dismiss",
+    summary     = "Dismiss (reset) undelivered notifications",
+    description = "Reset the 'N missed while away' badge: soft-dismiss (is_hidden=True) the authenticated user's undelivered notifications (state created/queued). State is preserved (audit trail); the badge and pull-able inbox both drop to zero."
+)
+async def dismiss_undelivered_notifications(
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)]
+):
+    """
+    Soft-dismiss the authenticated user's undelivered (missed-while-offline) notifications.
+
+    Backs the "reset" button beside the "N missed while away" indicator. Sets is_hidden=True
+    on every row the badge counts (mirroring the count query, including the 24h age cap) so
+    the badge zeroes; notification state is left untouched so the never-delivered audit trail
+    survives. Reversible by flipping is_hidden back.
+
+    Requires:
+        - a valid API key or Bearer JWT (authenticated_user_id is the recipient's system UUID)
+
+    Ensures:
+        - soft-dismisses rows in state 'created'/'queued' within the configured age cap
+        - shape: { status, dismissed_count, undelivered_count, timestamp }
+        - undelivered_count is the post-dismiss count (0 on success)
+
+    Raises:
+        - HTTPException 400 if authenticated_user_id is not a valid UUID
+        - HTTPException 500 on update failure
+    """
+    try:
+        recipient_uuid = uuid.UUID( authenticated_user_id )
+    except ( ValueError, AttributeError, TypeError ):
+        raise HTTPException( status_code=400, detail="authenticated user id is not a valid UUID" )
+
+    try:
+        max_age_hours = _undelivered_max_age_hours()
+        with get_db() as session:
+            repo            = NotificationRepository( session )
+            dismissed_count = repo.dismiss_undelivered_for_recipient( recipient_uuid, max_age_hours=max_age_hours )
+            remaining       = repo.count_undelivered_for_recipient( recipient_uuid, max_age_hours=max_age_hours )
+        print( f"[NOTIFY] Dismissed {dismissed_count} undelivered notification(s) for {authenticated_user_id}" )
+        return {
+            "status"            : "success",
+            "dismissed_count"   : dismissed_count,
+            "undelivered_count" : remaining,
+            "timestamp"         : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error dismissing undelivered for {authenticated_user_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to dismiss undelivered notifications: {str( e )}" )
+
+
 @router.get(
     "/notifications/{user_id}",
     summary     = "Get user notifications",

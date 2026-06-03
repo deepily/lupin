@@ -389,6 +389,46 @@ class NotificationRepository( BaseRepository[Notification] ):
             query  = query.filter( Notification.created_at >= cutoff )
         return query.count()
 
+    def dismiss_undelivered_for_recipient( self, recipient_id: uuid.UUID, max_age_hours: Optional[int] = None ) -> int:
+        """
+        Soft-dismiss the recipient's UNDELIVERED notifications (the "reset missed" action).
+
+        Sets is_hidden=True on every row the "N missed while away" badge counts, so the
+        badge and the pull-able inbox both drop to zero. The notification STATE is left
+        untouched ('created'/'queued') — preserving the honest audit trail that these
+        rows were never actually delivered. is_hidden is the column the count/getter
+        queries already filter on, so no schema change is needed and the dismiss is
+        reversible (flip is_hidden back).
+
+        The filter MIRRORS count_undelivered_for_recipient exactly so that, after this
+        call, count_undelivered_for_recipient returns 0 for the same recipient + cap.
+
+        Requires:
+            - recipient_id: Valid user UUID
+            - max_age_hours: None (dismiss all undelivered) or a positive int (hours)
+
+        Ensures:
+            - sets is_hidden=True on rows in state 'created'/'queued', is_hidden=False
+            - When max_age_hours is set, only rows newer than the cutoff are dismissed
+              (matches the windowed badge — older rows already fall out of the count)
+            - does NOT change notification state (audit trail preserved)
+            - flushes the session
+
+        Returns:
+            int — the number of rows dismissed
+        """
+        query = self.session.query( Notification ).filter(
+            Notification.recipient_id == recipient_id,
+            Notification.state.in_( [ 'created', 'queued' ] ),
+            Notification.is_hidden == False
+        )
+        if max_age_hours is not None:
+            cutoff = datetime.now( timezone.utc ) - timedelta( hours=max_age_hours )
+            query  = query.filter( Notification.created_at >= cutoff )
+        dismissed = query.update( { Notification.is_hidden: True }, synchronize_session=False )
+        self.session.flush()
+        return dismissed
+
     def get_expired_notifications( self ) -> List[Notification]:
         """
         Get all notifications in 'delivered' state past their expires_at.

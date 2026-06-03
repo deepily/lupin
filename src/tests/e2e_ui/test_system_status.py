@@ -136,3 +136,48 @@ class TestSystemStatusActions:
             logged_in_page.wait_for_timeout( 3000 )
             # Logout may redirect to login or landing page
             assert "/login" in logged_in_page.url or "/app" in logged_in_page.url
+
+
+# ---------------------------------------------------------------------------
+# Missed-notifications "Reset" button (badge reset, soft-dismiss)
+# ---------------------------------------------------------------------------
+
+class TestMissedResetButton:
+    """
+    Tests for the "Reset" button beside the "N missed while away" indicator.
+
+    The onclick handlers on this section are inline (window.<global>.<method>()).
+    A wrong global name resolves to `undefined` at click time and throws
+    'Cannot read properties of undefined' — a class of bug that DOM-presence
+    checks miss but a global-resolution check catches. These guard exactly that.
+    """
+
+    def test_missed_reset_button_present( self, logged_in_page ):
+        """The Reset button element exists in the System Status section."""
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        assert logged_in_page.get_by_test_id( "notifications-missed-reset-btn" ).count() > 0
+
+    def test_inline_onclick_globals_resolve( self, logged_in_page ):
+        """
+        REGRESSION GUARD: every inline onclick global in the status section must
+        resolve to a real instance with the referenced method. Catches the
+        window.freshQueueUI (undefined) → resetMissedNotifications/logout bug.
+
+        Ensures:
+            - window.notificationsUI is defined
+            - resetMissedNotifications and logout are functions on it
+            - no remaining 'freshQueueUI' reference in the status-section onclicks
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        assert logged_in_page.evaluate( "() => typeof window.notificationsUI" ) == "object"
+        assert logged_in_page.evaluate( "() => typeof window.notificationsUI.resetMissedNotifications" ) == "function"
+        assert logged_in_page.evaluate( "() => typeof window.notificationsUI.logout" ) == "function"
+
+        reset_onclick  = logged_in_page.get_by_test_id( "notifications-missed-reset-btn" ).get_attribute( "onclick" ) or ""
+        logout_onclick = logged_in_page.get_by_test_id( "notifications-logout-btn" ).get_attribute( "onclick" ) or ""
+        assert "window.notificationsUI." in reset_onclick and "freshQueueUI" not in reset_onclick
+        assert "window.notificationsUI." in logout_onclick and "freshQueueUI" not in logout_onclick

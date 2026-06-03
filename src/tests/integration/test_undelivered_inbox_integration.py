@@ -95,6 +95,78 @@ def test_undelivered_requires_auth():
     assert resp.status_code in ( 401, 403 ), resp.text
 
 
+def test_dismiss_requires_auth():
+    """The dismiss (reset) endpoint rejects an unauthenticated request."""
+    resp = requests.post( f"{BASE_URL}/api/notifications/undelivered/dismiss", timeout=10 )
+    assert resp.status_code in ( 401, 403 ), resp.text
+
+
+def test_dismiss_resets_badge_and_soft_hides( auth_headers ):
+    """
+    The reset button's endpoint: POST /api/notifications/undelivered/dismiss
+
+    Soft-dismisses (is_hidden=True) the user's undelivered notifications so the
+    "N missed while away" badge zeroes, while PRESERVING state (audit trail).
+
+    DB-backed, self-cleaning: insert one FRESH undelivered probe for the test user,
+    POST dismiss, then assert (a) response shape (dismissed_count >= 1,
+    undelivered_count == 0), (b) the probe row is now is_hidden=True with state
+    still 'created', and (c) the capped undelivered count is 0 afterward.
+
+    Venue: :8000 (mutates DB state; runs in-container where get_db reaches the DB).
+    """
+    import uuid
+    from sqlalchemy import text
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories.notification_repository import NotificationRepository
+
+    probe_id = "0000aaaa-0000-0000-0000-0000000000d1"
+
+    with get_db() as session:
+        row = session.execute( text( "SELECT id FROM users WHERE email = :e" ), { "e": _EMAIL } ).first()
+        assert row is not None, f"test user {_EMAIL} not found"
+        rid      = str( row[ 0 ] )
+        rid_uuid = uuid.UUID( rid )
+        repo     = NotificationRepository( session )
+
+        try:
+            session.execute( text(
+                "INSERT INTO notifications "
+                "(id, sender_id, recipient_id, message, type, priority, created_at, response_requested, state, is_hidden) VALUES "
+                "(:pid,'probe',:rid,'PROBE dismiss','task','high', now(), false, 'created', false)"
+            ), { "pid": probe_id, "rid": rid } )
+            session.commit()
+
+            before = repo.count_undelivered_for_recipient( rid_uuid, max_age_hours=24 )
+            assert before >= 1, before
+
+            resp = requests.post(
+                f"{BASE_URL}/api/notifications/undelivered/dismiss",
+                headers = auth_headers,
+                timeout = 15,
+            )
+            assert resp.status_code == 200, f"dismiss failed: {resp.status_code} {resp.text}"
+            data = resp.json()
+            assert data[ "status" ] == "success", data
+            assert data[ "dismissed_count" ] >= 1, data
+            assert data[ "undelivered_count" ] == 0, data   # badge resets to zero
+
+            # The probe row is soft-hidden but its state is preserved (audit trail intact).
+            session.expire_all()
+            probe = session.execute(
+                text( "SELECT state, is_hidden FROM notifications WHERE id = :pid" ),
+                { "pid": probe_id },
+            ).first()
+            assert probe is not None and probe[ 0 ] == "created" and probe[ 1 ] is True, probe
+
+            # Server-side capped count agrees: nothing undelivered remains.
+            session.expire_all()
+            assert repo.count_undelivered_for_recipient( rid_uuid, max_age_hours=24 ) == 0
+        finally:
+            session.execute( text( "DELETE FROM notifications WHERE id = :pid" ), { "pid": probe_id } )
+            session.commit()
+
+
 def test_age_cap_excludes_stale_undelivered():
     """
     Storm-guard regression (2026-06-03 incident): the undelivered drain MUST
