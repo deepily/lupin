@@ -264,7 +264,7 @@ def delete_item( storage, schema_type, item_id=None, match_fields=None ):
 
         mask = pd.Series( True, index=df.index )
         for field, value in match_fields.items():
-            if field in df.columns:
+            if field in df.columns:  # pragma: no branch  # validated: _validate_match_fields guarantees membership
                 mask = mask & ( df[ field ].astype( str ) == str( value ) )
 
     deleted_count = mask.sum()
@@ -320,7 +320,7 @@ def update_item( storage, schema_type, field_updates, item_id=None, match_fields
 
         mask = pd.Series( True, index=df.index )
         for field, value in match_fields.items():
-            if field in df.columns:
+            if field in df.columns:  # pragma: no branch  # validated: _validate_match_fields guarantees membership
                 mask = mask & ( df[ field ].astype( str ) == str( value ) )
 
     updated_count = mask.sum()
