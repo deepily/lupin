@@ -1,5 +1,9 @@
 # TODO
 
+## 🔵 2026-06-03 FOLLOW-UP (Rachel 🕊️, session 624abe39) — tmux heartbeat / self-continuation for grind workers
+
+- [ ] **[LUPIN]** **Follow up on the tmux-heartbeat self-continuation design** → `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/20-tmux-heartbeat-self-continuation-design.md`. **Verdict**: the same `tmux send-keys` path that delivers Rick's voice messages can inject "keep going" as first-class input — no new poker needed; `_arm_idle_waiter` already IS the poker (just notifies Rick instead of nudging the worker). **Gate the poke on the Notification `idle_prompt` event** (safe-to-poke signal — fires when CC is parked at the prompt; its own output is discarded so it can't inject, only time). Pairs with `build_stop_block` (in-turn reflex, self-guarded) as the backstop. **6 open questions in the doc** — chiefly: (Q1) consecutive-poke ceiling/backoff, (Q2) work-pending signal source, (Q3) speakerphone posture for grind workers. Reconcile with the messaging-coordination plane (`2026.06.02-messaging-coordination-plane-design.md`) — may share infra. For Tiberius 👑 + María 🌸.
+
 ## 🟢 2026-06-02 (Tiberius 👑, session 1333e106) — Post-game consolidated + TTS cap shipped; next infra item pending Rick's pick
 
 **DONE today (checkpoint, NOT pushed):**
