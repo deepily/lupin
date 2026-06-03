@@ -93,3 +93,54 @@ def test_undelivered_requires_auth():
     """The pull endpoint rejects an unauthenticated request."""
     resp = requests.get( f"{BASE_URL}/api/notifications/undelivered", timeout=10 )
     assert resp.status_code in ( 401, 403 ), resp.text
+
+
+def test_age_cap_excludes_stale_undelivered():
+    """
+    Storm-guard regression (2026-06-03 incident): the undelivered drain MUST
+    exclude rows older than `notification undelivered max age hours` so a server
+    bounce / WS reconnect can never replay months-old notifications as a TTS storm.
+
+    DB-backed (mirrors the live probe that confirmed the fix): insert one FRESH
+    and one STALE (48h-old) undelivered row for the test user, then assert the
+    repo's get/count with a 24h cap returns ONLY the fresh row while the uncapped
+    query returns both. Self-cleaning in a finally block.
+
+    Venue: :8000 (mutates DB state; runs in-container where get_db reaches the DB).
+    """
+    import uuid
+    from sqlalchemy import text
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories.notification_repository import NotificationRepository
+
+    fresh_id = "0000aaaa-0000-0000-0000-0000000000f1"
+    stale_id = "0000aaaa-0000-0000-0000-0000000000f2"
+    probe    = ( "PROBE fresh", "PROBE stale" )
+
+    with get_db() as session:
+        row = session.execute( text( "SELECT id FROM users WHERE email = :e" ), { "e": _EMAIL } ).first()
+        assert row is not None, f"test user {_EMAIL} not found"
+        rid      = str( row[ 0 ] )
+        rid_uuid = uuid.UUID( rid )
+
+        try:
+            session.execute( text(
+                "INSERT INTO notifications "
+                "(id, sender_id, recipient_id, message, type, priority, created_at, response_requested, state, is_hidden) VALUES "
+                "(:fid,'probe',:rid,'PROBE fresh','task','high', now(),                    false, 'created', false), "
+                "(:sid,'probe',:rid,'PROBE stale','task','high', now() - interval '48 hours', false, 'created', false)"
+            ), { "fid": fresh_id, "sid": stale_id, "rid": rid } )
+            session.commit()
+
+            repo          = NotificationRepository( session )
+            no_cap_msgs   = sorted( n.message for n in repo.get_undelivered_for_recipient( rid_uuid )                  if n.message in probe )
+            capped_msgs   = sorted( n.message for n in repo.get_undelivered_for_recipient( rid_uuid, max_age_hours=24 ) if n.message in probe )
+            no_cap_count  = repo.count_undelivered_for_recipient( rid_uuid )
+            capped_count  = repo.count_undelivered_for_recipient( rid_uuid, max_age_hours=24 )
+
+            assert no_cap_msgs == [ "PROBE fresh", "PROBE stale" ], no_cap_msgs   # uncapped sees both
+            assert capped_msgs == [ "PROBE fresh" ], capped_msgs                  # cap excludes the stale row
+            assert no_cap_count >= capped_count + 1                               # dropping the cap re-adds >= the stale row
+        finally:
+            session.execute( text( "DELETE FROM notifications WHERE id IN (:fid, :sid)" ), { "fid": fresh_id, "sid": stale_id } )
+            session.commit()

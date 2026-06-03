@@ -10,10 +10,12 @@ Covers (all mocked — no DB, no server → :7999-eligible):
 The full DB- + WS-backed integration test runs on :8000 (scheduled).
 """
 
+import sys
 import uuid
 import types
 import asyncio
 import contextlib
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -40,8 +42,12 @@ def _fake_notif( **kw ):
 
 # ── repo query wiring ────────────────────────────────────────────────────────
 class _FakeQuery:
-    def __init__( self, result ): self.result = result
-    def filter( self, *a, **k ): return self
+    def __init__( self, result ):
+        self.result       = result
+        self.filter_calls = 0           # storm-guard: 1 base filter, +1 when age-capped
+    def filter( self, *a, **k ):
+        self.filter_calls += 1
+        return self
     def order_by( self, *a, **k ): return self
     def limit( self, n ): return self
     def all( self ): return self.result
@@ -49,21 +55,41 @@ class _FakeQuery:
 
 
 class _FakeSession:
-    def __init__( self, result ): self.result = result
-    def query( self, model ): return _FakeQuery( self.result )
+    def __init__( self, result ):
+        self.result     = result
+        self.last_query = None          # retained so tests can inspect filter wiring
+    def query( self, model ):
+        self.last_query = _FakeQuery( self.result )
+        return self.last_query
 
 
 class TestRepoQuery:
     def test_returns_session_query_result( self ):
         sentinel = [ _fake_notif(), _fake_notif() ]
-        repo = NotificationRepository( _FakeSession( sentinel ) )
+        sess = _FakeSession( sentinel )
+        repo = NotificationRepository( sess )
         out  = repo.get_undelivered_for_recipient( uuid.UUID( VALID_UUID ) )
         assert out == sentinel
+        assert sess.last_query.filter_calls == 1          # no age cap → base filter only
+
+    def test_get_applies_age_filter_when_capped( self ):
+        sess = _FakeSession( [ _fake_notif() ] )
+        repo = NotificationRepository( sess )
+        repo.get_undelivered_for_recipient( uuid.UUID( VALID_UUID ), max_age_hours=24 )
+        assert sess.last_query.filter_calls == 2          # base + created_at cutoff filter
 
     def test_count_returns_unbounded_total( self ):
         sentinel = [ _fake_notif(), _fake_notif(), _fake_notif() ]
-        repo = NotificationRepository( _FakeSession( sentinel ) )
+        sess = _FakeSession( sentinel )
+        repo = NotificationRepository( sess )
         assert repo.count_undelivered_for_recipient( uuid.UUID( VALID_UUID ) ) == 3
+        assert sess.last_query.filter_calls == 1          # no age cap → base filter only
+
+    def test_count_applies_age_filter_when_capped( self ):
+        sess = _FakeSession( [ _fake_notif() ] )
+        repo = NotificationRepository( sess )
+        repo.count_undelivered_for_recipient( uuid.UUID( VALID_UUID ), max_age_hours=24 )
+        assert sess.last_query.filter_calls == 2          # base + created_at cutoff filter
 
 
 # ── projection ───────────────────────────────────────────────────────────────
@@ -90,16 +116,23 @@ def _patch_db( monkeypatch, repo ):
     monkeypatch.setattr( nmod, "NotificationRepository", lambda session: repo )
     # get_local_timestamp() needs app/config context absent in a bare unit test.
     monkeypatch.setattr( nmod, "get_local_timestamp", lambda: "2026-06-02T00:00:00" )
+    # _undelivered_max_age_hours() reads main_module.config_mgr — stub it out.
+    monkeypatch.setattr( nmod, "_undelivered_max_age_hours", lambda: 24 )
 
 
 class TestUndeliveredEndpoint:
     def test_success( self, monkeypatch ):
-        repo = types.SimpleNamespace( get_undelivered_for_recipient=lambda rid, limit: [ _fake_notif(), _fake_notif() ] )
+        captured = {}
+        def _get( rid, limit, max_age_hours ):
+            captured[ "max_age_hours" ] = max_age_hours
+            return [ _fake_notif(), _fake_notif() ]
+        repo = types.SimpleNamespace( get_undelivered_for_recipient=_get )
         _patch_db( monkeypatch, repo )
         out = asyncio.run( nmod.get_undelivered_notifications( authenticated_user_id=VALID_UUID, limit=100 ) )
         assert out[ "status" ] == "success"
         assert out[ "undelivered_count" ] == 2
         assert len( out[ "notifications" ] ) == 2
+        assert captured[ "max_age_hours" ] == 24          # endpoint passes the configured cap through
 
     def test_bad_uuid_raises_400( self, monkeypatch ):
         with pytest.raises( HTTPException ) as exc:
@@ -107,7 +140,7 @@ class TestUndeliveredEndpoint:
         assert exc.value.status_code == 400
 
     def test_repo_error_raises_500( self, monkeypatch ):
-        def boom( rid, limit ):
+        def boom( rid, limit, max_age_hours ):
             raise RuntimeError( "db down" )
         repo = types.SimpleNamespace( get_undelivered_for_recipient=boom )
         _patch_db( monkeypatch, repo )
@@ -122,16 +155,40 @@ class TestComputeUndeliveredCount:
         @contextlib.contextmanager
         def fake_get_db():
             yield "SESSION"
+        captured = {}
+        def _count( rid, max_age_hours ):
+            captured[ "max_age_hours" ] = max_age_hours
+            return 3
         monkeypatch.setattr( dbmod, "get_db", fake_get_db )
         monkeypatch.setattr( repomod, "NotificationRepository",
-                             lambda session: types.SimpleNamespace( count_undelivered_for_recipient=lambda rid: 3 ) )
+                             lambda session: types.SimpleNamespace( count_undelivered_for_recipient=_count ) )
+        monkeypatch.setattr( wsmod, "_undelivered_max_age_hours", lambda: 24 )
         assert wsmod._compute_undelivered_count( VALID_UUID ) == 3
+        assert captured[ "max_age_hours" ] == 24          # count call carries the configured cap
 
-    def test_bad_uuid_returns_zero( self ):
+    def test_bad_uuid_returns_zero( self, monkeypatch ):
+        monkeypatch.setattr( wsmod, "_undelivered_max_age_hours", lambda: 24 )
         assert wsmod._compute_undelivered_count( "not-a-uuid" ) == 0
 
     def test_db_error_returns_zero( self, monkeypatch ):
         def boom():
             raise RuntimeError( "no db" )
+        monkeypatch.setattr( wsmod, "_undelivered_max_age_hours", lambda: 24 )
         monkeypatch.setattr( dbmod, "get_db", boom )
         assert wsmod._compute_undelivered_count( VALID_UUID ) == 0
+
+
+# ── undelivered age-cap resolver helpers (storm guard) ───────────────────────
+class TestUndeliveredMaxAgeHours:
+    def _fake_main( self, value ):
+        return types.SimpleNamespace(
+            config_mgr=types.SimpleNamespace( get=lambda key, default, return_type: value )
+        )
+
+    def test_notifications_helper_reads_config( self ):
+        with patch.dict( sys.modules, { "fastapi_app.main": self._fake_main( 24 ) } ):
+            assert nmod._undelivered_max_age_hours() == 24
+
+    def test_websocket_helper_reads_config( self ):
+        with patch.dict( sys.modules, { "fastapi_app.main": self._fake_main( 12 ) } ):
+            assert wsmod._undelivered_max_age_hours() == 12

@@ -1179,6 +1179,20 @@ def _project_undelivered_notification( n ) -> dict:
 
 # NOTE: this static route MUST be registered BEFORE "/notifications/{user_id}" so
 # FastAPI does not capture "undelivered" as a {user_id} path parameter.
+def _undelivered_max_age_hours() -> int:
+    """
+    Resolve the undelivered-drain age cap (hours) from config.
+
+    Storm guard (2026-06-03 incident): the durable-outbox drain must not replay
+    stale rows on reconnect. The cap bounds how far back the pull-able inbox
+    reaches. Runtime-tunable via the INI key.
+
+    Ensures:
+        - returns the configured int cap (default 24 hours)
+    """
+    import fastapi_app.main as main_module
+    return main_module.config_mgr.get( "notification undelivered max age hours", default=24, return_type="int" )
+
 @router.get(
     "/notifications/undelivered",
     summary     = "Get undelivered (missed) notifications",
@@ -1208,9 +1222,10 @@ async def get_undelivered_notifications(
         raise HTTPException( status_code=400, detail="authenticated user id is not a valid UUID" )
 
     try:
+        max_age_hours = _undelivered_max_age_hours()
         with get_db() as session:
             repo          = NotificationRepository( session )
-            items         = repo.get_undelivered_for_recipient( recipient_uuid, limit=limit )
+            items         = repo.get_undelivered_for_recipient( recipient_uuid, limit=limit, max_age_hours=max_age_hours )
             notifications = [ _project_undelivered_notification( n ) for n in items ]
         return {
             "status"            : "success",

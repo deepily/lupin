@@ -99,22 +99,39 @@ def get_app_debug():
     import fastapi_app.main as main_module
     return main_module.app_debug, main_module.app_verbose
 
+def _undelivered_max_age_hours() -> int:
+    """
+    Resolve the undelivered-drain age cap (hours) from config.
+
+    Storm guard (2026-06-03 incident): the durable-outbox drain must not replay
+    stale rows on reconnect. The cap bounds how far back the "N missed" count and
+    the pull-able inbox reach. Runtime-tunable via the INI key, mirroring the
+    TTS spoken-char-cap pattern.
+
+    Ensures:
+        - returns the configured int cap (default 24 hours)
+    """
+    import fastapi_app.main as main_module
+    return main_module.config_mgr.get( "notification undelivered max age hours", default=24, return_type="int" )
+
 def _compute_undelivered_count( user_id ) -> int:
     """
     Count the user's undelivered (missed-while-offline) notifications for the
     auth_success "N missed" surfacing (messaging-coordination plane, lever D).
 
     Ensures:
-        - returns the count of notifications in state created/queued for this user
+        - returns the count of notifications in state created/queued for this user,
+          bounded by the undelivered age cap (storm guard)
         - NEVER raises — returns 0 on any error (a count failure must not break auth)
     """
     try:
         import uuid as _uuid
         from cosa.rest.db.database import get_db
         from cosa.rest.db.repositories.notification_repository import NotificationRepository
+        max_age_hours = _undelivered_max_age_hours()
         with get_db() as session:
             repo = NotificationRepository( session )
-            return repo.count_undelivered_for_recipient( _uuid.UUID( str( user_id ) ) )
+            return repo.count_undelivered_for_recipient( _uuid.UUID( str( user_id ) ), max_age_hours=max_age_hours )
     except Exception:
         return 0
 

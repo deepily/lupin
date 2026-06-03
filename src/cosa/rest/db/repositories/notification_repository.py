@@ -6,7 +6,7 @@ including sender-based grouping and activity-anchored window loading.
 """
 
 from typing import Optional, List, Dict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 
 from sqlalchemy.orm import Session
@@ -316,7 +316,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.created_at.asc()
         ).all()
 
-    def get_undelivered_for_recipient( self, recipient_id: uuid.UUID, limit: int = 100 ) -> List[Notification]:
+    def get_undelivered_for_recipient( self, recipient_id: uuid.UUID, limit: int = 100, max_age_hours: Optional[int] = None ) -> List[Notification]:
         """
         Get the recipient's UNDELIVERED notifications (the pull-able AFK inbox).
 
@@ -325,49 +325,69 @@ class NotificationRepository( BaseRepository[Notification] ):
         is what the user "missed" while offline. This is the durable, pull-able
         record so a returning/AFK user can recover what a failed push dropped.
 
+        The `max_age_hours` cap is the structural guard against the durable-outbox
+        drain replaying STALE rows as a TTS storm on reconnect (the 2026-06-03
+        incident: a server bounce drained months-old undelivered rows). When set,
+        only rows newer than the cutoff are returned — applies to today's backlog
+        AND any future row that goes stale-while-undelivered (live-path coverage).
+
         Requires:
             - recipient_id: Valid user UUID
+            - max_age_hours: None (no age cap) or a positive int (hours)
 
         Ensures:
             - Returns notifications with state in ('created', 'queued') ONLY
               (excludes delivered / responded / expired)
             - Excludes soft-deleted/archived rows (is_hidden = True)
+            - When max_age_hours is set, excludes rows older than that many hours
             - Ordered by created_at ascending (oldest-first — FIFO recovery)
             - Honors limit
 
         Returns:
             List of undelivered Notification instances
         """
-        return self.session.query( Notification ).filter(
+        query = self.session.query( Notification ).filter(
             Notification.recipient_id == recipient_id,
             Notification.state.in_( [ 'created', 'queued' ] ),
             Notification.is_hidden == False
-        ).order_by(
+        )
+        if max_age_hours is not None:
+            cutoff = datetime.now( timezone.utc ) - timedelta( hours=max_age_hours )
+            query  = query.filter( Notification.created_at >= cutoff )
+        return query.order_by(
             Notification.created_at.asc()
         ).limit( limit ).all()
 
-    def count_undelivered_for_recipient( self, recipient_id: uuid.UUID ) -> int:
+    def count_undelivered_for_recipient( self, recipient_id: uuid.UUID, max_age_hours: Optional[int] = None ) -> int:
         """
         Count the recipient's UNDELIVERED notifications (lever D — accurate "N missed").
 
         Unlike `get_undelivered_for_recipient` (which caps at `limit` for paging), this
         is an UNBOUNDED count, so the auth_success "N missed" surfacing is not silently
-        capped at the page size.
+        capped at the page size. The `max_age_hours` cap mirrors the getter so the
+        surfaced "N missed" count matches what is actually pullable (no phantom count
+        of stale rows the getter would skip — and no stale-backlog storm trigger).
 
         Requires:
             - recipient_id: Valid user UUID
+            - max_age_hours: None (no age cap) or a positive int (hours)
 
         Ensures:
             - counts notifications in state 'created'/'queued', excluding is_hidden
+            - When max_age_hours is set, excludes rows older than that many hours
 
         Returns:
             int — the undelivered count
         """
-        return self.session.query( Notification ).filter(
+        query = self.session.query( Notification ).filter(
             Notification.recipient_id == recipient_id,
             Notification.state.in_( [ 'created', 'queued' ] ),
             Notification.is_hidden == False
-        ).count()
+        )
+        if max_age_hours is not None:
+            cutoff = datetime.now( timezone.utc ) - timedelta( hours=max_age_hours )
+            query  = query.filter( Notification.created_at >= cutoff )
+        return query.count()
 
     def get_expired_notifications( self ) -> List[Notification]:
         """
