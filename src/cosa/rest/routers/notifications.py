@@ -264,6 +264,44 @@ def resolve_sender_id( explicit_sender_id: Optional[str], message: str ) -> str:
 # Internally, the config system uses 'global_notification_recipient' to support
 # future multi-recipient routing. This naming mismatch is intentional.
 # API stability takes precedence over naming consistency.
+def _persist_notification_sync(
+    resolved_sender_id, target_system_id, message, type, priority, title,
+    abstract, parsed_response_options, job_id, progress_group_id, is_connected
+):
+    """
+    Synchronous DB persist for notify_user — run OFF the event loop via
+    asyncio.to_thread (lever B, messaging-coordination plane).
+
+    Moving this blocking DB I/O off the single async event loop stops the notify
+    path from stalling every other request under fleet load (the FM-7 black-hole).
+
+    Ensures:
+        - creates the Notification row; marks it 'delivered' when is_connected
+        - returns the new notification id (str)
+
+    Raises:
+        - propagates DB errors to the caller (handled there as non-fatal)
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        db_notification = repo.create_notification(
+            sender_id          = resolved_sender_id,
+            recipient_id       = uuid.UUID( target_system_id ),
+            message            = message.strip(),
+            type               = type,
+            priority           = priority,
+            title              = title,
+            abstract           = abstract,
+            response_options   = parsed_response_options,
+            job_id             = job_id,
+            progress_group_id  = progress_group_id
+        )
+        nid = str( db_notification.id )
+        if is_connected:
+            repo.update_state( db_notification.id, "delivered" )
+        return nid
+
+
 @router.post(
     "/notify",
     summary     = "Send notification",
@@ -437,6 +475,18 @@ async def notify_user(
     # Resolve sender_id using precedence: explicit > extracted from [PREFIX] > default
     resolved_sender_id = resolve_sender_id( sender_id, message )
 
+    # Lever E (messaging plane): per-session backpressure. Over the cap → 429 +
+    # Retry-After; the caller's durable outbox honors it (queue + retry, never lost),
+    # so a throttled runaway worker is slowed without dropping the message.
+    from cosa.rest.notify_rate_limiter import check_notify_allowed
+    _bp_allowed, _bp_retry = check_notify_allowed( resolved_sender_id )
+    if not _bp_allowed:
+        raise HTTPException(
+            status_code = 429,
+            detail      = "notify rate limit exceeded",
+            headers     = { "Retry-After": str( int( _bp_retry ) + 1 ) },
+        )
+
     # Log notification (existing logging system)
     mode = "response-required" if response_requested else "fire-and-forget"
     print(f"[NOTIFY] Claude Code notification ({mode}): {type}/{priority} - {message}")
@@ -525,28 +575,18 @@ async def notify_user(
                         print( f"[NOTIFY] Idempotency hit: {idempotency_key} — returning cached response" )
                         return cached_response
 
-            # 1. Persist to PostgreSQL (unconditionally — preserves notification history)
+            # 1. Persist to PostgreSQL (unconditionally — preserves notification history).
+            #    Lever B (messaging plane): run the blocking DB I/O OFF the event loop
+            #    via asyncio.to_thread so a slow DB under fleet load can't stall the
+            #    notify path (and every other request sharing the loop) — the FM-7 fix.
             db_notification_id = None
             try:
-                with get_db() as session:
-                    repo = NotificationRepository( session )
-                    db_notification = repo.create_notification(
-                        sender_id        = resolved_sender_id,
-                        recipient_id     = uuid.UUID( target_system_id ),
-                        message          = message.strip(),
-                        type             = type,
-                        priority         = priority,
-                        title            = title,
-                        abstract         = abstract,
-                        response_options   = parsed_response_options,
-                        job_id             = job_id,
-                        progress_group_id  = progress_group_id
-                    )
-                    db_notification_id = str( db_notification.id )
-                    # Update state to delivered if user is connected
-                    if is_connected:
-                        repo.update_state( db_notification.id, "delivered" )
-                    print( f"[NOTIFY] ✓ Persisted notification {db_notification.id} to PostgreSQL" )
+                db_notification_id = await asyncio.to_thread(
+                    _persist_notification_sync,
+                    resolved_sender_id, target_system_id, message, type, priority,
+                    title, abstract, parsed_response_options, job_id, progress_group_id, is_connected
+                )
+                print( f"[NOTIFY] ✓ Persisted notification {db_notification_id} to PostgreSQL" )
 
             except Exception as db_error:
                 # Log but don't fail - FIFO queue is the primary delivery mechanism

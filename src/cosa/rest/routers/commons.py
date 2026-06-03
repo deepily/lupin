@@ -20,6 +20,7 @@ Design split:
   integration tests do NOT contribute to the gate").
 """
 
+import asyncio
 import hashlib
 import json
 import re
@@ -1179,7 +1180,11 @@ async def post_broadcast_to_cc_sessions(   # pragma: no cover
     notification_queue=Depends( get_notification_queue ),
 ) -> JSONResponse:
     _require_initialized()
-    result = execute_broadcast(
+    # Lever B (messaging plane): run the blocking store-write + fan-out I/O OFF the
+    # event loop (asyncio.to_thread) so the commons-broadcast flood can't stall the
+    # shared :7999 loop under fleet load (the other named FM-7 contributor).
+    result = await asyncio.to_thread(
+        execute_broadcast,
         authenticated_user_id            = authenticated_user_id,
         body                             = body,
         store                            = _commons_store,

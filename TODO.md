@@ -23,7 +23,10 @@
 > Queue for `/plan-decide` (the **guided-decision-walkthrough** skill). One-line topics; the skill frames each live with pros/cons + a recommendation, descending priority. Detail lives in the linked design docs.
 
 **Messaging-coordination plane (P0)** — ✅ **ALL 7 RESOLVED 2026-06-02 via `/plan-decide`** (Rick ratified every recommendation). Source `src/rnd/v0.1.8/2026.06.02-messaging-coordination-plane-design.md` (§ Ratified Decisions). Rulings in the Decisions Log below.
-- **Implementation queue (Rick-cleared):** Phase 1 = **lever A durable outbox** → then D pull-able inbox → B loop de-blocking → C express lane → E backpressure. In-process, no broker. Each phase independently shippable + 100%-covered.
+- **Implementation queue — ✅ ALL 5 LEVERS COMPLETE:** A durable outbox · D pull-able inbox · B loop de-block · C express lane · E backpressure. In-process, no broker. **A ✅ · D ✅ (committed `722e624`, :8000 integration 2/2) · B ✅ · C ✅ · E ✅** — 990 unit tests green, no regressions. B/C/E committed in the wrap-up checkpoint.
+
+**Messaging plane — follow-on (deferred design decision):**
+- [ ] **[LUPIN] Lever B comprehensive sweep** — revisit moving ALL remaining sync DB/file I/O off the event loop (beyond the surgical hot-handler fix), after measuring whether colder paths still stall under load. Deferred per Rick 2026-06-02; surgical fix lands first.
 
 ## Decisions Log
 
@@ -44,6 +47,9 @@
 - 2026-06-02 — MP-C load isolation → C1 in-process express/priority lane for interactive notify/ask. Why: keep Rick's voice alive during a fleet storm.
 - 2026-06-02 — MP-E backpressure → E1 per-source cap + 429/retry-after. Why: shed excess fleet load gracefully; outbox honors retry-after.
 - 2026-06-02 — MP-Order rollout → A→D→B→C→E. Why: A+D first retire the silent-loss class at lowest risk; each phase independently shippable.
+- 2026-06-02 — Lever B (loop de-block) scope → **SURGICAL** (hottest handlers first: notify DB-persist + commons file writes via `run_in_executor`), NOT a comprehensive sweep. Why: lowest blast radius; targets the FM-7 hot paths; measure then expand. (Revisit item filed in Pending Decisions.)
+- 2026-06-02 — Lever C (express lane) signal → **PRIORITY field** (high/urgent = express, low/medium = normal). Why: the speakerphone rider already sets interactive notifies to high; zero new concept.
+- 2026-06-02 — Lever E (backpressure) source → **PER-SESSION by `sender_id`**; values in `lupin-app.ini` (per-session cap + window + retry-after), runtime-tunable (mtime-gated) + splainer. Why: isolates a runaway worker without throttling the user's interactive session.
 
 ## 🚀 ACTIVE (2026-05-30) — GCP deployment: local-dev → GCP-TEST migration (Milestone 1)
 
