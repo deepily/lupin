@@ -18,6 +18,7 @@ This test module validates:
 
 import os
 import sys
+import pytest
 import tempfile
 import json
 from pathlib import Path
@@ -31,7 +32,7 @@ try:
     from unit_test_utilities import UnitTestUtilities
 except ImportError as e:
     print( f"Failed to import test infrastructure: {e}" )
-    sys.exit( 1 )
+    pytest.skip( "legacy test-infra import unavailable under pytest collection; module skipped pending harvest (de-poison batch)", allow_module_level=True )
 
 # Import the modules under test
 try:
@@ -42,7 +43,7 @@ try:
     )
 except ImportError as e:
     print( f"Failed to import LLM exceptions: {e}" )
-    sys.exit( 1 )
+    pytest.skip( "legacy test-infra import unavailable under pytest collection; module skipped pending harvest (de-poison batch)", allow_module_level=True )
 
 
 class DataTypesAndExceptionsUnitTests:

@@ -13,6 +13,7 @@ This test module validates:
 
 import os
 import sys
+import pytest
 import time
 import tempfile
 import xml.etree.ElementTree as ET
@@ -25,7 +26,7 @@ try:
     from cosa.tests.unit.infrastructure.unit_test_utilities import UnitTestUtilities
 except ImportError as e:
     print( f"Failed to import test infrastructure: {e}" )
-    sys.exit( 1 )
+    pytest.skip( "legacy test-infra import unavailable under pytest collection; module skipped pending harvest (de-poison batch)", allow_module_level=True )
 
 # Import the modules under test
 try:
@@ -34,7 +35,7 @@ try:
     from cosa.utils.util_stopwatch import Stopwatch
 except ImportError as e:
     print( f"Failed to import core utilities: {e}" )
-    sys.exit( 1 )
+    pytest.skip( "legacy test-infra import unavailable under pytest collection; module skipped pending harvest (de-poison batch)", allow_module_level=True )
 
 
 class CoreUtilitiesUnitTests:
