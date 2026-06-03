@@ -5,11 +5,20 @@
 # password is read from Secret Manager at apply — never in tfvars or as a plaintext
 # input. Schema is created by the pre-deploy Alembic step (NOT auto-on-startup).
 
-data "google_secret_manager_secret_version" "db_password" {
+# DB password: GENERATED here and written as a version on the lupin-db-password
+# secret (the empty container is created by the secret-manager module). This avoids
+# the chicken-egg of reading a secret version that doesn't exist yet; the app reads
+# this same version at runtime. Never appears in tfvars (only in state).
+resource "random_password" "db" {
   count   = var.create_instance ? 1 : 0
-  project = var.project_id
-  secret  = var.db_password_secret_id
-  version = "latest"
+  length  = 24
+  special = false
+}
+
+resource "google_secret_manager_secret_version" "db_password" {
+  count       = var.create_instance ? 1 : 0
+  secret      = "projects/${var.project_id}/secrets/${var.db_password_secret_id}"
+  secret_data = random_password.db[0].result
 }
 
 resource "google_sql_database_instance" "pg16" {
@@ -23,6 +32,7 @@ resource "google_sql_database_instance" "pg16" {
 
   settings {
     tier              = var.tier
+    edition           = "ENTERPRISE" # db-custom-* tiers require ENTERPRISE; ENTERPRISE_PLUS only allows db-perf-optimized-*
     availability_type = var.availability_type
 
     ip_configuration {
@@ -63,5 +73,5 @@ resource "google_sql_user" "app_user" {
   project  = var.project_id
   name     = var.db_user
   instance = google_sql_database_instance.pg16[0].name
-  password = data.google_secret_manager_secret_version.db_password[0].secret_data
+  password = random_password.db[0].result
 }

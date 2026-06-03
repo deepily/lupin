@@ -63,7 +63,11 @@ module "cloud_sql" {
   environment       = var.environment
   network_self_link = var.app_vpc_self_link
 
-  depends_on = [google_service_networking_connection.private_services]
+  # Private IP needs the peering first; the db-password version needs the secret container.
+  depends_on = [
+    google_service_networking_connection.private_services,
+    module.secret_manager,
+  ]
 }
 
 module "onprem_vpn" {
