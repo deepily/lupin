@@ -232,10 +232,11 @@ RUN python /tmp/patch-pytest-playwright-visual-snapshot.py
 RUN curl -fsSL https://d2lang.com/install.sh | sh
 
 # ----------------------------------------------------------------------------
-# Claude Code CLI (Tier 2 will switch to signed apt repo)
-# Installer respects $HOME — writes to /home/rruiz/.local/bin (rruiz-owned).
+# Claude Code CLI — symlinked from the claude-agent-sdk bundled binary
+# (pinned via uv.lock). One hash-pinned binary serves both the SDK runtime
+# and interactive `claude`; no drift, no extra fetch.
 # ----------------------------------------------------------------------------
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN ln -sf "$(python -c 'import claude_agent_sdk as m, pathlib as p; print(p.Path(m.__file__).parent / "_bundled" / "claude")')" /home/rruiz/.local/bin/claude
 
 # ----------------------------------------------------------------------------
 # Runtime configuration
