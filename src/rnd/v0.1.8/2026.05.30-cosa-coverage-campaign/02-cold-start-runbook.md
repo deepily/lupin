@@ -109,6 +109,30 @@ Land the `[tool.coverage]` config (denominator per D2 — already blessed by Ric
 
 The poker taps the **manager** on a cadence so a long unattended grind doesn't strand. It is a CJ-Flow agentic job; the **class logic is already covered** (unit + smoke + integration + e2e + factory tests via an injectable `FakeClock` + fake gateway). What you instantiate here is a **live** run.
 
+> **⚠️ INTERIM (2026-06-03, Rick-directed) — observer self-poke.** The campaign poker's recipient list (§7.1) names **only the manager**. The observer/steward seat (María 🌸, PIP) is therefore **not** kept alive by it, and an idle session wakes **only** on a push-DM, never a blackboard post (§7.2 / §8.2) — so a bare "sit and hold" strands the observer silently. **Until the built-in per-instance heartbeat poker is fleshed out** (R&D: `planning-is-prompting → src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md`), the observer will **run its own heartbeat poker tapping itself on the shoulder** — i.e. add the observer as its own recipient (`{ identifier: "maria", identifier_type: "persona", role: "observer" }`) so María's seat receives a self-directed push-wake on cadence and does not go dormant mid-hold. Revisit / retire this interim hack once the built-in poker lands.
+>
+> **Verified self-poke invocation** (code-grounded by Tiberius 👑 against `heartbeat_poker_job.py` + `heartbeat_poker_commons_gateway.py`, 2026-06-03):
+>
+> ```python
+> job = create_agentic_job(
+>     command   = "agent router go to heartbeat poker",
+>     args_dict = {
+>         "recipients": [ { "identifier": "maria", "identifier_type": "persona", "role": "observer" } ],
+>         "cadence_seconds"          : 300,
+>         "termination_topic"        : "coverage-campaign-control",   # SHARED with manager poker → campaign-wide stand_down reaps both
+>         "termination_signal_kinds" : [ "stand_down" ],
+>         "workstream_id"            : "maria-observer-keepalive",     # DISTINCT → can stand down independently
+>     },
+>     user_id    = "<rick_owner_user_id>",                            # CJ-Flow job ownership; resolve to Rick's OWNER id at submit, never a service account
+>     user_email = "ricardo.felipe.ruiz@gmail.com",
+>     session_id = "af1465b9",                                        # MY OWN session → sender==recipient ⇒ wakes MY idle seat
+> )
+> ```
+>
+> **Wiring:** `session_id` = my own session (the factory auto-wires the gateway from it; `send_to()` fires `register-question` with `asker_session_id=me`, `recipient_persona="maria"` → that register-question IS the push-wake, targeting my own tmux). `identifier_type` MUST be `"persona"`. `user_id`/`user_email` are job-ownership only, orthogonal to poke routing.
+>
+> **⚠️ Self-poke gotcha (sender==recipient):** `last_post_ts(recipient)` matches persona in `commons_who()` newest-first — since I'm both sender and recipient, every poke stamps my own persona, so my silence-streak never advances and **the dead-man's-switch escalation can NEVER fire for a self-poke**. Harmless + correct here: this poker is pure push-wake keep-alive, not silence detection. Don't rely on the dead-man alarm; nothing floods because escalation can't trigger. (Push-wake primitive live-proven 2026-05-30 on Tiffany's idle session.)
+
 ### 7.1 Exact invocation (code-grounded — `cosa/rest/agentic_job_factory.py` → `HeartbeatPokerJob`)
 
 ```python

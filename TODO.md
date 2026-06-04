@@ -1,19 +1,65 @@
 # TODO
 
+## ⏸️▶ 2026-06-04 RESUME-HERE (Tiberius 👑, session 1333e106) — picked up after Rick's end-of-session shutdown
+
+> Written 2026-06-03 PM at Rick's "note where you are so we can pick up tomorrow" broadcast. Full rehydration memento: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/27-tiberius-rehydration-memento-2026.06.03-pm.md`. Session-end state: my docs committed + branch PUSHED + backup done (Tiberius exempted from the no-push/no-backup rule); signalled María to run the global roll-ups after me.
+
+**▶ START HERE TOMORROW (descending priority):**
+1. **🔝 Rick's NEW WORKFLOW IDEA** — still un-described. ASK Rick to describe it, then capture + divide hub-spoke with María 🌸. (The reason I was standing by when shutdown was called.)
+2. ~~Rachel's B3 — `notifications.py:1291` re-raise~~ → **DONE by Rachel** (`bbde599`); tree back to **100%**. Harvest now unblocked. (See Rachel's block immediately below.)
+3. **Harvest (parked, proven SAFE — now UNBLOCKED)** — delete the 4 redundant legacy agent test files (weather / math / date_and_time / token_counter; `test_agents_root_tail.py` is the real coverage-bearer). Tree is green → commit after a Krishna APPROVE.
+4. **E2E `:8000` (`ts-e1d42153`, scope `e2e`, auto_fix=False)** — CHECK result on resume.
+5. **Optional T6 test** (Krishna non-blocking nit) — concurrent `register_question` double-insert guard (`commons_question_watcher.py:202`). Belt+suspenders.
+6. **Standing gate**: Krishna 🦚 reviews ALL code before commit — no self-exemption. Never prompt Rick about pushing.
+
+---
+
+## 🕊️ 2026-06-03 RACHEL (session 7bca7a96) — RESUME HERE TOMORROW
+
+**Shipped, reviewer-cleared, COMMITTED locally (`bbde599` on wip-v0.1.8, NOT pushed — held for María's push wave + Rick's word):**
+- Missed-badge **Reset button** + logout dead-onclick-global fix (earlier commit `c0db33d`).
+- **Confidence-overflow "22123%" fix** — clamp `similarity_pct` to [0,100] at the dot-metric boundary.
+- **Send-bar code-fence rendering** — `renderMarkdownInline` delegates ```-fenced text to the block renderer.
+- **Prediction-hint thumbs 👍🏼/👎🏼 → training signal** (Rick's feature): ratification-aware CBR weighting (approve boosts; downvote = negative vote / steer-away) + `POST /api/notify/prediction-vote/{id}` + `record_hint_vote` + UI controls + 4 INI keys.
+- **Fixed `notifications.py:1291`** (dismiss endpoint dead `except HTTPException: raise`, Tiberius's catch) → tree back to 100%. *(→ Tiberius's "[ ] Cover notifications.py:1291" item below is DONE.)*
+- Krishna 🦚 APPROVED (B1/B2/N1/B3 closed); vote-flow E2E green (`ts-852bb878`, 2/2); `prediction_engine.py` 100% line+branch.
+
+**PICK UP TOMORROW:**
+- [ ] **[LUPIN]** PUSH `bbde599` (held for María's push wave + Rick's word — do NOT push solo).
+- [ ] **[LUPIN]** Thumbs-vote **Stage 3**: extend ratification weighting to multi-select + open-ended paths (Stage 1 covered yes_no + MC single-select only); add a :8000 integration test (DB-backed 👍 → approved case steers a later prediction; 👎 → steer-away).
+- [ ] **[LUPIN]** Tidy (Krishna non-blocking nit): `MIN_PCT=50` hardcoded in `notifications.js` mirrors the INI `prediction hint vote min confidence threshold` — fold the threshold into the hint payload / expose to client so they can't drift.
+- [ ] **[LUPIN]** Still mine (PG-D4): Global hermetic-config autouse fixture (FM-21) — design + isolation-verify; land only on a clean full-suite gate.
+
+Design docs: `src/rnd/v0.1.8/2026.06.03-prediction-hint-thumbs-vote-training-signal.md`, `src/rnd/v0.1.8/2026.06.03-notification-markdown-and-confidence-overflow-fixes.md`.
+
+---
+
 ## ✅🏁 2026-06-03 CoSA COVERAGE MARATHON — COMPLETE (Tiberius 👑, session 1333e106)
 
 **DONE:** `cosa` 100% line+branch+function tree-wide (412 files, 0 miss / 0 partial); 11 test-only commits HELD on `wip-v0.1.8` (`d75bb69`→`e70e02e`), Krishna 8/8 reviewer-clean, certified + steward-ratified. Full record: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/23-overnight-grind-certified-complete.md`.
 
-**🔁 RICK'S MORNING GATE (none blocked the marathon — all deferred-by-design):**
-- [ ] **[LUPIN]** PUSH the 11 held CoSA commits (Rick's call).
-- [ ] **[LUPIN]** PROD BUG (a): `dispatcher.py` uninitialized `self.debug` → AttributeError on interactive rate-limit. Fix: add `debug: bool = False` to `ClaudeCodeDispatcher.__init__`. Pinned, not fixed.
-- [ ] **[LUPIN]** PROD BUG (b) #12: `cosa_interface.ask_yes_no` → missing `_dispatcher.ask_yes_no` on AgentNotificationDispatcher. strict-xfail-pinned; fix method + de-arm xfail.
-- [ ] **[LUPIN]** Harvest-block deletions — superseded `quick_smoke_test`/`__main__` blocks (crud/job/orchestration) + redundant shallow legacy agent test files. One consolidated pass.
-- [ ] **[LUPIN]** Global hermetic-config autouse fixture (FM-21 systemic kill) — design + isolation-verify before landing, else defer (María's verified-or-deferred ruling).
-- [ ] **[LUPIN]** Stale CLAUDE.md §PROJECT STRUCTURE — `src/cosa/app/` no longer exists; correct it.
-- [ ] **[LUPIN]** io_files watch-note (doc 90) — candidate FM-22 (order/loop-state flakiness); promote only on recurrence WITH captured `--tb=long`.
-- [ ] **[LUPIN]** Optional: `:8000`-scheduled integration/E2E tier (all-tiers beyond unit) — needs Rick's slot.
-- [ ] **[LUPIN]** HYGIENE: `.claude-session.md` (412KB) + `TODO.md` (273KB) badly bloated — run dedicated size-management (todo-size-management skill + manifest prune).
+**🔁 RICK'S MORNING GATE — session 1333e106 progress (2026-06-03):**
+- [x] **[LUPIN]** PUSH the marathon CoSA commits — DONE (on origin; branch 0 ahead / 0 behind, git-verified).
+- [x] **[LUPIN]** PROD BUG (a): `dispatcher.py` uninitialized `self.debug` — FIXED + de-armed (commit `71d0645`); 2 tests cover both debug arms.
+- [x] **[LUPIN]** PROD BUG (b) #12: `cosa_interface.ask_yes_no` → missing `_dispatcher.ask_yes_no` — FIXED (delegates to real `ask_confirmation`) + strict-xfail de-armed (commit `71d0645`).
+- [x] **[LUPIN]** Stale CLAUDE.md §PROJECT STRUCTURE — FIXED (11 real `cosa` source dirs; deleted `app` removed; commit `7526700`); María mirroring the block into PIP.
+- [ ] **[LUPIN]** Global hermetic-config autouse fixture (FM-21) — **Rachel's lane** per PG-D4 (design + isolation-verify; land only on a clean full-suite gate).
+- [ ] **[LUPIN]** io_files watch-note (doc 90) — candidate FM-22; promote only on recurrence WITH captured `--tb=long`. (Monitor.)
+- [~] **[LUPIN]** `:8000` integration/E2E tier — **E2E SCHEDULED** this session (job `ts-e1d42153`, scope `e2e`, `auto_fix=False`); result pending.
+- [ ] **[LUPIN]** HYGIENE: `.claude-session.md` (412KB) + `TODO.md` (273KB) bloat — dedicated size-management (deferred per PG-D4 ruling).
+
+**🔧 RELOCATE PASS — MISDIAGNOSED; corrected (1333e106):**
+> CORRECTION: the 1-statement gap was NOT stray agent coverage. `--cov-report=term-missing` + `git blame` proved the missing line is `notifications.py:1291` (the `except HTTPException: raise` in the new dismiss endpoint), added by **Rachel's `c0db33d`** — unrelated to the harvest. The 4-file agent harvest is coverage-SAFE (agent modules stay 100%). My earlier "stray cross-tree incidental coverage" theory was a confabulation (theorized before reading the line). Corrected lesson: doc 26 §6.
+- [x] **[LUPIN]** Found the lost statement: `notifications.py:1291`, owner = Rachel's `c0db33d` (NOT agent tests).
+- [ ] **[LUPIN]** Cover `notifications.py:1291` (dismiss endpoint re-raise) — **Rachel's lane**, under Krishna review; flagged to her with the exact fix. Tree is 99% until done.
+- [ ] **[LUPIN]** Harvest (now proven safe) — delete the 4 redundant legacy agent test files; commit ONLY once tree is green (Rachel's line covered) + Krishna review. Lower priority.
+
+**🤝 NEW (1333e106) — coordinate with María on Rick's new workflow idea:**
+- [ ] **[LUPIN]** Coordinate with María 🌸 on Rick's **new workflow idea** (idea TBD — Rick to specify; then capture + divide with María per the hub-spoke pattern). Placeholder added 2026-06-03 at Rick's request.
+
+**🧵 FM-7 :7999 fix follow-up (1333e106):**
+- [x] **[LUPIN]** Offload 3 blocking commons handlers to `asyncio.to_thread` (get_active_sessions / get_broadcast_history / post_register_question) — Krishna-APPROVED, committed `21af084`. Removes residual sync bridge I/O from the shared event loop (FM-7 / §13B saturation).
+- [ ] **[LUPIN]** OPTIONAL belt+suspenders (Krishna's non-blocking nit): unit test asserting two concurrent `register_question` calls under a stubbed cap don't double-insert — pins the T6 lock invariant (`commons_question_watcher.py:202`) now that `to_thread` permits true concurrent registration. Not a blocker; the path is lock-safe by construction.
 
 ---
 
@@ -29,6 +75,25 @@
 - [ ] **[LUPIN]** PUSH the held GCP commits (Lupin `baba032`→`32c0373`; `terraforming-vms` wip-2026.06.02-deploying-lupin-to-gcp: `9310741`, `7304dab`) — awaiting Rick's word.
 
 Filed 2026-06-03 by Mr. Radio 🦉 at Rick's request.
+
+## 🎙️ 2026-06-03 SESSION-END (Sam 🎙️, session 68ecdfb8) — GCP M1: SDK 0.2.88 + bundled-CLI + cloud-test compose; lupin:1.1.0 built & verified
+
+**✅ DONE (committed `2637e01`, 6 files, UNPUSHED — per Rick's no-push session-end):**
+- Guided 5-decision walkthrough → plan + decisions log: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.03-m1-vm-bringup-plan.md`. Decisions: full cutover · ratify standalone-VM architecture · **mount model** (bind-mount `./src` on the VM, NOT bake) · keys = manual scp interim · CC OAuth = manual setup-token + re-auth · Secure Boot stays OFF this milestone (COS signed-driver image = untried/viable).
+- `claude-agent-sdk` 0.1.56→**0.2.88**; `uv.lock` regenerated (only SDK changed); Dockerfile CC CLI `curl|bash` → **symlink to SDK-bundled `_bundled/claude`** (CLI 2.1.161).
+- `docker-compose.cloud-test.yml` — Cloud SQL **Auth Proxy sidecar** (unix socket) + mount-model app (`LUPIN_CLOUD_BACKED` + Testing-GCS) + GPU model-server (cuda:0); +8 unit tests (`src/tests/unit/deploy/test_cloud_test_compose.py`), all green.
+- **`lupin:1.1.0` built + verified** (candidate tag; working `1.0.0` untouched): `claude --version`→2.1.161 via symlink; SDK + all 7 CC call-site symbols import; full app import OK (168 routes); compose lints.
+
+**🔁 RESUME HERE (continues Mr. Radio's GCP RETURN-TO above):**
+- [ ] **[LUPIN]** PUSH commit `2637e01` (+ Mr. Radio's held GCP commits) — awaiting Rick's word.
+- [ ] **[LUPIN]** Rick: generate CC OAuth token (`claude setup-token` on home box) → seed into the VM like the keys.
+- [ ] **[LUPIN]** Phase B — repoint data-plane IAM to `vm_sa` (TF `coalesce(external_vm_sa_email, runtime_sa)`; plan §Phase B).
+- [ ] **[LUPIN]** Phase D2 — push `lupin:1.1.0` to `lupin-images` (secret-scan gate).
+- [ ] **[LUPIN]** Phase E — VM bring-up: clone repo to data disk, `chown -R 1001:1001`, scp keys, fetch `DB_PASSWORD`, `docker compose -f docker-compose.cloud-test.yml up`.
+- [ ] **[LUPIN]** Decide model double-load on the single L4 (flip `speech to text provider = model-server` in Testing-GCS so the app defers to the model-server) — plan open item.
+- [ ] **[LUPIN]** Phase G — full uvicorn boot + `/health` + bounded-CC-job E2E (needs GPU + token; user-run or at deploy).
+
+Filed 2026-06-03 by Sam 🎙️ at Rick's session-end request.
 
 ## 🔵 2026-06-03 FOLLOW-UP (Rachel 🕊️, session 624abe39) — tmux heartbeat / self-continuation for grind workers
 
