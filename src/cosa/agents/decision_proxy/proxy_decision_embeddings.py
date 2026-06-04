@@ -228,9 +228,15 @@ class ProxyDecisionEmbeddings:
 
             similar = []
             for record in results:
-                # With dot metric: _distance = 1 - dot_product (lower = more similar)
+                # With dot metric: _distance = 1 - dot_product (lower = more similar).
+                # The dot product is only bounded to [-1, 1] for UNIT-normalized
+                # vectors; when stored/query vectors are not unit-norm, _distance can
+                # fall outside [0, 1], so ( 1 - distance ) * 100 can exceed 100 or go
+                # negative. Clamp to the [0, 100] percentage contract at this boundary
+                # so every downstream consumer ( similarity_pct / 100 → confidence ) stays
+                # in [0, 1]. An unclamped value is what produced the "22123%" hint bug.
                 distance       = record.get( "_distance", 0.0 )
-                similarity_pct = ( 1.0 - distance ) * 100
+                similarity_pct = max( 0.0, min( 100.0, ( 1.0 - distance ) * 100 ) )
 
                 if similarity_pct >= ( threshold * 100 ):
                     # Remove LanceDB internal fields from record
@@ -250,6 +256,26 @@ class ProxyDecisionEmbeddings:
         except Exception as e:
             if self.debug: print( f"[ProxyDecisionEmbeddings] find_similar failed (non-fatal): {e}" )
             return []
+
+    def exists( self, id ) -> bool:
+        """
+        Return True iff a decision with this id is present in the table.
+
+        Lets callers choose the proven insert path (add_decision) vs the proven update
+        path (update_ratification_state) for an idempotent upsert, without a manual
+        merge_insert (which risks embedding-column schema coercion on a fresh insert).
+
+        Ensures:
+            - returns False on any error or missing table (never raises)
+        """
+        try:
+            if not self._ensure_table():
+                return False
+            escaped = id.replace( "'", "''" )
+            return len( self._table.search().where( f"id = '{escaped}'" ).limit( 1 ).to_list() ) > 0
+        except Exception as e:
+            if self.debug: print( f"[ProxyDecisionEmbeddings] exists check failed: {e}" )
+            return False
 
     def update_ratification_state( self, id, new_state ):
         """

@@ -14,6 +14,16 @@ DEFAULT_CBR_TOP_K              = 5
 DEFAULT_CBR_SIMILARITY_THRESHOLD = 0.75
 DEFAULT_CONFIDENCE_THRESHOLD   = 0.60
 
+# Prediction-hint thumbs up/down voting → human-confirmed training signal.
+# A thumbs-up case (ratification_state="approved") contributes APPROVED_WEIGHT to its
+# decision_value in the CBR majority tally; a thumbs-down case ("rejected") casts a
+# NEGATIVE vote of magnitude REJECTED_WEIGHT against its value (steer-away — Rick's
+# decision 2026-06-03). Ordinary (pending/not_required) cases contribute 1.0.
+DEFAULT_HINT_VOTING_ENABLED          = True
+DEFAULT_HINT_VOTE_MIN_CONFIDENCE     = 0.50
+DEFAULT_HINT_VOTE_APPROVED_WEIGHT    = 2.0
+DEFAULT_HINT_VOTE_REJECTED_WEIGHT    = 2.0
+
 # HTTP embedding fallback (when local GPU is unavailable)
 DEFAULT_EMBEDDING_FALLBACK_PORT = 7999
 

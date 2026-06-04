@@ -13746,6 +13746,15 @@ class NotificationsUI {
     renderMarkdownInline( text ) {
         if ( !text ) return '';
 
+        // Fenced code blocks (```) are a BLOCK-level construct that parseInline()
+        // cannot render — without this they show as literal backticks. When a fence
+        // is present, delegate to the full block renderer (renderMarkdown) which
+        // permits <pre>/<code> and is CSS-styled. Messages without a fence keep the
+        // lighter inline path (no <p> wrapping, safe inside chat-bubble <span>s).
+        if ( typeof text === 'string' && text.indexOf( '```' ) !== -1 ) {
+            return this.renderMarkdown( text );
+        }
+
         // Normalize escaped newlines to actual newlines
         text = text.replace( /\\n/g, '\n' );
 
@@ -13843,9 +13852,8 @@ class NotificationsUI {
     async resetMissedNotifications() {
         const n = this.notificationState.undeliveredCount || 0;
         if ( n <= 0 ) return 0;
-        if ( !window.confirm( `Dismiss ${n} missed notification${n === 1 ? "" : "s"}? They stay in your history but the badge resets to zero.` ) ) {
-            return n;
-        }
+        // No confirm prompt (per Rick): reset is non-destructive (soft-dismiss,
+        // state preserved) and reversible, so clear straight through on click.
         try {
             const response = await this.authedFetch( "/api/notifications/undelivered/dismiss", { method: "POST" } );
             if ( !response.ok ) {
@@ -15969,12 +15977,85 @@ class NotificationsUI {
 
         if ( !predictedText ) return '';
 
+        // Stash the hint context so votePrediction() can POST what was voted on — the
+        // prediction hint is not persisted server-side, so the client supplies it.
+        this._predictionVoteContext = this._predictionVoteContext || {};
+        if ( notification.id ) {
+            this._predictionVoteContext[ notification.id ] = {
+                question        : notification.message,
+                predicted_value : hint.predicted_value,
+                category        : hint.category,
+                response_type   : responseType,
+            };
+        }
+
+        const voteControls = this._buildPredictionVoteControls( notification, confidence );
+
         return `
             <div class="prediction-hint">
                 <div class="prediction-hint-label">${predictedText}</div>
                 <div class="prediction-hint-strategy">${strategy}</div>
+                ${voteControls}
             </div>
         `;
+    }
+
+    // Thumbs up/down vote controls under a prediction hint. Shown only when the hint's
+    // confidence meets the minimum threshold (so the user does not train on noise). The
+    // 👍🏼/👎🏼 use the medium-light skin tone (U+1F3FC — Rick's preference, NOT default yellow).
+    _buildPredictionVoteControls( notification, confidencePct ) {
+        const MIN_PCT = 50;   // mirrors INI "prediction hint vote min confidence threshold" = 0.50
+        if ( !notification || !notification.id ) return '';
+        if ( Number( confidencePct ) < MIN_PCT ) return '';
+        const id = notification.id;
+        return `
+            <div class="prediction-hint-vote" data-testid="prediction-hint-vote">
+                <button type="button" class="prediction-vote-btn prediction-vote-up"
+                        data-testid="prediction-vote-up" title="Good prediction — reinforce it"
+                        onclick="window.notificationsUI.votePrediction('${id}', 'up')">👍🏼</button>
+                <button type="button" class="prediction-vote-btn prediction-vote-down"
+                        data-testid="prediction-vote-down" title="Bad prediction — steer away from it"
+                        onclick="window.notificationsUI.votePrediction('${id}', 'down')">👎🏼</button>
+            </div>
+        `;
+    }
+
+    // Send a thumbs up/down vote on a prediction hint to the capture endpoint, then reflect
+    // the selected state. up → approved (reinforce); down → rejected (negative — steer away).
+    async votePrediction( notificationId, vote ) {
+        if ( !notificationId || ( vote !== 'up' && vote !== 'down' ) ) return;
+        const ctx = ( this._predictionVoteContext || {} )[ notificationId ];
+        if ( !ctx ) {
+            this.error( `[PRED-VOTE] no hint context for ${notificationId} — cannot vote` );
+            return;
+        }
+        try {
+            const response = await this.authedFetch(
+                `/api/notify/prediction-vote/${encodeURIComponent( notificationId )}`,
+                { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify( {
+                      vote,
+                      question         : ctx.question,
+                      predicted_value  : ctx.predicted_value,
+                      category         : ctx.category,
+                      response_type    : ctx.response_type
+                  } ) }
+            );
+            if ( !response.ok ) {
+                this.error( `[PRED-VOTE] vote failed: HTTP ${response.status}` );
+                return;
+            }
+            this.log( `[PRED-VOTE] recorded ${vote} for ${notificationId}` );
+            const btn       = document.querySelector( `.prediction-hint-vote button[onclick*="${notificationId}"]` );
+            const container = btn ? btn.closest( '.prediction-hint-vote' ) : null;
+            if ( container ) {
+                container.classList.add( 'voted' );
+                const selected = container.querySelector( vote === 'up' ? '.prediction-vote-up' : '.prediction-vote-down' );
+                if ( selected ) selected.classList.add( 'selected' );
+            }
+        } catch ( err ) {
+            this.error( `[PRED-VOTE] vote error: ${err}` );
+        }
     }
 
     /**

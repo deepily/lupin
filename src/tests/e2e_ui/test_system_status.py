@@ -181,3 +181,39 @@ class TestMissedResetButton:
         logout_onclick = logged_in_page.get_by_test_id( "notifications-logout-btn" ).get_attribute( "onclick" ) or ""
         assert "window.notificationsUI." in reset_onclick and "freshQueueUI" not in reset_onclick
         assert "window.notificationsUI." in logout_onclick and "freshQueueUI" not in logout_onclick
+
+
+# ---------------------------------------------------------------------------
+# Message-body markdown rendering (send-bar code blocks)
+# ---------------------------------------------------------------------------
+
+class TestNotificationMarkdownRendering:
+    """
+    A message body with a fenced code block (```) must render as <pre><code>,
+    not as literal backticks. renderMarkdownInline() delegates fenced content to
+    the block renderer; non-fenced content keeps the lighter inline path. These
+    drive the ACTUAL shipped function in a real browser (marked + DOMPurify loaded),
+    so they catch regressions in the delegation logic. Read-only (no send, no DB).
+    """
+
+    def test_fenced_code_renders_as_pre_block( self, logged_in_page ):
+        """Triple-backtick fenced code → <pre><code>, no raw backticks leak."""
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        html = logged_in_page.evaluate(
+            r"() => window.notificationsUI.renderMarkdownInline('```js\nconst x = 1;\n```')"
+        )
+        assert "<pre" in html and "<code" in html, f"fenced code did not render as a block: {html}"
+        assert "```" not in html, f"raw fences leaked into rendered output: {html}"
+
+    def test_inline_code_stays_inline_no_block( self, logged_in_page ):
+        """Single-backtick inline code still renders inline, NOT as a <pre> block."""
+        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.wait_for_load_state( "networkidle" )
+
+        html = logged_in_page.evaluate(
+            "() => window.notificationsUI.renderMarkdownInline('run `npm test` now')"
+        )
+        assert "<code>npm test</code>" in html, f"inline code did not render: {html}"
+        assert "<pre" not in html, f"inline path must not emit a block: {html}"

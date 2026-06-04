@@ -35,6 +35,8 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_OPEN_ENDED_CBR_TOP_K,
     DEFAULT_OPEN_ENDED_CBR_THRESHOLD,
     DEFAULT_OPEN_ENDED_LLM_SPEC_KEY,
+    DEFAULT_HINT_VOTE_APPROVED_WEIGHT,
+    DEFAULT_HINT_VOTE_REJECTED_WEIGHT,
     STRATEGY_CBR_MAJORITY,
     STRATEGY_CBR_RETRIEVAL,
     STRATEGY_LLM_SYNTHESIS,
@@ -107,6 +109,9 @@ class PredictionEngine:
             self.open_ended_cbr_threshold  = config_mgr.get( "prediction engine open ended cbr threshold", default=str( DEFAULT_OPEN_ENDED_CBR_THRESHOLD ), return_type="float" )
             self._llm_spec_key             = config_mgr.get( "prediction engine open ended llm spec key", default=DEFAULT_OPEN_ENDED_LLM_SPEC_KEY )
             self._synthesis_prompt_path    = config_mgr.get( "prediction engine open ended prompt template", default="/src/conf/prompts/prediction-engine-open-ended-synthesis.txt" )
+            # Thumbs vote weights (human-confirmed training signal)
+            self.hint_vote_approved_weight = config_mgr.get( "prediction hint vote approved weight", default=str( DEFAULT_HINT_VOTE_APPROVED_WEIGHT ), return_type="float" )
+            self.hint_vote_rejected_weight = config_mgr.get( "prediction hint vote rejected weight", default=str( DEFAULT_HINT_VOTE_REJECTED_WEIGHT ), return_type="float" )
         else:
             self.enabled              = DEFAULT_ENABLED
             self.cbr_top_k            = DEFAULT_CBR_TOP_K
@@ -119,6 +124,8 @@ class PredictionEngine:
             self.open_ended_cbr_threshold = DEFAULT_OPEN_ENDED_CBR_THRESHOLD
             self._llm_spec_key            = DEFAULT_OPEN_ENDED_LLM_SPEC_KEY
             self._synthesis_prompt_path   = "/src/conf/prompts/prediction-engine-open-ended-synthesis.txt"
+            self.hint_vote_approved_weight = DEFAULT_HINT_VOTE_APPROVED_WEIGHT
+            self.hint_vote_rejected_weight = DEFAULT_HINT_VOTE_REJECTED_WEIGHT
 
         # Initialize classifier
         self.classifier = NotificationCategoryClassifier( debug=self.debug )
@@ -223,6 +230,44 @@ class PredictionEngine:
                 metadata      = { "reason": "prediction_error", "error": str( e ) }
             )
 
+    def _ratified_weight( self, record ) -> float:
+        """
+        Vote weight a retrieved CBR case contributes to its decision_value, by the
+        user's thumbs up/down ratification (human-confirmed training signal).
+
+        Requires:
+            - record is a dict that may carry a "ratification_state" key
+
+        Ensures:
+            - "approved" → +hint_vote_approved_weight (human-confirmed up-weight, > 1.0)
+            - "rejected" → -hint_vote_rejected_weight (NEGATIVE vote — engine steers away)
+            - anything else (pending / not_required / "" / missing) → +1.0 (ordinary case)
+        """
+        state = ( record.get( "ratification_state" ) or "" ).lower()
+        if state == "approved": return  self.hint_vote_approved_weight
+        if state == "rejected": return -self.hint_vote_rejected_weight
+        return 1.0
+
+    @staticmethod
+    def _bounded_consistency( votes: dict, winner ) -> float:
+        """
+        Majority-vote consistency in [0,1] that tolerates negative (steer-away) votes.
+
+        The classic `winner_votes / total_votes` breaks once rejected cases cast
+        negative votes (total can be small, zero, or negative). Normalizing by the
+        POSITIVE mass keeps the result bounded and meaningful.
+
+        Requires:
+            - votes is a {value: signed_weight} dict, winner is a key in votes
+
+        Ensures:
+            - returns winner_tally / sum(positive tallies), clamped to [0,1]
+            - returns 0.0 when there is no positive mass (everything steered away)
+        """
+        positive_mass = sum( v for v in votes.values() if v > 0 )
+        if positive_mass <= 0: return 0.0
+        return max( 0.0, min( 1.0, votes[ winner ] / positive_mass ) )
+
     def _predict_yes_no( self, message: str, category: str, embedding: Optional[list] ) -> PredictionResult:
         """
         Predict yes/no response using CBR majority vote with qualifier retrieval.
@@ -278,7 +323,9 @@ class PredictionEngine:
                 metadata           = { "reason": "no_similar_cases" }
             )
 
-        # Majority vote
+        # Majority vote — ratification-aware (thumbs up/down training signal):
+        # approved cases up-weight their value, rejected cases cast a NEGATIVE vote
+        # against their value so the engine actively steers away. See _ratified_weight().
         votes = {}
         max_similarity = 0.0
 
@@ -286,13 +333,13 @@ class PredictionEngine:
             decision_value = record.get( "decision_value", "" )
             # Extract binary from potential qualified value
             binary_value = "yes" if decision_value.lower().startswith( "yes" ) else "no"
-            votes[ binary_value ] = votes.get( binary_value, 0 ) + 1
+            votes[ binary_value ] = votes.get( binary_value, 0.0 ) + self._ratified_weight( record )
             max_similarity = max( max_similarity, similarity_pct / 100.0 )
 
-        # Winner and consistency
-        total_votes = sum( votes.values() )
+        # Winner = highest (most positive) tally; consistency bounded to [0,1] via
+        # positive-mass normalization so negative (steer-away) votes can't break it.
         winner      = max( votes, key=votes.get )
-        consistency = votes[ winner ] / total_votes if total_votes > 0 else 0.0
+        consistency = self._bounded_consistency( votes, winner )
 
         # Confidence = max_similarity * consistency
         confidence = max_similarity * consistency
@@ -442,11 +489,15 @@ class PredictionEngine:
             options_multi_select = any( v[ "multi_select" ] for v in valid_options.values() )
 
         # Per-header vote accumulation (type-aware: single vs multi-select)
-        # header_votes: { "Header": { "OptionA": count, "OptionB": count } }
-        header_votes    = {}
-        max_similarity  = 0.0
-        valid_cases     = 0
-        is_multi_select = False
+        # header_votes: { "Header": { "OptionA": count, "OptionB": count } } — raw integer
+        # counts (used by multi-select selection + valid-option fallback, unchanged).
+        # header_votes_weighted: same shape with ratification-WEIGHTED floats (approved
+        # up-weight, rejected negative/steer-away) — used for single-select winner + consistency.
+        header_votes          = {}
+        header_votes_weighted = {}
+        max_similarity        = 0.0
+        valid_cases           = 0
+        is_multi_select       = False
 
         for similarity_pct, record in similar_cases:
             decision_value = record.get( "decision_value", "" )
@@ -457,19 +508,25 @@ class PredictionEngine:
             valid_cases += 1
             max_similarity = max( max_similarity, similarity_pct / 100.0 )
 
-            answers = parsed.get( "answers", {} )
+            answers     = parsed.get( "answers", {} )
+            case_weight = self._ratified_weight( record )   # +approved / -rejected / 1.0
             for header, option in answers.items():
                 if header not in header_votes:
                     header_votes[ header ] = {}
 
                 if isinstance( option, list ):
-                    # Multi-select: count each individual option
+                    # Multi-select: raw integer counts only. Ratification weighting is NOT
+                    # wired for multi-select in Stage 1 (the weighted tally below is single-
+                    # select only), so we deliberately do not build a weighted entry here.
                     is_multi_select = True
                     for item in option:
                         header_votes[ header ][ item ] = header_votes[ header ].get( item, 0 ) + 1
                 else:
-                    # Single-select: count the option directly
+                    # Single-select: raw count + ratification-WEIGHTED tally (consumed below).
                     header_votes[ header ][ option ] = header_votes[ header ].get( option, 0 ) + 1
+                    if header not in header_votes_weighted:
+                        header_votes_weighted[ header ] = {}
+                    header_votes_weighted[ header ][ option ] = header_votes_weighted[ header ].get( option, 0.0 ) + case_weight
 
         if not header_votes or valid_cases == 0:
             return PredictionResult(
@@ -492,10 +549,11 @@ class PredictionEngine:
             consistency_sum    = 0.0
             header_count       = 0
 
-            for header, option_votes in header_votes.items():
-                winner       = max( option_votes, key=option_votes.get )
-                total_votes  = sum( option_votes.values() )
-                consistency  = option_votes[ winner ] / total_votes if total_votes > 0 else 0.0
+            for header, weighted_votes in header_votes_weighted.items():
+                # Ratification-aware: winner = highest weighted tally; consistency bounded
+                # to [0,1] via positive-mass normalization (rejected cases steer away).
+                winner      = max( weighted_votes, key=weighted_votes.get )
+                consistency = self._bounded_consistency( weighted_votes, winner )
                 predicted_answers[ header ] = winner
                 consistency_sum += consistency
                 header_count    += 1
@@ -1241,6 +1299,79 @@ class PredictionEngine:
 
         except Exception as e:
             if self.debug: print( f"[PredictionEngine] _store_decision error: {e}" )
+
+    @staticmethod
+    def _decision_value_from_predicted( predicted_value ) -> str:
+        """
+        Serialize a hint's predicted_value to the CBR decision_value string format.
+
+        Ensures:
+            - dict with "answers" → json.dumps({"answers": ...}) (MC / batch shape)
+            - dict with "value"   → str(value) (yes_no envelope shape)
+            - other dict          → json.dumps(dict)
+            - non-dict            → str(predicted_value) (yes/no/open-ended scalar)
+        """
+        import json
+        if isinstance( predicted_value, dict ):
+            answers = predicted_value.get( "answers" )
+            if answers is not None:
+                return json.dumps( { "answers": answers } )
+            value = predicted_value.get( "value" )
+            return str( value ) if value is not None else json.dumps( predicted_value )
+        return str( predicted_value )
+
+    def record_hint_vote( self, notification_id, question, predicted_value, category, response_type, vote ):
+        """
+        Record a user thumbs up/down on a prediction hint as a human-confirmed CBR case.
+
+        up → ratification_state="approved" (reinforce that answer in future retrieval);
+        down → "rejected" (the ratification-aware tally casts a NEGATIVE vote against that
+        value — the engine steers away). The case is keyed deterministically on the
+        notification id so a re-vote flips its state IN PLACE (idempotent) instead of
+        duplicating; first vote inserts via the proven add_decision path.
+
+        Requires:
+            - notification_id, question non-empty; vote in {"up","down"}
+            - predicted_value is the hint's predicted value (str or {"answers": {...}})
+
+        Ensures:
+            - writes/updates exactly one organic case; returns
+              {case_id, ratification_state, updated}
+
+        Raises:
+            - ValueError if vote is not "up"/"down"
+            - RuntimeError if the embedding store/provider is unavailable
+        """
+        if vote not in ( "up", "down" ):
+            raise ValueError( f"vote must be 'up' or 'down', got {vote!r}" )
+
+        store    = self._get_embedding_store()
+        provider = self._get_embedding_provider()
+        if store is None or provider is None:
+            raise RuntimeError( "embedding store/provider unavailable — cannot record hint vote" )
+
+        ratification_state = "approved" if vote == "up" else "rejected"
+        case_id            = f"hintvote-{notification_id}"
+
+        # Re-vote: flip the existing case's state in place (idempotent). First vote: insert.
+        if store.exists( case_id ):
+            store.update_ratification_state( case_id, ratification_state )
+            return { "case_id": case_id, "ratification_state": ratification_state, "updated": True }
+
+        decision_value = self._decision_value_from_predicted( predicted_value )
+        embedding      = provider.generate_embedding( question, content_type="prose" )
+        store.add_decision(
+            id                 = case_id,
+            question           = question,
+            category           = category or "general",
+            decision_value     = decision_value,
+            ratification_state = ratification_state,
+            question_embedding = embedding,
+            created_at         = datetime.now( timezone.utc ).isoformat(),
+            data_origin        = "organic",
+            response_type      = response_type or ""
+        )
+        return { "case_id": case_id, "ratification_state": ratification_state, "updated": False }
 
     def get_accuracy_summary( self, window_days: int = 30, category: Optional[str] = None,
                               response_type: Optional[str] = None ) -> Dict[str, Any]:

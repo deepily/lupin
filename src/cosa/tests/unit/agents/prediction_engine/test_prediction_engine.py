@@ -160,6 +160,8 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine open ended cbr threshold"      : 0.9,
                 "prediction engine open ended llm spec key"       : "spec/x",
                 "prediction engine open ended prompt template"    : "/src/conf/p.txt",
+                "prediction hint vote approved weight"            : 2.0,
+                "prediction hint vote rejected weight"            : 2.0,
             }
             return table[ key ]
 
@@ -172,6 +174,8 @@ def test_init_with_config_mgr_reads_keys():
     assert eng._server_port == 1234
     assert eng.open_ended_cbr_threshold == 0.9
     assert eng._llm_spec_key == "spec/x"
+    assert eng.hint_vote_approved_weight == 2.0
+    assert eng.hint_vote_rejected_weight == 2.0
     # debug = config(False) OR debug(True) = True
     assert eng.debug is True
     PredictionEngine.reset()

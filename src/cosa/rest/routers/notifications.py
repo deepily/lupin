@@ -10,8 +10,9 @@ Generated on: 2025-01-24
 
 from fastapi import APIRouter, Query, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional, Annotated
+from typing import Dict, Any, Optional, Annotated, Literal
 import zoneinfo
 import asyncio
 import json
@@ -1286,11 +1287,95 @@ async def dismiss_undelivered_notifications(
             "undelivered_count" : remaining,
             "timestamp"         : get_local_timestamp()
         }
-    except HTTPException:
-        raise
     except Exception as e:
         print( f"[NOTIFY] Error dismissing undelivered for {authenticated_user_id}: {str( e )}" )
         raise HTTPException( status_code=500, detail=f"Failed to dismiss undelivered notifications: {str( e )}" )
+
+
+class PredictionVoteRequest( BaseModel ):
+    """Body for POST /api/notify/prediction-vote/{notification_id}.
+
+    The client supplies the hint context it is voting on. `question` and `response_type`
+    are OPTIONAL because the endpoint authoritatively resolves them from the persisted
+    notification when the client omits them (the notification.message IS persisted; the
+    prediction hint's predicted_value is NOT, so the client must supply predicted_value)."""
+    vote            : Literal[ "up", "down" ]
+    predicted_value : Any = None
+    question        : Optional[ str ] = None
+    category        : Optional[ str ] = None
+    response_type   : Optional[ str ] = None
+
+
+@router.post(
+    "/notify/prediction-vote/{notification_id}",
+    summary     = "Vote on a prediction hint (thumbs up/down → training signal)",
+    description = "Record the user's 👍/👎 on a prediction hint. up→approved (reinforce in future CBR retrieval), down→rejected (negative vote — steer away). Writes one human-confirmed organic case into the prediction CBR store; idempotent per notification (re-vote flips state in place)."
+)
+async def vote_on_prediction_hint(
+    notification_id: str,
+    body: PredictionVoteRequest,
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)]
+):
+    """
+    Record a thumbs up/down vote on a prediction hint as human-confirmed training signal.
+
+    Requires:
+        - a valid API key or Bearer JWT
+        - body.vote in {"up","down"}, body.question non-empty (Pydantic-validated → 422)
+
+    Ensures:
+        - writes/updates exactly one organic CBR case (approved on up / rejected on down)
+        - idempotent: a re-vote on the same notification flips the case state in place
+        - shape: { status, notification_id, vote, ratification_state, updated, timestamp }
+
+    Raises:
+        - HTTPException 422 if record_hint_vote rejects the vote value
+        - HTTPException 500 on record failure
+    """
+    # Resolve question + response_type authoritatively from the persisted notification when
+    # the client omits them (notification.message is persisted; predicted_value is not).
+    question      = ( body.question or "" ).strip()
+    response_type = body.response_type
+    try:
+        notif_uuid = uuid.UUID( notification_id )
+        with get_db() as session:
+            notif = NotificationRepository( session ).get_by_id( notif_uuid )
+            if notif is not None:
+                if not question:      question      = ( notif.message or "" ).strip()
+                if not response_type: response_type = notif.response_type
+    except ( ValueError, AttributeError, TypeError ):
+        pass  # non-UUID id or lookup failure → fall back to whatever the client supplied
+
+    if not question:
+        raise HTTPException( status_code=422, detail="could not resolve a question for this notification (none supplied and notification not found)" )
+    if body.predicted_value is None:
+        raise HTTPException( status_code=422, detail="predicted_value is required to record a prediction vote" )
+
+    try:
+        from cosa.agents.prediction_engine import get_prediction_engine
+        engine = get_prediction_engine()
+        result = engine.record_hint_vote(
+            notification_id = notification_id,
+            question        = question,
+            predicted_value = body.predicted_value,
+            category        = body.category,
+            response_type   = response_type,
+            vote            = body.vote,
+        )
+        print( f"[NOTIFY] Prediction-hint vote '{body.vote}' for {notification_id} -> {result.get( 'ratification_state' )}" )
+        return {
+            "status"             : "success",
+            "notification_id"    : notification_id,
+            "vote"               : body.vote,
+            "ratification_state" : result.get( "ratification_state" ),
+            "updated"            : result.get( "updated", False ),
+            "timestamp"          : get_local_timestamp()
+        }
+    except ValueError as e:
+        raise HTTPException( status_code=422, detail=str( e ) )
+    except Exception as e:
+        print( f"[NOTIFY] Prediction-hint vote error for {notification_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to record prediction vote: {str( e )}" )
 
 
 @router.get(
