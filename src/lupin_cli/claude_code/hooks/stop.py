@@ -35,7 +35,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id,
-    get_speakerphone, get_session_metadata,
+    get_speakerphone, get_session_metadata, get_voice_persona,
     get_idle_detection, set_idle_detection_field, kill_idle_waiter,
     get_last_autonarrated_turn_id, set_last_autonarrated_turn_id,
 )
@@ -48,6 +48,19 @@ from lupin_cli.claude_code.hooks.lib.idle_settings import load_idle_settings
 from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
     fire_anything_else_ask, summarize_task as _shared_summarize_task,
 )
+# ── Heartbeat Hook (Branch-C self-poke) — additive, gated, downstream of the
+#    stop_hook_active loop guard; voice always wins. Leaf modules are pure +
+#    100%-covered; this file holds only the thin adapter. See:
+#    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
+    get_poke_count, increment_poke_count,
+)
+from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
+    decide_heartbeat, OUTCOME_POKE,
+)
+from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_settings
+from lupin_cli.claude_code.hooks.lib import heartbeat_events
 
 
 def _summarize_task( last_assistant_message ):
@@ -647,6 +660,127 @@ def _try_auto_narrate( session_id, payload ):
         } )
 
 
+def _notify_cap_reached( session_id ):
+    """
+    Observability FYI when the heartbeat poke-cap is reached (§0 #6).
+
+    v1 = log-only. The richer USER-FACING async notify ("max auto-nudges
+    reached, awaiting user" — the §0 #6 intent that the user eventually learns
+    nudging stopped) is deferred to v1.1: the only sync hook primitive,
+    notify_user_sync, is SSE-BLOCKING (response-required) and would HANG the
+    Stop hook — wrong for a fire-and-forget FYI. log_to_stream is non-blocking,
+    zero-server-dependency, and greppable in io/claude_code_hooks/ captures.
+
+    Requires:
+        - session_id is a string
+
+    Ensures:
+        - Emits a "heartbeat_cap_reached" log record carrying session_id +
+          poke_count (greppable); never raises, never blocks the stop
+    """
+    log_to_stream( "stop", {}, extra={
+        "phase"      : "heartbeat_cap_reached",
+        "session_id" : session_id,
+        "poke_count" : get_poke_count( session_id ),
+        # v1.1: also fire a user-facing async notify here (§0 #6) — deferred;
+        # notify_user_sync is SSE-blocking and cannot be used in a Stop hook.
+    } )
+
+
+def _run_heartbeat( session_id ):
+    """
+    Branch-C heartbeat self-poke adapter (thin; composes the pure leaf modules).
+
+    The §0 5-step decision logic lives entirely in the pure, 100%-covered leaf
+    modules (heartbeat_hold / heartbeat_work_owed / heartbeat_poke_cap /
+    heartbeat_decision). This adapter is ONLY the side-effecting shell: read
+    the hold + poke count, call decide_heartbeat, apply the increment / cap-FYI
+    side effects it signals, and return the block dict to emit when (and only
+    when) the heartbeat owns this stop.
+
+    **v1 scope (reconciled with Tiffany 2026-06-04):** wires ONLY the
+    hold-declared work-owed signal — `oracle_verdict=None`. So v1 honors fresh
+    reasoned holds, pokes a session that left a STALE / reasonless
+    self-declared `work_owed=True` hold, and never pokes a session with no hold
+    (conservative). The headline undeclared-lazy-stop catch (live TODO/Pending/
+    inbound-DM oracle) is v2, gated on María's §C.3 Q4.
+
+    Gated by ~/.claude/settings.json ["heartbeat"]["enabled"] (DEFAULT False).
+    A malformed config (ValueError from the loader) fails SAFE → disabled.
+
+    Requires:
+        - session_id is a string
+        - called ONLY from Branch C (no voice_ctx), DOWNSTREAM of the
+          stop_hook_active loop guard — voice always wins; never poke on a
+          re-fire
+
+    Ensures:
+        - Returns {"decision":"block","reason": …} ONLY when the heartbeat
+          pokes (OUTCOME_POKE) — the caller emits it and skips the idle path
+        - Returns None on disabled / malformed config / honored hold / nothing
+          owed / cap reached — the caller falls through to the existing
+          idle-waiter / "Anything else?" path UNCHANGED
+        - Applies the counter increment (on poke) + cap FYI (at cap) side
+          effects that decide_heartbeat signals
+    """
+    try:
+        settings = load_heartbeat_settings()
+    except ValueError as e:
+        # Malformed heartbeat config — fail SAFE (never poke on bad config).
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "heartbeat_settings_invalid",
+            "session_id" : session_id,
+            "error"      : str( e ),
+        } )
+        return None
+
+    if not settings[ "enabled" ]:
+        return None
+
+    hold       = read_hold( session_id )
+    poke_count = get_poke_count( session_id )
+    # v2: live oracle (TODO/Pending/inbound-DM scan) gated on María §C.3 Q4 —
+    # v1 passes oracle_verdict=None (hold-declared work-owed signal only).
+    result = decide_heartbeat( hold, None, poke_count, settings[ "poke_cap" ] )
+
+    if result[ "should_increment" ]:
+        increment_poke_count( session_id )
+    if result[ "should_notify_cap" ]:
+        _notify_cap_reached( session_id )
+
+    # ── EMIT NOW, CONSUME LATER (María §0 #2) ──────────────────────────────────
+    # Fire-and-forget poke-OUTCOME record so the v2 agentic Poker lands later as
+    # a PURE CONSUMER (zero Hook retrofit). emit_outcome SELF-FILTERS (writes
+    # only for {poke, honored, cap_reached}; no-op on not_owed/unknown) — called
+    # unconditionally, no branching. Writes to the FLEET dir
+    # ~/.claude/heartbeat-events/ (outside the repo); :7999-free. The try/except
+    # makes emission NEVER a dependency of the poke: if it fails the poke still
+    # proceeds (the §0 #2 invariant) — belt to emit_outcome's never-raises belt.
+    try:
+        persona = get_voice_persona( session_id )
+        heartbeat_events.emit_outcome(
+            session_id,
+            persona.get( "name" ) if persona else None,
+            result[ "outcome" ],
+            get_poke_count( session_id ),                       # POST-increment
+            settings[ "poke_cap" ],
+            work_owed = None,                                   # v1 (oracle gated on María §C.3 Q4)
+            awaiting  = ( hold.get( "awaiting" ) if hold else None ),
+            reason    = result[ "hook_output" ].get( "reason" ),  # poke text, else None
+        )
+    except Exception as e:
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "heartbeat_emit_error",
+            "session_id" : session_id,
+            "error"      : str( e ),
+        } )
+    # ── end emit ──
+
+    if result[ "outcome" ] == OUTCOME_POKE:
+        return result[ "hook_output" ]
+    return None
+
+
 def main():
 
     payload = read_hook_input()
@@ -715,6 +849,18 @@ def main():
         #     src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
         #   - enabled=false (LEGACY): fire the prompt immediately as before.
         reset_stop_block_count( session_id )
+
+        # ── Heartbeat self-poke (additive; gated; voice already lost above) ──
+        # Downstream of the stop_hook_active loop guard (never poke on a
+        # re-fire) and only in Branch C (no voice_ctx → voice always wins).
+        # Returns a block dict ONLY when the heartbeat pokes; otherwise None →
+        # fall through to the existing idle-waiter / "Anything else?" path.
+        heartbeat_output = _run_heartbeat( session_id )
+        if heartbeat_output is not None:
+            emit_json( heartbeat_output )
+            return
+        # ── end heartbeat ──
+
         last_assistant_message = payload.get( "last_assistant_message" )
         cwd                    = payload.get( "cwd" )
 

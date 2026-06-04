@@ -199,6 +199,35 @@ class TestUserPromptSubmitHook:
             assert "mcp__cosa-voice__notify()" in ctx
 
 
+class TestHeartbeatPokeReset:
+    """Genuine user re-engagement reopens the heartbeat self-poke budget."""
+
+    def test_reset_poke_count_called_on_prompt( self ):
+        """UserPromptSubmit resets the per-session heartbeat poke counter."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = { "session_id": "abc12345-fake-uuid" }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
+                _run_hook_main( payload, tmp_dir )
+            mock_reset.assert_called_once_with( "abc12345-fake-uuid" )
+
+    def test_reset_skipped_on_empty_payload( self ):
+        """Empty payload exits before session resolution → no reset attempted."""
+        import io
+        from lupin_cli.claude_code.hooks import user_prompt_submit
+
+        captured = io.StringIO()
+        with patch( "sys.stdin", io.StringIO( "{}" ) ), \
+             patch( "sys.stdout", captured ), \
+             patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
+            try:
+                user_prompt_submit.main()
+            except SystemExit:
+                pass
+
+        mock_reset.assert_not_called()
+
+
 # ── Standalone ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

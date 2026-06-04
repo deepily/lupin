@@ -36,6 +36,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, resolve_stable_session_id,
     kill_idle_waiter, set_idle_detection_field,
 )
+from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import reset_poke_count
 
 
 def main():
@@ -64,6 +65,14 @@ def main():
         last_interaction_at = _dt.datetime.now().astimezone().isoformat( timespec="seconds" ),
         backoff_index       = 0,
     )
+
+    # Heartbeat Hook: genuine user re-engagement reopens the self-poke budget.
+    # Reset the per-session heartbeat poke-cap counter (separate file from the
+    # voice MAX_STOP_BLOCKS counter) so a session that capped at N pokes during
+    # quiescence gets a fresh budget once the user actually comes back —
+    # mirrors the backoff_index=0 reset above. See:
+    # src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
+    reset_poke_count( session_id )
 
     # Record turn start time for stop hook duration gating
     write_turn_start_marker( session_id )
