@@ -44,14 +44,14 @@ def _quiet_for_seconds( ts, now ):
         return None
 
 
-def classify_idle( view, now, idle_threshold_seconds ):
+def classify_idle( view, now, quiet_threshold_seconds ):
     """
     Trust-classify a session view's idle status, or None if it is NOT idle.
 
     Requires:
         - view is a fleet_data_model VIEW dict
         - now is an aware datetime
-        - idle_threshold_seconds is a positive number (the "quiet" window)
+        - quiet_threshold_seconds is a positive number (the "quiet" window)
 
     Ensures:
         - last_outcome == EVENT_IDLE → (IDLE_SOURCE_DECLARED, TRUST_DECLARED)
@@ -66,19 +66,19 @@ def classify_idle( view, now, idle_threshold_seconds ):
     if not view.get( "alive" ):
         return None
     quiet_for = _quiet_for_seconds( view.get( "last_activity_ts" ), now )
-    if quiet_for is not None and quiet_for >= idle_threshold_seconds:
+    if quiet_for is not None and quiet_for >= quiet_threshold_seconds:
         return ( IDLE_SOURCE_INFERENCE, TRUST_INFERRED )
     return None
 
 
-def build_roster( fleet_view, now, idle_threshold_seconds ):
+def build_roster( fleet_view, now, quiet_threshold_seconds ):
     """
     Build the trust-labeled fleet idle-roster (HYBRID: declared ∪ inferred).
 
     Requires:
         - fleet_view is a dict { session_id: VIEW } (build_fleet_view output)
         - now is an aware datetime
-        - idle_threshold_seconds is a positive number
+        - quiet_threshold_seconds is a positive number
 
     Ensures:
         - Returns a list of { session_id, persona, idle_source, trust_label,
@@ -90,7 +90,7 @@ def build_roster( fleet_view, now, idle_threshold_seconds ):
     for view in fleet_view.values():
         if not isinstance( view, dict ):
             continue
-        classified = classify_idle( view, now, idle_threshold_seconds )
+        classified = classify_idle( view, now, quiet_threshold_seconds )
         if classified is None:
             continue
         source, label = classified
@@ -122,7 +122,7 @@ def quick_smoke_test():
                 "alive": False, "last_activity_ts": quiet },                # dead → excluded
         "s5": "not-a-dict",
     }
-    roster = build_roster( fleet_view, now, idle_threshold_seconds=300 )
+    roster = build_roster( fleet_view, now, quiet_threshold_seconds=300 )
     by_sid = { e[ "session_id" ]: e for e in roster }
     assert set( by_sid ) == { "s1", "s2" }, set( by_sid )
     assert by_sid[ "s1" ][ "trust_label" ] == TRUST_DECLARED
