@@ -138,6 +138,29 @@ def test_build_poke_reason_with_no_work_uses_placeholder():
     assert o.NO_WORK_SPECIFICS in reason
 
 
+# ── v2 — Task*-replay shape contract (María §0.3 / doc 04 §4) ──────────────────
+
+def test_v2_task_replay_shape_maps_1to1():
+    # Rachel's fetch_task_work_owed yields {status, owned_by_me:True} for tasks
+    # whose LATEST Task* status ∈ {in_progress, pending}. Confirm evaluate_work_owed
+    # consumes that shape UNCHANGED — Task* status vocab == the oracle's constants.
+    task_items = [
+        { "status": "in_progress", "owned_by_me": True },
+        { "status": "pending",     "owned_by_me": True },
+    ]
+    v = o.evaluate_work_owed( todo_items=task_items )
+    assert v[ "work_owed" ] is True
+    assert v[ "signals" ] == [ "todo_in_progress", "todo_unstarted" ]
+    # status literals equal the oracle constants → genuine 1:1, no leaf change.
+    assert ( o.TODO_IN_PROGRESS, o.TODO_PENDING ) == ( "in_progress", "pending" )
+
+
+def test_v2_task_replay_empty_owed_set_is_idle():
+    # All-completed/deleted dropped by the replay → empty owed set → not owed
+    # (→ the adapter emits the genuine-idle beacon).
+    assert o.evaluate_work_owed( todo_items=[ ] )[ "work_owed" ] is False
+
+
 # ── quick_smoke_test ──────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():

@@ -54,8 +54,16 @@ EVENTS_FILENAME_TEMPLATE = "{session_id}.jsonl"
 # Fleet-wide events dir (NOT project root — see module docstring).
 FLEET_EVENTS_DIR = Path( os.path.expanduser( "~/.claude/heartbeat-events" ) )
 
-# Only these outcomes are emitted (not_owed is per-turn noise; skipped).
-EMITTED_OUTCOMES = ( OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_CAP_REACHED )
+# v2 genuine-idle DECLARATION beacon value (arbiter design §6.2). The caller
+# (Rachel's adapter) passes outcome="idle" ONLY on the TRANSITION into
+# genuine-idle (gate via is_idle_transition) — never per-turn. A
+# backward-compatible additive outcome VALUE (no field change) → schema_version
+# stays 1.
+EVENT_IDLE = "idle"
+
+# Outcome values emit_outcome will write. v1 = {poke, honored, cap_reached}
+# (not_owed is per-turn noise, skipped); v2 ADDS the explicit "idle" beacon.
+EMITTED_OUTCOMES = ( OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_CAP_REACHED, EVENT_IDLE )
 
 
 def _resolve_base_dir( base_dir ):
@@ -101,7 +109,7 @@ def emit_outcome( session_id, persona, outcome, poke_count, cap,
         - reason is the poke text (included ONLY when outcome == "poke")
 
     Ensures:
-        - Emits ONLY for {poke, honored, cap_reached}; any other outcome
+        - Emits for {poke, honored, cap_reached, idle}; any other outcome
           (incl. not_owed / unknown) → returns False, writes nothing
         - Creates the fleet dir if missing (parents, idempotent)
         - Appends exactly one JSON line (schema_version 1 record)
@@ -169,6 +177,58 @@ def read_events( session_id, base_dir=None ):
     return records
 
 
+def last_emitted_outcome( session_id, base_dir=None ):
+    """
+    The session's most recent emitted outcome value, or None if no events.
+
+    Requires:
+        - session_id is a string
+
+    Ensures:
+        - Returns the "outcome" of the last record, or None (no events, or a
+          last record missing the field) — never raises (read_events is total).
+    """
+    records = read_events( session_id, base_dir=base_dir )
+    if not records:
+        return None
+    return records[ -1 ].get( "outcome" )
+
+
+def should_emit_idle( last_outcome ):
+    """
+    PURE edge-trigger predicate for the genuine-idle beacon (§6.2, N4).
+
+    Emit the idle beacon ONLY on the TRANSITION into idle — i.e. when the
+    session's last emitted outcome was not already "idle". Sticky-until-
+    superseded: once idle, repeated idle stops do NOT re-emit; a
+    poke/honored/cap_reached supersedes, after which the next idle is a fresh
+    transition.
+
+    Requires:
+        - last_outcome is the prior emitted outcome string, or None (no prior)
+
+    Ensures:
+        - Returns True iff last_outcome != "idle" (None → True: the first idle
+          is a transition from nothing).
+    """
+    return last_outcome != EVENT_IDLE
+
+
+def is_idle_transition( session_id, base_dir=None ):
+    """
+    Should an idle beacon be emitted for this session NOW? (the de-dup gate)
+
+    Composes last_emitted_outcome + should_emit_idle so the caller (Rachel's
+    adapter) can gate the emit on the transition:
+        if is_idle_transition(session_id): emit_outcome(..., EVENT_IDLE, ...)
+
+    Ensures:
+        - Returns True on the transition into idle; False if already idle.
+        - Never raises.
+    """
+    return should_emit_idle( last_emitted_outcome( session_id, base_dir=base_dir ) )
+
+
 def quick_smoke_test():
     """
     Self-contained smoke test (temp dir — never touches the real fleet dir).
@@ -186,17 +246,25 @@ def quick_smoke_test():
                              awaiting="peer:Rachel", reason="poke text", base_dir=tmp ) is True
         assert emit_outcome( sid, "Tiffany 💍", OUTCOME_HONORED, 0, 3,
                              awaiting="peer:Rachel", reason="ignored", base_dir=tmp ) is True
-        # not_owed is skipped — no line, returns False
+        # not_owed is skipped — no line, returns False (caller emits "idle" instead)
         assert emit_outcome( sid, "Tiffany 💍", "not_owed", 0, 3, base_dir=tmp ) is False
 
+        # v2 idle beacon — edge-triggered (last was "honored" → a transition)
+        assert is_idle_transition( sid, base_dir=tmp ) is True
+        assert emit_outcome( sid, "Tiffany 💍", EVENT_IDLE, 0, 3, work_owed=False, base_dir=tmp ) is True
+        assert is_idle_transition( sid, base_dir=tmp ) is False   # already idle → de-dup
+
         events = read_events( sid, base_dir=tmp )
-        assert len( events ) == 2,                      "two emitted events expected"
+        assert len( events ) == 3,                      "poke + honored + idle expected"
         assert events[ 0 ][ "outcome" ] == "poke"
         assert events[ 0 ][ "reason" ] == "poke text"
         assert events[ 0 ][ "work_owed" ] is None,      "v1 work_owed is null"
         assert events[ 0 ][ "awaiting" ] == "peer:Rachel"
         assert events[ 1 ][ "outcome" ] == "honored"
         assert "reason" not in events[ 1 ],             "reason rides ONLY the poke"
+        assert events[ 2 ][ "outcome" ] == "idle"
+        assert events[ 2 ][ "work_owed" ] is False
+        assert "reason" not in events[ 2 ]
 
     return True
 

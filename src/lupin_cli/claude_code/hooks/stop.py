@@ -57,10 +57,15 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
     get_poke_count, increment_poke_count,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
-    decide_heartbeat, OUTCOME_POKE,
+    decide_heartbeat, OUTCOME_POKE, OUTCOME_NOT_OWED,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_settings
 from lupin_cli.claude_code.hooks.lib import heartbeat_events
+# v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
+from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import evaluate_work_owed
+from lupin_cli.claude_code.hooks.lib.heartbeat_task_state import (
+    fetch_task_work_owed, is_task_set_empty,
+)
 
 
 def _summarize_task( last_assistant_message ):
@@ -687,29 +692,75 @@ def _notify_cap_reached( session_id ):
     } )
 
 
-def _run_heartbeat( session_id ):
+def _emit_genuine_idle( session_id, persona_name, cap ):
+    """
+    Genuine-idle DECLARATION beacon (Rick §6.2 = Option B), edge-triggered.
+
+    Called only when this Stop is genuinely idle (not_owed AND an empty Task*
+    set). De-dup is delegated to heartbeat_events.is_idle_transition (a tested
+    pure helper, Tiffany's lane): emit the beacon ONLY on the TRANSITION into
+    idle — sticky-until-superseded, so a quiet streak writes ONE beacon, not one
+    per Stop. Fire-and-forget: wrapped so a write/read failure NEVER breaks the
+    poke path (mirrors the poke-outcome emit invariant, §0 #2).
+
+    Requires:
+        - session_id is a string
+        - persona_name is a string or None
+        - cap is the per-session poke-cap int
+
+    Ensures:
+        - Appends one outcome="idle" event iff this is the transition into idle
+        - work_owed=False (genuinely idle); no reason
+        - Never raises, never blocks the stop
+    """
+    try:
+        if heartbeat_events.is_idle_transition( session_id ):
+            heartbeat_events.emit_outcome(
+                session_id,
+                persona_name,
+                heartbeat_events.EVENT_IDLE,
+                get_poke_count( session_id ),
+                cap,
+                work_owed = False,
+                awaiting  = None,
+            )
+    except Exception as e:
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "heartbeat_idle_emit_error",
+            "session_id" : session_id,
+            "error"      : str( e ),
+        } )
+
+
+def _run_heartbeat( session_id, transcript_path ):
     """
     Branch-C heartbeat self-poke adapter (thin; composes the pure leaf modules).
 
     The §0 5-step decision logic lives entirely in the pure, 100%-covered leaf
     modules (heartbeat_hold / heartbeat_work_owed / heartbeat_poke_cap /
-    heartbeat_decision). This adapter is ONLY the side-effecting shell: read
-    the hold + poke count, call decide_heartbeat, apply the increment / cap-FYI
-    side effects it signals, and return the block dict to emit when (and only
-    when) the heartbeat owns this stop.
+    heartbeat_decision). This adapter is ONLY the side-effecting shell: read the
+    hold + poke count + live work-owed verdict, call decide_heartbeat, apply the
+    increment / cap-FYI / emit side effects it signals, and return the block
+    dict to emit when (and only when) the heartbeat owns this stop.
 
-    **v1 scope (reconciled with Tiffany 2026-06-04):** wires ONLY the
-    hold-declared work-owed signal — `oracle_verdict=None`. So v1 honors fresh
-    reasoned holds, pokes a session that left a STALE / reasonless
-    self-declared `work_owed=True` hold, and never pokes a session with no hold
-    (conservative). The headline undeclared-lazy-stop catch (live TODO/Pending/
-    inbound-DM oracle) is v2, gated on María's §C.3 Q4.
+    **v2 scope (Task* live oracle — §0.3, corrected TodoWrite→Task*):** the
+    work-owed verdict comes from the session's OWN Task* state, replayed from
+    its transcript (`transcript_path`). So v2 ALSO catches the FM-19
+    undeclared-lazy-stop case: a session with NO hold that stops with owed Task*
+    work (in_progress / pending) is poked. v1 behavior is preserved — a fresh
+    reasoned hold is still honored; the hold's self-declared work_owed still
+    wins over the oracle (decide_heartbeat order). `owned_by_me` is TRUE by
+    construction (the Task* calls live in THIS session's transcript). The
+    transcript read is `:7999`-free and never a dependency of the poke (the
+    reader never raises; a missing/empty transcript ⇒ no owed work ⇒
+    conservative).
 
     Gated by ~/.claude/settings.json ["heartbeat"]["enabled"] (DEFAULT False).
     A malformed config (ValueError from the loader) fails SAFE → disabled.
 
     Requires:
         - session_id is a string
+        - transcript_path is the Stop-hook payload's transcript_path (str/None)
         - called ONLY from Branch C (no voice_ctx), DOWNSTREAM of the
           stop_hook_active loop guard — voice always wins; never poke on a
           re-fire
@@ -720,8 +771,8 @@ def _run_heartbeat( session_id ):
         - Returns None on disabled / malformed config / honored hold / nothing
           owed / cap reached — the caller falls through to the existing
           idle-waiter / "Anything else?" path UNCHANGED
-        - Applies the counter increment (on poke) + cap FYI (at cap) side
-          effects that decide_heartbeat signals
+        - Applies the counter increment (on poke) + cap FYI (at cap) +
+          fire-and-forget event emission side effects
     """
     try:
         settings = load_heartbeat_settings()
@@ -739,9 +790,11 @@ def _run_heartbeat( session_id ):
 
     hold       = read_hold( session_id )
     poke_count = get_poke_count( session_id )
-    # v2: live oracle (TODO/Pending/inbound-DM scan) gated on María §C.3 Q4 —
-    # v1 passes oracle_verdict=None (hold-declared work-owed signal only).
-    result = decide_heartbeat( hold, None, poke_count, settings[ "poke_cap" ] )
+    # v2: REAL work-owed verdict from the session's own Task* state, replayed
+    # from its transcript (§0.3). owned_by_me TRUE by construction; :7999-free;
+    # the reader never raises (missing/empty transcript ⇒ no owed work).
+    verdict = evaluate_work_owed( todo_items=fetch_task_work_owed( transcript_path ) )
+    result  = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
 
     if result[ "should_increment" ]:
         increment_poke_count( session_id )
@@ -756,15 +809,16 @@ def _run_heartbeat( session_id ):
     # ~/.claude/heartbeat-events/ (outside the repo); :7999-free. The try/except
     # makes emission NEVER a dependency of the poke: if it fails the poke still
     # proceeds (the §0 #2 invariant) — belt to emit_outcome's never-raises belt.
+    persona      = get_voice_persona( session_id )
+    persona_name = persona.get( "name" ) if persona else None
     try:
-        persona = get_voice_persona( session_id )
         heartbeat_events.emit_outcome(
             session_id,
-            persona.get( "name" ) if persona else None,
+            persona_name,
             result[ "outcome" ],
             get_poke_count( session_id ),                       # POST-increment
             settings[ "poke_cap" ],
-            work_owed = None,                                   # v1 (oracle gated on María §C.3 Q4)
+            work_owed = verdict[ "work_owed" ],                 # v2: REAL bool (was null in v1)
             awaiting  = ( hold.get( "awaiting" ) if hold else None ),
             reason    = result[ "hook_output" ].get( "reason" ),  # poke text, else None
         )
@@ -775,6 +829,13 @@ def _run_heartbeat( session_id ):
             "error"      : str( e ),
         } )
     # ── end emit ──
+
+    # ── 2b: genuine-idle DECLARATION beacon (Rick §6.2 = Option B) ─────────────
+    # Edge-triggered: declare idle ONLY on the TRANSITION into genuine-idle
+    # (not_owed AND an empty Task* set), de-duped against the last emitted event
+    # so a quiet streak emits ONE beacon, not one per Stop. Fire-and-forget.
+    if result[ "outcome" ] == OUTCOME_NOT_OWED and is_task_set_empty( transcript_path ):
+        _emit_genuine_idle( session_id, persona_name, settings[ "poke_cap" ] )
 
     if result[ "outcome" ] == OUTCOME_POKE:
         return result[ "hook_output" ]
@@ -855,7 +916,8 @@ def main():
         # re-fire) and only in Branch C (no voice_ctx → voice always wins).
         # Returns a block dict ONLY when the heartbeat pokes; otherwise None →
         # fall through to the existing idle-waiter / "Anything else?" path.
-        heartbeat_output = _run_heartbeat( session_id )
+        # transcript_path (Stop payload) feeds the v2 Task*-replay work-owed oracle.
+        heartbeat_output = _run_heartbeat( session_id, payload.get( "transcript_path" ) )
         if heartbeat_output is not None:
             emit_json( heartbeat_output )
             return

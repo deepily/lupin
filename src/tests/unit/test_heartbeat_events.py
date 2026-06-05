@@ -145,6 +145,53 @@ def test_read_events_oserror_returns_empty( tmp_path ):
     assert e.read_events( "s14", base_dir=tmp_path ) == [ ]
 
 
+# ── v2 idle beacon + edge-trigger helpers ─────────────────────────────────────
+
+def test_emit_idle_writes_record( tmp_path ):
+    ok = e.emit_outcome( "i1", "Tiffany 💍", e.EVENT_IDLE, 0, 3, work_owed=False, base_dir=tmp_path )
+    assert ok is True
+    r = e.read_events( "i1", base_dir=tmp_path )[ 0 ]
+    assert r[ "outcome" ]   == "idle"
+    assert r[ "work_owed" ] is False
+    assert "reason" not in r
+
+
+def test_should_emit_idle_pure():
+    assert e.should_emit_idle( None )         is True   # first idle = transition from nothing
+    assert e.should_emit_idle( "poke" )       is True
+    assert e.should_emit_idle( "honored" )    is True
+    assert e.should_emit_idle( e.EVENT_IDLE ) is False  # already idle → de-dup
+
+
+def test_last_emitted_outcome_no_events( tmp_path ):
+    assert e.last_emitted_outcome( "none", base_dir=tmp_path ) is None
+
+
+def test_last_emitted_outcome_returns_last( tmp_path ):
+    e.emit_outcome( "i2", "P", OUTCOME_POKE, 1, 3, base_dir=tmp_path )
+    e.emit_outcome( "i2", "P", OUTCOME_CAP_REACHED, 3, 3, base_dir=tmp_path )
+    assert e.last_emitted_outcome( "i2", base_dir=tmp_path ) == "cap_reached"
+
+
+def test_last_emitted_outcome_missing_field_is_none( tmp_path ):
+    ( tmp_path / "i3.jsonl" ).write_text( '{"no_outcome_field": 1}\n' )
+    assert e.last_emitted_outcome( "i3", base_dir=tmp_path ) is None
+
+
+def test_is_idle_transition_first_idle_is_transition( tmp_path ):
+    assert e.is_idle_transition( "i4", base_dir=tmp_path ) is True   # no prior events
+
+
+def test_is_idle_transition_after_active_outcome( tmp_path ):
+    e.emit_outcome( "i5", "P", OUTCOME_POKE, 1, 3, base_dir=tmp_path )
+    assert e.is_idle_transition( "i5", base_dir=tmp_path ) is True
+
+
+def test_is_idle_transition_dedup_after_idle( tmp_path ):
+    e.emit_outcome( "i6", "P", e.EVENT_IDLE, 0, 3, work_owed=False, base_dir=tmp_path )
+    assert e.is_idle_transition( "i6", base_dir=tmp_path ) is False
+
+
 # ── quick_smoke_test ──────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():

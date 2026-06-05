@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """
-Unit + integration tests for the Stop-hook Heartbeat Branch-C adapter.
+Unit + integration tests for the Stop-hook Heartbeat Branch-C adapter (v2).
 
-Two layers:
-  1. _run_heartbeat / _notify_cap_reached — the side-effecting adapter shell,
-     driven against the REAL pure leaf modules (heartbeat_hold +
-     heartbeat_decision) so the seam composition is validated, not mocked away.
-     Mirrors Tiffany's leaf-only contract test (test_heartbeat_v1_composition.py)
-     but adds the stop.py side effects (settings gate, increment, cap FYI).
-  2. main() — the Branch-C wiring: a poke owns the stop (emit block, skip idle);
-     a non-poke falls through to the existing idle path UNCHANGED.
+Layers:
+  1. _run_heartbeat — the side-effecting adapter shell, driven against the REAL
+     pure leaves (heartbeat_hold + heartbeat_work_owed + heartbeat_decision) so
+     the v2 seam composition is validated, not mocked away. The Task*-replay
+     SOURCE is injected via patched fetch_task_work_owed / is_task_set_empty
+     (the reader itself is unit-tested in test_heartbeat_task_state.py).
+  2. _emit_genuine_idle — the §6.2 genuine-idle declaration beacon (edge-trigger
+     gate delegated to heartbeat_events.is_idle_transition).
+  3. _notify_cap_reached — log-only cap FYI.
+  4. main() — the Branch-C wiring (poke owns stop vs fall-through-to-idle), now
+     threading transcript_path.
 
-v1 scope: hold-declared work-owed only (oracle_verdict=None). Conservative —
-no hold → no poke. The live oracle (v2) is gated on María §C.3 Q4.
+v2 scope (§0.3): work-owed source = the session's own Task* state replayed from
+its transcript. v1 behavior preserved (fresh hold honored; hold-declared owed
+still wins). FM-19 catch added: no hold + owed Task* → poke.
 
 Venue: :7999-eligible / local — fully mocked I/O, no server, sub-second.
 """
@@ -29,7 +33,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.stop import (
-    main, _run_heartbeat, _notify_cap_reached,
+    main, _run_heartbeat, _emit_genuine_idle, _notify_cap_reached,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     DECLARED_OWED_REASON, OUTCOME_POKE, OUTCOME_NOT_OWED,
@@ -43,188 +47,223 @@ def _now():
 
 
 def _fresh_reasoned_hold():
-    """A fresh, reasoned, work-owed hold → honored (no poke)."""
     return {
-        "session_id"  : "s",
-        "persona"     : "María 🌸",
-        "held_at"     : _now().isoformat(),
-        "ttl_seconds" : 900,
-        "work_owed"   : True,
-        "reason"      : "holding on the Tiberius gate",
+        "session_id"  : "s", "persona": "María 🌸", "held_at": _now().isoformat(),
+        "ttl_seconds" : 900, "work_owed": True, "reason": "holding on the gate",
         "awaiting"    : "peer:Rachel",
     }
 
 
 def _stale_owed_hold():
-    """A STALE self-declared work-owed hold → pokeable (v1's catch)."""
     stale = ( _now() - datetime.timedelta( seconds=10_000 ) ).isoformat()
     return {
-        "session_id"  : "s",
-        "persona"     : "Tiffany 💍",
-        "held_at"     : stale,
-        "ttl_seconds" : 900,
-        "work_owed"   : True,
-        "reason"      : "was holding on Rachel",
-        "awaiting"    : "none",
+        "session_id"  : "s", "persona": "Tiffany 💍", "held_at": stale,
+        "ttl_seconds" : 900, "work_owed": True, "reason": "was holding", "awaiting": "none",
     }
 
 
+_OWED_TASK   = [ { "status": "in_progress", "owned_by_me": True } ]   # FM-19 owed Task* set
+_NO_OWED     = [ ]
+
+
 # ═════════════════════════════════════════════════════════════════════════════
-# _run_heartbeat — adapter shell over the REAL leaf modules
+# _run_heartbeat — v2 adapter shell over the REAL leaves
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestRunHeartbeat:
-    """Adapter side-effect shell; real decide_heartbeat composition."""
+    """Real decide_heartbeat + evaluate_work_owed; Task* source + emit injected."""
 
     @pytest.fixture( autouse=True )
-    def _isolate_emit( self ):
+    def _isolate( self ):
         """
-        Isolate the fire-and-forget EMIT-NOW side effect for ALL tests in this
-        class: patch the heartbeat_events module (so emit_outcome never writes a
-        real ~/.claude/heartbeat-events/ file) and stub persona resolution to
-        None. Individual tests set self.mock_get_persona.return_value or inspect
-        self.mock_events.emit_outcome.call_args as needed.
+        Isolate side effects for ALL tests: patch the emit module (no real
+        ~/.claude writes), stub persona resolution, and default the Task*
+        source to 'no owed work / empty set'. Tests override as needed.
         """
         with patch( "lupin_cli.claude_code.hooks.stop.heartbeat_events" ) as ev, \
-             patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=None ) as vp:
-            self.mock_events      = ev
-            self.mock_get_persona = vp
+             patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=None ) as vp, \
+             patch( "lupin_cli.claude_code.hooks.stop.fetch_task_work_owed", return_value=_NO_OWED ) as ft, \
+             patch( "lupin_cli.claude_code.hooks.stop.is_task_set_empty", return_value=True ) as ie:
+            ev.EVENT_IDLE = "idle"
+            ev.is_idle_transition.return_value = True
+            self.mock_events  = ev
+            self.mock_persona = vp
+            self.mock_fetch   = ft
+            self.mock_idle    = ie
             yield
+
+    # ── gate / fail-safe ──
 
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": False, "poke_cap": 3 } )
-    def test_disabled_returns_none_no_leaf_reads( self, mock_load, mock_read ):
-        """Gate off → None, never read the hold, never emit."""
-        assert _run_heartbeat( "sid" ) is None
+    def test_disabled_returns_none_no_reads( self, mock_load, mock_read ):
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         mock_read.assert_not_called()
+        self.mock_fetch.assert_not_called()
         self.mock_events.emit_outcome.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            side_effect=ValueError( "heartbeat.poke_cap must be > 0, got 0" ) )
+            side_effect=ValueError( "bad poke_cap" ) )
     def test_malformed_config_fails_safe( self, mock_load, mock_read, mock_log ):
-        """Malformed config → fail SAFE (None) + logged; never poke, never emit."""
-        assert _run_heartbeat( "sid" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         mock_read.assert_not_called()
         self.mock_events.emit_outcome.assert_not_called()
-        phases = [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
-        assert "heartbeat_settings_invalid" in phases
+        assert "heartbeat_settings_invalid" in [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
 
-    @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
-    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
-    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
-    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3 } )
-    def test_poke_returns_block_and_increments( self, mock_load, mock_read, mock_count,
-                                                  mock_incr, mock_notify ):
-        """Stale owed hold, under cap → block dict + increment, no cap FYI."""
-        mock_read.return_value = _stale_owed_hold()
-        out = _run_heartbeat( "sid" )
-        assert out == { "decision": "block", "reason": DECLARED_OWED_REASON }
-        mock_incr.assert_called_once_with( "sid" )
-        mock_notify.assert_not_called()
+    # ── poke paths ──
 
-    @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
-    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
-    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
-    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3 } )
-    def test_fresh_hold_honored_no_poke( self, mock_load, mock_read, mock_count,
-                                          mock_incr, mock_notify ):
-        """Fresh reasoned hold → honored → None, no side effects."""
-        mock_read.return_value = _fresh_reasoned_hold()
-        assert _run_heartbeat( "sid" ) is None
-        mock_incr.assert_not_called()
-        mock_notify.assert_not_called()
-
-    @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3 } )
-    def test_no_hold_not_owed_no_poke( self, mock_load, mock_read, mock_count,
-                                        mock_incr, mock_notify ):
-        """No hold + oracle None → not_owed → None (conservative v1)."""
-        assert _run_heartbeat( "sid" ) is None
+    def test_v2_fm19_catch_no_hold_owed_task_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
+        """FM-19: no hold + owed Task* (in_progress) → poke (the v2 headline catch)."""
+        self.mock_fetch.return_value = _OWED_TASK
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out[ "decision" ] == "block"
+        assert out[ "reason" ]                                    # oracle-owed reason (quotes specifics)
+        mock_incr.assert_called_once_with( "sid" )
+        # emit carries the REAL work_owed=True
+        _, kwargs = self.mock_events.emit_outcome.call_args
+        assert kwargs[ "work_owed" ] is True
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3 } )
+    def test_v1_preserved_stale_declared_hold_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
+        """v1 preserved: stale self-declared-owed hold pokes even with no owed Task*."""
+        mock_read.return_value       = _stale_owed_hold()
+        self.mock_fetch.return_value = _NO_OWED
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out == { "decision": "block", "reason": DECLARED_OWED_REASON }
+        mock_incr.assert_called_once_with( "sid" )
+
+    # ── non-poke paths ──
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3 } )
+    def test_fresh_hold_honored( self, mock_load, mock_read, mock_count, mock_incr ):
+        mock_read.return_value = _fresh_reasoned_hold()
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         mock_incr.assert_not_called()
-        mock_notify.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3 } )
+    def test_not_owed_empty_taskset_emits_idle( self, mock_load, mock_read, mock_count ):
+        """not_owed + empty Task* set → genuine-idle beacon (transition)."""
+        self.mock_fetch.return_value = _NO_OWED
+        self.mock_idle.return_value  = True
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        # idle beacon emitted (is_idle_transition True by fixture)
+        self.mock_events.is_idle_transition.assert_called_once_with( "sid" )
+        idle_calls = [ c for c in self.mock_events.emit_outcome.call_args_list
+                       if c.args[ 2 ] == "idle" ]
+        assert len( idle_calls ) == 1
+        assert idle_calls[ 0 ].kwargs[ "work_owed" ] is False
+
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3 } )
+    def test_not_owed_nonempty_taskset_no_idle( self, mock_load, mock_read, mock_count ):
+        """not_owed but tasks exist (all completed) → NOT genuine-idle → no beacon."""
+        self.mock_fetch.return_value = _NO_OWED       # nothing owed
+        self.mock_idle.return_value  = False          # but the task set is non-empty
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        self.mock_events.is_idle_transition.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=3 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3 } )
-    def test_cap_reached_fires_notify_no_increment( self, mock_load, mock_read, mock_count,
-                                                      mock_incr, mock_notify ):
-        """Owed but at cap → None (allow stop) + cap FYI, no increment."""
-        mock_read.return_value = _stale_owed_hold()
-        assert _run_heartbeat( "sid" ) is None
+    def test_cap_reached_notifies_no_increment( self, mock_load, mock_read, mock_count,
+                                                 mock_incr, mock_notify ):
+        """Owed Task* but at cap → no poke, cap FYI, no increment."""
+        self.mock_fetch.return_value = _OWED_TASK
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         mock_notify.assert_called_once_with( "sid" )
         mock_incr.assert_not_called()
 
-    # ── EMIT NOW, CONSUME LATER — the single fire-and-forget call-site ────────
+    # ── emit details ──
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=1 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3 } )
-    def test_emit_called_on_poke_with_contract_args( self, mock_load, mock_read, mock_count, mock_incr ):
-        """On poke: emit_outcome gets resolved persona, POST-increment count, cap, reason."""
-        self.mock_get_persona.return_value = { "name": "Rachel" }
-        mock_read.return_value             = _stale_owed_hold()   # awaiting="none"
-        out = _run_heartbeat( "sid" )
-        assert out == { "decision": "block", "reason": DECLARED_OWED_REASON }
-        self.mock_events.emit_outcome.assert_called_once()
-        args, kwargs = self.mock_events.emit_outcome.call_args
-        assert args[ 0 ] == "sid"                 # session_id
-        assert args[ 1 ] == "Rachel"              # persona resolved from the bridge
-        assert args[ 2 ] == OUTCOME_POKE          # outcome
-        assert args[ 3 ] == 1                     # get_poke_count read at emit (post-increment)
-        assert args[ 4 ] == 3                     # cap
-        assert kwargs[ "work_owed" ] is None      # v1
-        assert kwargs[ "awaiting" ] == "none"     # from the hold
-        assert kwargs[ "reason" ]   == DECLARED_OWED_REASON
+    def test_emit_persona_and_awaiting_from_hold( self, mock_load, mock_read, mock_count, mock_incr ):
+        self.mock_persona.return_value = { "name": "Rachel" }
+        mock_read.return_value         = _stale_owed_hold()      # awaiting="none"
+        _run_heartbeat( "sid", "/t.jsonl" )
+        poke_emits = [ c for c in self.mock_events.emit_outcome.call_args_list
+                       if c.args[ 2 ] == OUTCOME_POKE ]
+        assert len( poke_emits ) == 1
+        assert poke_emits[ 0 ].args[ 1 ] == "Rachel"            # persona resolved
+        assert poke_emits[ 0 ].kwargs[ "awaiting" ] == "none"
 
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3 } )
-    def test_emit_called_unconditionally_on_not_owed( self, mock_load, mock_read, mock_count ):
-        """Unconditional call: emit fires even on not_owed (the module self-filters the write).
-        With no hold + unresolved persona → persona None, awaiting None, reason None."""
-        assert _run_heartbeat( "sid" ) is None
-        self.mock_events.emit_outcome.assert_called_once()
-        args, kwargs = self.mock_events.emit_outcome.call_args
-        assert args[ 1 ] is None                  # persona unresolved → None
-        assert args[ 2 ] == OUTCOME_NOT_OWED
-        assert kwargs[ "awaiting" ] is None       # no hold
-        assert kwargs[ "reason" ]   is None       # {"continue":True} → no reason
-
-    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
-    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
-    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=1 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
-    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3 } )
     def test_emit_failure_never_breaks_poke( self, mock_load, mock_read, mock_count, mock_incr, mock_log ):
-        """§0 #2 invariant: an emission failure must NOT break the poke."""
-        mock_read.return_value                      = _stale_owed_hold()
-        self.mock_events.emit_outcome.side_effect   = RuntimeError( "disk full" )
-        out = _run_heartbeat( "sid" )
-        assert out == { "decision": "block", "reason": DECLARED_OWED_REASON }   # poke STILL proceeds
-        phases = [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
-        assert "heartbeat_emit_error" in phases
+        """§0 #2: emission failure must NOT break the poke."""
+        self.mock_fetch.return_value             = _OWED_TASK
+        self.mock_events.emit_outcome.side_effect = RuntimeError( "disk full" )
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out[ "decision" ] == "block"
+        assert "heartbeat_emit_error" in [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# _notify_cap_reached — log-only FYI (v1)
+# _emit_genuine_idle — the §6.2 beacon (edge-trigger gate delegated)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestEmitGenuineIdle:
+
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.heartbeat_events" )
+    def test_emits_on_transition( self, mock_ev, mock_count ):
+        mock_ev.EVENT_IDLE = "idle"
+        mock_ev.is_idle_transition.return_value = True
+        _emit_genuine_idle( "sid", "Rachel", 3 )
+        mock_ev.emit_outcome.assert_called_once()
+        args, kwargs = mock_ev.emit_outcome.call_args
+        assert args[ 0 ] == "sid" and args[ 1 ] == "Rachel" and args[ 2 ] == "idle"
+        assert kwargs[ "work_owed" ] is False and kwargs[ "awaiting" ] is None
+
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.heartbeat_events" )
+    def test_skips_when_already_idle( self, mock_ev, mock_count ):
+        mock_ev.is_idle_transition.return_value = False
+        _emit_genuine_idle( "sid", "Rachel", 3 )
+        mock_ev.emit_outcome.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.heartbeat_events" )
+    def test_failure_never_raises( self, mock_ev, mock_count, mock_log ):
+        mock_ev.is_idle_transition.side_effect = RuntimeError( "events unreadable" )
+        _emit_genuine_idle( "sid", "Rachel", 3 )   # must not raise
+        assert "heartbeat_idle_emit_error" in [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _notify_cap_reached — log-only FYI
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestNotifyCapReached:
@@ -235,17 +274,16 @@ class TestNotifyCapReached:
         _notify_cap_reached( "sid42" )
         assert mock_log.call_count == 1
         extra = mock_log.call_args.kwargs[ "extra" ]
-        assert extra[ "phase" ]      == "heartbeat_cap_reached"
+        assert extra[ "phase" ] == "heartbeat_cap_reached"
         assert extra[ "session_id" ] == "sid42"
         assert extra[ "poke_count" ] == 3
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# main() — Branch-C wiring
+# main() — Branch-C wiring (threads transcript_path)
 # ═════════════════════════════════════════════════════════════════════════════
 
 class TestMainBranchCWiring:
-    """A poke owns the stop (emit block, skip idle); non-poke → idle path."""
 
     @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings" )
     @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat",
@@ -257,14 +295,17 @@ class TestMainBranchCWiring:
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
-    def test_poke_emits_block_and_skips_idle( self, mock_read, mock_log, mock_resolve,
-                                               mock_sp, mock_drain, mock_emit,
-                                               mock_reset, mock_hb, mock_idle ):
-        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+    def test_poke_emits_block_skips_idle_passes_transcript( self, mock_read, mock_log, mock_resolve,
+                                                            mock_sp, mock_drain, mock_emit,
+                                                            mock_reset, mock_hb, mock_idle ):
+        mock_read.return_value = {
+            "stop_hook_active": False, "session_id": "abc12345",
+            "transcript_path": "/home/u/.claude/projects/p/abc.jsonl",
+        }
         main()
         mock_emit.assert_called_once_with( { "decision": "block", "reason": "poke!" } )
-        mock_hb.assert_called_once_with( "abc12345" )
-        mock_idle.assert_not_called()   # idle path skipped — poke owns the stop
+        mock_hb.assert_called_once_with( "abc12345", "/home/u/.claude/projects/p/abc.jsonl" )
+        mock_idle.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop._arm_idle_waiter" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
@@ -280,8 +321,8 @@ class TestMainBranchCWiring:
     def test_no_poke_falls_through_to_idle( self, mock_read, mock_log, mock_resolve,
                                             mock_sp, mock_drain, mock_emit, mock_reset,
                                             mock_hb, mock_idle, mock_arm ):
-        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }   # no transcript_path key
         main()
-        mock_hb.assert_called_once_with( "abc12345" )
-        mock_arm.assert_called_once()           # idle waiter armed → fell through
-        mock_emit.assert_called_once_with( {} ) # allow stop after arming
+        mock_hb.assert_called_once_with( "abc12345", None )   # missing key → None threaded
+        mock_arm.assert_called_once()
+        mock_emit.assert_called_once_with( {} )
