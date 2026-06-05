@@ -30,9 +30,13 @@ import json
 import os
 from pathlib import Path
 
-from lupin_cli.claude_code.hooks.lib.heartbeat_events import (
-    FLEET_EVENTS_DIR, EVENTS_FILENAME_TEMPLATE,
-)
+# Import the MODULE (not the FLEET_EVENTS_DIR value) so the fleet dir is read at
+# CALL time. A value-import binds the real ~/.claude path at import, and the test
+# conftest's FLEET_EVENTS_DIR→tmp monkeypatch would never reach us → the
+# events_dir=None path would read the real shared dir (phantom sessions). The
+# filename template is a constant, so importing its value is fine.
+from lupin_cli.claude_code.hooks.lib import heartbeat_events
+from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENTS_FILENAME_TEMPLATE
 
 
 def _session_id_from_path( path ):
@@ -128,7 +132,7 @@ def tail_fleet_events( events_dir=None, offsets=None ):
         - A file that errors mid-read is skipped (its offset is preserved)
         - NEVER raises
     """
-    base = Path( events_dir ) if events_dir is not None else FLEET_EVENTS_DIR
+    base = Path( events_dir ) if events_dir is not None else heartbeat_events.FLEET_EVENTS_DIR
     offsets = dict( offsets ) if offsets else { }
 
     events_by_session = { }
