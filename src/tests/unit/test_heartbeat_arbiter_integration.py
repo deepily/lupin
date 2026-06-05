@@ -205,9 +205,13 @@ class TestGroupPCLoopClosure:
 
         # the REAL emitted file lands in the conftest-redirected fleet dir
         fleet_dir = heartbeat_events.FLEET_EVENTS_DIR
-        now       = datetime.datetime.now( UTC )                  # ≈ emit ts → alive
-        arb       = _make_arbiter( fleet_dir, clock=SteppableClock( now ) )
-        summary   = arb._poll_once()
+        # Deterministic `now`: derive it from the emitted record's OWN ts (the
+        # record is alive at its own ts) — NEVER real wall-clock, which would
+        # flake under parallel load. Keeps PC1 a true full-chain test, hermetic.
+        emitted  = heartbeat_events.read_events( "ha-sid-1" )
+        rec_ts   = datetime.datetime.fromisoformat( emitted[ -1 ][ "ts" ] )
+        arb      = _make_arbiter( fleet_dir, clock=SteppableClock( rec_ts ) )
+        summary  = arb._poll_once()
 
         assert summary[ "sessions" ] == 1
         rec = arb._acc.snapshot()[ "ha-sid-1" ][ -1 ]            # consumer state == producer's real write
