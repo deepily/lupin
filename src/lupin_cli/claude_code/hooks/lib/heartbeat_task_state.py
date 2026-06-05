@@ -74,23 +74,24 @@ def replay_task_state( transcript_path, _iter=iter_tool_uses ):
     return state
 
 
-def fetch_task_work_owed( transcript_path, _iter=iter_tool_uses ):
+def owed_items_from_state( state ):
     """
-    Build the work-owed `todo_items` list for `evaluate_work_owed`.
+    Derive the work-owed `todo_items` list from an already-replayed task state.
+
+    PURE — no I/O. Lets the caller replay the transcript ONCE (perf: the Stop
+    hook fires every turn) and derive both the owed-items AND the empty-set
+    signal from the single state dict, instead of replaying twice.
 
     Requires:
-        - transcript_path is a path-like / string / None
-        - _iter is the tool-use iterator (injectable for tests)
+        - state is a { taskId: status } dict (replay_task_state output)
 
     Ensures:
         - Returns a list of { "status": <status>, "owned_by_me": True } — one
-          per task whose latest replayed status ∈ {in_progress, pending}
+          per task whose status ∈ {in_progress, pending}
         - owned_by_me is always True (by construction — same transcript =
           same session)
-        - No owed tasks (or empty transcript) → []
-        - NEVER raises
+        - No owed tasks → []
     """
-    state = replay_task_state( transcript_path, _iter=_iter )
     return [
         { "status": status, "owned_by_me": True }
         for status in state.values()
@@ -98,23 +99,55 @@ def fetch_task_work_owed( transcript_path, _iter=iter_tool_uses ):
     ]
 
 
+def is_empty_state( state ):
+    """
+    Is the (already-replayed) Task* state genuinely empty (no tasks at all)?
+
+    PURE companion to owed_items_from_state for the single-replay path.
+
+    Requires:
+        - state is a { taskId: status } dict
+
+    Ensures:
+        - Returns True iff the state has zero tasks
+    """
+    return len( state ) == 0
+
+
+def fetch_task_work_owed( transcript_path, _iter=iter_tool_uses ):
+    """
+    Convenience wrapper: replay the transcript + derive the work-owed list.
+
+    Requires:
+        - transcript_path is a path-like / string / None
+        - _iter is the tool-use iterator (injectable for tests)
+
+    Ensures:
+        - Returns owed_items_from_state( replay_task_state( transcript_path ) )
+        - No owed tasks (or empty transcript) → []
+        - NEVER raises
+
+    (The single-replay hot path in stop.py calls replay_task_state +
+    owed_items_from_state + is_empty_state directly to avoid replaying twice.)
+    """
+    return owed_items_from_state( replay_task_state( transcript_path, _iter=_iter ) )
+
+
 def is_task_set_empty( transcript_path, _iter=iter_tool_uses ):
     """
-    Is the session's Task* set genuinely empty (no tasks at all)?
+    Convenience wrapper: replay the transcript + report the empty-set signal.
 
-    Distinguishes "genuinely idle — nothing on my plate" from "this turn
-    happens to owe nothing." Used by the §6.2 genuine-idle declaration beacon
-    (Rick Option B): a genuine-idle signal requires BOTH no owed work AND an
-    empty task set (never created a task, or every task is gone).
+    Used by the §6.2 genuine-idle declaration beacon (Rick Option B): a
+    genuine-idle signal requires BOTH no owed work AND an empty task set.
 
     Requires:
         - transcript_path is a path-like / string / None
 
     Ensures:
-        - Returns True iff the replayed Task* state has zero tasks
+        - Returns is_empty_state( replay_task_state( transcript_path ) )
         - NEVER raises
     """
-    return len( replay_task_state( transcript_path, _iter=_iter ) ) == 0
+    return is_empty_state( replay_task_state( transcript_path, _iter=_iter ) )
 
 
 def quick_smoke_test():

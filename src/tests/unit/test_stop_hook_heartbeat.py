@@ -62,8 +62,11 @@ def _stale_owed_hold():
     }
 
 
-_OWED_TASK   = [ { "status": "in_progress", "owned_by_me": True } ]   # FM-19 owed Task* set
-_NO_OWED     = [ ]
+# v2.1: stop.py replays the transcript ONCE → these are replay_task_state outputs
+# (the derive helpers owed_items_from_state / is_empty_state run real on them).
+_OWED_STATE  = { "1": "in_progress" }    # FM-19 owed Task* state
+_EMPTY_STATE = { }                        # no tasks → genuinely idle (empty set)
+_DONE_STATE  = { "1": "completed" }       # not owed, but task set NON-empty
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -82,14 +85,15 @@ class TestRunHeartbeat:
         """
         with patch( "lupin_cli.claude_code.hooks.stop.heartbeat_events" ) as ev, \
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=None ) as vp, \
-             patch( "lupin_cli.claude_code.hooks.stop.fetch_task_work_owed", return_value=_NO_OWED ) as ft, \
-             patch( "lupin_cli.claude_code.hooks.stop.is_task_set_empty", return_value=True ) as ie:
+             patch( "lupin_cli.claude_code.hooks.stop.replay_task_state", return_value={ } ) as rt:
+            # owed_items_from_state + is_empty_state run REAL on the replayed
+            # state (single-replay v2.1 path) — tests drive scenarios by setting
+            # self.mock_replay.return_value to a { taskId: status } dict.
             ev.EVENT_IDLE = "idle"
             ev.is_idle_transition.return_value = True
             self.mock_events  = ev
             self.mock_persona = vp
-            self.mock_fetch   = ft
-            self.mock_idle    = ie
+            self.mock_replay  = rt
             yield
 
     # ── gate / fail-safe ──
@@ -100,7 +104,7 @@ class TestRunHeartbeat:
     def test_disabled_returns_none_no_reads( self, mock_load, mock_read ):
         assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         mock_read.assert_not_called()
-        self.mock_fetch.assert_not_called()
+        self.mock_replay.assert_not_called()
         self.mock_events.emit_outcome.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
@@ -122,7 +126,7 @@ class TestRunHeartbeat:
             return_value={ "enabled": True, "poke_cap": 3 } )
     def test_v2_fm19_catch_no_hold_owed_task_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """FM-19: no hold + owed Task* (in_progress) → poke (the v2 headline catch)."""
-        self.mock_fetch.return_value = _OWED_TASK
+        self.mock_replay.return_value = _OWED_STATE
         out = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert out[ "reason" ]                                    # oracle-owed reason (quotes specifics)
@@ -139,7 +143,7 @@ class TestRunHeartbeat:
     def test_v1_preserved_stale_declared_hold_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """v1 preserved: stale self-declared-owed hold pokes even with no owed Task*."""
         mock_read.return_value       = _stale_owed_hold()
-        self.mock_fetch.return_value = _NO_OWED
+        self.mock_replay.return_value = _EMPTY_STATE
         out = _run_heartbeat( "sid", "/t.jsonl" )
         assert out == { "decision": "block", "reason": DECLARED_OWED_REASON }
         mock_incr.assert_called_once_with( "sid" )
@@ -162,8 +166,7 @@ class TestRunHeartbeat:
             return_value={ "enabled": True, "poke_cap": 3 } )
     def test_not_owed_empty_taskset_emits_idle( self, mock_load, mock_read, mock_count ):
         """not_owed + empty Task* set → genuine-idle beacon (transition)."""
-        self.mock_fetch.return_value = _NO_OWED
-        self.mock_idle.return_value  = True
+        self.mock_replay.return_value = _EMPTY_STATE
         assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         # idle beacon emitted (is_idle_transition True by fixture)
         self.mock_events.is_idle_transition.assert_called_once_with( "sid" )
@@ -178,8 +181,7 @@ class TestRunHeartbeat:
             return_value={ "enabled": True, "poke_cap": 3 } )
     def test_not_owed_nonempty_taskset_no_idle( self, mock_load, mock_read, mock_count ):
         """not_owed but tasks exist (all completed) → NOT genuine-idle → no beacon."""
-        self.mock_fetch.return_value = _NO_OWED       # nothing owed
-        self.mock_idle.return_value  = False          # but the task set is non-empty
+        self.mock_replay.return_value = _DONE_STATE        # nothing owed, but task set NON-empty
         assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         self.mock_events.is_idle_transition.assert_not_called()
 
@@ -192,7 +194,7 @@ class TestRunHeartbeat:
     def test_cap_reached_notifies_no_increment( self, mock_load, mock_read, mock_count,
                                                  mock_incr, mock_notify ):
         """Owed Task* but at cap → no poke, cap FYI, no increment."""
-        self.mock_fetch.return_value = _OWED_TASK
+        self.mock_replay.return_value = _OWED_STATE
         assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         mock_notify.assert_called_once_with( "sid" )
         mock_incr.assert_not_called()
@@ -222,7 +224,7 @@ class TestRunHeartbeat:
             return_value={ "enabled": True, "poke_cap": 3 } )
     def test_emit_failure_never_breaks_poke( self, mock_load, mock_read, mock_count, mock_incr, mock_log ):
         """§0 #2: emission failure must NOT break the poke."""
-        self.mock_fetch.return_value             = _OWED_TASK
+        self.mock_replay.return_value = _OWED_STATE
         self.mock_events.emit_outcome.side_effect = RuntimeError( "disk full" )
         out = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"

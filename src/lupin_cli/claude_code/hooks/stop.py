@@ -64,7 +64,7 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import evaluate_work_owed
 from lupin_cli.claude_code.hooks.lib.heartbeat_task_state import (
-    fetch_task_work_owed, is_task_set_empty,
+    replay_task_state, owed_items_from_state, is_empty_state,
 )
 
 
@@ -793,8 +793,12 @@ def _run_heartbeat( session_id, transcript_path ):
     # v2: REAL work-owed verdict from the session's own Task* state, replayed
     # from its transcript (§0.3). owned_by_me TRUE by construction; :7999-free;
     # the reader never raises (missing/empty transcript ⇒ no owed work).
-    verdict = evaluate_work_owed( todo_items=fetch_task_work_owed( transcript_path ) )
-    result  = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
+    # v2.1 perf: replay the transcript ONCE and derive BOTH the owed-items and
+    # the genuine-idle empty-set signal from the single state (the Stop hook
+    # fires every turn — halves the per-Stop transcript reads).
+    task_state = replay_task_state( transcript_path )
+    verdict    = evaluate_work_owed( todo_items=owed_items_from_state( task_state ) )
+    result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
 
     if result[ "should_increment" ]:
         increment_poke_count( session_id )
@@ -834,7 +838,7 @@ def _run_heartbeat( session_id, transcript_path ):
     # Edge-triggered: declare idle ONLY on the TRANSITION into genuine-idle
     # (not_owed AND an empty Task* set), de-duped against the last emitted event
     # so a quiet streak emits ONE beacon, not one per Stop. Fire-and-forget.
-    if result[ "outcome" ] == OUTCOME_NOT_OWED and is_task_set_empty( transcript_path ):
+    if result[ "outcome" ] == OUTCOME_NOT_OWED and is_empty_state( task_state ):
         _emit_genuine_idle( session_id, persona_name, settings[ "poke_cap" ] )
 
     if result[ "outcome" ] == OUTCOME_POKE:
