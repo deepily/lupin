@@ -399,7 +399,11 @@ async def notify_user(
         "task", "progress", "alert", "custom", "user_initiated_message", "session_topic",
         "voice_persona_assigned", "voice_persona_released", "speakerphone_changed",
         "commons_broadcast_ack", "commons_answer_received", "commons_activity",
-        "commons_question_received"
+        "commons_question_received",
+        # Worker-reap state-update (2026-06-05): emitted by session_spawner.dismiss_sessions
+        # on harvest. envelope sender_id = the reaped worker's sender_id → SenderStore drops
+        # its badge + the broadcast card refreshes. Consumer wiring owned by Sam.
+        "session_reaped"
     ]
     if type not in valid_types:
         raise HTTPException(

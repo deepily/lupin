@@ -5647,6 +5647,26 @@ class NotificationsUI {
                 }
                 return;
 
+            case "session_reaped":
+                // A worker was harvested/reaped by its manager. Remove its
+                // focus-bar strip badge (the user's visual confirmation the
+                // reap landed) and refresh the broadcast card's recipient
+                // list. The producer (dismiss_sessions) deletes the reaped
+                // session's bridge file, so /api/commons/active-sessions
+                // already excludes it on the re-fetch below — without that
+                // delete the mtime-liveness filter would keep it for ~8h.
+                // See: src/rnd/v0.1.8/2026.06.05-reap-event-focus-bar-and-broadcast-refresh.md
+                if ( notification.sender_id ) {
+                    this.senderPersonaMap.delete( notification.sender_id );
+                    this._setPersonaBadgeOnCard( notification.sender_id, null );
+                    this._removeStripIcon( notification.sender_id );
+                    this._applyHideInactiveStripFilter();
+                }
+                if ( window.broadcastPanel && typeof window.broadcastPanel.refreshSessions === "function" ) {
+                    window.broadcastPanel.refreshSessions();
+                }
+                return;
+
             case "speakerphone_changed":
                 // Re-shape from notification.payload to the legacy envelope keys
                 // that handleConversationModeChanged reads. Server-side wire field

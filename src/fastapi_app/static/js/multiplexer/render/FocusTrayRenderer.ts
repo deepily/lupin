@@ -33,7 +33,7 @@
 // idempotency pattern).
 
 import type { EventBus } from "../shared/EventBus";
-import type { SenderRecord, StoreSendersChangedPayload } from "../shared/types";
+import type { LupinEvent, SenderRecord, StoreSendersChangedPayload } from "../shared/types";
 import { renderFocusTray } from "./templates/focusTray";
 
 interface SenderStoreLike {
@@ -111,11 +111,12 @@ class FocusTrayRendererImpl implements FocusTrayRenderer {
     trayEl.addEventListener("click", this.trayClickHandler);
 
     // Subscribe to sender-store changes. Pin moves, persona updates,
-    // sender adds — every emission re-reconciles.
+    // sender adds — every emission re-reconciles. A "removed" change targeting
+    // the focused anchor additionally auto-exits focus mode (see onSendersChanged).
     this.unsubscribers.push(
       this.bus.on<StoreSendersChangedPayload>(
         "store_senders_changed",
-        () => this.reconcile(),
+        (e) => this.onSendersChanged(e),
       ),
     );
 
@@ -184,6 +185,28 @@ class FocusTrayRendererImpl implements FocusTrayRenderer {
     // doesn't matter for now; future revisions may route the click to the
     // specific sender via data-sender-id).
     this.focusModeActive = false;
+    this.reconcile();
+  }
+
+  // -------------------------------------------------------------------------
+  // Store-change handling
+  // -------------------------------------------------------------------------
+
+  private onSendersChanged(e: LupinEvent<StoreSendersChangedPayload>): void {
+    // Auto-exit focus mode when the focused anchor itself is removed — e.g.
+    // the pinned sender was reaped (session_reaped → SenderStore removal).
+    // Without this, reconcile() would keep focus mode ON anchored to a now-dead
+    // sender while findPinned() === null disables the toggle, stranding the
+    // user with no way out. Mirrors the legacy `_removeStripIcon` auto-exit.
+    // See: src/rnd/v0.1.8/2026.06.05-reap-event-focus-bar-and-broadcast-refresh.md
+    if (
+      this.focusModeActive &&
+      e.payload.changeKind === "removed" &&
+      e.payload.sender_id === this.lastPinnedId
+    ) {
+      this.focusModeActive = false;
+      this.lastPinnedId    = null;
+    }
     this.reconcile();
   }
 

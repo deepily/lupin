@@ -54,11 +54,20 @@ import type {
 // names so it works pre- and post- a future server-side rename. Today
 // only `speakerphone_changed` reaches the wire; that's a known transition
 // state and the bridge handles it (see header comment).
+// `session_reaped` (added 2026-06-05) is the reap → focus-bar signal: when a
+// manager harvests a worker, the producer (Tiberius's `dismiss_sessions`)
+// deletes the worker's bridge and emits this state-update with the envelope
+// `sender_id` set to the REAPED worker (exactly like `voice_persona_released`).
+// The handler removes that sender from the store outright so FocusTrayRenderer
+// (which lists `senders.list()` minus the pin) reconciles the badge away —
+// the user's visual confirmation that the reap landed.
+// See: src/rnd/v0.1.8/2026.06.05-reap-event-focus-bar-and-broadcast-refresh.md
 const STATE_UPDATE_TYPES = new Set<string>([
   "voice_persona_assigned",
   "voice_persona_released",
   "speakerphone_changed",
   "conversation_mode_changed",
+  "session_reaped",
 ]);
 
 // Server payload shape for notification_queue_update — same as
@@ -172,8 +181,11 @@ class SenderStoreImpl implements SenderStore {
       // Conversation-mode events (both `speakerphone_changed` current-wire
       // and `conversation_mode_changed` post-rename) mutate the
       // `conversation_mode_active` slot. Persona events mutate the
-      // `voice_persona` slot. Neither bumps unread / last_active.
-      if (n.type === "conversation_mode_changed" || n.type === "speakerphone_changed") {
+      // `voice_persona` slot. `session_reaped` removes the sender outright.
+      // None of them bump unread / last_active.
+      if (n.type === "session_reaped") {
+        this.handleSessionReaped(senderId);
+      } else if (n.type === "conversation_mode_changed" || n.type === "speakerphone_changed") {
         this.handleConversationModeUpdate(senderId, n);
       } else {
         this.handlePersonaUpdate(senderId, n.type, n.voice_persona ?? null);
@@ -291,6 +303,18 @@ class SenderStoreImpl implements SenderStore {
       record.conversation_mode_active = false;
       this.emit("updated", senderId);
     }
+  }
+
+  private handleSessionReaped(senderId: string): void {
+    // Reap → focus-bar badge drop. The worker named by `senderId` (envelope)
+    // was harvested by its manager; remove it from the store entirely and
+    // emit a "removed" change so FocusTrayRenderer reconciles its tray badge
+    // away. No-op when the sender was never tracked (e.g. a worker that never
+    // sent a notification has no badge) — nothing to remove, no spurious emit.
+    // See: src/rnd/v0.1.8/2026.06.05-reap-event-focus-bar-and-broadcast-refresh.md
+    if (!this.senders.has(senderId)) return;
+    this.senders.delete(senderId);
+    this.emit("removed", senderId);
   }
 
   // -------------------------------------------------------------------------

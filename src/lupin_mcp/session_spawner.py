@@ -330,6 +330,87 @@ def spawn_sessions(
     }
 
 
+def _capture_reap_identity( session_dir: Path, tmux_session: str ) -> Optional[ Dict[ str, Any ] ]:
+    """
+    Capture { bridge_path, persona, sender_id, session_id } for a soon-to-be-
+    reaped tmux session by scanning `session_dir` for the bridge whose
+    `tmux_session` field matches. MUST run BEFORE the bridge is unlinked
+    (sender_id + persona both derive from the bridge). Returns None when no
+    bridge matches or is unreadable. Never raises.
+    """
+    try:
+        candidates = list( session_dir.glob( "cc-*.json" ) )
+    except OSError:
+        return None
+    for path in candidates:
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+        try:
+            data = json.loads( path.read_text() )
+        except ( json.JSONDecodeError, OSError ):
+            continue
+        if data.get( "tmux_session" ) != tmux_session:
+            continue
+        session_id = data.get( "stable_session_id" ) or data.get( "session_id" )
+        sender_id  = None
+        try:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+            sender_id = build_sender_id_for_cc( session_id ) if session_id else None
+        except Exception:
+            pass
+        return {
+            "bridge_path" : path,
+            "persona"     : data.get( "voice_persona" ),
+            "sender_id"   : sender_id,
+            "session_id"  : session_id,
+        }
+    return None
+
+
+def _default_emit_reap( identity: Dict[ str, Any ], reason: str = "" ) -> None:
+    """
+    Default reap-event emitter (producer of Sam's reap-UI wiring, 2026-06-05):
+    fire-and-forget POST of a `session_reaped` state-update onto the Lupin
+    notification rail, envelope `sender_id` = the REAPED worker's sender_id
+    (→ SenderStore drops its badge; the broadcast card refreshes). Best-effort:
+    a down server / missing sender_id NEVER breaks a reap. Override via
+    `dismiss_sessions(emit_reap_fn=...)` — tests inject a capture instead.
+
+    Contract (locked with Sam): type="session_reaped", sender_id=reaped worker.
+    """
+    sender_id = identity.get( "sender_id" )
+    if not sender_id:
+        return
+    try:
+        import requests
+        from cosa.utils.config_loader import get_api_config, load_api_key
+        env     = os.getenv( "LUPIN_ENV", "local" )
+        cfg     = get_api_config( env )
+        api_key = load_api_key( cfg[ "api_key_file" ] )
+        # /api/notify REQUIRES target_user — the reap event must route to the human
+        # OWNER's UI (focus bar + broadcast card), not the worker. Resolve from the
+        # dev/owner email (LUPIN_DEV_EMAIL), falling back to the configured recipient.
+        target  = os.getenv( "LUPIN_DEV_EMAIL" ) or cfg.get( "global_notification_recipient" )
+        if not target:
+            return                          # can't route → skip (best-effort)
+        persona = identity.get( "persona" ) if isinstance( identity.get( "persona" ), dict ) else { }
+        name    = ( persona or { } ).get( "name" ) or "A worker"
+        requests.post(
+            f"{cfg[ 'api_url' ].rstrip( '/' )}/api/notify",
+            params  = {
+                "message"     : f"{name} reaped",
+                "type"        : "session_reaped",
+                "priority"    : "low",
+                "sender_id"   : sender_id,
+                "target_user" : target,
+            },
+            headers = { "X-API-Key": api_key },
+            timeout = 3,
+        )
+    except Exception:
+        pass  # producer must NEVER break the reap
+
+
 def dismiss_sessions(
     manager_session_id : str,
     *,
@@ -337,7 +418,8 @@ def dismiss_sessions(
     reason             : str = "",
     write_memento      : bool = True,
     runner             : Callable = default_runner,
-    session_dir        : Path = SESSION_DIR
+    session_dir        : Path = SESSION_DIR,
+    emit_reap_fn       : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -380,6 +462,10 @@ def dismiss_sessions(
     targets   = session_names if session_names is not None else list( known )
     dismissed = []
 
+    # Capture each target's bridge identity (persona + sender_id) BEFORE teardown —
+    # the bridge is unlinked below, and sender_id/persona both derive from it.
+    identities = { name: _capture_reap_identity( session_dir, name ) for name in targets }
+
     for name in targets:
         result = runner( [ "tmux", "kill-session", "-t", name ] )
         ok     = getattr( result, "returncode", 1 ) == 0
@@ -399,12 +485,36 @@ def dismiss_sessions(
         except ( FileNotFoundError, OSError ):
             pass
 
+    # Bridge-delete + reap-event emit (2026-06-05, Rick): per reaped session, delete
+    # its bridge file so the mtime-filtered active-sessions list drops it IMMEDIATELY
+    # (broadcast send-to list + focus bar), then emit the `session_reaped` event.
+    # Ordering: kill + manifest-rewrite (above) → unlink bridge → emit. Producer is
+    # fail-safe — a bad unlink/emit NEVER breaks the reap.
+    emit             = emit_reap_fn if emit_reap_fn is not None else _default_emit_reap
+    bridges_deleted  = 0
+    for name in reaped_names:
+        ident = identities.get( name )
+        if not ident:
+            continue
+        bridge_path = ident.get( "bridge_path" )
+        if bridge_path is not None:
+            try:
+                bridge_path.unlink()
+                bridges_deleted += 1
+            except ( FileNotFoundError, OSError ):
+                pass
+        try:
+            emit( ident, reason )
+        except Exception:
+            pass  # producer must NEVER break the reap
+
     return {
         "dismissed"          : dismissed,
         "manager_session_id" : manager_session_id,
         "reason"             : reason,
         "write_memento"      : write_memento,
-        "remaining"          : [ r[ "session_name" ] for r in remaining ]
+        "remaining"          : [ r[ "session_name" ] for r in remaining ],
+        "bridges_deleted"    : bridges_deleted
     }
 
 
