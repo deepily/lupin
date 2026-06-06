@@ -54,10 +54,18 @@ from cosa.rest.arbiter_snapshot_store import set_snapshot as _default_snapshot_s
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_bridge_mtime as _default_bridge_mtime_fn,
 )
+from cosa.agents.heartbeat_arbiter.manager_resolver import (
+    resolve_manager as _default_resolve_manager,
+)
 
 
 # Manager-surface topic + auto-ping message template
 ROSTER_TOPIC          = "fleet-arbiter"
+# v2.2 B3 D3 trigger: a reserved topic a worker/manager posts to when the fleet
+# hits a decision IT can't make (scope / prod-logic / hard ambiguity). The
+# arbiter TAILS it (read-only) and escalates each new post to Rick. Registered in
+# planning-is-prompting → workflow/cross-session-communication.md reserved-topic table.
+DECISION_TOPIC        = "fleet-decision-needed"
 PING_MESSAGE_TEMPLATE = "Session {holder} is holding on you — where are we?"
 # build_graph edges are persona→persona; a richer "reason" is not well-sourced
 # from the event stream (the holder's `awaiting` is just "peer:<awaited>",
@@ -79,6 +87,10 @@ class ArbiterGateway( Protocol ):
     def who( self, retention_hours: int = 24 ) -> List[ dict ]: ...
     def send_to( self, recipient: str, body: str ) -> None: ...
     def post( self, topic: str, body: str ) -> None: ...
+    # v2.2 B3: tail a reserved topic (e.g. fleet-decision-needed). READ is pure
+    # OBSERVATION — side-effect-free, redline-safe (NOT actuation). Verb set is
+    # now {who, send_to, post, read}: all sense/recommend/escalate, zero actuate.
+    def read( self, topic: str, since: Optional[ str ] = None, limit: int = 50 ) -> List[ dict ]: ...
 
 
 class ArbiterConsumerJob( AgenticJobBase ):
@@ -106,11 +118,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         max_duration_seconds     : int                  = 43_200,   # 12h
         events_dir               : Optional[ str ]      = None,     # None → fleet dir
         tail_maxlen              : int                  = DEFAULT_TAIL_MAXLEN,
+        tap_min_interval_seconds : int                  = 300,
+        manager_ack_window_seconds : int                = 600,
+        fleet_stall_window_seconds : int                = 1800,
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
         snapshot_sink            : Optional[ Callable ] = None,
         render_sink              : Optional[ Callable ] = None,
+        resolve_manager_fn       : Optional[ Callable ] = None,
         user_id      : str  = None,
         user_email   : str  = None,
         session_id   : str  = None,
@@ -200,6 +216,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._bridge_mtime_fn = bridge_mtime_fn if bridge_mtime_fn is not None else _default_bridge_mtime_fn
         self._snapshot_sink   = snapshot_sink   if snapshot_sink   is not None else _default_snapshot_sink
         self._render_sink     = render_sink      if render_sink     is not None else print
+        # v2.2 B2 manager-tap: per-worker manager routing (D5 lineage) seam.
+        self._resolve_manager_fn = resolve_manager_fn if resolve_manager_fn is not None else _default_resolve_manager
+        self.tap_min_interval_seconds   = tap_min_interval_seconds
+        self.manager_ack_window_seconds = manager_ack_window_seconds
+        self.fleet_stall_window_seconds = fleet_stall_window_seconds
 
         # --- consumer state (carried across polls) ---
         self._offsets       = { }                                  # sid -> byte offset
@@ -212,6 +233,23 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # frame signature + when it last changed (for the tick's since-duration).
         self._last_frame_sig = None
         self._last_change_at = None
+        # v2.2 B2 manager-tap throttle state (per manager persona): last tapped
+        # crew-summary signature + when, so a manager is tapped only on CHANGE +
+        # min-interval (never tap on no-change).
+        self._last_tap_sig = { }
+        self._last_tap_at  = { }
+        # v2.2 B4/D4 manager-ack tracking: managers already escalated as down for
+        # their current (un-acked) tap — so manager-down escalates ONCE, not every
+        # poll, until the manager re-acks (shows liveness after the tap).
+        self._manager_down_escalated = set()
+        # v2.2 B3 state: decision-needed tail cursor (ISO ts; baselined on first
+        # poll so a pre-arbiter backlog isn't re-escalated) + whole-fleet-stall
+        # progress tracking (last PROGRESS signature + when it last advanced +
+        # whether the current stall was already escalated).
+        self._decision_since   = None
+        self._last_progress_sig = None
+        self._last_progress_at  = None
+        self._stall_escalated   = False
 
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI (QueueableJob protocol)."""
@@ -245,17 +283,25 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._escalate_deadlocks( graph[ "cycles" ] )
         pings_fired = self._auto_ping( graph[ "edges" ], now )
         roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds )
-        self._surface_to_manager( fleet_view, graph, roster )
-        rendered    = self._publish_fleet_snapshot( fleet_view, now )
+        self._surface_to_manager( fleet_view, graph, roster )       # durable topic fallback
+        taps_fired    = self._tap_managers( fleet_view, graph, roster, now )   # v2.2 B2 DM tap
+        managers_down = self._check_manager_acks( now, who_rows )   # v2.2 B4/D4 manager-down
+        decisions     = self._check_decision_needed( now )          # v2.2 B3 D3 decision-needed
+        stalled       = self._check_fleet_stall( fleet_view, now )  # v2.2 B3 D3 whole-fleet-stall
+        rendered      = self._publish_fleet_snapshot( fleet_view, now )
 
         self._poll_count += 1
         return {
-            "sessions"    : len( fleet_view ),
-            "edges"       : len( graph[ "edges" ] ),
-            "cycles"      : len( graph[ "cycles" ] ),
-            "pings_fired" : pings_fired,
-            "roster"      : len( roster ),
-            "rendered"    : rendered,
+            "sessions"      : len( fleet_view ),
+            "edges"         : len( graph[ "edges" ] ),
+            "cycles"        : len( graph[ "cycles" ] ),
+            "pings_fired"   : pings_fired,
+            "roster"        : len( roster ),
+            "taps_fired"    : taps_fired,
+            "managers_down" : managers_down,
+            "decisions"     : decisions,
+            "stalled"       : stalled,
+            "rendered"      : rendered,
         }
 
     def _publish_fleet_snapshot( self, fleet_view, now ):
@@ -390,6 +436,270 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if stuck:
             lines.append( "Stuck (≥2 cap-reached, work owed): " + ", ".join( stuck ) )
         self._commons.post( ROSTER_TOPIC, "\n".join( lines ) )
+
+    # ── v2.2 B2: active manager-tap (DM-push, per-group, throttled) ─────────────
+
+    def _attention_workers( self, fleet_view, graph ):
+        """
+        The workers needing a manager's attention: STUCK sessions ∪ holders
+        blocked on a peer (the §4 blocked-edge holders).
+
+        Ensures:
+            - returns a list of view dicts (stuck OR a blocked-edge holder by
+              persona); never raises
+        """
+        holders = set( graph[ "edges" ].keys() )
+        out     = [ ]
+        for view in fleet_view.values():
+            if not isinstance( view, dict ):
+                continue
+            if view.get( "stuck" ) or view.get( "persona" ) in holders:
+                out.append( view )
+        return out
+
+    def _tap_signature( self, members, graph ):
+        """
+        Hashable signature over a manager-crew's SEMANTIC state (NOT liveness
+        ages) — so the tap fires on a real change, not on the clock ticking.
+        """
+        crew = tuple( sorted(
+            ( v.get( "session_id" ), v.get( "persona" ), v.get( "state" ),
+              bool( v.get( "stuck" ) ), v.get( "holding_on" ) )
+            for v in members
+        ) )
+        return ( crew, len( graph[ "cycles" ] ) )
+
+    def _should_tap( self, manager, sig, now ):
+        """
+        Tap iff the crew-summary CHANGED since the last tap AND (first-ever tap OR
+        ≥ tap_min_interval_seconds elapsed). NEVER tap on no-change (anti-storm).
+        """
+        if self._last_tap_sig.get( manager ) == sig:
+            return False                              # no change → never tap
+        last_at = self._last_tap_at.get( manager )
+        if last_at is None:
+            return True                               # first tap for this manager
+        return ( now - last_at ).total_seconds() >= self.tap_min_interval_seconds
+
+    def _format_manager_tap( self, manager, members, graph, free_n ):
+        """
+        Build the ADVISORY tap body (D5/§6.3): "I observe … / I recommend …" —
+        the manager ACTUATES; the arbiter NEVER assigns. No hardcoded persona.
+        """
+        stuck   = [ ( v.get( "persona" ) or v.get( "session_id" ) ) for v in members if v.get( "stuck" ) ]
+        blocked = [ ( v.get( "persona" ) or v.get( "session_id" ) ) for v in members if not v.get( "stuck" ) ]
+        k       = len( graph[ "cycles" ] )
+        lines = [
+            "Heartbeat arbiter (advisory — I observe + recommend; you actuate).",
+            f"I observe: {len( stuck )} stuck/dead · {len( blocked )} blocked · "
+            f"{free_n} free fleet-wide · {k} deadlock cycle(s).",
+        ]
+        if stuck:
+            lines.append( "Stuck: " + ", ".join( stuck ) )
+        if blocked:
+            lines.append( "Blocked: " + ", ".join( blocked ) )
+        lines.append(
+            "I recommend: pull a free worker to unblock the stuck, or cajole the "
+            "blockers. (Recommendation only — I do not assign.)"
+        )
+        return "\n".join( lines )
+
+    def _tap_managers( self, fleet_view, graph, roster, now ):
+        """
+        Actively TAP each manager-on-duty with their crew's actionable ADVISORY
+        summary (DM-push), throttled tap-on-change + min-interval (B2 / D1).
+
+        Routing (D5): each attention-needing worker → resolve_manager → grouped
+        by manager persona; an UNRESOLVED manager → escalate to Rick via
+        notify_fn (never a wrong-manager DM). The topic post (_surface_to_manager)
+        remains the durable fallback.
+
+        Invariant: this method calls ONLY {send_to, post} + notify_fn — NO
+        actuation (never-auto-assign).
+
+        Ensures:
+            - taps a manager only when their crew-summary signature changed since
+              the last tap AND ≥ tap_min_interval_seconds elapsed (anti-storm)
+            - unresolved-manager workers escalate to Rick (notify_fn)
+            - returns the count of manager DMs fired this poll; never raises
+        """
+        attention = self._attention_workers( fleet_view, graph )
+        if not attention:
+            return 0
+
+        groups = { }                                 # manager_persona -> [view, ...]
+        for view in attention:
+            res     = self._resolve_manager_fn( view.get( "session_id" ),
+                                                declared_manager=self.manager_recipient )
+            persona = res.get( "manager_persona" ) if isinstance( res, dict ) else None
+            if not persona:
+                self._notify_fn(
+                    f"Unresolved manager for attention-needing worker "
+                    f"{view.get( 'persona' ) or view.get( 'session_id' )} — escalating to Rick"
+                )
+                continue
+            groups.setdefault( persona, [ ] ).append( view )
+
+        fired  = 0
+        free_n = len( roster )
+        for manager, members in groups.items():
+            sig = self._tap_signature( members, graph )
+            if self._should_tap( manager, sig, now ):
+                self._commons.send_to( manager, self._format_manager_tap( manager, members, graph, free_n ) )
+                self._last_tap_sig[ manager ] = sig
+                self._last_tap_at[ manager ]  = now
+                fired += 1
+        return fired
+
+    # ── v2.2 B4 / D4: manager-ack tracking → manager-down → escalate + HOLD ─────
+
+    @staticmethod
+    def _manager_last_activity( manager, who_rows ):
+        """Most-recent commons activity ts for a manager persona (who row), or None."""
+        best = None
+        for row in who_rows or [ ]:
+            if not isinstance( row, dict ) or row.get( "persona_name" ) != manager:
+                continue
+            raw = row.get( "last_post_ts" )
+            try:
+                ts = datetime.datetime.fromisoformat( raw ) if raw else None
+            except ( TypeError, ValueError ):
+                ts = None
+            if ts is not None and ( best is None or ts > best ):
+                best = ts
+        return best
+
+    def _check_manager_acks( self, now, who_rows ):
+        """
+        B4/D4 manager-down detector via the liveness-proxy ACK.
+
+        A manager tapped at T is treated as having "acked" (present-to-act) while
+        their liveness (commons activity from who()) is fresh AT/AFTER T. If a
+        TAPPED manager shows NO activity since the tap AND ≥
+        manager_ack_window_seconds have elapsed → MANAGER-DOWN → escalate to Rick
+        (notify_fn) + HOLD.
+
+        IMPORTANT (semantics): the liveness-proxy proves ALIVENESS, not
+        CONSUMPTION. That's correct for D4, whose trigger IS manager-DOWN —
+        staleness detects exactly that. "Alive-but-ignoring-the-tap" is NOT a D4
+        case (it's manager judgment, not down). Explicit-ack (proves consumption)
+        is a logged V2 item.
+
+        HOLD = escalate-ONLY: this path takes NO actuation (never auto-assign —
+        acting-manager succession is V2). Escalates ONCE per un-acked tap (until
+        the manager re-acks), not every poll.
+
+        Ensures:
+            - returns the count of NEW manager-down escalations this poll
+            - clears a manager's down-flag once it shows activity since its tap
+            - never raises
+        """
+        down = 0
+        for manager, tapped_at in list( self._last_tap_at.items() ):
+            last_activity = self._manager_last_activity( manager, who_rows )
+            if last_activity is not None and last_activity >= tapped_at:
+                self._manager_down_escalated.discard( manager )   # acked → clear
+                continue
+            if ( now - tapped_at ).total_seconds() >= self.manager_ack_window_seconds \
+               and manager not in self._manager_down_escalated:
+                self._manager_down_escalated.add( manager )
+                self._notify_fn(
+                    f"MANAGER-DOWN: {manager} did not ack the arbiter tap within "
+                    f"{self.manager_ack_window_seconds}s (no liveness since tap) — "
+                    f"escalating to Rick + HOLDING (no auto-assign)"
+                )
+                down += 1
+        return down
+
+    # ── v2.2 B3: D3 escalation detectors (decision-needed + whole-fleet-stall) ──
+
+    def _check_decision_needed( self, now ):
+        """
+        D3 trigger: a worker/manager posted a decision the FLEET can't make to the
+        reserved `fleet-decision-needed` topic → escalate each NEW one to Rick
+        (genuine trigger, NOT a digest).
+
+        READ is pure observation (side-effect-free; never-auto-assign safe). The
+        cursor is baselined on the FIRST poll to `now` so a pre-arbiter backlog
+        isn't re-escalated; subsequent polls read strictly newer entries.
+
+        Ensures:
+            - returns the count of NEW decision-needed posts escalated this poll
+            - advances the tail cursor to the latest entry ts seen
+            - never raises (a read hiccup is swallowed — observer invariant)
+        """
+        if self._decision_since is None:
+            self._decision_since = now.isoformat()       # baseline: ignore backlog
+            return 0
+        try:
+            entries = self._commons.read( DECISION_TOPIC, since=self._decision_since )
+        except Exception:
+            return 0
+        fired = 0
+        for entry in entries or [ ]:
+            if not isinstance( entry, dict ):
+                continue
+            ts      = entry.get( "ts" )
+            body    = entry.get( "body", "" )
+            who     = entry.get( "persona_name" ) or entry.get( "sender_session_id" ) or "a session"
+            self._notify_fn( f"DECISION-NEEDED (escalating to Rick) — {who}: {body}" )
+            fired += 1
+            if ts and ( self._decision_since is None or ts > self._decision_since ):
+                self._decision_since = ts
+        return fired
+
+    @staticmethod
+    def _fleet_progress_signature( fleet_view ):
+        """
+        A hashable signature over the fleet's SEMANTIC progress (per-session
+        state / stuck / holding) — NOT liveness ages. When ANY session's semantic
+        state advances, the signature changes ⇒ progress. Used by the stall
+        detector (state≠liveness: stall keys on progress, never on liveness).
+        """
+        return tuple( sorted(
+            ( v.get( "session_id" ), v.get( "state" ), bool( v.get( "stuck" ) ), v.get( "holding_on" ) )
+            for v in fleet_view.values() if isinstance( v, dict )
+        ) )
+
+    def _check_fleet_stall( self, fleet_view, now ):
+        """
+        D3 catch-all: no FLEET PROGRESS for ≥ fleet_stall_window_seconds while
+        work is owed → escalate to Rick (so nothing rots silently).
+
+        LOAD-BEARING (María): this keys on fleet PROGRESS (the semantic
+        signature), NOT on manager liveness — so it FIRES EVEN WHEN A MANAGER'S
+        BRIDGE-MTIME IS FRESH. That catches the "manager alive-but-IGNORING the
+        tap" failure mode, which is OUTSIDE D4's manager-DOWN scope. The two
+        triggers compose: D4 = manager GONE; D3-stall = manager PRESENT-but-not-
+        acting. Escalate-only (no actuation; never auto-assign).
+
+        Ensures:
+            - resets the stall timer whenever the progress signature changes
+            - escalates ONCE per stall episode when the signature is unchanged for
+              ≥ the window AND there is owed work (a non-idle fleet); re-arms on
+              the next progress
+            - returns 1 on a new escalation else 0; never raises
+        """
+        sig = self._fleet_progress_signature( fleet_view )
+        if sig != self._last_progress_sig:
+            self._last_progress_sig = sig
+            self._last_progress_at  = now
+            self._stall_escalated   = False
+            return 0
+        has_owed = any(
+            isinstance( v, dict ) and v.get( "state" ) in ( "working", "stuck", "holding" )
+            for v in fleet_view.values()
+        )
+        if ( has_owed and self._last_progress_at is not None
+             and ( now - self._last_progress_at ).total_seconds() >= self.fleet_stall_window_seconds
+             and not self._stall_escalated ):
+            self._stall_escalated = True
+            self._notify_fn(
+                f"WHOLE-FLEET-STALL: no fleet progress for ≥{self.fleet_stall_window_seconds}s "
+                f"with work owed — escalating to Rick (manager present-but-not-acting?)"
+            )
+            return 1
+        return 0
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 

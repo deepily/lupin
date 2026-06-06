@@ -38,6 +38,11 @@ class FakeStore:
             "persona_name": persona_name, "metadata": metadata,
         } )
 
+    def read( self, topic, since=None, limit=50 ):
+        self.read_calls = getattr( self, "read_calls", [ ] )
+        self.read_calls.append( ( topic, since, limit ) )
+        return [ { "ts": "t1", "body": "decision?" } ]
+
 
 def _gw( store=None ):
     return LupinArbiterGateway( "arb-1", store or FakeStore(), persona_name="Arbiter" )
@@ -80,6 +85,15 @@ def test_post_stamps_surface_metadata():
     assert p[ "topic" ] == "fleet-arbiter"
     assert p[ "metadata" ] == { "kind": "arbiter-surface" }
     assert p[ "persona_name" ] == "Arbiter"
+
+
+def test_read_delegates_to_store():
+    """v2.2 B3: gateway.read tails a topic via the store — pure observation."""
+    store = FakeStore()
+    gw    = _gw( store )
+    out   = gw.read( "fleet-decision-needed", since="t0", limit=10 )
+    assert out == [ { "ts": "t1", "body": "decision?" } ]
+    assert store.read_calls == [ ( "fleet-decision-needed", "t0", 10 ) ]
 
 
 def test_quick_smoke_test_passes():

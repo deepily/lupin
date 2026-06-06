@@ -129,6 +129,22 @@ class FakeGateway:
     def post( self, topic, body ):
         self.posts.append( ( topic, body ) )
 
+    def read( self, topic, since=None, limit=50 ):
+        return [ ]   # v2.2 B3: no decision-needed posts in this suite (hermetic)
+
+
+def _pings( arb ):
+    """
+    Auto-ping sends ONLY — excludes the v2.2 B2 manager-tap advisory DMs.
+
+    Since v2.2, `_poll_once` fires BOTH `_auto_ping` (to the blocked peer) AND
+    `_tap_managers` (an advisory DM to the manager), so `_commons.sent` carries
+    two outbound surfaces. The auto-ping body uniquely contains "holding on you";
+    the tap body never does — so these backoff-trajectory tests (which count
+    AUTO-PINGS) filter on that signature to keep their intent explicit.
+    """
+    return [ s for s in arb._commons.sent if "holding on you" in s[ 1 ] ]
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Helpers — the REAL producer write path + arbiter factory
@@ -159,6 +175,13 @@ def _make_arbiter( events_dir, *, gateway=None, clock=None, notify_fn=None, **ov
         events_dir              = str( events_dir ),
         clock                   = clock if clock is not None else SteppableClock( BASE_NOW ),
         notify_fn               = notify_fn if notify_fn is not None else ( lambda *a, **k: None ),
+        # v2.2: a DETERMINISTIC, hermetic manager resolver — the production default
+        # would do a real ~/.claude bridge lookup (violating this suite's hermetic
+        # mandate). Resolving every worker to "Tiberius" means the B2 tap fires to
+        # a fixed manager (its DMs are filtered out by _pings; backoff-trajectory
+        # tests count auto-pings only).
+        resolve_manager_fn      = lambda sid, declared_manager=None: {
+            "manager_session_id": "mgr", "manager_persona": "Tiberius", "source": "lineage" },
     )
     cfg.update( overrides )
     return ArbiterConsumerJob( commons=gateway if gateway is not None else FakeGateway(), **cfg )
@@ -327,23 +350,23 @@ class TestGroupTHBackoffTrajectory:
         arb = _make_arbiter( fleet, clock=clk )
 
         arb._poll_once()                                          # T0   → ping #1 (last_ping was None)
-        assert len( arb._commons.sent ) == 1
+        assert len( _pings( arb ) ) == 1
 
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=59 ) )
         arb._poll_once()                                          # +59  → within the 60s first gap → no ping
-        assert len( arb._commons.sent ) == 1
+        assert len( _pings( arb ) ) == 1
 
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=60 ) )
         arb._poll_once()                                          # +60  → schedule[0]=60 elapsed → ping #2
-        assert len( arb._commons.sent ) == 2
+        assert len( _pings( arb ) ) == 2
 
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=60 + 299 ) )
         arb._poll_once()                                          # next gap is 300 → not yet
-        assert len( arb._commons.sent ) == 2
+        assert len( _pings( arb ) ) == 2
 
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=60 + 300 ) )
         arb._poll_once()                                          # 300 elapsed → ping #3
-        assert len( arb._commons.sent ) == 3
+        assert len( _pings( arb ) ) == 3
 
     def test_th2_global_cap_rolling_window_reopens( self, fleet ):
         """Global cap halts excess; once the cap window passes, _prune reopens capacity."""
@@ -354,16 +377,16 @@ class TestGroupTHBackoffTrajectory:
 
         s1 = arb._poll_once()                                     # T0 → cap=1 → exactly one of the two fires
         assert s1[ "pings_fired" ] == 1
-        assert len( arb._commons.sent ) == 1
+        assert len( _pings( arb ) ) == 1
 
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=50 ) )
         arb._poll_once()                                          # within window → still capped → no new ping
-        assert len( arb._commons.sent ) == 1
+        assert len( _pings( arb ) ) == 1
 
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=150 ) )
         s3 = arb._poll_once()                                     # window passed → prune → capacity reopens
         assert s3[ "pings_fired" ] == 1
-        assert len( arb._commons.sent ) == 2                      # the other blocker finally pinged
+        assert len( _pings( arb ) ) == 2                      # the other blocker finally pinged
 
     def test_th3_clear_on_resume_resets_backoff( self, fleet ):
         """An edge that resumes then re-blocks resets its attempt → the next ping fires IMMEDIATELY."""
@@ -373,11 +396,11 @@ class TestGroupTHBackoffTrajectory:
         arb = _make_arbiter( fleet, clock=clk )
 
         arb._poll_once()                                          # ping #1
-        assert len( arb._commons.sent ) == 1
+        assert len( _pings( arb ) ) == 1
 
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=10 ) )
         arb._poll_once()                                          # within 300 → no ping; edge still tracked
-        assert len( arb._commons.sent ) == 1
+        assert len( _pings( arb ) ) == 1
         assert arb._ledger.tracked_edges()                        # the Bob edge is tracked
 
         _emit( fleet, "s1", "poke", awaiting="none", persona="Alice", poke_count=2 )   # RESUMED
@@ -389,7 +412,7 @@ class TestGroupTHBackoffTrajectory:
         _emit( fleet, "s1", "honored", awaiting="peer:Bob", persona="Alice" )           # RE-BLOCKED
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=30 ) )
         arb._poll_once()                                          # attempt reset → last_ping None → fires now
-        assert len( arb._commons.sent ) == 2                      # immediate re-ping after the resume/re-block
+        assert len( _pings( arb ) ) == 2                      # immediate re-ping after the resume/re-block
 
 
 # ═════════════════════════════════════════════════════════════════════════════

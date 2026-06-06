@@ -98,6 +98,17 @@ class LupinArbiterGateway:
             metadata      = { "kind": "arbiter-surface" },
         )
 
+    def read( self, topic: str, since=None, limit: int = 50 ) -> List[ dict ]:
+        """
+        Tail a reserved commons topic (v2.2 B3 — e.g. `fleet-decision-needed`).
+
+        Ensures:
+            - Returns CommonsStore.read() entries for `topic` (ascending when
+              `since` supplied; newest-first otherwise) — pure OBSERVATION,
+              side-effect-free (never posts/writes); the arbiter never actuates
+        """
+        return self._store.read( topic, since=since, limit=limit )
+
     @classmethod
     def from_environment( cls, sender_session_id,
                           persona_name="heartbeat-arbiter" ):   # pragma: no cover - production IO boundary

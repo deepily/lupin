@@ -839,6 +839,14 @@ async def lifespan( app: FastAPI ):
     except Exception as e:
         print( f"[WARN] Scheduled job restoration failed: {e}" )
 
+    # v2.2 closed-loop (B1 standing cadence): auto-submit ONE standing
+    # Heartbeat-Arbiter observer into CJ Flow. Single-instance-guarded (skips if a
+    # restored/existing heartbeat_arbiter job is present) + degrade-safe (any
+    # failure is swallowed inside; the arbiter is an additive observer, never a
+    # dependency of the local poke path). See cosa.rest.arbiter_bootstrap.
+    from cosa.rest.arbiter_bootstrap import submit_arbiter_if_absent
+    submit_arbiter_if_absent( jobs_todo_queue, jobs_run_queue, config_mgr )
+
     print( f"FastAPI startup complete at {datetime.now()}" )
     
     yield

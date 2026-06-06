@@ -85,6 +85,9 @@ class FakeGateway:
     def post( self, topic, body ):
         self.posts.append( ( topic, body ) )
 
+    def read( self, topic, since=None, limit=50 ):
+        return [ ]   # v2.2 B3: no decision-needed posts in these v1 tests
+
 
 def _make_job( events_dir, gateway=None, notify_fn=None, **overrides ):
     cfg = dict(
@@ -96,6 +99,11 @@ def _make_job( events_dir, gateway=None, notify_fn=None, **overrides ):
         events_dir              = str( events_dir ),
         clock                   = FakeClock(),
         notify_fn               = notify_fn or ( lambda *a, **k: None ),
+        # v2.2 B2: default these v1-era tests to an UNRESOLVED manager so the new
+        # manager-tap fires zero DMs here — keeps the auto-ping send-count
+        # assertions isolated from the tap. The tap is covered in its own suite.
+        resolve_manager_fn      = lambda sid, declared_manager=None: {
+            "manager_session_id": None, "manager_persona": None, "source": "unresolved" },
     )
     cfg.update( overrides )
     return ArbiterConsumerJob( commons=gateway or FakeGateway(), **cfg )
@@ -324,3 +332,33 @@ def test_do_all_stamps_timestamps( tmp_path ):
     job._cancel_requested = True
     job.do_all()
     assert job.started_at is not None and job.completed_at is not None
+
+
+# ── v2.2 B5: composed _poll_once integration (all detectors wired together) ─────
+
+def test_poll_once_composes_all_v2_2_detectors( tmp_path ):
+    """One full poll runs tap + ack-check + decision-needed + stall together and
+    returns the composed v2.2 summary keys — proving the lanes integrate."""
+    # s1: two cap_reached+owed → STUCK → attention → manager tap.
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "cap_reached", work_owed=True, persona="Stuckie",
+                           ts="2026-06-05T11:58:00+00:00", poke_count=3 ),
+                   _event( "s1", "cap_reached", work_owed=True, persona="Stuckie",
+                           ts="2026-06-05T11:59:00+00:00", poke_count=3 ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Stuckie", "last_post_ts": NOW_ISO } ] )
+    job = _make_job(
+        tmp_path, gateway=gw,
+        resolve_manager_fn=lambda sid, declared_manager=None: {
+            "manager_session_id": "m1", "manager_persona": "MgrX", "source": "lineage" },
+    )
+    summary = job._poll_once()
+
+    # composed summary surface
+    for key in ( "taps_fired", "managers_down", "decisions", "stalled", "rendered" ):
+        assert key in summary
+    assert summary[ "taps_fired" ] == 1                 # MgrX tapped for stuck Stuckie
+    assert gw.sent and gw.sent[ -1 ][ 0 ] == "MgrX"
+    assert summary[ "decisions" ] == 0                  # FakeGateway.read → []
+    assert summary[ "stalled" ] == 0                    # first poll = progress baseline
+    assert summary[ "managers_down" ] == 0             # MgrX just tapped, ack window open
+    assert "do not assign" in gw.sent[ -1 ][ 1 ].lower()   # advisory framing carried through
