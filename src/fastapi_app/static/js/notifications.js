@@ -10438,6 +10438,22 @@ class NotificationsUI {
         const shell   = document.querySelector( ".content-shell" );
         if ( !pane || !body ) return;
 
+        // Scroll-position preservation across the closed→open scroll-container
+        // handoff (2026-06-06, Rick). When the pane is CLOSED in horizontal mode
+        // the WINDOW scrolls (the center column has no own scroll container);
+        // adding .pane-open below flips .left-column into its OWN scroll container
+        // (overflow-y:auto, capped height) which starts at scrollTop=0 — so the
+        // content the user was reading appears to jump to the top. We capture the
+        // topmost visible center-column card BEFORE the flip and re-pin it to the
+        // same viewport position AFTER (an anchor, not a raw scrollTop copy, so it
+        // survives the simultaneous reflow to 80% container width). The jump only
+        // occurs on this one transition — when the pane is already open there is no
+        // handoff, so we skip the work entirely.
+        const wasClosed     = !!shell && !shell.classList.contains( "pane-open" );
+        const scrollAnchor  = ( wasClosed && this._layoutMode === "horizontal" )
+            ? this._captureCenterScrollAnchor()
+            : null;
+
         // Push to history. Cap depth.
         this._contentPaneHistory.push( { type, payload, title: title || "" } );
         if ( this._contentPaneHistory.length > 10 ) this._contentPaneHistory.shift();
@@ -10452,6 +10468,73 @@ class NotificationsUI {
         if ( backBtn ) backBtn.disabled = this._contentPaneHistory.length <= 1;
         // Pane just opened → left column shrank; re-center the toolbar over it.
         this._updateToolbarPosition();
+
+        // Restore the captured anchor SYNCHRONOUSLY. Reading getBoundingClientRect
+        // inside _restoreCenterScrollAnchor forces a layout flush, so the .pane-open
+        // flex + 80%-width reflow are fully applied when we measure — and setting
+        // scrollTop in the same frame means the intermediate scrollTop=0 state is
+        // never painted (no visible flash).
+        if ( scrollAnchor ) this._restoreCenterScrollAnchor( scrollAnchor );
+    }
+
+    /**
+     * Capture the topmost center-column notification card currently visible below
+     * the nav strip, as a scroll anchor for _restoreCenterScrollAnchor.
+     *
+     * Requires:
+     *   - called while the layout is still in its pre-mutation state
+     *
+     * Ensures:
+     *   - returns { el, top } where `el` is the first card whose viewport-top is at
+     *     or below the nav strip, and `top` is that viewport-relative top (px)
+     *   - returns null when the center column or a visible card is absent (caller
+     *     then skips restoration — e.g. an empty list)
+     */
+    _captureCenterScrollAnchor() {
+        const container = document.querySelector( ".left-column .container" );
+        if ( !container ) return null;
+        // Nav strip occupies the top ~100px (matches the CSS max-height offset);
+        // a card whose top is above it is scrolled off and a poor anchor.
+        const navOffset = 100;
+        const cards = container.querySelectorAll(
+            ".conversation-pair, .notification-message, .sender-card"
+        );
+        for ( const el of cards ) {
+            const top = el.getBoundingClientRect().top;
+            if ( top >= navOffset ) return { el, top };
+        }
+        return null;
+    }
+
+    /**
+     * Re-pin a captured scroll anchor to its original viewport position by
+     * adjusting whichever scroll container is currently live.
+     *
+     * Requires:
+     *   - anchor is the { el, top } returned by _captureCenterScrollAnchor (or null)
+     *   - called AFTER the .pane-open class has been toggled to its new state
+     *
+     * Ensures:
+     *   - reads the element's new viewport-top (forcing a synchronous reflow) and
+     *     scrolls by the delta to its original top, so the anchor returns to where
+     *     it was on screen across BOTH handoffs:
+     *       · pane OPEN  (.pane-open present) → .left-column owns the scroll
+     *       · pane CLOSED (.pane-open absent) → the window owns the scroll
+     *   - no-op when anchor/element is missing, the element was detached, or the
+     *     open-state scroll column is absent
+     */
+    _restoreCenterScrollAnchor( anchor ) {
+        if ( !anchor || !anchor.el || !anchor.el.isConnected ) return;
+        const delta    = anchor.el.getBoundingClientRect().top - anchor.top;
+        const shell    = document.querySelector( ".content-shell" );
+        const paneOpen = !!shell && shell.classList.contains( "pane-open" );
+        if ( paneOpen ) {
+            const leftColumn = document.querySelector( ".left-column" );
+            if ( leftColumn ) leftColumn.scrollTop += delta;
+        } else {
+            // Pane closed → the window is the scroll container again.
+            window.scrollBy( 0, delta );
+        }
     }
 
     _renderContentPaneEntry( entry ) {
@@ -10487,6 +10570,20 @@ class NotificationsUI {
         const titleEl = document.getElementById( "content-pane-title" );
         const backBtn = document.getElementById( "content-pane-back" );
         const shell   = document.querySelector( ".content-shell" );
+
+        // Obverse of the open-time preservation (2026-06-06, Rick): closing removes
+        // .pane-open, handing scroll back from .left-column to the WINDOW — whose
+        // stale scrollY (often ~0) would snap the center content to the top. Capture
+        // the topmost visible center card BEFORE the reverse handoff and re-pin it to
+        // the same viewport position AFTER, so the center column returns to its
+        // calling position instead of jumping up. Gated on horizontal + actually-open
+        // so a vertical-mode switch (which sets _layoutMode="vertical" before calling
+        // us) and an already-closed call both do zero work.
+        const wasOpen      = !!shell && shell.classList.contains( "pane-open" );
+        const scrollAnchor = ( wasOpen && this._layoutMode === "horizontal" )
+            ? this._captureCenterScrollAnchor()
+            : null;
+
         if ( pane ) pane.hidden = true;
         if ( body ) body.innerHTML = "";
         if ( titleEl ) titleEl.textContent = "";
@@ -10496,6 +10593,10 @@ class NotificationsUI {
         this._contentPaneHistory = [];
         // Container is full-width again → re-center the toolbar at 50%.
         this._updateToolbarPosition();
+
+        // Synchronous restore (forced reflow read → no painted flash). With
+        // .pane-open now removed, _restoreCenterScrollAnchor scrolls the WINDOW.
+        if ( scrollAnchor ) this._restoreCenterScrollAnchor( scrollAnchor );
     }
 
     /**
