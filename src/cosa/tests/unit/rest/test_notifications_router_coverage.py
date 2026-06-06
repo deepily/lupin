@@ -23,6 +23,7 @@ import sys
 import os
 import time
 import uuid
+import threading
 import asyncio
 import importlib
 import unittest
@@ -465,6 +466,35 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
         self.assertIsInstance( out, StreamingResponse )
         engine.predict.assert_called_once()
 
+    async def test_predict_runs_off_event_loop_thread( self ):
+        # FM-7 regression guard: predict() must run on a WORKER thread (via
+        # asyncio.to_thread), never the event-loop thread — otherwise a slow
+        # GPU embedding / LanceDB search freezes the loop and /health times out.
+        # Reverting to a bare `prediction_engine.predict(...)` call makes predict
+        # run on the loop thread → this assertion fails. Deterministic, no sleep.
+        loop_thread_id = threading.get_ident()
+        captured       = {}
+        def _capture_predict( payload ):
+            captured[ "thread_id" ] = threading.get_ident()
+            pred = Mock(); pred.metadata = {}; pred.confidence = 0.9; pred.category = "yes"
+            pred.to_hint_dict.return_value = { "h": 1 }
+            return pred
+        nq = Mock(); nq.push_notification.return_value = self._online_item()
+        ws = _ws_manager( is_connected=True, connection_count=1 )
+        engine = Mock(); engine.enabled = True; engine.confidence_threshold = 0.5
+        engine.predict.side_effect = _capture_predict
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=self._online_repo() ), \
+             patch( "cosa.agents.prediction_engine.get_prediction_engine", return_value=engine ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            out = await self._call( nq, ws, response_requested=True, response_type="yes_no", response_default="no" )
+        self.assertIsInstance( out, StreamingResponse )
+        engine.predict.assert_called_once()
+        self.assertIn( "thread_id", captured )
+        self.assertNotEqual( captured[ "thread_id" ], loop_thread_id,
+                             "predict() ran on the event-loop thread — FM-7 offload regressed (must use asyncio.to_thread)" )
+
     async def test_online_prediction_engine_raises_nonfatal( self ):
         nq = Mock(); nq.push_notification.return_value = self._online_item()
         ws = _ws_manager( is_connected=True, connection_count=1 )
@@ -706,6 +736,38 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
             self.assertEqual( out[ "status" ], "success" )
             engine.record_outcome.assert_called_once()
             self.assertTrue( N.pending_responses[ UID_STR ][ "event" ].is_set() )
+        finally:
+            N.pending_responses.pop( UID_STR, None )
+
+    async def test_record_outcome_runs_off_event_loop_thread( self ):
+        # FM-7 regression guard (symmetric to predict): record_outcome() does
+        # 3-5 GPU embeddings + a LanceDB write; it must run on a WORKER thread,
+        # never the event-loop thread, or the response path freezes /health.
+        # Reverting to a bare call makes this assertion fail. Deterministic.
+        loop_thread_id = threading.get_ident()
+        captured       = {}
+        def _capture_record( **kwargs ):
+            captured[ "thread_id" ] = threading.get_ident()
+        notif = Mock(); notif.state = "delivered"; notif.recipient_id = UID_STR; notif.job_id = None
+        repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
+        N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None,
+                                           "prediction_result": Mock( response_type="yes_no" ) }
+        engine = Mock(); engine.record_outcome.side_effect = _capture_record
+        try:
+            with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+                 patch.object( N, "NotificationRepository", return_value=repo ), \
+                 patch( "cosa.agents.prediction_engine.get_prediction_engine", return_value=engine ), \
+                 patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
+                 patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
+                 _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
+                out = await submit_notification_response(
+                    request_body={ "notification_id": UID_STR, "response_value": "yes" },
+                    ws_manager=_ws_manager() )
+            self.assertEqual( out[ "status" ], "success" )
+            engine.record_outcome.assert_called_once()
+            self.assertIn( "thread_id", captured )
+            self.assertNotEqual( captured[ "thread_id" ], loop_thread_id,
+                                 "record_outcome() ran on the event-loop thread — FM-7 offload regressed" )
         finally:
             N.pending_responses.pop( UID_STR, None )
 

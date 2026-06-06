@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.05 - Session 426571cd (Tiffany 💍) | Prediction-hook event-loop offload — `/health` timeout fix (FM-7), reviewer-gated, checkpoint HELD
+
+**Root-caused + fixed the intermittent `:7999` `/health` timeouts** (Docker `ExitCode 1`) Rick hit while a blocking voice ask was pending. Cause: the notification path ran the Prediction Engine **synchronously on the FastAPI event loop** — `notify_user` / `submit_notification_response` / `vote_on_prediction_hint` called `predict()` / `record_outcome()` / `record_hint_vote()` **bare** (GPU embedding + LanceDB search + an HTTP-fallback **reentrant self-call** into the same loop), starving the trivial `async health()`. A concrete **FM-7** instance; Tiberius's per-Stop sync-notify heartbeat was a load multiplier on it.
+
+**Fix:** wrapped 6 hot-path sites in `asyncio.to_thread` (matching the FM-7 idiom already at `notifications.py:589`) — predict / record_outcome / record_hint_vote / session-gist + both embeddings GPU endpoints. Reviewer-required add: **one shared class-level `threading.RLock`** in `ProxyDecisionEmbeddings` guarding all 3 LanceDB write sites, incl. the `record_hint_vote` **check-then-act** compound (two concurrent votes could both see `exists()==False` and both-insert).
+
+**Verified:** 100% line+branch on all 4 modified modules; 2 deterministic thread-identity regression guards (**proven** to fail-without-fix via a revert probe); live `:7999` probe `/health` p50=**2ms / 0 timeouts** (was a hard 3s timeout). Reviewed **APPROVE** by Krishna 🦚 (independent re-run of all 4 suites) + Tiberius 👑 backstop. **Selective checkpoint** — staged only my 6 files; **excluded** the foreign `session_reaped` hunk inside `notifications.py` and **skipped** the co-mingled `src/rnd/README.md` line (other sessions' work). **HELD — not pushed.** R&D: `src/rnd/v0.1.8/2026.06.05-prediction-hook-eventloop-offload.md`.
+
+---
+
 ### 2026.06.03 - Session 1333e106 (Tiberius 👑) | CoSA coverage marathon → certified 100% tree-wide (11 commits, HELD)
 
 **Ran the CoSA all-tiers coverage grind to completion as manager** (Rick's overnight directive, relayed via María since broadcasts rendered blank). Drove `cosa` to **certified 100% line+branch+function tree-wide**: 412 files, 38,447 stmts / 0 miss, 11,172 branches / 0 partial; full canonical gate **13,300 passed / 0 failed / 2 xfailed** (both xfails proven pre-existing, María git-verified — honest 100%, no masking). **11 test-only commits, all reviewer-gated (Krishna 8/8 batches, 0 hollow), HELD on `wip-v0.1.8` — not pushed.**

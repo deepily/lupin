@@ -823,7 +823,11 @@ async def notify_user(
                 from cosa.agents.prediction_engine import get_prediction_engine
                 prediction_engine = get_prediction_engine()
                 if prediction_engine.enabled:
-                    prediction_result = prediction_engine.predict( {
+                    # FM-7 event-loop offload: predict() runs GPU embedding +
+                    # LanceDB search synchronously; run it OFF the event loop via
+                    # asyncio.to_thread so a slow embedding/search can't stall the
+                    # notify path (and /health) — same idiom as the DB persist above.
+                    prediction_result = await asyncio.to_thread( prediction_engine.predict, {
                         "message"          : message.strip(),
                         "response_type"    : response_type,
                         "sender_id"        : resolved_sender_id,
@@ -1104,7 +1108,11 @@ async def submit_notification_response(
                 # Determine response type from the prediction result
                 resp_type = prediction_result.response_type
 
-                prediction_engine.record_outcome(
+                # FM-7 event-loop offload: record_outcome() does 3-5 GPU
+                # embeddings + a LanceDB write; run it OFF the event loop so the
+                # response path (and /health) can't stall under embedding latency.
+                await asyncio.to_thread(
+                    prediction_engine.record_outcome,
                     notification_id   = notification_id,
                     prediction_result = prediction_result,
                     actual_value      = response_value,
@@ -1354,7 +1362,11 @@ async def vote_on_prediction_hint(
     try:
         from cosa.agents.prediction_engine import get_prediction_engine
         engine = get_prediction_engine()
-        result = engine.record_hint_vote(
+        # FM-7 event-loop offload: record_hint_vote() may generate an embedding
+        # + write to LanceDB; run it OFF the event loop so the vote path (and
+        # /health) can't stall under embedding/store latency.
+        result = await asyncio.to_thread(
+            engine.record_hint_vote,
             notification_id = notification_id,
             question        = question,
             predicted_value = body.predicted_value,
@@ -2569,8 +2581,11 @@ async def generate_session_gist(
 
         # Use Gister with session title prompt (cache bypassed for this prompt type)
         # The prompt enforces 3-5 words, so no truncation needed
+        # FM-7 event-loop offload: get_gist() does a LanceDB cache read +
+        # (on miss) a blocking LLM HTTP call; run it OFF the event loop so the
+        # gist path (and /health) can't stall under LLM latency.
         gister = Gister( debug=True )
-        title = gister.get_gist( combined, prompt_key="prompt template for session title" )
+        title = await asyncio.to_thread( gister.get_gist, combined, prompt_key="prompt template for session title" )
 
         print( f"[NOTIFY] Generated session title: '{title}'" )
 

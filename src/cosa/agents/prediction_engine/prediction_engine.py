@@ -1354,24 +1354,32 @@ class PredictionEngine:
         case_id            = f"hintvote-{notification_id}"
 
         # Re-vote: flip the existing case's state in place (idempotent). First vote: insert.
-        if store.exists( case_id ):
-            store.update_ratification_state( case_id, ratification_state )
-            return { "case_id": case_id, "ratification_state": ratification_state, "updated": True }
+        #
+        # This is a CHECK-THEN-ACT: exists() → (update | add). Now that callers
+        # offload record_hint_vote via asyncio.to_thread, two concurrent votes
+        # could both see exists()==False and both insert → a duplicate/clobbered
+        # case. Hold the store's shared re-entrant write-lock ACROSS the whole
+        # exists()→write compound to make it atomic; the nested
+        # update_ratification_state/add_decision re-acquire the same RLock cleanly.
+        with store._write_lock:
+            if store.exists( case_id ):
+                store.update_ratification_state( case_id, ratification_state )
+                return { "case_id": case_id, "ratification_state": ratification_state, "updated": True }
 
-        decision_value = self._decision_value_from_predicted( predicted_value )
-        embedding      = provider.generate_embedding( question, content_type="prose" )
-        store.add_decision(
-            id                 = case_id,
-            question           = question,
-            category           = category or "general",
-            decision_value     = decision_value,
-            ratification_state = ratification_state,
-            question_embedding = embedding,
-            created_at         = datetime.now( timezone.utc ).isoformat(),
-            data_origin        = "organic",
-            response_type      = response_type or ""
-        )
-        return { "case_id": case_id, "ratification_state": ratification_state, "updated": False }
+            decision_value = self._decision_value_from_predicted( predicted_value )
+            embedding      = provider.generate_embedding( question, content_type="prose" )
+            store.add_decision(
+                id                 = case_id,
+                question           = question,
+                category           = category or "general",
+                decision_value     = decision_value,
+                ratification_state = ratification_state,
+                question_embedding = embedding,
+                created_at         = datetime.now( timezone.utc ).isoformat(),
+                data_origin        = "organic",
+                response_type      = response_type or ""
+            )
+            return { "case_id": case_id, "ratification_state": ratification_state, "updated": False }
 
     def get_accuracy_summary( self, window_days: int = 30, category: Optional[str] = None,
                               response_type: Optional[str] = None ) -> Dict[str, Any]:

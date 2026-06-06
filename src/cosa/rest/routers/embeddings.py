@@ -8,6 +8,8 @@ without loading a second copy of the model into VRAM.
 Generated on: 2026-02-24
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Annotated, List
@@ -73,8 +75,12 @@ async def generate_embedding(
 
     Uses the server's already-loaded GPU model (singleton).
     """
+    # FM-7 event-loop offload: GPU inference is blocking; run it OFF the event
+    # loop so this endpoint (reachable as the prediction engine's HTTP fallback)
+    # never freezes the loop — which would otherwise self-deadlock against the
+    # caller and stall /health.
     provider  = get_embedding_provider()
-    embedding = provider.generate_embedding( request.text, content_type=request.content_type )
+    embedding = await asyncio.to_thread( provider.generate_embedding, request.text, content_type=request.content_type )
 
     return EmbedResponse(
         embedding  = embedding,
@@ -100,8 +106,10 @@ async def generate_embeddings_batch(
     if not request.texts:
         raise HTTPException( status_code=400, detail="texts list must not be empty" )
 
+    # FM-7 event-loop offload: batch GPU inference is blocking; run it OFF the
+    # event loop so this endpoint never freezes the loop.
     provider   = get_embedding_provider()
-    embeddings = provider.generate_embeddings_batch( request.texts, content_type=request.content_type )
+    embeddings = await asyncio.to_thread( provider.generate_embeddings_batch, request.texts, content_type=request.content_type )
 
     return EmbedBatchResponse(
         embeddings = embeddings,

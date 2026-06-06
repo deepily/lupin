@@ -13,6 +13,8 @@ Dependency Rule:
     This module NEVER imports from notification_proxy or swe_team.
 """
 
+import threading
+
 import lancedb
 import pyarrow as pa
 
@@ -37,6 +39,22 @@ class ProxyDecisionEmbeddings:
         - update_ratification_state() modifies an existing record
         - All operations are non-fatal (try/except wrapped)
     """
+
+    # Shared re-entrant lock serializing ALL table mutations across threads.
+    #
+    # Callers offload writes via asyncio.to_thread (FM-7 event-loop offload),
+    # which runs them on the DEFAULT ThreadPoolExecutor — so the old
+    # single-threaded-event-loop write-serialization is gone. _table.add() /
+    # merge_insert() release the GIL in native Rust, so concurrent writers can
+    # collide and silently drop a CBR record (these methods swallow exceptions).
+    #
+    # It is RE-ENTRANT (RLock) and CLASS-LEVEL (one lock shared by all stores)
+    # so that a check-then-act compound — e.g. PredictionEngine.record_hint_vote's
+    # exists()→(update|add) — can hold the lock across the whole sequence while
+    # the nested add_decision/update_ratification_state re-acquire it cleanly.
+    # Reads (find_similar, exists) stay lock-free — LanceDB MVCC snapshots are
+    # write-safe. Writes are infrequent, so there is no perf concern.
+    _write_lock = threading.RLock()
 
     def __init__( self, db_path, table_name="proxy_decisions", embedding_dim=768, nprobes=20, debug=False ):
         """
@@ -166,7 +184,8 @@ class ProxyDecisionEmbeddings:
                 "created_at"         : created_at,
             }
 
-            self._table.add( [ record ] )
+            with self._write_lock:
+                self._table.add( [ record ] )
 
             if self.debug: print( f"[ProxyDecisionEmbeddings] Added decision: {id}" )
 
@@ -314,7 +333,8 @@ class ProxyDecisionEmbeddings:
             # Use merge_insert for upsert behavior
             import pyarrow as pa
             update_table = pa.table( { k: [ v ] for k, v in clean_record.items() } )
-            self._table.merge_insert( "id" ).when_matched_update_all().execute( update_table )
+            with self._write_lock:
+                self._table.merge_insert( "id" ).when_matched_update_all().execute( update_table )
 
             if self.debug: print( f"[ProxyDecisionEmbeddings] Updated ratification state: {id} -> {new_state}" )
 
