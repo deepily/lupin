@@ -5630,6 +5630,26 @@ class NotificationsUI {
                     // Layer A: patch any existing card header in place so the
                     // badge appears without a re-render. No-op when card not yet built.
                     this._setPersonaBadgeOnCard( notification.sender_id, notification.voice_persona );
+                    // Spin-up symmetry with `session_reaped` (2026-06-06, Rick): a
+                    // freshly-spawned worker has no sender card yet, so its focus-bar
+                    // badge would otherwise only appear on its FIRST notification and
+                    // the broadcast recipient list would stay stale until a manual
+                    // refresh. This event fires at persona-allocation time with the
+                    // bridge already written (the server sets the persona on the bridge
+                    // BEFORE emitting — voice_persona.py), so add the strip badge now
+                    // (idempotent: no-op if the icon already exists) and refresh the
+                    // broadcast card so the new persona appears without a page reload.
+                    // See: src/rnd/v0.1.8/2026.06.05-reap-event-focus-bar-and-broadcast-refresh.md (§ Spin-up symmetry)
+                    const parsed = this.parseSenderId( notification.sender_id );
+                    this._addStripIcon(
+                        notification.sender_id,
+                        parsed.project.toUpperCase(),
+                        notification.voice_persona,
+                        parsed.sessionId
+                    );
+                    if ( window.broadcastPanel && typeof window.broadcastPanel.refreshSessions === "function" ) {
+                        window.broadcastPanel.refreshSessions();
+                    }
                     // Re-evaluate strip filter: this senderId may have just become
                     // active and (if the toggle is on) needs to un-hide.
                     this._applyHideInactiveStripFilter();
@@ -12043,7 +12063,7 @@ class NotificationsUI {
             messageDiv.innerHTML = `
                 <div class="progress-group-head">
                     <span class="message-time">${timeStr}</span>
-                    <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
+                    <span class="message-text">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
                 </div>
             `;
 
@@ -12055,7 +12075,7 @@ class NotificationsUI {
         } else {
             messageDiv.innerHTML = `
                 <span class="message-time">${timeStr}</span>
-                <span class="message-text" title="${cleanMessage.replace( /"/g, '&quot;' )}">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
+                <span class="message-text">${this.renderMarkdownInline( cleanMessage )}${expiredBadge}${abstractIndicator}</span>
             `;
         }
 
@@ -12189,7 +12209,7 @@ class NotificationsUI {
         // Update head with new notification values
         if ( oldMessageSpan ) {
             oldMessageSpan.innerHTML = this.renderMarkdownInline( cleanMessage );
-            oldMessageSpan.title = cleanMessage.replace( /"/g, '&quot;' );
+            oldMessageSpan.removeAttribute( 'title' );
         }
         if ( oldTimeSpan ) {
             let timeStr;
@@ -12381,7 +12401,7 @@ class NotificationsUI {
         messageDiv.className = `sender-message ${isResponse ? 'outgoing' : 'incoming'}`;
         messageDiv.innerHTML = `
             <span class="message-time">${time}${isResponse ? ' →' : ''}</span>
-            <span class="message-text" title="${displayMessage}">${this.renderMarkdownInline( displayMessage )}</span>
+            <span class="message-text">${this.renderMarkdownInline( displayMessage )}</span>
         `;
 
         // Prepend to container so newest messages always appear at top
