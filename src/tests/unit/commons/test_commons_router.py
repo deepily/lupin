@@ -410,6 +410,7 @@ def test_filter_includes_same_user():
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1
 
@@ -426,6 +427,7 @@ def test_filter_excludes_other_user():
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert out == [ ]
 
@@ -446,6 +448,7 @@ def test_filter_graceful_includes_bridge_without_owner_user_id():
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1
     assert out[ 0 ][ "session_id" ] == "sid-legacy"
@@ -464,6 +467,7 @@ def test_filter_graceful_includes_bridge_with_null_owner_user_id():
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1
 
@@ -497,32 +501,38 @@ def test_filter_uses_owner_user_id_not_legacy_user_id():
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1, "filter must use owner_user_id, not legacy user_id"
     assert out[ 0 ][ "session_id" ] == "sid-A"
 
 
-def test_filter_excludes_session_stale_via_idle_detection_iso():
+def test_filter_includes_dormant_worker_stale_interaction_fresh_mtime():
     """
-    2026-05-13 fix — bridge with stale `idle_detection.last_interaction_at`
-    is excluded by the time-threshold filter (previously a no-op because the
-    filter looked at wrong field names). Per
-    `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`.
+    HEADLINE REGRESSION (2026-06-05): a dormant-but-ALIVE worker — last user
+    interaction hours ago but bridge mtime kept FRESH by the idle-waiter
+    heartbeat — MUST remain reachable by broadcast. The pre-2026-06-05 filter
+    keyed on `last_interaction_at` and wrongly excluded it. Per
+    `src/rnd/v0.1.8/2026.06.05-broadcast-liveness-mtime-filter.md`.
     """
-    raw = [ _make_session_tuple( "/bridge/stale", "sid-stale", { "name": "MrRadio" } ) ]
+    raw = [ _make_session_tuple( "/bridge/dormant", "sid-dormant", { "name": "MrRadio" } ) ]
     from datetime import datetime, timedelta, timezone
-    # Last interaction 2 hours ago — well past the 600s (10min) threshold
-    stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=2 ) ).isoformat()
+    # Last interaction 9.5h ago (Mr. Radio's real value), but bridge mtime is fresh.
+    stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=9, minutes=30 ) ).isoformat()
     now_epoch = datetime.now( timezone.utc ).timestamp()
     loader = lambda p: { "idle_detection": { "last_interaction_at": stale_iso } }
     out = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "anyone",
-        active_session_threshold_seconds = 600,
+        active_session_threshold_seconds = 7200,
         now_epoch                        = now_epoch,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: now_epoch - 60.0,   # bridge written 60s ago = alive
     )
-    assert out == [ ], "stale bridge should have been pruned by the time-threshold filter"
+    assert len( out ) == 1, "dormant-but-alive worker (fresh mtime) must stay reachable"
+    assert out[ 0 ][ "session_id" ] == "sid-dormant"
+    # last_seen_iso still reflects the (stale) last interaction — informational only.
+    assert out[ 0 ][ "last_seen_iso" ] == stale_iso
 
 
 def test_filter_includes_session_recently_interactive_via_idle_detection_iso():
@@ -541,9 +551,10 @@ def test_filter_includes_session_recently_interactive_via_idle_detection_iso():
         active_session_threshold_seconds = 600,
         now_epoch                        = now_epoch,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: now_epoch,   # fresh bridge mtime → alive
     )
     assert len( out ) == 1
-    # Bonus: last_seen_iso projection now populates
+    # last_seen_iso projection still populates from last_interaction_at (display only)
     assert out[ 0 ][ "last_seen_iso" ] == recent_iso
 
 
@@ -567,6 +578,7 @@ def test_filter_strict_when_bridge_has_owner_user_id():
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     # Only alice's bridge is included — bob's is rejected because his bridge HAS owner_user_id and it doesn't match
     assert len( out ) == 1
@@ -586,32 +598,85 @@ def test_filter_skips_unloadable_bridge():
     assert out == [ ]
 
 
-def test_filter_excludes_stale_session():
-    """Session past activity threshold is excluded."""
+def test_filter_excludes_dead_session_stale_mtime():
+    """A DEAD session — bridge mtime frozen past the liveness threshold — is excluded."""
     raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
-    loader = lambda p: { "owner_user_id": "alice", "last_activity_epoch": 100.0 }
-    out = filter_and_project_sessions(
-        raw_sessions                     = raw,
-        authenticated_user_id            = "alice",
-        active_session_threshold_seconds = 600,
-        now_epoch                        = 1000.0,   # 900s after last_activity, > 600s threshold
-        bridge_loader                    = loader,
-    )
-    assert out == [ ]
-
-
-def test_filter_includes_session_with_no_activity_timestamp():
-    """If bridge has NO last_activity field, treat as active (don't drop)."""
-    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
-    loader = lambda p: { "user_id": "alice" }   # no last_activity_*
+    loader = lambda p: { "owner_user_id": "alice" }
     out = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 100.0,   # 900s old > 600s threshold = dead
+    )
+    assert out == [ ]
+
+
+def test_filter_includes_session_regardless_of_interaction_fields():
+    """
+    Liveness no longer depends on any interaction timestamp in the bridge —
+    a fresh mtime alone keeps the session reachable.
+    """
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    loader = lambda p: { "user_id": "alice" }   # no interaction/activity fields at all
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1
+
+
+def test_filter_mtime_fn_oserror_skips_session():
+    """TOCTOU: if mtime_fn raises OSError (bridge vanished mid-scan), skip the session."""
+    raw = [ _make_session_tuple( "/bridge/gone", "sid-gone", { "name": "Maria" } ) ]
+    def boom( p ):
+        raise OSError( "bridge vanished" )
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        mtime_fn                         = boom,
+    )
+    assert out == [ ]
+
+
+def test_filter_default_mtime_fn_uses_real_file_stat( tmp_path ):
+    """
+    Cover the DEFAULT `mtime_fn` (`p.stat().st_mtime`) against a real file:
+    a freshly-written bridge passes liveness; an aged one (os.utime) is excluded.
+    """
+    import os
+    bridge_path = tmp_path / "cc-12345.json"
+    bridge_path.write_text( "{}" )
+    now_epoch = time.time()
+    raw    = [ _make_session_tuple( bridge_path, "sid-real", { "name": "Maria" } ) ]
+    loader = lambda p: { "owner_user_id": "alice" }
+    # Fresh file (just written) → included via the DEFAULT mtime_fn (no injection).
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = now_epoch,
+        bridge_loader                    = loader,
+    )
+    assert len( out ) == 1
+    # Age the file 1 hour into the past → excluded by the same default mtime_fn.
+    os.utime( bridge_path, ( now_epoch - 3600, now_epoch - 3600 ) )
+    out = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = now_epoch,
+        bridge_loader                    = loader,
+    )
+    assert out == [ ]
 
 
 def test_filter_excludes_originator_when_requested():
@@ -628,6 +693,7 @@ def test_filter_excludes_originator_when_requested():
         bridge_loader                    = loader,
         originator_session_id            = "sid-A",
         include_originator               = False,
+        mtime_fn                         = lambda p: 1000.0,   # fresh → liveness OK
     )
     assert len( out ) == 1
     assert out[ 0 ][ "session_id" ] == "sid-B"
@@ -647,6 +713,7 @@ def test_filter_includes_originator_by_default():
         bridge_loader                    = loader,
         originator_session_id            = "sid-A",
         include_originator               = True,
+        mtime_fn                         = lambda p: 1000.0,   # fresh → liveness OK
     )
     assert len( out ) == 2
 
@@ -912,6 +979,7 @@ def test_execute_broadcast_happy_path_with_recipients( store, rate_limiter, ack_
         bridge_loader                    = _bridge_loader_fixed(),
         build_sender_id                  = lambda sid: f"sender-{sid}",
         now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → alive
     )
     assert result[ "http_status" ] == 200
     assert result[ "recipients" ] == 1
@@ -945,6 +1013,7 @@ def test_execute_broadcast_inflight_pruned_mid_fanout( store, rate_limiter, ack_
         bridge_loader                    = _bridge_loader_fixed(),
         build_sender_id                  = lambda sid: sid,
         now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → alive
     )
     # Fanout still happened; just the entry was gone for the update
     assert result[ "http_status" ] == 200
@@ -986,6 +1055,7 @@ def test_execute_broadcast_with_recipients_require_ack_false_no_inflight_update(
         bridge_loader                    = _bridge_loader_fixed(),
         build_sender_id                  = lambda sid: sid,
         now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → alive
     )
     assert result[ "http_status" ] == 200
     assert result[ "recipients" ] == 1
@@ -1008,6 +1078,7 @@ def test_execute_broadcast_require_ack_false_skips_tracking( store, rate_limiter
         bridge_loader                    = _bridge_loader_fixed(),
         build_sender_id                  = lambda sid: sid,
         now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → alive
     )
     assert result[ "http_status" ] == 200
     assert result[ "broadcast_id" ] is not None

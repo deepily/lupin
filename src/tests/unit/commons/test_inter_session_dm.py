@@ -164,6 +164,7 @@ class TestResolveDmRecipient:
             raw_sessions_fn       = _fake_raw_sessions_fn( [ sess_a, sess_b ] ),
             bridge_loader         = _fake_bridge_loader,
             active_session_threshold_seconds = 600.0,
+            mtime_fn              = lambda p: time.time(),   # fresh bridge mtime → alive
         )
         assert result[ "http_status" ] == 200
         assert result[ "session_id" ]   == "sid_a"
@@ -179,6 +180,7 @@ class TestResolveDmRecipient:
             raw_sessions_fn       = _fake_raw_sessions_fn( [ sess_a ] ),
             bridge_loader         = _fake_bridge_loader,
             active_session_threshold_seconds = 600.0,
+            mtime_fn              = lambda p: time.time(),   # fresh bridge mtime → alive
         )
         assert result[ "http_status" ] == 422
         assert result[ "detail" ][ "error" ] == "recipient_inactive"
@@ -196,6 +198,7 @@ class TestResolveDmRecipient:
             raw_sessions_fn       = _fake_raw_sessions_fn( [ sess_a ] ),
             bridge_loader         = _fake_bridge_loader,
             active_session_threshold_seconds = 600.0,
+            mtime_fn              = lambda p: time.time(),   # fresh bridge mtime → alive
         )
         assert result[ "http_status" ] == 200
         assert result[ "session_id" ]   == "sid_a"
@@ -212,6 +215,7 @@ class TestResolveDmRecipient:
             raw_sessions_fn       = _fake_raw_sessions_fn( [ sess_a ] ),
             bridge_loader         = _fake_bridge_loader,
             active_session_threshold_seconds = 600.0,
+            mtime_fn              = lambda p: time.time(),   # fresh bridge mtime → alive
         )
         assert result[ "http_status" ] == 200
         assert result[ "persona_name" ] == "radio"
@@ -227,6 +231,7 @@ class TestResolveDmRecipient:
             raw_sessions_fn       = _fake_raw_sessions_fn( [ sess_a ] ),
             bridge_loader         = _fake_bridge_loader,
             active_session_threshold_seconds = 600.0,
+            mtime_fn              = lambda p: time.time(),   # fresh bridge mtime → alive
         )
         assert result[ "http_status" ] == 422
         assert result[ "detail" ][ "error" ] == "recipient_not_found"
@@ -244,6 +249,7 @@ class TestResolveDmRecipient:
             raw_sessions_fn       = _fake_raw_sessions_fn( [ sess_a ] ),
             bridge_loader         = _fake_bridge_loader,
             active_session_threshold_seconds = 600.0,
+            mtime_fn              = lambda p: time.time(),   # fresh bridge mtime → alive
         )
         assert result[ "http_status" ] == 422
         assert result[ "detail" ][ "error" ] == "recipient_required"

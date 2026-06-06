@@ -322,6 +322,7 @@ def filter_and_project_sessions(
     bridge_loader                     : Callable[ [ Any ], Optional[ Dict[ str, Any ] ] ],
     originator_session_id             : Optional[ str ] = None,
     include_originator                : bool            = True,
+    mtime_fn                          : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
 ) -> List[ Dict[ str, Any ] ]:
     """
     Apply all AC2 filters + T7 + T8 projection to the raw 3-tuple list.
@@ -345,7 +346,11 @@ def filter_and_project_sessions(
        (The legacy `user_id` field is preserved on the bridge for telemetry —
        it identifies the listener service account that wrote the bridge — but
        is no longer used for scoping.)
-    3. Filter by last-activity age (newer than threshold)
+    3. Filter by LIVENESS (bridge-file mtime newer than threshold) — `mtime_fn`
+       is injectable (defaults to `path.stat().st_mtime`) for filesystem-free
+       unit tests, mirroring the `now_epoch_fn` injection in `execute_broadcast`.
+       Replaces the pre-2026-06-05 `last_interaction_at` interaction-recency
+       check so dormant-but-alive workers stay reachable by broadcast.
     4. Optionally exclude originator's session (when `include_originator=False`)
     5. Project to response shape via `project_session_response` (T8 — no Path leak)
     """
@@ -362,8 +367,21 @@ def filter_and_project_sessions(
         # branch tightens to strict cross-user isolation.
         if bridge_owner_user_id is not None and bridge_owner_user_id != authenticated_user_id:
             continue
-        last_epoch = _bridge_last_activity_epoch( bridge )
-        if last_epoch is not None and ( now_epoch - last_epoch ) > active_session_threshold_seconds:
+        # Liveness filter (2026-06-05): key on bridge-file MTIME, not the bridge's
+        # `idle_detection.last_interaction_at`. The idle-waiter heartbeat rewrites
+        # the bridge on each backoff tick, so an alive-but-dormant session keeps a
+        # FRESH mtime even with zero user interaction; a dead session's waiter exits
+        # (PPID-death check) and the mtime freezes → ages past the threshold. Since
+        # mtime >= last_interaction_at always, this can only INCLUDE MORE live
+        # sessions than the old interaction-recency filter, never fewer — which is
+        # the whole point: a broadcast must reach dormant-but-alive workers.
+        # See src/rnd/v0.1.8/2026.06.05-broadcast-liveness-mtime-filter.md
+        try:
+            mtime_epoch = mtime_fn( path )
+        except OSError:
+            # TOCTOU: bridge vanished between enumeration and stat → treat as gone.
+            continue
+        if ( now_epoch - mtime_epoch ) > active_session_threshold_seconds:
             continue
         if not include_originator and originator_session_id is not None and sid == originator_session_id:
             continue
@@ -445,6 +463,7 @@ def execute_broadcast(
     bridge_loader                      : Callable[ [ Any ], Optional[ Dict[ str, Any ] ] ],
     build_sender_id                    : Callable[ [ str ], Optional[ str ] ],
     now_epoch_fn                       : Callable[ [ ], float ] = time.time,
+    mtime_fn                           : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
 ) -> Dict[ str, Any ]:
     """
     Full broadcast execution pipeline — pure-logic core of the POST endpoint.
@@ -488,6 +507,7 @@ def execute_broadcast(
         bridge_loader                    = bridge_loader,
         originator_session_id            = None,
         include_originator               = body.include_originator,
+        mtime_fn                         = mtime_fn,
     )
 
     # AC2 / Q14: zero recipients
@@ -858,6 +878,7 @@ def _resolve_dm_recipient(
     bridge_loader         : Callable[ [ Any ], Optional[ Dict[ str, Any ] ] ],
     active_session_threshold_seconds : float,
     now_epoch_fn          : Callable[ [ ], float ] = time.time,
+    mtime_fn              : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
 ) -> Dict[ str, Any ]:
     """
     Resolve an inter-session DM recipient to a concrete session_id + persona_name.
@@ -883,6 +904,7 @@ def _resolve_dm_recipient(
         bridge_loader                    = bridge_loader,
         originator_session_id            = None,
         include_originator               = True,
+        mtime_fn                         = mtime_fn,
     )
 
     candidate_alternatives = [
@@ -1012,6 +1034,7 @@ def execute_register_question(
     bridge_loader         : Optional[ Callable[ [ Any ], Optional[ Dict[ str, Any ] ] ] ]            = None,
     active_session_threshold_seconds : float = 600.0,
     now_epoch_fn          : Callable[ [ ], float ] = time.time,
+    mtime_fn              : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
 ) -> Dict[ str, Any ]:
     """
     Pure-logic core for POST /api/commons/register-question.
@@ -1073,6 +1096,7 @@ def execute_register_question(
             bridge_loader                    = bridge_loader,
             active_session_threshold_seconds = active_session_threshold_seconds,
             now_epoch_fn                     = now_epoch_fn,
+            mtime_fn                         = mtime_fn,
         )
         if resolution.get( "http_status" ) == 422:
             try:

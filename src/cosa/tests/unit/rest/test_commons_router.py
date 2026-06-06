@@ -341,6 +341,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
         out = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { "owner_user_id": None },
+            mtime_fn=lambda p: 1000.0,   # fresh bridge mtime → alive
         )
         self.assertEqual( len( out ), 1 )
 
@@ -349,31 +350,83 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
         out = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { "owner_user_id": "u" },
+            mtime_fn=lambda p: 1000.0,   # fresh bridge mtime → alive
         )
         self.assertEqual( len( out ), 1 )
 
-    def test_stale_activity_skipped( self ):
+    def test_stale_mtime_skipped( self ):
+        # Dead session: bridge mtime frozen past the liveness threshold.
         raw = [ ( "p", "s", self._persona() ) ]
         out = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=10,
-            now_epoch=1000.0, bridge_loader=lambda p: { "last_activity_epoch": 500.0 },
+            now_epoch=1000.0, bridge_loader=lambda p: { },
+            mtime_fn=lambda p: 500.0,   # 500s old > 10s threshold = dead
         )
         self.assertEqual( out, [ ] )
 
-    def test_fresh_activity_passes( self ):
+    def test_fresh_mtime_passes( self ):
         raw = [ ( "p", "s", self._persona() ) ]
         out = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=10000,
-            now_epoch=1000.0, bridge_loader=lambda p: { "last_activity_epoch": 999.0 },
+            now_epoch=1000.0, bridge_loader=lambda p: { },
+            mtime_fn=lambda p: 999.0,   # 1s old < threshold = alive
         )
         self.assertEqual( len( out ), 1 )
+
+    def test_dormant_worker_stale_interaction_fresh_mtime_included( self ):
+        # HEADLINE REGRESSION (2026-06-05): stale last_interaction but fresh mtime → reachable.
+        # src/rnd/v0.1.8/2026.06.05-broadcast-liveness-mtime-filter.md
+        from datetime import datetime, timedelta, timezone
+        stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=9 ) ).isoformat()
+        now_epoch = datetime.now( timezone.utc ).timestamp()
+        raw = [ ( "p", "s", self._persona() ) ]
+        out = filter_and_project_sessions(
+            raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=7200,
+            now_epoch=now_epoch,
+            bridge_loader=lambda p: { "idle_detection": { "last_interaction_at": stale_iso } },
+            mtime_fn=lambda p: now_epoch - 60.0,   # bridge written 60s ago = alive
+        )
+        self.assertEqual( len( out ), 1 )
+
+    def test_mtime_fn_oserror_skips( self ):
+        # TOCTOU: bridge vanished mid-scan → mtime_fn raises OSError → skip.
+        def boom( p ):
+            raise OSError( "gone" )
+        raw = [ ( "p", "s", self._persona() ) ]
+        out = filter_and_project_sessions(
+            raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
+            now_epoch=1000.0, bridge_loader=lambda p: { }, mtime_fn=boom,
+        )
+        self.assertEqual( out, [ ] )
+
+    def test_default_mtime_fn_uses_real_file( self ):
+        # Cover the DEFAULT mtime_fn (p.stat().st_mtime) against a real temp file.
+        import os, tempfile, time as _time
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge_path = Path( tmp ) / "cc-9.json"
+            bridge_path.write_text( "{}" )
+            now_epoch = _time.time()
+            raw = [ ( bridge_path, "s", self._persona() ) ]
+            loader = lambda p: { }
+            out = filter_and_project_sessions(
+                raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
+                now_epoch=now_epoch, bridge_loader=loader,
+            )
+            self.assertEqual( len( out ), 1 )
+            os.utime( bridge_path, ( now_epoch - 3600, now_epoch - 3600 ) )
+            out = filter_and_project_sessions(
+                raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
+                now_epoch=now_epoch, bridge_loader=loader,
+            )
+            self.assertEqual( out, [ ] )
 
     def test_originator_excluded_when_flag_false( self ):
         raw = [ ( "p", "ME", self._persona() ) ]
         out = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { }, originator_session_id="ME",
-            include_originator=False,
+            include_originator=False, mtime_fn=lambda p: 1000.0,
         )
         self.assertEqual( out, [ ] )
 
@@ -382,7 +435,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
         out = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { }, originator_session_id=None,
-            include_originator=False,
+            include_originator=False, mtime_fn=lambda p: 1000.0,
         )
         self.assertEqual( len( out ), 1 )
 
@@ -447,6 +500,7 @@ class TestExecuteBroadcast( unittest.TestCase ):
             bridge_loader=lambda p: { },
             build_sender_id=lambda sid: sid,
             now_epoch_fn=lambda: 1000.0,
+            mtime_fn=lambda p: 1000.0,   # fresh bridge mtime → alive
         )
         base.update( over )
         return base
@@ -698,6 +752,7 @@ class TestResolveDmRecipient( unittest.TestCase ):
             raw_sessions_fn=lambda: [ ( "p", "sid-active", { "name": "Rio" } ) ],
             bridge_loader=lambda p: { "owner_user_id": "u" },
             active_session_threshold_seconds=600, now_epoch_fn=lambda: 1000.0,
+            mtime_fn=lambda p: 1000.0,   # fresh bridge mtime → alive
         )
         base.update( over )
         return base
@@ -778,6 +833,7 @@ class TestExecuteRegisterQuestion( unittest.TestCase ):
             raw_sessions_fn=lambda: [ ( "p", "sid-active", { "name": "Rio" } ) ],
             bridge_loader=lambda p: { "owner_user_id": "u" },
             active_session_threshold_seconds=600, now_epoch_fn=lambda: 1000.0,
+            mtime_fn=lambda p: 1000.0,   # fresh bridge mtime → alive
         )
         base.update( over )
         return base

@@ -587,7 +587,7 @@ async def lifespan( app: FastAPI ):
                 store                            = commons_store,
                 rate_limiter                     = commons_rate_limiter,
                 ack_watcher                      = commons_ack_watcher,
-                active_session_threshold_seconds = config_mgr.get( "commons broadcast active session threshold seconds", default=600, return_type="int" ),
+                active_session_threshold_seconds = config_mgr.get( "commons broadcast liveness threshold seconds", default=28800, return_type="int" ),
                 question_watcher                 = commons_question_watcher,
             )
             commons_ack_watcher.start()
