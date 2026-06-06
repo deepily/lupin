@@ -45,6 +45,15 @@ from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
 from cosa.agents.heartbeat_arbiter.dependency_graph import build_graph
 from cosa.agents.heartbeat_arbiter.idle_roster import build_roster
 from cosa.agents.heartbeat_arbiter import ping_throttle
+# v2.1 direct-state visibility (design 03 §10.2-§10.4): per-session liveness off
+# the bridge-mtime clock, change-or-tick render, and the queryable snapshot push.
+from cosa.agents.heartbeat_arbiter.fleet_render import (
+    build_snapshot, frame_signature, render_fleet_table, render_tick,
+)
+from cosa.rest.arbiter_snapshot_store import set_snapshot as _default_snapshot_sink
+from lupin_cli.claude_code.hooks.lib.session_bridge import (
+    get_bridge_mtime as _default_bridge_mtime_fn,
+)
 
 
 # Manager-surface topic + auto-ping message template
@@ -99,6 +108,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
         tail_maxlen              : int                  = DEFAULT_TAIL_MAXLEN,
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
+        bridge_mtime_fn          : Optional[ Callable ] = None,
+        snapshot_sink            : Optional[ Callable ] = None,
+        render_sink              : Optional[ Callable ] = None,
         user_id      : str  = None,
         user_email   : str  = None,
         session_id   : str  = None,
@@ -182,6 +194,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._commons   = commons
         self._clock     = clock if clock is not None else SystemClock()
         self._notify_fn = notify_fn if notify_fn is not None else self.notify_progress
+        # v2.1 seams: bridge-mtime liveness reader, snapshot sink (in-pool →
+        # server singleton), and the render sink (greppable log; default stdout,
+        # captured by the container log). All injectable for 100% unit testing.
+        self._bridge_mtime_fn = bridge_mtime_fn if bridge_mtime_fn is not None else _default_bridge_mtime_fn
+        self._snapshot_sink   = snapshot_sink   if snapshot_sink   is not None else _default_snapshot_sink
+        self._render_sink     = render_sink      if render_sink     is not None else print
 
         # --- consumer state (carried across polls) ---
         self._offsets       = { }                                  # sid -> byte offset
@@ -190,6 +208,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._ping_attempts = { }                                  # edge_key -> attempt count
         self._recent_pings  = [ ]                                  # list of ping datetimes (global-cap window)
         self._poll_count    = 0
+        # v2.1 render state (§10.3 change-or-tick): the last rendered SEMANTIC
+        # frame signature + when it last changed (for the tick's since-duration).
+        self._last_frame_sig = None
+        self._last_change_at = None
 
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI (QueueableJob protocol)."""
@@ -224,6 +246,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         pings_fired = self._auto_ping( graph[ "edges" ], now )
         roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds )
         self._surface_to_manager( fleet_view, graph, roster )
+        rendered    = self._publish_fleet_snapshot( fleet_view, now )
 
         self._poll_count += 1
         return {
@@ -232,7 +255,43 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "cycles"      : len( graph[ "cycles" ] ),
             "pings_fired" : pings_fired,
             "roster"      : len( roster ),
+            "rendered"    : rendered,
         }
+
+    def _publish_fleet_snapshot( self, fleet_view, now ):
+        """
+        Build + render + push the v2.1 direct-state fleet snapshot (§10.2-§10.4).
+
+        Requires:
+            - fleet_view is the per-session view dict (build_fleet_view output)
+            - now is an aware datetime
+
+        Ensures:
+            - reads each session's bridge-mtime (the wedge-resilient liveness
+              clock, §10.1) via the injected reader and builds the snapshot with
+              STATE and LIVENESS kept as orthogonal columns (C4)
+            - renders the FULL table when the semantic frame changed (or on the
+              first poll), else a one-line tick with the duration-since-change
+              (§10.3 / D1) — to the injected render sink (greppable log)
+            - pushes the snapshot to the injected sink (the in-pool arbiter's
+              server singleton, surfaced by GET /api/arbiter/fleet-snapshot)
+            - returns "table" or "tick" (for the poll summary)
+        """
+        bridge_mtimes = { sid: self._bridge_mtime_fn( sid ) for sid in fleet_view }
+        snapshot      = build_snapshot( fleet_view, bridge_mtimes, now )
+
+        sig = frame_signature( snapshot )
+        if sig != self._last_frame_sig:
+            self._last_frame_sig = sig
+            self._last_change_at = now
+            self._render_sink( render_fleet_table( snapshot ) )
+            rendered = "table"
+        else:
+            self._render_sink( render_tick( now, self._last_change_at, snapshot[ "session_count" ] ) )
+            rendered = "tick"
+
+        self._snapshot_sink( snapshot )
+        return rendered
 
     def _auto_ping( self, edges, now ):
         """

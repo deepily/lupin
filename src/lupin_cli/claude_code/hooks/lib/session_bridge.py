@@ -38,6 +38,7 @@ import json
 import os
 import re
 import signal as signal_mod
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -648,6 +649,143 @@ def find_session_path_by_id( session_id ):
             continue
 
     return None
+
+
+# ── v2.1 liveness-stamp observability (arbiter design 03 §10.6 rider) ──────────
+# A swallowed bridge-touch failure must be DIAGNOSABLE, never silently dropped —
+# a dropped stamp would read as false-idle in the arbiter, the exact dishonesty
+# the C4 state/liveness split exists to prevent. Two cheap, hot-path-safe
+# signals (both fire ONLY on the failure path, never on success):
+#   • a monotonic in-memory counter — persists in long-lived processes (the
+#     cosa-voice MCP server middleware, the arbiter) for a debug surface to read;
+#   • a ONE-SHOT-per-process stderr line — the diagnosable signal for the
+#     SHORT-LIVED PostToolUse hook (a fresh process per tool call, so the counter
+#     resets each run; the one-shot stderr surfaces a persistent fleet-wide break
+#     as one line per failing invocation without per-call spam within a process).
+_bridge_touch_failure_count  = 0
+_bridge_touch_failure_logged = False
+
+
+def get_bridge_touch_failure_count() -> int:
+    """
+    Ensures:
+        - returns the count of swallowed touch_bridge_mtime() failures since
+          process start (observability rider) — meaningful in long-lived
+          processes; resets per-process for the ephemeral hook. Never raises.
+    """
+    return _bridge_touch_failure_count
+
+
+def _record_bridge_touch_failure() -> None:
+    """
+    Record a swallowed liveness-stamp failure (counter + one-shot stderr).
+
+    Ensures:
+        - increments the in-memory failure counter (always)
+        - writes a single stderr diagnostic on the FIRST failure of this process
+          only (bounded — no per-call spam); subsequent failures count silently
+        - NEVER raises (it runs inside touch_bridge_mtime's except — it must not
+          re-break the no-throw guarantee, so the stderr write is itself guarded)
+    """
+    global _bridge_touch_failure_count, _bridge_touch_failure_logged
+    _bridge_touch_failure_count += 1
+    if not _bridge_touch_failure_logged:
+        _bridge_touch_failure_logged = True
+        try:
+            sys.stderr.write(
+                "[session_bridge] touch_bridge_mtime liveness stamp dropped "
+                "(bridge unreachable); further failures counted, not logged\n"
+            )
+        except Exception:
+            pass
+
+
+def touch_bridge_mtime() -> bool:
+    """
+    Bump THIS session's bridge-file mtime to "now" — the v2.1 direct-state
+    liveness stamp (arbiter design `03` §10.1).
+
+    This is the **one host-side liveness clock** (§10.6 redline C4): the same
+    `~/.claude/sessions/cc-*.json` whose mtime the idle-waiter re-arm, the Stop
+    hook, and the cosa-voice server already bump. Adding the tool-use hook as a
+    fourth writer (§10.1) makes a heads-down worker refresh liveness on every
+    tool call. Because the file is written host-side (never through `:7999`),
+    the clock survives a server wedge.
+
+    **REDLINE C1 (load-bearing, §10.6):** this is a BARE metadata-only
+    `os.utime( path, None )` — it touches mtime/atime ONLY. It performs NO
+    content write (a one-byte write would corrupt the bridge JSON — hard gate),
+    NO transcript read, NO server POST, and NO heavy logic. It is called from
+    the PostToolUse hook which fires on every tool call, so anything heavier
+    would degrade every tool call fleet-wide. Path resolution reuses
+    `_find_session_file()` — a single `cc-{ppid}.json` `.exists()` stat in the
+    common (PPID-hit) case.
+
+    Requires:
+        - nothing (resolves the current process's own bridge file)
+
+    Ensures:
+        - bumps the resolved bridge file's mtime to the current time via
+          os.utime( path, None ) — metadata-only, no content write
+        - returns True if a bridge file was found and successfully touched
+        - returns False if no bridge file resolves or the touch fails
+        - NEVER raises (a hook must never break a tool call)
+
+    Fail-safe by design: the catch is broad (`Exception`), not just `OSError`.
+    This runs on the PostToolUse path — every tool call × every fleet session —
+    so design §10.6 mandates it be a no-op on *any* error. The realistic live
+    failures are all OSError subtypes (missing `~/.claude/sessions`, a
+    permission flip, an FS race where the bridge is unlinked/rotated mid-touch,
+    or `os.getcwd()` failing in `_find_session_file`'s cwd-fallback when the cwd
+    was deleted); the broad catch additionally guarantees that no unforeseen
+    error class can ever propagate out of a tool call.
+    """
+    try:
+        result = _find_session_file()
+        if not result:
+            return False
+        path, _source = result
+        os.utime( path, None )
+        return True
+    except Exception:
+        _record_bridge_touch_failure()
+        return False
+
+
+def get_bridge_mtime( session_id ) -> Optional[ float ]:
+    """
+    Read the bridge-file mtime (epoch seconds) for a session by id — the
+    arbiter's direct liveness reader (arbiter design `03` §10.1/§10.2).
+
+    The consumer-side counterpart to `touch_bridge_mtime()`: the arbiter maps
+    each tracked session_id to its bridge file and reads the mtime so the fleet
+    render can show liveness as an honest age (`bridge 4s ago`), never an
+    inferred boolean (§10.2 — state and liveness stay orthogonal columns).
+
+    Resolves the bridge path via `find_session_path_by_id()` (full-uuid or
+    8-char-prefix match; container-PID-aware). Heavier than
+    `touch_bridge_mtime()` (it globs/reads the session dir), but the arbiter
+    calls it ~once per session per ~60s poll — well outside the hot hook path
+    C1 protects.
+
+    Requires:
+        - session_id is a string (full UUID or 8-char prefix); empty/None
+          yields None
+
+    Ensures:
+        - returns the bridge file's mtime in epoch seconds if the session
+          resolves to a live bridge file
+        - returns None if no bridge file matches or the stat fails
+        - NEVER raises (broad catch — the arbiter poll must survive any single
+          session's bridge-read failure under live FS conditions)
+    """
+    try:
+        path = find_session_path_by_id( session_id )
+        if path is None:
+            return None
+        return path.stat().st_mtime
+    except Exception:
+        return None
 
 
 BRIDGE_FORMAT_VERSION = 2

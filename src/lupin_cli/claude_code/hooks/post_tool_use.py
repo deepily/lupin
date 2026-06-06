@@ -22,7 +22,7 @@ import sys
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
-if _src_path not in sys.path:
+if _src_path not in sys.path:                 # pragma: no cover - bootstrap-exception (PATH MANAGEMENT mandate): sets sys.path BEFORE the lupin_cli package is importable, so it is genuinely unreachable under pytest (src already on sys.path) — not a coverable branch
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
@@ -33,7 +33,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, resolve_stable_session_id,
-    kill_idle_waiter, set_idle_detection_field,
+    kill_idle_waiter, set_idle_detection_field, touch_bridge_mtime,
 )
 
 
@@ -43,6 +43,18 @@ def main():
     if not payload:
         emit_json( {} )
         sys.exit( 0 )
+
+    # v2.1 direct-state liveness (arbiter design 03 §10.1; redlines C1/C3/C4):
+    # bump THIS session's bridge mtime on EVERY tool call so a heads-down worker
+    # — one that's actively churning and never hits a Stop — still reports live.
+    # This is the SINGLE PostToolUse stamp (C3): a BARE metadata-only os.utime on
+    # the ONE host-side clock (C4 — shared touch_bridge_mtime, no parallel store),
+    # with NO content write (bridge-JSON corruption gate — C1), NO transcript
+    # read, NO server POST, NO heavy logic. The hook fires dozens of times per
+    # turn × every session, so the stamp must stay this cheap. touch_bridge_mtime
+    # is no-throw by contract (unit-proven), so no guard is added — a redundant
+    # try/except here would only be a dead, uncoverable branch.
+    touch_bridge_mtime()
 
     # Extract tool information
     tool_name  = payload.get( "tool_name", "unknown" )

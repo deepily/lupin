@@ -790,6 +790,17 @@ mcp = FastMCP(
 
 
 # ------------------------------------------------------------------------------
+# v2.1 direct-state-visibility — SERVER per-MCP-call bridge-mtime stamp
+# (arbiter design 03 §10.1 / §10.7). Bumps THIS session's bridge-file mtime on
+# every inbound tool call so a heads-down (never-Stops) session still reports
+# live liveness. Converges on the ONE host-side clock (redline C4) via
+# touch_bridge_mtime — no parallel last-seen store. See bridge_liveness_middleware.
+# ------------------------------------------------------------------------------
+from lupin_mcp.bridge_liveness_middleware import BridgeLivenessMiddleware
+mcp.add_middleware( BridgeLivenessMiddleware() )
+
+
+# ------------------------------------------------------------------------------
 # Spoken-brevity cap (caller-side TTS limit) — Rick 2026-06-02
 # ------------------------------------------------------------------------------
 # The spoken field (`message` / `question`) of the speaking tools is read aloud

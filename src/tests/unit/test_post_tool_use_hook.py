@@ -17,6 +17,21 @@ from unittest.mock import patch, MagicMock
 from lupin_cli.claude_code.hooks.post_tool_use import main
 
 
+@pytest.fixture( autouse=True )
+def _stub_bridge_touch():
+    """
+    Stub the v2.1 bridge-mtime liveness stamp for every test in this module.
+
+    main() now calls touch_bridge_mtime() on every tool call (arbiter design
+    `03` §10.1). Stubbing it keeps these unit tests free of real filesystem
+    side effects (the stamp does a real os.utime against the resolved bridge)
+    and lets the dedicated stamp test assert the call. Autouse so the existing
+    tests inherit the stub without per-method decorators.
+    """
+    with patch( "lupin_cli.claude_code.hooks.post_tool_use.touch_bridge_mtime" ) as m:
+        yield m
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # TestSmartTTS
 # ═════════════════════════════════════════════════════════════════════════════
@@ -274,3 +289,76 @@ class TestContextInjection:
         assert "[Voice]: first thing" in ctx
         assert "[Voice]: second thing" in ctx
         assert "\n" in ctx
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestBridgeLivenessStamp (v2.1 direct-state visibility — arbiter design 03 §10.1)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestBridgeLivenessStamp:
+    """The PostToolUse bridge-mtime stamp (single hook, C3) fires per tool call."""
+
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
+    def test_touch_fires_once_per_tool_call( self, mock_read, mock_log, mock_session,
+                                             mock_send, mock_drain, mock_emit, mock_resolve,
+                                             _stub_bridge_touch ):
+        """A normal tool call bumps the bridge mtime exactly once."""
+        mock_read.return_value = {
+            "tool_name"  : "Read",
+            "tool_input" : { "file_path": "/tmp/test.py" },
+            "session_id" : "abc12345"
+        }
+
+        main()
+
+        _stub_bridge_touch.assert_called_once_with()
+
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input", return_value={} )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
+    def test_no_touch_on_empty_payload( self, mock_emit, mock_read, _stub_bridge_touch ):
+        """An empty payload exits before the stamp — no liveness lie on a no-op turn."""
+        with pytest.raises( SystemExit ):
+            main()
+
+        _stub_bridge_touch.assert_not_called()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestCosaVoiceIdleReset (covers the mcp__cosa-voice__ idle-waiter branch)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestCosaVoiceIdleReset:
+    """A cosa-voice tool kills the pending idle waiter + bumps last_interaction_at."""
+
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.set_idle_detection_field" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.kill_idle_waiter" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.get_claude_session_id", return_value="abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" )
+    @patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input" )
+    def test_cosa_voice_tool_resets_idle( self, mock_read, mock_log, mock_session,
+                                          mock_send, mock_drain, mock_emit, mock_resolve,
+                                          mock_kill, mock_set_field ):
+        """A cosa-voice notify/ask kills the idle waiter and stamps last_interaction_at."""
+        mock_read.return_value = {
+            "tool_name"  : "mcp__cosa-voice__notify",
+            "tool_input" : { "message": "hi" },
+            "session_id" : "abc12345"
+        }
+
+        main()
+
+        mock_kill.assert_called_once_with( "abc12345" )
+        assert mock_set_field.call_count == 1
+        # session_id positional + a last_interaction_at ISO string keyword
+        assert mock_set_field.call_args[ 0 ][ 0 ] == "abc12345"
+        assert "last_interaction_at" in mock_set_field.call_args[ 1 ]

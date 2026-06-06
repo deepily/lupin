@@ -69,7 +69,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs, record_server_available
 
@@ -1035,6 +1035,7 @@ app.include_router(speakerphone.router)
 app.include_router(voice_persona.router)
 app.include_router(multiplexer_config.router)
 app.include_router(commons.router)
+app.include_router(arbiter.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")
