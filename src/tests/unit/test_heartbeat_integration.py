@@ -710,6 +710,11 @@ class TestGroupFMainPrecedence:
 
     def test_f2_not_owed_falls_through_to_idle_path( self, roots, monkeypatch ):
         """Empty Task* set → heartbeat returns None → main falls through to the idle waiter; idle beacon emitted."""
+        # Thread A flipped the Stop-hook default idle behavior ask→idle_announce,
+        # so not-owed now ANNOUNCES rather than arming the waiter. This test asserts
+        # the legacy idle-WAITER fall-through, so force the "ask" behavior (mirrors
+        # test_stop_hook.py::_force_immediate_ask_path).
+        monkeypatch.setattr( stop, "_stop_hook_idle_behavior", lambda: "ask" )
         roots.enable()
         tp  = roots.task_transcript( _EMPTY )
         cap = _drive_main( roots, monkeypatch,
