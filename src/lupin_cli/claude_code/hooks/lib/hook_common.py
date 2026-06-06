@@ -170,15 +170,20 @@ def emit_json( data ):
 
 def get_timestamp():
     """
-    Get current UTC timestamp in human-readable format.
+    Get current US/Eastern timestamp in human-readable format.
+
+    Uses the project's canonical US/Eastern timezone (matching the FastAPI
+    server + `cosa.utils.util`), NOT host-local/UTC: the hook runs on the host
+    which is often UTC, so we convert explicitly — otherwise hook-event times
+    read 4-5h ahead of the EST the rest of the system reports. (2026-06-05)
 
     Ensures:
-        - Returns formatted string with date, time, and milliseconds
+        - Returns formatted string with date, time, and milliseconds in EST/EDT
 
     Returns:
-        str: Formatted timestamp (e.g., "2026.03.12 @ 17:15 56,123ms")
+        str: Formatted timestamp (e.g., "2026.06.05 @ 21:15 56,123ms")
     """
-    now = datetime.now( timezone.utc )
+    now = cu.get_current_datetime_raw( tz_name="US/Eastern" )
     return now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
 
 

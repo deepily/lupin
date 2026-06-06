@@ -111,7 +111,10 @@ class LupinArbiterGateway:
               LupinCommonsGateway.from_environment).
         """
         from lupin_mcp.commons_store import CommonsStore
-        return cls( sender_session_id, CommonsStore(), persona_name=persona_name )
+        import cosa.utils.util as cu
+        # CommonsStore manages `<root>/io/commons/`; the root IS the project root
+        # (mirrors the server: main.py builds CommonsStore( commons_root )).
+        return cls( sender_session_id, CommonsStore( cu.get_project_root() ), persona_name=persona_name )
 
 
 def quick_smoke_test():

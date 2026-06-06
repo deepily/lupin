@@ -40,11 +40,13 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_last_autonarrated_turn_id, set_last_autonarrated_turn_id,
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
+from lupin_cli.notifications.notify_user_async import notify_user_async
 from lupin_cli.notifications.notification_models import (
-    NotificationRequest, ResponseType, NotificationPriority
+    NotificationRequest, ResponseType, NotificationPriority, AsyncNotificationRequest
 )
 from cosa.utils.notification_utils import extract_qualifier_comment
 from lupin_cli.claude_code.hooks.lib.idle_settings import load_idle_settings
+from cosa.config.configuration_manager import ConfigurationManager
 from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
     fire_anything_else_ask, summarize_task as _shared_summarize_task,
 )
@@ -57,7 +59,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
     get_poke_count, increment_poke_count,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
-    decide_heartbeat, OUTCOME_POKE, OUTCOME_NOT_OWED,
+    decide_heartbeat, OUTCOME_POKE, OUTCOME_NOT_OWED, OUTCOME_HONORED, OUTCOME_CAP_REACHED,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_settings
 from lupin_cli.claude_code.hooks.lib import heartbeat_events
@@ -220,6 +222,97 @@ def _get_session_context( cwd ):
             pass
 
     return topic, branch
+
+
+DEFAULT_IDLE_BEHAVIOR = "idle_announce"
+_VALID_IDLE_BEHAVIORS = ( "none", "ask", "idle_announce" )
+
+
+def _stop_hook_idle_behavior() -> str:
+    """
+    Thread A 3-way toggle: what does the Stop hook do on a no-poke (idle) Stop?
+
+    Returns one of:
+        - "none"          → take no action, just allow the stop (silent).
+        - "ask"           → the legacy idle-waiter / "Anything else?" path
+                            (load_idle_settings → _arm_idle_waiter or
+                            _ask_anything_else).
+        - "idle_announce" → (DEFAULT) fire ONE low-priority idle status notify
+                            (the persona "speaks" its idle state), then allow
+                            the stop. v2.1 direct-state visibility owns fleet
+                            liveness; this is just a lightweight courtesy ping.
+
+    Read from `lupin-app.ini [Lupin: Baseline] stop hook idle behavior` via the
+    ConfigurationManager (project mandate: config lives in lupin-app.ini with a
+    matching splainer entry). The Stop hook fires per-TURN (not per-tool), so the
+    parse cost is acceptable; the read is wrapped in redirect_stdout because the
+    ConfigurationManager banners would otherwise corrupt the hook's stdout JSON
+    protocol channel.
+
+    Ensures:
+        - returns one of _VALID_IDLE_BEHAVIORS
+        - fail-safe to DEFAULT_IDLE_BEHAVIOR ("idle_announce") on any error, a
+          missing key, or an unrecognized value
+        - never raises; never writes to stdout
+    """
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stdout( io.StringIO() ):
+            mgr   = ConfigurationManager(
+                env_var_name = "LUPIN_CONFIG_MGR_CLI_ARGS",
+                silent       = True,
+                mute_splainer = True,
+            )
+            value = mgr.get( "stop hook idle behavior", default=DEFAULT_IDLE_BEHAVIOR, silent=True )
+        value = str( value or DEFAULT_IDLE_BEHAVIOR ).strip().lower()
+        return value if value in _VALID_IDLE_BEHAVIORS else DEFAULT_IDLE_BEHAVIOR
+    except Exception:
+        return DEFAULT_IDLE_BEHAVIOR
+
+
+def _idle_sentence( persona_name ) -> str:
+    """
+    The first-person idle status sentence for the `idle_announce` behavior
+    (seeded from the dropped poke-scaffold's NOT_OWED case). Pure.
+
+    Ensures:
+        - returns "I'm <persona>. Idle — nothing owed." ("a worker" when the
+          persona name is missing)
+    """
+    return f"I'm {persona_name or 'a worker'}. Idle — nothing owed."
+
+
+def _announce_idle( session_id, persona_name ):
+    """
+    Fire ONE low-priority, non-blocking idle status notify for the
+    `idle_announce` behavior. The persona "speaks" its own idle state.
+
+    A SINGLE low-pri fire-and-forget notify (NOT the dropped per-outcome
+    poke-report spam): the per-Stop /api/notify push is cheap now that the
+    prediction hot path is offloaded via asyncio.to_thread (f3cfabf), but it
+    stays low-priority + failsafe so it never dings and never blocks the Stop.
+
+    Ensures:
+        - posts a low-priority AsyncNotificationRequest carrying _idle_sentence,
+          stamped with this session's CC sender_id so it renders AS the persona
+        - NEVER raises / never blocks the Stop (try/except; mirrors the
+          emit-outcome invariant)
+    """
+    try:
+        request = AsyncNotificationRequest(
+            message   = _idle_sentence( persona_name ),
+            priority  = NotificationPriority.LOW,
+            sender_id = build_sender_id_for_cc( session_id ),
+            abstract  = "Heartbeat: idle — nothing owed.",
+        )
+        notify_user_async( request )
+    except Exception as e:
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "idle_announce_error",
+            "session_id" : session_id,
+            "error"      : str( e ),
+        } )
 
 
 def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
@@ -797,7 +890,8 @@ def _run_heartbeat( session_id, transcript_path ):
     # the genuine-idle empty-set signal from the single state (the Stop hook
     # fires every turn — halves the per-Stop transcript reads).
     task_state = replay_task_state( transcript_path )
-    verdict    = evaluate_work_owed( todo_items=owed_items_from_state( task_state ) )
+    owed_items = owed_items_from_state( task_state )
+    verdict    = evaluate_work_owed( todo_items=owed_items )
     result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
 
     if result[ "should_increment" ]:
@@ -815,6 +909,23 @@ def _run_heartbeat( session_id, transcript_path ):
     # proceeds (the §0 #2 invariant) — belt to emit_outcome's never-raises belt.
     persona      = get_voice_persona( session_id )
     persona_name = persona.get( "name" ) if persona else None
+
+    # ── Live oracle log line (2026-06-05, Rick) — "signs of life" every Stop ──
+    # Greppable in the stop log stream (`docker logs … | grep heartbeat_oracle`):
+    # the work-owed verdict + decision outcome + poke count, so you can watch the
+    # Oracle's state update in real time and confirm it's accurate + current.
+    log_to_stream( "stop", {}, extra={
+        "phase"      : "heartbeat_oracle",
+        "session_id" : session_id,
+        "persona"    : persona_name,
+        "outcome"    : result[ "outcome" ],
+        "work_owed"  : verdict[ "work_owed" ],
+        "owed_items" : len( owed_items ),
+        "poke_count" : get_poke_count( session_id ),
+        "cap"        : settings[ "poke_cap" ],
+        "awaiting"   : ( hold.get( "awaiting" ) if hold else None ),
+    } )
+
     try:
         heartbeat_events.emit_outcome(
             session_id,
@@ -833,6 +944,14 @@ def _run_heartbeat( session_id, transcript_path ):
             "error"      : str( e ),
         } )
     # ── end emit ──
+    #
+    # NOTE (Thread A, 2026-06-06): the 2026-06-05 on-behalf "poke-report" scaffold
+    # (_heartbeat_state_sentence + _send_poke_report, a per-Stop /api/notify PUSH)
+    # was DROPPED here — superseded by v2.1 direct-state visibility, which makes
+    # liveness a cheap centrally-PULLED bridge-mtime age instead of an expensive
+    # per-Stop push (the push was the FM-7 load multiplier). The poke, oracle log,
+    # and genuine-idle beacon below all remain live. See
+    # src/rnd/v0.1.8/2026.06.06-heartbeat-poke-scaffold-vs-v2.1-supersession.md.
 
     # ── 2b: genuine-idle DECLARATION beacon (Rick §6.2 = Option B) ─────────────
     # Edge-triggered: declare idle ONLY on the TRANSITION into genuine-idle
@@ -876,9 +995,14 @@ def main():
                 "session_id" : session_id,
                 "error"      : str( e ),
             } )
+        # Speakerphone/chorus sessions skip the "Anything else?" prompt + heartbeat
+        # path entirely (it would interrupt the user's live voice dialogue); the
+        # auto-narrate safety net above is preserved. Restored to clean
+        # pre-experiment behavior (Thread A, 2026-06-06 — the 2026-06-05 comment-out
+        # was incidental experiment debris).
         log_to_stream( "stop", {}, extra={
             "phase"      : "speakerphone_skip",
-            "session_id" : session_id
+            "session_id" : session_id,
         } )
         emit_json( {} )
         sys.exit( 0 )
@@ -927,26 +1051,43 @@ def main():
             return
         # ── end heartbeat ──
 
-        last_assistant_message = payload.get( "last_assistant_message" )
-        cwd                    = payload.get( "cwd" )
+        # ── Idle-Stop behavior (Thread A — 3-way enum) ────────────────────────
+        # On a no-poke (idle) Stop, `lupin-app.ini [Lupin: Baseline] stop hook
+        # idle behavior` selects the action. v2.1 direct-state visibility owns
+        # fleet liveness now, so the legacy idle-waiter is no longer the default:
+        #   - "idle_announce" (DEFAULT) → fire ONE low-pri idle status notify
+        #     (the persona speaks its idle state), then allow the stop.
+        #   - "ask"   → the legacy path verbatim: deferred idle-waiter
+        #     (idle_detection enabled) or the immediate "Anything else?" prompt.
+        #   - "none"  → take no action, just allow the stop (silent).
+        idle_behavior = _stop_hook_idle_behavior()
 
-        try:
-            settings = load_idle_settings()
-        except ValueError as e:
-            # Malformed schedule in settings.json — log and fall back to legacy
-            # immediate-ask. User-facing message would be confusing here.
-            log_to_stream( "stop", {}, extra={
-                "phase" : "idle_settings_invalid",
-                "error" : str( e ),
-            } )
-            settings = { "enabled": False, "backoff_minutes": [] }
+        if idle_behavior == "ask":
+            last_assistant_message = payload.get( "last_assistant_message" )
+            cwd                    = payload.get( "cwd" )
 
-        if settings[ "enabled" ]:
-            _arm_idle_waiter( session_id, last_assistant_message, cwd )
-            emit_json( {} )  # allow stop; waiter will fire later if still idle
-        else:
-            result = _ask_anything_else( session_id, last_assistant_message, cwd=cwd )
-            emit_json( result )
+            try:
+                settings = load_idle_settings()
+            except ValueError as e:
+                log_to_stream( "stop", {}, extra={
+                    "phase" : "idle_settings_invalid",
+                    "error" : str( e ),
+                } )
+                settings = { "enabled": False, "backoff_minutes": [] }
+
+            if settings[ "enabled" ]:
+                _arm_idle_waiter( session_id, last_assistant_message, cwd )
+                emit_json( {} )  # allow stop; waiter will fire later if still idle
+            else:
+                result = _ask_anything_else( session_id, last_assistant_message, cwd=cwd )
+                emit_json( result )
+        elif idle_behavior == "idle_announce":
+            persona      = get_voice_persona( session_id )
+            persona_name = persona.get( "name" ) if persona else None
+            _announce_idle( session_id, persona_name )
+            emit_json( {} )  # allow stop — v2.1 owns liveness; this is a courtesy ping
+        else:   # "none": silent allow-stop
+            emit_json( {} )
 
 if __name__ == "__main__":
     main()

@@ -309,6 +309,7 @@ class TestMainBranchCWiring:
         mock_hb.assert_called_once_with( "abc12345", "/home/u/.claude/projects/p/abc.jsonl" )
         mock_idle.assert_not_called()
 
+    @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
     @patch( "lupin_cli.claude_code.hooks.stop._arm_idle_waiter" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
             return_value={ "enabled": True, "backoff_minutes": [ 5 ] } )
@@ -322,7 +323,8 @@ class TestMainBranchCWiring:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_no_poke_falls_through_to_idle( self, mock_read, mock_log, mock_resolve,
                                             mock_sp, mock_drain, mock_emit, mock_reset,
-                                            mock_hb, mock_idle, mock_arm ):
+                                            mock_hb, mock_idle, mock_arm, mock_behavior ):
+        """Idle behavior 'ask' + no poke + idle enabled → arm the deferred waiter, allow stop."""
         mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }   # no transcript_path key
         main()
         mock_hb.assert_called_once_with( "abc12345", None )   # missing key → None threaded
