@@ -1,5 +1,13 @@
 # TODO
 
+## 🔥 2026-06-06 PM (Tiberius 👑, session 060c8d6b) — heartbeat hardening follow-ups
+
+- [ ] **[LUPIN]** **Broadcast-miss root-cause (NOT yet solved — listener layer)** — a USER BROADCAST didn't reach Tiberius while DMs still landed (2026-06-06). Initial "stale bridge > 600s / Thread A `idle_announce` removed the heartbeat" hypothesis was **REFUTED** — the live fanout threshold is `commons broadcast liveness threshold seconds = 28800` (8h), and idle was only ~77 min, so the bridge-mtime filter did NOT drop the session; `owner_user_id` also passes (un-stamped → graceful). **Real direction:** broadcasts arrive via the `cc_notification_listener` (separate from the harness direct-prompt path) → fault is in the listener/injection layer. **Anomaly found:** DUPLICATE listeners for one session (a 09:34 one + a 16:22 one, both alive, same log) on a ~14h-old `claude` process. Needs a dedicated root-cause: the broadcast dispatch path + why a 2nd listener spawns without reaping the 1st. Memory: `reference_broadcast_miss_is_listener_layer`.
+- [ ] **[LUPIN]** **Interim heartbeat poker** (Rick greenlit 2026-06-06) — lightweight recurring watcher that (a) stamps idle managers' bridges to keep them broadcast-reachable + (b) detects whole-fleet-stall → escalates to Rick + DMs the manager. Mechanism lane = Tiberius; charter-doctrine lane = María (standing-pair-must-not-both-go-dark). Retire once the v2.2 arbiter is deployed live on :8000. Was about to fetch CronCreate vs standalone-script mechanism when redirected.
+- [ ] **[LUPIN]** **Deploy v2.2 arbiter** (`0d7adad`, committed held) — stand up `submit_arbiter_if_absent` as a standing job on :8000 post-push + run the live :8000 standing-arbiter integration test (the scheduled post-commit handoff). + the :8000 auth-matrix run (Mr. Radio's lane, needs Rick in-band).
+
+---
+
 ## ⏸️▶ 2026-06-04 RESUME-HERE (Tiberius 👑, session 1333e106) — picked up after Rick's end-of-session shutdown
 
 > Written 2026-06-03 PM at Rick's "note where you are so we can pick up tomorrow" broadcast. Full rehydration memento: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/27-tiberius-rehydration-memento-2026.06.03-pm.md`. Session-end state: my docs committed + branch PUSHED + backup done (Tiberius exempted from the no-push/no-backup rule); signalled María to run the global roll-ups after me.
