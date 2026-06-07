@@ -311,7 +311,7 @@ Suites that qualify:
 
 ### :8000 (test) — monopolize mode, scheduled only
 
-Submit via `POST /api/test-suite/submit` with a `scheduled_at` the user has confirmed does not overlap other scheduled runs. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
+Submit via `POST /api/test-suite/submit`. **Self-authorization rule (2026-06-06): a verified-IDLE `:8000` — nothing running, nothing scheduled — is bounce-then-schedule SELF-AUTHORIZED; the user is NOT a gate.** `list-pending` FIRST to decide placement: empty queue → bounce (to clear static-snapshot drift, see §reference) + schedule + run now; something already SCHEDULED (queued, not yet running) → still self-authorized, but set `scheduled_at` AFTER the queued job (never jump an expected-next run); something RUNNING → queue behind it, no bounce. Only **killing a LIVE in-flight job** needs the user's word. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
 
 Eligible if **any**:
 - Mutates persistent state (DB rows, shared files, LLM API spend, enqueues jobs).
@@ -324,7 +324,7 @@ Suites that qualify:
 - `src/scripts/run-e2e-ui-tests.sh` (functional + visual)
 - `src/tests/run-presentation-regression.sh` (all variants)
 
-The user-ask for :8000 is **slot availability**, not budget approval or tester-duty deferral. The AI owns executing the test; the user owns calendar coordination.
+The AI **self-authorizes** :8000 runs on a verified-idle server (logged, no human gate) and owns both scheduling and executing. The ONLY user-gate is **killing a live in-flight job**. Never budget approval, never tester-duty deferral, never an idle-slot ask.
 
 ### The `src/tests/smoke/` caveat
 
@@ -347,7 +347,7 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 ## TESTING
 
-Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per §TESTING VENUES above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit` with a user-confirmed `scheduled_at`.
+Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per §TESTING VENUES above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see §TESTING VENUES).
 
 | Suite | Venue | Command | Notes |
 |---|---|---|---|
@@ -376,7 +376,7 @@ Integration is the final gate because it exercises complete user workflows acros
 **Testing anti-patterns** (NEVER):
 - `curl` for pipeline/integration testing, or manual `/api/push` + poll `/api/get-queue/done` — use the automated scripts (`LivePipelineTestBase`), never bespoke curl.
 - Running :8000-bucket suites (integration, E2E UI, proxy-integration, presentation regression) against :7999 — they depend on server monopoly; the dev server is not a stand-in.
-- Side-door injecting :8000 tests via curl / direct `/api/push` / in-process instantiation / anything but `POST /api/test-suite/submit` with a user-confirmed `scheduled_at` — collides with in-flight runs and poisons both.
+- Side-door injecting :8000 tests via curl / direct `/api/push` / in-process instantiation / anything but `POST /api/test-suite/submit` — collides with in-flight runs and poisons both. (Submission itself is self-authorized on a verified-idle server; the prohibition is on the side-door, not on submitting.)
 - Curl is acceptable ONLY for: API-reference docs, deployment health checks, one-off debugging (never committed).
 - New agent? Add an automated smoke test (see `.claude/skills/agentic-voice-workflow/SKILL.md`).
 
