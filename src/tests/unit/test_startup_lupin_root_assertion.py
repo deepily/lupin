@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-from fastapi_app.bootstrap_helpers import assert_lupin_root_valid
+from lupin_app.bootstrap_helpers import assert_lupin_root_valid
 
 
 def test_valid_root_passes( tmp_path ):

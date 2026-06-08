@@ -648,8 +648,8 @@ def test_ac_b15_grep_gate_d_css_has_zero_keyframes_focus_flash():
     as SSOT. Mechanical grep guards against the contract regressing during
     future Phase 6c refactors."""
     import subprocess
-    d_css = "src/fastapi_app/static/css/multiplexer/conversation-mode-pin.css"
-    b_css = "src/fastapi_app/static/css/multiplexer/focus-tray.css"
+    d_css = "src/lupin_app/static/css/multiplexer/conversation-mode-pin.css"
+    b_css = "src/lupin_app/static/css/multiplexer/focus-tray.css"
 
     # D-CSS: zero occurrences of "@keyframes focus-flash".
     d_result = subprocess.run(

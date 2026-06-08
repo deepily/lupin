@@ -1,5 +1,5 @@
 """
-Carveout-scoped unit tests for `fastapi_app.main` lifespan switch — Phase 5.6
+Carveout-scoped unit tests for `lupin_app.main` lifespan switch — Phase 5.6
 of the 2026-05-16 model-server carve-out.
 
 The lifespan switch is inline inside a 700+ LOC async function with ~10
@@ -27,12 +27,12 @@ import importlib
 
 def test_main_module_imports_speech_to_text_provider():
     """
-    `fastapi_app.main` must import cleanly with the carveout symbols
+    `lupin_app.main` must import cleanly with the carveout symbols
     available — confirms no import-time regression from the lifespan changes.
 
     NOTE: We import `cosa.memory.speech_to_text_provider` (the source of
     the symbol that `main.py`'s lifespan imports inline) rather than
-    `fastapi_app.main` itself, because `fastapi_app.main` performs heavy
+    `lupin_app.main` itself, because `lupin_app.main` performs heavy
     module-level side effects (config_mgr instantiation, queue/router
     wiring) that would slow this unit test by orders of magnitude.
 

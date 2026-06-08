@@ -572,7 +572,7 @@ class BugFixExpediterJob( AgenticJobBase ):
             )
 
             # Get the todo queue from the app module singleton
-            import fastapi_app.main as main_module
+            import lupin_app.main as main_module
             todo_queue = main_module.jobs_todo_queue
             if todo_queue is None:
                 await voice_io.notify(

@@ -38,10 +38,10 @@ from cosa.rest.routers.websocket_admin import get_websocket_manager
 
 def _patch_fastapi_main( mock_main ):
     """
-    Robustly patch `fastapi_app.main` for direct-call unit tests.
+    Robustly patch `lupin_app.main` for direct-call unit tests.
 
-    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
-    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    `import lupin_app.main as m` binds m via getattr(sys.modules['lupin_app'],
+    'main'), NOT sys.modules['lupin_app.main']. Once the REAL lupin_app
     package is cached by an earlier test, patching only the submodule entry is
     silently ignored (passes in isolation, fails under full-suite ordering).
     Overriding BOTH the package object and the submodule entry makes the import
@@ -49,7 +49,7 @@ def _patch_fastapi_main( mock_main ):
     """
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 class TestWebSocketAdminRouter( unittest.TestCase ):

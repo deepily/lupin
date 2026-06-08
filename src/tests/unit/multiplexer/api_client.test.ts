@@ -7,9 +7,9 @@ import assert from "node:assert/strict";
 import {
   createApiClient,
   ApiError,
-} from "../../../fastapi_app/static/js/multiplexer/api/ApiClient";
-import type { AuthManager } from "../../../fastapi_app/static/js/multiplexer/auth/AuthManager";
-import type { Token } from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/api/ApiClient";
+import type { AuthManager } from "../../../lupin_app/static/js/multiplexer/auth/AuthManager";
+import type { Token } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 interface FakeAuthState {
   token        : Token;

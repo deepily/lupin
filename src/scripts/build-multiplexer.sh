@@ -6,10 +6,10 @@
 #   bash src/scripts/build-multiplexer.sh --watch   # dev: rebuilds on .ts changes
 #
 # Outputs (production):
-#   src/fastapi_app/static/dist/multiplexer/boot.js          — stable filename, loaded by multiplexer.html
-#   src/fastapi_app/static/dist/multiplexer/boot.js.map      — sourcemap sibling
-#   src/fastapi_app/static/dist/multiplexer/boot.<hash>.js   — content-hashed copy (CDN cache-bust target)
-#   src/fastapi_app/static/dist/multiplexer/manifest.json    — { "boot.js": "boot.<hash>.js" }
+#   src/lupin_app/static/dist/multiplexer/boot.js          — stable filename, loaded by multiplexer.html
+#   src/lupin_app/static/dist/multiplexer/boot.js.map      — sourcemap sibling
+#   src/lupin_app/static/dist/multiplexer/boot.<hash>.js   — content-hashed copy (CDN cache-bust target)
+#   src/lupin_app/static/dist/multiplexer/manifest.json    — { "boot.js": "boot.<hash>.js" }
 
 set -euo pipefail
 
@@ -18,8 +18,8 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
 cd "$PROJECT_ROOT"
 
-ENTRY="src/fastapi_app/static/js/multiplexer/boot.ts"
-OUTDIR="src/fastapi_app/static/dist/multiplexer"
+ENTRY="src/lupin_app/static/js/multiplexer/boot.ts"
+OUTDIR="src/lupin_app/static/dist/multiplexer"
 OUTFILE="$OUTDIR/boot.js"
 
 ESBUILD="$PROJECT_ROOT/node_modules/.bin/esbuild"

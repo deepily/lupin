@@ -8,7 +8,7 @@ or LLM fallback), and submits the response via REST API.
 
 References:
     - src/cosa/rest/routers/notifications.py (POST /api/notify/response)
-    - src/fastapi_app/static/js/notifications.js (submitResponse pattern)
+    - src/lupin_app/static/js/notifications.js (submitResponse pattern)
 """
 
 import json

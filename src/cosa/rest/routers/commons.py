@@ -1153,7 +1153,7 @@ def execute_unregister_question(
 
 def get_notification_queue():
     """DI: return the singleton NotificationFifoQueue from main module."""
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_notification_queue
 
 

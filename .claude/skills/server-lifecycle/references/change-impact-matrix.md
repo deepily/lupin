@@ -18,7 +18,7 @@ CLAUDE.md memory entry `feedback_cosa_edit_vs_manage_git.md` confirms this.
 
 ## Static Assets — Why No Bounce Ever
 
-`src/fastapi_app/static/` files (`.js`, `.html`, `.css`, images, etc.) are served fresh from disk on every HTTP request. The Python process never caches them.
+`src/lupin_app/static/` files (`.js`, `.html`, `.css`, images, etc.) are served fresh from disk on every HTTP request. The Python process never caches them.
 
 - Browser caching is the *only* layer that needs invalidation
 - Hard-refresh (Ctrl+Shift+R / Cmd+Shift+R) bypasses the browser cache
@@ -30,7 +30,7 @@ This applies to BOTH `:7999` and `:8000`. The reload-mode asymmetry doesn't matt
 
 ## Jinja Templates
 
-If a template lives in `src/fastapi_app/templates/` or `src/templates/`:
+If a template lives in `src/lupin_app/templates/` or `src/templates/`:
 
 - FastAPI's `Jinja2Templates` instance reads templates fresh per request (default behavior)
 - No bounce needed on `:7999` or `:8000`

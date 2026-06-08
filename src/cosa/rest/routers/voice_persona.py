@@ -64,7 +64,7 @@ _voice_persona_lock = asyncio.Lock()
 
 def get_notification_queue():
     """Dependency to get the singleton NotificationFifoQueue from main module."""
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_notification_queue
 
 

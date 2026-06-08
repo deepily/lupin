@@ -10,7 +10,7 @@ Created: 2025-10-17
 import pytest
 import time
 from fastapi.testclient import TestClient
-from fastapi_app.main import app
+from lupin_app.main import app
 from cosa.rest.user_service import create_user, get_user_by_email
 from cosa.rest.jwt_service import create_access_token, decode_and_validate_token
 

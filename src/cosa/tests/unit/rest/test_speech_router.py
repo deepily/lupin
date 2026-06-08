@@ -6,7 +6,7 @@ Covers the full module surface:
   `save_upload_to_temp`.
 - DI accessors: `get_whisper_pipeline`, `get_speech_provider`,
   `get_websocket_manager`, `get_config_manager`, `get_active_tasks`,
-  `get_todo_queue` (dual-key `fastapi_app.main` patch).
+  `get_todo_queue` (dual-key `lupin_app.main` patch).
 - Async route handlers: `upload_and_transcribe_mp3_file` (agent / non-agent /
   OOM-503 / generic-500), `get_tts_audio` (all validation branches + success +
   500), `get_tts_audio_elevenlabs` (validation incl. numeric ranges + success),
@@ -66,10 +66,10 @@ P = "cosa.rest.routers.speech"
 
 
 def _patch_fastapi_main( mock_main ):
-    """Dual-key `fastapi_app.main` patch (Gotcha 1)."""
+    """Dual-key `lupin_app.main` patch (Gotcha 1)."""
     pkg = MagicMock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 class _ConnClosed( Exception ):

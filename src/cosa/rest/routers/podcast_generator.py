@@ -81,7 +81,7 @@ def get_todo_queue():
     Returns:
         RunningFifoQueue: The todo queue instance
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_todo_queue
 
 
@@ -92,7 +92,7 @@ def get_websocket_mgr():
     Returns:
         WebSocketManager: The WebSocket manager instance
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.websocket_manager
 
 

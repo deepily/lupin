@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-arbiter-vigilance FastAPI app — the standalone, out-of-band fleet watcher on :8001.
+lupin-arbiter-app FastAPI app — the standalone, out-of-band fleet watcher on :8001.
 
 Surface so far:
     GET /health  (L1) — cheap, always-answer liveness for systemd/cron (deploy §7).
@@ -25,8 +25,8 @@ from typing import Any, Callable, Optional
 
 from fastapi import FastAPI
 
-from arbiter_vigilance import __version__
-from arbiter_vigilance.local_snapshot_store import LocalSnapshotStore
+from lupin_arbiter_app import __version__
+from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
 
 def _utcnow() -> datetime.datetime:
@@ -42,7 +42,7 @@ def create_app(
     loop_b_runner  : Optional[ Any ]                = None,
 ) -> FastAPI:
     """
-    Build the arbiter-vigilance FastAPI app.
+    Build the lupin-arbiter-app FastAPI app.
 
     Requires:
         - now_fn (if provided) is a 0-arg callable returning an aware datetime
@@ -72,7 +72,7 @@ def create_app(
             if lp is not None:
                 lp.stop()
 
-    app = FastAPI( title="arbiter-vigilance", version=__version__, lifespan=lifespan )
+    app = FastAPI( title="lupin-arbiter-app", version=__version__, lifespan=lifespan )
     app.state.snapshot_store = store
     app.state.started_at     = started_at
     app.state.health_loop    = health_loop
@@ -85,7 +85,7 @@ def create_app(
         uptime = ( now - started_at ).total_seconds()
         return {
             "status"         : "ok",
-            "service"        : "arbiter-vigilance",
+            "service"        : "lupin-arbiter-app",
             "version"        : __version__,
             "started_at"     : started_at.isoformat(),
             "uptime_seconds" : uptime,
@@ -114,7 +114,7 @@ def create_app(
         loop_b_fleet = composite.get( "loop_b_fleet" )
         return {
             "status"       : "ok",
-            "service"      : "arbiter-vigilance",
+            "service"      : "lupin-arbiter-app",
             "version"      : __version__,
             "generated_at" : now_fn().isoformat(),
             "loop_a"       : loop_a if loop_a is not None else { "status": "awaiting" },
@@ -153,9 +153,9 @@ def assemble_app(
           :7999/:8000 HTTP and builds NO job until the runner starts (testable
           with a fake cfg + fake gateway)
     """
-    from arbiter_vigilance.health_watch import HealthWatchLoop, docker_inspect_health
-    from arbiter_vigilance.health_watch import _default_log_fn as _log_default
-    from arbiter_vigilance.loop_b import LoopBRunner, build_loop_b_job_factory
+    from lupin_arbiter_app.health_watch import HealthWatchLoop, docker_inspect_health
+    from lupin_arbiter_app.health_watch import _default_log_fn as _log_default
+    from lupin_arbiter_app.loop_b import LoopBRunner, build_loop_b_job_factory
 
     store  = store  if store  is not None else LocalSnapshotStore()
     log_fn = log_fn if log_fn is not None else _log_default
@@ -212,7 +212,7 @@ def create_production_app() -> FastAPI:   # pragma: no cover - literal external 
     from cosa.config.configuration_manager import ConfigurationManager
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
     cfg     = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-    gateway = LupinArbiterGateway.from_environment( sender_session_id="arbiter-vigilance-8001" )
+    gateway = LupinArbiterGateway.from_environment( sender_session_id="lupin-arbiter-app-8001" )
     return assemble_app( cfg, gateway )
 
 

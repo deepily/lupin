@@ -233,7 +233,7 @@ sqlite_database_path = /src/conf/long-term-memory/test-lupin-auth.db  # ✅ TEST
 export LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing"
 
 # Then starts server - ConfigurationManager singleton locks in Testing config
-python -m fastapi_app.main
+python -m lupin_app.main
 ```
 
 **Safety Verification** (`src/cosa/rest/sqlite_database.py:18-79`):

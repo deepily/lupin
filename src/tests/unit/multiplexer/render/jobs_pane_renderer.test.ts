@@ -8,23 +8,23 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createJobStore, type JobHistoryApiClient } from "../../../../fastapi_app/static/js/multiplexer/stores/JobStore";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createJobStore, type JobHistoryApiClient } from "../../../../lupin_app/static/js/multiplexer/stores/JobStore";
 import {
   createJobsPaneRenderer,
   type JobsPaneApiClient,
-} from "../../../../fastapi_app/static/js/multiplexer/render/JobsPaneRenderer";
-import { ApiError } from "../../../../fastapi_app/static/js/multiplexer/api/ApiClient";
+} from "../../../../lupin_app/static/js/multiplexer/render/JobsPaneRenderer";
+import { ApiError } from "../../../../lupin_app/static/js/multiplexer/api/ApiClient";
 import type {
   EventBus,
-} from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+} from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import type {
   Job,
   StoreJobsChangedPayload,
   HydrationFailedPayload,
   LupinEvent,
   JobStateTransitionPayload,
-} from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

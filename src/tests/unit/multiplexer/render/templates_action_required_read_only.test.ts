@@ -5,8 +5,8 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { renderActionRequiredReadOnly } from "../../../../fastapi_app/static/js/multiplexer/render/templates/actionRequiredReadOnly";
-import type { ActionRequiredItem } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import { renderActionRequiredReadOnly } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredReadOnly";
+import type { ActionRequiredItem } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

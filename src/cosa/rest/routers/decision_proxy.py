@@ -499,7 +499,7 @@ def get_run_queue():
     Dependency to get the running job queue from main module.
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_run_queue attribute
 
     Ensures:
@@ -508,7 +508,7 @@ def get_run_queue():
     Returns:
         RunningFifoQueue: The run queue instance
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_run_queue
 
 
@@ -519,7 +519,7 @@ def get_config_mgr():
     Returns:
         ConfigurationManager: The configuration manager instance
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.config_mgr
 
 

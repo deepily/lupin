@@ -39,7 +39,7 @@ def get_snapshot_manager():
     math agent writes and admin reads.
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has snapshot_mgr attribute
 
     Ensures:
@@ -50,7 +50,7 @@ def get_snapshot_manager():
         - ImportError if main module not available
         - AttributeError if snapshot_mgr not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.snapshot_mgr
 
 
@@ -1262,7 +1262,7 @@ def _reexec_process():
     print( "[ADMIN-REFRESH] Re-executing process via os.execv to reload source" )
     _sys.stdout.flush()
     _sys.stderr.flush()
-    _os.execv( _sys.executable, [ _sys.executable, "-m", "fastapi_app.main" ] )
+    _os.execv( _sys.executable, [ _sys.executable, "-m", "lupin_app.main" ] )
 
 
 @router.post(

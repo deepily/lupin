@@ -2,7 +2,7 @@
 Smoke test — document-viewer iframe embedding (X-Frame-Options).
 
 Regression (fixed 2026-05-30, Speedy 🌿 session fb0bc8a5): the global
-`add_security_headers` middleware in src/fastapi_app/main.py set
+`add_security_headers` middleware in src/lupin_app/main.py set
 `X-Frame-Options: DENY` on EVERY response. DENY blocks ALL framing — even
 same-origin — so the notifications master-detail Reading Pane (which embeds
 `/app/docs?path=...` in an iframe) failed with Chrome's "localhost refused to

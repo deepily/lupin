@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-import { html, raw, resetForTesting } from "../../../../fastapi_app/static/js/multiplexer/render/html";
+import { html, raw, resetForTesting } from "../../../../lupin_app/static/js/multiplexer/render/html";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

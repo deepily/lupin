@@ -7,20 +7,20 @@ import assert from "node:assert/strict";
 import {
   createAuthManager,
   ChainMutexLockManager,
-} from "../../../fastapi_app/static/js/multiplexer/auth/AuthManager";
+} from "../../../lupin_app/static/js/multiplexer/auth/AuthManager";
 import {
   createEventBusForTesting,
-} from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+} from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createStorageServiceForTesting,
-} from "../../../fastapi_app/static/js/multiplexer/shared/StorageService";
+} from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import type {
   AuthStateChangePayload,
   LupinEvent,
   RefreshFailedPayload,
   RefreshStartedPayload,
   Token,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 interface FetchCall {
   url      : string;

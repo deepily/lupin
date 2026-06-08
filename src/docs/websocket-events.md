@@ -272,7 +272,7 @@ Wrapped in the canonical `notification_queue_update` envelope with `notification
 
 Client handling:
 - Legacy UI: `notifications.js::handleConversationModeChanged()` (line ~5552) — client-side maps `payload.on → conversation_mode_active` for the legacy in-memory state model; the legacy handler kept its original method name for callsite stability.
-- Multiplexer UI: `src/fastapi_app/static/js/multiplexer/stores/SenderStore.ts` — `STATE_UPDATE_TYPES` Set includes BOTH `"speakerphone_changed"` (current wire) AND `"conversation_mode_changed"` (post-rename target, in case the type is ever re-renamed back). Reducer reads `payload.active ?? payload.on` to accept either field name. **Forward-compat bridge** — implementer can rename either direction without breaking the client. See `2026-05-19 Run 3 cascade Section D` for the Path III bridge ratification rationale.
+- Multiplexer UI: `src/lupin_app/static/js/multiplexer/stores/SenderStore.ts` — `STATE_UPDATE_TYPES` Set includes BOTH `"speakerphone_changed"` (current wire) AND `"conversation_mode_changed"` (post-rename target, in case the type is ever re-renamed back). Reducer reads `payload.active ?? payload.on` to accept either field name. **Forward-compat bridge** — implementer can rename either direction without breaking the client. See `2026-05-19 Run 3 cascade Section D` for the Path III bridge ratification rationale.
 
 **INI subscription**: included in `lupin-app.ini` `websocket available events` (line 741). Subscribed by both legacy and multiplexer clients via the WS auth handshake.
 
@@ -478,7 +478,7 @@ The deprecated name is NOT in the `valid_types` whitelist; pushing it returns HT
 
 The server uses RFC 6455 application close codes (4000–4999) to signal
 auth-failure outcomes that the browser-side state machine
-(`src/fastapi_app/static/js/ws-channel.js`) treats as PERMANENT — the
+(`src/lupin_app/static/js/ws-channel.js`) treats as PERMANENT — the
 channel goes straight to `OPEN_CIRCUIT` and does NOT auto-retry.
 
 Codes were introduced in Phase 5 of the WS reconnect circuit-breaker

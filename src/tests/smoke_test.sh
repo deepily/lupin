@@ -36,7 +36,7 @@ check_server() {
 start_server() {
     echo "Starting FastAPI server..."
     cd "$PROJECT_ROOT/src"
-    python -m uvicorn fastapi_app.main:app --port ${PORT} > /tmp/fastapi_test.log 2>&1 &
+    python -m uvicorn lupin_app.main:app --port ${PORT} > /tmp/fastapi_test.log 2>&1 &
     SERVER_PID=$!
     echo "Server PID: ${SERVER_PID}"
     

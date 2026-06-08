@@ -95,7 +95,7 @@ def get_notification_queue():
     Dependency to get notification queue from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_notification_queue attribute
         
     Ensures:
@@ -107,7 +107,7 @@ def get_notification_queue():
         - AttributeError if notification queue not found
     """
     # This will be properly injected later
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_notification_queue
 
 def get_websocket_manager():
@@ -115,7 +115,7 @@ def get_websocket_manager():
     Dependency to get websocket manager from main module.
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has websocket_manager attribute
 
     Ensures:
@@ -126,7 +126,7 @@ def get_websocket_manager():
         - ImportError if main module not available
         - AttributeError if websocket manager not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.websocket_manager
 
 def get_local_timestamp():
@@ -134,7 +134,7 @@ def get_local_timestamp():
     Get timezone-aware timestamp using configured timezone from ConfigurationManager.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - config_mgr and app_debug are accessible
         - zoneinfo module is available
         
@@ -147,7 +147,7 @@ def get_local_timestamp():
     Raises:
         - None (handles all exceptions with fallback to UTC)
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     config_mgr = main_module.config_mgr
     app_debug = main_module.app_debug
     
@@ -175,7 +175,7 @@ def get_formatted_time_display():
     Format: "HH:MM TZ" (e.g., "17:45 EST")
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - config_mgr is accessible
         - zoneinfo module is available
 
@@ -184,7 +184,7 @@ def get_formatted_time_display():
         - Uses configured timezone or defaults to America/New_York
         - Falls back to simple time format if timezone configuration is invalid
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     config_mgr = main_module.config_mgr
 
     timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
@@ -204,7 +204,7 @@ def get_formatted_date_display():
     Uses configured timezone to ensure correct date near midnight.
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - config_mgr is accessible
         - zoneinfo module is available
 
@@ -213,7 +213,7 @@ def get_formatted_date_display():
         - Uses configured timezone or defaults to America/New_York
         - Falls back to local date if timezone configuration is invalid
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     config_mgr = main_module.config_mgr
 
     timezone_name = config_mgr.get( "app timezone", default="America/New_York" )
@@ -513,7 +513,7 @@ async def notify_user(
         print( f"[NOTIFY] Resolved user {target_user} → UUID {target_system_id}" )
 
         # ── Diagnostic: WebSocket state dump for offline debugging ──
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         if main_module.app_debug and main_module.app_verbose:
             ws_user_keys   = list( ws_manager.user_sessions.keys() )
             ws_active_keys = list( ws_manager.active_connections.keys() )
@@ -1062,7 +1062,7 @@ async def submit_notification_response(
                 )
 
             # Grace period check - read from config (supports pause button feature)
-            import fastapi_app.main as main_module
+            import lupin_app.main as main_module
             config_mgr = main_module.config_mgr
             grace_period_seconds = config_mgr.get( "notification grace period seconds", default=300, return_type="int" )
 
@@ -1203,7 +1203,7 @@ def _undelivered_max_age_hours() -> int:
     Ensures:
         - returns the configured int cap (default 24 hours)
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.config_mgr.get( "notification undelivered max age hours", default=24, return_type="int" )
 
 @router.get(

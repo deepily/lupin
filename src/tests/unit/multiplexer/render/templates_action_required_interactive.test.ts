@@ -9,11 +9,11 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   renderActionRequiredInteractive,
   type ActionRequiredInteractiveHandlers,
-} from "../../../../fastapi_app/static/js/multiplexer/render/templates/actionRequiredInteractive";
+} from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredInteractive";
 import type {
   ActionRequiredItem,
   ActionRequiredResponse,
-} from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -245,7 +245,7 @@ test("widget root carries .action-required-widget-interactive (distinct from rea
 
 test("AC2e: source file contains zero .innerHTML= / rawHTML( / .outerHTML= sinks", () => {
   const src = readFileSync(
-    "src/fastapi_app/static/js/multiplexer/render/templates/actionRequiredInteractive.ts",
+    "src/lupin_app/static/js/multiplexer/render/templates/actionRequiredInteractive.ts",
     "utf8",
   );
   // Strip all comments (single-line + multi-line) so doc-comments mentioning the banned tokens don't trigger.

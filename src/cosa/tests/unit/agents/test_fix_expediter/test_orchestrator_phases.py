@@ -16,7 +16,7 @@ git + validation methods:
 ALL boundaries mocked — sdk_query is replaced with an async-generator stub
 (real TextBlock/ToolUseBlock/AssistantMessage blocks; spec'd ResultMessage/
 RateLimitEvent), and every collaborator (FixExecutor, GitStrategist, GitOps,
-WorktreeContext, PlanWriter, create_agentic_job, fastapi_app.main, run_pytest,
+WorktreeContext, PlanWriter, create_agentic_job, lupin_app.main, run_pytest,
 the safety hooks, cosa_interface voice gates) is patched. NO real SDK / LLM /
 git / subprocess / network. Zero spend.
 
@@ -867,7 +867,7 @@ class TestPhase6:
         todo = MagicMock()
         main_mod = SimpleNamespace( jobs_todo_queue=todo )
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=vjob ), \
-             patch.dict( sys.modules, { "fastapi_app.main": main_mod } ):
+             patch.dict( sys.modules, { "lupin_app.main": main_mod } ):
             out = run( o.run_phase6_validation() )
         assert out == "ts-rerun"
         assert vjob.metadata[ "triggered_by_tfe" ] == "tfe-test1"
@@ -879,7 +879,7 @@ class TestPhase6:
         vjob = SimpleNamespace( id_hash="ts-rerun", metadata={} )
         main_mod = SimpleNamespace( jobs_todo_queue=None )   # None -> RuntimeError -> caught
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=vjob ), \
-             patch.dict( sys.modules, { "fastapi_app.main": main_mod } ):
+             patch.dict( sys.modules, { "lupin_app.main": main_mod } ):
             assert run( o.run_phase6_validation() ) is None
 
     def test_queue_push_raises_caught( self ):
@@ -889,5 +889,5 @@ class TestPhase6:
         todo = MagicMock(); todo.push.side_effect = RuntimeError( "queue full" )
         main_mod = SimpleNamespace( jobs_todo_queue=todo )
         with patch( "cosa.rest.agentic_job_factory.create_agentic_job", return_value=vjob ), \
-             patch.dict( sys.modules, { "fastapi_app.main": main_mod } ):
+             patch.dict( sys.modules, { "lupin_app.main": main_mod } ):
             assert run( o.run_phase6_validation() ) is None

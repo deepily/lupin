@@ -9,7 +9,7 @@ Filesystem-touching paths (`match_research_docs`) run against a real `TemporaryD
 so `os.walk`/`os.listdir`/`os.path.exists` exercise genuine behaviour with zero risk.
 
 Covers:
-- `get_todo_queue` / `get_websocket_mgr` — dual-key `fastapi_app.main` patch (Gotcha 1).
+- `get_todo_queue` / `get_websocket_mgr` — dual-key `lupin_app.main` patch (Gotcha 1).
 - `is_research_path` — every detection arm (deep-research prefix w/ + w/o leading slash,
   email-in-text + .md, general path + extension, description → False).
 - `validate_source_path` — absolute + relative normalisation, traversal rejection,
@@ -53,10 +53,10 @@ M = "cosa.rest.routers.podcast_generator"
 
 
 def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `fastapi_app.main` (Gotcha 1)."""
+    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _fake_config( mapping ):
@@ -82,7 +82,7 @@ def _fake_config( mapping ):
 class TestDependencyProviders( unittest.TestCase ):
     """
     Ensures:
-        - get_todo_queue / get_websocket_mgr read off fastapi_app.main
+        - get_todo_queue / get_websocket_mgr read off lupin_app.main
     """
 
     def test_get_todo_queue_reads_main( self ):

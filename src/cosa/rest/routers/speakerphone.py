@@ -82,7 +82,7 @@ def get_notification_queue():
         - Returns the singleton NotificationFifoQueue instance
         - Raises ImportError if main module not yet initialized
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_notification_queue
 
 

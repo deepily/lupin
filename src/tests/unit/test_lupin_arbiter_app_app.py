@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for the arbiter-vigilance app + section-keyed local store (L1, evolved in L2).
+Unit tests for the lupin-arbiter-app app + section-keyed local store (L1, evolved in L2).
 
 Venue: :7999-eligible (pure in-process TestClient — no network, no persistent
 state mutation, no real threads/docker; the health_loop is a fake). Coverage
@@ -12,11 +12,11 @@ import datetime
 
 from fastapi.testclient import TestClient
 
-from arbiter_vigilance import __version__
-from arbiter_vigilance.app import create_app, assemble_app, _utcnow
-from arbiter_vigilance.health_watch import HealthWatchLoop
-from arbiter_vigilance.loop_b import LoopBRunner
-from arbiter_vigilance.local_snapshot_store import LocalSnapshotStore
+from lupin_arbiter_app import __version__
+from lupin_arbiter_app.app import create_app, assemble_app, _utcnow
+from lupin_arbiter_app.health_watch import HealthWatchLoop
+from lupin_arbiter_app.loop_b import LoopBRunner
+from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
 
 UTC = datetime.timezone.utc
@@ -40,7 +40,7 @@ def test_health_defaults():
         assert resp.status_code == 200
         body = resp.json()
         assert body[ "status" ]         == "ok"
-        assert body[ "service" ]        == "arbiter-vigilance"
+        assert body[ "service" ]        == "lupin-arbiter-app"
         assert body[ "version" ]        == __version__
         assert body[ "uptime_seconds" ] >= 0.0
         assert isinstance( client.app.state.snapshot_store, LocalSnapshotStore )
@@ -156,7 +156,7 @@ def test_state_cold_start_both_sections_awaiting():
         assert resp.status_code == 200
         body = resp.json()
         assert body[ "status" ]       == "ok"
-        assert body[ "service" ]      == "arbiter-vigilance"
+        assert body[ "service" ]      == "lupin-arbiter-app"
         assert body[ "version" ]      == __version__
         assert body[ "generated_at" ] == now.isoformat()
         assert body[ "loop_a" ]       == { "status": "awaiting" }

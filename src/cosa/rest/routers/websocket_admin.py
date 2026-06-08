@@ -26,7 +26,7 @@ def get_websocket_manager():
     Dependency to get WebSocket manager from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has websocket_manager attribute
         
     Ensures:
@@ -37,7 +37,7 @@ def get_websocket_manager():
         - ImportError if main module not available
         - AttributeError if websocket_manager not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.websocket_manager
 
 @router.get(

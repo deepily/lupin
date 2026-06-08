@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Loop A — the dev/test health watch (L2 of the :8001 arbiter-vigilance service).
+Loop A — the dev/test health watch (L2 of the :8001 lupin-arbiter-app service).
 
 Out-of-band, per-container Docker health observation. Each poll inspects each
 NAMED container's `.State.Health.Status`, tracks status transitions from our OWN
@@ -65,7 +65,7 @@ def _default_log_fn( event: str, **fields: Any ) -> None:
     """
     line : Dict[ str, Any ] = {
         "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
-        "service" : "arbiter-vigilance",
+        "service" : "lupin-arbiter-app",
         "loop"    : "A",
         "event"   : event,
     }

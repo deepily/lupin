@@ -132,7 +132,7 @@ class TestAccessorsAndGuards( unittest.TestCase ):
         mock_main = MagicMock()
         mock_main.jobs_notification_queue = "NQ"
         pkg = MagicMock(); pkg.main = mock_main
-        with patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } ):
+        with patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } ):
             self.assertEqual( get_notification_queue(), "NQ" )
 
     def test_require_initialized_passes_when_all_wired( self ):

@@ -22,7 +22,7 @@ def get_static_dir():
     Dependency to get static directory from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has static_dir attribute
         
     Ensures:
@@ -33,7 +33,7 @@ def get_static_dir():
         - ImportError if main module not available
         - AttributeError if static_dir not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.static_dir
 
 @router.get(
@@ -91,7 +91,7 @@ async def get_answer(id: str):
     
     Requires:
         - id is a non-empty string identifier
-        - fastapi_app.main module is accessible
+        - lupin_app.main module is accessible
         - static_dir contains audio/gentle-gong.mp3 file
         - Placeholder audio file exists in static directory
         
@@ -114,7 +114,7 @@ async def get_answer(id: str):
     print(f"[STUB] /get-answer/{id} called")
     
     # Get static directory from main module
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     static_dir = main_module.static_dir
     
     # For now, return the gentle gong as placeholder audio
@@ -320,7 +320,7 @@ def quick_smoke_test():
             
             # Test that function has proper import structure
             source_lines = inspect.getsource( get_static_dir )
-            if 'import fastapi_app.main' in source_lines:
+            if 'import lupin_app.main' in source_lines:
                 print( "✓ Dependency injection import structure valid" )
             else:
                 print( "⚠ Dependency injection structure may have issues" )

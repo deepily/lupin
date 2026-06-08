@@ -120,7 +120,7 @@ Based on analysis of the codebase, here's how the COSA (Collection of Small Agen
 ### 1. Entry Points (FastAPI)
 
 ```
-FastAPI Server (fastapi_app/main.py) - CURRENT
+FastAPI Server (lupin_app/main.py) - CURRENT
      |
      ├── WebSocket endpoints
      ├── REST API endpoints

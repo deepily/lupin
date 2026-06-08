@@ -25,17 +25,17 @@ import unittest
 from datetime import datetime
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
 
-# G1 — dual-key fastapi_app.main patch (see test_queues_router.py for rationale)
+# G1 — dual-key lupin_app.main patch (see test_queues_router.py for rationale)
 def _patch_fastapi_main( mock_main ):
     """
-    Patch BOTH sys.modules["fastapi_app"] (a Mock carrying a .main attr) and
-    sys.modules["fastapi_app.main"] so `import fastapi_app.main as m` resolves
+    Patch BOTH sys.modules["lupin_app"] (a Mock carrying a .main attr) and
+    sys.modules["lupin_app.main"] so `import lupin_app.main as m` resolves
     to mock_main regardless of prior import state (single-key patches pass in
     isolation but fail under full-suite ordering).
     """
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 from fastapi import HTTPException

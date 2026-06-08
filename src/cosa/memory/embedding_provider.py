@@ -59,7 +59,7 @@ class EmbeddingProvider:
     def declare_in_process_engine_owner( cls ):
         """
         Mark this Python process as the owner of the in-process GPU engine
-        singletons. Called by `src/fastapi_app/main.py` AFTER `get_code_engine()`
+        singletons. Called by `src/lupin_app/main.py` AFTER `get_code_engine()`
         and `get_prose_engine()` have completed their eager warmup.
 
         Effect: subsequent `generate_embedding()` / `generate_embeddings_batch()`

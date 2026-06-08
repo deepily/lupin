@@ -2,7 +2,7 @@
 Unit tests for the Presentation Generator router (`cosa.rest.routers.presentation_generator`).
 
 Covers:
-- `get_todo_queue` / `get_websocket_mgr` — dual-key `fastapi_app.main` reads.
+- `get_todo_queue` / `get_websocket_mgr` — dual-key `lupin_app.main` reads.
 - `validate_source_path` — within-root (absolute + relative), escape, and the
   exact-project-root edge.
 - `submit_presentation_job` — empty-source 400, path-escape 403, file-not-found 404,
@@ -36,10 +36,10 @@ from cosa.rest.routers.presentation_generator import (
 
 
 def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `fastapi_app.main` (Gotcha 1)."""
+    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _job( id_hash="init_hash" ):
@@ -52,7 +52,7 @@ def _job( id_hash="init_hash" ):
 class TestDependencies( unittest.TestCase ):
     """
     Ensures:
-        - get_todo_queue / get_websocket_mgr read the right attrs off fastapi_app.main
+        - get_todo_queue / get_websocket_mgr read the right attrs off lupin_app.main
     """
 
     def test_get_todo_queue( self ):

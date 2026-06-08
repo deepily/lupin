@@ -100,7 +100,7 @@ def get_whisper_pipeline():
     in remote mode the pipeline arg is unused and may be None.
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has whisper_pipeline attribute
 
     Ensures:
@@ -113,7 +113,7 @@ def get_whisper_pipeline():
     Raises:
         - ImportError if main module not available
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return getattr( main_module, "whisper_pipeline", None )
 
 
@@ -131,7 +131,7 @@ def get_speech_provider() -> SpeechToTextProvider:
 
     See: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return SpeechToTextProvider(
         debug   = getattr( main_module, "app_debug",   False ),
         verbose = getattr( main_module, "app_verbose", False )
@@ -142,7 +142,7 @@ def get_websocket_manager():
     Dependency to get WebSocket manager from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has websocket_manager attribute
         
     Ensures:
@@ -153,7 +153,7 @@ def get_websocket_manager():
         - ImportError if main module not available
         - AttributeError if websocket_manager not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.websocket_manager
 
 def get_config_manager():
@@ -161,7 +161,7 @@ def get_config_manager():
     Dependency to get configuration manager from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has config_mgr attribute
         
     Ensures:
@@ -172,7 +172,7 @@ def get_config_manager():
         - ImportError if main module not available
         - AttributeError if config_mgr not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.config_mgr
 
 def get_active_tasks():
@@ -180,7 +180,7 @@ def get_active_tasks():
     Dependency to get active tasks dictionary from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has active_tasks attribute
         
     Ensures:
@@ -191,7 +191,7 @@ def get_active_tasks():
         - ImportError if main module not available
         - AttributeError if active_tasks not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.active_tasks
 
 def get_todo_queue():
@@ -199,7 +199,7 @@ def get_todo_queue():
     Dependency to get todo queue from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_todo_queue attribute
         
     Ensures:
@@ -210,7 +210,7 @@ def get_todo_queue():
         - ImportError if main module not available
         - AttributeError if jobs_todo_queue not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_todo_queue
 
 @router.post(
@@ -264,7 +264,7 @@ async def upload_and_transcribe_mp3_file(
     """
     try:
         # Get global debug settings
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         app_debug = main_module.app_debug
         app_verbose = main_module.app_verbose
         
@@ -404,7 +404,7 @@ async def get_tts_audio(
     """
     try:
         # Get global debug settings
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         app_debug = main_module.app_debug
         app_verbose = main_module.app_verbose
 
@@ -532,7 +532,7 @@ async def get_tts_audio_elevenlabs(
     """
     try:
         # Get global debug settings
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         app_debug = main_module.app_debug
         app_verbose = main_module.app_verbose
 
@@ -662,7 +662,7 @@ async def upload_and_transcribe_wav_file(
         - whisper_pipeline is initialized and functional
         - Write permissions exist for /tmp directory
         - Audio file is in valid WAV format readable by Whisper
-        - fastapi_app.main module is accessible for debug settings
+        - lupin_app.main module is accessible for debug settings
         
     Ensures:
         - Uploaded file is saved to unique temporary location
@@ -687,7 +687,7 @@ async def upload_and_transcribe_wav_file(
     """
     try:
         # Get global debug settings
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         app_debug = main_module.app_debug
         app_verbose = main_module.app_verbose
         
@@ -937,7 +937,7 @@ async def stream_tts_elevenlabs(
         print( f"[TTS-ELEVENLABS] <<<<" )
         
         # Get app_debug / app_verbose from main module (same pattern as other dependencies)
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         app_debug   = main_module.app_debug
         app_verbose = main_module.app_verbose
         

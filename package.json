@@ -7,7 +7,7 @@
     "build": "bash src/scripts/build-multiplexer.sh",
     "build:watch": "bash src/scripts/build-multiplexer.sh --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint src/fastapi_app/static/js/multiplexer/",
+    "lint": "eslint src/lupin_app/static/js/multiplexer/",
     "test": "tsx --test"
   },
   "devDependencies": {

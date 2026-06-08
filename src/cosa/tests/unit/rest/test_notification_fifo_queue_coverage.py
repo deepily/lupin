@@ -7,8 +7,8 @@ This file closes the remaining gap across both classes:
 
     NotificationItem:
         - `_get_local_timestamp` / `_get_time_display` happy paths (the
-          `fastapi_app.main` config branch — exercised via a G1 DUAL-KEY
-          sys.modules patch so the `import fastapi_app.main as m` binding
+          `lupin_app.main` config branch — exercised via a G1 DUAL-KEY
+          sys.modules patch so the `import lupin_app.main as m` binding
           resolves to a mock regardless of full-suite import ordering),
     NotificationFifoQueue:
         - `__init__` debug print, `push` debug print,
@@ -36,8 +36,8 @@ from unittest.mock import MagicMock, patch
 
 
 def _patch_fastapi_main( app_debug=True, tz="America/New_York" ):
-    """G1 DUAL-KEY patch: bind BOTH `fastapi_app` (with `.main`) and
-    `fastapi_app.main` so `import fastapi_app.main as m` resolves to the mock
+    """G1 DUAL-KEY patch: bind BOTH `lupin_app` (with `.main`) and
+    `lupin_app.main` so `import lupin_app.main as m` resolves to the mock
     whether the binding goes through the package attribute or the submodule
     key (the gotcha that passes in isolation but fails under suite ordering)."""
     cfg          = MagicMock()
@@ -47,7 +47,7 @@ def _patch_fastapi_main( app_debug=True, tz="America/New_York" ):
     main.app_debug  = app_debug
     pkg          = MagicMock()
     pkg.main     = main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": main } )
 
 
 class _Base( unittest.TestCase ):

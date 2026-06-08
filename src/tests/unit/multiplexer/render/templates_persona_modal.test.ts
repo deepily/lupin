@@ -11,7 +11,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   renderPersonaPopover,
   type PersonaPopoverInput,
-} from "../../../../fastapi_app/static/js/multiplexer/render/templates/personaModal";
+} from "../../../../lupin_app/static/js/multiplexer/render/templates/personaModal";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

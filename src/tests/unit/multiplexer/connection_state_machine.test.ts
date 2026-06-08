@@ -8,18 +8,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   backoffDelayMs,
   createConnectionStateMachine,
-} from "../../../fastapi_app/static/js/multiplexer/transport/ConnectionStateMachine";
+} from "../../../lupin_app/static/js/multiplexer/transport/ConnectionStateMachine";
 import type {
   ConnectionLifecyclePayload,
   ConnectionReconnectingPayload,
   ConnectionState,
   ConnectionStateChangePayload,
   LupinEvent,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 function makeHarness(graceMs?: number) {
   const bus = createEventBusForTesting();

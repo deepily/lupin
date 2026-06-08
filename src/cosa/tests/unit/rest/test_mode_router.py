@@ -2,14 +2,14 @@
 Unit tests for the mode-management router (`cosa.rest.routers.mode`).
 
 Covers:
-- `get_todo_queue` — pulls jobs_todo_queue off `fastapi_app.main` (dual-key patched).
+- `get_todo_queue` — pulls jobs_todo_queue off `lupin_app.main` (dual-key patched).
 - `_get_display_name` — System (None), MODE_METADATA hit, title-cased fallback.
 - `get_available_modes` / `get_mode` / `set_mode` / `clear_mode` endpoints,
   including the 400-on-ValueError arm and the system-mode (None) branches.
 
 Zero external dependencies — the todo queue is boundary-mocked, the auth
 dependency is bypassed by passing `current_user` explicitly, MODE_METADATA is
-patched to a controlled dict, and `fastapi_app.main` is dual-key patched.
+patched to a controlled dict, and `lupin_app.main` is dual-key patched.
 """
 
 import unittest
@@ -36,10 +36,10 @@ from cosa.rest.routers.mode import (
 
 
 def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `fastapi_app.main` (Gotcha 1)."""
+    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 _FAKE_METADATA = { "math": { "display_name": "Math Agent" } }
@@ -52,7 +52,7 @@ class TestGetTodoQueue( unittest.TestCase ):
     """
 
     def test_returns_main_module_todo_queue( self ):
-        """Ensures: the dependency reads jobs_todo_queue off fastapi_app.main."""
+        """Ensures: the dependency reads jobs_todo_queue off lupin_app.main."""
         mock_main = MagicMock()
         mock_main.jobs_todo_queue = "THE_QUEUE"
         with _patch_fastapi_main( mock_main ):

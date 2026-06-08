@@ -50,10 +50,10 @@ UID_UUID = uuid.UUID( UID_STR )
 
 
 def _patch_fastapi_main( mock_main ):
-    """G1 dual-key patch of fastapi_app.main (see test_notifications_router.py)."""
+    """G1 dual-key patch of lupin_app.main (see test_notifications_router.py)."""
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _ctx_db( mock_db ):

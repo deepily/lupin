@@ -39,7 +39,7 @@ def get_todo_queue():
     Dependency to get todo queue from main module.
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_todo_queue attribute
 
     Ensures:
@@ -49,7 +49,7 @@ def get_todo_queue():
         - ImportError if main module not available
         - AttributeError if todo queue not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_todo_queue
 
 router = APIRouter(tags=["system"])
@@ -166,7 +166,7 @@ async def init( config_block_id: Optional[ str ] = None ):
         - FastAPI application is running with initialized components
         - Configuration files exist at specified paths (lupin-app.ini)
         - LUPIN_CONFIG_MGR_CLI_ARGS environment variable is set
-        - fastapi_app.main module is accessible with global components
+        - lupin_app.main module is accessible with global components
 
     Ensures:
         - Reinitializes the singleton ConfigurationManager (not a throwaway)
@@ -183,7 +183,7 @@ async def init( config_block_id: Optional[ str ] = None ):
     try:
         from cosa.rest.db.database import swap_database
         import cosa.rest.dependencies.config as config_module
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
 
         # Get the singleton config manager (not a throwaway instance)
         config_mgr = config_module.get_config_manager()
@@ -390,7 +390,7 @@ async def get_websocket_sessions(
     
     Requires:
         - Valid JWT authentication token in Authorization header
-        - fastapi_app.main module is accessible
+        - lupin_app.main module is accessible
         - WebSocketManager is initialized in main module
         - WebSocketManager has get_all_sessions_info() method
         
@@ -412,7 +412,7 @@ async def get_websocket_sessions(
         dict: Session metrics, policy info, session list, and timestamp
     """
     # Get WebSocketManager from main module
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     websocket_manager = main_module.websocket_manager
     
     sessions = websocket_manager.get_all_sessions_info()
@@ -450,7 +450,7 @@ async def cleanup_stale_sessions(
     
     Requires:
         - Valid JWT authentication token in Authorization header
-        - fastapi_app.main module is accessible
+        - lupin_app.main module is accessible
         - WebSocketManager is initialized in main module
         - max_age_hours is a positive integer value
         - WebSocketManager has cleanup_stale_sessions() method
@@ -474,7 +474,7 @@ async def cleanup_stale_sessions(
         dict: Number of sessions cleaned, age limit, and timestamp
     """
     # Get WebSocketManager from main module
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     websocket_manager = main_module.websocket_manager
     
     cleaned = websocket_manager.cleanup_stale_sessions(max_age_hours)
@@ -499,7 +499,7 @@ async def get_websocket_state():
     or protected in production environments.
 
     Requires:
-        - fastapi_app.main module is accessible
+        - lupin_app.main module is accessible
         - WebSocketManager is initialized in main module
 
     Ensures:
@@ -531,7 +531,7 @@ async def get_websocket_state():
         }
     """
     # Get WebSocketManager from main module
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     websocket_manager = main_module.websocket_manager
 
     # Extract internal state

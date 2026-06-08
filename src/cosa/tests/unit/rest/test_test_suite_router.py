@@ -3,7 +3,7 @@ Unit tests for the test-suite submission router ( cosa.rest.routers.test_suite )
 
 Covers the single POST endpoint /api/test-suite/submit and its todo-queue
 dependency in full isolation:
-- get_todo_queue() dependency resolution against fastapi_app.main
+- get_todo_queue() dependency resolution against lupin_app.main
 - submit_test_suite() happy path (queued response + job tracking + push)
 - 400 paths (missing uid, missing email)
 - 500 paths (factory returns None, queue push raises)
@@ -48,11 +48,11 @@ def _valid_user():
 
 class TestGetTodoQueueDependency( unittest.TestCase ):
     """
-    Cover get_todo_queue() — it imports fastapi_app.main lazily and returns
+    Cover get_todo_queue() — it imports lupin_app.main lazily and returns
     its jobs_todo_queue attribute.
 
     Requires:
-        - fastapi_app.main importable (real or injected stub)
+        - lupin_app.main importable (real or injected stub)
 
     Ensures:
         - the module-level jobs_todo_queue is returned unchanged
@@ -60,11 +60,11 @@ class TestGetTodoQueueDependency( unittest.TestCase ):
 
     def test_get_todo_queue_returns_main_module_queue( self ):
         sentinel_queue            = Mock( name="jobs_todo_queue" )
-        fake_main                 = types.ModuleType( "fastapi_app.main" )
+        fake_main                 = types.ModuleType( "lupin_app.main" )
         fake_main.jobs_todo_queue = sentinel_queue
-        fake_pkg                  = types.ModuleType( "fastapi_app" )
+        fake_pkg                  = types.ModuleType( "lupin_app" )
 
-        with patch.dict( sys.modules, { "fastapi_app": fake_pkg, "fastapi_app.main": fake_main } ):
+        with patch.dict( sys.modules, { "lupin_app": fake_pkg, "lupin_app.main": fake_main } ):
             result = get_todo_queue()
 
         self.assertIs( result, sentinel_queue )

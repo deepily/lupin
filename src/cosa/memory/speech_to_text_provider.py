@@ -71,7 +71,7 @@ class SpeechToTextProvider:
         """
         Flip the class flag indicating THIS process owns the Whisper pipeline.
 
-        Called by `src/fastapi_app/main.py` lifespan AFTER `load_stt_model()`
+        Called by `src/lupin_app/main.py` lifespan AFTER `load_stt_model()`
         returns successfully and `whisper_pipeline` is bound. Mirrors
         `EmbeddingProvider.declare_in_process_engine_owner()` semantically and
         in call-site placement.

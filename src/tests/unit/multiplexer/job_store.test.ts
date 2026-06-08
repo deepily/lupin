@@ -5,15 +5,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createJobStore,
   type JobHistoryApiClient,
-} from "../../../fastapi_app/static/js/multiplexer/stores/JobStore";
+} from "../../../lupin_app/static/js/multiplexer/stores/JobStore";
 import type {
   LupinEvent,
   StoreJobsChangedPayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

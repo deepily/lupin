@@ -21,7 +21,7 @@ def get_snapshot_mgr():
     Dependency to get snapshot manager from main module.
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has snapshot_mgr attribute
 
     Ensures:
@@ -32,7 +32,7 @@ def get_snapshot_mgr():
         - ImportError if main module not available
         - AttributeError if snapshot_mgr not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.snapshot_mgr
 
 

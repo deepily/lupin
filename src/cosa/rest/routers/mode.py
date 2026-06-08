@@ -62,7 +62,7 @@ def get_todo_queue():
     Dependency to get todo queue from main module.
 
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_todo_queue attribute
 
     Ensures:
@@ -72,7 +72,7 @@ def get_todo_queue():
         - ImportError if main module not available
         - AttributeError if todo queue not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_todo_queue
 
 

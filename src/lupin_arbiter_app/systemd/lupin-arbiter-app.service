@@ -1,4 +1,4 @@
-# arbiter-vigilance.service — systemd --user unit for the standalone :8001 fleet watcher.
+# lupin-arbiter-app.service — systemd --user unit for the standalone :8001 fleet watcher.
 #
 # ┌──────────────────────────────────────────────────────────────────────────┐
 # │ STAGED, NOT ENABLED. HELD FOR RICK.                                        │
@@ -15,7 +15,7 @@
 # the watcher runs ~24/7.
 
 [Unit]
-Description=Lupin arbiter-vigilance — out-of-band fleet watcher (:8001)
+Description=Lupin arbiter app — out-of-band fleet watcher (:8001)
 After=network.target
 
 [Service]
@@ -27,7 +27,7 @@ Type=exec
 # inherit them — see the script header). To override the config block, set
 # LUPIN_CONFIG_MGR_CLI_ARGS here and the script's `:-` default yields to it.
 Environment=LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin
-ExecStart=/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/run-arbiter-vigilance.sh
+ExecStart=/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/run-lupin-arbiter-app.sh
 Restart=always
 RestartSec=5
 # Loop B's graceful stop checks the cancel flag at top-of-poll (≤ poll_seconds,

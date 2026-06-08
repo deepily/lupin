@@ -49,7 +49,7 @@ arguments:
   test_types: ["unit", "smoke"]
   test_location: "src/cosa/tests/unit/agents/"
 
-"src/fastapi_app/":
+"src/lupin_app/":
   type: "lupin_integration"
   criticality: "critical"
   test_types: ["smoke"]
@@ -78,7 +78,7 @@ arguments:
      - src/cosa/memory/: core_infrastructure, critical (unit + smoke, tests at src/cosa/tests/unit/memory/)
      - src/cosa/rest/: api_integration, critical (unit + smoke, tests at src/cosa/tests/unit/rest/)
      - src/cosa/agents/: business_logic, non-critical (unit + smoke, tests at src/cosa/tests/unit/agents/)
-     - src/fastapi_app/: lupin_integration, critical (smoke only, tests at src/tests/unit/)
+     - src/lupin_app/: lupin_integration, critical (smoke only, tests at src/tests/unit/)
      - src/cosa/utils/: support, non-critical (unit only, tests at src/cosa/tests/unit/)
    - Do NOT proceed without these parameters
 

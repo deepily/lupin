@@ -5,13 +5,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createStorageServiceForTesting, InMemoryStorage } from "../../../fastapi_app/static/js/multiplexer/shared/StorageService";
-import { createNotificationStore } from "../../../fastapi_app/static/js/multiplexer/stores/NotificationStore";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createStorageServiceForTesting, InMemoryStorage } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
+import { createNotificationStore } from "../../../lupin_app/static/js/multiplexer/stores/NotificationStore";
 import type {
   LupinEvent,
   StoreNotificationsChangedPayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Test utilities — manual timer + Date.now stubs so tests are fully deterministic.

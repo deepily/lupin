@@ -14,14 +14,14 @@ import threading
 
 import pytest
 
-from arbiter_vigilance.health_watch import (
+from lupin_arbiter_app.health_watch import (
     ContainerHealthTracker,
     HealthWatchLoop,
     SystemClock,
     _default_log_fn,
     _parse_inspect_result,
 )
-from arbiter_vigilance.local_snapshot_store import LocalSnapshotStore
+from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
 
 UTC = datetime.timezone.utc
@@ -337,4 +337,4 @@ def test_default_log_fn_emits_json_line( capsys ):
     assert parsed[ "event" ] == "health_obs"
     assert parsed[ "container" ] == "c1"
     assert parsed[ "loop" ] == "A"
-    assert parsed[ "service" ] == "arbiter-vigilance"
+    assert parsed[ "service" ] == "lupin-arbiter-app"

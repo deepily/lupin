@@ -56,7 +56,7 @@ def _patch_fastapi_main( mock_main ):
     """G1 DUAL-KEY patch (see test_websocket_router._patch_fastapi_main)."""
     pkg      = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _mgr():

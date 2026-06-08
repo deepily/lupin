@@ -541,7 +541,7 @@ main() {
     
     if ! check_server_health; then
         log_error "Server is not healthy. Please start the FastAPI server on port 7999"
-        log_info "Run: cd src && python -m uvicorn fastapi_app.main:app --port 7999"
+        log_info "Run: cd src && python -m uvicorn lupin_app.main:app --port 7999"
         exit 1
     fi
     

@@ -27,7 +27,7 @@ import vm from "node:vm";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
-const NOTIFICATIONS_JS = resolve( HERE, "../../../fastapi_app/static/js/notifications.js" );
+const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
 
 before( () => {
   if ( typeof globalThis.document === "undefined" ) {

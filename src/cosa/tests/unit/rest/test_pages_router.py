@@ -104,10 +104,10 @@ class TestPagesEndpoints( unittest.TestCase ):
         """
         Ensures:
             - The import-time static dir resolved to a normalized absolute path
-              ending in fastapi_app/static
+              ending in lupin_app/static
         """
         self.assertTrue( os.path.isabs( _static_dir ) )
-        self.assertTrue( _static_dir.endswith( os.path.join( "fastapi_app", "static" ) ) )
+        self.assertTrue( _static_dir.endswith( os.path.join( "lupin_app", "static" ) ) )
 
 
 def isolated_unit_test():

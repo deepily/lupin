@@ -41,7 +41,7 @@ VP = "cosa.rest.routers.voice_persona"
 
 def _patch_fastapi_main( mock_main ):
     pkg = Mock(); pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _json( response ):
@@ -68,7 +68,7 @@ class TestDependencies( unittest.TestCase ):
     """Ensures: the two DI helpers resolve correctly."""
 
     def test_get_notification_queue( self ):
-        """Ensures: notification queue read off fastapi_app.main."""
+        """Ensures: notification queue read off lupin_app.main."""
         m = MagicMock(); m.jobs_notification_queue = "NQ"
         with _patch_fastapi_main( m ):
             self.assertEqual( get_notification_queue(), "NQ" )

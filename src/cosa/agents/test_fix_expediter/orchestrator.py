@@ -2151,7 +2151,7 @@ class TFEOrchestrator:
 
         # Push to the todo queue (same pattern as BFE Phase 6 _resubmit_original_job)
         try:
-            import fastapi_app.main as main_module
+            import lupin_app.main as main_module
             todo_queue = main_module.jobs_todo_queue
             if todo_queue is None:
                 raise RuntimeError( "jobs_todo_queue is None — app not initialized" )

@@ -1,5 +1,5 @@
 """
-arbiter-vigilance — the standalone, host-side, OUT-OF-BAND fleet watcher on :8001.
+lupin-arbiter-app — the standalone, host-side, OUT-OF-BAND fleet watcher on :8001.
 
 A separate uvicorn process whose uptime is independent of the dev (:7999) and
 test (:8000) servers and any Claude Code session, so fleet vigilance survives a

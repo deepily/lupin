@@ -1,4 +1,4 @@
-# arbiter-vigilance systemd --user unit (STAGED — held for Rick)
+# lupin-arbiter-app systemd --user unit (STAGED — held for Rick)
 
 This unit is **staged, not installed or enabled**. Per the engagement gate, the
 implementer does **not** actuate Rick's login session. Rick (or a Rick-authorized
@@ -21,11 +21,11 @@ Supervisor ladder actually selected (deploy doc R1): system-systemd ✗ (no root
 
 ```bash
 # 0. (one time) confirm LUPIN_ROOT in the unit matches this host
-#    grep Environment= arbiter-vigilance.service
+#    grep Environment= lupin-arbiter-app.service
 
 # 1. Copy the unit into the user systemd dir
 mkdir -p ~/.config/systemd/user
-cp "$LUPIN_ROOT/src/arbiter_vigilance/systemd/arbiter-vigilance.service" ~/.config/systemd/user/
+cp "$LUPIN_ROOT/src/lupin_arbiter_app/systemd/lupin-arbiter-app.service" ~/.config/systemd/user/
 
 # 2. Survive logout. On this box `loginctl enable-linger` for your own user MAY
 #    need a one-time polkit/sudo grant — if the plain form is denied, use sudo.
@@ -33,10 +33,10 @@ loginctl enable-linger "$USER"            # if denied: sudo loginctl enable-ling
 
 # 3. Reload + enable + start
 systemctl --user daemon-reload
-systemctl --user enable --now arbiter-vigilance.service
+systemctl --user enable --now lupin-arbiter-app.service
 
 # 4. Verify liveness (ops health check — NOT a test surface)
-systemctl --user status arbiter-vigilance.service
+systemctl --user status lupin-arbiter-app.service
 curl -s http://127.0.0.1:8001/health      # expect {"status":"ok", ...}
 ```
 
@@ -60,14 +60,14 @@ external liveness poke. Until `WatchdogSec` + `sd_notify` lands (V2), an optiona
 user crontab line covers the gap:
 
 ```cron
-*/5 * * * * curl -fs http://127.0.0.1:8001/health >/dev/null || systemctl --user restart arbiter-vigilance.service
+*/5 * * * * curl -fs http://127.0.0.1:8001/health >/dev/null || systemctl --user restart lupin-arbiter-app.service
 ```
 
 ## Uninstall / rollback (symmetric)
 
 ```bash
-systemctl --user disable --now arbiter-vigilance.service
-rm ~/.config/systemd/user/arbiter-vigilance.service
+systemctl --user disable --now lupin-arbiter-app.service
+rm ~/.config/systemd/user/lupin-arbiter-app.service
 systemctl --user daemon-reload
 # (optional) loginctl disable-linger "$USER"
 ```

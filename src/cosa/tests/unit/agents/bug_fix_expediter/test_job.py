@@ -16,7 +16,7 @@ Surface covered:
   - _write_final_report() : full-artifacts render · minimal · failure section · writer-exception
 
 Every external boundary (voice_io, cosa_interface, dead_job_packager, BFEOrchestrator,
-ConfigurationManager, agentic_job_factory, queue_extensions, fastapi_app.main, ReportWriter)
+ConfigurationManager, agentic_job_factory, queue_extensions, lupin_app.main, ReportWriter)
 is mocked — no real LLM/SDK/network/DB/git/fs writes, zero spend. quick_smoke_test +
 __main__ excluded via pyproject coverage config.
 
@@ -427,12 +427,12 @@ class TestResubmit( unittest.TestCase ):
         tracker = MagicMock()
         tracker.register_scoped_job = MagicMock( side_effect=lambda idh, uid, sid: idh )
         qext_mod.user_job_tracker = tracker
-        main_mod = types.ModuleType( "fastapi_app.main" )
+        main_mod = types.ModuleType( "lupin_app.main" )
         main_mod.jobs_todo_queue = todo_queue
         self.es.enter_context( patch.dict( sys.modules, {
             "cosa.rest.agentic_job_factory": factory_mod,
             "cosa.rest.queue_extensions"   : qext_mod,
-            "fastapi_app.main"             : main_mod,
+            "lupin_app.main"             : main_mod,
         } ) )
         return factory_mod, tracker, main_mod
 

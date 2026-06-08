@@ -5,18 +5,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createStorageServiceForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/StorageService";
-import { createStores } from "../../../fastapi_app/static/js/multiplexer/stores";
-import type { ActionRequiredApiClient } from "../../../fastapi_app/static/js/multiplexer/stores";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createStorageServiceForTesting } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
+import { createStores } from "../../../lupin_app/static/js/multiplexer/stores";
+import type { ActionRequiredApiClient } from "../../../lupin_app/static/js/multiplexer/stores";
 import type {
   AudioContextLike,
   AudioBufferLike,
-} from "../../../fastapi_app/static/js/multiplexer/audio/pcm-decoder";
+} from "../../../lupin_app/static/js/multiplexer/audio/pcm-decoder";
 import type {
   LupinEvent,
   LupinEventType,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

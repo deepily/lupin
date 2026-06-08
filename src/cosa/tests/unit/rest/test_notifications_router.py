@@ -35,10 +35,10 @@ from cosa.rest.routers.notifications import get_notification_queue, get_websocke
 
 def _patch_fastapi_main( mock_main ):
     """
-    Robustly patch `fastapi_app.main` for direct-call unit tests.
+    Robustly patch `lupin_app.main` for direct-call unit tests.
 
-    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
-    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    `import lupin_app.main as m` binds m via getattr(sys.modules['lupin_app'],
+    'main'), NOT sys.modules['lupin_app.main']. Once the REAL lupin_app
     package is cached by an earlier test in the suite, patching only the
     submodule entry is silently ignored — the test passes in isolation but fails
     under full-suite ordering. Overriding BOTH the package object and the
@@ -47,7 +47,7 @@ def _patch_fastapi_main( mock_main ):
     """
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 class TestNotificationsRouter( unittest.TestCase ):
@@ -731,7 +731,7 @@ class TestNotificationsRouter( unittest.TestCase ):
         Test notification router dependency functions.
         
         Ensures:
-            - All dependency functions can import fastapi_app.main
+            - All dependency functions can import lupin_app.main
             - Dependencies return correct attributes
         """
         # Test get_notification_queue dependency

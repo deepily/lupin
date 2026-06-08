@@ -21,7 +21,7 @@ class RouterMigrator:
     def __init__(self):
         self.project_root = du.get_project_root()
         self.src_dir = os.path.join(self.project_root, "src")
-        self.main_py = os.path.join(self.src_dir, "fastapi_app/main.py")
+        self.main_py = os.path.join(self.src_dir, "lupin_app/main.py")
         self.cosa_rest = os.path.join(self.src_dir, "cosa/rest")
         self.test_script = os.path.join(self.src_dir, "tests/test_refactoring.py")
         

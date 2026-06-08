@@ -10,7 +10,7 @@ import {
   pcm16ToAudioBufferFromBlob,
   type AudioContextLike,
   type AudioBufferLike,
-} from "../../../fastapi_app/static/js/multiplexer/audio/pcm-decoder";
+} from "../../../lupin_app/static/js/multiplexer/audio/pcm-decoder";
 
 // ---------------------------------------------------------------------------
 // Stub AudioContext / AudioBuffer for Node testing. Captures the createBuffer

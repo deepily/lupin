@@ -45,7 +45,7 @@ class BugFixExpediterSubmitResponse( BaseModel ):
 
 def get_todo_queue():
     """Get the todo queue from the FastAPI app module."""
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_todo_queue
 
 

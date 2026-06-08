@@ -250,9 +250,9 @@ class TestUndeliveredMaxAgeHours:
         )
 
     def test_notifications_helper_reads_config( self ):
-        with patch.dict( sys.modules, { "fastapi_app.main": self._fake_main( 24 ) } ):
+        with patch.dict( sys.modules, { "lupin_app.main": self._fake_main( 24 ) } ):
             assert nmod._undelivered_max_age_hours() == 24
 
     def test_websocket_helper_reads_config( self ):
-        with patch.dict( sys.modules, { "fastapi_app.main": self._fake_main( 12 ) } ):
+        with patch.dict( sys.modules, { "lupin_app.main": self._fake_main( 12 ) } ):
             assert wsmod._undelivered_max_age_hours() == 12

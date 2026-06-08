@@ -10,14 +10,14 @@ import datetime
 import json
 import threading
 
-from arbiter_vigilance.loop_b import (
+from lupin_arbiter_app.loop_b import (
     LoopBRunner,
     build_loop_b_job_factory,
     make_escalation_notify_fn,
     make_warmup_notify_fn,
     _default_log_fn,
 )
-from arbiter_vigilance.local_snapshot_store import LocalSnapshotStore
+from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
 
 UTC = datetime.timezone.utc

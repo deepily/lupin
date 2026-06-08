@@ -176,7 +176,7 @@ System prompt lives in
 to parse `classname::name[param]` test IDs into source file paths and how to
 recognize four failure mode categories:
 
-- **`code_bug`** — production code under test is wrong. Fix in `src/cosa/` or `src/fastapi_app/`.
+- **`code_bug`** — production code under test is wrong. Fix in `src/cosa/` or `src/lupin_app/`.
 - **`test_bug`** — test itself is wrong (stale assertion, bad mock). Fix in `src/tests/`.
 - **`fixture_bug`** — shared fixture is broken, affecting many tests. Fix in `conftest.py`.
 - **`env_bug`** — environment/config issue. Fix in `src/conf/` or infra.
@@ -446,7 +446,7 @@ test fix expediter auto fix enabled = true
 
 The `TestSuiteCompletionWatchdog` is initialized at server startup via the
 unified facade `init_watchdogs()` in `src/cosa/rest/watchdogs.py`, called from
-`src/fastapi_app/main.py`.
+`src/lupin_app/main.py`.
 
 To disable auto-fix globally, flip the key to `false` and restart the server.
 

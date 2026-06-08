@@ -27,7 +27,7 @@ if lupin_root is None:
         "LUPIN_ROOT environment variable not set.\n"
         "Set it before starting FastAPI server:\n"
         "  export LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin\n"
-        "  python src/fastapi_app/main.py"
+        "  python src/lupin_app/main.py"
     )
 
 # Load LoRA model paths from ~/.lora_env (auto-updated by peft_trainer.py)
@@ -48,7 +48,7 @@ if src_path not in sys.path:
 # Promote the weak "LUPIN_ROOT is set" guard above to a strong "LUPIN_ROOT is
 # valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
 # instead of cryptically later at config load. (No defensive fallback.)
-from fastapi_app.bootstrap_helpers import assert_lupin_root_valid
+from lupin_app.bootstrap_helpers import assert_lupin_root_valid
 assert_lupin_root_valid( lupin_root )
 
 # Reduce CUDA memory fragmentation (prevents periodic OOM on Whisper inference)
@@ -845,7 +845,7 @@ async def lifespan( app: FastAPI ):
     # failure is swallowed inside; the arbiter is an additive observer, never a
     # dependency of the local poke path). See cosa.rest.arbiter_bootstrap.
     # R0 (2026-06-07): gated by `arbiter in-process bootstrap enabled` (default True).
-    # When the standalone :8001 arbiter-vigilance service owns Loop B, flip the flag
+    # When the standalone :8001 lupin-arbiter-app service owns Loop B, flip the flag
     # False so the in-process arbiter does NOT submit — never two arbiters actuating.
     from cosa.rest.arbiter_bootstrap import submit_arbiter_if_enabled
     submit_arbiter_if_enabled( jobs_todo_queue, jobs_run_queue, config_mgr )
@@ -1102,9 +1102,9 @@ if __name__ == "__main__":
     reload_kwargs = {}
     if not is_production_or_test:
         reload_kwargs[ "reload" ] = True
-        reload_kwargs[ "reload_dirs" ] = [ "fastapi_app", "cosa", "lib", "lupin_cli", "lupin_mcp" ]
+        reload_kwargs[ "reload_dirs" ] = [ "lupin_app", "cosa", "lib", "lupin_cli", "lupin_mcp" ]
     uvicorn.run(
-        "fastapi_app.main:app",
+        "lupin_app.main:app",
         host="0.0.0.0",
         port=port,
         workers=1,  # Single worker required for in-memory notification state (pending_responses dict)

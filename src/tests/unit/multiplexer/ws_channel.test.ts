@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 
 import {
   createWSChannel,
-} from "../../../fastapi_app/static/js/multiplexer/transport/ws-channel";
+} from "../../../lupin_app/static/js/multiplexer/transport/ws-channel";
 
 // ---------------------------------------------------------------------------
 // CloseEvent shim — Node 22 omits CloseEvent from globals (it requires the

@@ -17,7 +17,7 @@ import cosa.utils.util as cu
 router = APIRouter( tags=[ "pages" ] )
 
 # Resolve the static directory once at import time
-_static_dir = os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), "..", "..", "..", "fastapi_app", "static" )
+_static_dir = os.path.join( os.path.dirname( os.path.abspath( __file__ ) ), "..", "..", "..", "lupin_app", "static" )
 _static_dir = os.path.normpath( _static_dir )
 
 # Route table: clean URL → relative path under static/

@@ -111,7 +111,7 @@ class NotificationItem:
         """Get timezone-aware timestamp using configured timezone from ConfigurationManager"""
         try:
             # Import here to avoid circular imports
-            import fastapi_app.main as main_module
+            import lupin_app.main as main_module
             config_mgr = main_module.config_mgr
             app_debug = main_module.app_debug
 
@@ -137,7 +137,7 @@ class NotificationItem:
         """Get formatted time with timezone abbreviation (e.g., '14:30 EST') for UI display."""
         try:
             # Import here to avoid circular imports
-            import fastapi_app.main as main_module
+            import lupin_app.main as main_module
             config_mgr = main_module.config_mgr
 
             # Get timezone from config

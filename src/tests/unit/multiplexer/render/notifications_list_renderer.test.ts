@@ -10,16 +10,16 @@ import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createNotificationsListRenderer,
   type NotificationsListRenderer,
-} from "../../../../fastapi_app/static/js/multiplexer/render";
+} from "../../../../lupin_app/static/js/multiplexer/render";
 import type {
   Notification,
   SenderRecord,
   ActionRequiredItem,
-} from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -732,7 +732,7 @@ test("ownership flag absent: renderActionRequiredSection() runs normally (Phase 
 //   per F-Arnold-D4). Floor: ≥4 new cases.
 // ===========================================================================
 
-import type { SenderSortComparator } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import type { SenderSortComparator } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 interface SortTestSetup extends TestSetup {
   sCardsRoot : HTMLElement;

@@ -16,7 +16,7 @@ fast (<5s), no shared external state.
 
 **Build approach**: instantiates a stripped-down `FastAPI()` app with the
 commons router mounted and `init_commons_state(...)` wired manually. Skips
-the heavyweight GPU + embedding lifespan in `src/fastapi_app/main.py`.
+the heavyweight GPU + embedding lifespan in `src/lupin_app/main.py`.
 
 **Auth bypass**: the test overrides `require_api_key_or_jwt` to return a
 fixed user_id, avoiding JWT issuance for in-process unit-level coverage.

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# run-arbiter-vigilance.sh — launch the standalone, OUT-OF-BAND fleet watcher on :8001.
+# run-lupin-arbiter-app.sh — launch the standalone, OUT-OF-BAND fleet watcher on :8001.
 #
 # Host-side process, runs OUTSIDE all Docker containers (deploy doc §3, D1).
 # Binds 127.0.0.1 explicit (R3 — never 0.0.0.0; the :7999 reverse-proxy is the
 # only external view path). reload=False (a watcher must not hot-reload itself).
 #
-# Supervised by the systemd --user unit in src/arbiter_vigilance/systemd/ (this
+# Supervised by the systemd --user unit in src/lupin_arbiter_app/systemd/ (this
 # script is its ExecStart). systemd runs with a MINIMAL, NON-INHERITED env, so we
 # set BOTH the interpreter (the project .venv — a bare `python` would resolve to
 # system python with no uvicorn) AND LUPIN_CONFIG_MGR_CLI_ARGS (ConfigurationManager
@@ -39,7 +39,7 @@ cd "${LUPIN_ROOT}/src"
 
 # --factory: create_production_app() builds the real Loop A (health watch) wired
 # to the shared :8001-local store. The lifespan start()s the loop on boot.
-exec "${PYBIN}" -m uvicorn arbiter_vigilance.app:create_production_app --factory \
+exec "${PYBIN}" -m uvicorn lupin_arbiter_app.app:create_production_app --factory \
   --host 127.0.0.1 \
   --port 8001 \
   --no-access-log

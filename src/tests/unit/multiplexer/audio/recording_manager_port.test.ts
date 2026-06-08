@@ -5,7 +5,7 @@ import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { recordingManager } from "../../../../fastapi_app/static/js/multiplexer/audio/recordingManager";
+import { recordingManager } from "../../../../lupin_app/static/js/multiplexer/audio/recordingManager";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

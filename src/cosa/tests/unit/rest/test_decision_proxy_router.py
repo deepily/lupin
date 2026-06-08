@@ -12,7 +12,7 @@ Covers:
   get_trust_mode (ini-only + running + config-read failure), update_trust_mode
   (invalid mode via model_construct, config put failure, running update, queued).
 
-Zero external dependencies — get_db, the two repositories, fastapi_app.main, and
+Zero external dependencies — get_db, the two repositories, lupin_app.main, and
 SweTeamJob are boundary-mocked. No real DB, no real queue. Auth bypassed by
 passing current_user explicitly.
 """
@@ -42,7 +42,7 @@ UUID = "12345678-1234-5678-1234-567812345678"
 
 def _patch_fastapi_main( mock_main ):
     pkg = Mock(); pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _db_cm( session ):
@@ -293,13 +293,13 @@ class TestTrustModeDeps( unittest.TestCase ):
     """get_run_queue / get_config_mgr dependencies + _find_running_swe_job."""
 
     def test_get_run_queue( self ):
-        """Ensures: run queue read off fastapi_app.main."""
+        """Ensures: run queue read off lupin_app.main."""
         m = MagicMock(); m.jobs_run_queue = "RQ"
         with _patch_fastapi_main( m ):
             self.assertEqual( get_run_queue(), "RQ" )
 
     def test_get_config_mgr( self ):
-        """Ensures: config manager read off fastapi_app.main."""
+        """Ensures: config manager read off lupin_app.main."""
         m = MagicMock(); m.config_mgr = "CM"
         with _patch_fastapi_main( m ):
             self.assertEqual( get_config_mgr(), "CM" )

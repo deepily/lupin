@@ -87,7 +87,7 @@ def test_fleet_state_success_echoes_upstream( client, monkeypatch ):
     """Reachable :8001 → the proxy returns the upstream composite verbatim (200)."""
     composite = {
         "status"       : "ok",
-        "service"      : "arbiter-vigilance",
+        "service"      : "lupin-arbiter-app",
         "version"      : "x.y.z",
         "generated_at" : "2026-06-07T22:00:00+00:00",
         "loop_a"       : { "containers": { } },
@@ -108,7 +108,7 @@ def test_fleet_state_unreachable_when_pull_fails( client, monkeypatch ):
     assert r.status_code == 200
     body = r.json()
     assert body[ "status" ]  == "unreachable"
-    assert body[ "service" ] == "arbiter-vigilance"
+    assert body[ "service" ] == "lupin-arbiter-app"
     assert body[ "loop_a" ] is None and body[ "loop_b_fleet" ] is None
     assert "ConnectError" in body[ "detail" ]
 

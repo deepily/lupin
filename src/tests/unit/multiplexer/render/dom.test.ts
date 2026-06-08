@@ -10,7 +10,7 @@ import {
   replaceChildren,
   keyedListMerge,
   type KeyedEntry,
-} from "../../../../fastapi_app/static/js/multiplexer/render/dom";
+} from "../../../../lupin_app/static/js/multiplexer/render/dom";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

@@ -21,7 +21,7 @@
   },
   "overrides": [
     {
-      "files": ["src/fastapi_app/static/css/multiplexer/jobs-pane.css"],
+      "files": ["src/lupin_app/static/css/multiplexer/jobs-pane.css"],
       "rules": {
         "selector-disallowed-list": [
           ["*", "html", "body", ":root"],
@@ -30,7 +30,7 @@
       }
     },
     {
-      "files": ["src/fastapi_app/static/css/multiplexer/action-required.css"],
+      "files": ["src/lupin_app/static/css/multiplexer/action-required.css"],
       "rules": {
         "selector-disallowed-list": [
           ["*", "html", "body", ":root"],
@@ -39,7 +39,7 @@
       }
     },
     {
-      "files": ["src/fastapi_app/static/css/multiplexer/tts-chrome.css"],
+      "files": ["src/lupin_app/static/css/multiplexer/tts-chrome.css"],
       "rules": {
         "selector-disallowed-list": [
           ["*", "html", "body", ":root"],
@@ -48,7 +48,7 @@
       }
     },
     {
-      "files": ["src/fastapi_app/static/css/multiplexer/conversation-mode-pin.css"],
+      "files": ["src/lupin_app/static/css/multiplexer/conversation-mode-pin.css"],
       "rules": {
         "selector-disallowed-list": [
           ["*", "html", "body", ":root"],
@@ -57,7 +57,7 @@
       }
     },
     {
-      "files": ["src/fastapi_app/static/css/multiplexer/focus-tray.css"],
+      "files": ["src/lupin_app/static/css/multiplexer/focus-tray.css"],
       "rules": {
         "selector-disallowed-list": [
           ["*", "html", "body", ":root"],
@@ -66,7 +66,7 @@
       }
     },
     {
-      "files": ["src/fastapi_app/static/css/multiplexer/persona-modal.css"],
+      "files": ["src/lupin_app/static/css/multiplexer/persona-modal.css"],
       "rules": {
         "selector-disallowed-list": [
           ["*", "html", "body", ":root"],
@@ -75,7 +75,7 @@
       }
     },
     {
-      "files": ["src/fastapi_app/static/css/multiplexer/sender-card-recorder.css"],
+      "files": ["src/lupin_app/static/css/multiplexer/sender-card-recorder.css"],
       "rules": {
         "selector-disallowed-list": [
           ["*", "html", "body", ":root"],

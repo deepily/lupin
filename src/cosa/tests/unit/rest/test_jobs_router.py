@@ -2,11 +2,11 @@
 Unit tests for the jobs router (`cosa.rest.routers.jobs`).
 
 Covers:
-- `get_static_dir` — pulls static_dir off fastapi_app.main (dual-key patched).
+- `get_static_dir` — pulls static_dir off lupin_app.main (dual-key patched).
 - `delete_snapshot` — valid id → success dict; empty / "invalid"-prefixed id → 404.
 - `get_answer` — serves the placeholder audio via FileResponse; 404 when missing.
 
-Zero external dependencies — fastapi_app.main, os.path.exists, FileResponse, and
+Zero external dependencies — lupin_app.main, os.path.exists, FileResponse, and
 the timestamp helper are boundary-mocked. No real disk access.
 """
 
@@ -24,10 +24,10 @@ JOBS = "cosa.rest.routers.jobs"
 
 
 def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `fastapi_app.main` (Gotcha 1)."""
+    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 class TestGetStaticDir( unittest.TestCase ):
@@ -37,7 +37,7 @@ class TestGetStaticDir( unittest.TestCase ):
     """
 
     def test_returns_main_module_static_dir( self ):
-        """Ensures: dependency reads static_dir off fastapi_app.main."""
+        """Ensures: dependency reads static_dir off lupin_app.main."""
         mock_main = MagicMock()
         mock_main.static_dir = "/static"
         with _patch_fastapi_main( mock_main ):
@@ -79,7 +79,7 @@ class TestGetAnswer( unittest.TestCase ):
     Unit tests for `get_answer`.
 
     Requires:
-        - fastapi_app.main, os.path.exists, FileResponse boundary-mocked
+        - lupin_app.main, os.path.exists, FileResponse boundary-mocked
 
     Ensures:
         - serves the placeholder audio via FileResponse when present

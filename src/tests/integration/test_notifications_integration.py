@@ -263,7 +263,7 @@ class TestMarkPlayedEndpoint:
         """
         Build a minimal FastAPI app with just the notifications router and
         a NotificationFifoQueue wired to a mock websocket_mgr. Mocks out
-        `get_local_timestamp` since it imports `fastapi_app.main` at call time.
+        `get_local_timestamp` since it imports `lupin_app.main` at call time.
         """
         from unittest.mock import MagicMock, patch
 
@@ -286,7 +286,7 @@ class TestMarkPlayedEndpoint:
             app.include_router( notifications_router )
             app.dependency_overrides[ get_notification_queue ] = lambda: queue
 
-            # get_local_timestamp() imports fastapi_app.main; short-circuit it.
+            # get_local_timestamp() imports lupin_app.main; short-circuit it.
             with patch(
                 "cosa.rest.routers.notifications.get_local_timestamp",
                 return_value="2026-04-22T15:00:00-04:00"

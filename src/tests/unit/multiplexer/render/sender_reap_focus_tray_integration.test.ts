@@ -18,9 +18,9 @@ import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createSenderStore } from "../../../../fastapi_app/static/js/multiplexer/stores/SenderStore";
-import { createFocusTrayRenderer } from "../../../../fastapi_app/static/js/multiplexer/render/FocusTrayRenderer";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createSenderStore } from "../../../../lupin_app/static/js/multiplexer/stores/SenderStore";
+import { createFocusTrayRenderer } from "../../../../lupin_app/static/js/multiplexer/render/FocusTrayRenderer";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

@@ -137,8 +137,8 @@ Example:
 - Use `ConfigurationManager` to access config values
 
 ## PROJECT STRUCTURE
-- `/src/fastapi_app/`: FastAPI application directory
-  - `/src/fastapi_app/main.py`: Main FastAPI server entry point
+- `/src/lupin_app/`: FastAPI application directory
+  - `/src/lupin_app/main.py`: Main FastAPI server entry point
   - `/src/cosa/rest/routers/`: API endpoint routers
 - `/src/cosa/`: Contains the CoSA (Collection of Small Agents) framework
   - **Folded into the Lupin mono-repo (2026-05-29)**: `src/cosa/` is now a regular

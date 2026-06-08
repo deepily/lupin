@@ -10,7 +10,7 @@ import {
   formatHM,
   formatDateKey,
   formatDuration,
-} from "../../../../fastapi_app/static/js/multiplexer/render/time";
+} from "../../../../lupin_app/static/js/multiplexer/render/time";
 
 // ---------------------------------------------------------------------------
 // formatCountdown — D-H purity invariant

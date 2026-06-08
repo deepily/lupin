@@ -192,7 +192,7 @@ SELECTED_FIXES = [
         "confidence"    : 0.92,
         "target_files"  : [
             "src/lupin_cli/claude_code/hooks/stop.py",
-            "src/fastapi_app/static/js/notifications.js",
+            "src/lupin_app/static/js/notifications.js",
         ],
         "failing_tests" : [ "TestVoiceBlocking", "TestNotifyUserSync" ],
         "description"   : (
@@ -225,7 +225,7 @@ SELECTED_FIXES = [
         "title"         : "Fix renderHistoryActions to always emit .delete-btn",
         "fix_type"      : "code_patch",
         "confidence"    : 0.92,
-        "target_files"  : [ "src/fastapi_app/static/js/notifications.js" ],
+        "target_files"  : [ "src/lupin_app/static/js/notifications.js" ],
         "failing_tests" : [ "renderHistoryActions" ],
         "description"   : (
             "Narrower variant of C8 Part (2) only: remove the early `if ( !canRetry ) return ''` guard in "

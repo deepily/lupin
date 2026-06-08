@@ -34,10 +34,10 @@ from cosa.rest.routers.queues import get_todo_queue, get_running_queue, get_done
 
 def _patch_fastapi_main( mock_main ):
     """
-    Robustly patch `fastapi_app.main` for direct-call unit tests.
+    Robustly patch `lupin_app.main` for direct-call unit tests.
 
-    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
-    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    `import lupin_app.main as m` binds m via getattr(sys.modules['lupin_app'],
+    'main'), NOT sys.modules['lupin_app.main']. Once the REAL lupin_app
     package is cached by an earlier test, patching only the submodule entry is
     silently ignored (passes in isolation, fails under full-suite ordering).
     Overriding BOTH the package object and the submodule entry makes the import
@@ -45,7 +45,7 @@ def _patch_fastapi_main( mock_main ):
     """
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 class TestQueuesRouter( unittest.TestCase ):
@@ -631,7 +631,7 @@ class TestQueuesRouter( unittest.TestCase ):
         Test queue dependency functions for proper module imports.
         
         Ensures:
-            - All dependency functions can import fastapi_app.main
+            - All dependency functions can import lupin_app.main
             - Dependencies return correct queue attributes
             - Import errors are properly handled
         """

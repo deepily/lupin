@@ -5,8 +5,8 @@ import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { renderNotificationItem } from "../../../../fastapi_app/static/js/multiplexer/render/templates/notificationItem";
-import type { Notification } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import { renderNotificationItem } from "../../../../lupin_app/static/js/multiplexer/render/templates/notificationItem";
+import type { Notification } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

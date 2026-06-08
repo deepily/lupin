@@ -1746,7 +1746,7 @@ class {AgentName}SubmitResponse( BaseModel ):
 
 def get_todo_queue():
     """Dependency to get todo queue from main module."""
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_todo_queue
 
 
@@ -1818,7 +1818,7 @@ async def submit_{agent_name}(
 
 ### Register Router in main.py
 
-Add the import and registration in `src/fastapi_app/main.py`:
+Add the import and registration in `src/lupin_app/main.py`:
 
 ```python
 # At the top with other router imports:
@@ -3726,7 +3726,7 @@ confirmation dialog issues, argument extraction errors.
 
 Each agent needs an HTML card in the notification UI and a JavaScript handler to submit jobs.
 
-**1. HTML Card** — Add to `src/fastapi_app/static/html/notifications.html`:
+**1. HTML Card** — Add to `src/lupin_app/static/html/notifications.html`:
 
 ```html
 <div class="job-submit-card" id="{agent-name}-submit-card">
@@ -3762,7 +3762,7 @@ Each agent needs an HTML card in the notification UI and a JavaScript handler to
 </div>
 ```
 
-**2. JavaScript Handler** — Add to `src/fastapi_app/static/js/notifications.js`:
+**2. JavaScript Handler** — Add to `src/lupin_app/static/js/notifications.js`:
 
 Wire the submit button in `setupJobSubmitEventListeners()`:
 

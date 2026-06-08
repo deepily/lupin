@@ -7,8 +7,8 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { renderFocusTray } from "../../../../fastapi_app/static/js/multiplexer/render/templates/focusTray";
-import type { SenderRecord, VoicePersona } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import { renderFocusTray } from "../../../../lupin_app/static/js/multiplexer/render/templates/focusTray";
+import type { SenderRecord, VoicePersona } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

@@ -21,4 +21,4 @@ python3 scripts/seed_test_companions.py
 [ -f /home/rruiz/.lupin/test-env.sh ] && source /home/rruiz/.lupin/test-env.sh
 
 # Start FastAPI (LUPIN_ENV=testing set by docker-compose env block)
-python3 -m fastapi_app.main
+python3 -m lupin_app.main

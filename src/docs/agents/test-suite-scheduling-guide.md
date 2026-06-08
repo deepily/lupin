@@ -207,7 +207,7 @@ authenticated Lupin API.
 to find your job. Or watch the Activity Log in the web UI for real-time updates.
 
 **Full endpoint schema**: available via the interactive Swagger UI at `/docs` on
-the running server. The schema lives in `src/fastapi_app/main.py`'s router
+the running server. The schema lives in `src/lupin_app/main.py`'s router
 registration.
 
 ### Direct invocation via `/api/push`

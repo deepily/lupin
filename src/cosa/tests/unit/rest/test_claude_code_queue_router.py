@@ -5,7 +5,7 @@ Unit tests for the Claude Code queue submission router
 Covers:
 - Pydantic models `ClaudeCodeQueueRequest` / `ClaudeCodeQueueResponse`
   (defaults + explicit values).
-- DI accessors `get_todo_queue` (dual-key `fastapi_app.main` patch) and
+- DI accessors `get_todo_queue` (dual-key `lupin_app.main` patch) and
   `get_user_job_tracker`.
 - `submit_claude_code_to_queue` endpoint — canonical + deprecated-alias paths,
   missing-uid / missing-email / invalid-task_type 400s, websocket_id default
@@ -41,7 +41,7 @@ P = "cosa.rest.routers.claude_code_queue"
 def _patch_fastapi_main( mock_main ):
     pkg = MagicMock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 # ── Pydantic models ─────────────────────────────────────────────────────────────

@@ -53,7 +53,7 @@ def get_websocket_manager():
     FastAPI dependency to get the WebSocket manager instance.
     
     Requires:
-        - fastapi_app.main module exists and has websocket_manager attribute
+        - lupin_app.main module exists and has websocket_manager attribute
         
     Ensures:
         - Returns the global WebSocketManager instance
@@ -62,7 +62,7 @@ def get_websocket_manager():
         - ImportError if main module cannot be imported
         - AttributeError if websocket_manager attribute is missing
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.websocket_manager
 
 def get_active_tasks():
@@ -70,7 +70,7 @@ def get_active_tasks():
     FastAPI dependency to get the active tasks dictionary.
     
     Requires:
-        - fastapi_app.main module exists and has active_tasks attribute
+        - lupin_app.main module exists and has active_tasks attribute
         
     Ensures:
         - Returns the global active_tasks dictionary for task management
@@ -79,7 +79,7 @@ def get_active_tasks():
         - ImportError if main module cannot be imported
         - AttributeError if active_tasks attribute is missing
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.active_tasks
 
 def get_app_debug():
@@ -87,7 +87,7 @@ def get_app_debug():
     FastAPI dependency to get application debug and verbose settings.
     
     Requires:
-        - fastapi_app.main module exists and has app_debug, app_verbose attributes
+        - lupin_app.main module exists and has app_debug, app_verbose attributes
         
     Ensures:
         - Returns tuple of (app_debug, app_verbose) boolean flags
@@ -96,7 +96,7 @@ def get_app_debug():
         - ImportError if main module cannot be imported
         - AttributeError if debug/verbose attributes are missing
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.app_debug, main_module.app_verbose
 
 def _undelivered_max_age_hours() -> int:
@@ -111,7 +111,7 @@ def _undelivered_max_age_hours() -> int:
     Ensures:
         - returns the configured int cap (default 24 hours)
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.config_mgr.get( "notification undelivered max age hours", default=24, return_type="int" )
 
 def _compute_undelivered_count( user_id ) -> int:
@@ -217,7 +217,7 @@ async def websocket_audio_endpoint(websocket: WebSocket, session_id: str):
         session_id: Unique session identifier for this client
     """
     # Get dependencies from main module
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     websocket_manager = main_module.websocket_manager
     active_tasks = main_module.active_tasks
     app_debug = main_module.app_debug
@@ -370,7 +370,7 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
         session_id: Unique session identifier for this client
     """
     # Get dependencies from main module
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     websocket_manager = main_module.websocket_manager
     app_debug   = main_module.app_debug
     app_verbose = main_module.app_verbose
@@ -780,7 +780,7 @@ def quick_smoke_test():
             # Test dependency functions have proper import structure
             for dep_func in [ get_websocket_manager, get_active_tasks, get_app_debug ]:
                 source_lines = inspect.getsource( dep_func )
-                if 'import fastapi_app.main' in source_lines:
+                if 'import lupin_app.main' in source_lines:
                     print( f"✓ {dep_func.__name__} dependency injection structure valid" )
                 else:
                     print( f"⚠ {dep_func.__name__} dependency structure may have issues" )

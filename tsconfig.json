@@ -14,9 +14,9 @@
     "resolveJsonModule"            : true,
     "isolatedModules"              : true,
     "verbatimModuleSyntax"         : true,
-    "rootDir"                      : "src/fastapi_app/static/js/multiplexer",
-    "outDir"                       : "src/fastapi_app/static/dist/multiplexer",
+    "rootDir"                      : "src/lupin_app/static/js/multiplexer",
+    "outDir"                       : "src/lupin_app/static/dist/multiplexer",
     "noEmit"                       : true
   },
-  "include" : [ "src/fastapi_app/static/js/multiplexer/**/*.ts" ]
+  "include" : [ "src/lupin_app/static/js/multiplexer/**/*.ts" ]
 }

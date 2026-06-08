@@ -2,7 +2,7 @@
 Unit tests for the statistics router (`cosa.rest.routers.stats`).
 
 Covers:
-- `get_snapshot_mgr` — pulls snapshot_mgr off `fastapi_app.main` (dual-key patched).
+- `get_snapshot_mgr` — pulls snapshot_mgr off `lupin_app.main` (dual-key patched).
 - `_format_duration` — all four magnitude bands (ms / s / minutes / hours).
 - `get_time_saved_stats` — per-user aggregate: created-by-me counting, time saved
   for others, time saved for me within/outside the period, and the timestamp-parse
@@ -12,7 +12,7 @@ Covers:
 
 Zero external dependencies — the snapshot manager is boundary-mocked (no disk, no
 GPU), the auth dependency is bypassed by passing `current_user` explicitly, and
-`fastapi_app.main` is patched via the dual-key helper (Gotcha 1).
+`lupin_app.main` is patched via the dual-key helper (Gotcha 1).
 """
 
 import unittest
@@ -34,15 +34,15 @@ from cosa.rest.routers.stats import (
 
 def _patch_fastapi_main( mock_main ):
     """
-    Robustly patch `fastapi_app.main` for direct-call unit tests (Gotcha 1).
+    Robustly patch `lupin_app.main` for direct-call unit tests (Gotcha 1).
 
-    `import fastapi_app.main as m` binds via getattr(sys.modules['fastapi_app'],
-    'main'), NOT sys.modules['fastapi_app.main'], so patching only the submodule
+    `import lupin_app.main as m` binds via getattr(sys.modules['lupin_app'],
+    'main'), NOT sys.modules['lupin_app.main'], so patching only the submodule
     entry is silently ignored once the real package is cached. Override BOTH keys.
     """
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 class TestGetSnapshotMgr( unittest.TestCase ):
@@ -54,7 +54,7 @@ class TestGetSnapshotMgr( unittest.TestCase ):
     """
 
     def test_returns_main_module_snapshot_mgr( self ):
-        """Ensures: the dependency reads snapshot_mgr off fastapi_app.main."""
+        """Ensures: the dependency reads snapshot_mgr off lupin_app.main."""
         mock_main = MagicMock()
         mock_main.snapshot_mgr = "THE_MGR"
         with _patch_fastapi_main( mock_main ):

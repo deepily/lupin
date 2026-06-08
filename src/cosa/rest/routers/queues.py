@@ -35,7 +35,7 @@ def get_todo_queue():
     Dependency to get todo queue from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_todo_queue attribute
         
     Ensures:
@@ -46,7 +46,7 @@ def get_todo_queue():
         - ImportError if main module not available
         - AttributeError if todo queue not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_todo_queue
 
 def get_running_queue():
@@ -54,7 +54,7 @@ def get_running_queue():
     Dependency to get running queue from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_run_queue attribute
         
     Ensures:
@@ -65,7 +65,7 @@ def get_running_queue():
         - ImportError if main module not available
         - AttributeError if running queue not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_run_queue
 
 def get_done_queue():
@@ -73,7 +73,7 @@ def get_done_queue():
     Dependency to get done queue from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_done_queue attribute
         
     Ensures:
@@ -84,7 +84,7 @@ def get_done_queue():
         - ImportError if main module not available
         - AttributeError if done queue not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_done_queue
 
 def get_dead_queue():
@@ -92,7 +92,7 @@ def get_dead_queue():
     Dependency to get dead queue from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_dead_queue attribute
         
     Ensures:
@@ -103,7 +103,7 @@ def get_dead_queue():
         - ImportError if main module not available
         - AttributeError if dead queue not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_dead_queue
 
 def get_notification_queue():
@@ -111,7 +111,7 @@ def get_notification_queue():
     Dependency to get notification queue from main module.
     
     Requires:
-        - fastapi_app.main module is available
+        - lupin_app.main module is available
         - main_module has jobs_notification_queue attribute
         
     Ensures:
@@ -122,7 +122,7 @@ def get_notification_queue():
         - ImportError if main module not available
         - AttributeError if notification queue not found
     """
-    import fastapi_app.main as main_module
+    import lupin_app.main as main_module
     return main_module.jobs_notification_queue
 
 def _count_interactions_for_jobs( job_ids ):
@@ -960,7 +960,7 @@ async def send_job_message(
 
     # Emit WebSocket event to deliver to orchestrator's notification client
     try:
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         ws_manager = main_module.websocket_manager
 
         # Phase D migration (2026-04-27): use the canonical dispatch helper.
@@ -1275,12 +1275,12 @@ async def delete_queue_job(
     # Emit WebSocket event for UI synchronization (canonical dual-emit:
     # owner + watching admins, deduplicated). See
     # WebSocketManager.emit_to_user_and_admins_sync for the rationale.
-    # NOTE: import path is `fastapi_app.main` not `src.fastapi_app.main` —
+    # NOTE: import path is `lupin_app.main` not `src.lupin_app.main` —
     # PYTHONPATH already includes src/, so the `src.` prefix raises
     # ModuleNotFoundError and silently swallowed every job_removed emit
     # before today (Session 248e740e fix).
     try:
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         ws_manager = main_module.websocket_manager
         if ws_manager:
             ws_manager.emit_to_user_and_admins_sync( user_id, 'job_removed', {
@@ -1616,7 +1616,7 @@ async def pause_job(
     # Emit WebSocket event for UI update (state transition: queued/scheduled → paused).
     # Canonical dual-emit so admin viewers also see the pause badge appear.
     try:
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         ws_manager = main_module.websocket_manager
         ws_manager.emit_to_user_and_admins_sync(
             user_id = user_id,
@@ -1688,7 +1688,7 @@ async def resume_job(
     # Emit WebSocket event for UI update (state transition: paused → queued).
     # Canonical dual-emit so admin viewers also see the pause badge clear.
     try:
-        import fastapi_app.main as main_module
+        import lupin_app.main as main_module
         ws_manager = main_module.websocket_manager
         ws_manager.emit_to_user_and_admins_sync(
             user_id = user_id,

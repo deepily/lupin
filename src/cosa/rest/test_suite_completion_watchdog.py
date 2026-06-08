@@ -337,7 +337,7 @@ def init_watchdog(
     """
     Initialize the singleton TestSuiteCompletionWatchdog instance.
 
-    Called once at app startup from fastapi_app.main.
+    Called once at app startup from lupin_app.main.
     """
     global _watchdog_instance
     _watchdog_instance = TestSuiteCompletionWatchdog(

@@ -24,7 +24,7 @@ import pytest
 # ============================================================================
 
 _PROJECT_ROOT = os.environ.get( "LUPIN_ROOT", "/mnt/DATA01/include/www.deepily.ai/projects/lupin" )
-_STATIC_DIR   = os.path.join( _PROJECT_ROOT, "src", "fastapi_app", "static" )
+_STATIC_DIR   = os.path.join( _PROJECT_ROOT, "src", "lupin_app", "static" )
 
 _RATIFY_HTML      = os.path.join( _STATIC_DIR, "html", "auth", "admin", "proxy-ratify.html" )
 _DASHBOARD_HTML   = os.path.join( _STATIC_DIR, "html", "auth", "admin", "proxy-dashboard.html" )

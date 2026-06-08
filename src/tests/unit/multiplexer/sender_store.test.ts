@@ -5,12 +5,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createSenderStore } from "../../../fastapi_app/static/js/multiplexer/stores/SenderStore";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createSenderStore } from "../../../lupin_app/static/js/multiplexer/stores/SenderStore";
 import type {
   LupinEvent,
   StoreSendersChangedPayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Helpers

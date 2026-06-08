@@ -1,5 +1,5 @@
 """
-Layer-1 unit tests for src/fastapi_app/static/js/ws-channel.js.
+Layer-1 unit tests for src/lupin_app/static/js/ws-channel.js.
 
 Phase 1 of the WS reconnect circuit-breaker milestone. Pure state-machine
 assertions driven through Playwright's `page.evaluate()` against a
@@ -8,7 +8,7 @@ NO real network, NO real backoff timers fire.
 
 Strategy doc: src/rnd/v0.1.7/2026.05.02-ws-reconnect-circuit-breaker/
               07-test-strategy.md §Layer 1
-Module under test: src/fastapi_app/static/js/ws-channel.js
+Module under test: src/lupin_app/static/js/ws-channel.js
 
 Placement note: tests live in `src/tests/ws_channel_unit/` rather than
 `src/tests/e2e_ui/` because the e2e_ui conftest enforces a `:8000`
@@ -36,7 +36,7 @@ import pytest
 
 _MODULE_PATH = (
     pathlib.Path( __file__ ).resolve().parents[ 2 ]
-    / "fastapi_app" / "static" / "js" / "ws-channel.js"
+    / "lupin_app" / "static" / "js" / "ws-channel.js"
 )
 
 

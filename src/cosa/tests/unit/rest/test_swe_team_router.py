@@ -2,7 +2,7 @@
 Unit tests for the SWE Team router (`cosa.rest.routers.swe_team`).
 
 Covers:
-- `get_todo_queue` — pulls jobs_todo_queue off `fastapi_app.main` (dual-key patched).
+- `get_todo_queue` — pulls jobs_todo_queue off `lupin_app.main` (dual-key patched).
 - `submit_swe_team_task` — missing-uid 400, missing-email 400, session-id fallback,
   success (minimal + every optional arm: dry_run / lead_model / worker_model /
   budget / timeout / trust_mode / scheduled_at / monopolize / provided websocket_id),
@@ -30,10 +30,10 @@ from cosa.rest.routers.swe_team import (
 
 
 def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `fastapi_app.main` (Gotcha 1)."""
+    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _job( id_hash="init_hash", last_q="ship the feature" ):
@@ -51,7 +51,7 @@ class TestGetTodoQueue( unittest.TestCase ):
     """
 
     def test_returns_main_module_todo_queue( self ):
-        """Ensures: dependency reads jobs_todo_queue off fastapi_app.main."""
+        """Ensures: dependency reads jobs_todo_queue off lupin_app.main."""
         mock_main = MagicMock()
         mock_main.jobs_todo_queue = "Q"
         with _patch_fastapi_main( mock_main ):

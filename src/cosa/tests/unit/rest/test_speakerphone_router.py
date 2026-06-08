@@ -2,7 +2,7 @@
 Unit tests for the speakerphone router (`cosa.rest.routers.speakerphone`).
 
 Covers:
-- `get_notification_queue` — pulls jobs_notification_queue off fastapi_app.main.
+- `get_notification_queue` — pulls jobs_notification_queue off lupin_app.main.
 - `get_speakerphone_endpoint` — 404 (no bridge) + 200 read.
 - `set_speakerphone_endpoint` — 404, solo activate (displace loop: success,
   displace-write-fail skip, displace-notify push failure, displace-action push
@@ -33,10 +33,10 @@ SP = "cosa.rest.routers.speakerphone"
 
 
 def _patch_fastapi_main( mock_main ):
-    """Dual-key patch for `fastapi_app.main` (Gotcha 1)."""
+    """Dual-key patch for `lupin_app.main` (Gotcha 1)."""
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _json_body( response ):
@@ -52,7 +52,7 @@ class TestGetNotificationQueue( unittest.TestCase ):
     """
 
     def test_returns_main_module_notification_queue( self ):
-        """Ensures: dependency reads jobs_notification_queue off fastapi_app.main."""
+        """Ensures: dependency reads jobs_notification_queue off lupin_app.main."""
         mock_main = MagicMock()
         mock_main.jobs_notification_queue = "NQ"
         with _patch_fastapi_main( mock_main ):

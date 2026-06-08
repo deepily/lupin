@@ -124,7 +124,7 @@ topic in `<LUPIN_ROOT>/io/commons/broadcast-acks.md` and dispatches one
 
 `notifications.js:5370` switch case `"commons_broadcast_ack"` delegates to
 `window.broadcastPanel.handleAck(notification)` (defined in
-`src/fastapi_app/static/js/broadcast-panel.js`). The panel updates its in-page
+`src/lupin_app/static/js/broadcast-panel.js`). The panel updates its in-page
 aggregate (`N/Total complete`) and renders the per-session row with the
 listener-side persona stamp.
 
@@ -146,7 +146,7 @@ local `_in_flight` dict for the user-routing payload field to be safe.
 
 - Architecture: [`src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md`](../rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md) AC7 + AC9
 - Producer: `src/cosa/rest/commons_ack_watcher.py:223-249` `_push_ack_event()`
-- Consumer: `src/fastapi_app/static/js/broadcast-panel.js` `handleAck()`
+- Consumer: `src/lupin_app/static/js/broadcast-panel.js` `handleAck()`
 - E2E coverage: `src/tests/smoke/test_broadcast_two_session_e2e.py` (backend) +
   `src/tests/e2e_ui/test_broadcast_panel.py` (UI)
 
@@ -156,7 +156,7 @@ local `_in_flight` dict for the user-routing payload field to be safe.
 
 1. Append the string to `valid_types` in `src/cosa/rest/routers/notifications.py:359-363`.
 2. Add a `case "your_new_type":` branch in the switch at
-   `src/fastapi_app/static/js/notifications.js:5332` that handles the state
+   `src/lupin_app/static/js/notifications.js:5332` that handles the state
    update and `return`s BEFORE the message-render path. The branch should never
    produce a visible notification card unless it's user-facing.
 3. Document the trigger, payload shape, and UI handler here.

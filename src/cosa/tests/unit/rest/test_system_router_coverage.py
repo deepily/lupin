@@ -5,7 +5,7 @@ Supplemental unit tests — `cosa.rest.routers.system` coverage closure.
 Complements `test_system_router.py` (health / init-success+error / session-id /
 auth-test / websocket-sessions). This file closes the remaining gap:
 
-    - `get_todo_queue` dependency (G1 dual-key fastapi_app.main),
+    - `get_todo_queue` dependency (G1 dual-key lupin_app.main),
     - `get_server_info` (masked DB url, password present + None),
     - `init` with config_block_id (block-swap path) + PredictionEngine
       eager-rebuild exception arm,
@@ -17,7 +17,7 @@ auth-test / websocket-sessions). This file closes the remaining gap:
     - `get_client_config` (TEST + DEVELOPMENT env labels),
     - `get_similarity_confirmation` / `set_similarity_confirmation`.
 
-Boundary-mock discipline: `fastapi_app.main` is patched DUAL-KEY (G1);
+Boundary-mock discipline: `lupin_app.main` is patched DUAL-KEY (G1);
 ConfigurationManager / PredictionEngine / lancedb / db engine / get_config_manager
 / invalidate_all are all patched so NO real DB, LanceDB index, config file, or
 PredictionEngine cold-start runs. ZERO GPU, ZERO network, ZERO spend.
@@ -53,7 +53,7 @@ def _patch_fastapi_main( mock_main ):
     """G1 DUAL-KEY patch (see test_system_router._patch_fastapi_main)."""
     pkg      = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 class TestGetTodoQueue( unittest.TestCase ):
@@ -61,7 +61,7 @@ class TestGetTodoQueue( unittest.TestCase ):
     Exercises the `get_todo_queue` dependency.
 
     Ensures:
-        - returns main_module.jobs_todo_queue when fastapi_app.main is importable
+        - returns main_module.jobs_todo_queue when lupin_app.main is importable
     """
 
     def test_returns_main_module_queue( self ):
@@ -129,7 +129,7 @@ class TestInitWithBlockId( unittest.IsolatedAsyncioTestCase ):
              patch( "cosa.rest.db.database.swap_database", return_value="postgresql://test" ) as mk_swap, \
              patch( "cosa.config.cache_registry.invalidate_all", return_value=2 ), \
              patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine" ), \
-             patch.dict( "sys.modules", { "fastapi_app.main": Mock() } ), \
+             patch.dict( "sys.modules", { "lupin_app.main": Mock() } ), \
              patch( "builtins.print" ):
             result = await init( config_block_id="Lupin: Testing" )
         cfg.init.assert_called_once_with( config_block_id="Lupin: Testing" )
@@ -146,7 +146,7 @@ class TestInitWithBlockId( unittest.IsolatedAsyncioTestCase ):
              patch( "cosa.config.cache_registry.invalidate_all", return_value=0 ), \
              patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine",
                     side_effect=Exception( "PE boom" ) ), \
-             patch.dict( "sys.modules", { "fastapi_app.main": Mock() } ), \
+             patch.dict( "sys.modules", { "lupin_app.main": Mock() } ), \
              patch( "builtins.print" ) as mk_print:
             # "+" in the block id is decoded to a space before env lookup
             result = await init( config_block_id="Lupin:+Development" )

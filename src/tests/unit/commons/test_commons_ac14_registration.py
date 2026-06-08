@@ -4,7 +4,7 @@ AC14 smoke verification for Phase 2 step 8.
 Per src/rnd/v0.1.7/2026.05.09-inter-session-commons/03-phase2-user-broadcast-design.md AC14.
 
 Verifies that the `commons` router has the two endpoints registered as expected.
-A full TestClient-on-app integration test against `src/fastapi_app/main.py` is
+A full TestClient-on-app integration test against `src/lupin_app/main.py` is
 heavyweight (GPU model loading + database init), so we verify at the router
 level — the same routes will then be mounted on the app via
 `app.include_router(commons.router)` in main.py.

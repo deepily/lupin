@@ -12,12 +12,12 @@ Endpoints (all authenticated via `require_api_key_or_jwt` — X-API-Key OR
 Bearer JWT, the canonical machine-or-human credential, C2):
     - GET  /api/arbiter/fleet-state    — NEW authoritative surface (L4): a thin
       reverse-proxy that PULLS the single-pane composite from the standalone
-      arbiter-vigilance service at :8001/state (R3 — :8001 NEVER pushes here).
+      lupin-arbiter-app service at :8001/state (R3 — :8001 NEVER pushes here).
     - GET  /api/arbiter/fleet-snapshot — LEGACY v2.1: read the cached snapshot.
     - POST /api/arbiter/fleet-snapshot — LEGACY v2.1: the in-process arbiter
       PUSHES its latest snapshot here (updates the server singleton directly).
 
-SUPERSEDED (2026-06-07, R0/R3): the standalone host-side **arbiter-vigilance
+SUPERSEDED (2026-06-07, R0/R3): the standalone host-side **lupin-arbiter-app
 service on :8001** is now authoritative — it exposes `GET /state` (the single
 pane) and the :7999 reverse-proxy `GET /api/arbiter/fleet-state` PULLS from it
 (deploy doc R3). The legacy in-process GET/POST `/api/arbiter/fleet-snapshot`
@@ -119,17 +119,17 @@ async def push_fleet_snapshot(
 
 @router.get(
     "/arbiter/fleet-state",
-    summary     = "Arbiter-vigilance single-pane (reverse-proxy to :8001/state)",
+    summary     = "Lupin Arbiter App single-pane (reverse-proxy to :8001/state)",
     description = "NEW authoritative surface (L4): PULLS the single-pane composite "
                   "(Loop A health-watch + Loop B fleet snapshot) from the standalone "
-                  "arbiter-vigilance service at :8001/state (R3 — :8001 never pushes). "
+                  "lupin-arbiter-app service at :8001/state (R3 — :8001 never pushes). "
                   "Auth: X-API-Key or Bearer JWT. Supersedes /api/arbiter/fleet-snapshot."
 )
 async def get_fleet_state(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ):
     """
-    Reverse-proxy the standalone arbiter-vigilance composite from :8001/state.
+    Reverse-proxy the standalone lupin-arbiter-app composite from :8001/state.
 
     Requires:
         - authenticated caller (X-API-Key or Bearer JWT)
@@ -154,7 +154,7 @@ async def get_fleet_state(
     except httpx.HTTPError as e:
         return {
             "status"       : "unreachable",
-            "service"      : "arbiter-vigilance",
+            "service"      : "lupin-arbiter-app",
             "detail"       : f"{type( e ).__name__}: {e}",
             "loop_a"       : None,
             "loop_b_fleet" : None,

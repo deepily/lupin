@@ -4,7 +4,7 @@ Unit tests for cosa.rest.routers.admin — the admin router ( 14 endpoints + 4 h
 Every endpoint is exercised by DIRECT call. Per handoff Gotcha 2, every Depends parameter
 ( admin_user = Depends( require_admin ), snapshot_mgr = Depends( get_snapshot_manager ) ) and
 every Request is passed EXPLICITLY so no FieldInfo object leaks into a branch decision. Per
-Gotcha 1, get_snapshot_manager ( which does `import fastapi_app.main as main_module` ) is tested
+Gotcha 1, get_snapshot_manager ( which does `import lupin_app.main as main_module` ) is tested
 with the dual-key _patch_fastapi_main helper; all other snapshot endpoints receive an explicit
 mock snapshot_mgr, sidestepping the import entirely.
 
@@ -69,12 +69,12 @@ ADMIN = { "user_id": "admin-1", "email": "admin@example.com" }
 def _patch_fastapi_main( mock_main ):
     """
     Ensures:
-        - Patches BOTH the fastapi_app package and its .main submodule ( Gotcha 1 dual-key )
-          so `import fastapi_app.main as main_module` resolves to mock_main
+        - Patches BOTH the lupin_app package and its .main submodule ( Gotcha 1 dual-key )
+          so `import lupin_app.main as main_module` resolves to mock_main
     """
     pkg = MagicMock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 def _req( client_host="1.2.3.4" ):
@@ -123,13 +123,13 @@ class TestGetSnapshotManager( unittest.TestCase ):
     Tests for the get_snapshot_manager dependency.
 
     Ensures:
-        - Resolves main_module.snapshot_mgr via the dual-key fastapi_app.main patch
+        - Resolves main_module.snapshot_mgr via the dual-key lupin_app.main patch
     """
 
     def test_returns_main_module_snapshot_mgr( self ):
         """
         Ensures:
-            - The global snapshot manager from fastapi_app.main is returned
+            - The global snapshot manager from lupin_app.main is returned
         """
         sentinel = object()
         mock_main = MagicMock()
@@ -795,7 +795,7 @@ class TestReexecProcess( unittest.TestCase ):
     Tests for _reexec_process.
 
     Ensures:
-        - os.execv is invoked with the python -m fastapi_app.main argv ( never actually re-execs )
+        - os.execv is invoked with the python -m lupin_app.main argv ( never actually re-execs )
     """
 
     def test_invokes_execv( self ):
@@ -804,7 +804,7 @@ class TestReexecProcess( unittest.TestCase ):
             _reexec_process()
         mock_execv.assert_called_once()
         args = mock_execv.call_args.args
-        self.assertEqual( args[ 1 ], [ sys.executable, "-m", "fastapi_app.main" ] )
+        self.assertEqual( args[ 1 ], [ sys.executable, "-m", "lupin_app.main" ] )
 
 
 class TestRefreshSource( unittest.IsolatedAsyncioTestCase ):

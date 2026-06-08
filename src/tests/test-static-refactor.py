@@ -15,7 +15,7 @@ def test_static_paths():
     project_root = os.path.dirname( os.path.dirname( os.path.dirname( os.path.abspath( __file__ ) ) ) )
     
     # Test 1: Check new static directory exists
-    static_dir = os.path.join( project_root, "src/fastapi_app/static" )
+    static_dir = os.path.join( project_root, "src/lupin_app/static" )
     assert os.path.exists( static_dir ), f"Static directory not found: {static_dir}"
     print( f"✓ Static directory exists: {static_dir}" )
     

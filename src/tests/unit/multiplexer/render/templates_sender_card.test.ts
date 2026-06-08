@@ -5,8 +5,8 @@ import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { renderSenderCard } from "../../../../fastapi_app/static/js/multiplexer/render/templates/senderCard";
-import type { SenderRecord, Notification, VoicePersona } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import { renderSenderCard } from "../../../../lupin_app/static/js/multiplexer/render/templates/senderCard";
+import type { SenderRecord, Notification, VoicePersona } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

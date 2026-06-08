@@ -35,10 +35,10 @@ from cosa.rest.routers.system import router, health_check, health, init, get_ses
 
 def _patch_fastapi_main( mock_main ):
     """
-    Robustly patch `fastapi_app.main` for direct-call unit tests.
+    Robustly patch `lupin_app.main` for direct-call unit tests.
 
-    `import fastapi_app.main as m` binds m via getattr(sys.modules['fastapi_app'],
-    'main'), NOT sys.modules['fastapi_app.main']. Once the REAL fastapi_app
+    `import lupin_app.main as m` binds m via getattr(sys.modules['lupin_app'],
+    'main'), NOT sys.modules['lupin_app.main']. Once the REAL lupin_app
     package is cached by an earlier test, patching only the submodule entry is
     silently ignored (passes in isolation, fails under full-suite ordering).
     Overriding BOTH the package object and the submodule entry makes the import
@@ -46,7 +46,7 @@ def _patch_fastapi_main( mock_main ):
     """
     pkg = Mock()
     pkg.main = mock_main
-    return patch.dict( sys.modules, { "fastapi_app": pkg, "fastapi_app.main": mock_main } )
+    return patch.dict( sys.modules, { "lupin_app": pkg, "lupin_app.main": mock_main } )
 
 
 class TestSystemRouter( unittest.TestCase ):
@@ -174,7 +174,7 @@ class TestSystemRouter( unittest.TestCase ):
                  patch( 'cosa.rest.dependencies.config.get_config_manager', return_value=mock_config_mgr ) as mock_get_cfg, \
                  patch( 'cosa.config.cache_registry.invalidate_all', return_value=3 ) as mock_invalidate, \
                  patch( 'cosa.agents.prediction_engine.prediction_engine.get_prediction_engine' ) as mock_get_pe, \
-                 patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ), \
+                 patch.dict( 'sys.modules', { 'lupin_app.main': Mock() } ), \
                  patch( 'builtins.print' ):
 
                 result = await init()
@@ -211,7 +211,7 @@ class TestSystemRouter( unittest.TestCase ):
         async def run_test():
             with patch( 'cosa.utils.util.get_current_datetime_iso', return_value=self.test_timestamp ), \
                  patch( 'cosa.rest.dependencies.config.get_config_manager', side_effect=Exception( "Config file not found" ) ), \
-                 patch.dict( 'sys.modules', { 'fastapi_app.main': Mock() } ):
+                 patch.dict( 'sys.modules', { 'lupin_app.main': Mock() } ):
 
                 result = await init()
 

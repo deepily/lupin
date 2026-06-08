@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Loop B — the standing fleet-stall arbiter (L3 of the :8001 arbiter-vigilance service).
+Loop B — the standing fleet-stall arbiter (L3 of the :8001 lupin-arbiter-app service).
 
 Reuses the v2.2 `ArbiterConsumerJob` AS-IS (zero logic edits → its invariants carry
 by construction: never-auto-assign · additive-observer one-way · lineage-derived
@@ -38,7 +38,7 @@ import json
 import threading
 from typing import Any, Callable, Optional
 
-from arbiter_vigilance.health_watch import SystemClock
+from lupin_arbiter_app.health_watch import SystemClock
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 
 
@@ -49,7 +49,7 @@ def _default_log_fn( event: str, **fields: Any ) -> None:
     """Structured JSON line (loop:B) to stdout → systemd journal (flushed)."""
     line : dict = {
         "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
-        "service" : "arbiter-vigilance",
+        "service" : "lupin-arbiter-app",
         "loop"    : "B",
         "event"   : event,
     }
@@ -172,7 +172,7 @@ def build_loop_b_job_factory(
             notify_fn                  = warmup_notify,
             user_id                    = "system",
             user_email                 = "system@lupin.deepily.ai",
-            session_id                 = "arbiter-vigilance-8001",
+            session_id                 = "lupin-arbiter-app-8001",
         )
 
     return factory

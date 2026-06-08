@@ -211,7 +211,7 @@ def quick_smoke_test():
         import os as _os
         notif_js_path = _os.path.join(
             _os.environ.get( "LUPIN_ROOT", "/var/lupin" ),
-            "src/fastapi_app/static/js/notifications.js"
+            "src/lupin_app/static/js/notifications.js"
         )
         if _os.path.exists( notif_js_path ):
             with open( notif_js_path ) as f:

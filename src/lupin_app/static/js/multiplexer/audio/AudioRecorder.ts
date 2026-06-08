@@ -1,7 +1,7 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 6c Node C — AudioRecorder.
 //
-// TypeScript port of `src/fastapi_app/static/js/audio-recorder.js` per
+// TypeScript port of `src/lupin_app/static/js/audio-recorder.js` per
 // Rick's Q-C2 ratification 2026-05-19. Preserves the legacy contract:
 // constructor accepts options dict, exposes start/stop/cancel +
 // getCurrentMimeType, runs MediaRecorder + base64 upload + Bearer auth.

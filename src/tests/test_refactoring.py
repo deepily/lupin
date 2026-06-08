@@ -227,7 +227,7 @@ async def main():
     # First, always do a quick connectivity test
     if not await tester.run_quick_test():
         print("\n⚠️  Make sure the FastAPI server is running!")
-        print("Run: cd src && python -m uvicorn fastapi_app.main:app --port 7999")
+        print("Run: cd src && python -m uvicorn lupin_app.main:app --port 7999")
         sys.exit(1)
     
     if args.baseline:

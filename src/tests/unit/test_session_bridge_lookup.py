@@ -1093,7 +1093,7 @@ class TestBuildSenderIdForCcBridgeCwdAnchoring:
             project_root = tmp_root / "lupin"
             self._make_repo( sessions_dir, project_root, "lupin" )
             # Bridge cwd is a SUBDIRECTORY (e.g., user launched claude from src/)
-            sub_dir = project_root / "src" / "fastapi_app"
+            sub_dir = project_root / "src" / "lupin_app"
             sub_dir.mkdir( parents=True, exist_ok=True )
 
             sid = "22222222-2222-3333-4444-555566667777"
