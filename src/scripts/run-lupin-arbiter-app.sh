@@ -3,8 +3,11 @@
 # run-lupin-arbiter-app.sh — launch the standalone, OUT-OF-BAND fleet watcher on :8001.
 #
 # Host-side process, runs OUTSIDE all Docker containers (deploy doc §3, D1).
-# Binds 127.0.0.1 explicit (R3 — never 0.0.0.0; the :7999 reverse-proxy is the
-# only external view path). reload=False (a watcher must not hot-reload itself).
+# Binds 0.0.0.0 (Option 2, 2026-06-08): the :7999/:8000 reverse-proxies run INSIDE
+# Docker containers and reach this host process via host.docker.internal (host-gateway).
+# A 127.0.0.1 host-loopback bind (the original R3 default) is unreachable from a
+# container's separate network namespace. The broader bind is host-firewall-restricted,
+# not publicly exposed. reload=False (a watcher must not hot-reload itself).
 #
 # Supervised by the systemd --user unit in src/lupin_arbiter_app/systemd/ (this
 # script is its ExecStart). systemd runs with a MINIMAL, NON-INHERITED env, so we
@@ -40,6 +43,6 @@ cd "${LUPIN_ROOT}/src"
 # --factory: create_production_app() builds the real Loop A (health watch) wired
 # to the shared :8001-local store. The lifespan start()s the loop on boot.
 exec "${PYBIN}" -m uvicorn lupin_arbiter_app.app:create_production_app --factory \
-  --host 127.0.0.1 \
+  --host 0.0.0.0 \
   --port 8001 \
   --no-access-log

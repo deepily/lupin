@@ -125,6 +125,10 @@ services:
     user: "1001:1001"
     ports:
       - "7999:7999"
+    # host.docker.internal → host gateway so the in-container :7999 reverse-proxy
+    # reaches the host-side standalone arbiter on :8001 (Option 2, 2026-06-08).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
@@ -204,6 +208,10 @@ services:
     command: ["/bin/bash", "/var/lupin/src/scripts/run-fastapi-lupin-test.sh"]
     ports:
       - "8000:7999"
+    # host.docker.internal → host gateway so the in-container :8000 reverse-proxy
+    # reaches the host-side standalone arbiter on :8001 (Option 2, 2026-06-08).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
