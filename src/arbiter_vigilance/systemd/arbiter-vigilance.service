@@ -1,0 +1,40 @@
+# arbiter-vigilance.service — systemd --user unit for the standalone :8001 fleet watcher.
+#
+# ┌──────────────────────────────────────────────────────────────────────────┐
+# │ STAGED, NOT ENABLED. HELD FOR RICK.                                        │
+# │ Do NOT `systemctl --user enable` this unit and do NOT run                  │
+# │ `loginctl enable-linger` without Rick's explicit word — those actuate his  │
+# │ login session. Install + enable steps: see README.md in this directory.    │
+# └──────────────────────────────────────────────────────────────────────────┘
+#
+# Why systemd --user (not /etc/systemd/system): the :8001 service user has no
+# root / no passwordless sudo on the dev box (verified 2026-06-07: uid 1001).
+# systemd --user keeps the unconditional Restart=always guarantee (deploy doc §6)
+# without root; cron-only was rejected because it loses that guarantee.
+# `loginctl enable-linger` (see README) makes the user manager survive logout so
+# the watcher runs ~24/7.
+
+[Unit]
+Description=Lupin arbiter-vigilance — out-of-band fleet watcher (:8001)
+After=network.target
+
+[Service]
+Type=exec
+# The single deploy-time value to confirm on a new host (PATH MANAGEMENT: this
+# absolute path is inherent to a systemd ExecStart; everything downstream reads
+# LUPIN_ROOT from here). The run script (ExecStart) derives the rest from this:
+# the .venv interpreter AND LUPIN_CONFIG_MGR_CLI_ARGS (systemd's clean env won't
+# inherit them — see the script header). To override the config block, set
+# LUPIN_CONFIG_MGR_CLI_ARGS here and the script's `:-` default yields to it.
+Environment=LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin
+ExecStart=/mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/run-arbiter-vigilance.sh
+Restart=always
+RestartSec=5
+# Loop B's graceful stop checks the cancel flag at top-of-poll (≤ poll_seconds,
+# 60s default); give the clean cancel room before SIGKILL so a stop never races it.
+TimeoutStopSec=75
+# WatchdogSec + sd_notify is a V2 add (catches hung-but-not-exited); the
+# belt-and-suspenders cron in README handles that gap until then.
+
+[Install]
+WantedBy=default.target

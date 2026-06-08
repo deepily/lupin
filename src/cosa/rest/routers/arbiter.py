@@ -8,22 +8,38 @@ Mirrors `GET /api/queue/pool-status`: a single queryable HTTP surface on
 direct state + honest last-seen liveness ages), so Rick / the manager / a peer
 can read true fleet state from a distance — seen, never inferred.
 
-Endpoints (both authenticated via `require_api_key_or_jwt` — X-API-Key OR
+Endpoints (all authenticated via `require_api_key_or_jwt` — X-API-Key OR
 Bearer JWT, the canonical machine-or-human credential, C2):
-    - GET  /api/arbiter/fleet-snapshot — read the cached snapshot.
-    - POST /api/arbiter/fleet-snapshot — the standalone arbiter PUSHES its
-      latest snapshot here (the in-pool arbiter updates the singleton directly).
+    - GET  /api/arbiter/fleet-state    — NEW authoritative surface (L4): a thin
+      reverse-proxy that PULLS the single-pane composite from the standalone
+      arbiter-vigilance service at :8001/state (R3 — :8001 NEVER pushes here).
+    - GET  /api/arbiter/fleet-snapshot — LEGACY v2.1: read the cached snapshot.
+    - POST /api/arbiter/fleet-snapshot — LEGACY v2.1: the in-process arbiter
+      PUSHES its latest snapshot here (updates the server singleton directly).
 
-Per redline C2 there is NO standalone arbiter HTTP server — the arbiter pushes
-into this existing surface; the cache lives in `arbiter_snapshot_store`.
+SUPERSEDED (2026-06-07, R0/R3): the standalone host-side **arbiter-vigilance
+service on :8001** is now authoritative — it exposes `GET /state` (the single
+pane) and the :7999 reverse-proxy `GET /api/arbiter/fleet-state` PULLS from it
+(deploy doc R3). The legacy in-process GET/POST `/api/arbiter/fleet-snapshot`
+pair STAYS until the R0 cutover (feature-flag preservation — both coexist);
+**post-cutover `/api/arbiter/fleet-state` WINS** and the in-process snapshot
+pair retires with the in-process arbiter, which is gated OFF by the
+`arbiter in-process bootstrap enabled` flag (R0). The former redline-C2
+("there is NO standalone arbiter HTTP server") is retired with it.
 """
 from typing import Annotated, Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest import arbiter_snapshot_store as snapshot_store
+
+
+def _pull_arbiter_state( url: str, timeout: int ) -> Dict[ str, Any ]:   # pragma: no cover - literal httpx call boundary (live :8001 pull)
+    """The ONE external IO boundary: GET :8001/state and return its JSON body."""
+    return httpx.get( url, timeout=timeout ).raise_for_status().json()
 
 
 router = APIRouter( prefix="/api", tags=[ "arbiter" ] )
@@ -99,3 +115,47 @@ async def push_fleet_snapshot(
     """
     snapshot_store.set_snapshot( payload.model_dump() )
     return { "status": "ok", "session_count": payload.session_count }
+
+
+@router.get(
+    "/arbiter/fleet-state",
+    summary     = "Arbiter-vigilance single-pane (reverse-proxy to :8001/state)",
+    description = "NEW authoritative surface (L4): PULLS the single-pane composite "
+                  "(Loop A health-watch + Loop B fleet snapshot) from the standalone "
+                  "arbiter-vigilance service at :8001/state (R3 — :8001 never pushes). "
+                  "Auth: X-API-Key or Bearer JWT. Supersedes /api/arbiter/fleet-snapshot."
+)
+async def get_fleet_state(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Reverse-proxy the standalone arbiter-vigilance composite from :8001/state.
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+
+    Ensures:
+        - PULLS :8001/state (R3 — :7999 never pushes to :8001) and returns its
+          composite body verbatim when reachable
+        - on any httpx failure (connect refused / timeout / non-2xx) returns an
+          explicit { status: "unreachable", ... } envelope with null sections —
+          a HTTP 200 (mirroring the awaiting idiom: the proxy is up, the upstream
+          watcher is not), never a 5xx or a hung request
+        - reads the upstream URL + timeout LAZILY from the shared config singleton
+          (no module-scope ConfigurationManager → import/collection never touches
+          LUPIN_CONFIG_MGR_CLI_ARGS)
+    """
+    from cosa.rest.dependencies.config import get_config_manager
+    config_mgr = get_config_manager()
+    url     = config_mgr.get( "arbiter vigilance state url", default="http://127.0.0.1:8001/state" )
+    timeout = config_mgr.get( "arbiter vigilance state timeout seconds", default=5, return_type="int" )
+    try:
+        return _pull_arbiter_state( url, timeout )
+    except httpx.HTTPError as e:
+        return {
+            "status"       : "unreachable",
+            "service"      : "arbiter-vigilance",
+            "detail"       : f"{type( e ).__name__}: {e}",
+            "loop_a"       : None,
+            "loop_b_fleet" : None,
+        }

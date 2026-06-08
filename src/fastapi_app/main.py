@@ -844,8 +844,11 @@ async def lifespan( app: FastAPI ):
     # restored/existing heartbeat_arbiter job is present) + degrade-safe (any
     # failure is swallowed inside; the arbiter is an additive observer, never a
     # dependency of the local poke path). See cosa.rest.arbiter_bootstrap.
-    from cosa.rest.arbiter_bootstrap import submit_arbiter_if_absent
-    submit_arbiter_if_absent( jobs_todo_queue, jobs_run_queue, config_mgr )
+    # R0 (2026-06-07): gated by `arbiter in-process bootstrap enabled` (default True).
+    # When the standalone :8001 arbiter-vigilance service owns Loop B, flip the flag
+    # False so the in-process arbiter does NOT submit — never two arbiters actuating.
+    from cosa.rest.arbiter_bootstrap import submit_arbiter_if_enabled
+    submit_arbiter_if_enabled( jobs_todo_queue, jobs_run_queue, config_mgr )
 
     print( f"FastAPI startup complete at {datetime.now()}" )
     

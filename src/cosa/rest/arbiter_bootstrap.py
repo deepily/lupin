@@ -129,6 +129,53 @@ def submit_arbiter_if_absent(
         return None
 
 
+def submit_arbiter_if_enabled(
+    todo_queue,
+    run_queue,
+    config_mgr,
+    *,
+    submit_fn : Callable = submit_arbiter_if_absent,
+    log       : Callable = print,
+) -> Optional[ Any ]:
+    """
+    R0 gate (deploy-arch R0 / `2026.06.07-arbiter-r0-inprocess-decommission-spec.md`):
+    submit the IN-PROCESS standing arbiter only when the INI flag
+    `arbiter in-process bootstrap enabled` is True.
+
+    Never-two across BOTH mechanisms: this is the in-process mechanism. The
+    standalone :8001 service runs Loop B via its own single LoopBRunner thread (the
+    :8001-side single-instance). This flag gates the in-process side OFF so only ONE
+    path ever actuates; `arbiter_already_present` (inside submit_fn) remains the belt
+    against a double in-process submission. Cutover is break-before-make (flag False
+    → bounce → enable :8001) — a brief zero-arbiter window is acceptable, never two.
+
+    Requires:
+        - todo_queue / run_queue are the CJ Flow queues
+        - config_mgr exposes .get( key, default, return_type )
+        - submit_fn( todo, run, cfg, log=... ) -> job|None (injected for testing)
+
+    Ensures:
+        - reads the flag ONCE (read-once contract — no mid-run re-read)
+        - flag True (or absent → default True) → returns submit_fn(...)
+        - flag False → skips submission, logs a greppable DISABLED line, returns None
+        - a MALFORMED (present-but-not-clean-bool) value → coerced to False
+          (in-process OFF — never-two-safe in both regimes) with a LOUD WARNING
+          (a typo must not silently change fleet vigilance), then returns None
+        - mirrors ConfigurationManager's boolean coercion (str(value).lower() == "true")
+    """
+    raw        = str( config_mgr.get( "arbiter in-process bootstrap enabled", default="true", return_type="string" ) )
+    normalized = raw.strip().lower()
+    enabled    = normalized == "true"
+    if normalized not in ( "true", "false" ):
+        log( f"[ARBITER] WARNING: 'arbiter in-process bootstrap enabled'={raw!r} is not a clean "
+             f"bool -> coerced to False (in-process arbiter DISABLED) — a typo must not silently "
+             f"disable fleet vigilance; set it explicitly to true or false" )
+    if not enabled:
+        log( "[ARBITER] in-process bootstrap DISABLED by config — standalone :8001 owns the loop" )
+        return None
+    return submit_fn( todo_queue, run_queue, config_mgr, log=log )
+
+
 def quick_smoke_test():
     """Self-contained smoke test with fake queues. Returns True or raises."""
     class _Job:

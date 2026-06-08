@@ -1,10 +1,49 @@
 # TODO
 
+## 🌙 2026-06-07 NIGHT WRAP (Tiberius 👑, session 1f9f3c4c) — arbiter B1 DONE, NOT in production
+
+> Session-end state: arbiter-vigilance B1 (L1–L4 + R0) + test-debt sweep + broadcast source fix all reviewer-passed, committed + PUSHED (2 selective commits), backup to DATA02. **NOT in production** — :8000 verify not run, R0 cutover not done, :8001 staged-not-enabled. Resume memento: `io/mementos/tiberius-session-resume-2026.06.07-night.md`.
+
+**▶ NEXT SESSION — FIRST ACTIONS (descending priority):**
+1. **🔝 [LUPIN] Batched :8000 e2e verify — NOW UNBLOCKED.** Rick added the `docker restart lupin-rest-test` allow-rule (`.claude/settings.local.json`) clearing the harness gate that denied a peer-authorized bounce. **Krishna 🦚 is staged + holding** (idle-confirmed, preflight green, payload ready: `test_types="e2e"`, `pytest_args="--update-snapshots"`, `--bg`). Fire him: bounce → submit → triage the 6 visual rebaselines (doc_viewer_directory_listing_docs/_io, test_visual_claude_plans_listing, dm_badge_visual_baseline, test_multiplexer_phase5_visual, visual_regression notifications) against his sweep knowledge → directed-DM verdict. Authoritative green for the whole sweep + broadcast fix + L4.
+2. **[LUPIN] R0 break-before-make cutover** (Rick's call) — flip `arbiter in-process bootstrap enabled`=false → bounce :7999/:8000 (verify DISABLED log) → `systemctl --user enable --now arbiter-vigilance` + `loginctl enable-linger` → confirm :8001/health. Tiffany 💍 offered to clean-env-verify preconditions first. Supersedes the older "Deploy v2.2 arbiter on :8000" item below.
+3. **[LUPIN] history.md archival** — at ~19.8k tokens (≥19k archival line); archive older entries next session before it nears the 25k limit.
+
+**Left UNTRACKED on purpose (NOT committed tonight — separate/unreviewed):** the 4 `clayton-*.patch` files in the heartbeat-hook R&D dir, `src/rnd/v0.1.8/2026.06.07-fleet-context-pressure-assessment.md` + `2026.06.07-managing-context-memory/` (Clayton's context-pressure proposal, awaiting Rick's go — tracked in the PROPOSAL section below).
+
+---
+
+## 💡 2026-06-07 (Clayton 😎) — Fleet Context-Pressure Assessment Utility (PROPOSAL, Rick interested)
+
+- [ ] **[LUPIN]** **Fleet context-pressure assessment utility** — proposal serialized + parked at Rick's request (he found it "really interesting"). On-the-fly health-check utility to surface workers running low on context + recommend reset (compact) or harvest+respawn-with-memento. **Key insight (verified):** the SDK's `get_context_usage()` is client-only and does NOT reach our tmux-CLI workers; instead read each worker's transcript JSONL (`transcript_path` in its bridge) — last assistant message's `input + cache_read + cache_creation` = true occupancy (probed María's live session: ~46% of 1M). Sensor+recommender, never auto-act (P1/P2). **Proposal doc:** `src/rnd/v0.1.8/2026.06.07-fleet-context-pressure-assessment.md`. **Source R&D:** `src/rnd/v0.1.8/2026.06.07-managing-context-memory/`. **Status: PROPOSAL — awaiting Rick's go-ahead** (3 open Qs: ship P1-only first? WARN 70 / CRIT 85%? sensor-only? — Clayton recs yes/yes/yes). Ephemeral plan: `~/.claude/plans/rustling-knitting-mccarthy.md`.
+
 ## 🔥 2026-06-06 PM (Tiberius 👑, session 060c8d6b) — heartbeat hardening follow-ups
 
 - [ ] **[LUPIN]** **Broadcast-miss root-cause (NOT yet solved — listener layer)** — a USER BROADCAST didn't reach Tiberius while DMs still landed (2026-06-06). Initial "stale bridge > 600s / Thread A `idle_announce` removed the heartbeat" hypothesis was **REFUTED** — the live fanout threshold is `commons broadcast liveness threshold seconds = 28800` (8h), and idle was only ~77 min, so the bridge-mtime filter did NOT drop the session; `owner_user_id` also passes (un-stamped → graceful). **Real direction:** broadcasts arrive via the `cc_notification_listener` (separate from the harness direct-prompt path) → fault is in the listener/injection layer. **Anomaly found:** DUPLICATE listeners for one session (a 09:34 one + a 16:22 one, both alive, same log) on a ~14h-old `claude` process. Needs a dedicated root-cause: the broadcast dispatch path + why a 2nd listener spawns without reaping the 1st. Memory: `reference_broadcast_miss_is_listener_layer`.
 - [ ] **[LUPIN]** **Interim heartbeat poker** (Rick greenlit 2026-06-06) — lightweight recurring watcher that (a) stamps idle managers' bridges to keep them broadcast-reachable + (b) detects whole-fleet-stall → escalates to Rick + DMs the manager. Mechanism lane = Tiberius; charter-doctrine lane = María (standing-pair-must-not-both-go-dark). Retire once the v2.2 arbiter is deployed live on :8000. Was about to fetch CronCreate vs standalone-script mechanism when redirected.
 - [ ] **[LUPIN]** **Deploy v2.2 arbiter** (`0d7adad`, committed held) — stand up `submit_arbiter_if_absent` as a standing job on :8000 post-push + run the live :8000 standing-arbiter integration test (the scheduled post-commit handoff). + the :8000 auth-matrix run (Mr. Radio's lane, needs Rick in-band).
+
+---
+
+## 🔴 2026-06-06 E2E TEST-DEBT — Rachel's run unearthed 31 reds (Clayton 😎 picking up, session 19581015)
+
+> **Source run**: Rachel 🕊️ ran the full Playwright `e2e` suite on :8000 late afternoon 2026-06-06 (job `ts-838268c5`, ~32 min). Result **484 passed / 31 failed / 1 error / 3 skipped**. Triage verdict: NONE attributable to her scroll-preservation work (touched only `notifications.js`; the two tests covering that surface passed) → classified as **pre-existing fleet test-debt / branch drift**, handed to Tiberius's crew. Full results: `io/test-suite/2026.06.06-at-16:52-EDT-e2e-results.md`; triage table: `src/rnd/v0.1.8/2026.06.06-reading-pane-scroll-position-preservation.md` §"E2E validation run + triage". **Clayton owning triage + fixes; coordinating with Tiberius 👑 + María 🌸.**
+
+> **RESOLUTION (Clayton 😎, 2026-06-07): ALL 7 clusters fixed + Krishna L3-PASS. 6 test-side, 1 SOURCE (the broadcast bug). Zero source touched in clusters 1-5,7; cluster-6/7 = visual rebaselines. Everything HELD for the single batched :8000 `--update-snapshots` verify + Rick's commit/push.**
+
+- [x] **[LUPIN]** `test_commons_activity_toggle` (9) — STALE TEST: helper resolved controller via dead globals `window.__notifications_controller__`/`notificationsController` (git -S: never existed) → `window.notificationsUI`. Cleared vs `0d7adad`. Krishna L3-PASS.
+- [x] **[LUPIN]** `test_cc_session_strip_and_focus` (7) — ALL test-side: A conv-mode 481/522 `'true'`→`'speakerphone'` +540 `None`→`'quiet'`; B `lands_leftmost`→`_rightmost` (chronological-lock); C `+ensureDateAccordionExists` fixture; D focus-reload reclassified real-bug→fixture artifact (deliberate no-card revert @notifications.js:9933), neg-control + re-inject. Krishna L3-PASS.
+- [x] **[LUPIN]** `test_doc_viewer_directory` + `test_doc_viewer_multi_repo` (10) — STALE retired `?scope=` URLs → unified `?path=lupin/<rel>` / `?path=io` / `?path=claude-plans/` (trailing slash; claude-plans IS browsable — overturned an initial not-browsable ruling). Krishna L3-PASS.
+- [x] **[LUPIN]** `test_commons_recent_activity` (`.trim()` whitespace) / `test_filter_toggle` (flaky fixed-wait → `wait_for_function` poll) / `test_dm_recent_activity` (visual rebaseline). Krishna L3-PASS.
+- [x] **[LUPIN]** `test_layout_mode_toolbar_centering:172` (1) — BRITTLE TEST: iframe fills body **content** width (`clientWidth` 396 ≈ frame 395.6); test compared border-box width (410.6, incl 14.6px scrollbar). Fix = compare vs `clientWidth`. Test-only. (Krishna L3 pending.)
+- [x] **[LUPIN]** `test_multiplexer_phase5_visual` (1) + `test_visual_regression[notifications]` (1, the "error" = `notifications.png` snapshot mismatch surfaced at teardown) — legitimate post-unification/post-UI-change VISUAL REBASELINES → `--update-snapshots` in the batched :8000 run. No code fix.
+- [x] **[LUPIN]** **BROADCAST SUPPRESSION SOURCE BUG** (Rick-greenlit TOP priority) — `broadcast_handler._parse_body` misread prose-`@`-line-with-later-colon as a directive → Rick's AFK broadcast silently skipped fleet-wide. New `_directive_mentions()` (pure @-mention run + colon, match ANY, else default = fail toward delivery). 100% line+branch, Krishna L3-PASS with fails-before/passes-after. SWEEP: single-site.
+
+**FOLLOW-UPS (filed, non-blocking):**
+- [ ] **[LUPIN]** Broadcast matcher **roster-aware hardening** (Krishna nit, Tiberius-approved follow-up): the directive discriminator is heuristic — a short prose line like `@here goes: x` parses as a directive to a nonexistent persona → skips if it's the sole line. Bias is correctly toward-delivery for realistic prose (commas/length catch it). Future fix: give `_parse_body` the persona roster so a token is only a mention if it resembles a registered persona. Today `_parse_body` only sees `local_persona_name`.
+- [ ] **[LUPIN]** Bare-external-scope-root **no-slash 400** (Tiberius-queued robustness): `?path=claude-plans` (no trailing slash) → HTTP 400 while `?path=claude-plans/` lists and `?path=io` (built-in) lists at bare name. External-scope bare root should list or 301→slash. Separate from the test migration.
+- [ ] **[LUPIN]** Pane-body **14.6px vertical scrollbar** in the reading pane (cluster-5 observation) — possibly intended, possibly a tiny iframe overflow; confirm whether `.content-pane-body` should scroll at all.
+- [ ] **[LUPIN]** **Clean full-suite baseline**: no clean green full-suite baseline existed (06-05 reports were filtered 10–20-test runs) → this sweep is attribution-by-blast-radius. Establish a clean baseline so future attribution is before/after.
 
 ---
 

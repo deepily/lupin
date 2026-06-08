@@ -11,6 +11,7 @@ unit test — no persistent state, fast). 100% coverage of routers/arbiter.py.
 import os
 import sys
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -76,6 +77,53 @@ def test_post_rejects_negative_session_count( client ):
     """session_count has ge=0 — a negative value is a 422 (Pydantic-validated)."""
     r = client.post( "/api/arbiter/fleet-snapshot", json={ "session_count": -1 } )
     assert r.status_code == 422
+
+
+# ── GET /api/arbiter/fleet-state (L4) — :7999 reverse-proxy PULL from :8001/state ──
+# The httpx call boundary `_pull_arbiter_state` is monkeypatched, so NO live :8001
+# is needed: success path (fake returns) + unreachable path (fake raises httpx error).
+
+def test_fleet_state_success_echoes_upstream( client, monkeypatch ):
+    """Reachable :8001 → the proxy returns the upstream composite verbatim (200)."""
+    composite = {
+        "status"       : "ok",
+        "service"      : "arbiter-vigilance",
+        "version"      : "x.y.z",
+        "generated_at" : "2026-06-07T22:00:00+00:00",
+        "loop_a"       : { "containers": { } },
+        "loop_b_fleet" : { "status": "ok", "session_count": 1, "sessions": [ ] },
+    }
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", lambda url, timeout: composite )
+    r = client.get( "/api/arbiter/fleet-state" )
+    assert r.status_code == 200
+    assert r.json() == composite
+
+
+def test_fleet_state_unreachable_when_pull_fails( client, monkeypatch ):
+    """Any httpx failure → explicit unreachable envelope (HTTP 200, null sections)."""
+    def _boom( url, timeout ):
+        raise httpx.ConnectError( "connection refused" )
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", _boom )
+    r = client.get( "/api/arbiter/fleet-state" )
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "status" ]  == "unreachable"
+    assert body[ "service" ] == "arbiter-vigilance"
+    assert body[ "loop_a" ] is None and body[ "loop_b_fleet" ] is None
+    assert "ConnectError" in body[ "detail" ]
+
+
+def test_fleet_state_reads_configured_url_and_timeout( client, monkeypatch ):
+    """The proxy pulls the configured URL + int timeout from the shared config singleton."""
+    captured = { }
+    def _capture( url, timeout ):
+        captured[ "url" ]     = url
+        captured[ "timeout" ] = timeout
+        return { "status": "ok" }
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", _capture )
+    client.get( "/api/arbiter/fleet-state" )
+    assert captured[ "url" ]     == "http://127.0.0.1:8001/state"
+    assert captured[ "timeout" ] == 5 and isinstance( captured[ "timeout" ], int )
 
 
 if __name__ == "__main__":

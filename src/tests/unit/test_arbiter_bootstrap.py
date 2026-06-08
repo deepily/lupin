@@ -16,7 +16,8 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest.arbiter_bootstrap import (
-    arbiter_already_present, submit_arbiter_if_absent, quick_smoke_test,
+    arbiter_already_present, submit_arbiter_if_absent, submit_arbiter_if_enabled,
+    quick_smoke_test,
 )
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 
@@ -97,6 +98,64 @@ class TestSubmit:
         todo, run = _Queue(), _Queue()
         job = submit_arbiter_if_absent( todo, run, object(), job_builder=lambda cfg: _ArbiterJob() )
         assert job is not None
+
+
+# ── submit_arbiter_if_enabled — R0 gate (T1-T5) ────────────────────────────────
+
+class _FlagCfg:
+    """Fake config manager for the R0 flag; counts get() calls (read-once contract)."""
+    _ABSENT = object()
+    def __init__( self, value=_ABSENT ):
+        self._value    = value
+        self.get_calls = 0
+    def get( self, key, default=None, return_type="string" ):
+        self.get_calls += 1
+        return default if self._value is self._ABSENT else self._value
+
+
+def _recording_submit():
+    calls = [ ]
+    def submit( todo, run, cfg, log=print ):
+        calls.append( ( todo, run, cfg ) )
+        return "JOB"
+    return submit, calls
+
+
+class TestR0Gate:
+    def test_t1_flag_true_submits_once( self ):
+        submit, calls = _recording_submit()
+        out = submit_arbiter_if_enabled( _Queue(), _Queue(), _FlagCfg( "true" ),
+                                         submit_fn=submit, log=lambda *a: None )
+        assert out == "JOB" and len( calls ) == 1
+
+    def test_t2_flag_false_skips_with_disabled_log( self ):
+        submit, calls = _recording_submit()
+        logs = [ ]
+        out = submit_arbiter_if_enabled( _Queue(), _Queue(), _FlagCfg( "false" ),
+                                         submit_fn=submit, log=logs.append )
+        assert out is None and calls == [ ]
+        assert any( "DISABLED" in m for m in logs )
+
+    def test_t3_absent_defaults_true_submits( self ):
+        submit, calls = _recording_submit()
+        out = submit_arbiter_if_enabled( _Queue(), _Queue(), _FlagCfg(),       # key absent → default true
+                                         submit_fn=submit, log=lambda *a: None )
+        assert out == "JOB" and len( calls ) == 1
+
+    def test_t4_malformed_coerces_false_and_warns( self ):
+        submit, calls = _recording_submit()
+        logs = [ ]
+        out = submit_arbiter_if_enabled( _Queue(), _Queue(), _FlagCfg( "garbage" ),
+                                         submit_fn=submit, log=logs.append )
+        assert out is None and calls == [ ]
+        assert any( "WARNING" in m for m in logs )       # loud-warn on typo (ruling D)
+        assert any( "DISABLED" in m for m in logs )
+
+    def test_t5_flag_read_once( self ):
+        cfg = _FlagCfg( "true" )
+        submit, _ = _recording_submit()
+        submit_arbiter_if_enabled( _Queue(), _Queue(), cfg, submit_fn=submit, log=lambda *a: None )
+        assert cfg.get_calls == 1                          # read-once contract
 
 
 def test_quick_smoke_test():
