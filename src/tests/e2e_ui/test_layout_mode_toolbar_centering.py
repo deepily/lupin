@@ -154,7 +154,10 @@ class TestReadingPaneIframeFillsContainer:
                 if ( !body || !frame ) return null;
                 const b = body.getBoundingClientRect();
                 const f = frame.getBoundingClientRect();
-                return { bodyH: b.height, bodyW: b.width, frameH: f.height, frameW: f.width };
+                // clientWidth = the body's CONTENT width (excludes a vertical scrollbar
+                // gutter); the iframe correctly fills that, not the border-box width.
+                return { bodyH: b.height, bodyW: b.width, bodyClientW: body.clientWidth,
+                         frameH: f.height, frameW: f.width };
             }"""
         )
         assert dims is not None, "Pane body + iframe must exist after opening a doc"
@@ -169,9 +172,14 @@ class TestReadingPaneIframeFillsContainer:
             f"iframe height ({dims['frameH']:.0f}) must match pane-body height "
             f"({dims['bodyH']:.0f})"
         )
-        assert abs( dims[ "frameW" ] - dims[ "bodyW" ] ) < 4, (
-            f"iframe width ({dims['frameW']:.0f}) must match pane-body width "
-            f"({dims['bodyW']:.0f})"
+        # Compare against the body's CONTENT width (clientWidth), not the border-box
+        # width: when the pane body shows a vertical scrollbar (~15px gutter) the iframe
+        # fills the content area, which is the correct fill behavior (an iframe must not
+        # overlap the scrollbar). Asserting against getBoundingClientRect width would
+        # false-fail by exactly the scrollbar width.
+        assert abs( dims[ "frameW" ] - dims[ "bodyClientW" ] ) < 4, (
+            f"iframe width ({dims['frameW']:.0f}) must fill the pane-body content width "
+            f"({dims['bodyClientW']:.0f}); border-box width was {dims['bodyW']:.0f}"
         )
 
 

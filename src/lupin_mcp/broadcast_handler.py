@@ -12,10 +12,13 @@ reuse-as-is (per F2 REUSE):
 - listener's `_inject_via_tmux(text, wrap=False)` — injected as `inject_fn` callable
 - `commons_store.CommonsStore.post(topic="broadcast-acks", ...)` — injected as `store`
 
-The handler parses the broadcast body into default lines (no leading `@`) +
-persona-directive lines (`@PersonaName:`), computes the effective slice for the
-local persona, builds a `<system-reminder>` wrapper, and posts a per-session
-acknowledgment to the `broadcast-acks` reserved topic.
+The handler parses the broadcast body into default lines (everything that is not
+a clean directive — incl. prose that merely starts with/contains an `@`) +
+persona-directive lines (a leading PURE run of `@mention` tokens ending in a
+colon, e.g. `@a @b: msg`; a directive matches if ANY mention is the local
+persona). It computes the effective slice for the local persona, builds a
+`<system-reminder>` wrapper, and posts a per-session acknowledgment to the
+`broadcast-acks` reserved topic. Bias = fail toward delivery, not suppression.
 
 **Sanitization** (T1 + T3): body containing `<system-reminder>` or
 `</system-reminder>` substrings (case-insensitive) is rejected at the
@@ -42,11 +45,64 @@ _SYSTEM_REMINDER_CLOSE = "</system-reminder>"
 
 _ALL_ALIASES = ( "all", "everyone" )
 
+# Persona-directive discrimination (see `_directive_mentions`). A real persona
+# token is short and free of sentence punctuation; prose is not. Bias = FAIL
+# TOWARD DELIVERY: anything that is not a clean leading @-mention run terminated
+# by a colon DEFAULTS to inject-to-all. The pre-fix parser read the FIRST colon
+# anywhere on an @-leading line as a directive terminator, so a prose line like
+# "@maria @Tiberius ... a new directive: I want ..." became a single bogus
+# recipient, matched nobody, and the whole broadcast was silently SKIPPED
+# (2026-06-02 regression — Rick's AFK directive lost fleet-wide).
+_MAX_PERSONA_TOKEN_LEN = 40
+# NOTE: '.' is deliberately EXCLUDED — persona names carry it (e.g. "Mr. Radio"),
+# and match_persona is punctuation-tolerant. The length cap catches long prose;
+# these remaining marks flag short prose ("@ok, sounds good: ...") as non-directive.
+_SENTENCE_PUNCT        = ( ",", "!", "?", ";" )
+
 
 def _contains_reminder_framing( body: str ) -> bool:
     """True if body contains literal `<system-reminder>` or `</system-reminder>` (case-insensitive)."""
     lowered = body.lower()
     return _SYSTEM_REMINDER_OPEN in lowered or _SYSTEM_REMINDER_CLOSE in lowered
+
+
+def _directive_mentions( stripped: str ) -> Optional[ List[ str ] ]:
+    """
+    Return the persona-mention tokens of a persona-directive line, or None.
+
+    A persona-directive is a leading PURE run of @-mention tokens terminated by a
+    colon: `@a @b @c: message`. Tokens are split on "@" (NOT whitespace) so
+    multi-word personas like "mr radio" survive. Anything else → None, so the
+    caller treats the line as a default (inject-to-all) — bias toward delivery.
+
+    Requires:
+        - `stripped` is a left/right-stripped line
+
+    Ensures:
+        - "@a @b: msg"                      → ["a", "b"]
+        - "@mr radio: hi"                   → ["mr radio"]
+        - "@maria ... a new directive: x"   → None  (a token is prose: too long / sentence punct)
+        - "ping foo@bar.com: x"             → None  (does not start with "@")
+        - "@x" (no colon)                   → None
+        - "@@x:" / "@ @x:"                  → None  (empty mention segment ⇒ malformed)
+        - returns None whenever ANY candidate exceeds `_MAX_PERSONA_TOKEN_LEN`
+          or contains `_SENTENCE_PUNCT` (treat as prose → DEFAULT delivery)
+    """
+    if not stripped.startswith( "@" ):
+        return None
+    colon_idx = stripped.find( ":" )
+    if colon_idx == -1:
+        return None
+    pre        = stripped[ 1:colon_idx ]                       # drop leading "@", take up to first colon
+    candidates = [ seg.strip() for seg in pre.split( "@" ) ]   # split on "@" preserves multi-word names
+    if any( not c for c in candidates ):                      # empty segment ⇒ malformed mention run
+        return None
+    for c in candidates:
+        if len( c ) > _MAX_PERSONA_TOKEN_LEN:                 # prose, not a persona token
+            return None
+        if any( punct in c for punct in _SENTENCE_PUNCT ):
+            return None
+    return candidates
 
 
 def _parse_body(
@@ -56,12 +112,15 @@ def _parse_body(
     """
     Split body into (default_lines, matched_directive_lines, non_matching_directive_count).
 
-    A line starting with `@PersonaName:` is a persona-directive:
-    - `@all:` / `@everyone:` (case-insensitive) → treated as default scope
-    - matches local persona (via case-insensitive + punctuation-tolerant match) → goes into matched_directives
-    - other personas → ignored silently (counted for skip-detection)
+    A persona-directive is a leading PURE run of @-mention tokens terminated by a
+    colon (`@a @b @c: message`) — see `_directive_mentions`. For such a line:
+    - any mention is `@all` / `@everyone` (case-insensitive) → treated as default scope
+    - ANY mention matches the local persona (case-insensitive + punctuation-tolerant) → matched_directives
+    - none match → ignored silently (counted for skip-detection)
 
-    Lines starting with `@` but lacking a colon are treated as default lines (malformed directive).
+    Every OTHER line — plain text, or prose that merely starts with / contains an
+    `@` (colon mid-sentence, an inline email, or no colon) — is a default line
+    (inject-to-all). Bias = fail toward delivery, NOT suppression.
     """
     default_lines: List[ str ]            = [ ]
     matched_directive_lines: List[ str ]  = [ ]
@@ -69,24 +128,28 @@ def _parse_body(
 
     for line in body.splitlines():
         stripped = line.strip()
-        if stripped.startswith( "@" ):
-            colon_idx = stripped.find( ":" )
-            if colon_idx == -1:
-                # malformed directive — treat as default
-                default_lines.append( line )
-                continue
-            persona_ref = stripped[ 1:colon_idx ].strip()
-            if persona_ref.lower() in _ALL_ALIASES:
-                default_lines.append( line )
-                continue
-            if local_persona_name is not None:
-                matched = match_persona( persona_ref, [ local_persona_name ] )
-                if matched == local_persona_name:
-                    matched_directive_lines.append( line )
-                    continue
-            non_matching_directive_count += 1
-        else:
+        mentions = _directive_mentions( stripped )
+        if mentions is None:
+            # Plain text, OR prose that merely starts with / contains an "@" but is
+            # not a clean leading @-mention run + colon → broadcast to everyone.
+            # Fail toward delivery (the regression this fixes failed toward suppression).
             default_lines.append( line )
+            continue
+        # A persona-directive. `@all` / `@everyone` anywhere in the run → default scope.
+        if any( m.lower() in _ALL_ALIASES for m in mentions ):
+            default_lines.append( line )
+            continue
+        # Multi-addressee: the line is for us if ANY mention resolves to the local persona.
+        matched = False
+        if local_persona_name is not None:
+            for m in mentions:
+                if match_persona( m, [ local_persona_name ] ) == local_persona_name:
+                    matched = True
+                    break
+        if matched:
+            matched_directive_lines.append( line )
+        else:
+            non_matching_directive_count += 1
 
     return ( default_lines, matched_directive_lines, non_matching_directive_count )
 

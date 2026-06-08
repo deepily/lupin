@@ -449,8 +449,33 @@ class TestPersistence:
         page.reload()
         page.wait_for_load_state( "networkidle" )
 
-        # Toggle should still be ON (state restored).
+        # The DURABLE persistence layer is localStorage — the focus INTENT must
+        # survive the reload regardless of whether any card is hydrated yet.
+        stored_after = page.evaluate(
+            "() => localStorage.getItem( 'notifications_cc_focus_state' )"
+        )
+        assert stored_after is not None and "true" in stored_after.lower(), \
+            f"Focus intent must persist in localStorage across reload; got {stored_after!r}"
+
+        # NEGATIVE CONTROL (gives this test teeth — it is NOT tautological): the
+        # pill's VISUAL restore is deliberately gated on the focused sender's card
+        # being present. _restoreCcUiAfterLoad (notifications.js:9933) reverts the
+        # pill to OFF when the focused card is absent, PRESERVING the localStorage
+        # intent (the 2026-04-30 design + icon-churn-race fix). Immediately after
+        # reload the client-only card is gone, so the pill MUST be OFF. If the
+        # no-card revert ever regressed (pill wrongly ON without a card), this fails.
         toggle = page.locator( "#cc-strip-toggle" )
+        assert toggle.get_attribute( "data-focus-active" ) == "false", \
+            "no-card revert must leave the pill OFF right after reload (intent preserved in localStorage, not the visual)"
+
+        # POSITIVE PATH (against the REAL restore logic, not a mock): in production
+        # the focused sender's real notifications hydrate its card on reload; this
+        # synthetic test re-injects the card to mirror that hydration, then re-runs
+        # the genuine post-load restore. If _restoreCcUiAfterLoad's with-card restore
+        # regressed (pill stays OFF despite a present focused card), this fails.
+        _inject_cc_sender_card( page, sender_a )
+        page.evaluate( "() => window.notificationsUI._restoreCcUiAfterLoad()" )
+        page.wait_for_timeout( 50 )
         assert toggle.get_attribute( "data-focus-active" ) == "true"
 
 
@@ -478,7 +503,7 @@ class TestConvModeOrthogonality:
 
         sanitized = sender_a.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
         icon = page.locator( f"#cc-strip-icon-{sanitized}" )
-        assert icon.get_attribute( "data-conv-mode" ) == "true"
+        assert icon.get_attribute( "data-conv-mode" ) == "speakerphone"
 
     def test_conv_mode_off_via_ws_clears_strip_icon_overlay( self, notifications_page_with_strip ):
         """
@@ -519,8 +544,8 @@ class TestConvModeOrthogonality:
 
         sanitized = sender_a.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
         icon = page.locator( f"#cc-strip-icon-{sanitized}" )
-        assert icon.get_attribute( "data-conv-mode" ) == "true", \
-            "ON transition must set data-conv-mode despite full-UUID payload"
+        assert icon.get_attribute( "data-conv-mode" ) == "speakerphone", \
+            "ON transition must set data-conv-mode='speakerphone' despite full-UUID payload"
 
         # OFF transition — same full UUID, active=false. This is the path that
         # used to silently miss before the fix.
@@ -537,8 +562,8 @@ class TestConvModeOrthogonality:
         )
         page.wait_for_timeout( 50 )
 
-        assert icon.get_attribute( "data-conv-mode" ) is None, \
-            "OFF transition must remove data-conv-mode — mic icon must not strand"
+        assert icon.get_attribute( "data-conv-mode" ) == "quiet", \
+            "OFF transition must set data-conv-mode='quiet' (3-state badge since 2026-05-14) — mic icon must not strand"
 
 
 # ---------------------------------------------------------------------------
@@ -845,6 +870,10 @@ class TestPersonalessBubbleGradient:
             """( args ) => {
                 const ui = window.notificationsUI;
                 const today = new Date().toISOString().slice( 0, 10 );
+                // The real render path calls ensureDateAccordionExists (notifications.js:18112)
+                // BEFORE addMessageToDateAccordion, which early-returns (:12095-12101) if the
+                // date-messages container is absent. Mirror that precondition here.
+                ui.ensureDateAccordionExists( args.senderId, today );
                 for ( let i = 0; i < args.count; i++ ) {
                     ui.addMessageToDateAccordion( args.senderId, today, {
                         id        : `msg-${args.senderId}-${i}`,
@@ -979,9 +1008,11 @@ class TestStripOrdering:
         assert ids == ordered, \
             f"Initial-load strip ordering should match API order; got {ids!r}, expected {ordered!r}"
 
-    def test_runtime_addition_lands_leftmost( self, notifications_page_with_strip ):
-        """Runtime path (insertAtTop=true): a fresh icon prepends to the
-        existing strip, regardless of when its sender was first seen."""
+    def test_runtime_addition_lands_rightmost( self, notifications_page_with_strip ):
+        """Runtime path: a fresh icon APPENDS to the existing strip (newest
+        rightmost), so the chronological order (oldest leftmost) holds without
+        a re-sort. Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        (source comment notifications.js:460-463: "Runtime adds just append")."""
         page = notifications_page_with_strip
         # Seed two icons via the runtime path (default behavior).
         first  = "claude.code@lupin.deepily.ai#aaaaaaa1"
@@ -989,9 +1020,9 @@ class TestStripOrdering:
         _inject_cc_sender_card( page, first  )
         _inject_cc_sender_card( page, second )
 
-        # Most recently injected at runtime should be leftmost.
+        # Oldest injection stays leftmost; the newer one appends to the right.
         leftmost = page.evaluate(
             "() => document.querySelector( '#cc-strip-icons .cc-strip-icon' )?.getAttribute( 'data-sender-id' )"
         )
-        assert leftmost == second, \
-            f"Runtime injection should land leftmost; got {leftmost!r}, expected {second!r}"
+        assert leftmost == first, \
+            f"Runtime injection should append rightmost (oldest stays leftmost); got {leftmost!r}, expected {first!r}"

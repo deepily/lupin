@@ -313,14 +313,18 @@ class TestToolbarScrollOnShow:
 
         # Show debug section (it's at the bottom)
         debug_btn.click()
-        admin_page.wait_for_timeout( 500 )  # Allow scroll animation
-
-        # Verify section is in viewport
-        in_viewport = admin_page.evaluate( """() => {
-            const el = document.getElementById( 'section-debug' );
-            if ( !el ) return false;
-            const rect = el.getBoundingClientRect();
-            return rect.top >= 0 && rect.top < window.innerHeight;
-        }""" )
-
-        assert in_viewport, "Debug section should be scrolled into viewport after showing"
+        # The show path calls scrollIntoViewIfNeeded → scrollIntoView({behavior:'smooth'}),
+        # which settles ASYNCHRONOUSLY. POLL until the section is in the viewport rather
+        # than asserting at a fixed wait mid-animation: the old 500ms snapshot was flaky —
+        # it caught the section still in-flight near the viewport's bottom edge (probe:
+        # top≈672/720 at 500ms, settling to top≈246 by ~1s). wait_for_function raises
+        # TimeoutError (→ test failure with teeth) if it never enters the viewport.
+        admin_page.wait_for_function(
+            """() => {
+                const el = document.getElementById( 'section-debug' );
+                if ( !el ) return false;
+                const rect = el.getBoundingClientRect();
+                return rect.top >= 0 && rect.top < window.innerHeight;
+            }""",
+            timeout=5000
+        )

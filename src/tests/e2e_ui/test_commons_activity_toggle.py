@@ -76,7 +76,7 @@ def _render_entry_via_evaluate( page, body_text: str, with_topic: str = "dm-mari
     entry_id = "test-commons-entry-fixture"
     page.evaluate(
         """([entryId, body, topic]) => {
-            const controller = window.__notifications_controller__ || window.notificationsController;
+            const controller = window.notificationsUI;
             if ( !controller || typeof controller._renderCommonsEntry !== 'function' ) {
                 throw new Error( '_renderCommonsEntry not available on controller' );
             }
