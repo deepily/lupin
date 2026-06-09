@@ -47,11 +47,16 @@ def _job( gw, *, stall_window=1800, notify=None ):
     )
 
 
-def _stuck( sid ):
-    return { "session_id": sid, "persona": sid, "state": "stuck", "stuck": True, "holding_on": "none" }
+def _stuck( sid, alive=True ):
+    # alive defaults True — the 2b-1 calibration gates the stall trigger on a LIVE
+    # owed-work session; pass alive=False to model the dead/offline roster the old
+    # trigger mis-fired on (the Part-3/Part-7 false-fire).
+    return { "session_id": sid, "persona": sid, "state": "stuck", "stuck": True,
+             "holding_on": "none", "alive": alive }
 
-def _idle( sid ):
-    return { "session_id": sid, "persona": sid, "state": "idle", "stuck": False, "holding_on": "none" }
+def _idle( sid, alive=True ):
+    return { "session_id": sid, "persona": sid, "state": "idle", "stuck": False,
+             "holding_on": "none", "alive": alive }
 
 
 # ── decision-needed (D3) ───────────────────────────────────────────────────────
@@ -147,6 +152,99 @@ class TestFleetStall:
         job = _job( _GW(), stall_window=600 )
         # a non-dict view must not crash the signature
         assert job._check_fleet_stall( { "bad": "x", "s1": _stuck( "s1" ) }, NOW ) == 0
+
+
+# ── 2b-1 calibration: liveness GATES the stall trigger ─────────────────────────
+
+class TestFleetStallCalibration:
+    """
+    2b-1 receipt (a): the whole-fleet-stall false-positive (#11) calibration.
+
+    Tiberius's framing: liveness GATES whether to evaluate a stall (a dead/offline
+    roster never escalates), while PROGRESS stays keyed on work-advancement (the
+    semantic signature) — so commons chatter, which is liveness not progress, can
+    NOT mask a real stall. The receipts:
+      • (regression) the documented Part-3/Part-7 false-fire — a DEAD/offline
+        roster with frozen owed-work state — is now SUPPRESSED.
+      • (true-positive) a LIVE owed-work fleet, frozen past the window, STILL fires.
+      • (chatty-but-stuck) a LIVE fleet whose commons recency advances while WORK
+        does not — a REAL stall — STILL fires (commons never enters the signature).
+    """
+
+    def test_regression_dead_offline_roster_with_owed_is_suppressed( self ):
+        """REGRESSION (receipt a): reproduce the OLD false-positive at the view
+        level. Offline sessions (alive=False) with frozen owed-work `state`, held
+        past the window. The OLD predicate (owed-work ALONE) is TRUE → it fired;
+        the NEW gate (LIVE owed-work) is FALSE → suppressed."""
+        escal = [ ]
+        job   = _job( _GW(), stall_window=600, notify=lambda m, *a, **k: escal.append( m ) )
+        dead  = { "s1": _stuck( "s1", alive=False ), "s2": _stuck( "s2", alive=False ) }
+        # the roster DOES owe work (the OLD predicate) but no LIVE session owes it
+        # (the NEW gate) — exactly the dead-roster shape the old trigger mis-fired on
+        assert any( v[ "state" ] in ( "working", "stuck", "holding" ) for v in dead.values() )  # OLD → fire
+        assert job._has_live_owed_work( dead ) is False                                          # NEW → blocked
+        assert job._check_fleet_stall( dead, NOW ) == 0                                           # baseline
+        # frozen (no progress) past the window — the OLD bug fired HERE; now silent
+        assert job._check_fleet_stall( dead, NOW + datetime.timedelta( seconds=700 ) ) == 0
+        assert escal == [ ]
+
+    def test_regression_via_real_fleet_view_offline_sessions( self ):
+        """REGRESSION (faithful, through the REAL leaf): build the roster from
+        build_fleet_view with only STALE stop-events (2-day-old ts, no bridge/
+        commons) → every session alive=False → no LIVE owed work → suppressed even
+        past the window. This is the literal Part-7 scenario (dead historical
+        roster reading as 100%-offline 'no progress')."""
+        from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
+        old_ts = ( NOW - datetime.timedelta( days=2 ) ).isoformat()
+        events = {
+            "h1": [ { "session_id": "h1", "persona": "Ann", "outcome": "poke",
+                      "ts": old_ts, "awaiting": "peer:Bob", "work_owed": True } ],
+            "h2": [ { "session_id": "h2", "persona": "Bob", "outcome": "cap_reached",
+                      "ts": old_ts, "work_owed": True },
+                    { "session_id": "h2", "persona": "Bob", "outcome": "cap_reached",
+                      "ts": old_ts, "work_owed": True } ],
+        }
+        view = build_fleet_view( events, who_rows=[ ], now=NOW,
+                                 alive_threshold_seconds=600, bridge_sessions={ } )
+        assert view and all( v[ "alive" ] is False for v in view.values() )                     # all OFFLINE
+        assert any( v[ "state" ] in ( "working", "stuck", "holding" ) for v in view.values() )   # OLD → fire
+        job = _job( _GW(), stall_window=600 )
+        assert job._check_fleet_stall( view, NOW ) == 0                                           # baseline
+        assert job._check_fleet_stall( view, NOW + datetime.timedelta( seconds=700 ) ) == 0       # SUPPRESSED
+
+    def test_true_positive_live_owed_frozen_still_fires( self ):
+        """TRUE-POSITIVE (receipt a): a LIVE owed-work session (alive=True), frozen
+        past the window → STILL fires. Calibration must not suppress real stalls."""
+        escal = [ ]
+        job   = _job( _GW(), stall_window=600, notify=lambda m, *a, **k: escal.append( m ) )
+        live  = { "s1": _stuck( "s1", alive=True ) }
+        assert job._check_fleet_stall( live, NOW ) == 0                                           # baseline
+        assert job._check_fleet_stall( live, NOW + datetime.timedelta( seconds=700 ) ) == 1       # FIRES
+        assert "WHOLE-FLEET-STALL" in escal[ 0 ] and "escalating to Rick" in escal[ 0 ]
+
+    def test_chatty_but_stuck_live_fleet_still_fires( self ):
+        """CHATTY-BUT-STUCK (Tiberius's caveat): a LIVE fleet posting 'still
+        blocked' (commons recency ADVANCING) while WORK does not advance is a REAL
+        stall. Commons recency is liveness, not progress — it must NEVER reach the
+        signature. Here commons_ts advances between polls but `state` stays frozen
+        → progress signature UNCHANGED → STILL fires."""
+        escal   = [ ]
+        job     = _job( _GW(), stall_window=600, notify=lambda m, *a, **k: escal.append( m ) )
+        chatty1 = { "s1": { **_stuck( "s1" ), "commons_ts": "2026-06-06T22:00:00+00:00" } }
+        # same WORK state, but commons recency advanced 11 min (the fleet is chatting)
+        chatty2 = { "s1": { **_stuck( "s1" ), "commons_ts": "2026-06-06T22:11:00+00:00" } }
+        assert job._check_fleet_stall( chatty1, NOW ) == 0                                        # baseline
+        assert job._check_fleet_stall( chatty2, NOW + datetime.timedelta( seconds=700 ) ) == 1    # FIRES
+        assert "WHOLE-FLEET-STALL" in escal[ 0 ]
+
+    def test_live_and_dead_mixed_owed_fires_on_the_live_one( self ):
+        """A roster mixing a DEAD owed session + a LIVE owed session still has LIVE
+        owed work → fires (the gate is ANY live owed, not ALL)."""
+        escal = [ ]
+        job   = _job( _GW(), stall_window=600, notify=lambda m, *a, **k: escal.append( m ) )
+        mixed = { "dead": _stuck( "dead", alive=False ), "live": _stuck( "live", alive=True ) }
+        assert job._check_fleet_stall( mixed, NOW ) == 0
+        assert job._check_fleet_stall( mixed, NOW + datetime.timedelta( seconds=700 ) ) == 1
 
 
 if __name__ == "__main__":

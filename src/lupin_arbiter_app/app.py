@@ -201,19 +201,64 @@ def assemble_app(
     return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop )
 
 
+def _build_live_notify_fn( cfg ):   # pragma: no cover - literal external IO boundary (config, env credential, urllib)
+    """
+    Build the best-effort live-push-to-Rick notify_fn (2b-1), or None.
+
+    The IO boundary for the :7999 live hop: reads the gating INI knobs + the
+    X-API-Key from the environment and assembles a DEDUP-guarded urllib transport.
+    Returns None (live push OFF — escalations still land durably on the commons
+    topic) when the feature is disabled OR the credential is absent, so a missing
+    key degrades safe rather than spamming failed POSTs. The request SHAPE
+    (build_notify_request) and the dedup guard (make_live_notify_fn) are unit-tested;
+    only this wiring + the urllib round-trip are no-cover.
+    """
+    import os
+    from lupin_arbiter_app.arbiter_live_notify import (
+        build_notify_request, make_live_notify_fn, _http_post, _default_log_fn,
+    )
+
+    if not cfg.get( "arbiter live notify enabled", default=True, return_type="boolean" ):
+        _default_log_fn( "live_notify_disabled", reason="arbiter live notify enabled = false" )
+        return None
+
+    api_key = os.environ.get( "LUPIN_ARBITER_NOTIFY_API_KEY" )
+    if not api_key:
+        _default_log_fn( "live_notify_disabled", reason="LUPIN_ARBITER_NOTIFY_API_KEY not set" )
+        return None
+
+    base_url     = cfg.get( "arbiter live notify url", default="http://127.0.0.1:7999" ) or "http://127.0.0.1:7999"
+    target_user  = cfg.get( "arbiter live notify target user", default="" ) or ""
+    sender_id    = cfg.get( "arbiter live notify sender id",
+                            default="heartbeat-arbiter@lupin.deepily.ai" ) or "heartbeat-arbiter@lupin.deepily.ai"
+    dedup_window = int( cfg.get( "arbiter live notify dedup window seconds", default=900, return_type="int" ) )
+    timeout      = int( cfg.get( "arbiter live notify timeout seconds", default=5, return_type="int" ) )
+
+    def transport( message ):
+        url, headers = build_notify_request(
+            message, base_url=base_url, target_user=target_user,
+            sender_id=sender_id, api_key=api_key,
+        )
+        status = _http_post( url, headers, timeout_seconds=timeout )
+        _default_log_fn( "live_notify_sent", status=status, target_user=target_user )
+
+    return make_live_notify_fn( transport, dedup_window_seconds=dedup_window )
+
+
 def create_production_app() -> FastAPI:   # pragma: no cover - literal external construction (config, gateway)
     """
     uvicorn `--factory` target: build the literal externals (ConfigurationManager,
-    the bridge-less commons gateway) and delegate ALL wiring/branching to the
-    testable assemble_app. live_notify_fn stays None in V1 (the best-effort :7999
-    live-notify ingress is a documented build-time follow-up; escalations always
-    land durably on the fleet-escalations commons topic regardless).
+    the bridge-less commons gateway, the live-notify hop) and delegate ALL
+    wiring/branching to the testable assemble_app. live_notify_fn (2b-1) pushes
+    each escalation to Rick via POST :7999/api/notify when enabled + credentialed;
+    None otherwise — escalations always land durably on the fleet-escalations
+    commons topic regardless (the live push is best-effort, escalation-path only).
     """
     from cosa.config.configuration_manager import ConfigurationManager
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
     cfg     = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     gateway = LupinArbiterGateway.from_environment( sender_session_id="lupin-arbiter-app-8001" )
-    return assemble_app( cfg, gateway )
+    return assemble_app( cfg, gateway, live_notify_fn=_build_live_notify_fn( cfg ) )
 
 
 # Module-level loop-less ASGI entrypoint (safe to import; used by /health-only boots

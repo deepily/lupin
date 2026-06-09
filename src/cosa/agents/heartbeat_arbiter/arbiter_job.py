@@ -697,23 +697,62 @@ class ArbiterConsumerJob( AgenticJobBase ):
             for v in fleet_view.values() if isinstance( v, dict )
         ) )
 
+    @staticmethod
+    def _has_live_owed_work( fleet_view ):
+        """
+        Calibration GATE (2b-1): is there ≥1 session that is BOTH alive AND owes
+        work? — the liveness precondition the whole-fleet-stall trigger evaluates.
+
+        The documented false-fire (Part 3 / Part 7) was a roster of DEAD/offline
+        sessions — frozen owed-work `state`, no live bridge, every `alive` False —
+        reading as "no progress" → escalate. The old trigger keyed on owed-work
+        ALONE (it never consulted `alive`), so a dead roster tripped it. Requiring
+        a LIVE owed-work session means a dead/empty roster can NEVER stall-escalate.
+
+        Liveness here is the Round-1 union signal (`alive` = bridge ∪ commons ∪
+        idle_prompt ∪ stop-event recency, set by build_fleet_view) — NOT a
+        re-derivation. It gates EVALUATION only; PROGRESS itself stays keyed on
+        work-advancement (the semantic signature), so a chatty-but-stuck LIVE
+        fleet — alive sessions posting "still blocked" while nothing advances —
+        is a REAL stall and STILL fires (commons chatter is liveness, not
+        progress; it never reaches the signature).
+
+        Ensures:
+            - returns True iff some view is alive is True AND state ∈
+              {working, stuck, holding}; never raises
+        """
+        return any(
+            isinstance( v, dict ) and v.get( "alive" ) is True
+            and v.get( "state" ) in ( "working", "stuck", "holding" )
+            for v in fleet_view.values()
+        )
+
     def _check_fleet_stall( self, fleet_view, now ):
         """
         D3 catch-all: no FLEET PROGRESS for ≥ fleet_stall_window_seconds while
-        work is owed → escalate to Rick (so nothing rots silently).
+        LIVE work is owed → escalate to Rick (so nothing rots silently).
 
-        LOAD-BEARING (María): this keys on fleet PROGRESS (the semantic
-        signature), NOT on manager liveness — so it FIRES EVEN WHEN A MANAGER'S
+        LOAD-BEARING (María): PROGRESS keys on the semantic signature (state /
+        stuck / holding), NOT on liveness — so it FIRES EVEN WHEN A MANAGER'S
         BRIDGE-MTIME IS FRESH. That catches the "manager alive-but-IGNORING the
-        tap" failure mode, which is OUTSIDE D4's manager-DOWN scope. The two
-        triggers compose: D4 = manager GONE; D3-stall = manager PRESENT-but-not-
-        acting. Escalate-only (no actuation; never auto-assign).
+        tap" failure mode, OUTSIDE D4's manager-DOWN scope. The two triggers
+        compose: D4 = manager GONE; D3-stall = manager PRESENT-but-not-acting.
+        Escalate-only (no actuation; never auto-assign).
+
+        CALIBRATION (2b-1, Tiberius's framing): liveness GATES whether to evaluate
+        a stall at all — `_has_live_owed_work` requires the owed work to sit on a
+        session the Round-1 union marks ALIVE. A dead/offline roster (the Part-3
+        false-fire) no longer escalates; a chatty-but-stuck LIVE fleet still does
+        (progress ≠ aliveness). The progress SIGNATURE is deliberately UNCHANGED —
+        commons chatter must never read as work-advancement (else the arbiter's own
+        per-poll posts, which surface in who(), would mask every stall).
 
         Ensures:
             - resets the stall timer whenever the progress signature changes
             - escalates ONCE per stall episode when the signature is unchanged for
-              ≥ the window AND there is owed work (a non-idle fleet); re-arms on
-              the next progress
+              ≥ the window AND a LIVE session owes work; re-arms on the next
+              progress
+            - a dead/offline roster (no LIVE owed work) never escalates
             - returns 1 on a new escalation else 0; never raises
         """
         sig = self._fleet_progress_signature( fleet_view )
@@ -722,10 +761,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             self._last_progress_at  = now
             self._stall_escalated   = False
             return 0
-        has_owed = any(
-            isinstance( v, dict ) and v.get( "state" ) in ( "working", "stuck", "holding" )
-            for v in fleet_view.values()
-        )
+        has_owed = self._has_live_owed_work( fleet_view )
         if ( has_owed and self._last_progress_at is not None
              and ( now - self._last_progress_at ).total_seconds() >= self.fleet_stall_window_seconds
              and not self._stall_escalated ):
