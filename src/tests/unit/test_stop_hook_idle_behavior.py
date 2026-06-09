@@ -179,5 +179,53 @@ class TestIdleBehaviorGate:
             mock_emit.assert_called_once_with( {} )
 
 
+# ── main() speakerphone branch: silent idle-announce (Rick, 2026-06-08) ───────
+# Speakerphone sessions exit the hook BEFORE the Branch-C idle gate, so the
+# silent idle-announce is fired INSIDE the speakerphone branch. Gated to
+# idle_announce ONLY (ask/none stay fully silent — the blocking ask is correctly
+# skipped). _announce_idle posts at LOW priority → the client renders the DOM
+# card WITHOUT TTS (no chorus-TTS spam). The branch ends in sys.exit(0), so each
+# run raises SystemExit.
+
+class TestSpeakerphoneIdleAnnounce:
+
+    def _run_speakerphone_main( self, idle_behavior, persona ):
+        with patch( "lupin_cli.claude_code.hooks.stop._announce_idle" ) as mock_announce, \
+             patch( "lupin_cli.claude_code.hooks.stop.emit_json" ) as mock_emit, \
+             patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=persona ), \
+             patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value=idle_behavior ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=True ), \
+             patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x ), \
+             patch( "lupin_cli.claude_code.hooks.stop.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.read_hook_input",
+                    return_value={ "stop_hook_active": False, "session_id": "abc12345" } ):
+            with pytest.raises( SystemExit ):
+                main()
+            mock_emit.assert_called_once_with( {} )   # speakerphone still allows the stop
+            return mock_announce
+
+    def test_speakerphone_idle_announce_fires_silent_bubble( self ):
+        """speakerphone + idle_announce → _announce_idle fires (LOW pri → silent DOM bubble)."""
+        mock_announce = self._run_speakerphone_main( "idle_announce", { "name": "Rachel" } )
+        mock_announce.assert_called_once_with( "abc12345", "Rachel" )
+
+    def test_speakerphone_idle_announce_missing_persona( self ):
+        """speakerphone + idle_announce + no persona → _announce_idle fires with None threaded."""
+        mock_announce = self._run_speakerphone_main( "idle_announce", None )
+        mock_announce.assert_called_once_with( "abc12345", None )
+
+    def test_speakerphone_ask_stays_fully_silent( self ):
+        """speakerphone + ask → NO announce (blocking ask skipped, no silent-degrade per Rick)."""
+        mock_announce = self._run_speakerphone_main( "ask", { "name": "Rachel" } )
+        mock_announce.assert_not_called()
+
+    def test_speakerphone_none_stays_silent( self ):
+        """speakerphone + none → NO announce."""
+        mock_announce = self._run_speakerphone_main( "none", { "name": "Rachel" } )
+        mock_announce.assert_not_called()
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

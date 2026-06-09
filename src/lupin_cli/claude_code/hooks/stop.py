@@ -995,6 +995,22 @@ def main():
                 "session_id" : session_id,
                 "error"      : str( e ),
             } )
+        # Silent idle-announce (Rick, 2026-06-08). Speakerphone sessions previously
+        # exited here BEFORE the idle-behavior gate (~line 1063), so idle_announce
+        # never fired for them — an order-of-operations bug (the early-exit was
+        # written for the BLOCKING "Anything else?" ask path, never narrowed when the
+        # non-blocking idle_announce became default). Fire it here instead, SILENTLY:
+        # _announce_idle posts at LOW priority, which the client renders to the DOM
+        # card WITHOUT TTS (notifications.js gates speech on high/urgent only) — a
+        # subtle bubble, no chorus-TTS spam. Gated to idle_announce ONLY: `ask`/`none`
+        # stay fully silent in speakerphone (the blocking ask is correctly skipped).
+        # "Nothing owed" is a turn-boundary approximation — this runs upstream of the
+        # work-owed oracle (accepted by Rick).
+        if _stop_hook_idle_behavior() == "idle_announce":
+            persona      = get_voice_persona( session_id )
+            persona_name = persona.get( "name" ) if persona else None
+            _announce_idle( session_id, persona_name )
+
         # Speakerphone/chorus sessions skip the "Anything else?" prompt + heartbeat
         # path entirely (it would interrupt the user's live voice dialogue); the
         # auto-narrate safety net above is preserved. Restored to clean
