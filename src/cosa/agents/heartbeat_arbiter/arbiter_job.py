@@ -58,6 +58,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 from cosa.agents.heartbeat_arbiter.manager_resolver import (
     resolve_manager as _default_resolve_manager,
     resolve_active_managers as _default_resolve_active_managers,
+    list_manager_session_ids as _default_list_manager_session_ids,
 )
 # 2b-2 recipient routing — the ratified Part-6 tier model (pure leaf). CASE_TIERS
 # is the RUNTIME contract: _route(case, …) dispatches by tier_for(case).
@@ -416,7 +417,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - returns "table" or "tick" (for the poll summary)
         """
         bridge_mtimes = { sid: self._bridge_mtime_fn( sid ) for sid in fleet_view }
-        snapshot      = build_snapshot( fleet_view, bridge_mtimes, now )
+        # Fleet-Status P1 (design §4): enrich each row with role + manager via the
+        # already-injected resolver seam + the manager-manifest lister. Both are
+        # degrade-safe inside build_snapshot (never raises), so a brittle hop can
+        # only flatten the hierarchy — never crash the poll or mis-parent a worker.
+        snapshot      = build_snapshot(
+            fleet_view, bridge_mtimes, now,
+            resolve_manager_fn = self._resolve_manager_fn,
+            list_managers_fn   = _default_list_manager_session_ids,
+        )
 
         sig = frame_signature( snapshot )
         if sig != self._last_frame_sig:

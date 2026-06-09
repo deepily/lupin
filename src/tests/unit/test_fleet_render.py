@@ -132,6 +132,100 @@ class TestBuildSnapshot:
         snap = fr.build_snapshot( None, None, NOW )
         assert snap[ "session_count" ] == 0
 
+    def test_default_no_seams_role_worker_manager_none( self ):
+        # Neither seam injected → back-compatible flat snapshot, but the two new
+        # keys are ALWAYS present (the frontend row shape depends on them).
+        view = { "s1": { "session_id": "s1", "persona": "Ann", "state": "working",
+                         "holding_on": "none", "stuck": False } }
+        row = fr.build_snapshot( view, { }, NOW )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "worker" and row[ "manager" ] is None
+
+
+# ── _sid_matches (prefix-tolerant) ─────────────────────────────────────────────
+
+class TestSidMatches:
+    def test_exact( self ):            assert fr._sid_matches( "abc", "abc" ) is True
+    def test_short_prefix_of_full( self ):
+        assert fr._sid_matches( "d9e65cd8", "d9e65cd8-bb24-4656" ) is True
+    def test_full_prefix_of_short( self ):
+        assert fr._sid_matches( "d9e65cd8-bb24-4656", "d9e65cd8" ) is True
+    def test_no_match( self ):         assert fr._sid_matches( "abc", "xyz" ) is False
+    def test_falsy_a( self ):          assert fr._sid_matches( "", "x" ) is False
+    def test_falsy_b( self ):          assert fr._sid_matches( "x", None ) is False
+
+
+# ── build_snapshot hierarchy enrichment (Fleet-Status P1 §4) ────────────────────
+
+class TestBuildSnapshotEnrichment:
+    def _view( self ):
+        return {
+            "mgr0001": { "session_id": "mgr0001", "persona": "Tiberius", "state": "working",
+                         "holding_on": "none", "stuck": False },
+            "wkr0001": { "session_id": "wkr0001", "persona": "Rio", "state": "working",
+                         "holding_on": "none", "stuck": False },
+        }
+
+    def test_role_manager_via_prefix_match( self ):
+        # manager set carries the FULL slugified uuid; the row sid is the short form.
+        snap = fr.build_snapshot(
+            self._view(), { }, NOW,
+            list_managers_fn = lambda: { "mgr0001-bb24-4656-8076-29f646b60a98" },
+        )
+        by_sid = { r[ "session_id" ]: r for r in snap[ "sessions" ] }
+        assert by_sid[ "mgr0001" ][ "role" ] == "manager"
+        assert by_sid[ "wkr0001" ][ "role" ] == "worker"
+
+    def test_manager_persona_only_when_lineage( self ):
+        def resolver( sid ):
+            if sid == "wkr0001":
+                return { "manager_persona": "Tiberius", "source": "lineage" }
+            return { "manager_persona": "Bo", "source": "declared" }   # NOT lineage → ignored
+        snap = fr.build_snapshot( self._view(), { }, NOW, resolve_manager_fn = resolver )
+        by_sid = { r[ "session_id" ]: r for r in snap[ "sessions" ] }
+        assert by_sid[ "wkr0001" ][ "manager" ] == "Tiberius"   # lineage surfaces
+        assert by_sid[ "mgr0001" ][ "manager" ] is None         # declared → None (never guess)
+
+    def test_manager_none_when_unresolved( self ):
+        snap = fr.build_snapshot(
+            self._view(), { }, NOW,
+            resolve_manager_fn = lambda sid: { "manager_persona": None, "source": "unresolved" },
+        )
+        assert all( r[ "manager" ] is None for r in snap[ "sessions" ] )
+
+    def test_manager_none_when_resolver_returns_non_dict( self ):
+        snap = fr.build_snapshot(
+            self._view(), { }, NOW,
+            resolve_manager_fn = lambda sid: None,   # defensive: non-dict result
+        )
+        assert all( r[ "manager" ] is None for r in snap[ "sessions" ] )
+
+    def test_resolver_throws_degrades_to_none( self ):
+        def boom( sid ): raise RuntimeError( "brittle hop" )
+        snap = fr.build_snapshot( self._view(), { }, NOW, resolve_manager_fn = boom )
+        assert all( r[ "manager" ] is None for r in snap[ "sessions" ] )   # never raises
+
+    def test_list_managers_throws_degrades_to_all_workers( self ):
+        def boom(): raise RuntimeError( "no session dir" )
+        snap = fr.build_snapshot( self._view(), { }, NOW, list_managers_fn = boom )
+        assert all( r[ "role" ] == "worker" for r in snap[ "sessions" ] )   # never raises
+
+    def test_list_managers_returns_none_treated_as_empty( self ):
+        snap = fr.build_snapshot( self._view(), { }, NOW, list_managers_fn = lambda: None )
+        assert all( r[ "role" ] == "worker" for r in snap[ "sessions" ] )
+
+    def test_both_seams_full_hierarchy( self ):
+        snap = fr.build_snapshot(
+            self._view(), { }, NOW,
+            list_managers_fn   = lambda: { "mgr0001" },
+            resolve_manager_fn = lambda sid: (
+                { "manager_persona": "Tiberius", "source": "lineage" } if sid == "wkr0001"
+                else { "manager_persona": None, "source": "unresolved" }
+            ),
+        )
+        by_sid = { r[ "session_id" ]: r for r in snap[ "sessions" ] }
+        assert by_sid[ "mgr0001" ][ "role" ] == "manager" and by_sid[ "mgr0001" ][ "manager" ] is None
+        assert by_sid[ "wkr0001" ][ "role" ] == "worker"  and by_sid[ "wkr0001" ][ "manager" ] == "Tiberius"
+
 
 # ── frame_signature ───────────────────────────────────────────────────────────
 

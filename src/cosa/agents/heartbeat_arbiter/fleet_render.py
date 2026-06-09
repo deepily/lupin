@@ -27,6 +27,8 @@ Pure + never-raises. Design authority: lupin
 """
 import datetime
 
+from cosa.agents.heartbeat_arbiter.manager_resolver import SOURCE_LINEAGE
+
 
 # Liveness verdict thresholds (seconds). Defaults are render-layer constants
 # (not INI keys) so the lane stays config-light; the arbiter passes its own
@@ -157,12 +159,33 @@ def compute_liveness( view, bridge_mtime, now,
     }
 
 
-def build_snapshot( fleet_view, bridge_mtimes, now,
-                    live_seconds  = DEFAULT_LIVE_SECONDS,
-                    quiet_seconds = DEFAULT_QUIET_SECONDS,
-                    stale_seconds = DEFAULT_STALE_SECONDS ):
+def _sid_matches( a, b ):
     """
-    Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4).
+    Prefix-tolerant session-id match (short 8-char ids vs full uuids).
+
+    Mirrors `manager_resolver._id_matches` — kept LOCAL so build_snapshot's role
+    membership test stays self-contained and pure (no import of a sibling's
+    private symbol). The fleet_view keys are often short 8-char ids while the
+    manager set carries full slugified uuids, so equality alone under-matches.
+
+    Ensures:
+        - True when either id equals or is a prefix of the other; False if either
+          is falsy
+    """
+    if not a or not b:
+        return False
+    return a == b or a.startswith( b ) or b.startswith( a )
+
+
+def build_snapshot( fleet_view, bridge_mtimes, now,
+                    live_seconds       = DEFAULT_LIVE_SECONDS,
+                    quiet_seconds      = DEFAULT_QUIET_SECONDS,
+                    stale_seconds      = DEFAULT_STALE_SECONDS,
+                    resolve_manager_fn = None,
+                    list_managers_fn   = None ):
+    """
+    Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
+    with per-session hierarchy (Fleet-Status P1, design §4).
 
     Requires:
         - fleet_view is { session_id: VIEW } (build_fleet_view output)
@@ -172,10 +195,31 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
     Ensures:
         - returns { generated_at(iso), session_count, sessions: [row, ...] }
           sorted by session_id for stable rendering/diffing
-        - each row keeps STATE and LIVENESS as separate keys (C4):
-          { session_id, persona, state, holding_on, stuck, liveness{...} }
-        - never raises
+        - each row keeps STATE and LIVENESS as separate keys (C4) PLUS the two
+          hierarchy keys (role, manager):
+          { session_id, persona, state, holding_on, stuck, liveness{...},
+            role, manager }
+        - role = "manager" if the session-id (prefix-tolerantly) belongs to the
+          injected manager set (list_managers_fn), else "worker"
+        - manager = resolve_manager_fn(sid).manager_persona ONLY when its source
+          is "lineage"; for declared/unresolved/error → None (degrade-safe: we
+          NEVER show a guessed manager — None lands the row in the "Unmanaged"
+          group rather than mis-parenting a worker)
+        - INJECTED seams (both default None) keep this function pure + 100%-
+          testable with fakes, mirroring arbiter_job's resolve_active_managers_fn
+          injection. With neither injected → role="worker", manager=None for every
+          row (back-compatible flat snapshot)
+        - never raises — a throwing list_managers_fn degrades to an empty manager
+          set (all workers); a throwing resolve_manager_fn degrades that row to
+          manager=None
     """
+    manager_ids = set()
+    if list_managers_fn is not None:
+        try:
+            manager_ids = list_managers_fn() or set()
+        except Exception:
+            manager_ids = set()
+
     rows = [ ]
     for sid in sorted( ( fleet_view or { } ).keys() ):
         view = fleet_view[ sid ]
@@ -185,6 +229,15 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             view, ( bridge_mtimes or { } ).get( sid ), now,
             live_seconds, quiet_seconds, stale_seconds,
         )
+        role    = "manager" if any( _sid_matches( sid, mid ) for mid in manager_ids ) else "worker"
+        manager = None
+        if resolve_manager_fn is not None:
+            try:
+                res = resolve_manager_fn( sid )
+                if isinstance( res, dict ) and res.get( "source" ) == SOURCE_LINEAGE:
+                    manager = res.get( "manager_persona" )
+            except Exception:
+                manager = None
         rows.append( {
             "session_id" : sid,
             "persona"    : view.get( "persona" ),
@@ -192,6 +245,8 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             "holding_on" : view.get( "holding_on" ),
             "stuck"      : bool( view.get( "stuck" ) ),
             "liveness"   : liveness,
+            "role"       : role,
+            "manager"    : manager,
         } )
     return {
         "generated_at"  : now.isoformat(),
@@ -323,6 +378,21 @@ def quick_smoke_test():
     # s4: LIVE purely by idle_prompt
     s4 = snap[ "sessions" ][ 3 ][ "liveness" ]
     assert s4[ "verdict" ] == "LIVE" and s4[ "idle_prompt_age_s" ] == 8
+
+    # hierarchy enrichment (Fleet-Status P1 §4): default snapshot carries the two
+    # keys flat (role=worker, manager=None), and the injected seams light them up.
+    assert snap[ "sessions" ][ 0 ][ "role" ] == "worker" and snap[ "sessions" ][ 0 ][ "manager" ] is None
+    enriched = build_snapshot(
+        view, bridge_mtimes, now,
+        list_managers_fn   = lambda: { "s1" },                       # s1 is a manager
+        resolve_manager_fn = lambda sid: (                           # s2 reports to Ann via lineage
+            { "manager_persona": "Ann", "source": SOURCE_LINEAGE } if sid == "s2"
+            else { "manager_persona": None, "source": "unresolved" }
+        ),
+    )
+    e = { r[ "session_id" ]: r for r in enriched[ "sessions" ] }
+    assert e[ "s1" ][ "role" ] == "manager" and e[ "s1" ][ "manager" ] is None
+    assert e[ "s2" ][ "role" ] == "worker"  and e[ "s2" ][ "manager" ] == "Ann"
 
     # change signature ignores the ticking ages (same buckets ⇒ same sig)
     later = now + datetime.timedelta( seconds=10 )

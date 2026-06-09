@@ -96,7 +96,27 @@ def test_fleet_state_success_echoes_upstream( client, monkeypatch ):
     monkeypatch.setattr( arbiter, "_pull_arbiter_state", lambda url, timeout: composite )
     r = client.get( "/api/arbiter/fleet-state" )
     assert r.status_code == 200
-    assert r.json() == composite
+    body = r.json()
+    # Every upstream key is echoed VERBATIM …
+    assert { k: body[ k ] for k in composite } == composite
+    # … plus the ONE :7999-local injection (Fleet-Status §4.1): a non-empty IANA zone.
+    assert isinstance( body[ "app_timezone" ], str ) and body[ "app_timezone" ]
+
+
+def test_fleet_state_injects_configured_app_timezone( client, monkeypatch ):
+    """app_timezone is injected from the config key 'app timezone' (Fleet-Status §4.1)."""
+    from cosa.rest.dependencies.config import get_config_manager
+    expected = get_config_manager().get( "app timezone", default="America/New_York" )
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", lambda url, timeout: { "status": "ok" } )
+    body = client.get( "/api/arbiter/fleet-state" ).json()
+    assert body[ "app_timezone" ] == expected
+
+
+def test_fleet_state_non_dict_upstream_not_enriched( client, monkeypatch ):
+    """Defensive: a non-dict upstream body passes through untouched (no injection, no crash)."""
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", lambda url, timeout: [ "weird", "but", "json" ] )
+    r = client.get( "/api/arbiter/fleet-state" )
+    assert r.status_code == 200 and r.json() == [ "weird", "but", "json" ]
 
 
 def test_fleet_state_unreachable_when_pull_fails( client, monkeypatch ):
@@ -110,6 +130,8 @@ def test_fleet_state_unreachable_when_pull_fails( client, monkeypatch ):
     assert body[ "status" ]  == "unreachable"
     assert body[ "service" ] == "lupin-arbiter-app"
     assert body[ "health_watcher" ] is None and body[ "fleet_arbiter" ] is None
+    # app_timezone is intentionally OMITTED on the unreachable envelope (§4.1) → client falls back to browser-local.
+    assert "app_timezone" not in body
     # NEGATIVE: the OLD generic keys are GONE from the proxy envelope (contract break, not additive)
     assert "loop_a" not in body and "loop_b_fleet" not in body
     assert "ConnectError" in body[ "detail" ]

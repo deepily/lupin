@@ -144,13 +144,20 @@ async def get_fleet_state(
         - reads the upstream URL + timeout LAZILY from the shared config singleton
           (no module-scope ConfigurationManager → import/collection never touches
           LUPIN_CONFIG_MGR_CLI_ARGS)
+        - injects ONE top-level `app_timezone` field (the configured IANA zone,
+          e.g. "America/New_York") into the otherwise-verbatim composite — the
+          SINGLE deviation from verbatim-proxy, :7999-local (no :8001 change). The
+          client feeds it to Intl.DateTimeFormat to render the last-updated stamp
+          in the operator's DST-aware zone (Fleet-Status design §4.1). Omitted on
+          the unreachable envelope by design → the client falls back to browser-
+          local zone (display-only, never blocks the table).
     """
     from cosa.rest.dependencies.config import get_config_manager
     config_mgr = get_config_manager()
     url     = config_mgr.get( "arbiter vigilance state url", default="http://127.0.0.1:8001/state" )
     timeout = config_mgr.get( "arbiter vigilance state timeout seconds", default=5, return_type="int" )
     try:
-        return _pull_arbiter_state( url, timeout )
+        result = _pull_arbiter_state( url, timeout )
     except httpx.HTTPError as e:
         return {
             "status"         : "unreachable",
@@ -159,3 +166,6 @@ async def get_fleet_state(
             "health_watcher" : None,
             "fleet_arbiter"  : None,
         }
+    if isinstance( result, dict ):
+        result[ "app_timezone" ] = config_mgr.get( "app timezone", default="America/New_York" )
+    return result
