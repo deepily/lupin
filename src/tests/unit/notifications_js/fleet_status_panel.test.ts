@@ -44,6 +44,11 @@ before( () => {
 type FleetUI = Record<string, unknown> & {
   fetchFleetState: () => Promise<Record<string, unknown>>;
   groupFleetByManager: ( sessions: unknown ) => { totalCount: number; groups: GroupModel[] };
+  _splitFleetByLiveness: ( sessions: unknown ) => { live: Record<string, unknown>[]; offline: Record<string, unknown>[] };
+  _fleetOfflineToggleHtml: ( offlineCount: number, showOffline: boolean ) => string;
+  toggleFleetShowOffline: () => void;
+  fleetShowOffline: boolean;
+  _lastFleetComposite: unknown;
   _fleetLabelOf: ( session: unknown ) => string;
   _fleetLivenessTooltip: ( liveness: unknown ) => string;
   renderFleetStatusTable: ( model: { groups: GroupModel[] } ) => string;
@@ -111,6 +116,11 @@ const MARIA    = { session_id: "cc33dd44", persona: "María", state: "idle", hol
                    stuck: false, role: "worker", manager: null,
                    liveness: { bridge_age_s: 360, event_age_s: 360, commons_age_s: 360,
                                idle_prompt_age_s: 360, freshest_age_s: 360, verdict: "quiet 6m" } };
+// A days-stale dead session (the graveyard D6/§5.1 filters out by default).
+const OFFLINE  = { session_id: "ee55ff66", persona: "Krishna", state: "idle", holding_on: "none",
+                   stuck: false, role: "worker", manager: "Tiberius",
+                   liveness: { bridge_age_s: null, event_age_s: 300000, commons_age_s: null,
+                               idle_prompt_age_s: null, freshest_age_s: 300000, verdict: "offline" } };
 
 beforeEach( () => { document.body.replaceChildren(); } );
 
@@ -469,6 +479,95 @@ test( "startFleetStatusPolling is idempotent (clears a prior interval first)", (
   const second = ui.fleetStatusPollIntervalHandle;
   assert.notEqual( first, second, "a fresh interval replaced the old one" );
   ui.stopFleetStatusPolling();
+} );
+
+// ─────────────────────────── D6 / §5.1 live-only filter + offline toggle ───────────────────────────
+
+test( "_splitFleetByLiveness partitions by verdict; rows without liveness are treated as live", () => {
+  const ui = newUI();
+  const noLive = { session_id: "nl01", persona: "NoLive", role: "worker" };  // no liveness block
+  const { live, offline } = ui._splitFleetByLiveness( [ TIBERIUS, OFFLINE, noLive ] );
+  assert.deepEqual( live.map( s => s.persona ), [ "Tiberius", "NoLive" ] );
+  assert.deepEqual( offline.map( s => s.persona ), [ "Krishna" ] );
+} );
+
+test( "_splitFleetByLiveness: non-array input → empty partitions", () => {
+  const ui = newUI();
+  const { live, offline } = ui._splitFleetByLiveness( null );
+  assert.deepEqual( live, [] );
+  assert.deepEqual( offline, [] );
+} );
+
+test( "_fleetOfflineToggleHtml: 'Show offline (N)' when hidden, 'Hide offline (N)' when shown, wired to toggle", () => {
+  const ui = newUI();
+  const showHtml = ui._fleetOfflineToggleHtml( 7, false );
+  assert.match( showHtml, /Show offline \(7\)/ );
+  assert.match( showHtml, /window\.notificationsUI\.toggleFleetShowOffline\(\)/ );
+  assert.match( showHtml, /fleet-offline-toggle/ );
+  const hideHtml = ui._fleetOfflineToggleHtml( 7, true );
+  assert.match( hideHtml, /Hide offline \(7\)/ );
+} );
+
+test( "renderFleetStatus: default HIDES offline sessions + shows 'Show offline (N)'; count is live-only", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderFleetStatus( {
+    status: "ok", app_timezone: "America/New_York",
+    fleet_arbiter: { sessions: [ TIBERIUS, RIO, OFFLINE ] }
+  } );
+  const html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.ok( !html.includes( "Krishna" ), "offline session hidden by default" );
+  assert.match( html, /Show offline \(1\)/ );
+  assert.equal( document.getElementById( "fleet-status-count" )!.textContent, "2" );  // live only
+} );
+
+test( "renderFleetStatus: fleetShowOffline=true REVEALS offline + shows 'Hide offline (N)'; count is all", () => {
+  const ui = newUI();
+  ui.fleetShowOffline = true;
+  buildPanelDOM();
+  ui.renderFleetStatus( {
+    status: "ok", fleet_arbiter: { sessions: [ TIBERIUS, RIO, OFFLINE ] }
+  } );
+  const html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.match( html, /Krishna/ );
+  assert.match( html, /Hide offline \(1\)/ );
+  assert.equal( document.getElementById( "fleet-status-count" )!.textContent, "3" );
+} );
+
+test( "renderFleetStatus: all sessions offline + hidden → 'No live sessions' + toggle, count 0", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderFleetStatus( { status: "ok", fleet_arbiter: { sessions: [ OFFLINE ] } } );
+  const html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.match( html, /No live sessions/ );
+  assert.match( html, /Show offline \(1\)/ );
+  assert.equal( document.getElementById( "fleet-status-count" )!.textContent, "0" );
+} );
+
+test( "renderFleetStatus: no offline sessions → no toggle rendered", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderFleetStatus( { status: "ok", fleet_arbiter: { sessions: [ TIBERIUS, RIO ] } } );
+  const html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.ok( !html.includes( "fleet-offline-toggle" ), "no toggle when nothing offline" );
+} );
+
+test( "toggleFleetShowOffline flips state and re-renders from the cached composite (no re-fetch)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui._lastFleetComposite = { status: "ok", fleet_arbiter: { sessions: [ TIBERIUS, RIO, OFFLINE ] } };
+  ui.fleetShowOffline = false;
+
+  ui.toggleFleetShowOffline();
+  assert.equal( ui.fleetShowOffline, true );
+  let html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.match( html, /Krishna/ );             // offline now shown
+  assert.match( html, /Hide offline \(1\)/ );
+
+  ui.toggleFleetShowOffline();
+  assert.equal( ui.fleetShowOffline, false );
+  html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.ok( !html.includes( "Krishna" ), "offline hidden again" );
 } );
 
 if ( typeof process !== "undefined" && process.argv.includes( "--run" ) ) { /* node --test entry */ }

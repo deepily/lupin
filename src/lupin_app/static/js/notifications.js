@@ -8593,6 +8593,66 @@ class NotificationsUI {
         ].join( " · " );
     }
 
+    _splitFleetByLiveness( sessions ) {
+        /**
+         * Partition sessions into live vs offline by liveness verdict (D6 / §5.1).
+         *
+         * A session is OFFLINE only when `liveness.verdict === "offline"`. Rows with
+         * no liveness data are treated as LIVE (kept) — absence of a verdict is never
+         * grounds to hide a session.
+         *
+         * Requires:
+         *     - sessions is an array (or falsy → treated as empty)
+         *
+         * Ensures:
+         *     - Returns { live: [...], offline: [...] } preserving input order
+         *     - Pure: no DOM access, no side effects
+         */
+        const rows      = Array.isArray( sessions ) ? sessions : [];
+        const isOffline = ( s ) => !!( s && s.liveness && s.liveness.verdict === "offline" );
+        return {
+            live    : rows.filter( s => !isOffline( s ) ),
+            offline : rows.filter( s =>  isOffline( s ) )
+        };
+    }
+
+    _fleetOfflineToggleHtml( offlineCount, showOffline ) {
+        /**
+         * Build the "Show/Hide offline (N)" view-toggle control (D6 / §5.1).
+         *
+         * This is a READ-ONLY view control — it only changes what the table shows,
+         * never fleet state (§6.3 / D2). The count is surfaced so hidden offline
+         * sessions are discoverable, not silently erased.
+         *
+         * Requires:
+         *     - offlineCount is a non-negative integer
+         *     - showOffline is the current toggle state (bool)
+         *
+         * Ensures:
+         *     - Returns an HTML string with a button wired to toggleFleetShowOffline()
+         *     - Pure: no DOM access, no side effects
+         */
+        const label = showOffline
+            ? `Hide offline (${offlineCount})`
+            : `Show offline (${offlineCount})`;
+        return `<div class="fleet-offline-toggle">` +
+               `<button type="button" class="fleet-offline-toggle-btn" ` +
+               `onclick="window.notificationsUI.toggleFleetShowOffline()">${label}</button></div>`;
+    }
+
+    toggleFleetShowOffline() {
+        /**
+         * Flip the "show offline" view state and re-render the LAST fetched composite
+         * in place — no re-fetch (D6 / §5.1). View-only; never mutates fleet state.
+         *
+         * Ensures:
+         *     - this.fleetShowOffline is negated
+         *     - the panel re-renders from this._lastFleetComposite (no network call)
+         */
+        this.fleetShowOffline = !this.fleetShowOffline;
+        this.renderFleetStatus( this._lastFleetComposite );
+    }
+
     renderFleetStatusTable( model ) {
         /**
          * Render the grouped hierarchy model (§7) as a read-only table (mirrors the
@@ -8716,14 +8776,32 @@ class NotificationsUI {
             return;
         }
 
-        const sessions = composite.fleet_arbiter.sessions || [];
-        if ( countEl ) countEl.textContent = String( sessions.length );
+        // Cache the composite so the offline-toggle can re-render in place without a re-fetch.
+        this._lastFleetComposite = composite;
+
+        const sessions    = composite.fleet_arbiter.sessions || [];
+        const showOffline = !!this.fleetShowOffline;
+        const { live, offline } = this._splitFleetByLiveness( sessions );
+        // Default view hides offline sessions (D6 / §5.1) — the multi-day dead-session
+        // graveyard. A "Show offline (N)" toggle reveals them on demand.
+        const visible     = showOffline ? sessions : live;
+
+        // The count reflects what is actually shown (live-only by default).
+        if ( countEl ) countEl.textContent = String( visible.length );
+
+        const toggleHtml = offline.length > 0
+            ? this._fleetOfflineToggleHtml( offline.length, showOffline )
+            : "";
 
         if ( sessions.length === 0 ) {
             container.innerHTML = `<p class="fleet-status-message fleet-status-empty">No active sessions.</p>`;
+        } else if ( visible.length === 0 ) {
+            // Sessions exist but every one is offline and currently hidden.
+            container.innerHTML = toggleHtml +
+                `<p class="fleet-status-message fleet-status-empty">No live sessions.</p>`;
         } else {
-            const model = this.groupFleetByManager( sessions );
-            container.innerHTML = this.renderFleetStatusTable( model );
+            const model = this.groupFleetByManager( visible );
+            container.innerHTML = toggleHtml + this.renderFleetStatusTable( model );
         }
 
         this._stampFleetStatusUpdated( composite.app_timezone );
