@@ -2,6 +2,18 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.09 - Session d9e65cd8 (Tiberius 👑) | Arbiter liveness fix + operator loop (Phase 1, Round 2a, Round 2b) — built, committed, deployed
+
+**Drove the heartbeat-arbiter from blind sensor to a closed operator loop across three engagements** (manager seat: serialize → spawn crew → review → commit, per Rick's "drive to completion, commit as I see fit, push gated"):
+
+- **Phase-1 liveness fix** (`852ab83`): false WHOLE-FLEET-STALL killed — roster rebuilt as a multi-signal UNION (bridge ∪ commons ∪ idle_prompt ∪ stop-event), 4 distinct ages, BOTH-pid (`listener_pid`/`cc_pid`) check, `idle_prompt` 4th signal (Rick's catch). Deployed + verified live.
+- **Round 2a loop rename** (`21189d4`, Decision 6): `loop_a`/`loop_b_fleet` → `health_watcher`/`fleet_arbiter` everywhere (modules/classes/`/state` keys/proxy/logs), ZERO behavior change, deployed.
+- **Round 2b operator loop** — 2b-1 stall calibration + live-push-to-Rick (`06fb0b3`), 2b-2 Part-6 routing + phantom-guarded active-managers resolver (`b4441d7`), 2b-3 bounded auto-poke + reap-RECOMMENDATION (`ba57416`). Redline narrowed (Rick-confirmed) to "never **destructively** actuate" — poke yes (bounded, per-episode anti-storm cap), reap escalates only. **DEPLOYED live on :8001**; live-push pending `LUPIN_ARBITER_NOTIFY_API_KEY`.
+
+**Crew**: Rio/Tiffany/Cheech/Mr. Radio (impl + review) · María 🌸 (observer — independently verified every phase 3-for-3) · Rachel 🕊️ (liveness design). 100% L/B on all new arbiter code; standing redline AST-test. Design docs under `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/`. **Discipline lessons banked** (notify-≤500, milestone-must-land, not-a-gate/commit-as-I-see-fit, blast-radius bar).
+
+---
+
 ### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Manager-badge first-render fix (live-patch existing strip icon)
 
 **Fixed: the manager badge was missing on a worker's FIRST render, appearing only after a page refresh** (Rick found it). Root cause: `_addStripIcon` is idempotent (`if (getElementById(iconId)) return`), and a worker's strip icon is often created — by an earlier card/event — BEFORE its `voice_persona_assigned` event (carrying `manager_persona`) arrives, so the later add-icon call no-ops and never adds the badge. A full refresh rebuilds the strip with `managerPersonaMap` already populated, which is why refresh "fixed" it. **Fix:** extracted `_applyManagerBadge(icon, managerPersona)` (idempotent render/clear; falsy → remove) + new `_setManagerBadgeOnStripIcon(senderId, managerPersona)` that **live-patches** the badge onto an already-rendered icon, called in the `voice_persona_assigned` handler right after `managerPersonaMap` updates. +3 unit tests (live-patch onto existing icon · no-op when absent · null clears badge+flag); **6 badge + 27 JS suite green**. Selective-staged (mine only); excluded Tiffany's `stop.py` ppid→cc_pid rename + peer docs. HELD — not pushed.

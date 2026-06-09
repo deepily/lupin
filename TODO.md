@@ -1,5 +1,19 @@
 # TODO
 
+## 🌙 2026-06-09 SESSION-END (Tiberius 👑, session d9e65cd8) — arbiter OPERATOR LOOP done + DEPLOYED
+
+> Heartbeat-arbiter Phase-1 liveness fix + Round 2a rename + Round 2b operator loop (live-push + Part-6 routing + bounded auto-poke) all BUILT, committed, **deployed live on :8001**, María-verified 3-for-3, and PUSHED at session-end. Commits: `852ab83` (Phase 1) · `21189d4` (2a) · `06fb0b3`+`b4441d7`+`ba57416` (2b). Resume memento: `io/mementos/tiberius-session-resume-2026.06.08-night.md`.
+
+**▶ FOLLOW-UPS (descending priority):**
+1. **🚨 [LUPIN] history.md archival — CRITICAL (~93% of 25k).** Archive older entries FIRST next session, before adding new content (well past the 19k line).
+2. **[LUPIN] Live-push API key** — the arbiter's live-push-to-Rick (2b-1) is WIRED but OFF until `LUPIN_ARBITER_NOTIFY_API_KEY` env credential is provisioned (Rick's). Until then escalations stay durable-commons-only.
+3. **[LUPIN] Manual-poker make-before-break stand-down** — the manual cascade-poker stopgap stays LIVE until the deployed auto-poke (2b-3) is proven in prod; then stand the manual one down.
+4. **[LUPIN] Deploy allow-rule** — add a `settings.json` allow-rule for `systemctl --user restart lupin-arbiter-app` so the manager can deploy :8001 without the auto-mode classifier gate (per the session-end deploy-permission explanation).
+
+**Done this session (were pending below):** R0 cutover ✅ · operator loop ✅ · loop rename (Decision 6) ✅. The older "interim heartbeat poker" + "deploy v2.2 arbiter" items are now SUPERSEDED by the deployed operator loop.
+
+---
+
 ## 🌙 2026-06-07 NIGHT WRAP (Tiberius 👑, session 1f9f3c4c) — arbiter B1 DONE, NOT in production
 
 > Session-end state: arbiter-vigilance B1 (L1–L4 + R0) + test-debt sweep + broadcast source fix all reviewer-passed, committed + PUSHED (2 selective commits), backup to DATA02. **NOT in production** — :8000 verify not run, R0 cutover not done, :8001 staged-not-enabled. Resume memento: `io/mementos/tiberius-session-resume-2026.06.07-night.md`.
