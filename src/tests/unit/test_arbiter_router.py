@@ -89,9 +89,9 @@ def test_fleet_state_success_echoes_upstream( client, monkeypatch ):
         "status"       : "ok",
         "service"      : "lupin-arbiter-app",
         "version"      : "x.y.z",
-        "generated_at" : "2026-06-07T22:00:00+00:00",
-        "loop_a"       : { "containers": { } },
-        "loop_b_fleet" : { "status": "ok", "session_count": 1, "sessions": [ ] },
+        "generated_at"   : "2026-06-07T22:00:00+00:00",
+        "health_watcher" : { "containers": { } },
+        "fleet_arbiter"  : { "status": "ok", "session_count": 1, "sessions": [ ] },
     }
     monkeypatch.setattr( arbiter, "_pull_arbiter_state", lambda url, timeout: composite )
     r = client.get( "/api/arbiter/fleet-state" )
@@ -109,7 +109,9 @@ def test_fleet_state_unreachable_when_pull_fails( client, monkeypatch ):
     body = r.json()
     assert body[ "status" ]  == "unreachable"
     assert body[ "service" ] == "lupin-arbiter-app"
-    assert body[ "loop_a" ] is None and body[ "loop_b_fleet" ] is None
+    assert body[ "health_watcher" ] is None and body[ "fleet_arbiter" ] is None
+    # NEGATIVE: the OLD generic keys are GONE from the proxy envelope (contract break, not additive)
+    assert "loop_a" not in body and "loop_b_fleet" not in body
     assert "ConnectError" in body[ "detail" ]
 
 

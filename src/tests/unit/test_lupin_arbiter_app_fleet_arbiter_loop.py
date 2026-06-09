@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Unit tests for Loop B — the standing fleet-stall arbiter + recycle supervisor (L3).
+Unit tests for the fleet-arbiter loop — the standing fleet-stall arbiter + recycle supervisor (L3).
 
 Venue: :7999-eligible (pure logic + fakes; the one real-thread test uses a blocking
 fake job released deterministically by request_cancel — no real arbiter run, no
-docker, no commons IO). Coverage target: 100% line+branch+function on loop_b.py.
+docker, no commons IO). Coverage target: 100% line+branch+function on fleet_arbiter_loop.py.
 """
 import datetime
 import json
 import threading
 
-from lupin_arbiter_app.loop_b import (
-    LoopBRunner,
-    build_loop_b_job_factory,
+from lupin_arbiter_app.fleet_arbiter_loop import (
+    FleetArbiterLoop,
+    build_fleet_arbiter_job_factory,
     make_escalation_notify_fn,
     make_warmup_notify_fn,
     _default_log_fn,
@@ -106,12 +106,12 @@ def test_warmup_suppresses_then_passes():
 
 def test_build_factory_wires_sink_and_warmup_escalation():
     gw, store, clock = FakeGateway(), LocalSnapshotStore(), SettableClock( T0 )
-    factory = build_loop_b_job_factory( gw, store, clock=clock, log_fn=lambda *a, **k: None,
-                                        start_period_seconds=120 )
+    factory = build_fleet_arbiter_job_factory( gw, store, clock=clock, log_fn=lambda *a, **k: None,
+                                               start_period_seconds=120 )
     job = factory()
-    # snapshot_sink writes the loop_b_fleet section of the shared store
+    # snapshot_sink writes the fleet_arbiter section of the shared store
     job._snapshot_sink( { "session_count": 2 } )
-    assert store.get_section( "loop_b_fleet" ) == { "session_count": 2 }
+    assert store.get_section( "fleet_arbiter" ) == { "session_count": 2 }
     # notify within warm-up → suppressed (no durable post)
     clock.t = T0
     job._notify_fn( "early" )
@@ -122,7 +122,7 @@ def test_build_factory_wires_sink_and_warmup_escalation():
     assert gw.posts == [ ( "fleet-escalations", "late" ) ]
 
 
-# ── LoopBRunner recycle supervisor ──────────────────────────────────────────
+# ── FleetArbiterLoop recycle supervisor ─────────────────────────────────────
 
 def test_runner_recycles_until_stop():
     rec = Recorder()
@@ -132,11 +132,11 @@ def test_runner_recycles_until_stop():
         n[ "c" ] += 1
         if n[ "c" ] >= 2: runner._stop.set()       # stop AT the 2nd job (after its do_all)
         return FakeJob( result="hard-cap" )
-    runner = LoopBRunner( factory, log_fn=rec.log )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log )
     runner.run()
     assert runner.cycles == 2
-    assert len( [ e for e, _ in rec.logs if e == "loop_b_recycle" ] ) == 1     # one relaunch
-    assert len( [ e for e, _ in rec.logs if e == "loop_b_job_start" ] ) == 2
+    assert len( [ e for e, _ in rec.logs if e == "fleet_arbiter_recycle" ] ) == 1     # one relaunch
+    assert len( [ e for e, _ in rec.logs if e == "fleet_arbiter_job_start" ] ) == 2
 
 
 def test_runner_swallows_job_error():
@@ -145,17 +145,17 @@ def test_runner_swallows_job_error():
     def factory():
         runner._stop.set()                          # stop after this one job
         return FakeJob( raises=True )
-    runner = LoopBRunner( factory, log_fn=rec.log )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log )
     runner.run()
     assert runner.cycles == 1
-    assert any( e == "loop_b_job_error" for e, _ in rec.logs )
+    assert any( e == "fleet_arbiter_job_error" for e, _ in rec.logs )
 
 
 def test_runner_start_stop_thread():
     rec = Recorder()
     ev  = threading.Event()
     job = FakeJob( block=ev )
-    runner = LoopBRunner( lambda: job, log_fn=rec.log )
+    runner = FleetArbiterLoop( lambda: job, log_fn=rec.log )
     runner.start()
     runner.stop()                                   # _stop + request_cancel → ev.set → do_all returns → break → join
     assert job.cancelled is True
@@ -165,27 +165,27 @@ def test_runner_start_stop_thread():
 def test_runner_stop_cancel_error_swallowed():
     rec = Recorder()
     job = FakeJob( cancel_raises=True )
-    runner = LoopBRunner( lambda: job, log_fn=rec.log )
+    runner = FleetArbiterLoop( lambda: job, log_fn=rec.log )
     runner._current_job = job                        # simulate an in-flight job
     runner.stop()                                    # request_cancel raises → swallowed+logged
-    assert any( e == "loop_b_cancel_error" for e, _ in rec.logs )
+    assert any( e == "fleet_arbiter_cancel_error" for e, _ in rec.logs )
 
 
 def test_runner_stop_without_start_is_safe():
-    LoopBRunner( lambda: FakeJob(), log_fn=lambda *a, **k: None ).stop()   # no thread/job → no raise
+    FleetArbiterLoop( lambda: FakeJob(), log_fn=lambda *a, **k: None ).stop()   # no thread/job → no raise
 
 
 def test_runner_already_stopped_runs_no_job():
     """_stop set before run() → the while condition exits immediately (no job built)."""
     rec    = Recorder()
-    runner = LoopBRunner( lambda: FakeJob(), log_fn=rec.log )
+    runner = FleetArbiterLoop( lambda: FakeJob(), log_fn=rec.log )
     runner._stop.set()
     runner.run()
     assert runner.cycles == 0
     assert rec.logs == [ ]
 
 
-def test_default_log_fn_b_emits_json( capsys ):
-    _default_log_fn( "loop_b_job_start", cycle=1 )
+def test_default_log_fn_fleet_arbiter_emits_json( capsys ):
+    _default_log_fn( "fleet_arbiter_job_start", cycle=1 )
     p = json.loads( capsys.readouterr().out.strip() )
-    assert p[ "loop" ] == "B" and p[ "event" ] == "loop_b_job_start" and p[ "cycle" ] == 1
+    assert p[ "loop" ] == "fleet_arbiter" and p[ "event" ] == "fleet_arbiter_job_start" and p[ "cycle" ] == 1

@@ -4,12 +4,12 @@ lupin-arbiter-app FastAPI app — the standalone, out-of-band fleet watcher on :
 
 Surface so far:
     GET /health  (L1) — cheap, always-answer liveness for systemd/cron (deploy §7).
-    GET /state   (L4) — the single-pane composite (Loop A `loop_a` + Loop B
-                 `loop_b_fleet`) read from the :8001-LOCAL store; the :7999
-                 reverse-proxy PULLS from here (R3). Read-only, zero outbound HTTP.
-Loop A (L2, health watch) is wired via an INJECTABLE `health_loop` that the app
-lifespan start()s on boot and stop()s on shutdown. Loop B + R0 (L3) are wired
-via the injectable `loop_b_runner`.
+    GET /state   (L4) — the single-pane composite (health watcher `health_watcher` +
+                 fleet arbiter `fleet_arbiter`) read from the :8001-LOCAL store; the
+                 :7999 reverse-proxy PULLS from here (R3). Read-only, zero outbound HTTP.
+The health watcher (L2) is wired via an INJECTABLE `health_loop` that the app
+lifespan start()s on boot and stop()s on shutdown. The fleet arbiter + R0 (L3) are
+wired via the injectable `fleet_arbiter_loop`.
 
 Two design seams (Tiberius + Tiffany):
     • the :8001-LOCAL section-keyed `snapshot_store` on app.state — the loops
@@ -35,11 +35,11 @@ def _utcnow() -> datetime.datetime:
 
 
 def create_app(
-    snapshot_store : Optional[ LocalSnapshotStore ] = None,
-    now_fn         : Optional[ Callable ]           = None,
-    started_at     : Optional[ datetime.datetime ]  = None,
-    health_loop    : Optional[ Any ]                = None,
-    loop_b_runner  : Optional[ Any ]                = None,
+    snapshot_store     : Optional[ LocalSnapshotStore ] = None,
+    now_fn             : Optional[ Callable ]           = None,
+    started_at         : Optional[ datetime.datetime ]  = None,
+    health_loop        : Optional[ Any ]                = None,
+    fleet_arbiter_loop : Optional[ Any ]                = None,
 ) -> FastAPI:
     """
     Build the lupin-arbiter-app FastAPI app.
@@ -47,7 +47,7 @@ def create_app(
     Requires:
         - now_fn (if provided) is a 0-arg callable returning an aware datetime
         - started_at (if provided) is an aware datetime
-        - health_loop / loop_b_runner (if provided) expose start() / stop()
+        - health_loop / fleet_arbiter_loop (if provided) expose start() / stop()
 
     Ensures:
         - returns a FastAPI app exposing GET /health
@@ -64,19 +64,19 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan( _app: FastAPI ):
-        for lp in ( health_loop, loop_b_runner ):
+        for lp in ( health_loop, fleet_arbiter_loop ):
             if lp is not None:
                 lp.start()
         yield
-        for lp in ( loop_b_runner, health_loop ):        # stop in reverse start order
+        for lp in ( fleet_arbiter_loop, health_loop ):   # stop in reverse start order
             if lp is not None:
                 lp.stop()
 
     app = FastAPI( title="lupin-arbiter-app", version=__version__, lifespan=lifespan )
-    app.state.snapshot_store = store
-    app.state.started_at     = started_at
-    app.state.health_loop    = health_loop
-    app.state.loop_b_runner  = loop_b_runner
+    app.state.snapshot_store     = store
+    app.state.started_at         = started_at
+    app.state.health_loop        = health_loop
+    app.state.fleet_arbiter_loop = fleet_arbiter_loop
 
     @app.get( "/health" )
     def health() -> dict:
@@ -96,8 +96,8 @@ def create_app(
         """
         The single-pane composite (L4) — read-only, cheap, 127.0.0.1-bind (R3).
 
-        Reads the :8001-LOCAL section-keyed store (Loop A `loop_a` + Loop B
-        `loop_b_fleet`); the :7999 reverse-proxy `GET /api/arbiter/fleet-state`
+        Reads the :8001-LOCAL section-keyed store (health watcher `health_watcher` +
+        fleet arbiter `fleet_arbiter`); the :7999 reverse-proxy `GET /api/arbiter/fleet-state`
         PULLS from here (R3: this service NEVER pushes). Makes ZERO outbound HTTP
         and reads only the in-process store (R4 independence preserved).
 
@@ -109,17 +109,17 @@ def create_app(
               cold loop (not yet written) is distinguishable from a genuinely empty
               fleet (the §10.4 awaiting idiom, mirrored from /api/arbiter/fleet-snapshot)
         """
-        composite    = store.get()
-        loop_a       = composite.get( "loop_a" )
-        loop_b_fleet = composite.get( "loop_b_fleet" )
+        composite      = store.get()
+        health_watcher = composite.get( "health_watcher" )
+        fleet_arbiter  = composite.get( "fleet_arbiter" )
         return {
-            "status"       : "ok",
-            "service"      : "lupin-arbiter-app",
-            "version"      : __version__,
-            "generated_at" : now_fn().isoformat(),
-            "loop_a"       : loop_a if loop_a is not None else { "status": "awaiting" },
-            "loop_b_fleet" : loop_b_fleet if loop_b_fleet is not None
-                             else { "status": "awaiting", "session_count": 0, "sessions": [ ] },
+            "status"         : "ok",
+            "service"        : "lupin-arbiter-app",
+            "version"        : __version__,
+            "generated_at"   : now_fn().isoformat(),
+            "health_watcher" : health_watcher if health_watcher is not None else { "status": "awaiting" },
+            "fleet_arbiter"  : fleet_arbiter if fleet_arbiter is not None
+                               else { "status": "awaiting", "session_count": 0, "sessions": [ ] },
         }
 
     return app
@@ -137,31 +137,31 @@ def assemble_app(
     """
     Testable production wiring (Tiberius's principle: a factory that BRANCHES on
     config is NOT an IO boundary — inject the deps, pragma only literal external
-    construction). Builds Loop A (gated on `arbiter health watch enabled`) + Loop B
-    (the standing recycle-supervised v2.2 arbiter) wired to ONE shared :8001-local
-    store, and returns the FastAPI app.
+    construction). Builds the health watcher (gated on `arbiter health watch enabled`)
+    + the fleet arbiter (the standing recycle-supervised v2.2 arbiter) wired to ONE
+    shared :8001-local store, and returns the FastAPI app.
 
     Requires:
         - cfg exposes .get( key, default, return_type ) (real or fake)
         - gateway satisfies the ArbiterGateway protocol (who/send_to/post/read)
 
     Ensures:
-        - Loop B (LoopBRunner) is ALWAYS wired (the service IS the standing arbiter)
-        - Loop A (HealthWatchLoop) is wired iff `arbiter health watch enabled`
-          (disabled → health_loop=None + a loop_a_disabled log)
+        - the fleet arbiter (FleetArbiterLoop) is ALWAYS wired (the service IS the standing arbiter)
+        - the health watcher (HealthWatcherLoop) is wired iff `arbiter health watch enabled`
+          (disabled → health_loop=None + a health_watcher_disabled log)
         - both loops write sections of the SAME store; this function makes NO
           :7999/:8000 HTTP and builds NO job until the runner starts (testable
           with a fake cfg + fake gateway)
     """
-    from lupin_arbiter_app.health_watch import HealthWatchLoop, docker_inspect_health
-    from lupin_arbiter_app.health_watch import _default_log_fn as _log_default
-    from lupin_arbiter_app.loop_b import LoopBRunner, build_loop_b_job_factory
+    from lupin_arbiter_app.health_watcher import HealthWatcherLoop, docker_inspect_health
+    from lupin_arbiter_app.health_watcher import _default_log_fn as _log_default
+    from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop, build_fleet_arbiter_job_factory
 
     store  = store  if store  is not None else LocalSnapshotStore()
     log_fn = log_fn if log_fn is not None else _log_default
 
-    # ── Loop B (L3): the standing v2.2 arbiter on the recycle supervisor ──
-    loop_b_factory = build_loop_b_job_factory(
+    # ── fleet arbiter (L3): the standing v2.2 arbiter on the recycle supervisor ──
+    fleet_arbiter_factory = build_fleet_arbiter_job_factory(
         gateway, store,
         clock                = clock,
         log_fn               = log_fn,
@@ -175,18 +175,18 @@ def assemble_app(
         stall_window         = int( cfg.get( "arbiter fleet stall window seconds", default=1800, return_type="int" ) ),
         start_period_seconds = int( cfg.get( "arbiter start period seconds", default=120, return_type="int" ) ),
     )
-    loop_b_runner = LoopBRunner( loop_b_factory, log_fn=log_fn )
+    fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=log_fn )
 
-    # ── Loop A (L2): gated on the master enable ──
+    # ── health watcher (L2): gated on the master enable ──
     if not cfg.get( "arbiter health watch enabled", default=True, return_type="boolean" ):
-        log_fn( "loop_a_disabled", reason="arbiter health watch enabled = false" )
-        return create_app( snapshot_store=store, health_loop=None, loop_b_runner=loop_b_runner )
+        log_fn( "health_watcher_disabled", reason="arbiter health watch enabled = false" )
+        return create_app( snapshot_store=store, health_loop=None, fleet_arbiter_loop=fleet_arbiter_loop )
 
     def _csv( key, default ):
         raw = cfg.get( key, default=default ) or default
         return [ c.strip() for c in raw.split( "," ) if c.strip() ]
 
-    health_loop = HealthWatchLoop(
+    health_loop = HealthWatcherLoop(
         containers            = _csv( "arbiter health watch containers", "lupin-rest-dev,lupin-rest-test,lupin-model-server,lupin-postgres" ),
         inspect_fn            = lambda name: docker_inspect_health( name, int( cfg.get( "arbiter health inspect timeout seconds", default=5, return_type="int" ) ) ),
         notify_fn             = lambda msg: log_fn( "health_escalation", message=msg ),
@@ -198,7 +198,7 @@ def assemble_app(
         flap_exclude          = _csv( "arbiter health flap exclude containers", "lupin-rest-dev" ),
         blind_threshold_polls = int( cfg.get( "arbiter health blind threshold polls", default=3, return_type="int" ) ),
     )
-    return create_app( snapshot_store=store, health_loop=health_loop, loop_b_runner=loop_b_runner )
+    return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop )
 
 
 def create_production_app() -> FastAPI:   # pragma: no cover - literal external construction (config, gateway)

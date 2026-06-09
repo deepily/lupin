@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Unit tests for Loop A — the dev/test health watch (L2).
+Unit tests for the health watcher — the dev/test health watch (L2).
 
 Venue: :7999-eligible (pure logic on synthetic Status sequences; NO live docker,
 NO network; the one real-thread test uses a fast fake clock that stops the loop
-deterministically). Coverage target: 100% line+branch+function on health_watch.py
+deterministically). Coverage target: 100% line+branch+function on health_watcher.py
 (the real `docker inspect` subprocess + SystemClock.sleep are the only
 pragma-no-cover IO boundaries).
 """
@@ -14,9 +14,9 @@ import threading
 
 import pytest
 
-from lupin_arbiter_app.health_watch import (
+from lupin_arbiter_app.health_watcher import (
     ContainerHealthTracker,
-    HealthWatchLoop,
+    HealthWatcherLoop,
     SystemClock,
     _default_log_fn,
     _parse_inspect_result,
@@ -131,7 +131,7 @@ def test_tracker_prune_drops_old_transitions():
     assert tr.transitions_in_window() == 1
 
 
-# ── HealthWatchLoop construction validation ─────────────────────────────────
+# ── HealthWatcherLoop construction validation ───────────────────────────────
 
 @pytest.mark.parametrize( "kwargs", [
     { "containers": [ ] },
@@ -144,13 +144,13 @@ def test_loop_init_validation_raises( kwargs ):
     base = { "inspect_fn": lambda n: None, "notify_fn": lambda m: None }
     base.update( kwargs )
     with pytest.raises( ValueError ):
-        HealthWatchLoop( **base )
+        HealthWatcherLoop( **base )
 
 
-# ── HealthWatchLoop.poll_once ───────────────────────────────────────────────
+# ── HealthWatcherLoop.poll_once ─────────────────────────────────────────────
 
 def _loop( inspect_fn, rec, **kw ):
-    return HealthWatchLoop(
+    return HealthWatcherLoop(
         containers = kw.pop( "containers", [ "c1" ] ),
         inspect_fn = inspect_fn,
         notify_fn  = rec.notify,
@@ -210,19 +210,19 @@ def test_poll_notify_raises_is_swallowed():
     seq  = iter( [ { "Status": "healthy" }, { "Status": "unhealthy" } ] )
     def boom_notify( msg ):
         raise RuntimeError( "notify down" )
-    loop = HealthWatchLoop( containers=[ "c1" ], inspect_fn=lambda n: next( seq ),
-                            notify_fn=boom_notify, clock=FakeClock(), log_fn=rec.log )
+    loop = HealthWatcherLoop( containers=[ "c1" ], inspect_fn=lambda n: next( seq ),
+                              notify_fn=boom_notify, clock=FakeClock(), log_fn=rec.log )
     loop.poll_once()
     loop.poll_once()                                            # escalation fires → notify raises → swallowed
     assert any( ev == "notify_error" for ev, _ in rec.logs )
 
 
-def test_poll_writes_loop_a_section_to_store():
+def test_poll_writes_health_watcher_section_to_store():
     rec   = Recorder()
     store = LocalSnapshotStore()
     loop  = _loop( lambda n: { "Status": "healthy" }, rec, store=store, containers=[ "c1", "c2" ] )
     loop.poll_once()
-    section = store.get_section( "loop_a" )
+    section = store.get_section( "health_watcher" )
     assert set( section[ "containers" ].keys() ) == { "c1", "c2" }
     assert section[ "containers" ][ "c1" ][ "status" ] == "healthy"
     assert section[ "blind" ] is False
@@ -238,15 +238,15 @@ def test_poll_without_store_is_noop():
 def test_write_state_marks_flapping_and_exclusion():
     rec   = Recorder()
     store = LocalSnapshotStore()
-    loop  = HealthWatchLoop( containers=[ "dev", "other" ], inspect_fn=lambda n: { "Status": "healthy" },
-                             notify_fn=rec.notify, clock=FakeClock(), log_fn=rec.log, store=store,
-                             flap_threshold=2, flap_exclude=[ "dev" ] )
+    loop  = HealthWatcherLoop( containers=[ "dev", "other" ], inspect_fn=lambda n: { "Status": "healthy" },
+                               notify_fn=rec.notify, clock=FakeClock(), log_fn=rec.log, store=store,
+                               flap_threshold=2, flap_exclude=[ "dev" ] )
     # drive both containers through transitions to flap "other" (and would-be "dev")
     seq = { "dev": iter( [ "healthy", "unhealthy", "healthy" ] ),
             "other": iter( [ "healthy", "unhealthy", "healthy" ] ) }
     loop._inspect_fn = lambda n: { "Status": next( seq[ n ] ) }
     loop.poll_once(); loop.poll_once(); loop.poll_once()
-    section = store.get_section( "loop_a" )
+    section = store.get_section( "health_watcher" )
     assert section[ "containers" ][ "dev" ][ "flap_excluded" ] is True
     assert section[ "containers" ][ "dev" ][ "flapping" ] is False      # excluded → never flapping in the view
     assert section[ "containers" ][ "other" ][ "flapping" ] is True     # not excluded, ≥2 transitions
@@ -255,7 +255,7 @@ def test_write_state_marks_flapping_and_exclusion():
 # ── _format_escalation (all arms incl. defensive fallback) ──────────────────
 
 def test_format_escalation_all_events():
-    f = HealthWatchLoop._format_escalation
+    f = HealthWatcherLoop._format_escalation
     assert "UNHEALTHY" in f( "enter_unhealthy", "c", "unhealthy" )
     assert "FLAPPING"  in f( "flapping", "c", "unhealthy" )
     assert "BLIND"     in f( "blind", None, None )
@@ -267,8 +267,8 @@ def test_format_escalation_all_events():
 def test_run_swallows_poll_error_then_stops():
     rec   = Recorder()
     clock = FakeClock( raise_on_now=( 1, ), sleep_stops_after=1 )   # 1st now() raises → poll_once raises
-    loop  = HealthWatchLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
-                             notify_fn=rec.notify, clock=clock, log_fn=rec.log )
+    loop  = HealthWatcherLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+                               notify_fn=rec.notify, clock=clock, log_fn=rec.log )
     clock.stop_event = loop._stop
     loop.run()                                                  # poll raises → per-poll guard → sleep stops it
     assert any( ev == "poll_error" for ev, _ in rec.logs )
@@ -277,8 +277,8 @@ def test_run_swallows_poll_error_then_stops():
 def test_run_normal_then_stops():
     rec   = Recorder()
     clock = FakeClock( sleep_stops_after=1 )
-    loop  = HealthWatchLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
-                             notify_fn=rec.notify, clock=clock, log_fn=rec.log )
+    loop  = HealthWatcherLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+                               notify_fn=rec.notify, clock=clock, log_fn=rec.log )
     clock.stop_event = loop._stop
     loop.run()                                                  # one clean poll, then stop
     assert any( ev == "health_obs" for ev, _ in rec.logs )
@@ -287,8 +287,8 @@ def test_run_normal_then_stops():
 def test_start_stop_thread_lifecycle():
     rec   = Recorder()
     clock = FakeClock( sleep_stops_after=1 )
-    loop  = HealthWatchLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
-                             notify_fn=rec.notify, clock=clock, log_fn=rec.log )
+    loop  = HealthWatcherLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+                               notify_fn=rec.notify, clock=clock, log_fn=rec.log )
     clock.stop_event = loop._stop
     loop.start()
     loop._thread.join( timeout=5 )                              # thread self-stops via the fake clock
@@ -307,10 +307,10 @@ def test_stop_without_start_is_safe():
 def test_loop_default_seams_smoke():
     """Construct with default clock + default log_fn (covers the else-branches)."""
     store = LocalSnapshotStore()
-    loop  = HealthWatchLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
-                             notify_fn=lambda m: None, store=store )
+    loop  = HealthWatcherLoop( containers=[ "c1" ], inspect_fn=lambda n: { "Status": "healthy" },
+                               notify_fn=lambda m: None, store=store )
     loop.poll_once()                                            # uses SystemClock + _default_log_fn
-    assert store.get_section( "loop_a" )[ "containers" ][ "c1" ][ "status" ] == "healthy"
+    assert store.get_section( "health_watcher" )[ "containers" ][ "c1" ][ "status" ] == "healthy"
 
 
 def test_parse_inspect_result_all_arms():
@@ -336,5 +336,5 @@ def test_default_log_fn_emits_json_line( capsys ):
     parsed = json.loads( out )
     assert parsed[ "event" ] == "health_obs"
     assert parsed[ "container" ] == "c1"
-    assert parsed[ "loop" ] == "A"
+    assert parsed[ "loop" ] == "health_watcher"
     assert parsed[ "service" ] == "lupin-arbiter-app"

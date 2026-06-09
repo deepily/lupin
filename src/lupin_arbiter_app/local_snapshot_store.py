@@ -2,16 +2,16 @@
 """
 :8001-LOCAL, SECTION-KEYED in-process snapshot store — the R4 independence linchpin.
 
-The single coherent store behind GET /state (L4). Loop A (L2) and Loop B (L3)
-each write their OWN named SECTION of one shared instance — no clobber — and
-/state reads the whole composite:
+The single coherent store behind GET /state (L4). The health watcher (L2) and the
+fleet arbiter (L3) each write their OWN named SECTION of one shared instance — no
+clobber — and /state reads the whole composite:
 
-    store.set_section( "loop_a", { ...health-watch view... } )        # Loop A (L2)
-    store.set_section( "loop_b_fleet", { ...fleet snapshot... } )     # Loop B (L3, via a
-                                                                      # sink-adapter — the
-                                                                      # v2.2 arbiter code is
-                                                                      # left untouched)
-    store.get()  ->  { "loop_a": {...}, "loop_b_fleet": {...} }       # /state (L4)
+    store.set_section( "health_watcher", { ...health-watch view... } )  # health watcher (L2)
+    store.set_section( "fleet_arbiter", { ...fleet snapshot... } )      # fleet arbiter (L3, via a
+                                                                        # sink-adapter — the
+                                                                        # v2.2 arbiter code is
+                                                                        # left untouched)
+    store.get()  ->  { "health_watcher": {...}, "fleet_arbiter": {...} }  # /state (L4)
 
 It deliberately does NOT import or call `cosa.rest.arbiter_snapshot_store` (the
 in-process :7999 server singleton) and makes ZERO outbound HTTP — so the
@@ -20,8 +20,8 @@ fleet-stall path has no dependency on :7999/:8000 being up (deploy doc R4). The
 
 This closes the snapshot-sink trap Tiffany (B1 reviewer) flagged pre-build and
 Tiberius ratified: the v2.1 arbiter_job._snapshot_sink DEFAULTS to the :7999
-singleton (arbiter_job.py:53,217,339); on :8001 we point Loop B's sink at this
-store's `loop_b_fleet` section so the independence invariant holds end-to-end.
+singleton (arbiter_job.py:53,217,339); on :8001 we point the fleet arbiter's sink at this
+store's `fleet_arbiter` section so the independence invariant holds end-to-end.
 """
 import threading
 from typing import Any, Dict, Optional

@@ -143,8 +143,8 @@ def submit_arbiter_if_enabled(
     `arbiter in-process bootstrap enabled` is True.
 
     Never-two across BOTH mechanisms: this is the in-process mechanism. The
-    standalone :8001 service runs Loop B via its own single LoopBRunner thread (the
-    :8001-side single-instance). This flag gates the in-process side OFF so only ONE
+    standalone :8001 service runs the fleet arbiter via its own single FleetArbiterLoop
+    thread (the :8001-side single-instance). This flag gates the in-process side OFF so only ONE
     path ever actuates; `arbiter_already_present` (inside submit_fn) remains the belt
     against a double in-process submission. Cutover is break-before-make (flag False
     → bounce → enable :8001) — a brief zero-arbiter window is acceptable, never two.

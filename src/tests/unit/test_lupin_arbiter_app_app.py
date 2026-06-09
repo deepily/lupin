@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 
 from lupin_arbiter_app import __version__
 from lupin_arbiter_app.app import create_app, assemble_app, _utcnow
-from lupin_arbiter_app.health_watch import HealthWatchLoop
-from lupin_arbiter_app.loop_b import LoopBRunner
+from lupin_arbiter_app.health_watcher import HealthWatcherLoop
+from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
 
@@ -71,11 +71,11 @@ def test_lifespan_starts_and_stops_injected_health_loop():
 
 
 def test_lifespan_starts_and_stops_both_loops():
-    """Both background loops (health + loop_b) are started + stopped by the lifespan."""
+    """Both background loops (health watcher + fleet arbiter) are started + stopped by the lifespan."""
     a, b = _FakeLoop(), _FakeLoop()
-    with TestClient( create_app( health_loop=a, loop_b_runner=b ) ) as client:
+    with TestClient( create_app( health_loop=a, fleet_arbiter_loop=b ) ) as client:
         assert a.started is True and b.started is True
-        assert client.app.state.loop_b_runner is b
+        assert client.app.state.fleet_arbiter_loop is b
     assert a.stopped is True and b.stopped is True
 
 
@@ -102,19 +102,19 @@ class _FakeGateway:
 
 
 def test_assemble_app_enabled_wires_both_loops():
-    """enabled=true → Loop A (HealthWatchLoop) AND Loop B (LoopBRunner) wired."""
+    """enabled=true → the health watcher (HealthWatcherLoop) AND the fleet arbiter (FleetArbiterLoop) wired."""
     app = assemble_app( _FakeCfg( enabled=True ), _FakeGateway() )
-    assert isinstance( app.state.health_loop, HealthWatchLoop )
-    assert isinstance( app.state.loop_b_runner, LoopBRunner )
+    assert isinstance( app.state.health_loop, HealthWatcherLoop )
+    assert isinstance( app.state.fleet_arbiter_loop, FleetArbiterLoop )
 
 
-def test_assemble_app_health_disabled_still_wires_loop_b( capsys ):
-    """enabled=false → health_loop None + loop_a_disabled log; Loop B still wired."""
+def test_assemble_app_health_disabled_still_wires_fleet_arbiter( capsys ):
+    """enabled=false → health_loop None + health_watcher_disabled log; the fleet arbiter still wired."""
     app = assemble_app( _FakeCfg( enabled=False ), _FakeGateway() )
     assert app.state.health_loop is None
-    assert isinstance( app.state.loop_b_runner, LoopBRunner )
+    assert isinstance( app.state.fleet_arbiter_loop, FleetArbiterLoop )
     assert isinstance( app.state.snapshot_store, LocalSnapshotStore )
-    assert "loop_a_disabled" in capsys.readouterr().out
+    assert "health_watcher_disabled" in capsys.readouterr().out
 
 
 def test_utcnow_returns_aware_utc_datetime():
@@ -128,19 +128,19 @@ def test_local_snapshot_store_sections():
     """Section-keyed store: per-section writes coexist; get() is the composite."""
     store = LocalSnapshotStore()
     assert store.get() == { }
-    assert store.get_section( "loop_a" ) is None
+    assert store.get_section( "health_watcher" ) is None
 
-    store.set_section( "loop_a", { "containers": { } } )
-    store.set_section( "loop_b_fleet", { "session_count": 2 } )
+    store.set_section( "health_watcher", { "containers": { } } )
+    store.set_section( "fleet_arbiter", { "session_count": 2 } )
     # two writers, no clobber
-    assert store.get_section( "loop_a" ) == { "containers": { } }
-    assert store.get_section( "loop_b_fleet" ) == { "session_count": 2 }
-    assert store.get() == { "loop_a": { "containers": { } }, "loop_b_fleet": { "session_count": 2 } }
+    assert store.get_section( "health_watcher" ) == { "containers": { } }
+    assert store.get_section( "fleet_arbiter" ) == { "session_count": 2 }
+    assert store.get() == { "health_watcher": { "containers": { } }, "fleet_arbiter": { "session_count": 2 } }
 
     # overwriting one section leaves the other untouched
-    store.set_section( "loop_a", { "containers": { "c": 1 } } )
-    assert store.get_section( "loop_a" ) == { "containers": { "c": 1 } }
-    assert store.get_section( "loop_b_fleet" ) == { "session_count": 2 }
+    store.set_section( "health_watcher", { "containers": { "c": 1 } } )
+    assert store.get_section( "health_watcher" ) == { "containers": { "c": 1 } }
+    assert store.get_section( "fleet_arbiter" ) == { "session_count": 2 }
 
     store.clear()
     assert store.get() == { }
@@ -155,32 +155,34 @@ def test_state_cold_start_both_sections_awaiting():
         resp = client.get( "/state" )
         assert resp.status_code == 200
         body = resp.json()
-        assert body[ "status" ]       == "ok"
-        assert body[ "service" ]      == "lupin-arbiter-app"
-        assert body[ "version" ]      == __version__
-        assert body[ "generated_at" ] == now.isoformat()
-        assert body[ "loop_a" ]       == { "status": "awaiting" }
-        assert body[ "loop_b_fleet" ] == { "status": "awaiting", "session_count": 0, "sessions": [ ] }
+        assert body[ "status" ]         == "ok"
+        assert body[ "service" ]        == "lupin-arbiter-app"
+        assert body[ "version" ]        == __version__
+        assert body[ "generated_at" ]   == now.isoformat()
+        assert body[ "health_watcher" ] == { "status": "awaiting" }
+        assert body[ "fleet_arbiter" ]  == { "status": "awaiting", "session_count": 0, "sessions": [ ] }
+        # the OLD generic keys are GONE — the /state contract break is real, not additive
+        assert "loop_a" not in body and "loop_b_fleet" not in body
 
 
 def test_state_populated_returns_real_sections():
     """Both loops have written → /state echoes their real section values."""
     store = LocalSnapshotStore()
-    store.set_section( "loop_a", { "containers": { "lupin-rest-dev": "healthy" } } )
-    store.set_section( "loop_b_fleet", { "status": "ok", "session_count": 2, "sessions": [ { "session_id": "s1" } ] } )
+    store.set_section( "health_watcher", { "containers": { "lupin-rest-dev": "healthy" } } )
+    store.set_section( "fleet_arbiter", { "status": "ok", "session_count": 2, "sessions": [ { "session_id": "s1" } ] } )
     with TestClient( create_app( snapshot_store=store ) ) as client:
         body = client.get( "/state" ).json()
-        assert body[ "status" ]       == "ok"
-        assert body[ "loop_a" ]       == { "containers": { "lupin-rest-dev": "healthy" } }
-        assert body[ "loop_b_fleet" ][ "session_count" ] == 2
-        assert body[ "loop_b_fleet" ][ "sessions" ][ 0 ][ "session_id" ] == "s1"
+        assert body[ "status" ]         == "ok"
+        assert body[ "health_watcher" ] == { "containers": { "lupin-rest-dev": "healthy" } }
+        assert body[ "fleet_arbiter" ][ "session_count" ] == 2
+        assert body[ "fleet_arbiter" ][ "sessions" ][ 0 ][ "session_id" ] == "s1"
 
 
 def test_state_partial_one_section_awaiting():
-    """Loop A written, Loop B not → loop_a real, loop_b_fleet 'awaiting' (both None-arms covered)."""
+    """Health watcher written, fleet arbiter not → health_watcher real, fleet_arbiter 'awaiting' (both None-arms covered)."""
     store = LocalSnapshotStore()
-    store.set_section( "loop_a", { "containers": { } } )
+    store.set_section( "health_watcher", { "containers": { } } )
     with TestClient( create_app( snapshot_store=store ) ) as client:
         body = client.get( "/state" ).json()
-        assert body[ "loop_a" ]       == { "containers": { } }
-        assert body[ "loop_b_fleet" ] == { "status": "awaiting", "session_count": 0, "sessions": [ ] }
+        assert body[ "health_watcher" ] == { "containers": { } }
+        assert body[ "fleet_arbiter" ]  == { "status": "awaiting", "session_count": 0, "sessions": [ ] }

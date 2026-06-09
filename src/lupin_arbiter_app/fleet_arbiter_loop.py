@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-Loop B — the standing fleet-stall arbiter (L3 of the :8001 lupin-arbiter-app service).
+Fleet-arbiter loop — the standing fleet-stall arbiter (L3 of the :8001 lupin-arbiter-app service).
 
 Reuses the v2.2 `ArbiterConsumerJob` AS-IS (zero logic edits → its invariants carry
 by construction: never-auto-assign · additive-observer one-way · lineage-derived
 routing). The standalone difference is purely WIRING + SUPERVISION:
 
-  • RECYCLE-WRAPPER (LoopBRunner): the job's `do_all()` returns after the 12h
+  • RECYCLE-WRAPPER (FleetArbiterLoop): the job's `do_all()` returns after the 12h
     `max_duration` cap; a host-side thread that ran it ONCE would then sit silently
     dead while uvicorn keeps serving — and systemd's Restart=always only catches
-    PROCESS exit, NOT a clean background-thread return. So LoopBRunner RELAUNCHES a
+    PROCESS exit, NOT a clean background-thread return. So FleetArbiterLoop RELAUNCHES a
     fresh job on every clean cap-exit. SEQUENTIAL by construction (do_all() returns
     before the next job starts) → exactly one job runs at a time = the :8001-side
     single-instance (the in-process arbiter is the SEPARATE mechanism, gated OFF by
     the R0 flag; never two).
 
   • OUT-OF-BAND (R4): the job's snapshot_sink is overridden to write the :8001-LOCAL
-    store section "loop_b_fleet" (NOT the :7999 singleton). The DETECTION path is
+    store section "fleet_arbiter" (NOT the :7999 singleton). The DETECTION path is
     strictly :7999-free (events_tail / who / manager_resolver / sink are filesystem).
 
   • ESCALATION (ruling A): notify_fn ALWAYS posts to the durable `fleet-escalations`
@@ -38,7 +38,7 @@ import json
 import threading
 from typing import Any, Callable, Optional
 
-from lupin_arbiter_app.health_watch import SystemClock
+from lupin_arbiter_app.health_watcher import SystemClock
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 
 
@@ -46,11 +46,11 @@ ESCALATION_TOPIC = "fleet-escalations"
 
 
 def _default_log_fn( event: str, **fields: Any ) -> None:
-    """Structured JSON line (loop:B) to stdout → systemd journal (flushed)."""
+    """Structured JSON line (loop:fleet_arbiter) to stdout → systemd journal (flushed)."""
     line : dict = {
         "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
         "service" : "lupin-arbiter-app",
-        "loop"    : "B",
+        "loop"    : "fleet_arbiter",
         "event"   : event,
     }
     line.update( fields )
@@ -123,7 +123,7 @@ def make_warmup_notify_fn(
 
 # ── the standing-job factory ────────────────────────────────────────────────
 
-def build_loop_b_job_factory(
+def build_fleet_arbiter_job_factory(
     gateway              : Any,
     store                : Any,
     *,
@@ -145,7 +145,7 @@ def build_loop_b_job_factory(
 
     Ensures:
         - returned factory() builds an ArbiterConsumerJob whose snapshot_sink writes
-          store section "loop_b_fleet", whose notify_fn = warm-up(escalation(durable
+          store section "fleet_arbiter", whose notify_fn = warm-up(escalation(durable
           + best-effort live)), keyed on a fresh per-call job-start (warm-up resets
           on each recycle)
         - construction is pure in-memory (no IO until the job runs) — fully
@@ -167,8 +167,8 @@ def build_loop_b_job_factory(
             tap_min_interval_seconds   = tap_min_interval,
             manager_ack_window_seconds = ack_window,
             fleet_stall_window_seconds = stall_window,
-            snapshot_sink              = lambda snap: store.set_section( "loop_b_fleet", snap ),
-            render_sink                = lambda line: log_fn( "loop_b_render", line=line ),
+            snapshot_sink              = lambda snap: store.set_section( "fleet_arbiter", snap ),
+            render_sink                = lambda line: log_fn( "fleet_arbiter_render", line=line ),
             notify_fn                  = warmup_notify,
             user_id                    = "system",
             user_email                 = "system@lupin.deepily.ai",
@@ -180,9 +180,9 @@ def build_loop_b_job_factory(
 
 # ── recycle supervisor ──────────────────────────────────────────────────────
 
-class LoopBRunner:
+class FleetArbiterLoop:
     """
-    The :8001-side Loop B supervisor: runs one ArbiterConsumerJob at a time on a
+    The :8001-side fleet-arbiter supervisor: runs one ArbiterConsumerJob at a time on a
     background thread, RELAUNCHING a fresh job on each clean cap-exit (12h
     self-perpetuation fix). Single-instance by construction (sequential recycle).
     """
@@ -214,19 +214,19 @@ class LoopBRunner:
             job = self._job_factory()
             self._current_job = job
             self.cycles += 1
-            self._log_fn( "loop_b_job_start", cycle=self.cycles )
+            self._log_fn( "fleet_arbiter_job_start", cycle=self.cycles )
             try:
                 summary = job.do_all()
             except Exception as e:                   # a job blow-up must not kill the supervisor
-                self._log_fn( "loop_b_job_error", error=str( e ) )
+                self._log_fn( "fleet_arbiter_job_error", error=str( e ) )
                 summary = None
             if self._stop.is_set():
                 break
-            self._log_fn( "loop_b_recycle", reason="clean cap-exit — relaunching", summary=summary )
+            self._log_fn( "fleet_arbiter_recycle", reason="clean cap-exit — relaunching", summary=summary )
 
     def start( self ) -> None:
         """Spawn the daemon supervisor thread."""
-        self._thread = threading.Thread( target=self.run, name="loop-b-arbiter", daemon=True )
+        self._thread = threading.Thread( target=self.run, name="fleet-arbiter-loop", daemon=True )
         self._thread.start()
 
     def stop( self ) -> None:
@@ -236,6 +236,6 @@ class LoopBRunner:
             try:
                 self._current_job.request_cancel()
             except Exception as e:                   # cancel must never raise out of stop()
-                self._log_fn( "loop_b_cancel_error", error=str( e ) )
+                self._log_fn( "fleet_arbiter_cancel_error", error=str( e ) )
         if self._thread is not None:
             self._thread.join( timeout=5 )

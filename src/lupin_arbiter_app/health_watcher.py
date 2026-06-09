@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Loop A — the dev/test health watch (L2 of the :8001 lupin-arbiter-app service).
+Health watcher — the dev/test health watch (L2 of the :8001 lupin-arbiter-app service).
 
 Out-of-band, per-container Docker health observation. Each poll inspects each
 NAMED container's `.State.Health.Status`, tracks status transitions from our OWN
@@ -12,11 +12,11 @@ remediation is V2):
     • flapping        : >= flap_threshold status transitions / flap_window  (once per episode)
 
 Plus a self-watch: after K consecutive polls in which EVERY container's inspect
-fails, the watcher escalates "Loop A BLIND" — the watcher noticing it has gone
-blind is itself a real signal.
+fails, the watcher escalates "health watcher BLIND" — the watcher noticing it has
+gone blind is itself a real signal.
 
 THREE `/health`-never-blocks guards (Tiberius redline):
-    1. Loop A runs on its OWN background thread; GET /health never touches docker.
+    1. The health watcher runs on its OWN background thread; GET /health never touches docker.
     2. each `docker inspect` is timeout-bounded at the IO seam (< Docker's probe timeout).
     3. per-container AND per-poll try/except — one bad inspect never kills the loop.
 
@@ -66,7 +66,7 @@ def _default_log_fn( event: str, **fields: Any ) -> None:
     line : Dict[ str, Any ] = {
         "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
         "service" : "lupin-arbiter-app",
-        "loop"    : "A",
+        "loop"    : "health_watcher",
         "event"   : event,
     }
     line.update( fields )
@@ -205,9 +205,9 @@ class ContainerHealthTracker:
 
 # ── the loop ────────────────────────────────────────────────────────────────
 
-class HealthWatchLoop:
+class HealthWatcherLoop:
     """
-    Loop A: poll each named container's docker health, track + escalate, expose
+    Health watcher: poll each named container's docker health, track + escalate, expose
     state. Background-threaded; degrade-safe per-container + per-poll.
     """
 
@@ -336,16 +336,16 @@ class HealthWatchLoop:
     def _format_escalation( event: str, container: Optional[ str ], status: Optional[ str ] ) -> str:
         """Build the human-readable escalation message for an event."""
         if event == "enter_unhealthy":
-            return f"Loop A: container '{container}' entered UNHEALTHY (docker health)."
+            return f"Health watcher: container '{container}' entered UNHEALTHY (docker health)."
         if event == "flapping":
-            return f"Loop A: container '{container}' is FLAPPING (≥ threshold health transitions in window)."
+            return f"Health watcher: container '{container}' is FLAPPING (≥ threshold health transitions in window)."
         if event == "blind":
-            return ( "Loop A BLIND: docker inspect failing for ALL watched containers — "
+            return ( "Health watcher BLIND: docker inspect failing for ALL watched containers — "
                      "the health watch cannot see (escalating)." )
-        return f"Loop A: {event} for '{container}' (status={status})."
+        return f"Health watcher: {event} for '{container}' (status={status})."
 
     def _write_state( self, now: datetime.datetime ) -> None:
-        """Write the Loop A view to section 'loop_a' of the shared local store (if any)."""
+        """Write the health-watcher view to section 'health_watcher' of the shared local store (if any)."""
         if self._store is None:
             return
         view = {
@@ -357,7 +357,7 @@ class HealthWatchLoop:
             }
             for name, tr in self._trackers.items()
         }
-        self._store.set_section( "loop_a", {
+        self._store.set_section( "health_watcher", {
             "containers" : view,
             "blind"      : self._blind_escalated,
             "updated_at" : now.isoformat(),
@@ -383,7 +383,7 @@ class HealthWatchLoop:
 
     def start( self ) -> None:
         """Spawn the daemon poll thread."""
-        self._thread = threading.Thread( target=self.run, name="loop-a-health-watch", daemon=True )
+        self._thread = threading.Thread( target=self.run, name="health-watcher", daemon=True )
         self._thread.start()
 
     def stop( self ) -> None:

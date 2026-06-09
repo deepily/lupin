@@ -121,7 +121,7 @@ async def push_fleet_snapshot(
     "/arbiter/fleet-state",
     summary     = "Lupin Arbiter App single-pane (reverse-proxy to :8001/state)",
     description = "NEW authoritative surface (L4): PULLS the single-pane composite "
-                  "(Loop A health-watch + Loop B fleet snapshot) from the standalone "
+                  "(health watcher + fleet arbiter snapshot) from the standalone "
                   "lupin-arbiter-app service at :8001/state (R3 — :8001 never pushes). "
                   "Auth: X-API-Key or Bearer JWT. Supersedes /api/arbiter/fleet-snapshot."
 )
@@ -153,9 +153,9 @@ async def get_fleet_state(
         return _pull_arbiter_state( url, timeout )
     except httpx.HTTPError as e:
         return {
-            "status"       : "unreachable",
-            "service"      : "lupin-arbiter-app",
-            "detail"       : f"{type( e ).__name__}: {e}",
-            "loop_a"       : None,
-            "loop_b_fleet" : None,
+            "status"         : "unreachable",
+            "service"        : "lupin-arbiter-app",
+            "detail"         : f"{type( e ).__name__}: {e}",
+            "health_watcher" : None,
+            "fleet_arbiter"  : None,
         }
