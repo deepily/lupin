@@ -292,6 +292,13 @@ class NotificationsUI {
         this.activeActionRequiredId = null;      // Currently active notification ID (or null)
         this.isPaused = false;                   // True when active notification is paused (timer frozen)
 
+        // Action-required-in-reading-pane mode (Rick 2026-06-08): in HORIZONTAL
+        // layout the live #action-required-content element is LIFTED-AND-MOVED into the
+        // reader pane at a forced 50/50 split; when the queue empties it moves back home
+        // and the prior pane content + divider position (split ratio) are restored.
+        this._actionRequiredInPane = false;      // true while the content lives in the pane
+        this._arPaneStash          = null;       // { priorEntry, priorRatio, paneWasOpen, homeParent, homeNextSib, sectionDisplay }
+
         // ========================================
         // UNIFIED TTS QUEUE SYSTEM
         // ========================================
@@ -9421,7 +9428,9 @@ class NotificationsUI {
         if ( managerPersona ) {
             const mgrBadge = document.createElement( "span" );
             mgrBadge.className   = "cc-strip-manager-badge";
-            mgrBadge.textContent = `${ managerPersona.icon || "" }${ managerPersona.initial || "" }`;
+            // Letter only — the manager's initial (Rick 2026-06-08: drop the emoji, keep
+            // the letter; the glyph + initial together was visual overload).
+            mgrBadge.textContent = managerPersona.initial || "";
             if ( managerPersona.color ) mgrBadge.style.setProperty( "--manager-color", managerPersona.color );
             mgrBadge.setAttribute( "title", `Spawned by ${ managerPersona.name || "manager" }` );
             icon.setAttribute( "data-has-manager", "true" );
@@ -10449,8 +10458,16 @@ class NotificationsUI {
         try {
             localStorage.setItem( this.LAYOUT_MODE_KEY, next );
         } catch ( _ ) { /* Safari private-mode quota — degrade gracefully */ }
-        // Close the pane on switch-to-vertical so we don't leave orphan UI.
-        if ( next === "vertical" ) this._closeContentPane();
+        // Close the pane on switch-to-vertical so we don't leave orphan UI. If
+        // action-required is in the pane, move it back to its home section FIRST so it
+        // renders in the top section (vertical behavior), then close the pane.
+        if ( next === "vertical" ) {
+            if ( this._actionRequiredInPane ) this._exitActionRequiredPaneMode();
+            this._closeContentPane();
+        } else if ( this.actionRequiredNotifications && this.actionRequiredNotifications.size > 0 ) {
+            // Switch TO horizontal with action-required active → lift it into the pane.
+            this._enterActionRequiredPaneMode();
+        }
         const toggleBtn = document.getElementById( "layout-mode-toggle" );
         if ( toggleBtn ) this._updateLayoutModeButtonTooltip( toggleBtn );
         // Toolbar re-positions based on the new mode (over-pane vs left-of-container).
@@ -10495,6 +10512,9 @@ class NotificationsUI {
         const backBtn = document.getElementById( "content-pane-back" );
         const shell   = document.querySelector( ".content-shell" );
         if ( !pane || !body ) return;
+        // While action-required owns the pane (horizontal mode), suppress abstract/doc
+        // opens — the response card is blocking and keeps the pane (Rick 2026-06-08).
+        if ( this._actionRequiredInPane ) return;
 
         // Scroll-position preservation across the closed→open scroll-container
         // handoff (2026-06-06, Rick). When the pane is CLOSED in horizontal mode
@@ -10593,6 +10613,91 @@ class NotificationsUI {
             // Pane closed → the window is the scroll container again.
             window.scrollBy( 0, delta );
         }
+    }
+
+    /**
+     * Enter "action-required in reading pane" mode (Rick 2026-06-08). In HORIZONTAL
+     * layout, LIFT-AND-MOVE the live #action-required-content element into the reader
+     * pane at a forced 50/50 split. Stashes the prior pane content + divider position
+     * (split ratio) so _exitActionRequiredPaneMode restores them pixel-faithful.
+     * Idempotent; no-op in vertical mode or when already in this mode.
+     */
+    _enterActionRequiredPaneMode() {
+        if ( this._layoutMode !== "horizontal" || this._actionRequiredInPane ) return;
+        const content = document.getElementById( "action-required-content" );
+        const section = document.getElementById( "action-required-section" );
+        const pane    = document.getElementById( "content-pane" );
+        const body    = document.getElementById( "content-pane-body" );
+        const shell   = document.querySelector( ".content-shell" );
+        const titleEl = document.getElementById( "content-pane-title" );
+        if ( !content || !pane || !body || !shell ) return;
+
+        // Stash prior pane state (content entry + divider) so dismiss restores it.
+        const priorEntry = this._contentPaneHistory.length
+            ? this._contentPaneHistory[ this._contentPaneHistory.length - 1 ]
+            : null;
+        this._arPaneStash = {
+            paneWasOpen   : shell.classList.contains( "pane-open" ),
+            priorEntry    : priorEntry,
+            priorRatio    : this._paneSplitRatio,
+            homeParent    : content.parentNode,
+            homeNextSib   : content.nextSibling,
+            sectionDisplay: section ? section.style.display : "",
+        };
+
+        // Move the LIVE element into the pane (preserves its handlers + state); clear
+        // any rendered abstract/doc first (stashed above); hide the now-empty home.
+        body.innerHTML = "";
+        body.appendChild( content );
+        content.classList.add( "in-reading-pane" );
+        if ( section ) section.style.display = "none";
+
+        // Open the pane + force the 50/50 split.
+        pane.hidden = false;
+        shell.classList.add( "pane-open" );
+        if ( titleEl ) titleEl.textContent = "Action Required";
+        this._paneSplitRatio = 0.5;
+        this._applyPaneSplitRatio();
+        this._updateToolbarPosition();
+        this._actionRequiredInPane = true;
+    }
+
+    /**
+     * Exit "action-required in reading pane" mode: move #action-required-content back
+     * to its home section, then RESTORE both the prior pane content AND the divider
+     * position (Rick emphasized the divider, 2026-06-08) — or close the pane to
+     * full-width center if nothing was stashed. Idempotent.
+     */
+    _exitActionRequiredPaneMode() {
+        if ( !this._actionRequiredInPane ) return;
+        const stash   = this._arPaneStash || {};
+        const content = document.getElementById( "action-required-content" );
+        const section = document.getElementById( "action-required-section" );
+
+        // Move the live element back to its home location.
+        if ( content && stash.homeParent ) {
+            content.classList.remove( "in-reading-pane" );
+            stash.homeParent.insertBefore( content, stash.homeNextSib || null );
+        }
+        if ( section ) section.style.display = stash.sectionDisplay || "";
+
+        // Restore the divider position (split ratio) FIRST, then the content.
+        if ( typeof stash.priorRatio === "number" ) this._paneSplitRatio = stash.priorRatio;
+
+        if ( stash.priorEntry ) {
+            // Re-show whatever abstract/doc was in the pane before, at the restored ratio.
+            this._renderContentPaneEntry( stash.priorEntry );
+            const titleEl = document.getElementById( "content-pane-title" );
+            if ( titleEl ) titleEl.textContent = stash.priorEntry.title || "";
+            this._applyPaneSplitRatio();
+            this._updateToolbarPosition();
+        } else {
+            // Nothing was open before → close the pane (restores full-width center).
+            this._closeContentPane();
+        }
+
+        this._actionRequiredInPane = false;
+        this._arPaneStash = null;
     }
 
     _renderContentPaneEntry( entry ) {
@@ -12684,6 +12789,13 @@ class NotificationsUI {
                 if ( senderInfo.sender_id && senderInfo.voice_persona ) {
                     this.senderPersonaMap.set( senderInfo.sender_id, senderInfo.voice_persona );
                 }
+                // Manager-badge hydration (Rick 2026-06-08): populate managerPersonaMap from
+                // the server-stamped manager_persona so a force-refreshed page shows the
+                // spawning-manager badge for EXISTING workers (the cold-reload gap), not just
+                // workers that arrive via a live voice_persona_assigned event.
+                if ( senderInfo.sender_id && senderInfo.manager_persona ) {
+                    this.managerPersonaMap.set( senderInfo.sender_id, senderInfo.manager_persona );
+                }
             }
 
             // Load date-grouped conversation for each sender
@@ -14283,6 +14395,13 @@ class NotificationsUI {
             // Clean up localStorage after restore (remove expired entries)
             this.saveActionRequiredState();
 
+            // Action-required-in-pane (Rick 2026-06-08): a restored (page-reload) active
+            // action-required doesn't go through the live-arrival path, so route it into
+            // the reader pane here when we're in horizontal layout.
+            if ( this._layoutMode === "horizontal" && this.actionRequiredNotifications.size > 0 ) {
+                this._enterActionRequiredPaneMode();
+            }
+
         } catch ( error ) {
             this.error( 'Failed to restore action-required state:', error );
             // Clear corrupted data
@@ -14372,6 +14491,12 @@ class NotificationsUI {
         // Auto-expand the section content if collapsed
         this.ensureActionRequiredExpanded();
 
+        // Action-required-in-pane (Rick 2026-06-08): in HORIZONTAL layout, lift the live
+        // content element into the reader pane at a forced 50/50 split. Idempotent — the
+        // first action-required enters the mode; subsequent ones simply join the
+        // already-moved list (the element renders all pending items itself).
+        if ( this._layoutMode === "horizontal" ) this._enterActionRequiredPaneMode();
+
         // Hide empty state
         const emptyState = document.getElementById( 'action-required-empty' );
         if ( emptyState ) {
@@ -14433,6 +14558,12 @@ class NotificationsUI {
             const emptyState = document.getElementById( 'action-required-empty' );
             if ( emptyState && this.actionRequiredNotifications.size === 0 ) {
                 emptyState.style.display = 'block';
+            }
+            // Action-required-in-pane (Rick 2026-06-08): queue fully drained → move the
+            // content back to its home section and restore the prior pane content +
+            // divider position (split ratio) that we stashed on entry.
+            if ( this._actionRequiredInPane && this.actionRequiredNotifications.size === 0 ) {
+                this._exitActionRequiredPaneMode();
             }
             return;
         }

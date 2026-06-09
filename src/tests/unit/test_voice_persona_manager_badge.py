@@ -74,6 +74,45 @@ def test_returns_none_on_bad_bridge_json( tmp_path, monkeypatch ):
     assert voice_persona._resolve_manager_persona( "worker-5" ) is None
 
 
+# ── _manager_persona_for_sender_id (senders-visible HYDRATION helper) ──────────
+# Fixes the cold-reload gap (Rick 2026-06-08): a force-refreshed page must hydrate the
+# manager badge for EXISTING workers (e.g. Cheech), not wait for the next live event.
+# Resolves a sender_id by extracting its #-suffix session prefix and delegating to
+# _resolve_manager_persona.
+
+from cosa.rest.routers import notifications as _notif
+
+
+class TestManagerPersonaForSenderId:
+
+    def test_resolves_via_sender_id_suffix( self, monkeypatch ):
+        monkeypatch.setattr(
+            _notif, "_resolve_manager_persona",
+            lambda sid: { "icon": "👑", "color": "#3F51B5", "name": "Tiberius", "initial": "T" }
+                        if sid == "5e9bf4b7" else None,
+        )
+        result = _notif._manager_persona_for_sender_id( "claude.code@lupin.deepily.ai#5e9bf4b7" )
+        assert result == { "icon": "👑", "color": "#3F51B5", "name": "Tiberius", "initial": "T" }
+
+    def test_none_without_hash_suffix( self, monkeypatch ):
+        monkeypatch.setattr( _notif, "_resolve_manager_persona", lambda sid: { "x": 1 } )
+        assert _notif._manager_persona_for_sender_id( "claude.code@lupin.deepily.ai" ) is None
+
+    def test_none_on_empty_suffix( self, monkeypatch ):
+        monkeypatch.setattr( _notif, "_resolve_manager_persona", lambda sid: { "x": 1 } )
+        assert _notif._manager_persona_for_sender_id( "claude.code@lupin.deepily.ai#" ) is None
+
+    def test_none_when_resolver_unavailable( self, monkeypatch ):
+        monkeypatch.setattr( _notif, "_resolve_manager_persona", None )
+        assert _notif._manager_persona_for_sender_id( "a.b@c.deepily.ai#abc12345" ) is None
+
+    def test_none_when_resolver_raises( self, monkeypatch ):
+        def boom( sid ):
+            raise RuntimeError( "bridge fail" )
+        monkeypatch.setattr( _notif, "_resolve_manager_persona", boom )
+        assert _notif._manager_persona_for_sender_id( "a.b@c.deepily.ai#abc12345" ) is None
+
+
 if __name__ == "__main__":
     import sys
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

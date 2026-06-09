@@ -2226,16 +2226,18 @@
          * worker was spawned by a manager (data-has-manager="true"). */
         .cc-strip-icon .cc-strip-manager-badge {
             position: absolute;
-            top: 6px;
-            left: 6px;
-            transform: translate( -50%, -50% );
-            min-width: 16px;
-            height: 16px;
-            padding: 0 3px;
+            /* Mirror the speakerphone ::before badge exactly (same 18px circle, same
+               -6px outward dock) but at the TOP-LEFT corner — 180° opposite — so the
+               two superimposed metadata badges are identical in size + shape (Rick
+               2026-06-08). Single letter (the manager's initial), no emoji. */
+            top: -6px;
+            left: -6px;
+            width: 18px;
+            height: 18px;
             background: var( --manager-color, #495057 );
             color: #ffffff;
-            border-radius: 8px;
-            font-size: 9px;
+            border-radius: 50%;
+            font-size: 11px;
             font-weight: 700;
             line-height: 1;
             display: inline-flex;
@@ -2244,7 +2246,6 @@
             border: 2px solid #ffffff;
             box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.35 );
             pointer-events: none;
-            white-space: nowrap;
         }
 
         /* Speakerphone/quiet-state overlay on each strip persona icon.
@@ -2259,13 +2260,28 @@
          * quiet. Default state (user has never toggled) shows no badge. */
         .cc-strip-icon[data-conv-mode="speakerphone"]::before,
         .cc-strip-icon[data-conv-mode="quiet"]::before {
+            /* The page's `* { box-sizing: border-box }` reset does NOT match pseudo-
+               elements, so this ::before defaulted to content-box — the 2px border added
+               OUTSIDE the 18px (→ 22px), while the manager badge (a real <span>, covered
+               by `*`) was a true 18px. THAT 4px was the size mismatch Rick spotted. Force
+               border-box so width:18px is the true diameter, matching the manager badge. */
+            box-sizing: border-box;
+            /* Nudge the emoji UP + RIGHT ~1px (Rick 2026-06-08): emoji glyphs sit low on
+               the text baseline, so flex-centering the LINE box leaves the glyph reading
+               low-left. Asymmetric padding shifts the flex-centered glyph WITHIN the box
+               without moving the circle itself. */
+            padding: 0 0 2px 2px;
             position: absolute;
             bottom: -6px;
             right: -6px;
             width: 18px;
             height: 18px;
             border-radius: 50%;
-            font-size: 11px;
+            /* Speakerphone glyph reduced 11px → 9px so the emoji fits WITHIN the 18px
+               circle (emojis render larger than a letter at the same font-size and were
+               overflowing), making it visually match the manager badge's letter at the
+               same circle size (Rick 2026-06-08). */
+            font-size: 9px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -5667,6 +5683,17 @@ body[data-layout-mode="horizontal"] .layout-mode-btn {
    area edge-to-edge. The gutter stays for abstract (markdown) content. */
 .content-pane-body:has( iframe ) {
     padding: 0;
+}
+
+/* Action-required content lifted into the reader pane (Rick 2026-06-08): the pane
+   body already supplies gutters + its own vertical scroll, so drop the section's
+   inner padding and its overflow:hidden clip (and any collapse transition) so the
+   pending-items list flows and scrolls naturally inside the pane. */
+.content-pane-body .section-content.in-reading-pane {
+    padding   : 0;
+    max-height: none;
+    overflow  : visible;
+    transition: none;
 }
 
 /* ---- Horizontal mode + pane-open activates the two-pane split ----

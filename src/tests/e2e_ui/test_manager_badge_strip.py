@@ -55,7 +55,7 @@ class TestManagerBadgeStrip:
         )
         assert info is not None, "worker strip icon must be created"
         assert info[ "hasManager" ] == "true"
-        assert info[ "badgeText" ] == "👑T", "badge shows manager glyph + initial"
+        assert info[ "badgeText" ] == "T", "badge shows the manager's initial (letter only, no emoji)"
         assert info[ "title" ] == "Spawned by Tiberius"
 
     def test_root_worker_has_no_manager_badge( self, notifications_page ):

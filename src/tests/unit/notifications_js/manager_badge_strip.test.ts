@@ -77,7 +77,7 @@ test( "manager badge is appended when managerPersonaMap has the sender", () => {
   assert.equal( icon.getAttribute( "data-has-manager" ), "true" );
   const badge = icon.querySelector( ".cc-strip-manager-badge" ) as HTMLElement;
   assert.ok( badge, "manager badge child present" );
-  assert.equal( badge.textContent, "👑T", "badge shows manager glyph + initial" );
+  assert.equal( badge.textContent, "T", "badge shows the manager's initial (letter only, no emoji)" );
   assert.equal( badge.getAttribute( "title" ), "Spawned by Tiberius" );
   assert.equal( badge.style.getPropertyValue( "--manager-color" ), "#3F51B5" );
 } );
@@ -96,7 +96,7 @@ test( "no manager badge when the sender has no manager (root session)", () => {
   assert.equal( icon.querySelector( ".cc-strip-manager-badge" ), null, "no badge child" );
 } );
 
-test( "manager badge tolerates a missing initial / glyph (renders what it has)", () => {
+test( "manager badge is letter-only and tolerates a missing initial", () => {
   const ui = newUI();
   buildStripDOM();
   const senderId = "claude.code@lupin.deepily.ai#worker02";
@@ -107,7 +107,7 @@ test( "manager badge tolerates a missing initial / glyph (renders what it has)",
   const badge = document.getElementById( ui._stripIconIdFor( senderId ) )!
     .querySelector( ".cc-strip-manager-badge" ) as HTMLElement;
   assert.ok( badge, "badge present" );
-  assert.equal( badge.textContent, "👑", "glyph only when no initial" );
+  assert.equal( badge.textContent, "", "letter-only: no initial → empty text (no emoji fallback)" );
   assert.equal( badge.getAttribute( "title" ), "Spawned by manager", "falls back to generic name" );
 } );
 

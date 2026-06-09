@@ -38,6 +38,14 @@ try:
 except ImportError:
     _display_name_for = None
 
+# Manager-lineage badge (Rick 2026-06-08): resolve a worker's spawning-manager persona
+# so the senders-visible hydration can stamp it (covers the cold-reload gap where an
+# EXISTING worker's badge would otherwise wait for the next live voice_persona_assigned).
+try:
+    from cosa.rest.routers.voice_persona import _resolve_manager_persona
+except ImportError:
+    _resolve_manager_persona = None
+
 
 def _voice_persona_for_sender_id( resolved_sender_id ):
     """
@@ -67,6 +75,26 @@ def _voice_persona_for_sender_id( resolved_sender_id ):
     if persona and "display_name" not in persona and _display_name_for is not None:
         persona = { **persona, "display_name": _display_name_for( persona.get( "name", "" ) ) }
     return persona
+
+
+def _manager_persona_for_sender_id( resolved_sender_id ):
+    """
+    Resolve a sender_id to its SPAWNING MANAGER's persona badge dict
+    ({icon,color,name,initial}) for the focus-bar manager badge (Rick 2026-06-08), so a
+    force-refreshed page hydrates the badge for EXISTING workers instead of waiting for
+    the next live voice_persona_assigned event (the cold-reload gap). Returns None for
+    root sessions or any failure. Mirrors _voice_persona_for_sender_id's #-suffix
+    (session-prefix) extraction.
+    """
+    if _resolve_manager_persona is None or not resolved_sender_id or "#" not in resolved_sender_id:
+        return None
+    sid_suffix = resolved_sender_id.split( "#", 1 )[ 1 ].strip()
+    if not sid_suffix:
+        return None
+    try:
+        return _resolve_manager_persona( sid_suffix )
+    except Exception:
+        return None
 
 router = APIRouter(prefix="/api", tags=["notifications"])
 
@@ -2377,7 +2405,8 @@ async def get_visible_senders(
             for activity in activities:
                 if activity["last_activity"]:
                     activity["last_activity"] = activity["last_activity"].isoformat()
-                activity["voice_persona"] = _voice_persona_for_sender_id( activity.get( "sender_id" ) )
+                activity["voice_persona"]   = _voice_persona_for_sender_id( activity.get( "sender_id" ) )
+                activity["manager_persona"] = _manager_persona_for_sender_id( activity.get( "sender_id" ) )
 
             filter_label = " (excluding own jobs)" if exclude_own_jobs else ""
             print( f"[NOTIFY] Returning {len( activities )} visible senders for {user_email}{filter_label}" )
