@@ -10572,6 +10572,12 @@ class NotificationsUI {
         // Without this, .content-shell stays block-layout and .container stays
         // centered — preserving white-space when the pane is empty.
         if ( shell ) shell.classList.add( "pane-open" );
+        // Re-assert the reading-pane split ratio (default 0.667 → pane = 1/3, the
+        // historical abstract width) so an abstract/doc open is self-consistent. Without
+        // this, the inline flex-grow values left behind by a prior action-required
+        // 50/50 split (see _enterActionRequiredPaneMode) would persist and render the
+        // abstract at 50%. Action-required keeps its own 50/50; only the accordion is half-width.
+        this._applyPaneSplitRatio();
         if ( titleEl ) titleEl.textContent = title || "";
         if ( backBtn ) backBtn.disabled = this._contentPaneHistory.length <= 1;
         // Pane just opened → left column shrank; re-center the toolbar over it.
@@ -10722,7 +10728,10 @@ class NotificationsUI {
             this._applyPaneSplitRatio();
             this._updateToolbarPosition();
         } else {
-            // Nothing was open before → close the pane (restores full-width center).
+            // Nothing was open before → re-apply the restored ratio so the inline
+            // flex-grow values aren't left at the action-required 50/50 (which would
+            // then leak into the next abstract/doc open), THEN close the pane.
+            this._applyPaneSplitRatio();
             this._closeContentPane();
         }
 
