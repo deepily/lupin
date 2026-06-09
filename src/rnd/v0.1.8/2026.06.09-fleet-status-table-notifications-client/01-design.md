@@ -31,8 +31,9 @@ session (worker or manager), the **essentials only**, **grouped by hierarchy**
 | D3 | "Essentials" projection | **Six columns** (§5): Who · Role · State · Holding-on · Stuck · Liveness verdict. Raw 4 ages → hover tooltip. | locked |
 | D4 | Refresh + timestamp | **60s auto-poll** + **manual refresh button**; show **last-updated `HH:MM:SS TZ`** (e.g. `14:32:07 EDT`). Timezone read **at runtime** from config key `app timezone` (currently `America/New_York`), formatted client-side via `Intl.DateTimeFormat` (DST-aware). NOT hardcoded. | locked |
 | D5 | Container-health block | **Omit from v1** (sessions only). Optional summary strip is a fast-follow. | locked |
+| D6 | Live-only default filter | **Default to `verdict != "offline"`** (§5.1) — hide the multi-day dead-session graveyard (41→3 on the 2026-06-09 snapshot); "Show offline (N)" toggle reveals them. **Companion**: arbiter-side roster prune, esp. on explicit reap (§5.2). Rick 2026-06-09. | locked |
 
-All of D1–D5 are **locked** (D3–D5 decided by Rick via the 3-step walkthrough, 2026-06-09).
+All of D1–D6 are **locked** (D3–D5 via the 3-step walkthrough; D6 from the live `:8001/state` repetition finding, 2026-06-09).
 
 ---
 
@@ -177,6 +178,43 @@ Default columns (everything else hidden):
 - The 4 raw liveness ages (`bridge/event/commons/idle_prompt_age_s`) — fold into a hover tooltip on the Liveness cell.
 - `health_watcher` container-health block — omit v1 (D5).
 - `session_id` UUID, `generated_at`, flap counters — omit (sid shown only as fallback label).
+
+### 5.1 Live-only default filter (D6 — Rick 2026-06-09) ⭐
+
+**Problem (observed in live `:8001/state`, 2026-06-09):** the snapshot carried **41
+sessions but only 1 LIVE / 2 quiet / 38 offline** — many *days* stale (a sample
+`freshest_age_s` ≈ 3.4 days). Persona names are pooled/reused, so each persona
+accumulates many historical dead `session_id` rows (Tiffany ×7, Tiberius ×4, …). Rick:
+"I don't give a crap about old sessions — only today's."
+
+**Display fix (this table):** default the view to **`liveness.verdict != "offline"`**
+(i.e. LIVE + quiet + stale shown; offline hidden). On the 2026-06-09 snapshot that
+collapses **41 → 3 rows**. Implementation: filter in `groupFleetByManager()` before
+grouping. A **"Show offline (N)"** toggle reveals the hidden rows on demand (count
+surfaced so they're discoverable, not erased).
+
+- The filter rides the **existing** `liveness.verdict` field — no new backend data needed
+  for the display layer; the rows are already effectively timestamped (`freshest_age_s` +
+  `verdict` + snapshot `generated_at`).
+- Empty after filtering (all offline) → render "No live sessions" (not a blank table).
+
+### 5.2 Source-side roster prune (companion fix — flag to arbiter owners) ⭐
+
+The display filter hides the graveyard; it doesn't stop the **arbiter** from carrying a
+multi-day roster of dead sessions in the first place (41 rows for a ~3-live fleet). Rick
+(2026-06-09) — agreed: **the roster window should be pruned, especially when a worker is
+explicitly reaped.**
+
+- **Time-based**: drop sessions whose `freshest_age_s` exceeds a roster-retention cutoff
+  (config key, e.g. a few hours) so days-old dead sessions never reach the snapshot.
+- **Event-based (better, Rick's point)**: when a worker is **explicitly reaped**
+  (`dismiss_sessions` / reap event), evict it from the roster **immediately** — don't wait
+  for it to age out as `offline`. An explicit reap is a stronger signal than a stale clock.
+- This is an **arbiter-side** change (the fleet-roster builder / event-sourced roster in
+  `heartbeat_arbiter`), lineage: `2026.06.07-managing-context-memory/2026.06.08-arbiter-liveness-gap-diagnosis.md`.
+  **Out of scope for the notifications-client table**, but the display filter (§5.1)
+  depends on `verdict` accuracy, so the two should land together. **Flag to Tiberius +
+  the arbiter owners** as a separate companion task.
 
 ---
 
