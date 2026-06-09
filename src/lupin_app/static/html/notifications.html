@@ -36,6 +36,7 @@
         <button class="toolbar-btn active" data-section="action-required-section" data-testid="notifications-toolbar-action" title="Action Required">⚠️</button>
         <button class="toolbar-btn active" data-section="tts-queue-section" data-testid="notifications-toolbar-tts" title="TTS Queue">🔊</button>
         <button class="toolbar-btn active" data-section="section-notifications" data-testid="notifications-toolbar-notifs" title="Notifications">💬</button>
+        <button class="toolbar-btn active" data-section="section-fleet-status" data-testid="fleet-status-toolbar-btn" title="Fleet Status">🛰️</button>
         <button class="toolbar-btn active" data-section="filter-settings-section" data-testid="notifications-toolbar-filters" title="Filter Settings (Admin)">⚙️</button>
         <button class="toolbar-btn active" data-section="section-queues" data-testid="notifications-toolbar-queues" title="Job Queues">📋</button>
         <button class="toolbar-btn active" data-section="section-time-saved" data-testid="notifications-toolbar-time" title="Time Saved">⏱️</button>
@@ -811,6 +812,30 @@
 
                 <div id="notifications-list">
                     <!-- Sender cards will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Fleet Status Section (read-only operator view) — design:
+             src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §6.
+             Sits immediately beneath #section-notifications, before #section-queues.
+             Mirrors #section-time-saved structure: collapsible header + section-content.
+             Pure observability — NO mutating controls (D2 read-only). -->
+        <div class="collapsible-section" id="section-fleet-status">
+            <div class="section-header" onclick="toggleSection('fleet-status-section')">
+                <h3>🛰️ Fleet Status: <span id="fleet-status-count">0</span>
+                    <span id="fleet-status-updated" class="fleet-status-updated"
+                          data-testid="fleet-status-updated"
+                          title="Last refreshed (HH:MM:SS, configured timezone)"></span></h3>
+                <button class="refresh-btn" id="fleet-status-refresh"
+                        data-testid="fleet-status-refresh-btn"
+                        onclick="event.stopPropagation(); window.notificationsUI.refreshFleetStatus()"
+                        title="Refresh now">⟳</button>
+                <button class="toggle-button" id="fleet-status-toggle">▼</button>
+            </div>
+            <div class="section-content" id="fleet-status-section">
+                <div id="fleet-status-container" data-testid="fleet-status-container">
+                    <!-- rendered grouped table (read-only) -->
                 </div>
             </div>
         </div>

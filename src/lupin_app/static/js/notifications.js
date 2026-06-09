@@ -374,6 +374,14 @@ class NotificationsUI {
         this.WORK_HOURS_START = 8;              // 8 AM
         this.WORK_HOURS_END = 24;               // Midnight (12 AM next day)
 
+        // ========================================
+        // FLEET STATUS PANEL (read-only operator view)
+        // Design: src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §6
+        // ========================================
+        this.FLEET_STATUS_POLL_INTERVAL_MS = 60000;   // 60s auto-poll (D4)
+        this.fleetStatusPollIntervalHandle = null;    // setInterval handle (cleanup, mirrors healthCheckIntervalHandle)
+        this._fleetStatusFetchInFlight     = false;   // debounce guard: manual ⟳ vs the interval tick
+
         // STT for Q&A input
         this.qaAudioRecorder = null;
         this.qaRecordingInterval = null;
@@ -503,6 +511,10 @@ class NotificationsUI {
 
             // Load Time Saved Dashboard stats
             this.refreshTimeSavedStats();
+
+            // Start Fleet Status panel polling (read-only operator view, 60s auto-poll + manual ⟳).
+            // Design: src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §6.
+            this.startFleetStatusPolling();
 
             // Auto-focus STT button for spacebar activation
             document.getElementById( 'qa-stt-button' ).focus();
@@ -8435,6 +8447,385 @@ class NotificationsUI {
                 <span class="stats">${sol.replays} replays · ${sol.time_saved_formatted} saved</span>
             </div>
         ` ).join( '' );
+    }
+
+    // ========================================
+    // FLEET STATUS PANEL METHODS (read-only operator view)
+    // Design: src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §5,§6,§7
+    // ========================================
+
+    async fetchFleetState() {
+        /**
+         * Fetch the fleet-state composite from the JWT-authed :7999 reverse-proxy.
+         *
+         * The proxy (GET /api/arbiter/fleet-state) pulls the standalone arbiter's
+         * :8001/state and returns its body verbatim PLUS a top-level `app_timezone`
+         * (§4.1). On upstream failure it already returns HTTP 200 with
+         * { status: "unreachable", fleet_arbiter: null } — never 5xx, never hangs.
+         *
+         * Requires:
+         *     - this.authedFetch is available (handles JWT refresh)
+         *
+         * Ensures:
+         *     - Returns the parsed composite object on 2xx
+         *     - Returns { status: "auth_required" } on a hard 401 (token refresh failed)
+         *     - Returns { status: "unreachable", fleet_arbiter: null } on any network
+         *       throw or non-2xx, non-401 status (display-only degradation — never throws)
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-state" );
+            if ( response.status === 401 ) {
+                return { status: "auth_required" };
+            }
+            if ( !response.ok ) {
+                return { status: "unreachable", fleet_arbiter: null };
+            }
+            return await response.json();
+        } catch ( error ) {
+            this.log( `Fleet status fetch failed: ${error}` );
+            return { status: "unreachable", fleet_arbiter: null };
+        }
+    }
+
+    groupFleetByManager( sessions ) {
+        /**
+         * Build the PURE hierarchy model (§7) from a flat session array.
+         *
+         * Managers (role === "manager") become top-level group headers, sorted by
+         * persona. Each worker (role !== "manager") attaches to its manager's group
+         * when `worker.manager` matches a manager persona; otherwise it falls into
+         * the **Unmanaged** bucket (degrade-safe — a worker is NEVER mis-parented).
+         * A manager always renders as a top-level header; deeper (sub-manager)
+         * nesting degrades gracefully to flat-under-nearest per §7.
+         *
+         * Requires:
+         *     - sessions is an array (or falsy → treated as empty)
+         *     - each row may carry persona, session_id, role, manager, state,
+         *       holding_on, stuck, liveness (all optional — rendered defensively)
+         *
+         * Ensures:
+         *     - Returns { totalCount, groups: [...] }
+         *     - groups holds manager groups first (persona-sorted), then a single
+         *       Unmanaged group LAST (only when it has workers)
+         *     - each group: { managerPersona, manager, isUnmanaged, workers: [...] }
+         *     - workers within a group are sorted by display label (persona ‖ sid)
+         *     - pure: no DOM access, no side effects — unit-testable in isolation
+         */
+        const rows = Array.isArray( sessions ) ? sessions : [];
+
+        const managers = rows.filter( s => s && s.role === "manager" );
+        const workers  = rows.filter( s => !s || s.role !== "manager" );
+
+        // Sort managers by display label; build one group per manager persona.
+        const sortedManagers = managers
+            .slice()
+            .sort( ( a, b ) => this._fleetLabelOf( a ).localeCompare( this._fleetLabelOf( b ) ) );
+
+        const groupByPersona = new Map();   // manager persona → group
+        const managerGroups  = [];
+        sortedManagers.forEach( mgr => {
+            const group = { managerPersona: mgr.persona || null, manager: mgr, isUnmanaged: false, workers: [] };
+            managerGroups.push( group );
+            if ( mgr.persona ) groupByPersona.set( mgr.persona, group );
+        } );
+
+        // Attach each worker to its manager group, else to the Unmanaged bucket.
+        const unmanaged = [];
+        workers.forEach( w => {
+            const mgrPersona = w && w.manager;
+            if ( mgrPersona && groupByPersona.has( mgrPersona ) ) {
+                groupByPersona.get( mgrPersona ).workers.push( w );
+            } else {
+                unmanaged.push( w );
+            }
+        } );
+
+        const byLabel = ( a, b ) => this._fleetLabelOf( a ).localeCompare( this._fleetLabelOf( b ) );
+        managerGroups.forEach( g => g.workers.sort( byLabel ) );
+        unmanaged.sort( byLabel );
+
+        const groups = managerGroups.slice();
+        if ( unmanaged.length > 0 ) {
+            groups.push( { managerPersona: null, manager: null, isUnmanaged: true, workers: unmanaged } );
+        }
+
+        return { totalCount: rows.length, groups };
+    }
+
+    _fleetLabelOf( session ) {
+        /**
+         * Resolve the "Who" label for a session row: persona preferred, short
+         * session_id (first 8 chars) as fallback, "unknown" if neither present.
+         *
+         * Requires:
+         *     - session is an object (or falsy → "unknown")
+         *
+         * Ensures:
+         *     - Returns a non-empty string suitable for display + sort key
+         *     - Pure: no DOM, no side effects
+         */
+        if ( !session ) return "unknown";
+        if ( session.persona ) return session.persona;
+        if ( session.session_id ) return String( session.session_id ).slice( 0, 8 );
+        return "unknown";
+    }
+
+    _fleetLivenessTooltip( liveness ) {
+        /**
+         * Build the hover tooltip text for the Liveness cell from the raw 4 ages
+         * (§5: the "voluminous" detail folds into a tooltip, not the default view).
+         *
+         * Requires:
+         *     - liveness is an object (or falsy → generic "no liveness data")
+         *
+         * Ensures:
+         *     - Returns a single-line string of the raw ages; null ages render "n/a"
+         *     - Pure: no DOM, no side effects
+         */
+        if ( !liveness ) return "no liveness data";
+        const fmt = ( v ) => ( v === null || v === undefined ) ? "n/a" : `${v}s`;
+        return [
+            `bridge ${fmt( liveness.bridge_age_s )}`,
+            `event ${fmt( liveness.event_age_s )}`,
+            `commons ${fmt( liveness.commons_age_s )}`,
+            `idle_prompt ${fmt( liveness.idle_prompt_age_s )}`,
+            `freshest ${fmt( liveness.freshest_age_s )}`
+        ].join( " · " );
+    }
+
+    renderFleetStatusTable( model ) {
+        /**
+         * Render the grouped hierarchy model (§7) as a read-only table (mirrors the
+         * renderJobCard template-literal pattern). Managers are group headers;
+         * workers are indented beneath; the Unmanaged group renders last.
+         *
+         * Six columns (§5): Who · Role · State · Holding-on · Stuck · Liveness verdict.
+         * The Liveness cell carries the raw 4 ages as a hover tooltip (§5).
+         *
+         * Requires:
+         *     - model is the { totalCount, groups } shape from groupFleetByManager
+         *
+         * Ensures:
+         *     - Returns an HTML string (caller assigns to innerHTML)
+         *     - Read-only: no action column, no mutating controls (§6.3 / D2)
+         *     - Pure: no DOM access, no side effects (string in → string out)
+         */
+        const headerRow = `
+            <thead>
+                <tr>
+                    <th class="fleet-col-who">Who</th>
+                    <th class="fleet-col-role">Role</th>
+                    <th class="fleet-col-state">State</th>
+                    <th class="fleet-col-holding">Holding on</th>
+                    <th class="fleet-col-stuck">Stuck</th>
+                    <th class="fleet-col-liveness">Liveness</th>
+                </tr>
+            </thead>`;
+
+        const body = model.groups.map( group => {
+            const headerLabel = group.isUnmanaged
+                ? "(Unmanaged)"
+                : `${this.escapeHtml( group.managerPersona || this._fleetLabelOf( group.manager ) )} 👑`;
+
+            const groupHeaderHtml = `
+                <tr class="fleet-group-header${group.isUnmanaged ? " fleet-group-unmanaged" : ""}">
+                    <td colspan="6">${headerLabel}</td>
+                </tr>`;
+
+            // For a real manager, render the manager's own row first (as the header's
+            // data line), then its workers indented. The Unmanaged group has no
+            // manager row — only its collected workers.
+            const memberRows = [];
+            if ( !group.isUnmanaged && group.manager ) {
+                memberRows.push( this._renderFleetRow( group.manager, false ) );
+            }
+            group.workers.forEach( w => memberRows.push( this._renderFleetRow( w, true ) ) );
+
+            return groupHeaderHtml + memberRows.join( "" );
+        } ).join( "" );
+
+        return `<table class="fleet-status-table">${headerRow}<tbody>${body}</tbody></table>`;
+    }
+
+    _renderFleetRow( session, indented ) {
+        /**
+         * Render a single session row (one <tr>) for the fleet-status table.
+         *
+         * Requires:
+         *     - session is a row object (defensively handles missing fields)
+         *     - indented: true for workers (visual nesting), false for manager rows
+         *
+         * Ensures:
+         *     - Returns one <tr> HTML string with the six §5 columns
+         *     - "none" holding_on renders as "—"; stuck renders ✓ (red) / —
+         *     - Liveness cell carries the raw-4-ages tooltip via title=
+         *     - Pure: no DOM access, no side effects
+         */
+        const who      = this.escapeHtml( this._fleetLabelOf( session ) );
+        const role     = this.escapeHtml( session.role || "worker" );
+        const state    = this.escapeHtml( session.state || "unknown" );
+        const holdRaw  = session.holding_on;
+        const holding  = ( !holdRaw || holdRaw === "none" ) ? "—" : this.escapeHtml( holdRaw );
+        const isStuck  = !!session.stuck;
+        const stuckCell = isStuck ? "✓" : "—";
+        const liveness = session.liveness || {};
+        const verdict  = this.escapeHtml( liveness.verdict || "unknown" );
+        const tooltip  = this.escapeHtml( this._fleetLivenessTooltip( session.liveness ) );
+
+        return `
+            <tr class="fleet-row${indented ? " fleet-row-worker" : " fleet-row-manager"}${isStuck ? " fleet-row-stuck" : ""}">
+                <td class="fleet-col-who">${who}</td>
+                <td class="fleet-col-role"><span class="fleet-role-badge fleet-role-${role}">${role}</span></td>
+                <td class="fleet-col-state">${state}</td>
+                <td class="fleet-col-holding">${holding}</td>
+                <td class="fleet-col-stuck${isStuck ? " fleet-stuck-yes" : ""}">${stuckCell}</td>
+                <td class="fleet-col-liveness" title="${tooltip}">${verdict}</td>
+            </tr>`;
+    }
+
+    renderFleetStatus( composite ) {
+        /**
+         * Dispatch the fetched composite to the correct render state (§6.4) and
+         * stamp the last-updated time. This is the DOM-touching orchestrator;
+         * the table-building (renderFleetStatusTable) and model (groupFleetByManager)
+         * stay pure.
+         *
+         * Requires:
+         *     - composite is the object returned by fetchFleetState()
+         *     - #fleet-status-container / #fleet-status-count exist (no-op if absent)
+         *
+         * Ensures:
+         *     - auth_required → "sign-in required" message
+         *     - unreachable / fleet_arbiter null → "Arbiter offline" banner
+         *     - empty sessions → "No active sessions"
+         *     - populated → grouped table; count + last-updated stamp updated
+         */
+        const container = document.getElementById( "fleet-status-container" );
+        const countEl   = document.getElementById( "fleet-status-count" );
+        if ( !container ) return;
+
+        if ( composite && composite.status === "auth_required" ) {
+            container.innerHTML = `<p class="fleet-status-message fleet-status-signin">🔒 Sign-in required.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
+        if ( !composite || composite.status === "unreachable" || !composite.fleet_arbiter ) {
+            container.innerHTML = `<p class="fleet-status-message fleet-status-offline">🛰️ Arbiter offline — last known: none.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
+        const sessions = composite.fleet_arbiter.sessions || [];
+        if ( countEl ) countEl.textContent = String( sessions.length );
+
+        if ( sessions.length === 0 ) {
+            container.innerHTML = `<p class="fleet-status-message fleet-status-empty">No active sessions.</p>`;
+        } else {
+            const model = this.groupFleetByManager( sessions );
+            container.innerHTML = this.renderFleetStatusTable( model );
+        }
+
+        this._stampFleetStatusUpdated( composite.app_timezone );
+    }
+
+    _formatFleetTimestamp( date, ianaZone ) {
+        /**
+         * Format a Date as "HH:MM:SS TZ" (e.g. "14:32:07 EDT") in the configured
+         * IANA zone via Intl.DateTimeFormat (DST-aware). The zone is NEVER hardcoded
+         * — it comes from the server's app_timezone (§4.1); if absent or invalid,
+         * falls back to the browser's local zone.
+         *
+         * Requires:
+         *     - date is a Date instance
+         *     - ianaZone is an IANA zone string, or falsy for browser-local
+         *
+         * Ensures:
+         *     - Returns a formatted time string with a short timezone name
+         *     - An invalid ianaZone never throws — degrades to browser-local
+         *     - Pure: no DOM, no side effects
+         */
+        const opts = { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" };
+        if ( ianaZone ) {
+            try {
+                return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: ianaZone } ).format( date );
+            } catch ( error ) {
+                this.log( `Invalid fleet timezone "${ianaZone}", falling back to local: ${error}` );
+            }
+        }
+        return new Intl.DateTimeFormat( undefined, opts ).format( date );
+    }
+
+    _stampFleetStatusUpdated( ianaZone ) {
+        /**
+         * Stamp the #fleet-status-updated span with the current time in the
+         * configured zone (§4.1 / D4).
+         *
+         * Requires:
+         *     - #fleet-status-updated may or may not exist (no-op if absent)
+         *
+         * Ensures:
+         *     - Span text set to "updated HH:MM:SS TZ" on success
+         */
+        const el = document.getElementById( "fleet-status-updated" );
+        if ( !el ) return;
+        el.textContent = `updated ${this._formatFleetTimestamp( new Date(), ianaZone )}`;
+    }
+
+    async refreshFleetStatus() {
+        /**
+         * Orchestrate one fleet-status refresh: fetch → render. Shared by the 60s
+         * interval tick and the manual ⟳ button. Debounced via an in-flight guard
+         * so a manual click landing on an interval tick can't double-fetch.
+         *
+         * Ensures:
+         *     - At most one fetch in flight at a time (guard reset in finally)
+         *     - Renders the resulting state via renderFleetStatus
+         */
+        if ( this._fleetStatusFetchInFlight ) {
+            this.log( "Fleet status refresh skipped — fetch already in flight (debounce)" );
+            return;
+        }
+        this._fleetStatusFetchInFlight = true;
+        try {
+            const composite = await this.fetchFleetState();
+            this.renderFleetStatus( composite );
+        } finally {
+            this._fleetStatusFetchInFlight = false;
+        }
+    }
+
+    startFleetStatusPolling() {
+        /**
+         * Start the 60s fleet-status auto-poll (D4). Fires one immediate refresh,
+         * then schedules the interval. Idempotent — clears any existing interval
+         * first (mirrors startWebSocketHealthMonitor).
+         *
+         * Ensures:
+         *     - this.fleetStatusPollIntervalHandle holds the live interval handle
+         *     - An immediate first refresh is kicked off (fire-and-forget)
+         */
+        this.stopFleetStatusPolling();
+        this.refreshFleetStatus();
+        this.fleetStatusPollIntervalHandle = setInterval(
+            () => this.refreshFleetStatus(),
+            this.FLEET_STATUS_POLL_INTERVAL_MS
+        );
+        this.log( "Fleet status polling started (60s interval)" );
+    }
+
+    stopFleetStatusPolling() {
+        /**
+         * Stop the fleet-status auto-poll and clear the interval handle.
+         *
+         * Ensures:
+         *     - Clears setInterval if active; resets handle to null (no-op if inactive)
+         */
+        if ( this.fleetStatusPollIntervalHandle ) {
+            clearInterval( this.fleetStatusPollIntervalHandle );
+            this.fleetStatusPollIntervalHandle = null;
+            this.log( "Fleet status polling stopped" );
+        }
     }
 
     // ========================================
