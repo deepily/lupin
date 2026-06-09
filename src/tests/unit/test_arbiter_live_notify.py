@@ -21,7 +21,8 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_arbiter_app.arbiter_live_notify import (
-    build_notify_request, make_live_notify_fn, _default_log_fn, quick_smoke_test, NOTIFY_PATH,
+    build_notify_request, make_live_notify_fn, resolve_arbiter_api_key,
+    _default_log_fn, quick_smoke_test, NOTIFY_PATH,
 )
 from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn, ESCALATION_TOPIC
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
@@ -126,6 +127,78 @@ class TestLiveNotifyDedup:
         live( "z" ); live( "z" )                                          # 2nd is deduped → default log
         out = capsys.readouterr().out
         assert "live_notify_deduped" in out and pushed == [ "z" ]
+
+
+# ── resolve_arbiter_api_key — the §7.4 degrade-safe pure-seam resolver ─────────
+
+class TestResolveArbiterApiKey:
+    """§7.4 pure seam: the X-API-Key resolver lifted OUT of the app.py no-cover IO
+    boundary. The two config_loader functions are INJECTED, so the degrade-safe
+    try/except is fully testable without touching real files or env — covering the
+    happy path + all 3 failure branches (FileNotFoundError / ValueError / KeyError)
+    at 100% L/B."""
+
+    def test_happy_path_returns_validated_key( self ):
+        logged = [ ]
+        good_key = "ck_live_" + "A" * 64
+        def get_cfg( env ):
+            assert env == "development"
+            return { "api_url": "http://x:7999", "api_key_file": "/keys/notify-dev" }
+        def load_key( path ):
+            assert path == "/keys/notify-dev"
+            return good_key
+        key = resolve_arbiter_api_key(
+            get_cfg, load_key, env="development",
+            log_fn=lambda *a, **k: logged.append( ( a, k ) ),
+        )
+        assert key == good_key
+        assert logged == [ ]                                   # happy path logs nothing
+
+    def test_missing_config_file_not_found_disables( self ):
+        """(b) ~/.lupin/config absent → get_api_config raises FileNotFoundError → None + log."""
+        logged = [ ]
+        def get_cfg( env ): raise FileNotFoundError( "~/.lupin/config not found" )
+        def load_key( path ): raise AssertionError( "load_key must not be reached" )
+        key = resolve_arbiter_api_key(
+            get_cfg, load_key, env="development",
+            log_fn=lambda event, **k: logged.append( ( event, k ) ),
+        )
+        assert key is None
+        assert logged[ 0 ][ 0 ] == "live_notify_disabled"
+        assert "development" in logged[ 0 ][ 1 ][ "reason" ]
+
+    def test_bad_key_format_value_error_disables( self ):
+        """(c) bad/missing key file → load_api_key raises ValueError → None + log."""
+        logged = [ ]
+        def get_cfg( env ): return { "api_key_file": "/keys/bad" }
+        def load_key( path ): raise ValueError( "Invalid API key format in /keys/bad" )
+        key = resolve_arbiter_api_key(
+            get_cfg, load_key, env="testing",
+            log_fn=lambda event, **k: logged.append( ( event, k ) ),
+        )
+        assert key is None
+        assert logged[ 0 ][ 0 ] == "live_notify_disabled"
+        assert "testing" in logged[ 0 ][ 1 ][ "reason" ]
+
+    def test_missing_api_key_file_key_error_disables( self ):
+        """(d) config dict lacks 'api_key_file' → KeyError → None + log."""
+        logged = [ ]
+        def get_cfg( env ): return { "api_url": "http://x:7999" }   # no api_key_file → KeyError
+        def load_key( path ): raise AssertionError( "load_key must not be reached" )
+        key = resolve_arbiter_api_key(
+            get_cfg, load_key, env="development",
+            log_fn=lambda event, **k: logged.append( ( event, k ) ),
+        )
+        assert key is None
+        assert logged[ 0 ][ 0 ] == "live_notify_disabled"
+
+    def test_default_log_fn_seam_resolves_on_failure( self, capsys ):
+        """log_fn=None → _default_log_fn is used (covers the default-arg branch)."""
+        def get_cfg( env ): raise ValueError( "boom" )
+        key = resolve_arbiter_api_key( get_cfg, lambda p: "x", env="development" )
+        assert key is None
+        out = capsys.readouterr().out
+        assert "live_notify_disabled" in out and "development" in out
 
 
 def test_default_log_fn_emits_structured_json( capsys ):

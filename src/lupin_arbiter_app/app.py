@@ -233,26 +233,29 @@ def _build_live_notify_fn( cfg ):   # pragma: no cover - literal external IO bou
     Build the best-effort live-push-to-Rick notify_fn (2b-1), or None.
 
     The IO boundary for the :7999 live hop: reads the gating INI knobs + the
-    X-API-Key from the environment and assembles a DEDUP-guarded urllib transport.
-    Returns None (live push OFF — escalations still land durably on the commons
-    topic) when the feature is disabled OR the credential is absent, so a missing
-    key degrades safe rather than spamming failed POSTs. The request SHAPE
-    (build_notify_request) and the dedup guard (make_live_notify_fn) are unit-tested;
-    only this wiring + the urllib round-trip are no-cover.
+    X-API-Key from `~/.lupin/config` (reusing the canonical cosa.utils.config_loader)
+    and assembles a DEDUP-guarded urllib transport. Returns None (live push OFF —
+    escalations still land durably on the commons topic) when the feature is disabled
+    OR the credential cannot be resolved, so a missing/bad key degrades safe rather
+    than spamming failed POSTs (or crashing startup). The request SHAPE
+    (build_notify_request), the dedup guard (make_live_notify_fn), and the degrade-safe
+    key resolver (resolve_arbiter_api_key) are unit-tested; only this wiring + the
+    urllib round-trip are no-cover.
     """
-    import os
+    from cosa.utils.config_loader import get_api_config, load_api_key
     from lupin_arbiter_app.arbiter_live_notify import (
         build_notify_request, make_live_notify_fn, _http_post, _default_log_fn,
+        resolve_arbiter_api_key,
     )
 
     if not cfg.get( "arbiter live notify enabled", default=True, return_type="boolean" ):
         _default_log_fn( "live_notify_disabled", reason="arbiter live notify enabled = false" )
         return None
 
-    api_key = os.environ.get( "LUPIN_ARBITER_NOTIFY_API_KEY" )
+    config_env = cfg.get( "arbiter live notify config env", default="development" ) or "development"
+    api_key    = resolve_arbiter_api_key( get_api_config, load_api_key, env=config_env )
     if not api_key:
-        _default_log_fn( "live_notify_disabled", reason="LUPIN_ARBITER_NOTIFY_API_KEY not set" )
-        return None
+        return None   # resolver already logged live_notify_disabled with the cause
 
     base_url     = cfg.get( "arbiter live notify url", default="http://127.0.0.1:7999" ) or "http://127.0.0.1:7999"
     target_user  = cfg.get( "arbiter live notify target user", default="" ) or ""

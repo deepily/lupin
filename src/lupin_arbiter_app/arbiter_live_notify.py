@@ -142,6 +142,42 @@ def make_live_notify_fn(
     return live_notify
 
 
+def resolve_arbiter_api_key( get_api_config_fn, load_api_key_fn, *, env, log_fn=None ):
+    """
+    PURE-SEAM (degrade-safe) resolver for the live-push X-API-Key out of
+    `~/.lupin/config` — the testable branch logic lifted OUT of the app.py
+    no-cover IO boundary (§7.4 of 2026.06.09-arbiter-notify-key-from-lupin-config).
+
+    The two `cosa.utils.config_loader` functions are INJECTED (not imported here)
+    so the try/except is unit-testable without touching real files or env: the
+    literal file IO lives inside the injected callables; this seam is purely the
+    branch decision (key-or-None).
+
+    Requires:
+        - get_api_config_fn( env=... ) → dict carrying an "api_key_file" path
+          (raises FileNotFoundError if ~/.lupin/config is absent, ValueError if
+          the env/fields are malformed)
+        - load_api_key_fn( path ) → a validated `ck_live_…` key string (raises
+          ValueError on a missing/unreadable/bad-format file)
+        - env is the ~/.lupin/config section name (e.g. "development")
+
+    Ensures:
+        - happy path → returns the validated api_key string
+        - ANY of FileNotFoundError / ValueError / KeyError → logs
+          `live_notify_disabled` (with env + error) and returns None
+        - never raises — a missing/bad credential disables live push (escalations
+          stay durable on the commons topic), it NEVER crashes arbiter startup
+    """
+    log_fn = log_fn if log_fn is not None else _default_log_fn
+    try:
+        api_cfg = get_api_config_fn( env=env )
+        return load_api_key_fn( api_cfg[ "api_key_file" ] )
+    except ( FileNotFoundError, ValueError, KeyError ) as e:
+        log_fn( "live_notify_disabled",
+                reason=f"could not load api key from ~/.lupin/config [{env}]: {e}" )
+        return None
+
+
 def _http_post( url, headers, timeout_seconds=5 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)
     """
     POST to `url` with `headers` (empty body) and return the HTTP status.
