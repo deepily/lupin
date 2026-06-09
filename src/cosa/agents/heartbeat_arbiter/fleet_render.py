@@ -108,35 +108,52 @@ def compute_liveness( view, bridge_mtime, now,
                       quiet_seconds = DEFAULT_QUIET_SECONDS,
                       stale_seconds = DEFAULT_STALE_SECONDS ):
     """
-    Build the per-session LIVENESS block — ages off direct signals + verdict.
+    Build the per-session LIVENESS block — FOUR distinct ages + verdict.
+
+    The verdict rides the FRESHEST of FOUR direct-signal ages (arbiter liveness
+    fix, Part 7 / Step 1.5) — the OLD code saw only {bridge, event}, so a worker
+    live-by-commons or live-by-idle_prompt (but with a stale stop-event) read
+    `offline`: the false WHOLE-FLEET-STALL bug. The four ages stay DISTINCT
+    columns (never collapsed):
+        - bridge_age_s      — bridge-file mtime (wedge-resilient PRIMARY, §10.1)
+        - event_age_s       — last STOP/non-idle_prompt event ts (stop-event age)
+        - commons_age_s     — last commons_who activity ts
+        - idle_prompt_age_s — last kind=idle_prompt recency beacon ts (Step 1.3)
+    A session is LIVE if ANY signal is fresh (bias-to-alive); offline only when
+    NONE is recent.
 
     Requires:
-        - view is a per-session fleet-view dict (build_fleet_view output)
+        - view is a per-session fleet-view dict (build_fleet_view output) — it
+          carries last_event_ts / commons_ts / idle_prompt_ts as DISTINCT fields
         - bridge_mtime is an epoch-seconds float or None (get_bridge_mtime)
         - now is an aware datetime; thresholds are positive seconds
 
     Ensures:
-        - returns { bridge_age_s, event_age_s, freshest_age_s, verdict } where
-          ages are int seconds (or None) and verdict is the §10.2 label
-        - liveness is derived from the FRESHEST of {bridge, event} ages —
-          bridge mtime is the wedge-resilient PRIMARY (§10.1); event-ts backstops
+        - returns { bridge_age_s, event_age_s, commons_age_s, idle_prompt_age_s,
+          freshest_age_s, verdict } — ages are int seconds (or None), verdict is
+          the §10.2 label off `freshest_age_s = min(present ages)`
         - state is NOT consulted here (orthogonal columns, C4)
         - never raises
     """
-    bridge_age = _bridge_age( bridge_mtime, now )
-    event_age  = _event_age( view.get( "last_event_ts" ) if isinstance( view, dict ) else None, now )
+    is_view         = isinstance( view, dict )
+    bridge_age      = _bridge_age( bridge_mtime, now )
+    event_age       = _event_age( view.get( "last_event_ts" )  if is_view else None, now )
+    commons_age     = _event_age( view.get( "commons_ts" )     if is_view else None, now )
+    idle_prompt_age = _event_age( view.get( "idle_prompt_ts" ) if is_view else None, now )
 
-    candidates = [ a for a in ( bridge_age, event_age ) if a is not None ]
+    candidates = [ a for a in ( bridge_age, event_age, commons_age, idle_prompt_age ) if a is not None ]
     freshest   = min( candidates ) if candidates else None
 
     def _int( a ):
         return None if a is None else int( a )
 
     return {
-        "bridge_age_s"   : _int( bridge_age ),
-        "event_age_s"    : _int( event_age ),
-        "freshest_age_s" : _int( freshest ),
-        "verdict"        : _verdict( freshest, live_seconds, quiet_seconds, stale_seconds ),
+        "bridge_age_s"      : _int( bridge_age ),
+        "event_age_s"       : _int( event_age ),
+        "commons_age_s"     : _int( commons_age ),
+        "idle_prompt_age_s" : _int( idle_prompt_age ),
+        "freshest_age_s"    : _int( freshest ),
+        "verdict"           : _verdict( freshest, live_seconds, quiet_seconds, stale_seconds ),
     }
 
 
@@ -273,19 +290,39 @@ def quick_smoke_test():
                 "last_event_ts": now - datetime.timedelta( minutes=35 ) },
         "s2": { "session_id": "s2", "persona": "Bo", "state": "stuck",
                 "holding_on": "peer:Ann", "stuck": True, "last_event_ts": None },
+        # s3: LIVE by COMMONS ONLY — no bridge, no stop-event, fresh commons_ts.
+        # The OLD 2-age verdict read this `offline` (the bug); the 4-age fix LIVEs it.
+        "s3": { "session_id": "s3", "persona": "Cy", "state": "working",
+                "holding_on": "none", "stuck": False,
+                "last_event_ts": None, "commons_ts": now - datetime.timedelta( seconds=5 ) },
+        # s4: LIVE by IDLE_PROMPT ONLY — no bridge/event/commons, fresh idle_prompt_ts.
+        "s4": { "session_id": "s4", "persona": "Di", "state": "unknown",
+                "holding_on": "none", "stuck": False,
+                "last_event_ts": None, "idle_prompt_ts": now - datetime.timedelta( seconds=8 ) },
     }
     bridge_mtimes = { "s1": now.timestamp() - 4, "s2": None }   # s1 fresh bridge, s2 dark
 
     snap = build_snapshot( view, bridge_mtimes, now )
-    assert snap[ "session_count" ] == 2
+    assert snap[ "session_count" ] == 4
     s1 = snap[ "sessions" ][ 0 ]
     # s1: bridge 4s ⇒ LIVE, even though its event ts is 35m old (bridge is PRIMARY)
     assert s1[ "liveness" ][ "verdict" ] == "LIVE", s1[ "liveness" ]
     assert s1[ "liveness" ][ "bridge_age_s" ] == 4 and s1[ "liveness" ][ "event_age_s" ] == 35 * 60
+    # all four age columns are present + distinct (never collapsed)
+    assert set( s1[ "liveness" ] ) >= {
+        "bridge_age_s", "event_age_s", "commons_age_s", "idle_prompt_age_s", "freshest_age_s", "verdict"
+    }
     # state and liveness are separate keys (orthogonal columns, C4)
     assert s1[ "state" ] == "working" and "verdict" in s1[ "liveness" ]
-    # s2: no bridge, no event ⇒ offline
+    # s2: no bridge, no event, no commons, no idle_prompt ⇒ offline
     assert snap[ "sessions" ][ 1 ][ "liveness" ][ "verdict" ] == "offline"
+    # s3: LIVE purely by commons (the 4-age fix); commons_age set, others None
+    s3 = snap[ "sessions" ][ 2 ][ "liveness" ]
+    assert s3[ "verdict" ] == "LIVE" and s3[ "commons_age_s" ] == 5
+    assert s3[ "bridge_age_s" ] is None and s3[ "event_age_s" ] is None and s3[ "idle_prompt_age_s" ] is None
+    # s4: LIVE purely by idle_prompt
+    s4 = snap[ "sessions" ][ 3 ][ "liveness" ]
+    assert s4[ "verdict" ] == "LIVE" and s4[ "idle_prompt_age_s" ] == 8
 
     # change signature ignores the ticking ages (same buckets ⇒ same sig)
     later = now + datetime.timedelta( seconds=10 )

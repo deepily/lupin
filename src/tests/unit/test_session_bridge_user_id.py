@@ -22,7 +22,7 @@ def fake_bridge( tmp_path, monkeypatch ):
     bridge_path.write_text( json.dumps( {
         "session_id"        : "test-sid",
         "stable_session_id" : "test-sid",
-        "ppid"              : 99999,
+        "cc_pid"            : 99999,
         "voice_persona"     : { "name": "Maria", "icon": "🌸" },
     } ) )
 
@@ -50,7 +50,7 @@ def test_set_user_id_preserves_other_fields( fake_bridge ):
     data = json.loads( fake_bridge.read_text() )
     assert data[ "session_id" ]        == "test-sid"
     assert data[ "stable_session_id" ] == "test-sid"
-    assert data[ "ppid" ]              == 99999
+    assert data[ "cc_pid" ]            == 99999
     assert data[ "voice_persona" ]     == { "name": "Maria", "icon": "🌸" }
     assert data[ "user_id" ]           == "user-A"
 

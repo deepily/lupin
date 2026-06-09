@@ -53,6 +53,7 @@ from cosa.agents.heartbeat_arbiter.fleet_render import (
 from cosa.rest.arbiter_snapshot_store import set_snapshot as _default_snapshot_sink
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_bridge_mtime as _default_bridge_mtime_fn,
+    find_active_voice_persona_sessions as _find_active_voice_persona_sessions,
 )
 from cosa.agents.heartbeat_arbiter.manager_resolver import (
     resolve_manager as _default_resolve_manager,
@@ -72,6 +73,35 @@ PING_MESSAGE_TEMPLATE = "Session {holder} is holding on you — where are we?"
 # circular), so the throttle key uses a stable constant — one ping per
 # (holder, awaited) blocker pair per backoff window.
 PING_REASON           = "blocked"
+
+
+def _default_bridge_discovery():
+    """
+    Discover live persona bridges → { session_id: persona_name|None }.
+
+    The IMPURE integrator helper (arbiter liveness fix, Step 1.4): enumerates
+    the live persona bridges out-of-band and reduces each to its session_id +
+    persona name so the PURE `build_fleet_view` can fold them into the UNION
+    roster WITHOUT doing IO itself. A bridge presence makes a session a roster
+    member even with no events; its bridge mtime (read separately in
+    `_publish_fleet_snapshot`) supplies the bridge_age liveness signal.
+
+    Ensures:
+        - returns { session_id: persona_name|None } for each live bridge
+        - never raises — a discovery hiccup yields {} so the observer poll
+          degrades safe (the §0 #2 invariant)
+    """
+    out = { }
+    try:
+        for _path, session_id, persona in _find_active_voice_persona_sessions(
+                stale_threshold_seconds=43_200 ):
+            if not session_id:
+                continue
+            out[ session_id ] = persona.get( "name" ) if isinstance( persona, dict ) \
+                                else ( str( persona ) if persona else None )
+    except Exception:
+        return { }
+    return out
 
 
 @runtime_checkable
@@ -124,6 +154,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
+        bridge_discovery_fn      : Optional[ Callable ] = None,
         snapshot_sink            : Optional[ Callable ] = None,
         render_sink              : Optional[ Callable ] = None,
         resolve_manager_fn       : Optional[ Callable ] = None,
@@ -214,6 +245,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # server singleton), and the render sink (greppable log; default stdout,
         # captured by the container log). All injectable for 100% unit testing.
         self._bridge_mtime_fn = bridge_mtime_fn if bridge_mtime_fn is not None else _default_bridge_mtime_fn
+        # v1.4 integrator seam: bridge discovery → {sid: persona} folded into the
+        # build_fleet_view UNION roster (impure IO lives here, not in the leaf).
+        self._bridge_discovery_fn = bridge_discovery_fn if bridge_discovery_fn is not None else _default_bridge_discovery
         self._snapshot_sink   = snapshot_sink   if snapshot_sink   is not None else _default_snapshot_sink
         self._render_sink     = render_sink      if render_sink     is not None else print
         # v2.2 B2 manager-tap: per-worker manager routing (D5 lineage) seam.
@@ -274,9 +308,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         new_events, self._offsets = tail_fleet_events( self.events_dir, self._offsets )
         self._acc.update( new_events )
 
-        who_rows   = self._commons.who()
-        fleet_view = build_fleet_view(
-            self._acc.snapshot(), who_rows, now, self.alive_threshold_seconds
+        who_rows        = self._commons.who()
+        bridge_sessions = self._bridge_discovery_fn()              # impure discovery → UNION source (a)
+        fleet_view      = build_fleet_view(
+            self._acc.snapshot(), who_rows, now, self.alive_threshold_seconds,
+            bridge_sessions=bridge_sessions,
         )
         graph = build_graph( fleet_view )
 

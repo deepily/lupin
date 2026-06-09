@@ -228,10 +228,35 @@ def test_pid_alive_other_oserror_is_false( monkeypatch ):
 
 
 def test_assess_liveness_three_states( monkeypatch ):
-    monkeypatch.setattr( cp, "_pid_alive", lambda pid: pid != 0 )
+    # `None` must read as not-alive (real _pid_alive returns False on None), so
+    # the default cc_pid=None doesn't accidentally revive the DEAD case.
+    monkeypatch.setattr( cp, "_pid_alive", lambda pid: pid not in ( 0, None ) )
     assert cp.assess_liveness( 0, 0, now=100, idle_mtime_seconds=10 ) == cp.Liveness.DEAD
     assert cp.assess_liveness( 5, 95, now=100, idle_mtime_seconds=10 ) == cp.Liveness.ACTIVE
     assert cp.assess_liveness( 5, 50, now=100, idle_mtime_seconds=10 ) == cp.Liveness.IDLE
+
+
+def test_assess_liveness_cc_pid_or_matrix( monkeypatch ):
+    """Decision #2: process-alive is the OR of listener_pid and cc_pid."""
+    # Only pids 10 (listener) and 20 (cc_pid) are alive; everything else dead.
+    monkeypatch.setattr( cp, "_pid_alive", lambda pid: pid in ( 10, 20 ) )
+
+    # listener alive → OR short-circuits on the LEFT (cc_pid never consulted) → ACTIVE
+    assert cp.assess_liveness( 10, 95, now=100, cc_pid=None, idle_mtime_seconds=10 ) == cp.Liveness.ACTIVE
+    # listener DEAD but cc_pid alive (left-False, right-True) → still alive → ACTIVE
+    assert cp.assess_liveness( 0, 95, now=100, cc_pid=20, idle_mtime_seconds=10 ) == cp.Liveness.ACTIVE
+    # alive-via-cc_pid but stale mtime → IDLE (mtime branch reached through the right side)
+    assert cp.assess_liveness( 0, 50, now=100, cc_pid=20, idle_mtime_seconds=10 ) == cp.Liveness.IDLE
+    # BOTH dead (left-False, right-False) → DEAD
+    assert cp.assess_liveness( 0, 95, now=100, cc_pid=0, idle_mtime_seconds=10 ) == cp.Liveness.DEAD
+    # listener DEAD + cc_pid omitted (defaults to None ⇒ not-alive) → DEAD
+    assert cp.assess_liveness( 0, 95, now=100, idle_mtime_seconds=10 ) == cp.Liveness.DEAD
+
+
+def test_assess_liveness_cc_pid_revives_none_listener( monkeypatch ):
+    """False-DEAD protection: a missing listener_pid (None) is rescued by a live cc_pid."""
+    monkeypatch.setattr( cp, "_pid_alive", lambda pid: pid == 20 )
+    assert cp.assess_liveness( None, 95, now=100, cc_pid=20, idle_mtime_seconds=10 ) == cp.Liveness.ACTIVE
 
 
 # ---------------------------------------------------------------------------
@@ -338,14 +363,35 @@ def test_fleet_dead_and_idle_and_persona_as_string( tmp_path, monkeypatch ):
         ( dead, "d", "PersonaString" ),          # persona as a bare string
         ( idle, "i", { "name": "Krishna" } ),
     ] )
-    # dead pid → DEAD; idle pid alive but we force stale mtime via idle window 0
-    monkeypatch.setattr( cp, "_pid_alive", lambda pid: pid != 0 )
+    # dead pid → DEAD; idle pid alive but we force stale mtime via idle window 0.
+    # `None` (a bridge with no cc_pid) must read as not-alive so the OR doesn't
+    # revive the dead worker (Step 1.2 BOTH-pid OR).
+    monkeypatch.setattr( cp, "_pid_alive", lambda pid: pid not in ( 0, None ) )
 
     workers = cp.assess_fleet_context_pressure( idle_mtime_seconds=0 )
     by_id = { w.session_id: w for w in workers }
     assert by_id[ "d" ].liveness == cp.Liveness.DEAD and by_id[ "d" ].pressure is None
     assert by_id[ "d" ].persona == "PersonaString"
     assert by_id[ "i" ].liveness == cp.Liveness.IDLE and by_id[ "i" ].pressure is None
+
+
+def test_fleet_cc_pid_rescues_dead_listener( tmp_path, monkeypatch ):
+    """The fleet helper reads `cc_pid` from the bridge and the OR rescues a
+    worker whose listener_pid is dead but whose claude-CLI pid still answers."""
+    transcript = _write( tmp_path, "tr.jsonl", [ _assistant_line( input=100, cache_read=100 ) ] )
+    bridge = tmp_path / "cc-rescue.json"
+    bridge.write_text( json.dumps( {
+        "transcript_path": transcript, "listener_pid": 0, "cc_pid": 4242,
+        "window_size": 1000,
+    } ) )
+    _install_fake_bridge( monkeypatch, [ ( bridge, "r", { "name": "Tiffany" } ) ] )
+    # listener_pid 0 is dead; only the cc_pid (4242) is alive.
+    monkeypatch.setattr( cp, "_pid_alive", lambda pid: pid == 4242 )
+
+    workers = cp.assess_fleet_context_pressure( reserve=0, max_response=0, idle_mtime_seconds=10**9 )
+    assert len( workers ) == 1
+    assert workers[ 0 ].liveness == cp.Liveness.ACTIVE      # rescued via cc_pid, not DEAD
+    assert workers[ 0 ].pressure is not None
 
 
 def test_fleet_skips_unreadable_bridge( tmp_path, monkeypatch ):

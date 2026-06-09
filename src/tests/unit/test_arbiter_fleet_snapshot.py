@@ -45,6 +45,9 @@ def _view( state="working", stuck=False, event_age_min=2 ):
 
 
 def _make_job( **seams ):
+    # Hermetic bridge discovery (v1.4): default the UNION source (a) to EMPTY so
+    # _poll_once doesn't scan the real ~/.claude live fleet. Overridable per-test.
+    seams.setdefault( "bridge_discovery_fn", lambda: { } )
     return ArbiterConsumerJob(
         commons                 = _FakeGateway(),
         poll_seconds            = 5,

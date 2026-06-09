@@ -91,7 +91,7 @@ def _write_live_bridge( sessions_dir, session_id ):
         "session_id"        : session_id,
         "stable_session_id" : session_id,
         "cwd"               : "/tmp",
-        "ppid"              : os.getpid(),
+        "cc_pid"            : os.getpid(),
     } ) )
     return path
 

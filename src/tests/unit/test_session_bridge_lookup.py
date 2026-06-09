@@ -42,7 +42,7 @@ def _make_session_data( session_id, tmux_session=None, cwd="/tmp" ):
         "session_id"        : session_id,
         "stable_session_id" : session_id,
         "cwd"               : cwd,
-        "ppid"              : os.getpid(),  # Use current PID so liveness check passes
+        "cc_pid"            : os.getpid(),  # Use current PID so liveness check passes
         "hook_ppid"         : 1,
     }
     if tmux_session is not None:

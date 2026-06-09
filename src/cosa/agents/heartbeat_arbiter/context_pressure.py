@@ -303,16 +303,31 @@ def _pid_alive( pid ):
     return True
 
 
-def assess_liveness( listener_pid, mtime, *, now, idle_mtime_seconds=DEFAULT_IDLE_MTIME_SECONDS ):
+def assess_liveness( listener_pid, mtime, *, now, cc_pid=None, idle_mtime_seconds=DEFAULT_IDLE_MTIME_SECONDS ):
     """
-    Three-state liveness: process-alive AND-gate, then mtime freshness.
+    Three-state liveness: process-alive OR-gate, then mtime freshness.
+
+    Process-alive is the OR of TWO pids — the listener pid AND the claude-CLI
+    pid (`cc_pid`, pinned in the bridge at spawn). Either one passing `kill -0`
+    proves the worker exists. The OR (vs the prior single-pid AND) protects the
+    false-DEAD case, which is the worse error under the arbiter's bias-to-alive
+    liveness (Decision #2, 2026-06-08): a session is DEAD only when NO recent
+    signal exists, so we must not declare it dead while a pid still answers.
+
+    Requires:
+        - listener_pid is an int pid or None (None / non-int ⇒ not-alive)
+        - cc_pid is an int pid or None (None / non-int ⇒ not-alive; falls back
+          to listener_pid alone, e.g. a pre-rename bridge with no cc_pid field)
+        - now is an epoch-seconds float; mtime is the bridge-file mtime
 
     Ensures:
-        - DEAD   when the process is gone (definitive phantom signal)
-        - ACTIVE when alive AND mtime within idle_mtime_seconds
-        - IDLE   when alive but mtime stale (skip pressure, surface age)
+        - DEAD   when BOTH pids are gone/None (definitive phantom signal)
+        - ACTIVE when EITHER pid is alive AND mtime within idle_mtime_seconds
+        - IDLE   when EITHER pid is alive but mtime stale (skip pressure, age)
+        - a PermissionError on either pid counts as alive (exists, not ours)
+        - pure (stdlib only); never raises
     """
-    if not _pid_alive( listener_pid ):
+    if not ( _pid_alive( listener_pid ) or _pid_alive( cc_pid ) ):
         return Liveness.DEAD
     if ( now - mtime ) <= idle_mtime_seconds:
         return Liveness.ACTIVE
@@ -456,10 +471,13 @@ def assess_fleet_context_pressure(
         persona_name = persona.get( "name", "unknown" ) if isinstance( persona, dict ) else str( persona )
         tmux_session = bridge.get( "tmux_session" )
         listener_pid = bridge.get( "listener_pid" )
+        cc_pid       = bridge.get( "cc_pid" )                 # claude-CLI pid (None on a pre-rename bridge)
         transcript   = bridge.get( "transcript_path" )
         window_size  = bridge.get( "window_size", default_window )
 
-        liveness = assess_liveness( listener_pid, mtime, now=now, idle_mtime_seconds=idle_mtime_seconds )
+        liveness = assess_liveness(
+            listener_pid, mtime, now=now, cc_pid=cc_pid, idle_mtime_seconds=idle_mtime_seconds
+        )
 
         pressure = None
         if liveness == Liveness.ACTIVE and transcript:

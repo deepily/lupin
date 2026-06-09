@@ -112,55 +112,169 @@ def _count_stuck_episodes( events ):
     )
 
 
-def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds ):
+# heartbeat-event `kind` discriminator (Step 1.3): records carrying this kind are
+# the passive idle_prompt recency beacon — they feed `idle_prompt_ts` ONLY and
+# are FILTERED OUT of the ACTIVITY axis (last/state/stuck/stop-event), per N2.
+KIND_IDLE_PROMPT = "idle_prompt"
+
+
+def _canonicalize_ids( all_ids ):
     """
-    Build the per-session fleet view from an accumulated record tail + who rows.
+    Collapse heterogeneous session-id forms (short 8-char vs full uuid) to one
+    canonical id each, reusing the prefix-match logic (review N3).
+
+    The four union sources key sessions differently — event files use SHORT
+    8-char ids, commons_who returns BOTH short + full, bridges/commons use full
+    uuids. A naive set-union would double-count a session present as a short-id
+    event AND a full-uuid bridge. We group ids that prefix-match (`_who_matches`)
+    and elect the LONGEST id of each group as canonical (full uuid wins).
+
+    Requires:
+        - all_ids is an iterable of session-id strings (falsy entries ignored)
+
+    Ensures:
+        - returns { raw_id: canonical_id } where canonical_id is the longest id
+          in raw_id's prefix-group (raw_id itself when it has no longer match)
+        - never raises
+    """
+    ids   = [ i for i in all_ids if i ]
+    canon = { }
+    for i in ids:
+        best = i
+        for j in ids:
+            if j != i and _who_matches( i, j ) and len( j ) > len( best ):
+                best = j
+        canon[ i ] = best
+    return canon
+
+
+def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds, bridge_sessions=None ):
+    """
+    Build the per-session fleet view as the UNION of all liveness signals.
+
+    The roster is the UNION of FOUR sources (arbiter liveness fix, Part 7 /
+    Step 1.4) — a session enters the view if it appears in ANY of:
+        (a) bridge-discovered   — `bridge_sessions` (the arbiter passes this IN;
+            it does the IO via find_active_voice_persona_sessions — the leaf
+            stays pure),
+        (b) commons-active      — `who_rows`,
+        (c) idle_prompt-recent  — kind=idle_prompt records in events_by_session,
+        (d) stop-event sessions — the prior event-sourced members.
+    The old code iterated (d) ONLY and could merely ANNOTATE — so live workers
+    with no stop-event were invisible (the false WHOLE-FLEET-STALL bug). Now we
+    ADD union members.
+
+    The ACTIVITY axis (last_outcome/state/stuck/holding/stop-event ts) is built
+    from NON-idle_prompt records only (kind filter, N2): an idle_prompt record
+    must NEVER become `state` and must NEVER feed the stop-event age. It feeds
+    `idle_prompt_ts` ONLY.
+
+    Heterogeneous id forms (short 8-char event ids vs full-uuid bridge/commons
+    ids) are canonicalized BEFORE dedup (`_canonicalize_ids`, N3) so a session
+    present under both forms yields ONE view keyed by its canonical (longest) id.
 
     Requires:
         - events_by_session is a dict { session_id: list[event-record-dict] }
-          — the ACCUMULATED tail per session (oldest→newest)
+          (the ACCUMULATED tail per session, oldest→newest) or None
         - who_rows is a list of commons_who rows (dicts) or None
-        - now is an aware datetime
-        - alive_threshold_seconds is a positive number (the "alive" window)
+        - now is an aware datetime; alive_threshold_seconds is a positive number
+        - bridge_sessions is { session_id: persona_name|None } (the arbiter's
+          bridge discovery) or None — membership + naming source (a)
 
     Ensures:
-        - Returns dict { session_id: VIEW } for each session with ≥1 valid event
+        - Returns dict { canonical_session_id: VIEW } for every session with ≥1
+          REAL signal (an event record, an idle_prompt record, a commons match,
+          or a bridge presence); a bare empty event list with no other signal is
+          NOT a member (preserves the old "skip empty/untrackable" behavior)
         - VIEW (flat dict): session_id · persona · last_outcome ·
-          last_event_ts(datetime|None) · last_activity_ts(datetime|None;
-          max of last event ts + matching commons ts) · alive(bool) ·
-          state(working|holding|stuck|idle|unknown) · holding_on(str, "none"
-          default) · stuck(bool; ≥ STUCK_REPEAT_THRESHOLD cap_reached+owed) ·
-          poke_count · cap
-        - Sessions with no/invalid events are skipped (not trackable)
-        - liveness: alive = last_activity_ts within alive_threshold (event-ts
-          PRIMARY, commons_who SECONDARY matched by session_id)
+          last_event_ts(datetime|None — STOP/non-idle_prompt) ·
+          commons_ts(datetime|None) · idle_prompt_ts(datetime|None) ·
+          last_activity_ts(datetime|None; max of the three) · alive(bool) ·
+          state · holding_on · stuck · poke_count · cap
+        - the three distinct ts fields stay SEPARATE so the verdict seam
+          (fleet_render.compute_liveness) can derive four distinct ages
+        - persona prefers the bridge-discovered name, then the last activity
+          record, then the idle_prompt record
         - Never raises
     """
+    events_by_session = events_by_session or { }
+    bridge_sessions   = bridge_sessions or { }
+
+    # 1. Gather every candidate session id across the four sources, then
+    #    canonicalize the heterogeneous id forms before dedup (N3).
+    candidate_ids = set()
+    candidate_ids.update( k for k in events_by_session.keys() if k )
+    candidate_ids.update( k for k in bridge_sessions.keys() if k )
+    for row in who_rows or [ ]:
+        if isinstance( row, dict ) and row.get( "session_id" ):
+            candidate_ids.add( row.get( "session_id" ) )
+
+    canon = _canonicalize_ids( candidate_ids )
+
+    # raw_id → canonical inverse: canonical → [raw ids]
+    groups = { }
+    for raw, cid in canon.items():
+        groups.setdefault( cid, [ ] ).append( raw )
+
     view = { }
-    for sid, events in ( events_by_session or { } ).items():
-        if not isinstance( events, list ) or not events:
-            continue
-        last = events[ -1 ]
-        if not isinstance( last, dict ):
+    for cid, raw_ids in groups.items():
+        # Concatenate event records across all raw forms of this session, then
+        # split by the kind discriminator: idle_prompt feeds idle_prompt_ts ONLY.
+        records = [ ]
+        for raw in raw_ids:
+            recs = events_by_session.get( raw )
+            if isinstance( recs, list ):
+                records.extend( r for r in recs if isinstance( r, dict ) )
+
+        activity_recs   = [ r for r in records if r.get( "kind" ) != KIND_IDLE_PROMPT ]
+        idleprompt_recs = [ r for r in records if r.get( "kind" ) == KIND_IDLE_PROMPT ]
+
+        last_activity = activity_recs[ -1 ]   if activity_recs   else None
+        last_idle     = idleprompt_recs[ -1 ] if idleprompt_recs else None
+
+        commons_ts = _commons_ts_for_session( who_rows, cid )
+
+        # Bridge presence + persona (source a). A raw id may be the bridge key.
+        bridge_persona = None
+        bridge_present = False
+        for raw in raw_ids:
+            if raw in bridge_sessions:
+                bridge_present = True
+                if bridge_sessions[ raw ] and bridge_persona is None:
+                    bridge_persona = bridge_sessions[ raw ]
+
+        # Membership: a session is a member iff it has a REAL signal. An empty
+        # event list with no commons/idle/bridge signal is NOT trackable.
+        has_signal = bool( activity_recs ) or bool( idleprompt_recs ) \
+                     or commons_ts is not None or bridge_present
+        if not has_signal:
             continue
 
-        persona       = last.get( "persona" )
-        last_event_ts = _parse_iso( last.get( "ts" ) )
-        last_outcome  = last.get( "outcome" )
-        activity_ts   = _newer( last_event_ts, _commons_ts_for_session( who_rows, sid ) )
+        last_event_ts  = _parse_iso( last_activity.get( "ts" ) ) if last_activity else None
+        last_outcome   = last_activity.get( "outcome" ) if last_activity else None
+        idle_prompt_ts = _parse_iso( last_idle.get( "ts" ) ) if last_idle else None
+        activity_ts    = _newer( _newer( last_event_ts, commons_ts ), idle_prompt_ts )
 
-        view[ sid ] = {
-            "session_id"       : sid,
+        persona = bridge_persona
+        if persona is None and last_activity is not None:
+            persona = last_activity.get( "persona" )
+        if persona is None and last_idle is not None:
+            persona = last_idle.get( "persona" )
+
+        view[ cid ] = {
+            "session_id"       : cid,
             "persona"          : persona,
             "last_outcome"     : last_outcome,
             "last_event_ts"    : last_event_ts,
+            "commons_ts"       : commons_ts,
+            "idle_prompt_ts"   : idle_prompt_ts,
             "last_activity_ts" : activity_ts,
             "alive"            : _is_recent( activity_ts, now, alive_threshold_seconds ),
             "state"            : _STATE_BY_OUTCOME.get( last_outcome, "unknown" ),
-            "holding_on"       : last.get( "awaiting" ) or "none",
-            "stuck"            : _count_stuck_episodes( events ) >= STUCK_REPEAT_THRESHOLD,
-            "poke_count"       : last.get( "poke_count" ),
-            "cap"              : last.get( "cap" ),
+            "holding_on"       : ( last_activity.get( "awaiting" ) or "none" ) if last_activity else "none",
+            "stuck"            : _count_stuck_episodes( activity_recs ) >= STUCK_REPEAT_THRESHOLD,
+            "poke_count"       : last_activity.get( "poke_count" ) if last_activity else None,
+            "cap"              : last_activity.get( "cap" ) if last_activity else None,
         }
     return view
 
@@ -178,22 +292,52 @@ def quick_smoke_test():
     recent = ( now - datetime.timedelta( seconds=30 ) ).isoformat()
     old    = ( now - datetime.timedelta( seconds=9000 ) ).isoformat()
 
+    full_uuid = "abcd1234-aaaa-bbbb-cccc-dddddddddddd"
     events_by_session = {
         "s1": [ ev( "poke", recent, awaiting="peer:Bob", poke_count=1 ) ],
         # two cap_reached+owed episodes ⇒ REPEATED ⇒ stuck
         "s2": [ ev( "cap_reached", old, work_owed=True, poke_count=3 ),
                 ev( "cap_reached", recent, work_owed=True, poke_count=3 ) ],
         "s3": [ ev( "idle", old ) ],          # old event, but session active on commons
-        "s4": [ ],                            # no events → skipped
+        "s4": [ ],                            # empty + no other signal → skipped
+        # idle_prompt-ONLY session: kind-tagged, NO outcome → enters the roster
+        # via the idle_prompt signal but stays OFF the activity axis (N2)
+        "ip": [ { "session_id": "ip", "persona": "Dot", "kind": "idle_prompt", "ts": recent } ],
+        # canonicalization (N3): a SHORT event id that prefixes the full bridge uuid
+        "abcd1234": [ ev( "poke", recent, persona="Eve", poke_count=2 ) ],
     }
     who_rows = [ { "session_id": "s3", "persona_name": "Cal", "last_post_ts": recent } ]
+    bridge_sessions = {
+        full_uuid                : "Eve",     # SAME session as short event id "abcd1234"
+        "bridgeonly-no-events"   : "Fred",    # bridge-only member (no events at all)
+    }
 
-    view = build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds=3600 )
-    assert set( view ) == { "s1", "s2", "s3" }, set( view )
+    view = build_fleet_view(
+        events_by_session, who_rows, now, alive_threshold_seconds=3600, bridge_sessions=bridge_sessions
+    )
+
+    # UNION membership: stop-event (s1/s2/s3) ∪ idle_prompt (ip) ∪ canonical
+    # bridge⊕event (full_uuid) ∪ bridge-only (bridgeonly) — s4 (no signal) skipped
+    assert set( view ) == { "s1", "s2", "s3", "ip", full_uuid, "bridgeonly-no-events" }, set( view )
     assert view[ "s1" ][ "state" ] == "working" and view[ "s1" ][ "holding_on" ] == "peer:Bob"
     assert view[ "s2" ][ "stuck" ] is True and view[ "s2" ][ "state" ] == "stuck"
     # s3: old event ts but recent commons ts (matched by session_id) ⇒ alive
     assert view[ "s3" ][ "alive" ] is True and view[ "s3" ][ "last_outcome" ] == "idle"
+
+    # idle_prompt-only: kind filter keeps it OFF the activity axis, ON idle_prompt_ts
+    ipv = view[ "ip" ]
+    assert ipv[ "state" ] == "unknown" and ipv[ "last_outcome" ] is None
+    assert ipv[ "last_event_ts" ] is None and ipv[ "idle_prompt_ts" ] is not None
+    assert ipv[ "persona" ] == "Dot"
+
+    # canonicalization: short "abcd1234" event ⊕ full-uuid bridge ⇒ ONE view under the full uuid
+    assert "abcd1234" not in view
+    cv = view[ full_uuid ]
+    assert cv[ "state" ] == "working" and cv[ "persona" ] == "Eve"   # bridge persona preferred
+
+    # bridge-only member: present + named, but no activity ⇒ state unknown, no stop-event ts
+    bov = view[ "bridgeonly-no-events" ]
+    assert bov[ "persona" ] == "Fred" and bov[ "state" ] == "unknown" and bov[ "last_event_ts" ] is None
     return True
 
 

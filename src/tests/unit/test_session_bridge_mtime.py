@@ -48,7 +48,7 @@ def _write_session_file( sessions_dir, pid, session_id ):
         "session_id"        : session_id,
         "stable_session_id" : session_id,
         "cwd"               : "/tmp",
-        "ppid"              : os.getpid(),
+        "cc_pid"            : os.getpid(),
     }
     with open( path, "w" ) as f:
         json.dump( data, f )

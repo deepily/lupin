@@ -104,6 +104,9 @@ def _make_job( events_dir, gateway=None, notify_fn=None, **overrides ):
         # assertions isolated from the tap. The tap is covered in its own suite.
         resolve_manager_fn      = lambda sid, declared_manager=None: {
             "manager_session_id": None, "manager_persona": None, "source": "unresolved" },
+        # v1.4: hermetic bridge discovery — keep the union source (a) EMPTY so
+        # these tests don't pick up the real ~/.claude live fleet. Override per-test.
+        bridge_discovery_fn     = lambda: { },
     )
     cfg.update( overrides )
     return ArbiterConsumerJob( commons=gateway or FakeGateway(), **cfg )
@@ -155,6 +158,58 @@ def test_poll_once_builds_view_and_surfaces( tmp_path ):
     assert job._poll_count == 1
     # manager surface posted to the roster topic
     assert gw.posts and gw.posts[ 0 ][ 0 ] == ROSTER_TOPIC
+
+
+# ── v1.4 integrator: bridge discovery → UNION roster ──────────────────────────
+
+def test_default_bridge_discovery_maps_personas( monkeypatch ):
+    """The impure discovery helper reduces live bridges to {sid: persona_name}."""
+    from cosa.agents.heartbeat_arbiter import arbiter_job as aj
+    fake = [
+        ( "/p/cc-1.json", "sid-dict", { "name": "Tiffany" } ),   # dict persona → name
+        ( "/p/cc-2.json", "sid-str",  "BareString" ),            # str persona → itself
+        ( "/p/cc-3.json", "sid-none", None ),                    # no persona → None
+        ( "/p/cc-4.json", "",         { "name": "Skip" } ),      # empty sid → skipped
+    ]
+    monkeypatch.setattr( aj, "_find_active_voice_persona_sessions", lambda **k: fake )
+    assert aj._default_bridge_discovery() == {
+        "sid-dict": "Tiffany", "sid-str": "BareString", "sid-none": None
+    }
+
+
+def test_default_bridge_discovery_swallows_errors( monkeypatch ):
+    """A discovery hiccup yields {} — the observer poll degrades safe (never raises)."""
+    from cosa.agents.heartbeat_arbiter import arbiter_job as aj
+    def _boom( **k ):
+        raise RuntimeError( "bridge scan failed" )
+    monkeypatch.setattr( aj, "_find_active_voice_persona_sessions", _boom )
+    assert aj._default_bridge_discovery() == { }
+
+
+def test_poll_once_folds_bridge_only_session_into_union( tmp_path ):
+    """A session with NO events and NO commons — ONLY a live bridge — must enter
+    the UNION roster AND read LIVE via its fresh bridge_age (the false-offline fix)."""
+    import datetime
+    now_epoch = datetime.datetime.fromisoformat( NOW_ISO ).timestamp()
+    snapshots = [ ]
+    gw  = FakeGateway( who_rows=[ ] )                               # nothing on commons
+    job = _make_job(
+        tmp_path, gateway=gw,
+        bridge_discovery_fn = lambda: { "ghost-sid": "Ghost" },    # ONLY signal: a live bridge
+        bridge_mtime_fn     = lambda sid: now_epoch - 5,           # fresh bridge mtime → 5s
+        snapshot_sink       = snapshots.append,
+    )
+    summary = job._poll_once()
+    assert summary[ "sessions" ] == 1                              # bridge-only session is a member
+    row = snapshots[ -1 ][ "sessions" ][ 0 ]
+    assert row[ "session_id" ] == "ghost-sid" and row[ "persona" ] == "Ghost"
+    # the verdict reads LIVE off the FRESH bridge age — even with no events/commons
+    assert row[ "liveness" ][ "verdict" ] == "LIVE"
+    assert row[ "liveness" ][ "bridge_age_s" ] == 5
+    # all FOUR distinct age columns are present (Step 1.5)
+    assert set( row[ "liveness" ] ) >= {
+        "bridge_age_s", "event_age_s", "commons_age_s", "idle_prompt_age_s", "freshest_age_s", "verdict"
+    }
 
 
 def test_poll_once_inference_idle_with_shipped_defaults( tmp_path ):

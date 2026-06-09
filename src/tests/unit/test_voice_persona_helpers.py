@@ -102,7 +102,7 @@ def _bridge_with_persona( session_id, persona_name, voice_id="v_maria", borrowed
         "session_id"        : session_id,
         "stable_session_id" : session_id,
         "cwd"               : "/tmp",
-        "ppid"              : os.getpid(),  # liveness passes
+        "cc_pid"            : os.getpid(),  # liveness passes
         "hook_ppid"         : 1,
         "voice_persona"     : {
             "name"     : persona_name,
@@ -302,7 +302,7 @@ class TestFindActiveVoicePersonaSessions:
                 "session_id"        : "xyz98765-aaaa-bbbb-cccc-dddddddddddd",
                 "stable_session_id" : "xyz98765-aaaa-bbbb-cccc-dddddddddddd",
                 "cwd"               : "/tmp",
-                "ppid"              : os.getpid(),
+                "cc_pid"            : os.getpid(),
                 "hook_ppid"         : 1
             }
             _write_bridge( sessions_dir, os.getpid() + 1, data_no_persona )

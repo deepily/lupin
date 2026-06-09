@@ -22,13 +22,16 @@ import sys
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
-if _src_path not in sys.path:
+if _src_path not in sys.path:   # pragma: no cover - bootstrap import-guard; src is always on sys.path under pytest
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts, drain_and_acknowledge
 )
-from lupin_cli.claude_code.hooks.lib.session_bridge import get_claude_session_id, resolve_stable_session_id
+from lupin_cli.claude_code.hooks.lib.session_bridge import (
+    get_claude_session_id, resolve_stable_session_id, get_voice_persona
+)
+from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_idle_prompt
 
 
 def main():
@@ -60,6 +63,15 @@ def main():
     elif notification_type == "idle_prompt":
         tts_msg      = message if message else "Claude is waiting for input"
         tts_priority = "low"
+        # Fleet liveness 4th signal (arbiter liveness fix, Part 7 / Step 1.3):
+        # emit a kind-tagged idle_prompt recency event so the arbiter counts
+        # this session as ALIVE-by-idle. kind="idle_prompt" keeps it OFF the
+        # ACTIVITY axis (state) and the stop_event age — it feeds
+        # idle_prompt_age_s ONLY. Fire-and-forget: emit_idle_prompt never raises
+        # and the persona resolve is best-effort, so TTS is never affected.
+        _persona      = get_voice_persona( session_id )
+        _persona_name = _persona.get( "name" ) if isinstance( _persona, dict ) else None
+        emit_idle_prompt( session_id, persona=_persona_name )
     else:
         if message:
             truncated = message[:80] + "..." if len( message ) > 80 else message

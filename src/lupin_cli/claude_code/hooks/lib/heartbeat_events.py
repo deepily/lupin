@@ -65,6 +65,15 @@ EVENT_IDLE = "idle"
 # (not_owed is per-turn noise, skipped); v2 ADDS the explicit "idle" beacon.
 EMITTED_OUTCOMES = ( OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_CAP_REACHED, EVENT_IDLE )
 
+# Fleet liveness 4th-signal discriminator (arbiter liveness fix, Part 7 / Step
+# 1.3). The Notification hook's idle_prompt branch emits a record carrying
+# `kind="idle_prompt"` — a passive recency INPUT, NOT a poke-outcome. The
+# discriminator is LOAD-BEARING: build_fleet_view filters kind=idle_prompt OUT
+# of the ACTIVITY axis (last/state) and the stop_event age, and feeds it into
+# idle_prompt_age_s ONLY. The record deliberately carries NO `outcome` key so it
+# can never map through _STATE_BY_OUTCOME even if a filter were missed.
+EVENT_KIND_IDLE_PROMPT = "idle_prompt"
+
 
 def _resolve_base_dir( base_dir ):
     """
@@ -135,6 +144,49 @@ def emit_outcome( session_id, persona, outcome, poke_count, cap,
         if outcome == OUTCOME_POKE and reason is not None:
             record[ "reason" ] = reason
 
+        path = events_path( session_id, base_dir=base_dir )
+        path.parent.mkdir( parents=True, exist_ok=True )
+        with open( path, "a" ) as f:
+            f.write( json.dumps( record ) + "\n" )
+        return True
+    except ( OSError, TypeError, ValueError ):
+        return False
+
+
+def emit_idle_prompt( session_id, persona=None, ts=None, base_dir=None ):
+    """
+    Append one kind-tagged `idle_prompt` recency event. NEVER raises.
+
+    Emitted from the Notification hook's idle_prompt branch (Step 1.3) so the
+    fleet arbiter counts an idling session as ALIVE-by-idle (the 4th union
+    signal). It is an EDGE recency INPUT — fires when CC presents the idle
+    prompt — and is the strongest cc-native passive liveness beacon.
+
+    The record carries `kind="idle_prompt"` and DELIBERATELY OMITS `outcome`:
+    consumers MUST filter on the `kind` discriminator so the record feeds
+    `idle_prompt_age_s` ONLY and never corrupts the ACTIVITY axis (`state`) or
+    `stop_event_age_s`.
+
+    Requires:
+        - session_id is a string
+        - persona is a string or None (the session's voice-persona name, when
+          cheaply resolvable; None is fine — the union backfills from bridges)
+
+    Ensures:
+        - Appends exactly one JSON line: schema_version · session_id · persona ·
+          ts (ISO-8601 UTC) · kind="idle_prompt"  (NO `outcome` key)
+        - Creates the fleet dir if missing (parents, idempotent)
+        - Returns True on a successful append; False on any write/serialization
+          failure — NEVER raises into the caller (fire-and-forget; TTS unaffected)
+    """
+    try:
+        record = {
+            "schema_version" : SCHEMA_VERSION,
+            "session_id"     : session_id,
+            "persona"        : persona,
+            "ts"             : ts if ts is not None else _now_iso(),
+            "kind"           : EVENT_KIND_IDLE_PROMPT,
+        }
         path = events_path( session_id, base_dir=base_dir )
         path.parent.mkdir( parents=True, exist_ok=True )
         with open( path, "a" ) as f:
@@ -265,6 +317,12 @@ def quick_smoke_test():
         assert events[ 2 ][ "outcome" ] == "idle"
         assert events[ 2 ][ "work_owed" ] is False
         assert "reason" not in events[ 2 ]
+
+        # Step 1.3 — kind-tagged idle_prompt recency event (NO `outcome` key, so
+        # it never maps through _STATE_BY_OUTCOME; consumers filter on `kind`).
+        assert emit_idle_prompt( sid, persona="Tiffany 💍", base_dir=tmp ) is True
+        ip = read_events( sid, base_dir=tmp )[ -1 ]
+        assert ip[ "kind" ] == EVENT_KIND_IDLE_PROMPT and "outcome" not in ip
 
     return True
 

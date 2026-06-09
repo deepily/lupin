@@ -13,7 +13,7 @@ Design: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
 Invocation:
     python -m lupin_cli.claude_code.hooks.lib.idle_waiter \\
         --session-id  <session-id> \\
-        --ppid        <claude-code-ppid> \\
+        --cc-pid      <claude-code-pid> \\
         --backoff-index <int>
 
 Test mode (override sleep duration for smoke tests):
@@ -33,7 +33,7 @@ from pathlib import Path
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _lupin_root = os.environ.get( "LUPIN_ROOT", os.getcwd() )
 _src_path   = os.path.join( _lupin_root, "src" )
-if _src_path not in sys.path:
+if _src_path not in sys.path:   # pragma: no cover - bootstrap import-guard; src is always on sys.path under pytest
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -146,7 +146,7 @@ def _was_reset_during_sleep( session_id: str, started_at_iso: str ) -> bool:
     return last_dt > started_dt
 
 
-def _spawn_successor( session_id: str, ppid: int, backoff_index: int, sleep_secs_override: int = None ) -> int:
+def _spawn_successor( session_id: str, cc_pid: int, backoff_index: int, sleep_secs_override: int = None ) -> int:
     """
     Spawn a successor idle_waiter at the next backoff index (detached).
 
@@ -159,7 +159,7 @@ def _spawn_successor( session_id: str, ppid: int, backoff_index: int, sleep_secs
     cmd      = [
         sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
         "--session-id"   , session_id,
-        "--ppid"         , str( ppid ),
+        "--cc-pid"       , str( cc_pid ),
         "--backoff-index", str( backoff_index ),
     ]
     if sleep_secs_override is not None:
@@ -191,7 +191,7 @@ def _spawn_successor( session_id: str, ppid: int, backoff_index: int, sleep_secs
 
 def run_waiter(
     session_id    : str,
-    ppid          : int,
+    cc_pid        : int,
     backoff_index : int,
     sleep_secs_override : int = None,
 ) -> None:
@@ -201,8 +201,8 @@ def run_waiter(
     1. Validate session bridge exists; if not, exit (session ended).
     2. Atomically claim waiter_pid slot. If lost, exit.
     3. Compute sleep duration from settings (or override for tests).
-    4. Sleep in 30-second chunks, polling PPID liveness.
-    5. On wake: re-check reset signals + conv mode + PPID.
+    4. Sleep in 30-second chunks, polling CC-PID liveness.
+    5. On wake: re-check reset signals + conv mode + CC-PID.
     6. If clear to fire: invoke fire_anything_else_ask.
     7. Branch on response → exit / spawn successor.
     """
@@ -231,16 +231,16 @@ def run_waiter(
 
         _log( session_id, f"sleep {sleep_secs}s (backoff_index={capped_index} schedule={schedule})" )
 
-        # Chunked sleep — wake periodically to check PPID liveness so a dead
-        # CC parent doesn't keep a stale waiter alive for the full schedule.
+        # Chunked sleep — wake periodically to check CC-PID liveness so a dead
+        # CC process doesn't keep a stale waiter alive for the full schedule.
         elapsed = 0
         chunk   = 30
         while elapsed < sleep_secs:
             time.sleep( min( chunk, sleep_secs - elapsed ) )
             elapsed += chunk
 
-            if not _is_pid_alive( ppid ):
-                _log( session_id, f"ppid {ppid} dead during sleep; exiting" )
+            if not _is_pid_alive( cc_pid ):
+                _log( session_id, f"cc_pid {cc_pid} dead during sleep; exiting" )
                 return
 
         # Wake-time predicates
@@ -295,7 +295,7 @@ def run_waiter(
         # _claim_waiter_slot doesn't see us as a stale incumbent)
         _release_waiter_slot( session_id )
 
-        succ_pid = _spawn_successor( session_id, ppid, next_index, sleep_secs_override )
+        succ_pid = _spawn_successor( session_id, cc_pid, next_index, sleep_secs_override )
 
         # Successor will set its own waiter_pid via _claim_waiter_slot
         _log( session_id, f"spawned successor pid={succ_pid} at backoff_index={next_index}" )
@@ -313,7 +313,7 @@ def run_waiter(
 def main() -> int:
     parser = argparse.ArgumentParser( prog="idle_waiter", description="Idle-aware Stop hook deferred ask" )
     parser.add_argument( "--session-id"   , required=True, help="CC session ID" )
-    parser.add_argument( "--ppid"         , required=True, type=int, help="CC parent process ID" )
+    parser.add_argument( "--cc-pid"       , required=True, type=int, help="Claude Code process ID" )
     parser.add_argument( "--backoff-index", required=True, type=int, help="Index into settings backoff_minutes" )
     parser.add_argument( "--sleep-secs"   , type=int, default=None, help="Override sleep duration in seconds (test mode)" )
     args = parser.parse_args()
@@ -337,12 +337,12 @@ def main() -> int:
     signal.signal( signal.SIGTERM, _on_term )
     signal.signal( signal.SIGINT,  _on_term )
 
-    _log( args.session_id, f"start backoff_index={args.backoff_index} ppid={args.ppid} sleep_override={sleep_override}" )
+    _log( args.session_id, f"start backoff_index={args.backoff_index} cc_pid={args.cc_pid} sleep_override={sleep_override}" )
 
     try:
         run_waiter(
             session_id          = args.session_id,
-            ppid                = args.ppid,
+            cc_pid              = args.cc_pid,
             backoff_index       = args.backoff_index,
             sleep_secs_override = sleep_override,
         )

@@ -182,6 +182,11 @@ def _make_arbiter( events_dir, *, gateway=None, clock=None, notify_fn=None, **ov
         # tests count auto-pings only).
         resolve_manager_fn      = lambda sid, declared_manager=None: {
             "manager_session_id": "mgr", "manager_persona": "Tiberius", "source": "lineage" },
+        # v1.4: hermetic bridge discovery — the production default does a real
+        # ~/.claude bridge scan (non-deterministic here). Default to an EMPTY
+        # union source (a) so these event/commons-driven tests stay isolated;
+        # the dedicated union test overrides it.
+        bridge_discovery_fn     = lambda: { },
     )
     cfg.update( overrides )
     return ArbiterConsumerJob( commons=gateway if gateway is not None else FakeGateway(), **cfg )

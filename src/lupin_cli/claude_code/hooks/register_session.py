@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
-if _src_path not in sys.path:
+if _src_path not in sys.path:   # pragma: no cover - bootstrap import-guard; src is always on sys.path under pytest
     sys.path.insert( 0, _src_path )
 
 import urllib.request
@@ -799,7 +799,7 @@ def main():
             "session_ids"       : existing_ids,
             "transcript_path"   : transcript_path,
             "cwd"               : cwd,
-            "ppid"              : cc_pid,
+            "cc_pid"            : cc_pid,
             "hook_ppid"         : hook_ppid,
             "tmux_session"      : tmux_session,
             "window_size"       : _resolve_window_tokens(),

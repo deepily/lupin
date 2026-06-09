@@ -122,7 +122,7 @@ def test_fleet_state_reads_configured_url_and_timeout( client, monkeypatch ):
         return { "status": "ok" }
     monkeypatch.setattr( arbiter, "_pull_arbiter_state", _capture )
     client.get( "/api/arbiter/fleet-state" )
-    assert captured[ "url" ]     == "http://127.0.0.1:8001/state"
+    assert captured[ "url" ]     == "http://host.docker.internal:8001/state"
     assert captured[ "timeout" ] == 5 and isinstance( captured[ "timeout" ], int )
 
 

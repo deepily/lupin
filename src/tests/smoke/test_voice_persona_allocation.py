@@ -90,7 +90,7 @@ def synthetic_bridge():
         "session_ids"       : [ session_id ],
         "transcript_path"   : "/tmp/synthetic-transcript.jsonl",
         "cwd"               : "/tmp",
-        "ppid"              : test_pid,        # alive for liveness check
+        "cc_pid"            : test_pid,        # alive for liveness check
         "hook_ppid"         : 1,
         "tmux_session"      : None
     }
@@ -268,7 +268,7 @@ class TestVoicePersonaUniqueness:
                             "stable_session_id" : sid,
                             "session_ids"       : [ sid ],
                             "cwd"               : "/tmp",
-                            "ppid"              : test_pid,  # alive
+                            "cc_pid"            : test_pid,  # alive
                             "hook_ppid"         : 1
                         },
                         f
@@ -337,7 +337,7 @@ class TestVoicePersonaUniqueness:
                             "stable_session_id" : sid,
                             "session_ids"       : [ sid ],
                             "cwd"               : "/tmp",
-                            "ppid"              : test_pid,  # alive
+                            "cc_pid"            : test_pid,  # alive
                             "hook_ppid"         : 1
                         },
                         f

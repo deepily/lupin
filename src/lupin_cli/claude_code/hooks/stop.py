@@ -23,7 +23,7 @@ import sys
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
-if _src_path not in sys.path:
+if _src_path not in sys.path:   # pragma: no cover - bootstrap import-guard; src is always on sys.path under pytest
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
@@ -369,7 +369,7 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
     # Resolve CC PID from bridge (set by SessionStart). Fallback to hook's
     # grandparent walk if bridge doesn't have it.
     meta   = get_session_metadata()
-    cc_pid = meta.get( "ppid" ) or os.getppid()
+    cc_pid = meta.get( "cc_pid" ) or os.getppid()
 
     # Kill any stale waiter so we don't end up with parallel asks
     kill_idle_waiter( session_id )
@@ -390,7 +390,7 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
     cmd = [
         sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
         "--session-id"   , session_id,
-        "--ppid"         , str( cc_pid ),
+        "--cc-pid"       , str( cc_pid ),
         "--backoff-index", str( current_index ),
     ]
     # Test-mode hook: if env tells us to use a short sleep, propagate it
@@ -422,7 +422,7 @@ def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
             "phase"         : "idle_waiter_armed",
             "waiter_pid"    : proc.pid,
             "backoff_index" : current_index,
-            "ppid"          : cc_pid,
+            "cc_pid"        : cc_pid,
         } )
         return proc.pid
     except Exception as e:
