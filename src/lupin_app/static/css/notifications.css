@@ -2105,7 +2105,7 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 8px 12px;
+            padding: 10px 16px;   /* more internal room inside the focus bar (Rick 2026-06-08) */
             margin-bottom: 12px;
             background: linear-gradient( to bottom, #ffffff, #f8f9fa );
             border: 1px solid #dee2e6;
@@ -2119,7 +2119,7 @@
         .cc-strip-icons {
             display: flex;
             align-items: center;
-            gap: 14px;
+            gap: 18px;   /* more breathing room between persona badges (Rick 2026-06-08) */
             flex: 1 1 auto;
             min-width: 0;
             overflow-x: auto;
@@ -2216,6 +2216,35 @@
             border: 2px solid #ffffff;
             box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.35 );
             line-height: 1;
+        }
+
+        /* Manager-lineage badge (Rick 2026-06-08): the spawning manager's glyph +
+         * initial, tinted with the manager's color, docked at the TOP-LEFT perimeter
+         * (135°) — 180° opposite the bottom-right speaker ::before, and clear of the
+         * top-right unread ::after. Rendered as a real child element (not a pseudo)
+         * so it can carry the manager's glyph + initial text. Present only when the
+         * worker was spawned by a manager (data-has-manager="true"). */
+        .cc-strip-icon .cc-strip-manager-badge {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            transform: translate( -50%, -50% );
+            min-width: 16px;
+            height: 16px;
+            padding: 0 3px;
+            background: var( --manager-color, #495057 );
+            color: #ffffff;
+            border-radius: 8px;
+            font-size: 9px;
+            font-weight: 700;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #ffffff;
+            box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.35 );
+            pointer-events: none;
+            white-space: nowrap;
         }
 
         /* Speakerphone/quiet-state overlay on each strip persona icon.

@@ -60,6 +60,48 @@ router = APIRouter( prefix="/api/cosa-voice", tags=[ "cosa-voice" ] )
 _voice_persona_lock = asyncio.Lock()
 
 
+def _resolve_manager_persona( worker_session_id ):
+    """
+    Resolve the spawning manager's persona for the focus-bar manager badge
+    (2026-06-08, Rick). A worker's bridge carries `spawned_by` = the MANAGER's
+    session_id (set by session_spawner at spawn). We read that, then read the
+    manager's own voice_persona, and shape a compact badge dict (glyph + color +
+    initial) the client superimposes on the worker's focus-bar avatar.
+
+    Requires:
+        - worker_session_id is a non-empty session_id string
+
+    Ensures:
+        - returns { "icon", "color", "name", "initial" } when the worker was
+          spawned by a manager whose persona is resolvable
+        - returns None for a top-level / root session (no `spawned_by`), an
+          unresolvable manager persona, or any read failure (NEVER raises — this
+          runs inside the best-effort voice_persona_assigned emit path)
+    """
+    import json
+    try:
+        path = find_session_path_by_id( worker_session_id )
+        if not path:
+            return None
+        with open( path ) as f:
+            data = json.load( f )
+        manager_session_id = data.get( "spawned_by" )
+        if not manager_session_id:
+            return None
+        manager_persona = get_voice_persona( manager_session_id )
+        if not isinstance( manager_persona, dict ) or not manager_persona:
+            return None
+        name = manager_persona.get( "name" ) or ""
+        return {
+            "icon"    : manager_persona.get( "icon" ),
+            "color"   : manager_persona.get( "color" ),
+            "name"    : name,
+            "initial" : name[ :1 ].upper() if name else "",
+        }
+    except Exception:
+        return None
+
+
 # ── Dependency injection ─────────────────────────────────────────────────────
 
 def get_notification_queue():
@@ -353,7 +395,8 @@ async def allocate_voice_persona_endpoint(
             voice_persona      = persona,
             suppress_ding      = True,
             response_requested = False,
-            payload            = { "session_id": session_id }
+            payload            = { "session_id"     : session_id,
+                                   "manager_persona": _resolve_manager_persona( session_id ) }
         )
         broadcast_delivered = True
     except Exception as ws_err:

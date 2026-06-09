@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Focus-bar manager-lineage badge (current JS client + server)
+
+**Built: each spawned worker's focus-bar strip icon now shows a badge of the MANAGER that spawned it** (Rick's tweak — glyph + color + initial, docked top-left, 180° opposite the speaker badge). The lineage was already on the bridge (`spawned_by` = manager session_id, from session_spawner) but grep-confirmed it never reached the client. **Server** (`voice_persona.py`): new `_resolve_manager_persona(worker_session_id)` reads the worker's `spawned_by`, looks up the manager's `voice_persona`, and shapes `{icon,color,name,initial}` into the `voice_persona_assigned` event's `payload.manager_persona` (None for roots/failures). **Client** (`notifications.js`): a `managerPersonaMap` (populated from the event, cleared on release/reap); `_addStripIcon` superimposes a `.cc-strip-manager-badge` when present + sets `data-has-manager`. **CSS** (`notifications.css`): badge at the top-left perimeter (135°) — opposite the bottom-right speaker `::before`, clear of the top-right unread `::after` — plus Rick's breathing room (strip gap 14→18px, bar padding 8/12→10/16px).
+
+**Tested 2 runnable tiers + regression + e2e.** Server resolver unit **7/7** (`test_voice_persona_manager_badge.py` — spawned_by present/absent · bridge missing · manager None/empty · empty-name initial · bad-JSON). JS render unit **3/3** (`manager_badge_strip.test.ts`, happy-dom — badge present / root none / missing-initial fallback). Regression **18/18** (reading-pane/toggle unaffected). E2E written (`test_manager_badge_strip.py`, drives real `handleNotificationUpdate`; schedulable :8000). **Caveat:** cold-page-reload persistence depends on persona-event re-fire on WS reconnect; else `/api/commons/active-sessions` would need `manager_persona` (follow-up).
+
+**Selective-staged (mine only, never `-A`). Excluded — Tiffany's in-flight arbiter-liveness build** (`context_pressure`/`register_session`/`stop.py`/`heartbeat_arbiter` + ~20 tests), `src/rnd/README.md` (co-edit), `.claude-session.md`, peer docs. HELD — not pushed.
+
+---
+
 ### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Abstract-icon Reading-Pane toggle (current JS client) + worker→manager badge design
 
 **Built: the abstract icon (📋) in horizontal mode is now a TOGGLE** (Rick's tweak; in the CURRENT JS notification client `notifications.js`, NOT the multiplexer — Rick double-checked). The `.abstract-indicator` click opened the Reading Pane with the abstract; now a second click on the SAME indicator CLEARS the pane. A different indicator switches content; a doc-link entry / closed pane / empty history fall through to open. Implemented via a new pure predicate `_abstractAlreadyShown( abstract )` (pane open AND top-of-history is an abstract with matching payload) gating `_closeContentPane()` in the horizontal-mode branch; vertical-mode tooltip path unchanged.

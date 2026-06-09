@@ -130,6 +130,11 @@ class NotificationsUI {
         // Used by playTTS to pass voice_id so each session speaks with its own voice.
         // See: src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md
         this.senderPersonaMap = new Map();
+        // sender_id -> { icon, color, name, initial } of the MANAGER that spawned
+        // this worker (focus-bar manager badge, Rick 2026-06-08). Populated from the
+        // voice_persona_assigned event's payload.manager_persona; absent for top-level
+        // / root sessions. _addStripIcon reads it to superimpose a corner badge.
+        this.managerPersonaMap = new Map();
         
         // Notification sound system
         this.notificationSounds = {};
@@ -5627,6 +5632,16 @@ class NotificationsUI {
             case "voice_persona_assigned":
                 if ( notification.sender_id && notification.voice_persona ) {
                     this.senderPersonaMap.set( notification.sender_id, notification.voice_persona );
+                    // Manager-lineage badge (Rick 2026-06-08): the server resolves the
+                    // spawning manager's persona into payload.manager_persona (null for
+                    // root sessions). Stash it so _addStripIcon (below) superimposes the
+                    // corner badge; clear it if this session has no manager.
+                    const mgrPersona = notification.payload && notification.payload.manager_persona;
+                    if ( mgrPersona ) {
+                        this.managerPersonaMap.set( notification.sender_id, mgrPersona );
+                    } else {
+                        this.managerPersonaMap.delete( notification.sender_id );
+                    }
                     // Layer A: patch any existing card header in place so the
                     // badge appears without a re-render. No-op when card not yet built.
                     this._setPersonaBadgeOnCard( notification.sender_id, notification.voice_persona );
@@ -5659,6 +5674,7 @@ class NotificationsUI {
             case "voice_persona_released":
                 if ( notification.sender_id ) {
                     this.senderPersonaMap.delete( notification.sender_id );
+                    this.managerPersonaMap.delete( notification.sender_id );
                     // Layer A: remove the badge from any existing card header
                     this._setPersonaBadgeOnCard( notification.sender_id, null );
                     // Re-evaluate strip filter: this senderId is now inactive
@@ -5678,6 +5694,7 @@ class NotificationsUI {
                 // See: src/rnd/v0.1.8/2026.06.05-reap-event-focus-bar-and-broadcast-refresh.md
                 if ( notification.sender_id ) {
                     this.senderPersonaMap.delete( notification.sender_id );
+                    this.managerPersonaMap.delete( notification.sender_id );
                     this._setPersonaBadgeOnCard( notification.sender_id, null );
                     this._removeStripIcon( notification.sender_id );
                     this._applyHideInactiveStripFilter();
@@ -9394,6 +9411,21 @@ class NotificationsUI {
         icon.textContent = initial;
         if ( color ) {
             icon.style.setProperty( "--persona-color", color );
+        }
+
+        // Manager-lineage corner badge (Rick 2026-06-08): if this worker was spawned
+        // by a manager, superimpose a small badge carrying the manager's glyph + initial,
+        // tinted with the manager's color, 180° opposite the speaker-state ::before badge
+        // (placement in CSS). Top-level / root sessions (no manager) get no badge.
+        const managerPersona = this.managerPersonaMap && this.managerPersonaMap.get( senderId );
+        if ( managerPersona ) {
+            const mgrBadge = document.createElement( "span" );
+            mgrBadge.className   = "cc-strip-manager-badge";
+            mgrBadge.textContent = `${ managerPersona.icon || "" }${ managerPersona.initial || "" }`;
+            if ( managerPersona.color ) mgrBadge.style.setProperty( "--manager-color", managerPersona.color );
+            mgrBadge.setAttribute( "title", `Spawned by ${ managerPersona.name || "manager" }` );
+            icon.setAttribute( "data-has-manager", "true" );
+            icon.appendChild( mgrBadge );
         }
 
         // Mark focused if focus mode is on and this senderId matches the
