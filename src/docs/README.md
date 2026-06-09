@@ -31,6 +31,7 @@ These three features share a common foundation in `src/cosa/agents/shared/`.
 | [agents/test-fix-expediter-guide.md](agents/test-fix-expediter-guide.md) | Test-failure auto-recovery agent (TFE) — Phase 0 clustering, `TestSuiteCompletionWatchdog`, 16 INI keys | `src/cosa/agents/test_fix_expediter/` |
 | [agents/test-suite-scheduling-guide.md](agents/test-suite-scheduling-guide.md) | `TestSuiteJob` + `/schedule-tests` skill — suite types, monopolize mode, remediation snapshot schema v1.0 | `src/cosa/agents/test_suite/` |
 | [agents/shared-fix-primitives-reference.md](agents/shared-fix-primitives-reference.md) | `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` — how to add a new expediter agent | `src/cosa/agents/shared/` |
+| [agents/heartbeat-arbiter-routing-guide.md](agents/heartbeat-arbiter-routing-guide.md) | Heartbeat-arbiter routing & recipients — the 13-case→6-tier model, active-manager resolver + phantom guard, two delivery mechanisms, and the health-loop (Loop A → Rick-only) | `src/cosa/agents/heartbeat_arbiter/`, `src/lupin_arbiter_app/` |
 
 ## Operations & Configuration
 
@@ -69,3 +70,4 @@ Deep-dive documentation for the JWT authentication system (relocated from `docs/
 | agents/test-fix-expediter-guide.md | `src/cosa/agents/test_fix_expediter/` (197 tests) | 2026-04-10 |
 | agents/test-suite-scheduling-guide.md | `src/cosa/agents/test_suite/job.py` + `/schedule-tests` skill | 2026-04-10 |
 | agents/shared-fix-primitives-reference.md | `src/cosa/agents/shared/` (3 modules, extracted Session 1cfcdf73) | 2026-04-10 |
+| agents/heartbeat-arbiter-routing-guide.md | `arbiter_routing.py` / `arbiter_job.py` / `manager_resolver.py` / `lupin_arbiter_app/{fleet_arbiter_loop,app,arbiter_live_notify,health_watcher}.py` | 2026-06-09 |
