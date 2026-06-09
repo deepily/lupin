@@ -684,6 +684,31 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
         return False
 
 
+def _resolve_window_tokens():
+    """
+    Context-window size (in tokens) to PIN into the bridge at spawn.
+
+    The out-of-band context-pressure assessor needs each worker's true window as
+    the denominator and MUST NOT infer it from observed occupancy (a 1M worker at
+    138k and a 200k worker at 138k look identical from the transcript — and the
+    200k one is on fire). So we pin it here, as a property of the worker, read
+    from LUPIN_CC_WINDOW_TOKENS (set per-worker by the spawn path for [1m]-beta
+    workers) and falling back to the 1M fleet default.
+
+    See: src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.08-context-pressure-revised-plan.md §4
+
+    Ensures:
+        - returns a positive int (never raises — defensive: this runs inside the
+          live SessionStart hook on every registration)
+        - bad/absent env value → 1_000_000
+    """
+    try:
+        val = int( os.environ.get( "LUPIN_CC_WINDOW_TOKENS", "" ) )
+        return val if val > 0 else 1_000_000
+    except ( ValueError, TypeError ):
+        return 1_000_000
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -777,6 +802,7 @@ def main():
             "ppid"              : cc_pid,
             "hook_ppid"         : hook_ppid,
             "tmux_session"      : tmux_session,
+            "window_size"       : _resolve_window_tokens(),
         }
 
         # Manager-spawned headless reviewer tagging (2026-05-28). When this

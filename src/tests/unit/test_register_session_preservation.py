@@ -378,3 +378,27 @@ class TestCompactionAndResumeCarryForward:
         # No persona to carry → Phase 4.5 allocation runs; release still skipped
         assert patched_main[ "_allocate_voice_persona_via_http" ].call_count == 1
         patched_main[ "_release_voice_persona_via_http" ].assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# window_size pin for context-pressure assessment (2026-06-08)
+# See: src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.08-context-pressure-revised-plan.md §4
+# ---------------------------------------------------------------------------
+class TestResolveWindowTokens:
+    """_resolve_window_tokens() is defensive — it runs inside the live SessionStart hook."""
+
+    def test_absent_env_falls_back_to_default( self, monkeypatch ):
+        monkeypatch.delenv( "LUPIN_CC_WINDOW_TOKENS", raising=False )
+        assert register_session._resolve_window_tokens() == 1_000_000
+
+    def test_valid_env_is_honored( self, monkeypatch ):
+        monkeypatch.setenv( "LUPIN_CC_WINDOW_TOKENS", "200000" )
+        assert register_session._resolve_window_tokens() == 200_000
+
+    def test_garbage_env_falls_back( self, monkeypatch ):
+        monkeypatch.setenv( "LUPIN_CC_WINDOW_TOKENS", "not-a-number" )
+        assert register_session._resolve_window_tokens() == 1_000_000
+
+    def test_nonpositive_env_falls_back( self, monkeypatch ):
+        monkeypatch.setenv( "LUPIN_CC_WINDOW_TOKENS", "-5" )
+        assert register_session._resolve_window_tokens() == 1_000_000
