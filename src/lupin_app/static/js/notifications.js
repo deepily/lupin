@@ -8462,6 +8462,15 @@ class NotificationsUI {
                 // legacy fixed-position tooltip. Design:
                 // src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md
                 if ( this._layoutMode === "horizontal" ) {
+                    // Toggle (Rick, 2026-06-08): a second click on the indicator whose
+                    // abstract is ALREADY showing in the Reading Pane clears the pane
+                    // instead of re-opening it. Clicking a DIFFERENT indicator — or when
+                    // a doc-link is showing — switches to the new abstract rather than
+                    // toggling off (the predicate returns false → falls through to open).
+                    if ( this._abstractAlreadyShown( abstract ) ) {
+                        this._closeContentPane();
+                        return;
+                    }
                     // Derive a short title from the source message if available.
                     const card    = indicator.closest( '.conversation-pair, .notification-message, .sender-card' );
                     const titleEl = card ? card.querySelector( '.message-text' ) : null;
@@ -10420,6 +10429,23 @@ class NotificationsUI {
         btn.title = this._layoutMode === "horizontal"
             ? "Switch back to vertical layout"
             : "Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.";
+    }
+
+    /**
+     * Toggle predicate (Rick, 2026-06-08): is the Reading Pane currently OPEN and
+     * showing exactly this abstract? Drives the abstract-indicator toggle in
+     * horizontal mode — a second click on the same indicator clears the pane instead
+     * of re-opening it. A different abstract, a doc-link entry, an empty history, or a
+     * closed pane all return false (→ the click opens/switches as before).
+     *
+     * @param {string} abstract — decoded abstract markdown from the clicked indicator
+     * @returns {boolean}
+     */
+    _abstractAlreadyShown( abstract ) {
+        const shell    = document.querySelector( ".content-shell" );
+        const paneOpen = !!shell && shell.classList.contains( "pane-open" );
+        const current  = this._contentPaneHistory[ this._contentPaneHistory.length - 1 ];
+        return paneOpen && !!current && current.type === "abstract" && current.payload === abstract;
     }
 
     /**

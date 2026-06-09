@@ -2,6 +2,18 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Abstract-icon Reading-Pane toggle (current JS client) + worker→manager badge design
+
+**Built: the abstract icon (📋) in horizontal mode is now a TOGGLE** (Rick's tweak; in the CURRENT JS notification client `notifications.js`, NOT the multiplexer — Rick double-checked). The `.abstract-indicator` click opened the Reading Pane with the abstract; now a second click on the SAME indicator CLEARS the pane. A different indicator switches content; a doc-link entry / closed pane / empty history fall through to open. Implemented via a new pure predicate `_abstractAlreadyShown( abstract )` (pane open AND top-of-history is an abstract with matching payload) gating `_closeContentPane()` in the horizontal-mode branch; vertical-mode tooltip path unchanged.
+
+**Tested two tiers.** Unit: 6 new cases in `reading_pane_scroll_anchor.test.ts` (legacy notifications.js suite) covering every predicate branch — open+match→true; closed / different payload / doc-type / empty history / no shell→false. **18/18 green** (the happy-dom harness loads notifications.js via `vm.runInThisContext`, so a clean run also proves the file parses). E2E: new `src/tests/e2e_ui/test_abstract_indicator_toggle.py` (show→clear · switch-on-different · vertical-no-pane) **scheduled on :8000** — verified-idle → self-authorized bounce + submit, job `ts-d0ac0072`.
+
+**Also serialized (design-only):** `src/rnd/v0.1.8/2026.06.08-worker-manager-focus-bar-badge.md` — Rick's focus-bar badge showing each worker's spawning manager (glyph + color + initial, opposite the speaker icon). Feasibility green: `spawned_by` already on the bridge (`register_session.py:818`) but grep-confirmed it doesn't reach the client → small server-plumbing step + corner badge + spacing. Build paused for Rick's go.
+
+**Selective-staged (mine only, never `-A`). Excluded — Tiffany's in-flight arbiter-liveness build:** `context_pressure.py` + its test (cc_pid kw-arg), `register_session.py` / `stop.py` / `notification.py` (ppid→cc_pid rename + idle_prompt emit), the `heartbeat_arbiter/*` modules, ~20 session-bridge/heartbeat test files. Also excluded `src/rnd/README.md` (co-edit), `.claude-session.md`, peer docs. HELD — not pushed.
+
+---
+
 ### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Stop-hook silent idle-announce in speakerphone (order-of-ops bug fix)
 
 **Fixed: speakerphone sessions never emitted an idle announcement.** Rick noticed the legacy idle stop-prompt stopped appearing. Root cause = order-of-operations: `stop.py main()`'s speakerphone branch exits the hook (`sys.exit(0)`) BEFORE the Branch-C idle-behavior gate where `_announce_idle` lives — the early-exit was written for the BLOCKING "Anything else?" ask path and never narrowed when the non-blocking `idle_announce` became default. Fix fires a SILENT idle-announce inside the speakerphone branch: `_announce_idle` posts at LOW priority, which the client (`notifications.js` gates TTS on high/urgent only) renders as a subtle DOM bubble with NO TTS — so no chorus-TTS spam. Gated to `idle_announce` ONLY (Rick: `ask`/`none` stay fully silent); "nothing owed" accepted as a turn-boundary approximation (this branch runs upstream of the work-owed oracle). **KEY FINDING:** no new no-TTS flag needed — `priority=low` IS the no-TTS lever (`suppress_ding` only kills the ding, not speech). 4 new tests (`TestSpeakerphoneIdleAnnounce`), 108 stop-hook tests green, new branch fully covered.

@@ -267,3 +267,60 @@ test( "_closeContentPane does no scroll work in vertical mode", () => {
 
   assert.equal( scrollByCalls.length, 0, "vertical mode → gate skips the reverse-handoff restore" );
 } );
+
+// ── Abstract-indicator toggle predicate (Rick, 2026-06-08) ────────────────────
+// _abstractAlreadyShown drives the toggle: a second click on the indicator whose
+// abstract is already in the pane CLEARS it; a different abstract / a doc entry /
+// a closed pane all return false → the click opens or switches as before. The
+// full click→toggle behavior is also covered by the master-detail Playwright E2E.
+
+type ToggleUI = Record<string, unknown> & {
+  _abstractAlreadyShown: ( abstract: string ) => boolean;
+  _contentPaneHistory: Array<{ type: string; payload: string; title: string }>;
+};
+
+test( "_abstractAlreadyShown: true when pane open and top-of-history matches the abstract", () => {
+  const ui = newUI() as unknown as ToggleUI;
+  const { shell } = buildCenterColumn( [ 0 ] );
+  shell.classList.add( "pane-open" );
+  ui._contentPaneHistory = [ { type: "abstract", payload: "**same**", title: "t" } ];
+  assert.equal( ui._abstractAlreadyShown( "**same**" ), true );
+} );
+
+test( "_abstractAlreadyShown: false when the pane is closed (no .pane-open)", () => {
+  const ui = newUI() as unknown as ToggleUI;
+  buildCenterColumn( [ 0 ] );                       // shell present but NOT pane-open
+  ui._contentPaneHistory = [ { type: "abstract", payload: "**same**", title: "t" } ];
+  assert.equal( ui._abstractAlreadyShown( "**same**" ), false );
+} );
+
+test( "_abstractAlreadyShown: false for a DIFFERENT abstract (→ switch, not toggle-off)", () => {
+  const ui = newUI() as unknown as ToggleUI;
+  const { shell } = buildCenterColumn( [ 0 ] );
+  shell.classList.add( "pane-open" );
+  ui._contentPaneHistory = [ { type: "abstract", payload: "**other**", title: "t" } ];
+  assert.equal( ui._abstractAlreadyShown( "**this**" ), false );
+} );
+
+test( "_abstractAlreadyShown: false when a doc-link is showing (type mismatch)", () => {
+  const ui = newUI() as unknown as ToggleUI;
+  const { shell } = buildCenterColumn( [ 0 ] );
+  shell.classList.add( "pane-open" );
+  ui._contentPaneHistory = [ { type: "doc", payload: "/app/docs?path=x", title: "t" } ];
+  assert.equal( ui._abstractAlreadyShown( "**this**" ), false );
+} );
+
+test( "_abstractAlreadyShown: false when history is empty", () => {
+  const ui = newUI() as unknown as ToggleUI;
+  const { shell } = buildCenterColumn( [ 0 ] );
+  shell.classList.add( "pane-open" );
+  ui._contentPaneHistory = [];
+  assert.equal( ui._abstractAlreadyShown( "**this**" ), false );
+} );
+
+test( "_abstractAlreadyShown: false when there is no .content-shell", () => {
+  const ui = newUI() as unknown as ToggleUI;
+  document.body.replaceChildren();                  // no shell at all
+  ui._contentPaneHistory = [ { type: "abstract", payload: "x", title: "t" } ];
+  assert.equal( ui._abstractAlreadyShown( "x" ), false );
+} );
