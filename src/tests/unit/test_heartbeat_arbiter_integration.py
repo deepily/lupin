@@ -275,7 +275,7 @@ class TestGroupPCLoopClosure:
 
         assert summary[ "sessions" ] == 1
         rec = arb._acc.snapshot()[ "ha-sid-1" ][ -1 ]            # consumer state == producer's real write
-        assert rec[ "outcome" ]   == "poke"
+        assert rec[ "outcome" ]   == "poked"
         assert rec[ "work_owed" ] is True                         # v2 real bool flowed end-to-end
         assert rec[ "persona" ]   == "Mr. Radio 🦉"
         # surfaced via the /state snapshot (the pull-state surface that replaced the
@@ -342,11 +342,11 @@ class TestGroupTIncrementalTail:
         assert len( arb._acc.snapshot()[ "s1" ] ) == 1
         off1 = arb._offsets[ "s1" ]
 
-        _emit( fleet, "s1", "poke", awaiting="none", persona="A", poke_count=2 )   # a later turn
+        _emit( fleet, "s1", "poked", awaiting="none", persona="A", poke_count=2 )   # a later turn
         arb._poll_once()
         snap = arb._acc.snapshot()[ "s1" ]
         assert len( snap ) == 2                                   # grew by exactly one
-        assert snap[ -1 ][ "outcome" ] == "poke"                  # the new record
+        assert snap[ -1 ][ "outcome" ] == "poked"                  # the new record
         assert arb._offsets[ "s1" ] > off1                        # offset advanced past the old bytes
 
     def test_t2_partial_trailing_line_not_consumed_until_complete( self, fleet ):
@@ -361,12 +361,12 @@ class TestGroupTIncrementalTail:
         assert len( arb._acc.snapshot()[ "s1" ] ) == 1            # partial line skipped
 
         rec2 = json.dumps( { "schema_version": 1, "session_id": "s1", "persona": "A",
-                             "ts": BASE_NOW.isoformat(), "outcome": "poke", "poke_count": 2,
+                             "ts": BASE_NOW.isoformat(), "outcome": "poked", "poke_count": 2,
                              "cap": 3, "work_owed": False, "awaiting": "none" } )
         path.write_text( rec1 + "\n" + rec2 + "\n" )              # the line is now complete
         arb._poll_once()
         snap = arb._acc.snapshot()[ "s1" ]
-        assert len( snap ) == 2 and snap[ -1 ][ "outcome" ] == "poke"
+        assert len( snap ) == 2 and snap[ -1 ][ "outcome" ] == "poked"
 
     def test_t3_stuck_accumulates_across_polls( self, fleet ):
         """Stuck needs ≥2 cap_reached in the BOUNDED deque — they arrive in separate polls."""
@@ -448,7 +448,7 @@ class TestGroupTHBackoffTrajectory:
         assert len( _pings( arb ) ) == 1
         assert arb._ledger.tracked_edges()                        # the Bob edge is tracked
 
-        _emit( fleet, "s1", "poke", awaiting="none", persona="Alice", poke_count=2 )   # RESUMED
+        _emit( fleet, "s1", "poked", awaiting="none", persona="Alice", poke_count=2 )   # RESUMED
         clk.set_now( BASE_NOW + datetime.timedelta( seconds=20 ) )
         arb._poll_once()                                          # edge gone → cleared
         assert arb._ledger.tracked_edges() == set()
@@ -474,7 +474,7 @@ class TestGroupInferRoster:
         """
         # last activity 300s ago: quiet ≥ quiet(120) AND alive ≤ alive(600) → inferred
         quiet_ts = BASE_NOW - datetime.timedelta( seconds=300 )
-        _emit( fleet, "s-quiet", "poke", work_owed=False, persona="Cara", ts=quiet_ts, poke_count=1 )
+        _emit( fleet, "s-quiet", "poked", work_owed=False, persona="Cara", ts=quiet_ts, poke_count=1 )
         arb = _make_arbiter( fleet, quiet_threshold_seconds=120, alive_threshold_seconds=600 )
         summary = arb._poll_once()
         assert summary[ "roster" ] == 1
@@ -488,7 +488,7 @@ class TestGroupInferRoster:
         defaults (quiet=300 < alive=600) are exercised."""
         # quiet 450s ago: within the shipped window 300 ≤ age < 600 → inferred
         quiet_ts = BASE_NOW - datetime.timedelta( seconds=450 )
-        _emit( fleet, "s-def", "poke", work_owed=False, persona="Dee", ts=quiet_ts, poke_count=1 )
+        _emit( fleet, "s-def", "poked", work_owed=False, persona="Dee", ts=quiet_ts, poke_count=1 )
         arb = ArbiterConsumerJob(
             commons           = FakeGateway(),
             poll_seconds      = 5,

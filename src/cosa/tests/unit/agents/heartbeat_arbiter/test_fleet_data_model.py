@@ -90,7 +90,7 @@ def test_count_stuck_episodes():
     events = [
         { "outcome": "cap_reached", "work_owed": True },
         { "outcome": "cap_reached", "work_owed": False },     # not owed
-        { "outcome": "poke",        "work_owed": True },
+        { "outcome": "poked",        "work_owed": True },
         "not-a-dict",
         { "outcome": "cap_reached", "work_owed": True },
     ]
@@ -106,7 +106,7 @@ def test_build_view_skips_empty_and_invalid():
 
 def test_build_view_full():
     events = {
-        "s1": [ { "persona": "Ann", "ts": _ts( 30 ), "outcome": "poke",
+        "s1": [ { "persona": "Ann", "ts": _ts( 30 ), "outcome": "poked",
                   "awaiting": "peer:Bob", "poke_count": 1, "cap": 3, "work_owed": True } ],
         "s2": [ { "persona": "Bob", "ts": _ts( 9000 ), "outcome": "cap_reached",
                   "work_owed": True, "poke_count": 3, "cap": 3 },
@@ -137,9 +137,17 @@ def test_build_view_unknown_state():
     assert f.build_fleet_view( events, [ ], NOW, 3600 )[ "s1" ][ "state" ] == "unknown"
 
 
-def test_build_view_last_not_dict_skipped():
-    # the LAST tail record is non-dict → that session is skipped
-    assert f.build_fleet_view( { "s1": [ { "ok": 1 }, "trailing-non-dict" ] }, [ ], NOW, 3600 ) == { }
+def test_build_view_non_dict_records_filtered():
+    # Non-dict tail records are FILTERED, not session-fatal: the session still
+    # builds from its remaining dict records (unrecognized fields ⇒ state
+    # "unknown"). A tail with NO dict records at all skips the session.
+    # (Re-pinned 2026-06-09: this test previously asserted the pre-filter
+    # contract — a trailing non-dict skipped the whole session — which drifted
+    # from the implementation and its lupin-side sibling test.)
+    view = f.build_fleet_view( { "s1": [ { "ok": 1 }, "trailing-non-dict" ] }, [ ], NOW, 3600 )
+    assert set( view ) == { "s1" }
+    assert view[ "s1" ][ "state" ] == "unknown" and view[ "s1" ][ "last_outcome" ] is None
+    assert f.build_fleet_view( { "s2": [ "all", "non-dict" ] }, [ ], NOW, 3600 ) == { }
 
 
 def test_quick_smoke_test():

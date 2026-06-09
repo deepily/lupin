@@ -26,13 +26,21 @@ Design authority: lupin →
 """
 import datetime
 
+# Outcome vocabulary referenced from the emitting side (one-name-everywhere:
+# the hook's constants are the single source of truth for outcome VALUES, so
+# value renames — e.g. poke→poked, 2026-06-09 — ride through for free).
+from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
+    OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_CAP_REACHED,
+)
+from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENT_IDLE
+
 
 # last-outcome → coarse session state (doc 03 §4)
 _STATE_BY_OUTCOME = {
-    "poke"        : "working",
-    "honored"     : "holding",
-    "cap_reached" : "stuck",
-    "idle"        : "idle",
+    OUTCOME_POKE        : "working",
+    OUTCOME_HONORED     : "holding",
+    OUTCOME_CAP_REACHED : "stuck",
+    EVENT_IDLE          : "idle",
 }
 
 # "stuck = REPEATED cap_reached + work_owed" (§4): ≥ this many cap_reached+owed
@@ -108,7 +116,7 @@ def _count_stuck_episodes( events ):
     """Count cap_reached records with work_owed True in the accumulated tail."""
     return sum(
         1 for e in events
-        if isinstance( e, dict ) and e.get( "outcome" ) == "cap_reached" and e.get( "work_owed" ) is True
+        if isinstance( e, dict ) and e.get( "outcome" ) == OUTCOME_CAP_REACHED and e.get( "work_owed" ) is True
     )
 
 
@@ -294,17 +302,17 @@ def quick_smoke_test():
 
     full_uuid = "abcd1234-aaaa-bbbb-cccc-dddddddddddd"
     events_by_session = {
-        "s1": [ ev( "poke", recent, awaiting="peer:Bob", poke_count=1 ) ],
+        "s1": [ ev( OUTCOME_POKE, recent, awaiting="peer:Bob", poke_count=1 ) ],
         # two cap_reached+owed episodes ⇒ REPEATED ⇒ stuck
-        "s2": [ ev( "cap_reached", old, work_owed=True, poke_count=3 ),
-                ev( "cap_reached", recent, work_owed=True, poke_count=3 ) ],
-        "s3": [ ev( "idle", old ) ],          # old event, but session active on commons
+        "s2": [ ev( OUTCOME_CAP_REACHED, old, work_owed=True, poke_count=3 ),
+                ev( OUTCOME_CAP_REACHED, recent, work_owed=True, poke_count=3 ) ],
+        "s3": [ ev( EVENT_IDLE, old ) ],      # old event, but session active on commons
         "s4": [ ],                            # empty + no other signal → skipped
         # idle_prompt-ONLY session: kind-tagged, NO outcome → enters the roster
         # via the idle_prompt signal but stays OFF the activity axis (N2)
         "ip": [ { "session_id": "ip", "persona": "Dot", "kind": "idle_prompt", "ts": recent } ],
         # canonicalization (N3): a SHORT event id that prefixes the full bridge uuid
-        "abcd1234": [ ev( "poke", recent, persona="Eve", poke_count=2 ) ],
+        "abcd1234": [ ev( OUTCOME_POKE, recent, persona="Eve", poke_count=2 ) ],
     }
     who_rows = [ { "session_id": "s3", "persona_name": "Cal", "last_post_ts": recent } ]
     bridge_sessions = {
@@ -322,7 +330,7 @@ def quick_smoke_test():
     assert view[ "s1" ][ "state" ] == "working" and view[ "s1" ][ "holding_on" ] == "peer:Bob"
     assert view[ "s2" ][ "stuck" ] is True and view[ "s2" ][ "state" ] == "stuck"
     # s3: old event ts but recent commons ts (matched by session_id) ⇒ alive
-    assert view[ "s3" ][ "alive" ] is True and view[ "s3" ][ "last_outcome" ] == "idle"
+    assert view[ "s3" ][ "alive" ] is True and view[ "s3" ][ "last_outcome" ] == EVENT_IDLE
 
     # idle_prompt-only: kind filter keeps it OFF the activity axis, ON idle_prompt_ts
     ipv = view[ "ip" ]

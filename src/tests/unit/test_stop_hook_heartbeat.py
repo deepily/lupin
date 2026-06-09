@@ -34,10 +34,12 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.stop import (
     main, _run_heartbeat, _emit_genuine_idle, _notify_cap_reached,
+    _poke_sentence, _announce_poke, _has_pending_voice,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     DECLARED_OWED_REASON, OUTCOME_POKE, OUTCOME_NOT_OWED,
 )
+from lupin_cli.notifications.notification_models import NotificationPriority
 
 UTC = datetime.timezone.utc
 
@@ -80,20 +82,27 @@ class TestRunHeartbeat:
     def _isolate( self ):
         """
         Isolate side effects for ALL tests: patch the emit module (no real
-        ~/.claude writes), stub persona resolution, and default the Task*
-        source to 'no owed work / empty set'. Tests override as needed.
+        ~/.claude writes), stub persona resolution, default the Task* source
+        to 'no owed work / empty set', and intercept the §4 breadcrumb's
+        async notify (no network). Tests override as needed.
         """
         with patch( "lupin_cli.claude_code.hooks.stop.heartbeat_events" ) as ev, \
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=None ) as vp, \
-             patch( "lupin_cli.claude_code.hooks.stop.replay_task_state", return_value={ } ) as rt:
+             patch( "lupin_cli.claude_code.hooks.stop.replay_task_state", return_value={ } ) as rt, \
+             patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" ) as na, \
+             patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
+                    return_value="claude.code@lupin.deepily.ai#sid" ):
             # owed_items_from_state + is_empty_state run REAL on the replayed
             # state (single-replay v2.1 path) — tests drive scenarios by setting
             # self.mock_replay.return_value to a { taskId: status } dict.
+            # _announce_poke runs REAL (its AsyncNotificationRequest is
+            # asserted via self.mock_notify) — only the network call is cut.
             ev.EVENT_IDLE = "idle"
             ev.is_idle_transition.return_value = True
             self.mock_events  = ev
             self.mock_persona = vp
             self.mock_replay  = rt
+            self.mock_notify  = na
             yield
 
     # ── gate / fail-safe ──
@@ -134,6 +143,11 @@ class TestRunHeartbeat:
         # emit carries the REAL work_owed=True
         _, kwargs = self.mock_events.emit_outcome.call_args
         assert kwargs[ "work_owed" ] is True
+        # §4 breadcrumb rides the poke: ONE low-pri card notify with specifics
+        self.mock_notify.assert_called_once()
+        crumb = self.mock_notify.call_args[ 0 ][ 0 ]
+        assert crumb.message  == "A worker stopped — 1 owed Task item, poked."
+        assert crumb.priority == NotificationPriority.LOW
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
@@ -147,6 +161,10 @@ class TestRunHeartbeat:
         out = _run_heartbeat( "sid", "/t.jsonl" )
         assert out == { "decision": "block", "reason": DECLARED_OWED_REASON }
         mock_incr.assert_called_once_with( "sid" )
+        # §4 breadcrumb: declared-owed poke has no Task* count → self-declared text
+        self.mock_notify.assert_called_once()
+        crumb = self.mock_notify.call_args[ 0 ][ 0 ]
+        assert crumb.message == "A worker stopped — work owed (self-declared), poked."
 
     # ── non-poke paths ──
 
@@ -159,6 +177,7 @@ class TestRunHeartbeat:
         mock_read.return_value = _fresh_reasoned_hold()
         assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         mock_incr.assert_not_called()
+        self.mock_notify.assert_not_called()    # §4 breadcrumb rides ONLY the poke
 
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
@@ -330,3 +349,240 @@ class TestMainBranchCWiring:
         mock_hb.assert_called_once_with( "abc12345", None )   # missing key → None threaded
         mock_arm.assert_called_once()
         mock_emit.assert_called_once_with( {} )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# main() — §3 speakerphone poke matrix (the :990 split, 2026-06-09)
+#
+# Regression-guards the order-of-operations bug where the all-or-nothing
+# speakerphone early-exit bailed 75 lines upstream of _run_heartbeat, so NO
+# speakerphone session (i.e. every manager) was ever poked. Post-split:
+# speakerphone suppresses ONLY the blocking "Anything else?" ask — the poke
+# and the breadcrumb run; the loop guard + voice-wins invariants hold.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestMainSpeakerphonePokeMatrix:
+
+    def _patches( self, *, payload, pending_voice=False, heartbeat_output=None,
+                  idle_behavior="idle_announce", persona=None ):
+        """One ExitStack-style patch bundle for the speakerphone matrix."""
+        from contextlib import ExitStack
+        stack = ExitStack()
+        p     = lambda target, **kw: stack.enter_context(
+                    patch( f"lupin_cli.claude_code.hooks.stop.{target}", **kw ) )
+        mocks = {
+            "read"          : p( "read_hook_input", return_value=payload ),
+            "log_payload"   : p( "log_payload" ),
+            "log_stream"    : p( "log_to_stream" ),
+            "resolve"       : p( "resolve_stable_session_id", side_effect=lambda x: x ),
+            "speakerphone"  : p( "get_speakerphone", return_value=True ),
+            "auto_narrate"  : p( "_try_auto_narrate" ),
+            "voice_peek"    : p( "_has_pending_voice", return_value=pending_voice ),
+            "heartbeat"     : p( "_run_heartbeat", return_value=heartbeat_output ),
+            "idle_behavior" : p( "_stop_hook_idle_behavior", return_value=idle_behavior ),
+            "persona"       : p( "get_voice_persona", return_value=persona ),
+            "announce_idle" : p( "_announce_idle" ),
+            "emit"          : p( "emit_json" ),
+            "drain"         : p( "drain_and_acknowledge" ),
+            "ask"           : p( "_ask_anything_else" ),
+            "arm_waiter"    : p( "_arm_idle_waiter" ),
+            "notify_sync"   : p( "notify_user_sync" ),
+        }
+        return stack, mocks
+
+    _POKE = { "decision": "block", "reason": "Do not stop yet — owed Task work." }
+
+    def test_speakerphone_owed_pokes( self ):
+        """REGRESSION GUARD (brief §2): speakerphone ON + stopped-with-owed →
+        the POKE FIRES — emit the block dict, return (heartbeat owns the stop),
+        skip the idle announce. Pre-split this was unreachable."""
+        payload = { "stop_hook_active": False, "session_id": "abc12345",
+                    "transcript_path": "/t.jsonl" }
+        stack, m = self._patches( payload=payload, heartbeat_output=dict( self._POKE ) )
+        with stack:
+            main()   # returns (no sys.exit) — the poke path mirrors Branch C
+            m[ "heartbeat" ].assert_called_once_with( "abc12345", "/t.jsonl" )
+            m[ "emit" ].assert_called_once_with( self._POKE )
+            m[ "announce_idle" ].assert_not_called()
+            # the split is observable in the log stream
+            phases = [ c.kwargs[ "extra" ][ "phase" ] for c in m[ "log_stream" ].call_args_list ]
+            assert "speakerphone_poke" in phases
+            assert "speakerphone_skip" not in phases
+            # interactive surfaces stay suppressed
+            m[ "drain" ].assert_not_called()
+            m[ "notify_sync" ].assert_not_called()
+            m[ "ask" ].assert_not_called()
+
+    def test_speakerphone_not_owed_no_poke_idle_announces( self ):
+        """speakerphone ON + nothing owed → NO poke; the silent idle announce
+        (2026-06-08 behavior) still fires; stop allowed."""
+        payload  = { "stop_hook_active": False, "session_id": "abc12345" }
+        stack, m = self._patches( payload=payload, heartbeat_output=None,
+                                  persona={ "name": "Rachel" } )
+        with stack:
+            with pytest.raises( SystemExit ):
+                main()
+            m[ "heartbeat" ].assert_called_once_with( "abc12345", None )
+            m[ "announce_idle" ].assert_called_once_with( "abc12345", "Rachel" )
+            m[ "emit" ].assert_called_once_with( {} )
+
+    def test_speakerphone_blocking_ask_still_suppressed( self ):
+        """speakerphone ON + idle behavior 'ask' → the blocking 'Anything
+        else?' path stays FULLY suppressed (the preserved half of the :990
+        intent): no waiter, no ask, no sync notify."""
+        payload  = { "stop_hook_active": False, "session_id": "abc12345" }
+        stack, m = self._patches( payload=payload, heartbeat_output=None,
+                                  idle_behavior="ask" )
+        with stack:
+            with pytest.raises( SystemExit ):
+                main()
+            m[ "arm_waiter" ].assert_not_called()
+            m[ "ask" ].assert_not_called()
+            m[ "notify_sync" ].assert_not_called()
+            m[ "announce_idle" ].assert_not_called()   # gated to idle_announce only
+            m[ "emit" ].assert_called_once_with( {} )
+
+    def test_speakerphone_refire_never_pokes( self ):
+        """Loop-guard invariant: stop_hook_active=True (re-fire after a block)
+        → NEVER poke, exit silently BEFORE the heartbeat; auto-narrate (own
+        per-turn dedup) still ran upstream."""
+        payload  = { "stop_hook_active": True, "session_id": "abc12345" }
+        stack, m = self._patches( payload=payload, heartbeat_output=dict( self._POKE ) )
+        with stack:
+            with pytest.raises( SystemExit ):
+                main()
+            m[ "heartbeat" ].assert_not_called()
+            m[ "auto_narrate" ].assert_called_once_with( "abc12345", payload )
+            m[ "announce_idle" ].assert_not_called()
+            m[ "emit" ].assert_called_once_with( {} )
+
+    def test_speakerphone_pending_voice_suppresses_poke( self ):
+        """Branch-C invariant (voice always wins): pending buffered voice →
+        NO poke; the buffer is NOT drained (peek only); falls through to the
+        idle announce + allow-stop."""
+        payload  = { "stop_hook_active": False, "session_id": "abc12345" }
+        stack, m = self._patches( payload=payload, pending_voice=True,
+                                  heartbeat_output=dict( self._POKE ) )
+        with stack:
+            with pytest.raises( SystemExit ):
+                main()
+            m[ "heartbeat" ].assert_not_called()
+            m[ "drain" ].assert_not_called()           # peek, never consume
+            m[ "emit" ].assert_called_once_with( {} )
+
+    def test_speakerphone_auto_narrate_error_never_blocks_poke( self ):
+        """A raising auto-narrate is swallowed (logged) and the poke still
+        fires — the safety net is never a dependency of the heartbeat."""
+        payload  = { "stop_hook_active": False, "session_id": "abc12345",
+                     "transcript_path": "/t.jsonl" }
+        stack, m = self._patches( payload=payload, heartbeat_output=dict( self._POKE ) )
+        with stack:
+            m[ "auto_narrate" ].side_effect = RuntimeError( "transcript unreadable" )
+            main()
+            phases = [ c.kwargs[ "extra" ][ "phase" ] for c in m[ "log_stream" ].call_args_list ]
+            assert "auto_narrate_error" in phases
+            m[ "emit" ].assert_called_once_with( self._POKE )
+
+    def test_speakerphone_poke_composition_breadcrumb_fires( self ):
+        """§3+§4 composition over the REAL adapter: speakerphone main() with
+        the real _run_heartbeat (leaves stubbed to owed-under-cap) emits the
+        block AND fires the §4 breadcrumb — poke + breadcrumb in speakerphone,
+        end to end."""
+        payload = { "stop_hook_active": False, "session_id": "abc12345",
+                    "transcript_path": "/t.jsonl" }
+        with patch( "lupin_cli.claude_code.hooks.stop.read_hook_input", return_value=payload ), \
+             patch( "lupin_cli.claude_code.hooks.stop.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=True ), \
+             patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" ), \
+             patch( "lupin_cli.claude_code.hooks.stop._has_pending_voice", return_value=False ), \
+             patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+                    return_value={ "enabled": True, "poke_cap": 3 } ), \
+             patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
+             patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.replay_task_state",
+                    return_value={ "1": "in_progress", "2": "pending" } ), \
+             patch( "lupin_cli.claude_code.hooks.stop.heartbeat_events" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona",
+                    return_value={ "name": "Tiberius" } ), \
+             patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
+                    return_value="claude.code@lupin.deepily.ai#abc12345" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" ) as mock_async, \
+             patch( "lupin_cli.claude_code.hooks.stop.emit_json" ) as mock_emit:
+            main()
+            emitted = mock_emit.call_args[ 0 ][ 0 ]
+            assert emitted[ "decision" ] == "block"             # the poke owns the stop
+            mock_async.assert_called_once()                     # the breadcrumb fired
+            crumb = mock_async.call_args[ 0 ][ 0 ]
+            assert crumb.message  == "Tiberius stopped — 2 owed Task items, poked."
+            assert crumb.priority == NotificationPriority.LOW   # silent card bubble — no double-speak
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _poke_sentence / _announce_poke — the §4 breadcrumb leaf + shell
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestPokeSentence:
+
+    def test_singular_count( self ):
+        assert _poke_sentence( "Krishna", 1 ) == "Krishna stopped — 1 owed Task item, poked."
+
+    def test_plural_count( self ):
+        assert _poke_sentence( "Krishna", 2 ) == "Krishna stopped — 2 owed Task items, poked."
+
+    def test_zero_count_self_declared( self ):
+        """A hold-declared poke has no oracle specifics to count."""
+        assert _poke_sentence( "Krishna", 0 ) == "Krishna stopped — work owed (self-declared), poked."
+
+    def test_missing_persona( self ):
+        assert _poke_sentence( None, 3 ) == "A worker stopped — 3 owed Task items, poked."
+
+
+class TestAnnouncePoke:
+
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
+            return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" )
+    def test_posts_low_priority_persona_notify( self, mock_notify, mock_sender ):
+        _announce_poke( "abc12345", "Rio", 2 )
+        mock_notify.assert_called_once()
+        request = mock_notify.call_args[ 0 ][ 0 ]
+        assert request.message   == "Rio stopped — 2 owed Task items, poked."
+        assert request.priority  == NotificationPriority.LOW
+        assert request.sender_id == "claude.code@lupin.deepily.ai#abc12345"
+
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc", return_value="x" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_async",
+            side_effect=RuntimeError( "server down" ) )
+    def test_failsafe_swallows_errors( self, mock_notify, mock_sender, mock_log ):
+        # Must NOT raise — the breadcrumb can never block (or break) the poke.
+        _announce_poke( "abc12345", "Rio", 2 )
+        mock_log.assert_called_once()
+        assert mock_log.call_args[ 1 ][ "extra" ][ "phase" ] == "poke_announce_error"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _has_pending_voice — the Branch-C voice-wins peek (non-destructive)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestHasPendingVoice:
+
+    def test_true_when_buffer_exists( self, tmp_path ):
+        buf = tmp_path / "cc-buffer-abc12345.jsonl"
+        buf.write_text( '{"message": "hold on"}\n' )
+        with patch( "lupin_cli.claude_code.hooks.stop.get_buffer_path", return_value=buf ):
+            assert _has_pending_voice( "abc12345" ) is True
+        assert buf.exists(), "peek must NOT consume the buffer"
+
+    def test_false_when_no_buffer( self, tmp_path ):
+        with patch( "lupin_cli.claude_code.hooks.stop.get_buffer_path",
+                    return_value=tmp_path / "absent.jsonl" ):
+            assert _has_pending_voice( "abc12345" ) is False
+
+    def test_false_on_error_never_raises( self ):
+        with patch( "lupin_cli.claude_code.hooks.stop.get_buffer_path",
+                    side_effect=RuntimeError( "bad session dir" ) ):
+            assert _has_pending_voice( "abc12345" ) is False

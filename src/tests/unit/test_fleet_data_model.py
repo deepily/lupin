@@ -114,13 +114,13 @@ def test_canonicalize_merges_short_into_full_and_keeps_unrelated():
 def test_build_view_union_all_sources_and_empty_skipped():
     full = "abcd1234-aaaa-bbbb-cccc-dddddddddddd"
     events = {
-        "s1": [ _ev( "poke", _iso( 30 ), awaiting="peer:Bob", poke_count=1 ) ],
+        "s1": [ _ev( "poked", _iso( 30 ), awaiting="peer:Bob", poke_count=1 ) ],
         "s2": [ _ev( "cap_reached", _iso( 9000 ), work_owed=True ),
                 _ev( "cap_reached", _iso( 30 ), work_owed=True ) ],
         "s3": [ _ev( "idle", _iso( 9000 ) ) ],          # alive via commons only
         "s4": [ ],                                       # no signal → skipped
         "ip": [ _idle_rec( _iso( 30 ) ) ],               # idle_prompt-only
-        "abcd1234": [ _ev( "poke", _iso( 30 ), persona="Eve" ) ],   # canonical w/ bridge
+        "abcd1234": [ _ev( "poked", _iso( 30 ), persona="Eve" ) ],   # canonical w/ bridge
     }
     who_rows = [ { "session_id": "s3", "last_post_ts": _iso( 30 ) } ]
     bridges  = { full: "Eve", "bridgeonly": "Fred" }
@@ -145,7 +145,7 @@ def test_build_view_idle_prompt_off_activity_axis():
 
 
 def test_build_view_mixed_activity_and_idle_prompt_kept_distinct():
-    events = { "s1": [ _ev( "poke", _iso( 100 ), awaiting="peer:Z" ),
+    events = { "s1": [ _ev( "poked", _iso( 100 ), awaiting="peer:Z" ),
                        _idle_rec( _iso( 5 ), sid="s1" ) ] }
     v = m.build_fleet_view( events, None, NOW, 3600 )[ "s1" ]
     assert v[ "state" ] == "working" and v[ "last_event_ts" ] is not None   # from the poke
@@ -156,7 +156,7 @@ def test_build_view_mixed_activity_and_idle_prompt_kept_distinct():
 
 def test_build_view_persona_precedence_activity_then_idle():
     # no bridge persona → falls back to activity record persona
-    v1 = m.build_fleet_view( { "s": [ _ev( "poke", _iso( 5 ), persona="Act" ) ] }, None, NOW, 3600 )[ "s" ]
+    v1 = m.build_fleet_view( { "s": [ _ev( "poked", _iso( 5 ), persona="Act" ) ] }, None, NOW, 3600 )[ "s" ]
     assert v1[ "persona" ] == "Act"
     # no bridge, no activity → idle_prompt persona
     v2 = m.build_fleet_view( { "s": [ _idle_rec( _iso( 5 ), persona="Idle", sid="s" ) ] }, None, NOW, 3600 )[ "s" ]
@@ -165,7 +165,7 @@ def test_build_view_persona_precedence_activity_then_idle():
 
 def test_build_view_bridge_persona_preferred_over_event():
     full   = "feed1234-aaaa-bbbb"
-    events = { "feed1234": [ _ev( "poke", _iso( 5 ), persona="EventName" ) ] }
+    events = { "feed1234": [ _ev( "poked", _iso( 5 ), persona="EventName" ) ] }
     v = m.build_fleet_view( events, None, NOW, 3600, bridge_sessions={ full: "BridgeName" } )[ full ]
     assert v[ "persona" ] == "BridgeName"
 
@@ -196,7 +196,7 @@ def test_build_view_stuck_threshold():
 
 
 def test_build_view_non_list_and_non_dict_records_are_safe():
-    events = { "bad": "not-a-list", "mixed": [ "not-a-dict", _ev( "poke", _iso( 5 ) ) ] }
+    events = { "bad": "not-a-list", "mixed": [ "not-a-dict", _ev( "poked", _iso( 5 ) ) ] }
     v = m.build_fleet_view( events, None, NOW, 3600 )
     assert "bad" not in v                       # non-list events → no records → no signal → skipped
     assert v[ "mixed" ][ "state" ] == "working" # the one valid dict record drives it

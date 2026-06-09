@@ -24,16 +24,22 @@ injectable for tests; production uses the fleet dir.
 
 Record (schema_version 1) — one line per EMITTED heartbeat decision:
     schema_version · session_id · persona · ts (ISO-8601 UTC)
-    outcome    : "poke" | "honored" | "cap_reached"   (raw decide_heartbeat outcome)
+    outcome    : "poked" | "honored" | "cap_reached"   (raw decide_heartbeat outcome)
     poke_count : per-session heartbeat count AFTER this event · cap
     work_owed  : bool — **null in v1** (oracle_verdict=None); real bool at v2, ZERO schema change
     awaiting   : str | null   (from the hold artifact, else null)
-    reason     : str          (present ONLY when outcome == "poke")
+    reason     : str          (present ONLY when outcome == "poked")
 
-**Emit policy:** ONLY {poke, honored, cap_reached}. `not_owed` is skipped — a
+**Emit policy:** ONLY {poked, honored, cap_reached}. `not_owed` is skipped — a
 Stop hook fires after every ordinary turn, so it would be constant per-turn
 noise, not fleet signal. Disabled / malformed-config sessions never reach the
 emit (no decide_heartbeat outcome).
+
+**`poke`→`poked` value rename (2026-06-09):** the OUTCOME_POKE VALUE changed
+to "poked" (one-name-everywhere; consumers reference the constant). Per the
+no-migration + no-alias rules there is NO compatibility shim: existing on-disk
+`~/.claude/heartbeat-events/*.jsonl` records carrying the old pre-rename
+outcome value simply age out of the consumers' read windows.
 
 **Deferred to v2 (flagged, NOT built):** JSONL rotation / line-cap so the file
 cannot grow unbounded.
@@ -61,7 +67,7 @@ FLEET_EVENTS_DIR = Path( os.path.expanduser( "~/.claude/heartbeat-events" ) )
 # stays 1.
 EVENT_IDLE = "idle"
 
-# Outcome values emit_outcome will write. v1 = {poke, honored, cap_reached}
+# Outcome values emit_outcome will write. v1 = {poked, honored, cap_reached}
 # (not_owed is per-turn noise, skipped); v2 ADDS the explicit "idle" beacon.
 EMITTED_OUTCOMES = ( OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_CAP_REACHED, EVENT_IDLE )
 
@@ -115,10 +121,10 @@ def emit_outcome( session_id, persona, outcome, poke_count, cap,
         - poke_count (AFTER this event's increment) and cap are ints
         - work_owed is a bool or None (None in v1)
         - awaiting is a string or None (caller passes the hold's awaiting, else None)
-        - reason is the poke text (included ONLY when outcome == "poke")
+        - reason is the poke text (included ONLY when outcome == "poked")
 
     Ensures:
-        - Emits for {poke, honored, cap_reached, idle}; any other outcome
+        - Emits for {poked, honored, cap_reached, idle}; any other outcome
           (incl. not_owed / unknown) → returns False, writes nothing
         - Creates the fleet dir if missing (parents, idempotent)
         - Appends exactly one JSON line (schema_version 1 record)
@@ -307,8 +313,8 @@ def quick_smoke_test():
         assert is_idle_transition( sid, base_dir=tmp ) is False   # already idle → de-dup
 
         events = read_events( sid, base_dir=tmp )
-        assert len( events ) == 3,                      "poke + honored + idle expected"
-        assert events[ 0 ][ "outcome" ] == "poke"
+        assert len( events ) == 3,                      "poked + honored + idle expected"
+        assert events[ 0 ][ "outcome" ] == OUTCOME_POKE == "poked"
         assert events[ 0 ][ "reason" ] == "poke text"
         assert events[ 0 ][ "work_owed" ] is None,      "v1 work_owed is null"
         assert events[ 0 ][ "awaiting" ] == "peer:Rachel"

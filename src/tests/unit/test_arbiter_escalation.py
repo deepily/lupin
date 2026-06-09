@@ -197,7 +197,7 @@ class TestFleetStallCalibration:
         from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
         old_ts = ( NOW - datetime.timedelta( days=2 ) ).isoformat()
         events = {
-            "h1": [ { "session_id": "h1", "persona": "Ann", "outcome": "poke",
+            "h1": [ { "session_id": "h1", "persona": "Ann", "outcome": "poked",
                       "ts": old_ts, "awaiting": "peer:Bob", "work_owed": True } ],
             "h2": [ { "session_id": "h2", "persona": "Bob", "outcome": "cap_reached",
                       "ts": old_ts, "work_owed": True },

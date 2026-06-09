@@ -29,7 +29,7 @@ if _src_path not in sys.path:   # pragma: no cover - bootstrap import-guard; src
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, log_to_stream, emit_json, send_tts,
     drain_and_acknowledge, format_voice_context, build_stop_block,
-    inject_qualifier_via_tmux,
+    inject_qualifier_via_tmux, get_buffer_path,
     enrich_voice_context, get_stop_block_count, increment_stop_block_count,
     reset_stop_block_count, get_turn_elapsed_seconds, MAX_STOP_BLOCKS
 )
@@ -313,6 +313,83 @@ def _announce_idle( session_id, persona_name ):
             "session_id" : session_id,
             "error"      : str( e ),
         } )
+
+
+def _poke_sentence( persona_name, owed_count ) -> str:
+    """
+    The third-person poke breadcrumb sentence for the user's notification card
+    (§4, Rick 2026-06-09: "<persona> stopped — <specifics>, poked"). Pure.
+
+    Requires:
+        - persona_name is a string or None
+        - owed_count is an int >= 0 (0 ⇒ the poke was hold-declared owed, the
+          oracle had no Task* specifics to count)
+
+    Ensures:
+        - owed_count > 0  → "<who> stopped — N owed Task item(s), poked."
+        - owed_count == 0 → "<who> stopped — work owed (self-declared), poked."
+        - "A worker" when the persona name is missing
+    """
+    who = persona_name or "A worker"
+    if owed_count > 0:
+        plural = "" if owed_count == 1 else "s"
+        return f"{who} stopped — {owed_count} owed Task item{plural}, poked."
+    return f"{who} stopped — work owed (self-declared), poked."
+
+
+def _announce_poke( session_id, persona_name, owed_count ):
+    """
+    Fire ONE low-priority, non-blocking poke breadcrumb to the user's card
+    (§4): the hook caught a stopped-with-owed worker and poked it.
+
+    LOW priority is load-bearing twice over: (a) the client renders LOW to the
+    DOM card WITHOUT TTS (notifications.js gates speech on high/urgent only) —
+    so this composes with the silent decision:block poke without double-speak
+    (María Q2); (b) it never dings. De-dup rides the poke-cap: each breadcrumb
+    is a REAL poke event and the cap bounds them at poke_cap per session.
+
+    Ensures:
+        - posts a low-priority AsyncNotificationRequest carrying _poke_sentence,
+          stamped with this session's CC sender_id so it renders AS the persona
+        - NEVER raises / never blocks the Stop (try/except; mirrors the
+          _announce_idle invariant)
+    """
+    try:
+        request = AsyncNotificationRequest(
+            message   = _poke_sentence( persona_name, owed_count ),
+            priority  = NotificationPriority.LOW,
+            sender_id = build_sender_id_for_cc( session_id ),
+            abstract  = "Heartbeat: stopped with work owed — self-poke fired.",
+        )
+        notify_user_async( request )
+    except Exception as e:
+        log_to_stream( "stop", {}, extra={
+            "phase"      : "poke_announce_error",
+            "session_id" : session_id,
+            "error"      : str( e ),
+        } )
+
+
+def _has_pending_voice( session_id ) -> bool:
+    """
+    Non-destructive peek: is there buffered voice input for this session?
+
+    Branch-C invariant guard for the §3 speakerphone poke path (voice always
+    wins): the heartbeat poke must NOT fire while voice input is pending. The
+    buffer is deliberately NOT drained here — draining ACKNOWLEDGES (consumes)
+    the messages, and the speakerphone branch has no injection path for them;
+    this peek only suppresses the poke and leaves the buffer untouched for its
+    real consumer.
+
+    Ensures:
+        - Returns True iff the session's voice-buffer file exists
+        - Never raises (any path/IO error → False, fail-open to the poke's own
+          work-owed oracle gate)
+    """
+    try:
+        return get_buffer_path( session_id ).exists()
+    except Exception:
+        return False
 
 
 def _arm_idle_waiter( session_id, last_assistant_message, cwd ):
@@ -854,9 +931,10 @@ def _run_heartbeat( session_id, transcript_path ):
     Requires:
         - session_id is a string
         - transcript_path is the Stop-hook payload's transcript_path (str/None)
-        - called ONLY from Branch C (no voice_ctx), DOWNSTREAM of the
-          stop_hook_active loop guard — voice always wins; never poke on a
-          re-fire
+        - called DOWNSTREAM of the stop_hook_active loop guard, and ONLY when
+          no voice input is pending — Branch C's no-voice_ctx path, or the §3
+          speakerphone branch behind its _has_pending_voice peek. Voice always
+          wins; never poke on a re-fire
 
     Ensures:
         - Returns {"decision":"block","reason": …} ONLY when the heartbeat
@@ -866,6 +944,8 @@ def _run_heartbeat( session_id, transcript_path ):
           idle-waiter / "Anything else?" path UNCHANGED
         - Applies the counter increment (on poke) + cap FYI (at cap) +
           fire-and-forget event emission side effects
+        - On a poke, ALSO fires the §4 low-pri breadcrumb to the user's card
+          (_announce_poke — failsafe, never blocks the poke)
     """
     try:
         settings = load_heartbeat_settings()
@@ -961,6 +1041,12 @@ def _run_heartbeat( session_id, transcript_path ):
         _emit_genuine_idle( session_id, persona_name, settings[ "poke_cap" ] )
 
     if result[ "outcome" ] == OUTCOME_POKE:
+        # §4 breadcrumb (Rick 2026-06-09): the hook caught a stopped-with-owed
+        # worker → low-pri card notify ("<persona> stopped — <specifics>,
+        # poked"). Fires for BOTH branches (speakerphone and not) since this
+        # adapter is shared; failsafe inside _announce_poke (never blocks the
+        # poke). De-dup rides the poke-cap.
+        _announce_poke( session_id, persona_name, len( owed_items ) )
         return result[ "hook_output" ]
     return None
 
@@ -981,12 +1067,14 @@ def main():
     # Resolve session_id: payload first, then session bridge fallback
     session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
-    # Conversation mode: skip the "Anything else?" prompt path (would
-    # interrupt the user's voice dialogue), but FIRST run the Phase 4
-    # auto-narrate safety net — synthesize a notify() if Claude's last
-    # turn ended without one (silent-console-only failure mode). Per
+    speakerphone_on = get_speakerphone( session_id )
+
+    # Speakerphone: FIRST run the Phase 4 auto-narrate safety net — synthesize
+    # a notify() if Claude's last turn ended without one (silent-console-only
+    # failure mode). Stays UPSTREAM of the loop guard (pre-split position): it
+    # carries its own per-turn dedup (last_autonarrated_turn_id). Per
     # src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
-    if get_speakerphone( session_id ):
+    if speakerphone_on:
         try:
             _try_auto_narrate( session_id, payload )
         except Exception as e:
@@ -995,37 +1083,65 @@ def main():
                 "session_id" : session_id,
                 "error"      : str( e ),
             } )
-        # Silent idle-announce (Rick, 2026-06-08). Speakerphone sessions previously
-        # exited here BEFORE the idle-behavior gate (~line 1063), so idle_announce
-        # never fired for them — an order-of-operations bug (the early-exit was
-        # written for the BLOCKING "Anything else?" ask path, never narrowed when the
-        # non-blocking idle_announce became default). Fire it here instead, SILENTLY:
-        # _announce_idle posts at LOW priority, which the client renders to the DOM
-        # card WITHOUT TTS (notifications.js gates speech on high/urgent only) — a
-        # subtle bubble, no chorus-TTS spam. Gated to idle_announce ONLY: `ask`/`none`
-        # stay fully silent in speakerphone (the blocking ask is correctly skipped).
-        # "Nothing owed" is a turn-boundary approximation — this runs upstream of the
-        # work-owed oracle (accepted by Rick).
+
+    # Loop prevention: if stop_hook_active is True, we already blocked once —
+    # don't block again (would create infinite loop). §3 (2026-06-09): now
+    # UPSTREAM of the speakerphone heartbeat path too, so the never-poke-on-a-
+    # re-fire invariant holds for BOTH branches. (A speakerphone re-fire exits
+    # silently here — no idle-announce: the previous Stop was just blocked, so
+    # the session is mid-work, not idle.)
+    if stop_hook_active is True:
+        emit_json( {} )
+        sys.exit( 0 )
+
+    if speakerphone_on:
+        # ── §3 split (Rick's reframe, 2026-06-09) ──────────────────────────────
+        # The old all-or-nothing speakerphone early-exit was written narrowly to
+        # skip the BLOCKING "Anything else?" ask, but it bailed out 75 lines
+        # upstream of the heartbeat self-poke — so NO speakerphone session was
+        # ever poked (every manager runs speakerphone; the fleet's first line of
+        # defense was dark for exactly them). Split: speakerphone still
+        # suppresses ONLY the blocking ask — NOT the poke, NOT the breadcrumb.
+        # The poke's own work-owed oracle is the real gate (a worker actively in
+        # dialogue has no owed-and-stopped state); NO AFK gate. The poke rides
+        # the Stop-hook `reason` field (decision:block) — a silent re-prompt,
+        # not a TTS utterance, so it composes with auto-narrate above without
+        # double-speak (María Q2; auto-narrate only re-speaks Claude's LAST
+        # turn, never the injected reason).
+        #
+        # Branch-C invariant (voice always wins): peek at the voice buffer
+        # WITHOUT draining — pending voice ⇒ no poke, buffer left untouched.
+        if not _has_pending_voice( session_id ):
+            heartbeat_output = _run_heartbeat( session_id, payload.get( "transcript_path" ) )
+            if heartbeat_output is not None:
+                log_to_stream( "stop", {}, extra={
+                    "phase"      : "speakerphone_poke",
+                    "session_id" : session_id,
+                } )
+                emit_json( heartbeat_output )
+                return
+
+        # Silent idle-announce (Rick, 2026-06-08 — unchanged by the §3 split).
+        # _announce_idle posts at LOW priority, which the client renders to the
+        # DOM card WITHOUT TTS (notifications.js gates speech on high/urgent
+        # only) — a subtle bubble, no chorus-TTS spam. Gated to idle_announce
+        # ONLY: `ask`/`none` stay fully silent in speakerphone (the blocking
+        # ask is correctly skipped). "Nothing owed" is a turn-boundary
+        # approximation accepted by Rick (no-poke ⇒ the oracle found nothing
+        # owed, or the heartbeat is disabled/held/capped).
         if _stop_hook_idle_behavior() == "idle_announce":
             persona      = get_voice_persona( session_id )
             persona_name = persona.get( "name" ) if persona else None
             _announce_idle( session_id, persona_name )
 
-        # Speakerphone/chorus sessions skip the "Anything else?" prompt + heartbeat
-        # path entirely (it would interrupt the user's live voice dialogue); the
-        # auto-narrate safety net above is preserved. Restored to clean
-        # pre-experiment behavior (Thread A, 2026-06-06 — the 2026-06-05 comment-out
-        # was incidental experiment debris).
+        # Speakerphone/chorus sessions skip ONLY the blocking "Anything else?"
+        # prompt path below (it would interrupt the user's live voice
+        # dialogue); the heartbeat poke + breadcrumb above now run for them
+        # (§3, 2026-06-09 — the poke-fix this comment used to deny).
         log_to_stream( "stop", {}, extra={
             "phase"      : "speakerphone_skip",
             "session_id" : session_id,
         } )
-        emit_json( {} )
-        sys.exit( 0 )
-
-    # Loop prevention: if stop_hook_active is True, we already blocked once —
-    # don't block again (would create infinite loop)
-    if stop_hook_active is True:
         emit_json( {} )
         sys.exit( 0 )
 

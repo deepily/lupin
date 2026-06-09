@@ -662,9 +662,15 @@ def _drive_main( roots, monkeypatch, *, payload, speakerphone=False, voice_ctx="
     ONLY the genuine entry externalities (stdin / stdout / bridge / voice-drain /
     idle-waiter). Returns the dict captured from emit_json + spy flags.
     """
-    captured = { "emitted": [ ], "armed_idle": False, "asked": False, "voice_block": False }
+    captured = { "emitted": [ ], "armed_idle": False, "asked": False, "voice_block": False,
+                 "breadcrumbs": [ ] }
 
     monkeypatch.setattr( stop, "read_hook_input", lambda: payload )
+    # §4 breadcrumb externality: capture the async card notify (never network)
+    monkeypatch.setattr( stop, "notify_user_async",
+                         lambda req: captured[ "breadcrumbs" ].append( req ) )
+    monkeypatch.setattr( stop, "build_sender_id_for_cc",
+                         lambda _sid: "claude.code@lupin.deepily.ai#abc12345" )
     monkeypatch.setattr( stop, "emit_json", lambda d: captured[ "emitted" ].append( d ) )
     monkeypatch.setattr( stop, "log_payload", lambda *a, **k: None )
     monkeypatch.setattr( stop, "log_to_stream", lambda *a, **k: None )
@@ -723,15 +729,49 @@ class TestGroupFMainPrecedence:
         assert cap[ "emitted" ][ -1 ] == { }                   # allow-stop
         assert roots.events( "sidF2" )[ -1 ][ "outcome" ] == EVENT_IDLE
 
-    def test_f3_speakerphone_early_exit_no_heartbeat( self, roots, monkeypatch ):
-        """Speakerphone ON → Branch A early-exit BEFORE heartbeat → NO poke even with owed Task* (crown jewel)."""
+    def test_f3_speakerphone_owed_pokes( self, roots, monkeypatch ):
+        """§3 split (2026-06-09, INVERTED from the pre-split crown jewel):
+        speakerphone ON + owed Task* → the POKE FIRES over the REAL chain —
+        block emitted, exhaust written, count incremented, breadcrumb fired.
+        Pre-split, the all-or-nothing early-exit made this branch dark for
+        every speakerphone session (i.e. every manager)."""
+        roots.enable()
+        tp  = roots.task_transcript( _OWED )
+        cap = _drive_main( roots, monkeypatch, speakerphone=True,
+                           payload={ "session_id": "sidF3", "transcript_path": tp, "stop_hook_active": False } )
+        assert cap[ "emitted" ] and cap[ "emitted" ][ -1 ][ "decision" ] == "block"
+        assert roots.events( "sidF3" )[ -1 ][ "outcome" ] == OUTCOME_POKE
+        assert roots.poke_count( "sidF3" ) == 1
+        # the blocking-ask surfaces stayed suppressed (the preserved half)
+        assert cap[ "armed_idle" ] is False and cap[ "asked" ] is False
+        # §4 breadcrumb rode the poke
+        assert len( cap[ "breadcrumbs" ] ) == 1
+        assert "poked" in cap[ "breadcrumbs" ][ 0 ].message
+
+    def test_f3b_speakerphone_not_owed_no_poke( self, roots, monkeypatch ):
+        """Speakerphone ON + empty Task* set → no poke (the oracle is the gate);
+        allow-stop; the blocking ask stays suppressed (idle behavior forced to
+        'ask' to prove the speakerphone branch never reaches it)."""
+        monkeypatch.setattr( stop, "_stop_hook_idle_behavior", lambda: "ask" )
+        roots.enable()
+        tp  = roots.task_transcript( _EMPTY )
+        cap = _drive_main( roots, monkeypatch, speakerphone=True,
+                           payload={ "session_id": "sidF3b", "transcript_path": tp, "stop_hook_active": False } )
+        assert cap[ "emitted" ][ -1 ] == { }                   # allow-stop
+        assert roots.poke_count( "sidF3b" ) == 0
+        assert cap[ "armed_idle" ] is False and cap[ "asked" ] is False   # ask suppressed
+        assert cap[ "breadcrumbs" ] == [ ]                     # no poke → no breadcrumb
+
+    def test_f3c_speakerphone_refire_no_poke( self, roots, monkeypatch ):
+        """Speakerphone ON + stop_hook_active=True (re-fire) → loop guard wins
+        BEFORE the speakerphone heartbeat: no poke, no exhaust, no increment."""
         roots.enable()
         tp  = roots.task_transcript( _OWED )                   # WOULD poke
         cap = _drive_main( roots, monkeypatch, speakerphone=True,
-                           payload={ "session_id": "sidF3", "transcript_path": tp, "stop_hook_active": False } )
-        assert cap[ "emitted" ][ -1 ] == { }                   # speakerphone allow-stop
-        assert roots.events( "sidF3" ) == [ ]                  # heartbeat never ran → no exhaust
-        assert roots.poke_count( "sidF3" ) == 0
+                           payload={ "session_id": "sidF3c", "transcript_path": tp, "stop_hook_active": True } )
+        assert cap[ "emitted" ][ -1 ] == { }
+        assert roots.events( "sidF3c" ) == [ ]                 # heartbeat never reached
+        assert roots.poke_count( "sidF3c" ) == 0
 
     def test_f4_loop_guard_no_heartbeat_on_refire( self, roots, monkeypatch ):
         """stop_hook_active=True (re-fire) → loop guard allows stop BEFORE Branch C → NO poke even with owed Task*."""

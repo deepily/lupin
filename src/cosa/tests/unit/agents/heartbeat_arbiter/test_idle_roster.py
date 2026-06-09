@@ -18,7 +18,7 @@ def _v( **kw ):
     base = {
         "session_id"       : "s",
         "persona"          : "P",
-        "last_outcome"     : "poke",
+        "last_outcome"     : "poked",
         "alive"            : True,
         "last_activity_ts" : NOW - datetime.timedelta( seconds=600 ),
     }
@@ -63,8 +63,8 @@ def test_classify_bad_ts_is_none():
 def test_build_roster_filters_labels_and_sorts():
     fv = {
         "s1": _v( session_id="s1", last_outcome="idle", last_activity_ts=NOW - datetime.timedelta( seconds=600 ) ),
-        "s2": _v( session_id="s2", last_outcome="poke", alive=True, last_activity_ts=NOW - datetime.timedelta( seconds=900 ) ),
-        "s3": _v( session_id="s3", last_outcome="poke", alive=True, last_activity_ts=NOW - datetime.timedelta( seconds=10 ) ),  # working
+        "s2": _v( session_id="s2", last_outcome="poked", alive=True, last_activity_ts=NOW - datetime.timedelta( seconds=900 ) ),
+        "s3": _v( session_id="s3", last_outcome="poked", alive=True, last_activity_ts=NOW - datetime.timedelta( seconds=10 ) ),  # working
         "s4": "not-a-dict",
     }
     roster = r.build_roster( fv, NOW, 300 )

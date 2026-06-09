@@ -42,7 +42,7 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import build_poke_reaso
 # Outcome vocabulary (the adapter routes side effects off this)
 OUTCOME_HONORED     = "honored"       # fresh declared hold → don't poke
 OUTCOME_NOT_OWED    = "not_owed"      # nothing owed → genuinely done
-OUTCOME_POKE        = "poke"          # owed + under cap → self-poke
+OUTCOME_POKE        = "poked"         # owed + under cap → self-poke
 OUTCOME_CAP_REACHED = "cap_reached"   # owed + at/over cap → stop nudging
 
 # Reason used when work is owed via the hold's self-declared work_owed=True

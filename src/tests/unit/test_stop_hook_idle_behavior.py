@@ -180,8 +180,9 @@ class TestIdleBehaviorGate:
 
 
 # ── main() speakerphone branch: silent idle-announce (Rick, 2026-06-08) ───────
-# Speakerphone sessions exit the hook BEFORE the Branch-C idle gate, so the
-# silent idle-announce is fired INSIDE the speakerphone branch. Gated to
+# The silent idle-announce fires INSIDE the speakerphone branch, downstream of
+# the §3 heartbeat (patched to no-poke here — the poke matrix lives in
+# test_stop_hook_heartbeat.py::TestMainSpeakerphonePokeMatrix). Gated to
 # idle_announce ONLY (ask/none stay fully silent — the blocking ask is correctly
 # skipped). _announce_idle posts at LOW priority → the client renders the DOM
 # card WITHOUT TTS (no chorus-TTS spam). The branch ends in sys.exit(0), so each
@@ -193,6 +194,8 @@ class TestSpeakerphoneIdleAnnounce:
         with patch( "lupin_cli.claude_code.hooks.stop._announce_idle" ) as mock_announce, \
              patch( "lupin_cli.claude_code.hooks.stop.emit_json" ) as mock_emit, \
              patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" ), \
+             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop._has_pending_voice", return_value=False ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=persona ), \
              patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value=idle_behavior ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=True ), \

@@ -219,7 +219,7 @@ def test_poll_once_inference_idle_with_shipped_defaults( tmp_path ):
     half is alive, not config-dead. Drives real timestamps (no hardcoded alive)."""
     old_ts = "2026-06-05T11:53:20+00:00"          # 400s before NOW (12:00:00): 300 ≤ 400 ≤ 600
     _write_events( str( tmp_path ), "s1",
-                   _event( "s1", "poke", awaiting="none", persona="Alice", ts=old_ts ) )
+                   _event( "s1", "poked", awaiting="none", persona="Alice", ts=old_ts ) )
     gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": old_ts } ] )
     job = _make_job( tmp_path, gateway=gw )        # shipped defaults: quiet=300, alive=600
     summary = job._poll_once()
@@ -286,7 +286,7 @@ def test_clear_on_resume_drops_edge_state( tmp_path ):
     assert job._ledger.tracked_edges()                        # an edge is tracked
     # s1 resumes (no longer awaiting) → next poll the edge disappears → cleared
     with open( p, "a" ) as f:
-        f.write( json.dumps( _event( "s1", "poke", awaiting="none", persona="A" ) ) + "\n" )
+        f.write( json.dumps( _event( "s1", "poked", awaiting="none", persona="A" ) ) + "\n" )
     job._poll_once()
     assert job._ledger.tracked_edges() == set()
     assert job._ping_attempts == { }

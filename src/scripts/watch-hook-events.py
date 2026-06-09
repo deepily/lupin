@@ -8,13 +8,13 @@ special highlighting for the per-Stop **heartbeat oracle** line (added
 2026-06-05) so you can watch the fleet's heartbeat state update in real time:
 
     HH:MM:SS  🫀 Tiberius      not_owed     owed=False(0)  poke=0/3
-    HH:MM:SS  🫀 Tiffany       poke         owed=True(2)   poke=1/3
+    HH:MM:SS  🫀 Tiffany       poked        owed=True(2)   poke=1/3
     HH:MM:SS  🫀 Rachel        honored      owed=True      poke=0/3  awaiting=peer:Maria
     HH:MM:SS  🫀 Mr. Radio     cap_reached  owed=True(1)   poke=3/3   ← stuck
 
 Outcome legend (the four heartbeat states):
     not_owed     idle & FREE      (reassignable)        — green
-    poke         owed, nudged     (working)             — yellow
+    poked        owed, nudged     (working)             — yellow
     honored      blocked on a peer                      — cyan
     cap_reached  owed but pokes spent (idle & STUCK)    — red
 
@@ -25,8 +25,10 @@ Usage:
     python src/scripts/watch-hook-events.py --no-color       # plain text (also auto-off when piped)
     python src/scripts/watch-hook-events.py --once           # print current contents and exit (no follow)
 
-Requires: nothing beyond the stdlib. LUPIN_ROOT is honored for path resolution;
-falls back to the repo this script lives in.
+Requires: stdlib only beyond the in-repo hook constants (one-name-everywhere:
+the outcome→style map keys reference the emitting side's OUTCOME_* constants —
+a stdlib-only import chain). LUPIN_ROOT is honored for path resolution; falls
+back to the repo this script lives in.
 """
 import argparse
 import json
@@ -37,7 +39,8 @@ from datetime import datetime
 from pathlib import Path
 
 
-# ── Path resolution (no sys.path / cosa import needed — pure stdlib utility) ──
+# ── Path resolution (standalone-script bootstrap: sys.path gets <root>/src so
+#    the hook OUTCOME_* constants are importable; everything else stays stdlib) ──
 def _project_root():
     env = os.environ.get( "LUPIN_ROOT" )
     if env:
@@ -45,6 +48,17 @@ def _project_root():
     # This file lives at <root>/src/scripts/watch-hook-events.py
     return Path( __file__ ).resolve().parents[ 2 ]
 
+
+_src_path = str( _project_root() / "src" )
+if _src_path not in sys.path:
+    sys.path.insert( 0, _src_path )
+
+# One-name-everywhere: outcome VALUES come from the emitting side's constants,
+# so value renames (e.g. poke→poked, 2026-06-09) ride through for free.
+from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
+    OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_NOT_OWED, OUTCOME_CAP_REACHED,
+)
+from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENT_IDLE
 
 LOG_PATH = _project_root() / "io" / "claude_code_hooks" / "logs" / "hook-events.jsonl"
 
@@ -63,11 +77,11 @@ class C:
 
 
 OUTCOME_STYLE = {
-    "not_owed"    : ( C.GREEN,  "idle & free"  ),
-    "poke"        : ( C.YELLOW, "working"      ),
-    "honored"     : ( C.CYAN,   "blocked"      ),
-    "cap_reached" : ( C.RED,    "idle & STUCK" ),
-    "idle"        : ( C.GREEN,  "idle beacon"  ),
+    OUTCOME_NOT_OWED    : ( C.GREEN,  "idle & free"  ),
+    OUTCOME_POKE        : ( C.YELLOW, "working"      ),
+    OUTCOME_HONORED     : ( C.CYAN,   "blocked"      ),
+    OUTCOME_CAP_REACHED : ( C.RED,    "idle & STUCK" ),
+    EVENT_IDLE          : ( C.GREEN,  "idle beacon"  ),
 }
 
 _HEARTBEAT_PHASES = (
@@ -190,7 +204,7 @@ def _print_existing():
 def _follow():
     """Tail -f with rotation/truncation handling. Ctrl-C to stop."""
     print( _c( C.CYAN, f"▶ watching {LOG_PATH}" ) )
-    print( _c( C.DIM, "  outcomes: not_owed=free  poke=working  honored=blocked  cap_reached=STUCK   (Ctrl-C to stop)\n" ) )
+    print( _c( C.DIM, f"  outcomes: {OUTCOME_NOT_OWED}=free  {OUTCOME_POKE}=working  {OUTCOME_HONORED}=blocked  {OUTCOME_CAP_REACHED}=STUCK   (Ctrl-C to stop)\n" ) )
     while True:
         while not LOG_PATH.exists():
             time.sleep( 0.5 )

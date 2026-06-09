@@ -47,7 +47,7 @@ def test_emit_poke_writes_record_with_reason( tmp_path ):
         "session_id"     : "s1",
         "persona"        : "Tiffany 💍",
         "ts"             : "2026-06-04T20:00:00+00:00",
-        "outcome"        : "poke",
+        "outcome"        : "poked",
         "poke_count"     : 1,
         "cap"            : 3,
         "work_owed"      : None,
@@ -107,7 +107,7 @@ def test_emit_unknown_outcome_skipped( tmp_path ):
 def test_emit_creates_missing_fleet_dir( tmp_path ):
     nested = tmp_path / "does" / "not" / "exist"
     assert e.emit_outcome( "s10", "P", OUTCOME_POKE, 1, 3, base_dir=nested ) is True
-    assert e.read_events( "s10", base_dir=nested )[ 0 ][ "outcome" ] == "poke"
+    assert e.read_events( "s10", base_dir=nested )[ 0 ][ "outcome" ] == "poked"
 
 
 def test_emit_oserror_returns_false( tmp_path ):
@@ -130,14 +130,14 @@ def test_read_events_missing_file( tmp_path ):
 def test_read_events_skips_blank_and_malformed_and_non_object( tmp_path ):
     path = tmp_path / "s13.jsonl"
     path.write_text(
-        '{"outcome": "poke"}\n'
+        '{"outcome": "poked"}\n'
         "\n"                       # blank → skipped
         "{not json\n"              # malformed → skipped
         "[1, 2, 3]\n"              # non-object → skipped
         '{"outcome": "honored"}\n'
     )
     recs = e.read_events( "s13", base_dir=tmp_path )
-    assert [ r[ "outcome" ] for r in recs ] == [ "poke", "honored" ]
+    assert [ r[ "outcome" ] for r in recs ] == [ "poked", "honored" ]
 
 
 def test_read_events_oserror_returns_empty( tmp_path ):
@@ -158,7 +158,7 @@ def test_emit_idle_writes_record( tmp_path ):
 
 def test_should_emit_idle_pure():
     assert e.should_emit_idle( None )         is True   # first idle = transition from nothing
-    assert e.should_emit_idle( "poke" )       is True
+    assert e.should_emit_idle( "poked" )       is True
     assert e.should_emit_idle( "honored" )    is True
     assert e.should_emit_idle( e.EVENT_IDLE ) is False  # already idle → de-dup
 
