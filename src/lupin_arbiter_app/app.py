@@ -35,11 +35,12 @@ def _utcnow() -> datetime.datetime:
 
 
 def create_app(
-    snapshot_store     : Optional[ LocalSnapshotStore ] = None,
-    now_fn             : Optional[ Callable ]           = None,
-    started_at         : Optional[ datetime.datetime ]  = None,
-    health_loop        : Optional[ Any ]                = None,
-    fleet_arbiter_loop : Optional[ Any ]                = None,
+    snapshot_store        : Optional[ LocalSnapshotStore ] = None,
+    now_fn                : Optional[ Callable ]           = None,
+    started_at            : Optional[ datetime.datetime ]  = None,
+    health_loop           : Optional[ Any ]                = None,
+    fleet_arbiter_loop    : Optional[ Any ]                = None,
+    context_pressure_loop : Optional[ Any ]                = None,
 ) -> FastAPI:
     """
     Build the lupin-arbiter-app FastAPI app.
@@ -47,7 +48,8 @@ def create_app(
     Requires:
         - now_fn (if provided) is a 0-arg callable returning an aware datetime
         - started_at (if provided) is an aware datetime
-        - health_loop / fleet_arbiter_loop (if provided) expose start() / stop()
+        - health_loop / fleet_arbiter_loop / context_pressure_loop (if provided)
+          expose start() / stop()
 
     Ensures:
         - returns a FastAPI app exposing GET /health
@@ -64,19 +66,20 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan( _app: FastAPI ):
-        for lp in ( health_loop, fleet_arbiter_loop ):
+        for lp in ( health_loop, fleet_arbiter_loop, context_pressure_loop ):
             if lp is not None:
                 lp.start()
         yield
-        for lp in ( fleet_arbiter_loop, health_loop ):   # stop in reverse start order
+        for lp in ( context_pressure_loop, fleet_arbiter_loop, health_loop ):   # stop in reverse start order
             if lp is not None:
                 lp.stop()
 
     app = FastAPI( title="lupin-arbiter-app", version=__version__, lifespan=lifespan )
-    app.state.snapshot_store     = store
-    app.state.started_at         = started_at
-    app.state.health_loop        = health_loop
-    app.state.fleet_arbiter_loop = fleet_arbiter_loop
+    app.state.snapshot_store        = store
+    app.state.started_at            = started_at
+    app.state.health_loop           = health_loop
+    app.state.fleet_arbiter_loop    = fleet_arbiter_loop
+    app.state.context_pressure_loop = context_pressure_loop
 
     @app.get( "/health" )
     def health() -> dict:
@@ -109,17 +112,20 @@ def create_app(
               cold loop (not yet written) is distinguishable from a genuinely empty
               fleet (the §10.4 awaiting idiom, mirrored from /api/arbiter/fleet-snapshot)
         """
-        composite      = store.get()
-        health_watcher = composite.get( "health_watcher" )
-        fleet_arbiter  = composite.get( "fleet_arbiter" )
+        composite        = store.get()
+        health_watcher   = composite.get( "health_watcher" )
+        fleet_arbiter    = composite.get( "fleet_arbiter" )
+        context_pressure = composite.get( "context_pressure" )
         return {
-            "status"         : "ok",
-            "service"        : "lupin-arbiter-app",
-            "version"        : __version__,
-            "generated_at"   : now_fn().isoformat(),
-            "health_watcher" : health_watcher if health_watcher is not None else { "status": "awaiting" },
-            "fleet_arbiter"  : fleet_arbiter if fleet_arbiter is not None
-                               else { "status": "awaiting", "session_count": 0, "sessions": [ ] },
+            "status"           : "ok",
+            "service"          : "lupin-arbiter-app",
+            "version"          : __version__,
+            "generated_at"     : now_fn().isoformat(),
+            "health_watcher"   : health_watcher if health_watcher is not None else { "status": "awaiting" },
+            "fleet_arbiter"    : fleet_arbiter if fleet_arbiter is not None
+                                 else { "status": "awaiting", "session_count": 0, "sessions": [ ] },
+            "context_pressure" : context_pressure if context_pressure is not None
+                                 else { "status": "awaiting", "personas": { } },
         }
 
     return app
@@ -148,6 +154,56 @@ def _make_health_notify_fn( gateway, live_notify_fn, log_fn ):
     return notify
 
 
+def _build_context_pressure_loop( cfg, store, *, clock=None, log_fn=None ):
+    """
+    Build the context-headroom writer (the published per-persona service),
+    gated on the Phase-1 master switch `arbiter context watch enabled`.
+
+    Reads the §6 budget-policy keys (1M→0.50, 200K→0.75, default→0.50 — Rick's
+    Decision 5, config-tunable) + the existing Phase-1 leaf knobs, and wires the
+    REAL leaf (`assess_fleet_context_pressure`) into a ContextPressureWriterLoop.
+    Read-only — the writer takes no notify/commons seam by design (Decision 4:
+    the CRITICAL→recommender stays separately gated in the Phase 2/3 lineage).
+
+    Requires:
+        - cfg exposes .get( key, default, return_type ) (real or fake)
+        - store exposes set_section( name, value )
+        - log_fn is the already-resolved structured logger (never None here)
+
+    Ensures:
+        - returns a ContextPressureWriterLoop when the watch is enabled
+        - returns None + a context_pressure_writer_disabled log when disabled
+    """
+    if not cfg.get( "arbiter context watch enabled", default=True, return_type="boolean" ):
+        log_fn( "context_pressure_writer_disabled", reason="arbiter context watch enabled = false" )
+        return None
+
+    from cosa.agents.heartbeat_arbiter.context_pressure import assess_fleet_context_pressure
+    from lupin_arbiter_app.context_pressure_writer import ContextPressureWriterLoop
+
+    budget_fractions = {
+        1_000_000 : float( cfg.get( "arbiter context budget fraction 1000000", default=0.50, return_type="float" ) ),
+        200_000   : float( cfg.get( "arbiter context budget fraction 200000",  default=0.75, return_type="float" ) ),
+        "default" : float( cfg.get( "arbiter context budget fraction default", default=0.50, return_type="float" ) ),
+    }
+    leaf_kwargs = {
+        "reserve"            : int( cfg.get( "arbiter context autocompact reserve tokens", default=0, return_type="int" ) ),
+        "max_response"       : int( cfg.get( "arbiter context max response tokens", default=0, return_type="int" ) ),
+        "warn_pct"           : float( cfg.get( "arbiter context warn threshold pct", default=70, return_type="float" ) ),
+        "critical_pct"       : float( cfg.get( "arbiter context critical threshold pct", default=85, return_type="float" ) ),
+        "idle_mtime_seconds" : int( cfg.get( "arbiter context idle mtime seconds", default=1800, return_type="int" ) ),
+        "default_window"     : int( cfg.get( "arbiter context default window tokens", default=1_000_000, return_type="int" ) ),
+    }
+    return ContextPressureWriterLoop(
+        assess_fleet_context_pressure, store,
+        budget_fractions = budget_fractions,
+        leaf_kwargs      = leaf_kwargs,
+        clock            = clock,
+        log_fn           = log_fn,
+        interval_seconds = int( cfg.get( "arbiter context watch interval seconds", default=60, return_type="int" ) ),
+    )
+
+
 def assemble_app(
     cfg,
     gateway,
@@ -172,7 +228,9 @@ def assemble_app(
         - the fleet arbiter (FleetArbiterLoop) is ALWAYS wired (the service IS the standing arbiter)
         - the health watcher (HealthWatcherLoop) is wired iff `arbiter health watch enabled`
           (disabled → health_loop=None + a health_watcher_disabled log)
-        - both loops write sections of the SAME store; this function makes NO
+        - the context-headroom writer (ContextPressureWriterLoop) is wired iff
+          `arbiter context watch enabled` (disabled → None + a disabled log)
+        - all loops write sections of the SAME store; this function makes NO
           :7999/:8000 HTTP and builds NO job until the runner starts (testable
           with a fake cfg + fake gateway)
     """
@@ -204,10 +262,14 @@ def assemble_app(
     )
     fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=log_fn )
 
+    # ── context-headroom writer: gated on `arbiter context watch enabled` ──
+    context_pressure_loop = _build_context_pressure_loop( cfg, store, clock=clock, log_fn=log_fn )
+
     # ── health watcher (L2): gated on the master enable ──
     if not cfg.get( "arbiter health watch enabled", default=True, return_type="boolean" ):
         log_fn( "health_watcher_disabled", reason="arbiter health watch enabled = false" )
-        return create_app( snapshot_store=store, health_loop=None, fleet_arbiter_loop=fleet_arbiter_loop )
+        return create_app( snapshot_store=store, health_loop=None, fleet_arbiter_loop=fleet_arbiter_loop,
+                           context_pressure_loop=context_pressure_loop )
 
     def _csv( key, default ):
         raw = cfg.get( key, default=default ) or default
@@ -225,7 +287,8 @@ def assemble_app(
         flap_exclude          = _csv( "arbiter health flap exclude containers", "lupin-rest-dev" ),
         blind_threshold_polls = int( cfg.get( "arbiter health blind threshold polls", default=3, return_type="int" ) ),
     )
-    return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop )
+    return create_app( snapshot_store=store, health_loop=health_loop, fleet_arbiter_loop=fleet_arbiter_loop,
+                       context_pressure_loop=context_pressure_loop )
 
 
 def _build_live_notify_fn( cfg ):   # pragma: no cover - literal external IO boundary (config, env credential, urllib)

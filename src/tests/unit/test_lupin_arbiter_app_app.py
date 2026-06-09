@@ -13,9 +13,11 @@ import datetime
 from fastapi.testclient import TestClient
 
 from lupin_arbiter_app import __version__
-from lupin_arbiter_app.app import create_app, assemble_app, _utcnow, _make_health_notify_fn
+from lupin_arbiter_app.app import create_app, assemble_app, _utcnow, _make_health_notify_fn, \
+                                 _build_context_pressure_loop
 from lupin_arbiter_app.health_watcher import HealthWatcherLoop
 from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop
+from lupin_arbiter_app.context_pressure_writer import ContextPressureWriterLoop
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
 
 
@@ -96,18 +98,30 @@ def test_lifespan_starts_and_stops_both_loops():
     assert a.stopped is True and b.stopped is True
 
 
+def test_lifespan_starts_and_stops_all_three_loops():
+    """The context-headroom writer is the third lifespan-managed loop."""
+    a, b, c = _FakeLoop(), _FakeLoop(), _FakeLoop()
+    with TestClient( create_app( health_loop=a, fleet_arbiter_loop=b, context_pressure_loop=c ) ) as client:
+        assert a.started is True and b.started is True and c.started is True
+        assert client.app.state.context_pressure_loop is c
+    assert a.stopped is True and b.stopped is True and c.stopped is True
+
+
 class _FakeCfg:
     """Fake ConfigurationManager for assemble_app's enable-gate branches."""
-    def __init__( self, enabled ):
-        self._enabled = enabled
+    def __init__( self, enabled, context_enabled=True ):
+        self._enabled         = enabled
+        self._context_enabled = context_enabled
     def get( self, key, default=None, return_type="string" ):
         if key == "arbiter health watch enabled":
             return self._enabled                              # bool (boolean return_type)
+        if key == "arbiter context watch enabled":
+            return self._context_enabled
         if key == "arbiter health watch containers":
             return "c1,c2"
         if key == "arbiter health flap exclude containers":
             return "c1"
-        return default                                        # int/string keys → their defaults
+        return default                                        # int/string/float keys → their defaults
 
 
 class _FakeGateway:
@@ -118,20 +132,48 @@ class _FakeGateway:
     def read( self, topic, since=None, limit=50 ): return [ ]
 
 
-def test_assemble_app_enabled_wires_both_loops():
-    """enabled=true → the health watcher (HealthWatcherLoop) AND the fleet arbiter (FleetArbiterLoop) wired."""
+def test_assemble_app_enabled_wires_all_three_loops():
+    """enabled=true → health watcher + fleet arbiter + context-headroom writer all wired."""
     app = assemble_app( _FakeCfg( enabled=True ), _FakeGateway() )
     assert isinstance( app.state.health_loop, HealthWatcherLoop )
     assert isinstance( app.state.fleet_arbiter_loop, FleetArbiterLoop )
+    assert isinstance( app.state.context_pressure_loop, ContextPressureWriterLoop )
 
 
-def test_assemble_app_health_disabled_still_wires_fleet_arbiter( capsys ):
-    """enabled=false → health_loop None + health_watcher_disabled log; the fleet arbiter still wired."""
+def test_assemble_app_health_disabled_still_wires_fleet_arbiter_and_writer( capsys ):
+    """enabled=false → health_loop None + health_watcher_disabled log; fleet arbiter + writer still wired."""
     app = assemble_app( _FakeCfg( enabled=False ), _FakeGateway() )
     assert app.state.health_loop is None
     assert isinstance( app.state.fleet_arbiter_loop, FleetArbiterLoop )
+    assert isinstance( app.state.context_pressure_loop, ContextPressureWriterLoop )
     assert isinstance( app.state.snapshot_store, LocalSnapshotStore )
     assert "health_watcher_disabled" in capsys.readouterr().out
+
+
+def test_assemble_app_context_watch_disabled_wires_no_writer( capsys ):
+    """`arbiter context watch enabled`=false → context_pressure_loop None + a disabled log; other loops unaffected."""
+    app = assemble_app( _FakeCfg( enabled=True, context_enabled=False ), _FakeGateway() )
+    assert app.state.context_pressure_loop is None
+    assert isinstance( app.state.health_loop, HealthWatcherLoop )
+    assert isinstance( app.state.fleet_arbiter_loop, FleetArbiterLoop )
+    assert "context_pressure_writer_disabled" in capsys.readouterr().out
+
+
+def test_build_context_pressure_loop_reads_budget_policy_and_cadence():
+    """The §6 config wiring: budget fractions (1M→0.50, 200K→0.75, default→0.50) + 60s cadence + leaf knobs."""
+    store = LocalSnapshotStore()
+    loop  = _build_context_pressure_loop( _FakeCfg( enabled=True ), store,
+                                          log_fn=lambda ev, **kw: None )
+    assert isinstance( loop, ContextPressureWriterLoop )
+    assert loop._budget_fractions == { 1_000_000: 0.50, 200_000: 0.75, "default": 0.50 }
+    assert loop._interval_seconds == 60
+    assert loop._leaf_kwargs == { "reserve": 0, "max_response": 0, "warn_pct": 70.0,
+                                  "critical_pct": 85.0, "idle_mtime_seconds": 1800,
+                                  "default_window": 1_000_000 }
+    assert loop._store is store
+    # the REAL Phase-1 leaf is the assess seam
+    from cosa.agents.heartbeat_arbiter.context_pressure import assess_fleet_context_pressure
+    assert loop._assess_fn is assess_fleet_context_pressure
 
 
 def test_utcnow_returns_aware_utc_datetime():
@@ -176,30 +218,35 @@ def test_state_cold_start_both_sections_awaiting():
         assert body[ "service" ]        == "lupin-arbiter-app"
         assert body[ "version" ]        == __version__
         assert body[ "generated_at" ]   == now.isoformat()
-        assert body[ "health_watcher" ] == { "status": "awaiting" }
-        assert body[ "fleet_arbiter" ]  == { "status": "awaiting", "session_count": 0, "sessions": [ ] }
+        assert body[ "health_watcher" ]   == { "status": "awaiting" }
+        assert body[ "fleet_arbiter" ]    == { "status": "awaiting", "session_count": 0, "sessions": [ ] }
+        assert body[ "context_pressure" ] == { "status": "awaiting", "personas": { } }
         # the OLD generic keys are GONE — the /state contract break is real, not additive
         assert "loop_a" not in body and "loop_b_fleet" not in body
 
 
 def test_state_populated_returns_real_sections():
-    """Both loops have written → /state echoes their real section values."""
+    """All three loops have written → /state echoes their real section values."""
     store = LocalSnapshotStore()
     store.set_section( "health_watcher", { "containers": { "lupin-rest-dev": "healthy" } } )
     store.set_section( "fleet_arbiter", { "status": "ok", "session_count": 2, "sessions": [ { "session_id": "s1" } ] } )
+    store.set_section( "context_pressure", { "personas": { "Tiberius": { "headroom_tokens_current": 295000 } },
+                                             "summary": { "personas": 1 } } )
     with TestClient( create_app( snapshot_store=store ) ) as client:
         body = client.get( "/state" ).json()
         assert body[ "status" ]         == "ok"
         assert body[ "health_watcher" ] == { "containers": { "lupin-rest-dev": "healthy" } }
         assert body[ "fleet_arbiter" ][ "session_count" ] == 2
         assert body[ "fleet_arbiter" ][ "sessions" ][ 0 ][ "session_id" ] == "s1"
+        assert body[ "context_pressure" ][ "personas" ][ "Tiberius" ][ "headroom_tokens_current" ] == 295000
 
 
 def test_state_partial_one_section_awaiting():
-    """Health watcher written, fleet arbiter not → health_watcher real, fleet_arbiter 'awaiting' (both None-arms covered)."""
+    """Health watcher written, others not → health_watcher real, fleet_arbiter + context_pressure 'awaiting' (all None-arms covered)."""
     store = LocalSnapshotStore()
     store.set_section( "health_watcher", { "containers": { } } )
     with TestClient( create_app( snapshot_store=store ) ) as client:
         body = client.get( "/state" ).json()
-        assert body[ "health_watcher" ] == { "containers": { } }
-        assert body[ "fleet_arbiter" ]  == { "status": "awaiting", "session_count": 0, "sessions": [ ] }
+        assert body[ "health_watcher" ]   == { "containers": { } }
+        assert body[ "fleet_arbiter" ]    == { "status": "awaiting", "session_count": 0, "sessions": [ ] }
+        assert body[ "context_pressure" ] == { "status": "awaiting", "personas": { } }

@@ -13,6 +13,9 @@ Bearer JWT, the canonical machine-or-human credential, C2):
     - GET  /api/arbiter/fleet-state    — NEW authoritative surface (L4): a thin
       reverse-proxy that PULLS the single-pane composite from the standalone
       lupin-arbiter-app service at :8001/state (R3 — :8001 NEVER pushes here).
+    - GET  /api/arbiter/context-pressure — read-only per-persona context-headroom
+      service: PULLS :8001/state and returns JUST the `context_pressure` section
+      (persona-keyed budget-headroom map, design 2026.06.09 Decisions 1-5).
     - GET  /api/arbiter/fleet-snapshot — LEGACY v2.1: read the cached snapshot.
     - POST /api/arbiter/fleet-snapshot — LEGACY v2.1: the in-process arbiter
       PUSHES its latest snapshot here (updates the server singleton directly).
@@ -169,3 +172,53 @@ async def get_fleet_state(
     if isinstance( result, dict ):
         result[ "app_timezone" ] = config_mgr.get( "app timezone", default="America/New_York" )
     return result
+
+
+@router.get(
+    "/arbiter/context-pressure",
+    summary     = "Published per-persona context-headroom service (read-only)",
+    description = "Returns the persona-keyed context-headroom map: per worker, the "
+                  "tokens remaining before its soft budget line (1M window → 50%, "
+                  "200K → 75%; config-tunable). Thin reverse-proxy that PULLS "
+                  ":8001/state and returns JUST the `context_pressure` section. "
+                  "Pure sensor read — no side effects. Auth: X-API-Key or Bearer JWT. "
+                  "Design: src/rnd/v0.1.8/2026.06.07-managing-context-memory/"
+                  "2026.06.09-context-pressure-published-headroom-service-design.md §4-5."
+)
+async def get_context_pressure(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Reverse-proxy ONLY the `context_pressure` section of :8001/state (Decision 3:
+    the dedicated public surface; the section also rides the /fleet-state composite).
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+
+    Ensures:
+        - PULLS :8001/state (R3 — :7999 never pushes) and returns the
+          `context_pressure` section verbatim when present
+        - returns the explicit { status: "awaiting", personas: {} } placeholder
+          when the upstream composite lacks the section (e.g. the deployed
+          arbiter predates the writer) — never a bare null
+        - on any httpx failure returns an explicit { status: "unreachable", ... }
+          envelope with a null personas map — an HTTP 200 (the proxy is up, the
+          upstream watcher is not), never a 5xx or a hung request
+        - reads the upstream URL + timeout LAZILY from the shared config singleton
+          (same keys as /arbiter/fleet-state)
+    """
+    from cosa.rest.dependencies.config import get_config_manager
+    config_mgr = get_config_manager()
+    url     = config_mgr.get( "arbiter vigilance state url", default="http://127.0.0.1:8001/state" )
+    timeout = config_mgr.get( "arbiter vigilance state timeout seconds", default=5, return_type="int" )
+    try:
+        result = _pull_arbiter_state( url, timeout )
+    except httpx.HTTPError as e:
+        return {
+            "status"   : "unreachable",
+            "service"  : "lupin-arbiter-app",
+            "detail"   : f"{type( e ).__name__}: {e}",
+            "personas" : None,
+        }
+    section = result.get( "context_pressure" ) if isinstance( result, dict ) else None
+    return section if section is not None else { "status": "awaiting", "personas": { } }

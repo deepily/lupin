@@ -150,5 +150,75 @@ def test_fleet_state_reads_configured_url_and_timeout( client, monkeypatch ):
     assert captured[ "timeout" ] == 5 and isinstance( captured[ "timeout" ], int )
 
 
+# ── GET /api/arbiter/context-pressure — the published per-persona headroom service ──
+# (read-only sensor, Decision 3: dedicated surface returning JUST the section)
+
+_CP_SECTION = {
+    "generated_at" : "2026-06-09T17:30:00+00:00",
+    "policy"       : { "1000000": 0.50, "200000": 0.75, "default": 0.50 },
+    "personas"     : { "Tiberius": { "session_id": "7b76ad86", "window_size": 1000000,
+                                     "budget_ceiling_tokens": 500000, "occupancy_tokens": 205000,
+                                     "headroom_tokens_current": 295000, "status": "within_budget" } },
+    "summary"      : { "personas": 1, "within_budget": 1, "over_budget": 0, "idle_or_unknown": 0 },
+}
+
+
+def test_context_pressure_returns_just_the_section( client, monkeypatch ):
+    """Reachable :8001 with the section → ONLY the context_pressure section comes back, verbatim."""
+    composite = { "status": "ok", "service": "lupin-arbiter-app",
+                  "health_watcher": { "containers": { } }, "fleet_arbiter": { "session_count": 1 },
+                  "context_pressure": _CP_SECTION }
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", lambda url, timeout: composite )
+    r = client.get( "/api/arbiter/context-pressure" )
+    assert r.status_code == 200
+    body = r.json()
+    assert body == _CP_SECTION                                   # the section, nothing else
+    assert "health_watcher" not in body and "fleet_arbiter" not in body
+
+
+def test_context_pressure_awaiting_when_upstream_lacks_section( client, monkeypatch ):
+    """A deployed arbiter that predates the writer → explicit awaiting placeholder, never a bare null."""
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state",
+                         lambda url, timeout: { "status": "ok", "fleet_arbiter": { } } )
+    r = client.get( "/api/arbiter/context-pressure" )
+    assert r.status_code == 200
+    assert r.json() == { "status": "awaiting", "personas": { } }
+
+
+def test_context_pressure_awaiting_when_upstream_not_dict( client, monkeypatch ):
+    """Defensive: a non-dict upstream body → the awaiting placeholder (no crash, no .get on a list)."""
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", lambda url, timeout: [ "weird" ] )
+    r = client.get( "/api/arbiter/context-pressure" )
+    assert r.status_code == 200
+    assert r.json() == { "status": "awaiting", "personas": { } }
+
+
+def test_context_pressure_unreachable_when_pull_fails( client, monkeypatch ):
+    """Any httpx failure → explicit unreachable envelope (HTTP 200, null personas)."""
+    def _boom( url, timeout ):
+        raise httpx.ConnectError( "connection refused" )
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", _boom )
+    r = client.get( "/api/arbiter/context-pressure" )
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "status" ]   == "unreachable"
+    assert body[ "service" ]  == "lupin-arbiter-app"
+    assert body[ "personas" ] is None
+    assert "ConnectError" in body[ "detail" ]
+
+
+def test_context_pressure_reads_configured_url_and_timeout( client, monkeypatch ):
+    """The endpoint pulls the SAME configured upstream as /fleet-state (one :8001, one config)."""
+    captured = { }
+    def _capture( url, timeout ):
+        captured[ "url" ]     = url
+        captured[ "timeout" ] = timeout
+        return { "status": "ok", "context_pressure": _CP_SECTION }
+    monkeypatch.setattr( arbiter, "_pull_arbiter_state", _capture )
+    client.get( "/api/arbiter/context-pressure" )
+    assert captured[ "url" ]     == "http://host.docker.internal:8001/state"
+    assert captured[ "timeout" ] == 5 and isinstance( captured[ "timeout" ], int )
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
