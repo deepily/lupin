@@ -36,6 +36,8 @@ type StripUI = Record<string, unknown> & {
   managerPersonaMap: Map<string, unknown>;
   _addStripIcon: ( senderId: string, project: string, persona: unknown, sessionId: string ) => void;
   _stripIconIdFor: ( senderId: string ) => string;
+  _setManagerBadgeOnStripIcon: ( senderId: string, managerPersona: unknown ) => void;
+  _applyManagerBadge: ( icon: Element | null, managerPersona: unknown ) => void;
 };
 
 function newUI(): StripUI {
@@ -110,5 +112,47 @@ test( "manager badge is letter-only and tolerates a missing initial", () => {
   assert.equal( badge.textContent, "", "letter-only: no initial → empty text (no emoji fallback)" );
   assert.equal( badge.getAttribute( "title" ), "Spawned by manager", "falls back to generic name" );
 } );
+
+// ── Live-patch onto an ALREADY-rendered icon (Rick 2026-06-09 first-render miss) ──
+
+test( "_setManagerBadgeOnStripIcon live-patches a badge onto an already-rendered icon", () => {
+  const ui = newUI();
+  buildStripDOM();
+  const senderId = "claude.code@lupin.deepily.ai#late01";
+  // Icon created BEFORE the manager is known (managerPersonaMap empty) → no badge.
+  ui._addStripIcon( senderId, "LUPIN", { name: "Rio", color: "#28a745" }, "late01" );
+  const icon = document.getElementById( ui._stripIconIdFor( senderId ) ) as HTMLElement;
+  assert.equal( icon.querySelector( ".cc-strip-manager-badge" ), null, "no badge at first render" );
+
+  // The voice_persona_assigned event arrives later → live-patch the existing icon.
+  ui._setManagerBadgeOnStripIcon( senderId, { initial: "T", color: "#3F51B5", name: "Tiberius" } );
+  const badge = icon.querySelector( ".cc-strip-manager-badge" ) as HTMLElement;
+  assert.ok( badge, "badge patched onto the EXISTING icon (no refresh needed)" );
+  assert.equal( badge.textContent, "T" );
+  assert.equal( icon.getAttribute( "data-has-manager" ), "true" );
+} );
+
+test( "_setManagerBadgeOnStripIcon is a no-op when the icon does not exist yet", () => {
+  const ui = newUI();
+  buildStripDOM();
+  ui._setManagerBadgeOnStripIcon( "claude.code@lupin.deepily.ai#ghost",
+                                  { initial: "T", color: "#3F51B5", name: "Tiberius" } );
+  assert.equal( document.querySelector( ".cc-strip-manager-badge" ), null, "nothing rendered, no throw" );
+} );
+
+test( "_applyManagerBadge( icon, null ) clears the badge and the data-has-manager flag", () => {
+  const ui = newUI();
+  buildStripDOM();
+  const senderId = "claude.code@lupin.deepily.ai#flip01";
+  ui.managerPersonaMap.set( senderId, { initial: "T", color: "#3F51B5", name: "Tiberius" } );
+  ui._addStripIcon( senderId, "LUPIN", { name: "Rio" }, "flip01" );
+  const icon = document.getElementById( ui._stripIconIdFor( senderId ) ) as HTMLElement;
+  assert.ok( icon.querySelector( ".cc-strip-manager-badge" ), "badge present" );
+
+  ui._applyManagerBadge( icon, null );
+  assert.equal( icon.querySelector( ".cc-strip-manager-badge" ), null, "badge removed" );
+  assert.equal( icon.getAttribute( "data-has-manager" ), null, "flag cleared" );
+} );
+
 
 if ( typeof process !== "undefined" && process.argv.includes( "--run" ) ) { /* node --test entry */ }

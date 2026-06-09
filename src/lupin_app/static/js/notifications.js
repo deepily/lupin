@@ -5649,6 +5649,12 @@ class NotificationsUI {
                     } else {
                         this.managerPersonaMap.delete( notification.sender_id );
                     }
+                    // Patch the badge onto the strip icon if it ALREADY exists — the icon may
+                    // have been created (by an earlier event/card) before this persona event
+                    // arrived, in which case the _addStripIcon below no-ops (idempotent) and
+                    // would never add the badge → badge missing on first render until a page
+                    // refresh (Rick 2026-06-09).
+                    this._setManagerBadgeOnStripIcon( notification.sender_id, mgrPersona || null );
                     // Layer A: patch any existing card header in place so the
                     // badge appears without a re-render. No-op when card not yet built.
                     this._setPersonaBadgeOnCard( notification.sender_id, notification.voice_persona );
@@ -9378,6 +9384,41 @@ class NotificationsUI {
      *   - senderId is a non-empty string
      *   - This is a claude.code session (caller filters)
      */
+    /**
+     * Add / refresh / remove the manager-lineage corner badge on a strip-icon element.
+     * Idempotent: clears any existing badge first; pass a falsy managerPersona to remove.
+     * Used at icon creation (_addStripIcon) AND to live-patch an already-rendered icon
+     * (_setManagerBadgeOnStripIcon). Letter only — the manager's initial (no emoji).
+     */
+    _applyManagerBadge( icon, managerPersona ) {
+        if ( !icon ) return;
+        const existing = icon.querySelector( ".cc-strip-manager-badge" );
+        if ( existing ) existing.remove();
+        if ( !managerPersona ) {
+            icon.removeAttribute( "data-has-manager" );
+            return;
+        }
+        const mgrBadge = document.createElement( "span" );
+        mgrBadge.className   = "cc-strip-manager-badge";
+        mgrBadge.textContent = managerPersona.initial || "";
+        if ( managerPersona.color ) mgrBadge.style.setProperty( "--manager-color", managerPersona.color );
+        mgrBadge.setAttribute( "title", `Spawned by ${ managerPersona.name || "manager" }` );
+        icon.setAttribute( "data-has-manager", "true" );
+        icon.appendChild( mgrBadge );
+    }
+
+    /**
+     * Live-patch the manager badge onto an ALREADY-rendered strip icon (Rick 2026-06-09).
+     * Fixes the first-render miss: a worker's icon can be built before its
+     * voice_persona_assigned event (carrying manager_persona) arrives, and _addStripIcon
+     * is idempotent (no-ops on an existing icon) — so without this the badge only appeared
+     * after a full page refresh. No-op if the icon doesn't exist yet (creation handles it).
+     */
+    _setManagerBadgeOnStripIcon( senderId, managerPersona ) {
+        const icon = document.getElementById( this._stripIconIdFor( senderId ) );
+        if ( icon ) this._applyManagerBadge( icon, managerPersona );
+    }
+
     _addStripIcon( senderId, projectName, persona, sessionId, insertAtTop = true ) {
         const iconsContainer = document.getElementById( "cc-strip-icons" );
         const strip          = document.getElementById( "cc-session-strip" );
@@ -9420,22 +9461,11 @@ class NotificationsUI {
             icon.style.setProperty( "--persona-color", color );
         }
 
-        // Manager-lineage corner badge (Rick 2026-06-08): if this worker was spawned
-        // by a manager, superimpose a small badge carrying the manager's glyph + initial,
-        // tinted with the manager's color, 180° opposite the speaker-state ::before badge
-        // (placement in CSS). Top-level / root sessions (no manager) get no badge.
-        const managerPersona = this.managerPersonaMap && this.managerPersonaMap.get( senderId );
-        if ( managerPersona ) {
-            const mgrBadge = document.createElement( "span" );
-            mgrBadge.className   = "cc-strip-manager-badge";
-            // Letter only — the manager's initial (Rick 2026-06-08: drop the emoji, keep
-            // the letter; the glyph + initial together was visual overload).
-            mgrBadge.textContent = managerPersona.initial || "";
-            if ( managerPersona.color ) mgrBadge.style.setProperty( "--manager-color", managerPersona.color );
-            mgrBadge.setAttribute( "title", `Spawned by ${ managerPersona.name || "manager" }` );
-            icon.setAttribute( "data-has-manager", "true" );
-            icon.appendChild( mgrBadge );
-        }
+        // Manager-lineage corner badge (Rick 2026-06-08): superimpose the spawning
+        // manager's initial (size/placement in CSS — top-left, opposite the speaker
+        // ::before). Top-level / root sessions (no manager) get none. Extracted so the
+        // same render also patches an ALREADY-rendered icon live (_setManagerBadgeOnStripIcon).
+        this._applyManagerBadge( icon, this.managerPersonaMap && this.managerPersonaMap.get( senderId ) );
 
         // Mark focused if focus mode is on and this senderId matches the
         // persisted focused id (covers the case where a card for a
