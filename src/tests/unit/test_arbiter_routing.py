@@ -29,6 +29,7 @@ from cosa.agents.heartbeat_arbiter import arbiter_routing as R
 from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     CASE_TIERS, tier_for, TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS,
     TIER_OWNING_MANAGER, TIER_BLOCKER_AND_MANAGER, TIER_DROP, TIER_LOG_THEN_RICK,
+    CASE_AUTO_POKE_REAP_REC,
 )
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 from cosa.agents.heartbeat_arbiter import manager_resolver as MR
@@ -91,8 +92,16 @@ def test_case_tiers_mirror_part6_table( case ):
     assert tier_for( case ) == expected_tier == CASE_TIERS[ case ]
 
 
-def test_case_tiers_is_exhaustive_1_through_12():
-    assert set( CASE_TIERS ) == set( range( 1, 13 ) )
+def test_case_tiers_is_exhaustive_part6_plus_2b3_reap_rec():
+    # Part-6 outputs 1..12 + the 2b-3 auto-poke reap-recommendation (case 13)
+    assert set( CASE_TIERS ) == set( range( 1, 14 ) )
+
+
+def test_auto_poke_reap_rec_routes_rick_and_managers():
+    """2b-3: the auto-poke reap-RECOMMENDATION routes to Rick + all active
+    managers (same tier as the fleet crises) — recommendation, never a reap."""
+    assert CASE_AUTO_POKE_REAP_REC == 13
+    assert tier_for( CASE_AUTO_POKE_REAP_REC ) == TIER_RICK_AND_MANAGERS
 
 
 def test_tier_for_unknown_case_raises():

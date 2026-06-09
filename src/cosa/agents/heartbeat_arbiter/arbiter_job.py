@@ -63,7 +63,7 @@ from cosa.agents.heartbeat_arbiter.manager_resolver import (
 # is the RUNTIME contract: _route(case, …) dispatches by tier_for(case).
 from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS, TIER_OWNING_MANAGER,
-    TIER_BLOCKER_AND_MANAGER, TIER_DROP, tier_for,
+    TIER_BLOCKER_AND_MANAGER, TIER_DROP, tier_for, CASE_AUTO_POKE_REAP_REC,
 )
 
 
@@ -162,6 +162,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
         manager_ack_window_seconds : int                = 600,
         fleet_stall_window_seconds : int                = 1800,
         poll_error_escalate_threshold : int             = 3,
+        auto_poke_enabled        : bool                 = True,
+        poke_stall_threshold_seconds : int              = 720,    # ~12 min
+        poke_max_per_episode     : int                  = 3,
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
@@ -238,6 +241,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
             raise ValueError( f"tail_maxlen must be positive, got {tail_maxlen}" )
         if poll_error_escalate_threshold < 1:
             raise ValueError( f"poll_error_escalate_threshold must be >= 1, got {poll_error_escalate_threshold}" )
+        if poke_stall_threshold_seconds < 0:
+            raise ValueError( f"poke_stall_threshold_seconds must be >= 0, got {poke_stall_threshold_seconds}" )
+        if poke_max_per_episode < 1:
+            raise ValueError( f"poke_max_per_episode must be >= 1, got {poke_max_per_episode}" )
         if not manager_recipient:
             raise ValueError( "manager_recipient must be a non-empty string" )
 
@@ -275,6 +282,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self.manager_ack_window_seconds    = manager_ack_window_seconds
         self.fleet_stall_window_seconds    = fleet_stall_window_seconds
         self.poll_error_escalate_threshold = poll_error_escalate_threshold
+        # 2b-3 auto-poke (Rick redline-narrowing confirmed): bounded, non-destructive
+        # wake-nudge at genuinely-stuck LIVE sessions, then a reap-RECOMMENDATION.
+        self.auto_poke_enabled             = auto_poke_enabled
+        self.poke_stall_threshold_seconds  = poke_stall_threshold_seconds
+        self.poke_max_per_episode          = poke_max_per_episode
 
         # --- consumer state (carried across polls) ---
         self._offsets       = { }                                  # sid -> byte offset
@@ -309,6 +321,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # down). Streak resets on any clean poll; escalate-once per persistent run.
         self._poll_error_streak    = 0
         self._poll_error_escalated = False
+        # 2b-3 auto-poke per-STALL-EPISODE state (anti-storm FM-20: PERSISTS across
+        # ticks, NOT per-poll). Keyed by session_id; cleared when a session leaves
+        # the pokeable set (its episode ends → the cap re-arms for a future episode).
+        self._poke_stuck_since = { }                               # sid -> episode-start datetime
+        self._poke_count       = { }                               # sid -> pokes fired this episode
+        self._poke_escalated   = set()                             # sids whose reap-rec already fired
 
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI (QueueableJob protocol)."""
@@ -360,6 +378,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         managers_down = self._check_manager_acks( now, who_rows, active_managers )  # #9 Rick + all mgrs
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers )  # #11 Rick + all mgrs
+        pokes_fired   = self._auto_poke( fleet_view, now, active_managers )          # 2b-3 auto-poke
         rendered      = self._publish_fleet_snapshot( fleet_view, now )
 
         self._poll_count += 1
@@ -373,6 +392,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "managers_down" : managers_down,
             "decisions"     : decisions,
             "stalled"       : stalled,
+            "pokes_fired"   : pokes_fired,
             "rendered"      : rendered,
         }
 
@@ -920,6 +940,108 @@ class ArbiterConsumerJob( AgenticJobBase ):
             )
             return 1
         return 0
+
+    # ── 2b-3: bounded, non-destructive auto-poke + reap-recommendation ──────────
+
+    @staticmethod
+    def _pokeable_sessions( fleet_view ):
+        """
+        The genuinely-stuck LIVE sessions eligible for an auto-poke this poll.
+
+        POKEABLE iff BOTH (STALL≠QUIET, María's doctrine + the 2b-1 calibration):
+          • `alive is True`  — the Round-1 union liveness (the SAME gate the stall
+            detector uses); a dead/offline session is NEVER poked (poking a corpse
+            is waste), AND
+          • `stuck is True`  — repeated cap_reached + work owed = "owed work + NO
+            progress". A busy/working, declared-holding, or idle session is NOT
+            stuck → NOT poked (quiet ≠ stall; don't poke a heads-down live worker).
+
+        Ensures:
+            - returns { session_id: view } for each LIVE+stuck session; never raises
+        """
+        return {
+            v[ "session_id" ]: v
+            for v in fleet_view.values()
+            if isinstance( v, dict ) and v.get( "session_id" )
+            and v.get( "alive" ) is True and v.get( "stuck" ) is True
+        }
+
+    def _format_poke( self, view ):
+        """The non-destructive wake-nudge body sent to a stuck LIVE session."""
+        who = view.get( "persona" ) or view.get( "session_id" )
+        return (
+            f"Heartbeat arbiter (auto-poke): {who}, you appear STUCK — repeated "
+            f"cap-reached with work owed and no progress. Are you blocked or wedged? "
+            f"Post your status, ask for help, or resume. (Non-destructive nudge.)"
+        )
+
+    def _format_reap_recommendation( self, view, pokes ):
+        """The reap-RECOMMENDATION body — a recommendation to a HUMAN/manager; the
+        arbiter NEVER executes the reap (redline)."""
+        who = view.get( "persona" ) or view.get( "session_id" )
+        return (
+            f"REAP-RECOMMENDATION (advisory — I recommend, you decide; I do NOT reap): "
+            f"session {who} stayed STUCK through {pokes} bounded auto-poke(s) with no "
+            f"recovery. Recommend a human/manager reap-and-replace it. The arbiter "
+            f"takes NO destructive action."
+        )
+
+    def _auto_poke( self, fleet_view, now, active_managers ):
+        """
+        2b-3 auto-poke: fire a BOUNDED, TARGETED, NON-DESTRUCTIVE wake-nudge at each
+        genuinely-stuck LIVE session; after ≤N pokes with no recovery, emit ONE
+        reap-RECOMMENDATION (to Rick + active managers) and fall silent. The arbiter
+        NEVER reaps — the redline holds (this method calls ONLY send_to + _route,
+        both non-destructive; the structural redline test enforces it).
+
+        Anti-storm (FM-20): the cap + escalated-flag PERSIST per STALL-EPISODE
+        (state on self, keyed by session_id), NOT per-poll. A persistently-stuck
+        session therefore gets ≤ poke_max_per_episode pokes TOTAL → ONE
+        reap-recommendation → silence — never a per-tick re-poke storm. When a
+        session leaves the pokeable set (recovered / died / no longer stuck) its
+        episode ENDS: state is cleared and the cap re-arms for any future episode.
+
+        Threshold: a session must be continuously LIVE+stuck for ≥
+        poke_stall_threshold_seconds (observed by the arbiter) before its FIRST
+        poke — a brief stick that self-resolves is never poked.
+
+        Ensures:
+            - no-op when auto_poke_enabled is False (the make-before-break flag)
+            - pokes ≤ poke_max_per_episode times per session per episode, then
+              escalates exactly once, then silent
+            - returns the count of pokes fired this poll; never raises
+        """
+        if not self.auto_poke_enabled:
+            return 0
+
+        pokeable = self._pokeable_sessions( fleet_view )
+
+        # episode bookkeeping: a session no longer pokeable ended its episode →
+        # clear its state so the cap re-arms (clear-on-resume, mirrors _auto_ping).
+        for sid in [ s for s in self._poke_stuck_since if s not in pokeable ]:
+            del self._poke_stuck_since[ sid ]
+            self._poke_count.pop( sid, None )
+            self._poke_escalated.discard( sid )
+
+        fired = 0
+        for sid, view in pokeable.items():
+            if sid not in self._poke_stuck_since:
+                self._poke_stuck_since[ sid ] = now               # episode start (no poke yet)
+                self._poke_count[ sid ]       = 0
+            if ( now - self._poke_stuck_since[ sid ] ).total_seconds() < self.poke_stall_threshold_seconds:
+                continue                                          # not stuck long enough yet
+            if self._poke_count[ sid ] < self.poke_max_per_episode:
+                recipient = view.get( "persona" ) or sid
+                self._commons.send_to( recipient, self._format_poke( view ) )
+                self._poke_count[ sid ] += 1
+                fired += 1
+            elif sid not in self._poke_escalated:
+                self._poke_escalated.add( sid )
+                self._route( CASE_AUTO_POKE_REAP_REC,             # → Rick + active managers
+                             self._format_reap_recommendation( view, self._poke_count[ sid ] ),
+                             active_managers=active_managers )
+            # else: capped AND already escalated → silence (anti-storm)
+        return fired
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 

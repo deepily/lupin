@@ -53,6 +53,15 @@ ALL_TIERS = frozenset( {
 # 10 decision-needed                  (B)  → Rick only          (+owning mgr if known; human's domain)
 # 11 whole-fleet-stall                (B)  → Rick + all mgrs     (calibrated first, 2b-1)
 # 12 arbiter poll-error               (B)  → log; Rick if persistent
+#
+# 2b-3 ADDITION (post-Part-6): the auto-poke reap-RECOMMENDATION. After a stuck
+# LIVE session has absorbed ≤N bounded non-destructive pokes with no recovery, the
+# arbiter emits a recommendation to REAP/REPLACE it — to Rick + ALL active managers
+# (same tier as the fleet crises). It is a RECOMMENDATION ONLY: the arbiter never
+# executes reap/replace (the redline). Numbered 13 so it routes through the same
+# _route(case) dispatcher; it is NOT one of the original Part-6 12 outputs.
+CASE_AUTO_POKE_REAP_REC = 13
+
 CASE_TIERS = {
     1  : TIER_RICK_ONLY,
     2  : TIER_RICK_ONLY,
@@ -66,6 +75,7 @@ CASE_TIERS = {
     10 : TIER_RICK_ONLY,
     11 : TIER_RICK_AND_MANAGERS,
     12 : TIER_LOG_THEN_RICK,
+    CASE_AUTO_POKE_REAP_REC : TIER_RICK_AND_MANAGERS,   # 2b-3 auto-poke escalation
 }
 
 
@@ -86,9 +96,10 @@ def tier_for( case: int ) -> str:
 
 def quick_smoke_test():
     """Self-contained smoke test. Returns True or raises AssertionError."""
-    # every case maps to a known tier
-    assert set( CASE_TIERS ) == set( range( 1, 13 ) )
+    # every case maps to a known tier (Part-6 1..12 + the 2b-3 reap-rec case 13)
+    assert set( CASE_TIERS ) == set( range( 1, 14 ) )
     assert all( t in ALL_TIERS for t in CASE_TIERS.values() )
+    assert tier_for( CASE_AUTO_POKE_REAP_REC ) == TIER_RICK_AND_MANAGERS   # 2b-3
     # the three tiers + two cuts land where Part 6 says
     assert tier_for( 1 ) == tier_for( 2 ) == tier_for( 3 ) == TIER_RICK_ONLY
     assert tier_for( 6 ) == TIER_DROP                       # roster broadcast cut

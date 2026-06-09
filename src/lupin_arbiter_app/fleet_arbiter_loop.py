@@ -138,6 +138,9 @@ def build_fleet_arbiter_job_factory(
     ack_window           : int                  = 600,
     stall_window         : int                  = 1800,
     poll_error_escalate_threshold : int         = 3,
+    auto_poke_enabled    : bool                 = True,
+    poke_stall_threshold : int                  = 720,
+    poke_max_per_episode : int                  = 3,
     start_period_seconds : int                  = 120,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
@@ -169,6 +172,9 @@ def build_fleet_arbiter_job_factory(
             manager_ack_window_seconds = ack_window,
             fleet_stall_window_seconds = stall_window,
             poll_error_escalate_threshold = poll_error_escalate_threshold,
+            auto_poke_enabled            = auto_poke_enabled,
+            poke_stall_threshold_seconds = poke_stall_threshold,
+            poke_max_per_episode         = poke_max_per_episode,
             snapshot_sink              = lambda snap: store.set_section( "fleet_arbiter", snap ),
             render_sink                = lambda line: log_fn( "fleet_arbiter_render", line=line ),
             notify_fn                  = warmup_notify,
