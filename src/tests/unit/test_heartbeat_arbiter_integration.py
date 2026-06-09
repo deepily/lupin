@@ -75,6 +75,8 @@ import lupin_cli.claude_code.hooks.stop as stop
 from lupin_cli.claude_code.hooks.lib import heartbeat_events, heartbeat_poke_cap
 from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_outcome, EVENT_IDLE
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, ROSTER_TOPIC
+from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
+from cosa.agents.heartbeat_arbiter.idle_roster import build_roster
 
 UTC      = datetime.timezone.utc
 BASE_NOW = datetime.datetime( 2026, 6, 5, 12, 0, 0, tzinfo=UTC )
@@ -139,11 +141,35 @@ def _pings( arb ):
 
     Since v2.2, `_poll_once` fires BOTH `_auto_ping` (to the blocked peer) AND
     `_tap_managers` (an advisory DM to the manager), so `_commons.sent` carries
-    two outbound surfaces. The auto-ping body uniquely contains "holding on you";
-    the tap body never does — so these backoff-trajectory tests (which count
-    AUTO-PINGS) filter on that signature to keep their intent explicit.
+    two outbound surfaces. The 2b-2 #4-rewritten auto-ping body uniquely contains
+    "blocking worker"; the tap body never does — so these backoff-trajectory tests
+    (which count AUTO-PINGS) filter on that signature to keep their intent explicit.
     """
-    return [ s for s in arb._commons.sent if "holding on you" in s[ 1 ] ]
+    return [ s for s in arb._commons.sent if "blocking worker" in s[ 1 ] ]
+
+
+def _roster( arb ):
+    """
+    Rebuild the trust-labeled idle-roster the way _poll_once does — the sensing
+    leaf (build_roster) is unchanged by 2b-2; only its old surface (the dropped
+    #6 roster broadcast) is gone, so these tests assert the leaf output directly.
+    """
+    now = datetime.datetime.fromisoformat( arb._clock.now_iso() )
+    fv  = build_fleet_view( arb._acc.snapshot(), arb._commons.who(), now,
+                            arb.alive_threshold_seconds,
+                            bridge_sessions=arb._bridge_discovery_fn() )
+    return build_roster( fv, now, arb.quiet_threshold_seconds )
+
+
+def _snapshot_row( arb, sid ):
+    """The latest published /state snapshot row for `sid` (the pull-state surface
+    that REPLACED the #6 roster broadcast), or None."""
+    if not arb.captured_snapshots:
+        return None
+    for row in arb.captured_snapshots[ -1 ][ "sessions" ]:
+        if row[ "session_id" ] == sid:
+            return row
+    return None
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -189,7 +215,13 @@ def _make_arbiter( events_dir, *, gateway=None, clock=None, notify_fn=None, **ov
         bridge_discovery_fn     = lambda: { },
     )
     cfg.update( overrides )
-    return ArbiterConsumerJob( commons=gateway if gateway is not None else FakeGateway(), **cfg )
+    # Capture the /state snapshots (the pull-state surface that replaced the #6
+    # roster broadcast) so the sensing tests can assert against them.
+    captured = [ ]
+    cfg.setdefault( "snapshot_sink", captured.append )
+    arb = ArbiterConsumerJob( commons=gateway if gateway is not None else FakeGateway(), **cfg )
+    arb.captured_snapshots = captured
+    return arb
 
 
 @pytest.fixture
@@ -246,7 +278,10 @@ class TestGroupPCLoopClosure:
         assert rec[ "outcome" ]   == "poke"
         assert rec[ "work_owed" ] is True                         # v2 real bool flowed end-to-end
         assert rec[ "persona" ]   == "Mr. Radio 🦉"
-        assert arb._commons.posts[ 0 ][ 0 ] == ROSTER_TOPIC       # surfaced to the manager
+        # surfaced via the /state snapshot (the pull-state surface that replaced the
+        # #6 roster broadcast) — NOT a per-tick commons post (Part-6 #6 DROP)
+        assert _snapshot_row( arb, "ha-sid-1" ) is not None
+        assert arb._commons.posts == [ ]                          # #6: no roster broadcast
 
     def test_pc2_real_idle_beacon_to_declared_roster( self, fleet ):
         """Real idle beacon → roster entry trust-labeled declared-available."""
@@ -254,8 +289,10 @@ class TestGroupPCLoopClosure:
         arb     = _make_arbiter( fleet )
         summary = arb._poll_once()
         assert summary[ "roster" ] == 1
-        body = arb._commons.posts[ 0 ][ 1 ]
-        assert "Alice [declared-available]" in body               # the trust label the manager weighs
+        # the trust label the manager weighs — asserted on the (unchanged) build_roster
+        # leaf directly, now that the #6 roster broadcast that carried it is dropped
+        assert any( r[ "persona" ] == "Alice" and r[ "trust_label" ] == "declared-available"
+                    for r in _roster( arb ) )
 
     def test_pc3_real_poke_to_cap_surfaces_stuck( self, fleet ):
         """Real ≥2 cap_reached+work_owed=True (the stuck signal) → surfaced as Stuck."""
@@ -263,8 +300,8 @@ class TestGroupPCLoopClosure:
         _emit( fleet, "s-stuck", "cap_reached", work_owed=True, persona="Bob", poke_count=3 )
         arb = _make_arbiter( fleet )
         arb._poll_once()
-        body = arb._commons.posts[ 0 ][ 1 ]
-        assert "Stuck" in body and "s-stuck" in body
+        row = _snapshot_row( arb, "s-stuck" )                     # pull-state surface (#6 broadcast dropped)
+        assert row is not None and row[ "stuck" ] is True
 
     def test_pc4_real_awaiting_edge_auto_pings_blocker( self, fleet ):
         """Real honored+awaiting:peer:Bob → edge → auto-ping to Bob (F1-resolved: holder-only message)."""
@@ -273,8 +310,9 @@ class TestGroupPCLoopClosure:
         summary = arb._poll_once()
         assert summary[ "edges" ] == 1 and summary[ "pings_fired" ] == 1
         recipient, body = arb._commons.sent[ 0 ]
-        assert recipient == "Bob"                                 # pings the awaited peer
-        assert "Alice" in body and "holding on you" in body       # F1 fix: holder named, no bogus reason
+        assert recipient == "Bob"                                 # pings the awaited peer (the blocker)
+        # Part-6 #4 rewrite: names the blocked worker + the ask (not "where are we?")
+        assert "Alice" in body and "blocking worker" in body
 
     def test_pc5_mutual_await_is_deadlock_escalated_not_broken( self, fleet ):
         """Two real sessions awaiting each other → deadlock cycle → ESCALATE (never auto-broken)."""
@@ -284,8 +322,10 @@ class TestGroupPCLoopClosure:
         arb     = _make_arbiter( fleet, notify_fn=lambda m: escalations.append( m ) )
         summary = arb._poll_once()
         assert summary[ "cycles" ] == 1
-        assert escalations and "DEADLOCK" in escalations[ 0 ]     # surfaced, not autonomously broken
-        assert "DEADLOCK" in arb._commons.posts[ 0 ][ 1 ]
+        # Part-6 #5: surfaced to Rick (notify_fn) + active managers — not posted to a
+        # roster topic (#6 dropped), and NEVER autonomously broken
+        assert escalations and "DEADLOCK" in escalations[ 0 ]
+        assert arb._commons.posts == [ ]                          # #6: no roster broadcast
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -333,11 +373,11 @@ class TestGroupTIncrementalTail:
         _emit( fleet, "s1", "cap_reached", work_owed=True, persona="A", poke_count=3 )
         arb = _make_arbiter( fleet )
         arb._poll_once()
-        assert "Stuck" not in arb._commons.posts[ -1 ][ 1 ]       # one episode → not yet stuck
+        assert _snapshot_row( arb, "s1" )[ "stuck" ] is False     # one episode → not yet stuck
 
         _emit( fleet, "s1", "cap_reached", work_owed=True, persona="A", poke_count=3 )
         arb._poll_once()
-        assert "Stuck" in arb._commons.posts[ -1 ][ 1 ]           # the deque retained both → stuck
+        assert _snapshot_row( arb, "s1" )[ "stuck" ] is True      # the deque retained both → stuck
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -438,7 +478,8 @@ class TestGroupInferRoster:
         arb = _make_arbiter( fleet, quiet_threshold_seconds=120, alive_threshold_seconds=600 )
         summary = arb._poll_once()
         assert summary[ "roster" ] == 1
-        assert "Cara [quiet (inferred)]" in arb._commons.posts[ 0 ][ 1 ]
+        assert any( r[ "persona" ] == "Cara" and r[ "trust_label" ] == "quiet (inferred)"
+                    for r in _roster( arb ) )
 
     def test_infer2_shipped_defaults_keep_inference_reachable( self, fleet ):
         """F3 DEFAULTS-LOCK: with the SHIPPED defaults (no override), an alive+quiet
@@ -458,8 +499,10 @@ class TestGroupInferRoster:
         )
         assert arb.quiet_threshold_seconds < arb.alive_threshold_seconds   # F3 invariant holds for defaults
         summary = arb._poll_once()
+        # inference reachable under shipped defaults — the alive+quiet session lands on
+        # the idle-roster (the #6 roster broadcast that formerly carried the label is
+        # dropped; roster==1 is the surviving proof the inference half is alive)
         assert summary[ "roster" ] == 1
-        assert "Dee [quiet (inferred)]" in arb._commons.posts[ 0 ][ 1 ]
 
     def test_infer3_construction_rejects_config_dead_thresholds( self ):
         """F3 INVARIANT-LOCK: quiet_threshold ≥ alive_threshold is now UN-CONSTRUCTABLE
@@ -494,7 +537,9 @@ class TestGroupISOReadOnly:
         assert path.read_bytes() == before                       # event file untouched (read-only plane)
         files_after = sorted( p.name for p in fleet.iterdir() )
         assert files_after == [ "s1.jsonl" ]                     # arbiter wrote NO new file to the fleet dir
-        assert gw.posts and gw.sent                              # all outbound I/O captured by the fake seam
+        # outbound I/O is now directed DMs only (auto-ping + tap); the #6 roster
+        # broadcast is dropped, so NO commons post — all push, no blackboard spam
+        assert gw.sent and gw.posts == [ ]
 
     def test_iso2_full_execute_loop_over_real_events( self, fleet ):
         """The REAL poll LOOP (do_all → _execute) over a real event file — one poll then hard-cap.

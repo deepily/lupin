@@ -125,6 +125,29 @@ def create_app(
     return app
 
 
+def _make_health_notify_fn( gateway, live_notify_fn, log_fn ):
+    """
+    Build the health-watcher (Loop A) escalation notify_fn — Part-6 #1/#2/#3:
+    infra/self-health alerts (container unhealthy / flapping / health-watch BLIND)
+    route to RICK ONLY (durable `fleet-escalations` post + best-effort live push),
+    with NO manager fanout (managers don't act on containers). Keeps the structured
+    `health_escalation` log line too.
+
+    Ensures:
+        - returns notify( message ) that logs `health_escalation` AND escalates to
+          Rick via the shared escalation sink (durable + deduped live push); never
+          raises (the escalation sink is degrade-safe)
+    """
+    from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn
+    escalate = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn )
+
+    def notify( message ):
+        log_fn( "health_escalation", message=message )
+        escalate( message )                            # Part-6 #1/2/3 → Rick only (no managers)
+
+    return notify
+
+
 def assemble_app(
     cfg,
     gateway,
@@ -173,6 +196,7 @@ def assemble_app(
         tap_min_interval     = int( cfg.get( "arbiter tap min interval seconds", default=300, return_type="int" ) ),
         ack_window           = int( cfg.get( "arbiter manager ack window seconds", default=600, return_type="int" ) ),
         stall_window         = int( cfg.get( "arbiter fleet stall window seconds", default=1800, return_type="int" ) ),
+        poll_error_escalate_threshold = int( cfg.get( "arbiter poll error escalate threshold", default=3, return_type="int" ) ),
         start_period_seconds = int( cfg.get( "arbiter start period seconds", default=120, return_type="int" ) ),
     )
     fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=log_fn )
@@ -189,7 +213,7 @@ def assemble_app(
     health_loop = HealthWatcherLoop(
         containers            = _csv( "arbiter health watch containers", "lupin-rest-dev,lupin-rest-test,lupin-model-server,lupin-postgres" ),
         inspect_fn            = lambda name: docker_inspect_health( name, int( cfg.get( "arbiter health inspect timeout seconds", default=5, return_type="int" ) ) ),
-        notify_fn             = lambda msg: log_fn( "health_escalation", message=msg ),
+        notify_fn             = _make_health_notify_fn( gateway, live_notify_fn, log_fn ),   # Part-6 #1/2/3 → Rick
         store                 = store,
         log_fn                = log_fn,
         interval_seconds      = int( cfg.get( "arbiter health watch interval seconds", default=30, return_type="int" ) ),

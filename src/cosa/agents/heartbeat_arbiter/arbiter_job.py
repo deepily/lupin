@@ -57,6 +57,13 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 )
 from cosa.agents.heartbeat_arbiter.manager_resolver import (
     resolve_manager as _default_resolve_manager,
+    resolve_active_managers as _default_resolve_active_managers,
+)
+# 2b-2 recipient routing — the ratified Part-6 tier model (pure leaf). CASE_TIERS
+# is the RUNTIME contract: _route(case, …) dispatches by tier_for(case).
+from cosa.agents.heartbeat_arbiter.arbiter_routing import (
+    TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS, TIER_OWNING_MANAGER,
+    TIER_BLOCKER_AND_MANAGER, TIER_DROP, tier_for,
 )
 
 
@@ -67,7 +74,10 @@ ROSTER_TOPIC          = "fleet-arbiter"
 # arbiter TAILS it (read-only) and escalates each new post to Rick. Registered in
 # planning-is-prompting → workflow/cross-session-communication.md reserved-topic table.
 DECISION_TOPIC        = "fleet-decision-needed"
-PING_MESSAGE_TEMPLATE = "Session {holder} is holding on you — where are we?"
+# 2b-2 Part-6 #4 rewrite: the ping goes to the BLOCKER (`awaited`), naming the
+# blocked worker (`holder`) and the ASK — not the old vague "where are we?".
+PING_MESSAGE_TEMPLATE = ( "You're blocking worker {holder} — they're waiting on you. "
+                          "Post your status or unblock them." )
 # build_graph edges are persona→persona; a richer "reason" is not well-sourced
 # from the event stream (the holder's `awaiting` is just "peer:<awaited>",
 # circular), so the throttle key uses a stable constant — one ping per
@@ -151,6 +161,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         tap_min_interval_seconds : int                  = 300,
         manager_ack_window_seconds : int                = 600,
         fleet_stall_window_seconds : int                = 1800,
+        poll_error_escalate_threshold : int             = 3,
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
@@ -158,6 +169,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         snapshot_sink            : Optional[ Callable ] = None,
         render_sink              : Optional[ Callable ] = None,
         resolve_manager_fn       : Optional[ Callable ] = None,
+        resolve_active_managers_fn : Optional[ Callable ] = None,
         user_id      : str  = None,
         user_email   : str  = None,
         session_id   : str  = None,
@@ -224,6 +236,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             raise ValueError( f"ping_cap_window_seconds must be positive, got {ping_cap_window_seconds}" )
         if tail_maxlen <= 0:
             raise ValueError( f"tail_maxlen must be positive, got {tail_maxlen}" )
+        if poll_error_escalate_threshold < 1:
+            raise ValueError( f"poll_error_escalate_threshold must be >= 1, got {poll_error_escalate_threshold}" )
         if not manager_recipient:
             raise ValueError( "manager_recipient must be a non-empty string" )
 
@@ -252,9 +266,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._render_sink     = render_sink      if render_sink     is not None else print
         # v2.2 B2 manager-tap: per-worker manager routing (D5 lineage) seam.
         self._resolve_manager_fn = resolve_manager_fn if resolve_manager_fn is not None else _default_resolve_manager
-        self.tap_min_interval_seconds   = tap_min_interval_seconds
-        self.manager_ack_window_seconds = manager_ack_window_seconds
-        self.fleet_stall_window_seconds = fleet_stall_window_seconds
+        # 2b-2 Part-6 fanout: the active-managers-on-duty resolver seam (commons
+        # candidate ∩ live-bridge PID guard — phantom-safe). Injectable for tests.
+        self._resolve_active_managers_fn = ( resolve_active_managers_fn
+                                             if resolve_active_managers_fn is not None
+                                             else _default_resolve_active_managers )
+        self.tap_min_interval_seconds      = tap_min_interval_seconds
+        self.manager_ack_window_seconds    = manager_ack_window_seconds
+        self.fleet_stall_window_seconds    = fleet_stall_window_seconds
+        self.poll_error_escalate_threshold = poll_error_escalate_threshold
 
         # --- consumer state (carried across polls) ---
         self._offsets       = { }                                  # sid -> byte offset
@@ -284,6 +304,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._last_progress_sig = None
         self._last_progress_at  = None
         self._stall_escalated   = False
+        # 2b-2 Part-6 #12: poll-error is DEMOTED to a log; escalate to Rick only
+        # when PERSISTENT (≥ threshold consecutive failures = arbiter effectively
+        # down). Streak resets on any clean poll; escalate-once per persistent run.
+        self._poll_error_streak    = 0
+        self._poll_error_escalated = False
 
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI (QueueableJob protocol)."""
@@ -316,14 +341,25 @@ class ArbiterConsumerJob( AgenticJobBase ):
         )
         graph = build_graph( fleet_view )
 
-        self._escalate_deadlocks( graph[ "cycles" ] )
-        pings_fired = self._auto_ping( graph[ "edges" ], now )
+        # 2b-2 Part-6 fanout inputs: the active-managers-on-duty set (phantom-
+        # guarded) for the Rick+managers tier, and a persona→session_id map (off
+        # the fleet view) so #4 can cc the blocker's owning manager.
+        active_managers = self._active_managers( who_rows, bridge_sessions )
+        persona_to_sid  = {
+            v.get( "persona" ): v.get( "session_id" )
+            for v in fleet_view.values()
+            if isinstance( v, dict ) and v.get( "persona" )
+        }
+
+        self._escalate_deadlocks( graph[ "cycles" ], active_managers )    # #5 Rick + all mgrs
+        pings_fired = self._auto_ping( graph[ "edges" ], now, persona_to_sid )  # #4 blocker + cc mgr
         roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds )
-        self._surface_to_manager( fleet_view, graph, roster )       # durable topic fallback
-        taps_fired    = self._tap_managers( fleet_view, graph, roster, now )   # v2.2 B2 DM tap
-        managers_down = self._check_manager_acks( now, who_rows )   # v2.2 B4/D4 manager-down
-        decisions     = self._check_decision_needed( now )          # v2.2 B3 D3 decision-needed
-        stalled       = self._check_fleet_stall( fleet_view, now )  # v2.2 B3 D3 whole-fleet-stall
+        # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
+        # served by /state via the snapshot below; no per-tick commons post.
+        taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers )  # #7 / #8
+        managers_down = self._check_manager_acks( now, who_rows, active_managers )  # #9 Rick + all mgrs
+        decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
+        stalled       = self._check_fleet_stall( fleet_view, now, active_managers )  # #11 Rick + all mgrs
         rendered      = self._publish_fleet_snapshot( fleet_view, now )
 
         self._poll_count += 1
@@ -375,24 +411,89 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._snapshot_sink( snapshot )
         return rendered
 
-    def _auto_ping( self, edges, now ):
+    # ── 2b-2 Part-6 recipient routing ───────────────────────────────────────────
+
+    def _active_managers( self, who_rows, bridge_sessions ):
+        """
+        Resolve the active-managers-on-duty set for the Rick+managers fanout tier.
+
+        Delegates to the injected resolver (commons candidate ∩ live-bridge PID
+        guard — phantom-safe; a reaped manager whose commons last-post lingers is
+        EXCLUDED). Swallows any resolver hiccup → [] (observer invariant: a
+        resolver failure degrades the fanout to Rick-only, never crashes the poll).
+
+        Ensures:
+            - returns a list of active-manager personas (possibly empty); never raises
+        """
+        try:
+            return self._resolve_active_managers_fn( who_rows, bridge_sessions ) or [ ]
+        except Exception:
+            return [ ]
+
+    def _route( self, case, message, *, active_managers=None, owning_manager=None,
+                blocker=None, cc_message=None ):
+        """
+        Dispatch an arbiter output to its Part-6 recipient tier — CASE_TIERS
+        (arbiter_routing) is the contract; `tier_for(case)` selects the tier.
+
+        Invariant: calls ONLY {notify_fn, send_to} — NO actuation (redline). The
+        redline test (test_arbiter_redline) guards this structurally.
+
+        Tier behaviors:
+            - TIER_RICK_ONLY          → notify_fn(message)  (Rick: durable + live push)
+            - TIER_RICK_AND_MANAGERS  → notify_fn(message) + send_to each active manager
+            - TIER_OWNING_MANAGER     → send_to(owning_manager, message)  (if resolved)
+            - TIER_BLOCKER_AND_MANAGER→ send_to(blocker, message) + send_to(owning_manager,
+                                        cc_message)  (each when present)
+            - TIER_DROP               → no push (pull-state; #6)
+          (TIER_LOG_THEN_RICK #12 is handled by _on_poll_error's streak logic, not here.)
+
+        Ensures:
+            - emits exactly the recipients its tier prescribes; absent optional
+              recipients (no manager resolved, empty active set) degrade silently
+            - never raises out (gateway send hiccups propagate to the caller's guard)
+        """
+        tier = tier_for( case )
+        if tier == TIER_RICK_ONLY:
+            self._notify_fn( message )
+        elif tier == TIER_RICK_AND_MANAGERS:
+            self._notify_fn( message )
+            for manager in active_managers or [ ]:
+                self._commons.send_to( manager, message )
+        elif tier == TIER_OWNING_MANAGER:
+            if owning_manager:
+                self._commons.send_to( owning_manager, message )
+        elif tier == TIER_BLOCKER_AND_MANAGER:
+            if blocker:
+                self._commons.send_to( blocker, message )
+            if owning_manager and cc_message:
+                self._commons.send_to( owning_manager, cc_message )
+        # TIER_DROP → intentional no-op (the #6 roster broadcast is cut)
+
+    def _auto_ping( self, edges, now, persona_to_sid=None ):
         """
         Auto-ping each blocker, throttled + per-edge backoff + global cap, then
-        clear-on-resume (§6.1).
+        clear-on-resume (§6.1). Part-6 #4: DM the blocker AND cc its owning manager.
 
         Requires:
-            - edges is {holder: awaited} (build_graph output — persona→persona)
+            - edges is {holder: awaited} (build_graph output — persona→persona;
+              `holder` is the BLOCKED worker waiting on `awaited`, the BLOCKER)
             - now is an aware datetime
+            - persona_to_sid maps persona → session_id (for the manager cc) or None
 
         Ensures:
             - pings at most one DM per (holder, awaited) edge per backoff window,
               and never more than ping_global_cap within the cap window
-            - the DM names the holder + goes to the awaited peer
+            - the DM goes to the BLOCKER (awaited), naming the blocked worker
+              (holder) + the ask (Part-6 #4 rewrite), AND cc's the blocker's owning
+              manager (resolved via lineage) when resolvable — so the manager chases
+              if the blocker stays silent
             - records each ping in the ledger + attempt counter
             - drops ledger + attempt state for edges no longer active (resume)
             - returns the count of pings fired this poll
         """
         self._prune_recent_pings( now )
+        persona_to_sid = persona_to_sid or { }
         fired       = 0
         active_keys = set()
 
@@ -409,7 +510,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
             backoff   = ping_throttle.backoff_for_attempt( attempt - 1 )
             under_cap = ping_throttle.under_global_cap( len( self._recent_pings ), self.ping_global_cap )
             if under_cap and ping_throttle.should_ping( self._ledger.get_last( key ), now, backoff ):
-                self._commons.send_to( awaited, PING_MESSAGE_TEMPLATE.format( holder=holder ) )
+                manager, cc_msg = self._blocker_manager_cc( awaited, holder, persona_to_sid )
+                self._route( 4, PING_MESSAGE_TEMPLATE.format( holder=holder ),   # Part-6 #4
+                             blocker=awaited, owning_manager=manager, cc_message=cc_msg )
                 self._ledger.record_ping( key, now )
                 self._ping_attempts[ key ] = attempt + 1
                 self._recent_pings.append( now )
@@ -421,21 +524,50 @@ class ArbiterConsumerJob( AgenticJobBase ):
             del self._ping_attempts[ stale ]
         return fired
 
-    def _escalate_deadlocks( self, cycles ):
+    def _blocker_manager_cc( self, blocker, blocked_worker, persona_to_sid ):
         """
-        Escalate deadlock cycles to the user/manager — NEVER auto-break (§4).
+        Part-6 #4 helper: resolve the BLOCKER's owning manager + build the cc note
+        so the manager chases if the blocker stays silent.
+
+        Ensures:
+            - returns (manager_persona, cc_message) when a DM-able owning manager
+              (≠ the blocker) resolves from spawn-lineage; else (None, None)
+            - never raises (a resolver hiccup degrades to (None, None) → Rick/blocker
+              still nudged, just no cc)
+        """
+        sid = persona_to_sid.get( blocker )
+        if not sid:
+            return None, None
+        try:
+            res     = self._resolve_manager_fn( sid, declared_manager=self.manager_recipient )
+            manager = res.get( "manager_persona" ) if isinstance( res, dict ) else None
+        except Exception:
+            manager = None
+        if not manager or manager == blocker:
+            return None, None
+        cc = ( f"Heartbeat arbiter (cc): {blocker} is blocking worker {blocked_worker}. "
+               f"I've nudged {blocker} directly — chase if they stay silent." )
+        return manager, cc
+
+    def _escalate_deadlocks( self, cycles, active_managers=None ):
+        """
+        Escalate deadlock cycles — NEVER auto-break (§4). Part-6 #5: Rick + ALL
+        active managers (a human/manager breaks the cycle).
 
         Requires:
             - cycles is a list of canonical peer cycles (build_graph output)
+            - active_managers is the resolved on-duty manager set (or None)
 
         Ensures:
-            - fires ONE notify_fn escalation per poll when any cycle exists
-              (the arbiter surfaces deadlocks; a human decides the break)
+            - fires ONE escalation per poll when any cycle exists — to Rick
+              (notify_fn) + each active manager (send_to) — the arbiter surfaces
+              deadlocks; a human/manager decides the break
             - no-op when there are no cycles
         """
         if cycles:
             rendered = "; ".join( " → ".join( c ) for c in cycles )
-            self._notify_fn( f"DEADLOCK detected (no autonomous break) — escalating: {rendered}" )
+            self._route( 5, f"DEADLOCK detected (no autonomous break) — escalating: {rendered}",
+                         active_managers=active_managers )
 
     def _prune_recent_pings( self, now ):
         """Drop recorded pings older than the global-cap window (rolling cap)."""
@@ -445,33 +577,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if ( now - ts ).total_seconds() < cutoff
         ]
 
-    def _surface_to_manager( self, fleet_view, graph, roster ):
-        """
-        Post the sensor+recommender surface to the manager (§6.3 — never auto-assign).
-
-        Ensures:
-            - posts a single structured message to ROSTER_TOPIC summarising the
-              idle-roster, blocked edges, deadlock cycles, and stuck sessions
-            - deadlock cycles are flagged for manager escalation (the arbiter
-              never breaks a cycle autonomously)
-        """
-        stuck = [ v.get( "session_id" ) for v in fleet_view.values()
-                  if isinstance( v, dict ) and v.get( "stuck" ) ]
-        lines = [
-            f"Fleet arbiter — {len( fleet_view )} session(s).",
-            f"Idle-roster ({len( roster )}): " + ", ".join(
-                f"{r['persona'] or r['session_id']} [{r['trust_label']}]" for r in roster
-            ) if roster else "Idle-roster: (none)",
-            f"Blocked edges ({len( graph['edges'] )}): " + ", ".join(
-                f"{h}→{a}" for h, a in graph[ "edges" ].items()
-            ) if graph[ "edges" ] else "Blocked edges: (none)",
-        ]
-        if graph[ "cycles" ]:
-            lines.append( "⚠️ DEADLOCK cycle(s) — manager escalation: " +
-                          "; ".join( " → ".join( c ) for c in graph[ "cycles" ] ) )
-        if stuck:
-            lines.append( "Stuck (≥2 cap-reached, work owed): " + ", ".join( stuck ) )
-        self._commons.post( ROSTER_TOPIC, "\n".join( lines ) )
+    # NOTE (2b-2 Part-6 #6): the per-tick roster broadcast (formerly
+    # `_surface_to_manager` → post(ROSTER_TOPIC)) is DROPPED. A roster is PULL
+    # state: it is served by /state via `_publish_fleet_snapshot` (the snapshot
+    # sink), not spammed to a commons topic nobody polls every ~60s. ROSTER_TOPIC
+    # is retained only as the historical topic constant; nothing posts to it now.
 
     # ── v2.2 B2: active manager-tap (DM-push, per-group, throttled) ─────────────
 
@@ -540,23 +650,24 @@ class ArbiterConsumerJob( AgenticJobBase ):
         )
         return "\n".join( lines )
 
-    def _tap_managers( self, fleet_view, graph, roster, now ):
+    def _tap_managers( self, fleet_view, graph, roster, now, active_managers=None ):
         """
         Actively TAP each manager-on-duty with their crew's actionable ADVISORY
         summary (DM-push), throttled tap-on-change + min-interval (B2 / D1).
 
-        Routing (D5): each attention-needing worker → resolve_manager → grouped
-        by manager persona; an UNRESOLVED manager → escalate to Rick via
-        notify_fn (never a wrong-manager DM). The topic post (_surface_to_manager)
-        remains the durable fallback.
+        Routing (Part-6 #7/#8): each attention-needing worker → resolve_manager →
+        grouped by manager persona (#7, the owning-manager DM); an UNRESOLVED
+        manager → ORPHAN worker → escalate to Rick + ALL active managers (#8 — any
+        manager could adopt it), never a wrong-manager DM.
 
-        Invariant: this method calls ONLY {send_to, post} + notify_fn — NO
-        actuation (never-auto-assign).
+        Invariant: this method calls ONLY {send_to} + notify_fn — NO actuation
+        (never-auto-assign).
 
         Ensures:
             - taps a manager only when their crew-summary signature changed since
               the last tap AND ≥ tap_min_interval_seconds elapsed (anti-storm)
-            - unresolved-manager workers escalate to Rick (notify_fn)
+            - unresolved-manager (orphan) workers escalate to Rick + all active
+              managers
             - returns the count of manager DMs fired this poll; never raises
         """
         attention = self._attention_workers( fleet_view, graph )
@@ -569,9 +680,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
                                                 declared_manager=self.manager_recipient )
             persona = res.get( "manager_persona" ) if isinstance( res, dict ) else None
             if not persona:
-                self._notify_fn(
+                self._route(                                   # Part-6 #8 orphan worker
+                    8,
                     f"Unresolved manager for attention-needing worker "
-                    f"{view.get( 'persona' ) or view.get( 'session_id' )} — escalating to Rick"
+                    f"{view.get( 'persona' ) or view.get( 'session_id' )} — escalating to "
+                    f"Rick + active managers (orphan — any manager could adopt)",
+                    active_managers=active_managers
                 )
                 continue
             groups.setdefault( persona, [ ] ).append( view )
@@ -581,7 +695,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         for manager, members in groups.items():
             sig = self._tap_signature( members, graph )
             if self._should_tap( manager, sig, now ):
-                self._commons.send_to( manager, self._format_manager_tap( manager, members, graph, free_n ) )
+                self._route( 7, self._format_manager_tap( manager, members, graph, free_n ),  # Part-6 #7
+                             owning_manager=manager )
                 self._last_tap_sig[ manager ] = sig
                 self._last_tap_at[ manager ]  = now
                 fired += 1
@@ -605,7 +720,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 best = ts
         return best
 
-    def _check_manager_acks( self, now, who_rows ):
+    def _check_manager_acks( self, now, who_rows, active_managers=None ):
         """
         B4/D4 manager-down detector via the liveness-proxy ACK.
 
@@ -639,10 +754,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if ( now - tapped_at ).total_seconds() >= self.manager_ack_window_seconds \
                and manager not in self._manager_down_escalated:
                 self._manager_down_escalated.add( manager )
-                self._notify_fn(
+                self._route(                                   # Part-6 #9 manager-down
+                    9,
                     f"MANAGER-DOWN: {manager} did not ack the arbiter tap within "
                     f"{self.manager_ack_window_seconds}s (no liveness since tap) — "
-                    f"escalating to Rick + HOLDING (no auto-assign)"
+                    f"escalating to Rick + active managers + HOLDING (no auto-assign)",
+                    active_managers=active_managers
                 )
                 down += 1
         return down
@@ -678,11 +795,40 @@ class ArbiterConsumerJob( AgenticJobBase ):
             ts      = entry.get( "ts" )
             body    = entry.get( "body", "" )
             who     = entry.get( "persona_name" ) or entry.get( "sender_session_id" ) or "a session"
-            self._notify_fn( f"DECISION-NEEDED (escalating to Rick) — {who}: {body}" )
+            self._route( 10, f"DECISION-NEEDED (escalating to Rick) — {who}: {body}" )    # Part-6 #10 Rick
+            self._cc_decision_manager( entry )                                           # +owning mgr if known
             fired += 1
             if ts and ( self._decision_since is None or ts > self._decision_since ):
                 self._decision_since = ts
         return fired
+
+    def _cc_decision_manager( self, entry ):
+        """
+        Part-6 #10: cc the owning manager of a decision-needed post WHEN KNOWN.
+
+        Decisions are Rick-primary; the owning manager is looped in only if the
+        post carries a `sender_session_id` that resolves (via lineage) to a DM-able
+        manager. No session / no resolution → Rick-only (no-op). Calls ONLY
+        send_to (redline-safe).
+
+        Ensures:
+            - send_to( manager, cc-note ) exactly when a DM-able owning manager
+              resolves from the post's sender; else no-op; never raises
+        """
+        sid = entry.get( "sender_session_id" )
+        if not sid:
+            return
+        try:
+            res     = self._resolve_manager_fn( sid, declared_manager=None )
+            manager = res.get( "manager_persona" ) if isinstance( res, dict ) else None
+        except Exception:
+            manager = None
+        if manager:
+            self._commons.send_to(
+                manager,
+                f"Heartbeat arbiter (cc): your crew posted a decision-needed — "
+                f"{entry.get( 'body', '' )}. Rick has it; weigh in if it's yours."
+            )
 
     @staticmethod
     def _fleet_progress_signature( fleet_view ):
@@ -727,10 +873,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
             for v in fleet_view.values()
         )
 
-    def _check_fleet_stall( self, fleet_view, now ):
+    def _check_fleet_stall( self, fleet_view, now, active_managers=None ):
         """
         D3 catch-all: no FLEET PROGRESS for ≥ fleet_stall_window_seconds while
-        LIVE work is owed → escalate to Rick (so nothing rots silently).
+        LIVE work is owed → escalate to Rick + ALL active managers (Part-6 #11).
 
         LOAD-BEARING (María): PROGRESS keys on the semantic signature (state /
         stuck / holding), NOT on liveness — so it FIRES EVEN WHEN A MANAGER'S
@@ -766,9 +912,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
              and ( now - self._last_progress_at ).total_seconds() >= self.fleet_stall_window_seconds
              and not self._stall_escalated ):
             self._stall_escalated = True
-            self._notify_fn(
+            self._route(                                   # Part-6 #11 Rick + all mgrs
+                11,
                 f"WHOLE-FLEET-STALL: no fleet progress for ≥{self.fleet_stall_window_seconds}s "
-                f"with work owed — escalating to Rick (manager present-but-not-acting?)"
+                f"with work owed — escalating to Rick (manager present-but-not-acting?)",
+                active_managers=active_managers
             )
             return 1
         return 0
@@ -781,8 +929,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - exits on self._cancel_requested or elapsed >= max_duration_seconds
-            - a per-poll exception is logged via notify_fn and SWALLOWED (the
-              observer invariant — one bad poll never kills the arbiter)
+            - a per-poll exception is SWALLOWED (the observer invariant — one bad
+              poll never kills the arbiter) and DEMOTED to a render-sink log
+              (Part-6 #12); it escalates to Rick (notify_fn) ONLY when PERSISTENT
+              (≥ poll_error_escalate_threshold consecutive failures), once per run;
+              a clean poll resets the streak
             - returns an exit-summary string
         """
         start = self._clock.monotonic()
@@ -794,10 +945,39 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
             try:
                 self._poll_once()
+                self._poll_error_streak    = 0          # clean poll → reset the streak
+                self._poll_error_escalated = False
             except Exception as e:                      # observer invariant — never die on one poll
-                self._notify_fn( f"arbiter poll error (continuing): {e}" )
+                self._on_poll_error( e )
 
             await self._clock.sleep( self.poll_seconds )
+
+    def _on_poll_error( self, error ):
+        """
+        Part-6 #12: handle a swallowed per-poll exception — LOG (transient), escalate
+        to Rick ONLY when PERSISTENT.
+
+        Ensures:
+            - increments the consecutive-error streak
+            - at/after poll_error_escalate_threshold consecutive failures, escalates
+              ONCE to Rick (notify_fn — "arbiter effectively down"); below it, logs a
+              transient line to the render sink (no Rick spam on a one-off hiccup)
+            - never raises
+        """
+        self._poll_error_streak += 1
+        if ( self._poll_error_streak >= self.poll_error_escalate_threshold
+             and not self._poll_error_escalated ):
+            self._poll_error_escalated = True
+            self._notify_fn(
+                f"ARBITER POLL-ERROR persistent: {self._poll_error_streak} consecutive poll "
+                f"failures (≥{self.poll_error_escalate_threshold}) — escalating to Rick "
+                f"(arbiter effectively down): {error}"
+            )
+        else:
+            self._render_sink(
+                f"arbiter poll-error (transient, streak {self._poll_error_streak}/"
+                f"{self.poll_error_escalate_threshold}): {error}"
+            )
 
     def _exit_summary( self, reason ):
         """Ensures: returns a human-readable exit summary + stores it on the job."""

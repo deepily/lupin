@@ -149,15 +149,16 @@ def test_last_question_asked_display( tmp_path ):
 
 # ── _poll_once composition ────────────────────────────────────────────────────
 
-def test_poll_once_builds_view_and_surfaces( tmp_path ):
+def test_poll_once_builds_view_no_roster_broadcast( tmp_path ):
     _write_events( str( tmp_path ), "s1", _event( "s1", "honored", awaiting="none", persona="Alice" ) )
     gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": NOW_ISO } ] )
     job = _make_job( tmp_path, gateway=gw )
     summary = job._poll_once()
     assert summary[ "sessions" ] == 1
     assert job._poll_count == 1
-    # manager surface posted to the roster topic
-    assert gw.posts and gw.posts[ 0 ][ 0 ] == ROSTER_TOPIC
+    # Part-6 #6: the per-tick roster broadcast is DROPPED — the fleet roster is
+    # pull-state (/state snapshot), NOT a commons post. Nothing is posted.
+    assert gw.posts == [ ]
 
 
 # ── v1.4 integrator: bridge discovery → UNION roster ──────────────────────────
@@ -222,8 +223,7 @@ def test_poll_once_inference_idle_with_shipped_defaults( tmp_path ):
     gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": old_ts } ] )
     job = _make_job( tmp_path, gateway=gw )        # shipped defaults: quiet=300, alive=600
     summary = job._poll_once()
-    assert summary[ "roster" ] == 1
-    assert "quiet (inferred)" in gw.posts[ 0 ][ 1 ]
+    assert summary[ "roster" ] == 1                # inference half alive (roster built; #6 broadcast dropped)
 
 
 def test_poll_once_auto_pings_blocker( tmp_path ):
@@ -235,8 +235,8 @@ def test_poll_once_auto_pings_blocker( tmp_path ):
     summary = job._poll_once()
     assert summary[ "edges" ] == 1
     assert summary[ "pings_fired" ] == 1
-    assert gw.sent[ 0 ][ 0 ] == "Bob"
-    assert "holding on you" in gw.sent[ 0 ][ 1 ]
+    assert gw.sent[ 0 ][ 0 ] == "Bob"                     # the blocker (awaited peer)
+    assert "blocking worker" in gw.sent[ 0 ][ 1 ]         # Part-6 #4 rewrite
 
 
 def test_poll_once_throttle_blocks_second_ping( tmp_path ):
@@ -322,32 +322,10 @@ def test_prune_recent_pings_drops_old( tmp_path ):
     assert len( job._recent_pings ) == 1
 
 
-# ── _surface_to_manager branches ──────────────────────────────────────────────
-
-def test_surface_empty_fleet( tmp_path ):
-    gw  = FakeGateway()
-    job = _make_job( tmp_path, gateway=gw )
-    job._surface_to_manager( { }, { "edges": { }, "cycles": [ ] }, [ ] )
-    body = gw.posts[ 0 ][ 1 ]
-    assert "Idle-roster: (none)" in body and "Blocked edges: (none)" in body
-
-
-def test_surface_with_roster_edges_cycles_stuck( tmp_path ):
-    gw  = FakeGateway()
-    job = _make_job( tmp_path, gateway=gw )
-    fleet_view = {
-        "s1": { "session_id": "s1", "persona": "Alice", "stuck": True },
-        "s2": { "session_id": "s2", "persona": "Bob", "stuck": False },
-        "bad": "not-a-dict",                          # skipped by the stuck comprehension
-    }
-    graph  = { "edges": { "s1": "Bob" }, "cycles": [ [ "Alice", "Bob" ] ] }
-    roster = [ { "session_id": "s2", "persona": "Bob", "trust_label": "quiet (inferred)" } ]
-    job._surface_to_manager( fleet_view, graph, roster )
-    body = gw.posts[ 0 ][ 1 ]
-    assert "Bob [quiet (inferred)]" in body
-    assert "s1→Bob" in body
-    assert "DEADLOCK" in body
-    assert "Stuck" in body and "s1" in body
+# NOTE (2b-2 Part-6 #6): `_surface_to_manager` is DELETED — the per-tick roster
+# broadcast is dropped (pull-state via /state). Its former tests are removed;
+# the negative receipt (no roster post) is asserted by
+# test_poll_once_builds_view_no_roster_broadcast above and the integration suite.
 
 
 # ── _execute lifecycle + do_all ───────────────────────────────────────────────
@@ -371,15 +349,32 @@ def test_execute_hard_cap_exits_after_polls( tmp_path ):
     assert clk.sleeps == [ 5 ]                       # slept once (poll_seconds)
 
 
-def test_execute_swallows_poll_exception( tmp_path, monkeypatch ):
-    errs = [ ]
+def test_execute_swallows_poll_exception_transient_logs_not_escalates( tmp_path, monkeypatch ):
+    """Part-6 #12: ONE poll error is TRANSIENT — DEMOTED to a render-sink log, NOT
+    escalated to Rick (notify_fn). The loop survives."""
+    errs, logs = [ ], [ ]
     clk  = FakeClock( monotonic_seq=[ 0, 0, 100 ] )
     job  = _make_job( tmp_path, clock=clk, notify_fn=lambda m: errs.append( m ),
-                      max_duration_seconds=100 )
+                      render_sink=logs.append, max_duration_seconds=100 )   # threshold default 3
     monkeypatch.setattr( job, "_poll_once", lambda: ( _ for _ in () ).throw( RuntimeError( "boom" ) ) )
     summary = job.do_all()
     assert "hard-cap" in summary                     # loop survived the bad poll
-    assert errs and "arbiter poll error" in errs[ 0 ]
+    assert errs == [ ]                               # #12: NOT escalated to Rick on a one-off
+    assert any( "poll-error (transient" in l and "boom" in l for l in logs )
+
+
+def test_execute_persistent_poll_error_escalates_once( tmp_path, monkeypatch ):
+    """Part-6 #12: at ≥ poll_error_escalate_threshold consecutive failures the
+    arbiter IS escalated to Rick (notify_fn) — ONCE, 'effectively down'."""
+    errs = [ ]
+    clk  = FakeClock( monotonic_seq=[ 0, 0, 0, 100 ] )                       # two polls, then exit
+    job  = _make_job( tmp_path, clock=clk, notify_fn=lambda m: errs.append( m ),
+                      poll_error_escalate_threshold=2, max_duration_seconds=100 )
+    monkeypatch.setattr( job, "_poll_once", lambda: ( _ for _ in () ).throw( RuntimeError( "boom" ) ) )
+    summary = job.do_all()
+    assert "hard-cap" in summary
+    assert len( errs ) == 1                          # escalated once on the 2nd consecutive failure
+    assert "POLL-ERROR persistent" in errs[ 0 ] and "Rick" in errs[ 0 ]
 
 
 def test_do_all_stamps_timestamps( tmp_path ):

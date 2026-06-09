@@ -97,6 +97,113 @@ def find_manager_session_id( tmux_session: str, session_dir: Path = SESSION_DIR 
     return None
 
 
+def _id_matches( a, b ):
+    """Prefix-tolerant session-id match (short 8-char event ids vs full uuids)."""
+    if not a or not b:
+        return False
+    return a == b or a.startswith( b ) or b.startswith( a )
+
+
+def list_manager_session_ids( session_dir: Path = SESSION_DIR ):
+    """
+    Enumerate every MANAGER session-id that owns a (round-trip-valid) spawn manifest.
+
+    The inverse of `find_manager_session_id`: instead of resolving ONE worker's
+    manager, list ALL managers — a session is a manager iff it spawned ≥1 child
+    (a `spawned-<id>.json` manifest exists). The id is parsed from the filename
+    and trusted ONLY if it round-trips `_manifest_path(id).name == filename` (same
+    guard as find_manager_session_id — a lossy/non-round-tripping name is skipped).
+
+    Requires:
+        - session_dir is the spawn-manifest directory
+
+    Ensures:
+        - returns a set of manager session-ids (one per round-trip-valid manifest)
+        - returns an empty set on OSError / missing dir (degrade-safe)
+        - never raises
+    """
+    try:
+        manifests = sorted( session_dir.glob( f"{_MANIFEST_PREFIX}*{_MANIFEST_SUFFIX}" ) )
+    except OSError:
+        return set()
+    ids = set()
+    for path in manifests:
+        manager_id = path.name[ len( _MANIFEST_PREFIX ) : -len( _MANIFEST_SUFFIX ) ]
+        if manager_id and _manifest_path( manager_id, session_dir ).name == path.name:
+            ids.add( manager_id )
+    return ids
+
+
+def resolve_active_managers(
+    who_rows,
+    bridge_sessions,
+    *,
+    list_managers : Optional[ Callable ] = None,
+    session_dir   : Path                 = SESSION_DIR,
+):
+    """
+    Resolve the managers ON DUTY for the Part-6 fleet-crisis fanout (Rick + ALL
+    active managers), phantom-guarded.
+
+    A persona is an ACTIVE MANAGER iff it satisfies BOTH:
+      (1) MANAGER-ROLE — its session owns a spawn-lineage manifest (it spawned
+          ≥1 child; via `list_managers`).
+      (2) PROCESS-ALIVE — its session is present in `bridge_sessions` (the
+          PID + mtime-filtered live-bridge discovery, `find_active_voice_persona_sessions`).
+          This is the PHANTOM GUARD: a reaped manager whose commons `last_post_ts`
+          LINGERS in `who_rows` is EXCLUDED, because its dead bridge is absent from
+          bridge_sessions. (Raw commons_who is the phantom-prone signal — bridge
+          presence is the authoritative process-liveness axis, per the Round-1
+          union doctrine.)
+
+    `who_rows` (commons_who) SEEDS the candidate set (a manager visible on commons
+    OR discovered via its bridge); the bridge-presence check then GUARDS it. The
+    persona name prefers the authoritative bridge value, falling back to the
+    who-row persona.
+
+    Requires:
+        - who_rows is a list of commons_who rows (dicts) or None
+        - bridge_sessions is { session_id: persona_name|None } (the arbiter's
+          bridge discovery) or None
+
+    Ensures:
+        - returns a SORTED list of DISTINCT active-manager personas
+        - excludes non-managers (no manifest) AND phantoms (commons-recent but no
+          live bridge) AND managers with no DM-able persona
+        - never raises
+    """
+    list_managers   = list_managers   if list_managers   is not None else list_manager_session_ids
+    who_rows        = who_rows        or [ ]
+    bridge_sessions = bridge_sessions or { }
+
+    try:
+        manager_ids = list_managers( session_dir )
+    except Exception:
+        manager_ids = set()
+    if not manager_ids:
+        return [ ]
+
+    def _is_manager( sid ):
+        return any( _id_matches( sid, mid ) for mid in manager_ids )
+
+    # candidate manager sessions: commons-active (who_rows) ∪ bridge-present, ∩ role
+    candidates = { }                                   # session_id -> persona|None
+    for row in who_rows:
+        sid = row.get( "session_id" ) if isinstance( row, dict ) else None
+        if sid and _is_manager( sid ):
+            candidates[ sid ] = row.get( "persona_name" )
+    for sid, persona in bridge_sessions.items():
+        if sid and _is_manager( sid ):
+            candidates[ sid ] = persona or candidates.get( sid )
+
+    # PHANTOM GUARD: keep only sessions with a LIVE bridge (PID-alive), with a persona
+    alive = set()
+    for sid, persona in candidates.items():
+        if persona and any( _id_matches( sid, bsid ) for bsid in bridge_sessions ):
+            alive.add( persona )
+    return sorted( alive )
+
+
 def _default_bridge_lookup( session_id ):   # pragma: no cover - IO boundary
     from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
     return find_session_by_id( session_id )
@@ -182,6 +289,15 @@ def quick_smoke_test():
     # error → fallback (unresolved here)
     out = resolve_manager( "w", bridge_lookup=lambda sid: ( _ for _ in () ).throw( RuntimeError() ) )
     assert out[ "source" ] == "unresolved"
+
+    # active-managers resolver: role ∩ live-bridge, phantom EXCLUDED
+    managers = resolve_active_managers(
+        who_rows = [ { "session_id": "mgr-A", "persona_name": "Tiberius" },
+                     { "session_id": "phantom-mgr", "persona_name": "Ghost" } ],  # lingering last-post
+        bridge_sessions = { "mgr-A": "Tiberius", "worker-W": "Rio" },             # phantom NOT here (PID-dead)
+        list_managers = lambda sd: { "mgr-A", "phantom-mgr" },                    # both are managers by role
+    )
+    assert managers == [ "Tiberius" ], managers   # worker excluded (no role); phantom excluded (no live bridge)
     return True
 
 

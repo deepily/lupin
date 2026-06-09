@@ -13,7 +13,7 @@ import datetime
 from fastapi.testclient import TestClient
 
 from lupin_arbiter_app import __version__
-from lupin_arbiter_app.app import create_app, assemble_app, _utcnow
+from lupin_arbiter_app.app import create_app, assemble_app, _utcnow, _make_health_notify_fn
 from lupin_arbiter_app.health_watcher import HealthWatcherLoop
 from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop
 from lupin_arbiter_app.local_snapshot_store import LocalSnapshotStore
@@ -31,6 +31,23 @@ class _FakeLoop:
         self.started = True
     def stop( self ):
         self.stopped = True
+
+
+class _FakeGW:
+    def __init__( self ): self.posts = [ ]
+    def post( self, topic, body ): self.posts.append( ( topic, body ) )
+
+
+def test_make_health_notify_fn_logs_and_escalates_rick_only():
+    """Part-6 #1/2/3: health escalation logs AND pushes to Rick (durable post +
+    live push) — no manager fanout."""
+    gw, logs, live = _FakeGW(), [ ], [ ]
+    notify = _make_health_notify_fn( gw, live_notify_fn=live.append,
+                                     log_fn=lambda ev, **kw: logs.append( ( ev, kw ) ) )
+    notify( "postgres unhealthy" )
+    assert ( "health_escalation", { "message": "postgres unhealthy" } ) in logs   # the structured log
+    assert gw.posts == [ ( "fleet-escalations", "postgres unhealthy" ) ]          # durable, Rick
+    assert live == [ "postgres unhealthy" ]                                       # live push to Rick
 
 
 def test_health_defaults():

@@ -137,6 +137,7 @@ def build_fleet_arbiter_job_factory(
     tap_min_interval     : int                  = 300,
     ack_window           : int                  = 600,
     stall_window         : int                  = 1800,
+    poll_error_escalate_threshold : int         = 3,
     start_period_seconds : int                  = 120,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
@@ -167,6 +168,7 @@ def build_fleet_arbiter_job_factory(
             tap_min_interval_seconds   = tap_min_interval,
             manager_ack_window_seconds = ack_window,
             fleet_stall_window_seconds = stall_window,
+            poll_error_escalate_threshold = poll_error_escalate_threshold,
             snapshot_sink              = lambda snap: store.set_section( "fleet_arbiter", snap ),
             render_sink                = lambda line: log_fn( "fleet_arbiter_render", line=line ),
             notify_fn                  = warmup_notify,
