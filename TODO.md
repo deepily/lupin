@@ -1,5 +1,16 @@
 # TODO
 
+## 🌙 2026-06-10 SESSION-END (Tiberius 👑, session 4f7a7ab8) — pushed + backed up; SAT cutover next
+
+> **RESUME HERE TOMORROW** — memento: `io/mementos/tiberius-session-resume-2026.06.10-evening.md`. Headline: merge-train r2 complete (~50 commits PUSHED at session-end), **both servers on validated 1.1.0**, final flagless e2e **560/3/1/3 = cutover gate functionally GREEN**, oracle acked-ledger live (self-poke 46→~0). NOTE: the visible TaskCreate list does NOT persist — rebuild from this block + memento (this morning's pattern).
+>
+> **▶ TOMORROW, descending priority:**
+> 1. **[LUPIN] 🥇 GCP deploy resumes on Rick's word** — respin Rio's successor seeded from `io/mementos/rio-gcp-rotation-2026.06.10.md` (+ postscript): AR push lupin:1.1.0 → 12 secrets → VM bring-up → arbiter unit → CC OAuth setup-token (Rick-gated) → /health + bounded-CC E2E. Side-thread: Rick's settings.local.json `docker compose up` allow-rule.
+> 2. **[LUPIN] Harvest Rachel 🕊️ (680a2c22)** — held visual-baseline fixes (popover retarget + frozen-fixture listings, option (a) ratified); review → merge → rebaseline ×4 → e2e should read 100% green.
+> 3. **[LUPIN] SATURDAY CUTOVER prep (06-14)** — /app/multiplexer default + redirect; checklist `src/rnd/v0.1.8/2026.06.10-notifications-ui-multiplexer-gap-bridge/02-bridging-work-plan.md` §02; gate already functionally green.
+> 4. **[LUPIN] Verify oracle ledger live**: next manager stop-event should show ~0-3 owed (was 46/1001) — the acceptance proof on real traffic.
+> 5. Debt ledger (non-blocking): broadcast-miss F1–F4 fixes (post-cutover) · acked-ledger flock hardening (optional) · test-isolation pollution · fleet stopPolling decoupling · stop.py whole-file 89% · host-venue rule for file-assertion tests.
+
 ## ⏸️▶ 2026-06-10 MIDDAY ROTATION (Tiberius 👑, session 4f7a7ab8 → harvested at Rick's direction)
 
 > **RESUME HERE**: full rehydration memento → `io/mementos/tiberius-session-resume-2026.06.10-midday.md` (fleet roster, 10-item priority queue, Rick's gates, merge-train record). Headline: **MERGE TRAIN COMPLETE** on `wip-v0.1.8` (8 merges, all held/unpushed, 8/8 reviews APPROVE, all gates green: mux 1108/1108 · arbiter 428 · heartbeat 473). Next: Lane E color delta → Mr. Radio's E2E triage → SenderCardRecorder branch gap (Cheech) → :8000 batch → SATURDAY CUTOVER. Rick's open gates: GCP gitleaks in-band clearance (key rotation + dotfile audit) · :8001 restart offer · push.

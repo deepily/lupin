@@ -2,6 +2,21 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.10 - Session 4f7a7ab8 PM (Tiberius 👑) | Merge-train r2 + local 1.1.0 cutover + oracle acked-ledger + e2e near-sweep
+
+**Accomplishments**:
+- Landed 8 reviewed merges to `wip-v0.1.8`: Lane E color delta (`8e9488a9`), SenderCardRecorder c8 gap + un-ignore hygiene (`507ea7ba`/`db9e3e3f`), WP10 80vh + FocusTray-visual retire (`c9449a13`), Mr. Radio's triage stack (`4979c13c`/`619efd5c`/`64381b6c`), 16-fail scaffolding fix (`27f4ec33`) — every one through fresh+critical review (Tiffany 💍 6 verdicts, Clayton 😎 4, Sam 🎙️, Cheech 🌿)
+- **Both servers cut over to validated `lupin:1.1.0`** (Rick's local-today gate): :8000 14:48, :7999 15:00; CLI 2.1.161, SDK 0.2.88, unit 6126, bounded-CC probe 2.15s, WS smoke 50/50 — GCP push unblocked for tomorrow
+- **Work-owed oracle acked-inbound ledger** (Rick-directed): built/reviewed/merged (`8738ff7c`+`8fdea39a`), 122 board qids bulk-marked — self-poke backlog 46→~0; lost-update race ruled acceptable (2 independent analyses)
+- **Final flagless e2e `ts-127620e1`: 560 pass / 3 fail / 1 err / 3 skip** (vs 546/19/30 AM) — zero functional failures, Saturday cutover gate functionally GREEN; 4 visual stragglers triaged = unstable-baselines-by-construction (Rachel 🕊️ building held fixes)
+- Broadcast-miss root-cause report delivered (`964060fa`): duplicate-listener race, 7 silent skip gates, F1–F4 fix plan
+- Repo hygiene complete: orphan purge-tool adopted, manifest + acked-ledgers gitignored, stop-hook brief + gitleaks dotfiles committed, superseded stash verified+dropped; :8001 arbiter restarted on today's code
+- Fleet ops: 7 reaps with mementos (Sam, Krishna, Arnold, Tiffany, Mr. Radio, Clayton, Cheech@56% rotation, Rio@50%+ rotation), 16 worktrees cleaned; dark-window incident (13:58-14:43, 429'd wake pushes) owned → dead-man-timer pattern adopted
+
+**Files**: ~50 held commits on `wip-v0.1.8` (pushed at session-end per Rick)
+
+---
+
 ### 2026.06.09 - Session 110ff47d (Rio ⚡) | Fleet-Status: PID-liveness "offline" override (kill-0 fast-death)
 
 **A /exit'd (or killed) session now drops off the Fleet-Status table in ~1 poll (~60s) instead of aging out over ~1h.** Root cause Rick surfaced: the table verdict is purely staleness-based (`compute_liveness` rides the freshest of 4 signal ages, never the process), even though the context-pressure path already detects death via `kill -0` within a minute. Fix (Option A, Rick's call — keep verdict string `"offline"`, no new label): `build_snapshot` gains a `process_dead` data arg (iterable of confirmed-dead sids); a prefix-tolerant `_lookup_dead` forces `verdict="offline"` + an additive `liveness.process_dead=True` regardless of signal age. **Key discovery**: every existing bridge-locator SKIPS dead-PID bridges host-side, so none can surface a dead session — built a NEW unfiltered scanner `session_bridge.find_dead_sessions` + a stricter `_pid_confirmed_dead` (bias-to-alive: confirms death ONLY on ProcessLookupError, EPERM=alive). `arbiter_job._default_dead_session_ids` wraps it degrade-safe at the snapshot call site. **Two guardrails**: host-PID-trust gate (no-op in a container) + bias-to-alive (no bridge / no pid / any-alive / any-error → never dead). Zero frontend change (verdict string unchanged). Files: `session_bridge.py`, `fleet_render.py`, `arbiter_job.py` + 3 test suites. **170 unit tests green (+15); 100% L/B on the changed surface of all three.** Design+as-built: `…/03-pid-liveness-offline-override-design.md`. Backend — **needs an :8001 restart to land** (Rick's gate). HELD, not pushed.
