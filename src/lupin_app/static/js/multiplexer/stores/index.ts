@@ -44,6 +44,8 @@ import type { SessionStripStore } from "./SessionStripStore";
 import { createSessionStripStore } from "./SessionStripStore";
 import type { ReadingPaneStore } from "./ReadingPaneStore";
 import { createReadingPaneStore } from "./ReadingPaneStore";
+import type { CommonsStore } from "./CommonsStore";
+import { createCommonsStore } from "./CommonsStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -61,6 +63,10 @@ export interface StoreSet {
   // AR-store changes), NOT a server-frame subscriber, so it sits OUTSIDE the
   // pinned subscription-order chain below; construction order is irrelevant.
   readingPane    : ReadingPaneStore;
+  // Lane D (WP3) — commons "Recent Activity" panel store. No inter-store
+  // dependency (consumes notification_queue_update independently), so it
+  // constructs last; subscription order of the pinned 5 is unaffected.
+  commons        : CommonsStore;
 }
 
 export interface CreateStoresOptions {
@@ -82,7 +88,7 @@ export interface CreateStoresOptions {
  *   - opts.api is an ApiClient (or stub satisfying ActionRequiredApiClient)
  *
  * Ensures:
- *   - Returns the 7-store set (the 5 server-frame subscribers in pinned order + sessionStrip + the action-driven ReadingPaneStore)
+ *   - Returns the 8-store set (the 5 server-frame subscribers in pinned order + sessionStrip + readingPane + commons)
  *   - Each store's constructor is fully synchronous; the StoreSet is
  *     immediately usable on return
  */
@@ -103,8 +109,10 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // ReadingPaneStore (WP4) — order-independent (no server-frame subscription);
   // hydrates persisted layout mode + split ratio from storage at construction.
   const readingPane    = createReadingPaneStore  ({ bus: opts.eventBus, storage: opts.storage });
+  // Lane D (WP3) — commons store, also order-independent of the pinned five.
+  const commons        = createCommonsStore      ({ bus: opts.eventBus, storage: opts.storage });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -132,4 +140,6 @@ export { createSessionStripStore } from "./SessionStripStore";
 // boot-direct stragglers). Re-exported here for direct consumers/tests too.
 export type { ReadingPaneStore, ReadingPaneStoreOptions } from "./ReadingPaneStore";
 export { createReadingPaneStore } from "./ReadingPaneStore";
+export type { CommonsStore, CommonsStoreOptions, CommonsHistoryApiClient } from "./CommonsStore";
+export { createCommonsStore } from "./CommonsStore";
 /* c8 ignore stop */

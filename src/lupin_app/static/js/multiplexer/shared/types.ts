@@ -92,6 +92,22 @@ export type LupinEventType =
   // DOM. Ports the legacy `notifications.js` master-detail behavior (commits
   // cd6cc99, 9211e5c, 97bfb8c, e1ed26a, 498e98e) into the store/renderer split.
   | "store_reading_pane_changed"
+  // Lane B (CC-session strip — owns this member): SessionStripStore emits
+  // `store_session_strip_changed` on icon add/remove. Lane D (WP7) subscribes to
+  // it as the canonical recipient-change signal to refresh its persona filter
+  // dropdown (Tiberius-arbitrated 2026-06-10). Added provisionally from Lane D's
+  // boot-wiring pass because Lane B had not yet merged — Tiberius flagged to
+  // dedupe at Lane B's merge if they also add it. Harmless until an emitter
+  // exists (the subscription simply never fires).
+  | "store_session_strip_changed"
+  // Lane D (commons activity panel — WP3, 2026-06-10): CommonsStore emits this
+  // on every mutation (hydrate / live-prepend / filter-change). The renderer
+  // subscribes and repaints the filtered entry list. Carries a `changeKind`
+  // discriminator. Note there is NO top-level `commons_activity` event: the
+  // server delivers commons rows INSIDE `notification_queue_update`
+  // (`payload.notification.type === "commons_activity"`), so CommonsStore
+  // subscribes to `notification_queue_update` exactly like NotificationStore.
+  | "store_commons_changed"
   // boot.ts one-shot signal (Phase 4 per D-C ratification 2026-05-04 PM).
   // Emitted at end of bootMultiplexer() with the resolved binary handler
   // identity so AC9's Playwright check can verify the wiring without the
@@ -565,6 +581,10 @@ export interface BootCompletePayload {
     // `readingPaneRenderer.mount(.content-shell)` completes — appended at the
     // NEW-LANE MOUNT SLOT (after the Phase 5/6 mounts, before transports start).
     readingPaneRenderer?         : string;
+    // Lane D (WP3, 2026-06-10): literal "mounted" emitted after the commons
+    // activity renderer mounts at the NEW-LANE MOUNT SLOT. Optional per the
+    // Phase 6a forward/backward-compat pattern.
+    commonsActivityRenderer?     : string;
   };
 }
 
@@ -617,4 +637,59 @@ export type ReadingPaneChangeKind =
 
 export interface StoreReadingPaneChangedPayload {
   changeKind : ReadingPaneChangeKind;
+}
+
+// ---------------------------------------------------------------------------
+// Lane D — Commons "Recent Activity" panel (WP3, 2026-06-10).
+//
+// One projected commons entry. The shape is byte-identical between the REST
+// aggregator (`execute_broadcast_history` → `_project_history_entry`,
+// `src/cosa/rest/routers/commons.py:600`) and the live WS push
+// (`_dispatch_activity_event`, `src/cosa/rest/commons_activity_watcher.py:313`),
+// so one interface covers both the initial load and the live-prepend path.
+//
+// `ts` is an ISO-8601 string (UTC) as emitted server-side; the renderer
+// formats it to local HH:MM. All persona fields are nullable because reserved
+// topics / system rows may omit them.
+// ---------------------------------------------------------------------------
+
+export interface CommonsActivityEntry {
+  ts                ?: string | null;   // ISO-8601 (UTC); may be absent on malformed rows
+  topic              : string;
+  topic_kind         : "reserved" | "free-form";
+  sender_session_id ?: string | null;
+  persona_name      ?: string | null;
+  persona_icon      ?: string | null;
+  persona_color     ?: string | null;
+  body              ?: string | null;
+  metadata          ?: Record<string, unknown>;
+}
+
+// Time-window selector for the panel. "today" resolves client-side to
+// hours-since-local-midnight; "all" applies no cutoff; numeric strings ("1",
+// "6", "24", …) are passed through as an `hours` query param. Mirrors the
+// legacy dropdown semantics (`notifications.js:10685-10697`).
+export type CommonsActivityWindow = string;
+
+// 3-axis filter (per `2026.05.21-recent-activity-filter-and-focus-bar-...md`).
+// Each axis at its default contributes no constraint.
+export type CommonsActivityDirection = "sender" | "recipient" | null;
+export type CommonsActivityKind = "all" | "heartbeats" | "personas" | "broadcasts";
+
+export interface CommonsActivityFilter {
+  direction : CommonsActivityDirection;
+  kind      : CommonsActivityKind;
+  persona   : string | null;   // lowercased persona name; null = "any"
+}
+
+export type CommonsChangeKind =
+  | "hydrated"      // full reload from REST (window change / refresh / initial)
+  | "prepended"     // single live WS entry added to the head
+  | "filter-changed"; // filter axis mutated — re-render from cache, no fetch
+
+export interface StoreCommonsChangedPayload {
+  changeKind : CommonsChangeKind;
+  // Present on "prepended" — true when the live entry passes the active filter
+  // (so the renderer can prepend a single row instead of a full re-render).
+  matchesFilter? : boolean;
 }

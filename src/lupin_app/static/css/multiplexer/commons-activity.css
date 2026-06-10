@@ -1,0 +1,275 @@
+/* Multiplexer Lane D (WP3 + WP11, 2026-06-10) — commons "Recent Activity" panel.
+   Ported from the legacy notifications.css commons-activity rules
+   (notifications.css:4806-5079) with multiplexer-scoped `#commons-activity-*`
+   ids. The 2-line clamp on `.commons-activity-entry-body-content` + the
+   `.collapsed` body rule are the WP11/F4 visual contract: a Show-more toggle is
+   revealed only when the rendered content overflows the clamp. */
+
+#commons-activity-pane {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #dee2e6;
+}
+
+#commons-activity-pane[hidden] {
+  display: none;
+}
+
+#commons-activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+#commons-activity-header h5 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #495057;
+}
+
+.commons-activity-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.commons-activity-controls select {
+  min-width: 9em;
+  max-width: 14em;
+  padding: 2px 6px;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.commons-activity-controls #commons-activity-window {
+  min-width: auto;
+}
+
+.commons-activity-controls button {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #495057;
+  background: transparent;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.commons-activity-controls button:hover {
+  background-color: rgb(0 0 0 / 4%);
+}
+
+#commons-activity-body {
+  margin-top: 10px;
+  max-height: 480px;
+  padding: 8px;
+  overflow-y: auto;
+  background: #fafbfc;
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+}
+
+#commons-activity-body.collapsed {
+  display: none;
+}
+
+#commons-activity-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#commons-activity-empty {
+  padding: 24px 12px;
+  font-size: 12px;
+  font-style: italic;
+  color: #868e96;
+  text-align: center;
+}
+
+#commons-activity-empty[hidden] {
+  display: none;
+}
+
+/* Individual entry row. */
+.commons-activity-entry {
+  display: grid;
+  grid-template-columns: 24px 70px 75px 1fr auto auto;
+  grid-template-areas: "icon name chip body toggle time";
+  gap: 8px;
+  align-items: start;
+  padding: 6px 8px;
+  background: #fff;
+  border-left: 3px solid var(--persona-color, #6c757d);
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+
+.commons-activity-entry:hover {
+  background-color: rgb(0 0 0 / 2%);
+}
+
+.commons-activity-entry-icon {
+  display: flex;
+  grid-area: icon;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  color: #fff;
+  background-color: var(--persona-color, #6c757d);
+  border-radius: 50%;
+}
+
+.commons-activity-entry-name {
+  grid-area: name;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  color: #495057;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commons-activity-entry-topic-chip {
+  grid-area: chip;
+  justify-self: end;
+  max-width: 100%;
+  padding: 1px 6px;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  color: #495057;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background-color: rgb(0 0 0 / 2%);
+  border: 1px solid var(--persona-color, #ced4da);
+  border-radius: 8px;
+}
+
+.commons-activity-entry-topic-chip[hidden] {
+  display: none;
+}
+
+.commons-activity-entry-body {
+  grid-area: body;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #212529;
+  overflow-wrap: break-word;
+}
+
+/* The inner content is the 2-line clamp target; the sibling toggle lifts the
+   clamp via the `.expanded` class (WP11 / F4). */
+.commons-activity-entry-body-content {
+  display: -webkit-box;
+  max-height: 3em;   /* belt + suspenders for engines ignoring -webkit-line-clamp */
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.commons-activity-entry-body-content.expanded {
+  display: block;
+  max-height: none;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+/* Compact markdown rendering inside entries. */
+.commons-activity-entry-body-content p,
+.commons-activity-entry-body-content ul,
+.commons-activity-entry-body-content ol {
+  margin: 0.25em 0;
+}
+
+.commons-activity-entry-body-content ul,
+.commons-activity-entry-body-content ol {
+  padding-left: 1.4em;
+}
+
+.commons-activity-entry-body-content h1,
+.commons-activity-entry-body-content h2,
+.commons-activity-entry-body-content h3,
+.commons-activity-entry-body-content h4 {
+  margin: 0.3em 0 0.15em;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.commons-activity-entry-body-content code {
+  padding: 0 3px;
+  font-size: 90%;
+  background: rgb(0 0 0 / 5%);
+  border-radius: 3px;
+}
+
+.commons-activity-entry-body-content pre {
+  margin: 0.3em 0;
+  padding: 6px 8px;
+  overflow-x: auto;
+  font-size: 90%;
+  white-space: pre-wrap;
+  background: rgb(0 0 0 / 4%);
+  border-radius: 4px;
+}
+
+.commons-activity-entry-body-content pre code {
+  padding: 0;
+  background: none;
+}
+
+.commons-activity-entry-body-content blockquote {
+  margin: 0.3em 0;
+  padding-left: 0.8em;
+  color: #495057;
+  border-left: 3px solid rgb(0 0 0 / 15%);
+}
+
+.commons-activity-entry-body-content a {
+  color: #1c4587;
+  text-decoration: underline;
+}
+
+.commons-activity-entry-body-toggle {
+  grid-area: toggle;
+  align-self: start;
+  padding: 1px 4px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--persona-color, #1c4587);
+  white-space: nowrap;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.commons-activity-entry-body-toggle:hover {
+  text-decoration: underline;
+}
+
+.commons-activity-entry-body-toggle[hidden] {
+  display: none;
+}
+
+.commons-activity-entry-time {
+  grid-area: time;
+  align-self: start;
+  font-size: 10px;
+  color: #868e96;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
