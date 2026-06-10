@@ -64,12 +64,14 @@ afterEach(() => {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-// Fake AR-count store — only `.list().length` is consulted.
+// Fake AR store — items carry `state` (WP5 lift/drain filters non-terminal
+// states; the real ActionRequiredStore keeps responded/expired items in list()).
 function makeArStore(count: number = 0) {
-  let items = new Array(count).fill(0);
+  let items: Array<{ state: string }> = Array.from({ length: count }, () => ({ state: "pending" }));
   return {
-    store : { list: (): ReadonlyArray<unknown> => items },
-    set   : (n: number): void => { items = new Array(n).fill(0); },
+    store     : { list: (): ReadonlyArray<{ state: string }> => items },
+    set       : (n: number): void => { items = Array.from({ length: n }, () => ({ state: "pending" })); },
+    setStates : (states: string[]): void => { items = states.map(s => ({ state: s })); },
   };
 }
 
@@ -363,6 +365,53 @@ test("AR change with count already matching state is a no-op (neither branch)", 
   });
   assert.equal(store.isActionRequiredInPane(), false);
   void ar;
+});
+
+test("AR with 'submitting' state still lifts (non-terminal)", () => {
+  const { store, ar, bus } = setup({ seed: HORIZ, arCount: 0 });
+  ar.setStates(["submitting"]);
+  bus.emit<StoreActionRequiredChangedPayload>({
+    type: "store_action_required_changed",
+    payload: { changeKind: "responded-pending", id_hash: "p1" },
+    source: "test", ts: 0,
+  });
+  assert.equal(store.isActionRequiredInPane(), true);
+});
+
+test("AR with 'failed' state still lifts (retryable, non-terminal)", () => {
+  const { store, ar, bus } = setup({ seed: HORIZ, arCount: 0 });
+  ar.setStates(["failed"]);
+  bus.emit<StoreActionRequiredChangedPayload>({
+    type: "store_action_required_changed",
+    payload: { changeKind: "failed", id_hash: "p1" },
+    source: "test", ts: 0,
+  });
+  assert.equal(store.isActionRequiredInPane(), true);
+});
+
+test("AR with only TERMINAL items (responded) does NOT lift", () => {
+  const { store, ar, bus } = setup({ seed: HORIZ, arCount: 0 });
+  ar.setStates(["responded", "expired", "cancelled"]);
+  bus.emit<StoreActionRequiredChangedPayload>({
+    type: "store_action_required_changed",
+    payload: { changeKind: "responded", id_hash: "p1" },
+    source: "test", ts: 0,
+  });
+  assert.equal(store.isActionRequiredInPane(), false);
+});
+
+test("AR drains when the item flips to terminal but STAYS in list (real respond path)", () => {
+  const { store, ar, bus } = setup({ seed: HORIZ, arCount: 1 });   // pending → lifted at mount
+  assert.equal(store.isActionRequiredInPane(), true);
+  // Real respond(): item flips pending → responded but remains in list().
+  ar.setStates(["responded"]);
+  bus.emit<StoreActionRequiredChangedPayload>({
+    type: "store_action_required_changed",
+    payload: { changeKind: "responded", id_hash: "p1" },
+    source: "test", ts: 0,
+  });
+  assert.equal(store.isActionRequiredInPane(), false);
+  assert.equal($("#action-required-section").parentElement?.id, "notifications-pane");
 });
 
 test("close click is inert while AR owns the pane", () => {

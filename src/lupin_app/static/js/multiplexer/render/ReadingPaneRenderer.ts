@@ -48,9 +48,15 @@ export interface ReadingPaneStoreLike {
   exitActionRequiredPane(): boolean;
 }
 
-// Only the count of live action-required items matters for WP5 lift/drain.
+// WP5 lift/drain reads each item's `state` — ActionRequiredStore.list() retains
+// responded/expired/cancelled items in a TERMINAL state (it never removes
+// them), so a raw `.length` never drains. We filter to the still-blocking
+// states (pending / submitting / failed).
+export interface ActionRequiredItemLike {
+  state: string;
+}
 export interface ActionRequiredCountLike {
-  list(): ReadonlyArray<unknown>;
+  list(): ReadonlyArray<ActionRequiredItemLike>;
 }
 
 // Minimal window surface for bust-out (dependency-injected for testing).
@@ -297,9 +303,18 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // WP5 — action-required lift / restore
   // -------------------------------------------------------------------------
 
+  // Count prompts still demanding a response (non-terminal). The store keeps
+  // responded/expired/cancelled items in `list()`, so we must filter by state —
+  // a raw length would lift the pane and never drain it.
+  private activeActionRequiredCount(): number {
+    return this.actionRequired.list().filter(
+      i => i.state === "pending" || i.state === "submitting" || i.state === "failed",
+    ).length;
+  }
+
   private reconcileActionRequired(): void {
     if (this.store.getLayoutMode() !== "horizontal") return;
-    const count = this.actionRequired.list().length;
+    const count = this.activeActionRequiredCount();
     if (count > 0 && !this.store.isActionRequiredInPane()) {
       this.store.enterActionRequiredPane();
     } else if (count === 0 && this.store.isActionRequiredInPane()) {
@@ -339,7 +354,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     const mode = this.store.toggleLayoutMode();
     // Switching TO horizontal with AR active → lift it (the store's toggle does
     // not know the AR count; that coordination is the renderer's, as in legacy).
-    if (mode === "horizontal" && this.actionRequired.list().length > 0) {
+    if (mode === "horizontal" && this.activeActionRequiredCount() > 0) {
       this.store.enterActionRequiredPane();
     }
     this.updateToggleTooltip();
