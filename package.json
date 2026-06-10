@@ -8,7 +8,7 @@
     "build:watch": "bash src/scripts/build-multiplexer.sh --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src/lupin_app/static/js/multiplexer/",
-    "test": "tsx --test"
+    "test": "tsx --test \"src/tests/**/*.test.ts\""
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.9.0",
