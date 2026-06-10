@@ -458,6 +458,23 @@ test("hide-inactive toggle hides inactive icons only; toggling off reveals them"
   assert.equal(iconsEl.querySelector('[data-sender-id="dead"]')!.getAttribute("data-inactive-hidden"), null);
 });
 
+test("WP9: a 'hydrated' store change reconciles the strip from store.list()", () => {
+  const { root, iconsEl, stripEl } = makeRoot();
+  const bus = createEventBusForTesting();
+  const store = makeStore();
+  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
+  r.mount(root);
+  assert.equal(stripEl.getAttribute("hidden"), "");           // empty at mount
+  // Simulate the store having bulk-loaded a cold-reload snapshot, then emitting
+  // the single id-less "hydrated" change.
+  store.setList([session({ sender_id: "a" }), session({ sender_id: "b", assigned_at: 2000 })]);
+  bus.emit<StoreSessionStripChangedPayload>({
+    type: "store_session_strip_changed", payload: { changeKind: "hydrated" }, source: "test", ts: 0,
+  });
+  assert.equal(iconsEl.querySelectorAll(".cc-strip-icon").length, 2);
+  assert.equal(stripEl.getAttribute("hidden"), null);
+});
+
 test("forceRenderForTesting reconciles from current store state", () => {
   const { root, iconsEl } = makeRoot();
   const bus = createEventBusForTesting();

@@ -117,6 +117,6 @@ export { createAudioStore } from "./AudioStore";
 // is deliberately NOT folded into createStores() here. Wiring it into the
 // canonical store set is part of the deferred boot-integration step (against
 // Lane A's mount-slot convention), kept out of this lane's held commit.
-export type { SessionStripStore, SessionStripStoreOptions } from "./SessionStripStore";
+export type { SessionStripStore, SessionStripStoreOptions, ServerSenderHydrationRecord } from "./SessionStripStore";
 export { createSessionStripStore } from "./SessionStripStore";
 /* c8 ignore stop */

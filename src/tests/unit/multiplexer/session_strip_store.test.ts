@@ -276,3 +276,64 @@ test("list() returns every tracked session", () => {
   const ids = store.list().map(s => s.sender_id).sort();
   assert.deepEqual(ids, ["a", "b"]);
 });
+
+// ===========================================================================
+// WP9 — hydrate() cold-reload bulk load
+// ===========================================================================
+
+test("hydrate creates sessions from records + emits a single id-less 'hydrated'", () => {
+  const { store, events } = setup();
+  store.hydrate([
+    { sender_id: "s1", voice_persona: PERSONA, manager_persona: MANAGER },
+    { sender_id: "s2", voice_persona: { name: "Rio", color: "#fff", assigned_at: "2026-06-10T10:00:00Z" } },
+  ]);
+  assert.equal(store.list().length, 2);
+  const s1 = store.get("s1")!;
+  assert.equal(s1.active, true);
+  assert.equal(s1.voice_persona.name, "Krishna");
+  assert.deepEqual(s1.manager_persona, MANAGER);
+  assert.equal(s1.assigned_at, Date.parse("2026-06-10T14:28:34Z"));
+  assert.equal(store.get("s2")!.manager_persona, undefined);
+  // exactly one emission, changeKind hydrated, no sender_id
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.payload.changeKind, "hydrated");
+  assert.equal(events[0]!.payload.sender_id, undefined);
+});
+
+test("hydrate skips records without a persona, without a sender_id, or released", () => {
+  const { store, events } = setup();
+  store.hydrate([
+    { sender_id: "no-persona" },
+    { sender_id: "null-persona", voice_persona: null },
+    { voice_persona: PERSONA },                                  // no sender_id
+    { sender_id: "released", voice_persona: { name: "X", released: true } },
+    { sender_id: "good", voice_persona: PERSONA },
+  ]);
+  assert.equal(store.list().length, 1);
+  assert.ok(store.get("good"));
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.payload.changeKind, "hydrated");
+});
+
+test("hydrate merges idempotently with sessions already present from live events", () => {
+  const { bus, store } = setup();
+  emit(bus, { type: "voice_persona_assigned", sender_id: "s1", voice_persona: PERSONA });
+  const firstAssignedAt = store.get("s1")!.assigned_at;
+  store.hydrate([
+    { sender_id: "s1", voice_persona: { name: "Rio", color: "#222", assigned_at: "2027-01-01T00:00:00Z" }, manager_persona: MANAGER },
+    { sender_id: "s2", voice_persona: PERSONA },
+  ]);
+  assert.equal(store.list().length, 2);            // no duplicate s1
+  const s1 = store.get("s1")!;
+  assert.equal(s1.voice_persona.name, "Rio");      // refreshed
+  assert.deepEqual(s1.manager_persona, MANAGER);   // lineage added
+  assert.equal(s1.assigned_at, firstAssignedAt);   // chronological anchor preserved
+});
+
+test("hydrate with an empty snapshot emits 'hydrated' and tracks nothing", () => {
+  const { store, events } = setup();
+  store.hydrate([]);
+  assert.equal(store.list().length, 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.payload.changeKind, "hydrated");
+});

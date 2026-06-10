@@ -90,6 +90,19 @@ interface ServerManagerPersona {
   [k: string] : unknown;
 }
 
+// WP9 cold-reload hydration — one entry from GET
+// /api/notifications/senders-visible/{user_email}. The server already
+// resolves voice_persona + manager_persona per sender for exactly this gap
+// (notifications.py get_visible_senders → _voice_persona_for_sender_id +
+// _manager_persona_for_sender_id). `voice_persona` carries `assigned_at`.
+// A null voice_persona means no persona assigned → no strip icon (skipped).
+export interface ServerSenderHydrationRecord {
+  sender_id       ?: string;
+  voice_persona   ?: ServerVoicePersona | null;
+  manager_persona ?: ServerManagerPersona | null;
+  [k: string]     : unknown;
+}
+
 // ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
@@ -97,6 +110,15 @@ interface ServerManagerPersona {
 export interface SessionStripStore {
   get(senderId: string): StripSession | undefined;
   list(): ReadonlyArray<StripSession>;
+  /**
+   * WP9 cold-reload hydration — bulk-load strip sessions from a server
+   * snapshot (GET /api/notifications/senders-visible/{user_email}). Upserts
+   * each record carrying a non-null voice_persona (idempotent; merges with any
+   * live events that already arrived) and emits a single "hydrated" change so
+   * the renderer reconciles once. Records without a voice_persona (or without
+   * a sender_id) are skipped.
+   */
+  hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void;
   /** Test/cleanup helper: detach EventBus listeners. */
   disposeForTesting(): void;
 }
@@ -176,6 +198,20 @@ class SessionStripStoreImpl implements SessionStripStore {
     // voice_persona_assigned must carry a present, non-released persona.
     if (!persona || persona.released === true) return;
 
+    const managerPersona = this.normalizeManagerPersona(this.managerPersonaField(n.payload));
+    const kind = this.applyAssignment(senderId, persona, managerPersona);
+    this.emit(kind, senderId);
+  }
+
+  // Shared upsert for both the live voice_persona_assigned path and WP9
+  // hydration. Normalizes the persona, creates-or-refreshes the strip session,
+  // sets/clears the manager lineage, and returns the change kind. Does NOT
+  // emit — the caller decides ("added"/"updated" per-event vs one "hydrated").
+  private applyAssignment(
+    senderId       : string,
+    persona        : ServerVoicePersona,
+    managerPersona : ManagerPersona | null,
+  ): "added" | "updated" {
     const vp: VoicePersona = {
       name     : (persona.name ?? persona.display_name ?? "") + "",
       voice_id : persona.voice_id ?? "",
@@ -183,8 +219,6 @@ class SessionStripStoreImpl implements SessionStripStore {
       color    : persona.color ?? "",
       borrowed : persona.borrowed === true,
     };
-
-    const managerPersona = this.extractManagerPersona(n.payload);
 
     const existing = this.sessions.get(senderId);
     if (existing) {
@@ -194,20 +228,33 @@ class SessionStripStoreImpl implements SessionStripStore {
       existing.voice_persona = vp;
       existing.active        = true;
       this.setOrClearManager(existing, managerPersona);
-      this.emit("updated", senderId);
-      return;
+      return "updated";
     }
 
-    const assignedAt = this.parseAssignedAt(persona.assigned_at);
     const record: StripSession = {
       sender_id     : senderId,
       voice_persona : vp,
-      assigned_at   : assignedAt,
+      assigned_at   : this.parseAssignedAt(persona.assigned_at),
       active        : true,
     };
     this.setOrClearManager(record, managerPersona);
     this.sessions.set(senderId, record);
-    this.emit("added", senderId);
+    return "added";
+  }
+
+  hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
+    for (const rec of records) {
+      const senderId = rec.sender_id;
+      if (!senderId) continue;
+      const persona = rec.voice_persona;
+      // Cold-reload: only sessions WITH a persona get a strip icon (mirrors the
+      // live-assign requirement); a null/released persona means inactive/no-icon.
+      if (!persona || persona.released === true) continue;
+      const managerPersona = this.normalizeManagerPersona(rec.manager_persona);
+      this.applyAssignment(senderId, persona, managerPersona);
+    }
+    // Single emission for the whole snapshot — renderer reconciles from list().
+    this.emit("hydrated");
   }
 
   private handleReleased(senderId: string): void {
@@ -233,9 +280,12 @@ class SessionStripStoreImpl implements SessionStripStore {
   // Helpers
   // -------------------------------------------------------------------------
 
-  private extractManagerPersona(payload: Record<string, unknown> | null | undefined): ManagerPersona | null {
+  private managerPersonaField(payload: Record<string, unknown> | null | undefined): ServerManagerPersona | null | undefined {
     if (!payload) return null;
-    const raw = payload["manager_persona"] as ServerManagerPersona | null | undefined;
+    return payload["manager_persona"] as ServerManagerPersona | null | undefined;
+  }
+
+  private normalizeManagerPersona(raw: ServerManagerPersona | null | undefined): ManagerPersona | null {
     if (!raw) return null;
     return {
       name  : (raw.name ?? "") + "",
@@ -259,10 +309,13 @@ class SessionStripStoreImpl implements SessionStripStore {
     return ms;
   }
 
-  private emit(changeKind: SessionStripChangeKind, senderId: string): void {
+  private emit(changeKind: SessionStripChangeKind, senderId?: string): void {
+    const payload: StoreSessionStripChangedPayload = { changeKind };
+    // "hydrated" carries no single id; added/updated/removed always do.
+    if (senderId !== undefined) payload.sender_id = senderId;
     this.bus.emit<StoreSessionStripChangedPayload>({
       type    : "store_session_strip_changed",
-      payload : { changeKind, sender_id: senderId },
+      payload,
       source  : "SessionStripStore",
       ts      : this.nowFn(),
     });

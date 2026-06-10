@@ -397,11 +397,14 @@ export interface StripSession {
   active           : boolean;   // false after voice_persona_released; hide-inactive filter targets !active
 }
 
-export type SessionStripChangeKind = "added" | "updated" | "removed";
+export type SessionStripChangeKind = "added" | "updated" | "removed" | "hydrated";
 
 export interface StoreSessionStripChangedPayload {
   changeKind : SessionStripChangeKind;
-  sender_id  : string;
+  // Present for added/updated/removed; OMITTED for "hydrated" (WP9 cold-reload
+  // bulk load emits a single change for a whole snapshot — the renderer
+  // reconciles from store.list() rather than a single id).
+  sender_id? : string;
 }
 
 // Phase 6c Node D Step D3 (per F-Arnold-D3 — sender-level signature, NOT

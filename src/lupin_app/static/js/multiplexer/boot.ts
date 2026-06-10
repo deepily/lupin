@@ -30,6 +30,7 @@ import { redirectToLoginIfUnauthenticated } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
+import type { ServerSenderHydrationRecord } from "./stores";
 import {
   createNotificationsListRenderer,
   createJobsPaneRenderer,
@@ -369,6 +370,22 @@ function bootMultiplexer(): void {
   const sessionStripMountEl = document.querySelector<HTMLElement>("main.container");
   if (sessionStripMountEl === null) throw new Error("multiplexer: <main.container> not found");
   sessionStripRenderer.mount(sessionStripMountEl);
+
+  // Lane B WP9 — cold-reload lineage hydration. The server resolves
+  // voice_persona + manager_persona per sender (notifications.py
+  // get_visible_senders), so on a fresh page load we hydrate the strip store
+  // from that snapshot — existing sessions' icons + manager-lineage badges
+  // paint on first load instead of waiting for the next live
+  // voice_persona_assigned. Floated non-blocking (mirrors the config fetch);
+  // boundary .catch avoids an unhandled rejection — hydration is best-effort,
+  // live events still populate the strip. Skipped when no email resolves yet.
+  const hydrationEmail = authManager.getCurrentUserEmail();
+  if (hydrationEmail !== null && hydrationEmail !== "") {
+    apiClient
+      .get<ServerSenderHydrationRecord[]>(`/api/notifications/senders-visible/${encodeURIComponent(hydrationEmail)}`)
+      .then(records => stores.sessionStrip.hydrate(records))
+      .catch(() => { /* best-effort cold-reload hydration; live events still populate */ });
+  }
 
   attachLifecycleListeners();
 
