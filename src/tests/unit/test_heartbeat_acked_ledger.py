@@ -56,6 +56,29 @@ class TestReadAckedQids:
         al.acked_ledger_path( "s", base_dir=tmp_path ).write_text( "{bad json" )
         assert al.read_acked_qids( "s", base_dir=tmp_path ) == set()
 
+    def test_binary_garbage_is_degrade_safe_empty( self, tmp_path ):
+        # A non-UTF-8 / binary-garbage ledger file decodes-fail at open().read()
+        # → UnicodeDecodeError, a DISTINCT path from JSON-decode failure. Pin
+        # that the degrade-safe except still returns an empty set (never raises).
+        al.acked_ledger_path( "s", base_dir=tmp_path ).write_bytes( b"\xff\xfe\x00\x80garbage\x9c" )
+        assert al.read_acked_qids( "s", base_dir=tmp_path ) == set()
+
+    def test_concurrent_marks_use_distinct_tmp_files( self, tmp_path, monkeypatch ):
+        # (m1) two writers of the SAME session ledger must not share one .tmp
+        # name. Capture the tmp paths mark_acked opens across two calls (uuid
+        # differs) and assert they are distinct — no shared-name race window.
+        import builtins
+        seen = [ ]
+        real_open = builtins.open
+        def _spy_open( file, *a, **k ):
+            if str( file ).endswith( ".tmp" ):
+                seen.append( str( file ) )
+            return real_open( file, *a, **k )
+        monkeypatch.setattr( builtins, "open", _spy_open )
+        al.mark_acked( "s", [ "q1" ], base_dir=tmp_path )
+        al.mark_acked( "s", [ "q2" ], base_dir=tmp_path )
+        assert len( seen ) == 2 and seen[ 0 ] != seen[ 1 ]   # distinct per-writer tmp names
+
 
 class TestMarkAcked:
 

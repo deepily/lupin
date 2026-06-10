@@ -23,6 +23,8 @@ clobbering, and are atomic (tmp-write + rename) like the hold artifact.
 """
 
 import json
+import os
+import uuid
 from pathlib import Path
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import _resolve_base_dir
@@ -90,6 +92,12 @@ def mark_acked( session_id, qids, base_dir=None ):
           accrete, never clobber)
         - Non-string members of `qids` are ignored
         - Write is atomic (tmp-write + rename), mirroring the hold artifact
+        - The temp file carries a per-writer pid+uuid suffix, so two managers
+          bulk-marking the SAME session ledger concurrently never share one
+          `.tmp` path (a shared name lets writer A's partial json be renamed
+          into place by writer B). Each writer's `replace()` is still atomic;
+          last-writer-wins on the final file (acceptable — both merge over the
+          same prior contents, so neither loses the other's prior-state union)
         - Returns the resulting sorted list[str] of acked qids
         - Raises OSError if the target directory is not writable
     """
@@ -97,7 +105,7 @@ def mark_acked( session_id, qids, base_dir=None ):
     merged   = existing | { q for q in qids if isinstance( q, str ) }
     ordered  = sorted( merged )
     path = acked_ledger_path( session_id, base_dir )
-    tmp  = path.parent / ( path.name + ".tmp" )
+    tmp  = path.parent / f"{path.name}.{os.getpid()}-{uuid.uuid4().hex}.tmp"
     with open( tmp, "w" ) as f:
         json.dump( ordered, f )
     tmp.replace( path )
