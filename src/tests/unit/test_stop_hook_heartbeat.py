@@ -94,7 +94,7 @@ class TestRunHeartbeat:
              patch( "lupin_cli.claude_code.hooks.stop._gather_outstanding_delegations",
                     return_value=[ ] ) as gd, \
              patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
-                    return_value=[ ] ) as gq, \
+                    return_value={ "owed": [ ], "stale": [ ] } ) as gq, \
              patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
                     return_value="claude.code@lupin.deepily.ai#sid" ):
             # owed_items_from_state + is_empty_state run REAL on the replayed
@@ -288,7 +288,7 @@ class TestRunHeartbeat:
             return_value={ "enabled": True, "poke_cap": 3 } )
     def test_worker_with_open_inbound_dm_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """The worker fix: an unhandled inbound assignment DM → poke to resume/finish."""
-        self.mock_inbound.return_value = [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ]
+        self.mock_inbound.return_value = { "owed": [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ], "stale": [ ] }
         out = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "unanswered inbound question" in out[ "reason" ]
@@ -303,7 +303,7 @@ class TestRunHeartbeat:
     def test_oracle_log_carries_live_signal_counts( self, mock_load, mock_read, mock_count, mock_log ):
         """Observability: the heartbeat_oracle log line carries both new counts."""
         self.mock_delegations.return_value = [ ]
-        self.mock_inbound.return_value     = [ ]
+        self.mock_inbound.return_value     = { "owed": [ ], "stale": [ ] }
         _run_heartbeat( "sid", "/t.jsonl" )
         oracle = [ c.kwargs[ "extra" ] for c in mock_log.call_args_list
                    if c.kwargs[ "extra" ].get( "phase" ) == "heartbeat_oracle" ]
@@ -375,6 +375,11 @@ class TestGatherOutstandingDelegations:
 
 MY_SID = "6acfa341-1dcd-4240-96d5-9bc39ae58861"
 
+# Pinned "now" for the gatherer's age-out partition (spec (e)). Fixed 30 min
+# after the default _dm ts so date-pinned fixtures stay FRESH regardless of when
+# the suite runs (the gatherer's time.time() is mocked to this in _run/_run_full).
+_NOW_EPOCH = datetime.datetime( 2026, 6, 10, 2, 0, 0, tzinfo=UTC ).timestamp()
+
 
 def _dm( qid, sender="7b76ad86", ts="2026-06-10T01:30:00+00:00", in_reply_to=None, with_md=True ):
     md = { }
@@ -394,12 +399,25 @@ class TestGatherUnansweredInbound:
         store   = MagicMock()
         store.read.return_value = entries
         with patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=persona ), \
+             patch( "lupin_cli.claude_code.hooks.stop.time.time", return_value=_NOW_EPOCH ), \
              patch( "lupin_mcp.commons_store.CommonsStore", return_value=store ) as cs:
             out = _gather_unanswered_inbound_questions( MY_SID )
         if entries is not None and persona and persona.get( "name" ):
             cs.assert_called_once()
             assert store.read.call_args[ 0 ][ 0 ] == "dm-mr_radio"
-        return out
+        return out[ "owed" ]
+
+    def _run_full( self, entries, persona=None, acked=None ):
+        """Like _run but returns the whole { owed, stale } dict (age/ledger tests)."""
+        from lupin_cli.claude_code.hooks.stop import _gather_unanswered_inbound_questions
+        persona = persona if persona is not None else { "name": "mr radio" }
+        store   = MagicMock()
+        store.read.return_value = entries
+        with patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=persona ), \
+             patch( "lupin_cli.claude_code.hooks.stop.time.time", return_value=_NOW_EPOCH ), \
+             patch( "lupin_cli.claude_code.hooks.stop.read_acked_qids", return_value=set( acked or [ ] ) ), \
+             patch( "lupin_mcp.commons_store.CommonsStore", return_value=store ):
+            return _gather_unanswered_inbound_questions( MY_SID )
 
     def test_open_inbound_dm_is_owed( self ):
         out = self._run( [ _dm( "q1" ) ] )
@@ -438,8 +456,75 @@ class TestGatherUnansweredInbound:
         assert [ e[ "question_id" ] for e in out ] == [ "new" ]
 
     def test_missing_assigned_at_disables_floor( self ):
-        out = self._run( [ _dm( "old", ts="2020-01-01T00:00:00+00:00" ) ] )
-        assert len( out ) == 1                                   # bias-to-poke, cap-bounded
+        # No assigned_at ⇒ the tenure floor is OFF, so the ancient DM is still
+        # CONSIDERED (not floor-dropped). Being ancient it ages out to `stale`
+        # (review, not owed) rather than vanishing — that surfacing is the proof
+        # the floor was disabled (a floor would have excluded it entirely).
+        full = self._run_full( [ _dm( "old", ts="2020-01-01T00:00:00+00:00" ) ] )
+        assert full[ "owed" ] == [ ]
+        assert [ e[ "question_id" ] for e in full[ "stale" ] ] == [ "old" ]
+
+    # ── acked-inbound ledger spec parts (Rick 2026-06-10) ──────────────────────
+
+    def test_expect_reply_false_never_owed( self ):
+        """(a) fire-and-forget acks/verdicts (expect_reply=False) are NOT owed."""
+        e = _dm( "q1" )
+        e[ "metadata" ][ "expect_reply" ] = False
+        full = self._run_full( [ e ] )
+        assert full[ "owed" ] == [ ] and full[ "stale" ] == [ ]
+
+    def test_expect_reply_true_is_owed( self ):
+        """(a) an explicit expect_reply=True genuine question stays owed."""
+        e = _dm( "q1" )
+        e[ "metadata" ][ "expect_reply" ] = True
+        assert [ q[ "question_id" ] for q in self._run( [ e ] ) ] == [ "q1" ]
+
+    def test_expect_reply_missing_stays_owed( self ):
+        """(a) a MISSING expect_reply (older-format DM) is owed — bias-to-poke."""
+        assert [ q[ "question_id" ] for q in self._run( [ _dm( "q1" ) ] ) ] == [ "q1" ]
+
+    def test_acked_qid_subtracted( self ):
+        """(c) a qid in the looked-at ledger is cleared from owed."""
+        full = self._run_full( [ _dm( "q1" ), _dm( "q2" ) ], acked=[ "q1" ] )
+        assert [ q[ "question_id" ] for q in full[ "owed" ] ] == [ "q2" ]
+
+    def test_aged_out_inbound_is_stale_not_owed( self ):
+        """(e) an un-handled DM older than the threshold surfaces as stale."""
+        full = self._run_full( [ _dm( "fresh", ts="2026-06-10T01:45:00+00:00" ),
+                                 _dm( "old",   ts="2026-06-08T00:00:00+00:00" ) ] )
+        assert [ q[ "question_id" ] for q in full[ "owed" ] ]  == [ "fresh" ]
+        assert [ q[ "question_id" ] for q in full[ "stale" ] ] == [ "old" ]
+
+    def test_acceptance_backlog_collapses_to_genuinely_owed( self ):
+        """ACCEPTANCE (Rick 2026-06-10): a manager inbox of mostly serviced
+        acks/verdicts + old/looked-at items collapses to ONLY the genuinely
+        -awaiting few (~0-3), not the raw inbound count (the 46 → ~0-3 fix).
+
+        12 inbound DMs:
+          - 6 fire-and-forget acks/verdicts (expect_reply=False)   → (a) dropped
+          - 2 genuine questions already answered by my threaded reply → (b) cleared
+          - 1 genuine question the manager bulk-marked looked-at      → (c) acked
+          - 2 genuine questions older than the age threshold          → (e) stale
+          - 1 genuine, fresh, reply-expected question                 → OWED
+        Net: owed == 1 (was 12 under the old count-every-qid rule).
+        """
+        def _ack( i ):
+            e = _dm( f"ack{i}", ts="2026-06-10T01:50:00+00:00" )
+            e[ "metadata" ][ "expect_reply" ] = False
+            return e
+        entries = [ _ack( i ) for i in range( 6 ) ] + [
+            _dm( "answered1", ts="2026-06-10T01:50:00+00:00" ),
+            _dm( "answered2", ts="2026-06-10T01:50:00+00:00" ),
+            _dm( None, sender=MY_SID[ :8 ], in_reply_to="answered1" ),   # my reply (b)
+            _dm( None, sender=MY_SID[ :8 ], in_reply_to="answered2" ),   # my reply (b)
+            _dm( "lookedat", ts="2026-06-10T01:50:00+00:00" ),           # (c)
+            _dm( "stale1", ts="2026-06-07T00:00:00+00:00" ),             # (e)
+            _dm( "stale2", ts="2026-06-06T00:00:00+00:00" ),             # (e)
+            _dm( "OWED",   ts="2026-06-10T01:55:00+00:00" ),             # genuinely owed
+        ]
+        full = self._run_full( entries, acked=[ "lookedat" ] )
+        assert [ q[ "question_id" ] for q in full[ "owed" ] ] == [ "OWED" ]
+        assert sorted( q[ "question_id" ] for q in full[ "stale" ] ) == [ "stale1", "stale2" ]
 
     def test_no_persona_returns_empty( self ):
         assert self._run( [ _dm( "q1" ) ], persona={ } ) == [ ]
@@ -449,7 +534,7 @@ class TestGatherUnansweredInbound:
         monkeypatch.delenv( "LUPIN_ROOT", raising=False )
         with patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona",
                     return_value={ "name": "mr radio" } ):
-            assert _gather_unanswered_inbound_questions( MY_SID ) == [ ]
+            assert _gather_unanswered_inbound_questions( MY_SID ) == { "owed": [ ], "stale": [ ] }
 
     def test_degrade_safe_on_store_error( self ):
         from lupin_cli.claude_code.hooks.stop import _gather_unanswered_inbound_questions
@@ -457,7 +542,7 @@ class TestGatherUnansweredInbound:
                     return_value={ "name": "mr radio" } ), \
              patch( "lupin_mcp.commons_store.CommonsStore",
                     side_effect=RuntimeError( "store exploded" ) ):
-            assert _gather_unanswered_inbound_questions( MY_SID ) == [ ]
+            assert _gather_unanswered_inbound_questions( MY_SID ) == { "owed": [ ], "stale": [ ] }
 
 
 class TestDmTopicFor:
@@ -747,7 +832,7 @@ class TestMainSpeakerphonePokeMatrix:
              patch( "lupin_cli.claude_code.hooks.stop._gather_outstanding_delegations",
                     return_value=[] ), \
              patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
-                    return_value=[] ), \
+                    return_value={ "owed": [ ], "stale": [ ] } ), \
              patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
                     return_value="claude.code@lupin.deepily.ai#abc12345" ), \
              patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" ) as mock_async, \
@@ -831,6 +916,7 @@ class TestComposePokeAbstract:
             [ "Subj A", "Subj B" ],
             [ { "session_name": "wise-penguin" } ],
             [ { "sender": "7b76ad86", "question_id": "q1234567" } ],
+            [ { "sender": "old-peer", "question_id": "stale123" } ],
             "Do not stop yet.",
         )
         assert out.startswith( "Heartbeat: stopped with work owed — self-poke fired." )
@@ -838,27 +924,29 @@ class TestComposePokeAbstract:
         assert "• Subj A" in out and "• Subj B" in out
         assert "• wise-penguin" in out
         assert "from 7b76ad86 (qid q1234567)" in out
+        assert "Stale inbound (review, not owed):" in out
+        assert "from old-peer (qid stale123)" in out
         assert "Poke text injected into the worker:" in out
         assert "Do not stop yet." in out
 
     def test_none_verdict_no_referents_just_header( self ):
-        out = _compose_poke_abstract( None, [ ], [ ], [ ], None )
+        out = _compose_poke_abstract( None, [ ], [ ], [ ], [ ], None )
         assert out == "Heartbeat: stopped with work owed — self-poke fired."
 
     def test_delegation_name_falls_back_session_id_then_placeholder( self ):
         out = _compose_poke_abstract( { "signals": [ ] }, [ ],
-                                      [ { "session_id": "sid-1" }, { } ], [ ], None )
+                                      [ { "session_id": "sid-1" }, { } ], [ ], [ ], None )
         assert "• sid-1" in out      # session_name absent → session_id
         assert "• ?" in out          # both absent → placeholder
 
     def test_list_truncation_plus_n_more( self ):
-        out = _compose_poke_abstract( { "signals": [ ] }, [ f"t{i}" for i in range( 12 ) ], [ ], [ ], None )
+        out = _compose_poke_abstract( { "signals": [ ] }, [ f"t{i}" for i in range( 12 ) ], [ ], [ ], [ ], None )
         assert "…+4 more" in out     # 12 − 8 shown
         assert "• t0" in out
         assert "• t8" not in out     # beyond the 8-item cap
 
     def test_abstract_capped_at_ceiling( self ):
-        out = _compose_poke_abstract( { "signals": [ ] }, [ ], [ ], [ ], "x" * 9000 )
+        out = _compose_poke_abstract( { "signals": [ ] }, [ ], [ ], [ ], [ ], "x" * 9000 )
         assert len( out ) <= 4000
         assert out.endswith( "…" )
 
@@ -898,17 +986,19 @@ class TestBuildPokeAbstractSafe:
         with patch( "lupin_cli.claude_code.hooks.stop.replay_task_subjects",
                     return_value={ "1": "First subj" } ):
             out = _build_poke_abstract_safe(
-                { "signals": [ "todo_in_progress" ] }, task_state, "/t.jsonl", [ ], [ ], result )
+                { "signals": [ "todo_in_progress" ] }, task_state, "/t.jsonl", [ ], [ ],
+                [ { "sender": "old", "question_id": "stale9" } ], result )
         assert "First subj" in out      # owed task 1 has a subject
         assert "task 3" in out           # owed task 3 subject missing → fallback
         assert "POKE TEXT" in out
         assert "completed" not in out    # task 2 is terminal → not owed → not listed
+        assert "Stale inbound (review, not owed):" in out   # stale passed through the safe wrapper
 
     def test_owed_ids_empty_skips_subject_replay( self ):
         with patch( "lupin_cli.claude_code.hooks.stop.replay_task_subjects" ) as rps:
             out = _build_poke_abstract_safe(
                 { "signals": [ "outstanding_delegation" ] }, { }, "/t.jsonl",
-                [ { "session_name": "w1" } ], [ ], { "hook_output": { "reason": "r" } } )
+                [ { "session_name": "w1" } ], [ ], [ ], { "hook_output": { "reason": "r" } } )
         rps.assert_not_called()          # delegation-only poke → no transcript re-read
         assert "• w1" in out
 
@@ -917,7 +1007,7 @@ class TestBuildPokeAbstractSafe:
         with patch( "lupin_cli.claude_code.hooks.stop._compose_poke_abstract",
                     side_effect=RuntimeError( "boom" ) ):
             out = _build_poke_abstract_safe(
-                { "signals": [ ] }, { "1": "in_progress" }, "/t.jsonl", [ ], [ ],
+                { "signals": [ ] }, { "1": "in_progress" }, "/t.jsonl", [ ], [ ], [ ],
                 { "hook_output": { "reason": "r" } } )
         assert out is None               # degrade-safe → caller falls back to generic
         assert mock_log.call_args[ 1 ][ "extra" ][ "phase" ] == "poke_abstract_error"

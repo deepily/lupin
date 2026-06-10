@@ -195,3 +195,71 @@ def test_v2_task_replay_empty_owed_set_is_idle():
 
 def test_quick_smoke_test_passes():
     assert o.quick_smoke_test() is True
+
+
+# ── inbound age-out partition (acked-inbound ledger spec part (e)) ─────────────
+
+import datetime as _dt
+
+_T0  = _dt.datetime( 2026, 6, 10, 12, 0, 0, tzinfo=_dt.timezone.utc )
+_NOW = _T0.timestamp()
+
+
+def _ago( seconds ):
+    """ISO-8601 string for `seconds` before the fixed _NOW reference."""
+    return ( _T0 - _dt.timedelta( seconds=seconds ) ).isoformat()
+
+
+def test_inbound_age_seconds_parses_offset():
+    age = o._inbound_age_seconds( { "ts": _ago( 60 ) }, _NOW )
+    assert abs( age - 60 ) < 1
+
+
+def test_inbound_age_seconds_normalizes_z_suffix():
+    # Trailing "Z" must parse (3.10 fromisoformat rejects it without the fix).
+    age = o._inbound_age_seconds( { "ts": "2026-06-10T11:00:00Z" }, _NOW )
+    assert abs( age - 3600 ) < 1
+
+
+def test_inbound_age_seconds_undateable_returns_none():
+    assert o._inbound_age_seconds( { },                _NOW ) is None   # missing ts
+    assert o._inbound_age_seconds( { "ts": 123 },      _NOW ) is None   # non-string ts
+    assert o._inbound_age_seconds( { "ts": "nope" },   _NOW ) is None   # unparseable
+    assert o._inbound_age_seconds( "not-a-dict",       _NOW ) is None   # non-dict entry
+
+
+def test_partition_fresh_vs_stale():
+    fresh, stale = o.partition_inbound_by_age(
+        [ { "question_id": "f", "ts": _ago( 3600 ) },      # 1h → fresh
+          { "question_id": "s", "ts": _ago( 90000 ) } ],   # 25h → stale (>24h default)
+        _NOW )
+    assert [ e[ "question_id" ] for e in fresh ] == [ "f" ]
+    assert [ e[ "question_id" ] for e in stale ] == [ "s" ]
+
+
+def test_partition_boundary_equal_is_fresh():
+    # Exactly at the threshold is FRESH (strict ">" defines stale).
+    fresh, stale = o.partition_inbound_by_age(
+        [ { "question_id": "edge", "ts": _ago( o.INBOUND_STALE_AFTER_SECONDS ) } ], _NOW )
+    assert [ e[ "question_id" ] for e in fresh ] == [ "edge" ] and stale == [ ]
+
+
+def test_partition_undateable_is_fresh_bias_to_owed():
+    fresh, stale = o.partition_inbound_by_age( [ { "question_id": "x" } ], _NOW )
+    assert [ e[ "question_id" ] for e in fresh ] == [ "x" ] and stale == [ ]
+
+
+def test_partition_custom_threshold():
+    fresh, stale = o.partition_inbound_by_age(
+        [ { "question_id": "h", "ts": _ago( 3600 ) } ], _NOW, stale_after_seconds=1800 )
+    assert fresh == [ ] and [ e[ "question_id" ] for e in stale ] == [ "h" ]
+
+
+def test_partition_preserves_order_within_buckets():
+    items = [ { "question_id": "a", "ts": _ago( 10 ) },
+              { "question_id": "b", "ts": _ago( 99999 ) },
+              { "question_id": "c", "ts": _ago( 20 ) },
+              { "question_id": "d", "ts": _ago( 99998 ) } ]
+    fresh, stale = o.partition_inbound_by_age( items, _NOW )
+    assert [ e[ "question_id" ] for e in fresh ] == [ "a", "c" ]
+    assert [ e[ "question_id" ] for e in stale ] == [ "b", "d" ]

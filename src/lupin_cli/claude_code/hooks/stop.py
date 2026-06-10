@@ -20,6 +20,7 @@ Install in ~/.claude/settings.json:
 """
 import os
 import sys
+import time
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
@@ -65,7 +66,12 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
 from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_settings
 from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
-from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import evaluate_work_owed
+from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
+    evaluate_work_owed, partition_inbound_by_age,
+)
+# v4 acked-inbound ledger (Rick 2026-06-10) — explicit "looked-at" qids the
+# unanswered-inbound gatherer subtracts (spec part (c)).
+from lupin_cli.claude_code.hooks.lib.heartbeat_acked_ledger import read_acked_qids
 from lupin_cli.claude_code.hooks.lib.heartbeat_task_state import (
     replay_task_state, owed_items_from_state, is_empty_state,
     replay_task_subjects, OWED_STATUSES,
@@ -412,7 +418,7 @@ def _format_inbound( q ):
     return f"from {sender} (qid {short})"
 
 
-def _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbound, poke_text ):
+def _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbound, stale_inbound, poke_text ):
     """
     Build the receipts abstract for the poke breadcrumb (PURE; caller wraps it
     degrade-safe). Lists the fired signals + their referents and the verbatim
@@ -421,11 +427,15 @@ def _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbou
     Requires:
         - verdict is the evaluate_work_owed dict (or None)
         - owed_task_subjects is a list[str]; delegations is a list[dict] with
-          session_name/session_id; open_inbound is a list[dict] (_format_inbound)
+          session_name/session_id; open_inbound + stale_inbound are list[dict]
+          (_format_inbound shape)
         - poke_text is the verbatim reason injected into the worker (or None)
 
     Ensures:
         - returns a non-empty string headed by _POKE_ABSTRACT_HEADER
+        - stale_inbound (aged-out, NOT owed) is surfaced under its OWN
+          "review, not owed" heading so the reader can triage backlog without it
+          inflating the owed count
         - truncates each referent list with "+N more" and the whole abstract at
           the char ceiling
     """
@@ -441,6 +451,9 @@ def _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbou
     if open_inbound:
         parts.extend( _receipt_lines( "Unanswered inbound questions:",
                                       [ _format_inbound( q ) for q in open_inbound ] ) )
+    if stale_inbound:
+        parts.extend( _receipt_lines( "Stale inbound (review, not owed):",
+                                      [ _format_inbound( q ) for q in stale_inbound ] ) )
     if poke_text:
         parts.append( "" )
         parts.append( "Poke text injected into the worker:" )
@@ -451,7 +464,7 @@ def _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbou
     return text
 
 
-def _build_poke_abstract_safe( verdict, task_state, transcript_path, delegations, open_inbound, result ):
+def _build_poke_abstract_safe( verdict, task_state, transcript_path, delegations, open_inbound, stale_inbound, result ):
     """
     Degrade-safe wrapper around _compose_poke_abstract (§4, Rick 2026-06-10).
 
@@ -462,6 +475,8 @@ def _build_poke_abstract_safe( verdict, task_state, transcript_path, delegations
 
     Ensures:
         - returns the composed abstract string on success, or None on any error
+        - surfaces stale_inbound (aged-out, review-not-owed) alongside the owed
+          referents so backlog is visible without inflating the owed count
         - replays subjects ONLY when there is ≥1 owed task (delegation/inbound-
           only pokes skip the extra transcript pass)
     """
@@ -470,7 +485,7 @@ def _build_poke_abstract_safe( verdict, task_state, transcript_path, delegations
         subjects = replay_task_subjects( transcript_path ) if owed_ids else { }
         owed_task_subjects = [ ( subjects.get( tid ) or f"task {tid}" ) for tid in owed_ids ]
         poke_text = ( result.get( "hook_output" ) or { } ).get( "reason" )
-        return _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbound, poke_text )
+        return _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbound, stale_inbound, poke_text )
     except Exception as e:
         log_to_stream( "stop", { }, extra={
             "phase"      : "poke_abstract_error",
@@ -1118,56 +1133,81 @@ def _gather_unanswered_inbound_questions( session_id ):
     Requires:
         - session_id is this session's (stable) id string
 
+    The acked-inbound ledger (Rick 2026-06-10) layers FOUR clears on top of the
+    handled-by-threaded-reply rule so a manager's poke stops counting serviced
+    acks/verdicts as owed:
+        (a) expect_reply=False inbound is NEVER owed — fire-and-forget acks,
+            verdicts, and status pings carry it; they demand no threaded reply.
+        (b) a threaded reply (metadata.in_reply_to == qid) authored by THIS
+            session clears the qid (unchanged — the original rule).
+        (c) a qid present in this session's .heartbeat-acked-<sid>.json ledger
+            is "looked at" → subtracted (the manager's bulk-mark backstop).
+        (e) age-out: a still-unhandled qid older than INBOUND_STALE_AFTER_SECONDS
+            is surfaced as STALE ("review", not owed) — not counted toward the
+            poke, only shown in the receipts.
+
     Ensures:
-        - Returns [ { "question_id", "ts", "sender" }, ... ] for each unhandled
-          inbound DM that carries a question_id (qid-less entries cannot be
-          thread-matched and are excluded as untrackable — every send_to /
-          ask_async DM carries one). `sender` is the originating session id (for
-          the poke-abstract receipt); it never affects the oracle verdict.
+        - Returns { "owed": [ {question_id, ts, sender}, ... ],
+                    "stale": [ {question_id, ts, sender}, ... ] }:
+          OWED = fresh, unhandled, reply-expected, un-acked inbound (feeds the
+          oracle's unanswered_inbound_question signal); STALE = the same minus
+          the age cut (surfaced for review, never owed). `sender` is the
+          originating session id (poke-abstract receipt only; never the verdict)
+        - qid-less entries are excluded as untrackable (cannot be thread-matched
+          — every send_to / ask_async DM carries one)
         - Entries authored by this session never count as inbound
-        - Returns [] when the session has no persona, no LUPIN_ROOT, or no
-          DM topic — and on ANY error (never raises, never blocks the Stop)
+        - Returns {"owed":[],"stale":[]} when the session has no persona, no
+          LUPIN_ROOT, or no DM topic — and on ANY error (never raises, never
+          blocks the Stop)
     """
+    empty = { "owed": [ ], "stale": [ ] }
     try:
         persona = get_voice_persona( session_id )
         name    = persona.get( "name" ) if isinstance( persona, dict ) else None
         if not name:
-            return [ ]
+            return empty
         commons_root = os.environ.get( "LUPIN_ROOT" )
         if not commons_root:
-            return [ ]
+            return empty
         from lupin_mcp.commons_store import CommonsStore
         entries = CommonsStore( commons_root ).read( _dm_topic_for( name ), limit=50 )
 
         tenure_floor = persona.get( "assigned_at" )    # ISO-8601 str or None
-        # "Handled" keys: in_reply_to of entries THIS session authored.
+        acked        = read_acked_qids( session_id )   # (c) bulk-marked "looked at"
+        # "Handled" keys: in_reply_to of entries THIS session authored.        (b)
         handled = { ( e.get( "metadata" ) or { } ).get( "in_reply_to" )
                     for e in entries
                     if isinstance( e, dict )
                     and _is_same_session( e.get( "sender_session_id" ), session_id ) }
-        open_inbound = [ ]
+        candidates = [ ]
         for e in entries:
             if not isinstance( e, dict ):
                 continue
             if _is_same_session( e.get( "sender_session_id" ), session_id ):
                 continue                                 # my own post — not inbound
-            qid = ( e.get( "metadata" ) or { } ).get( "question_id" )
+            md  = e.get( "metadata" ) or { }
+            qid = md.get( "question_id" )
             if not qid:
                 continue                                 # untrackable (no thread key)
+            if md.get( "expect_reply" ) is False:        # (a) fire-and-forget — never owed
+                continue
+            if qid in acked:                             # (c) looked-at ledger
+                continue
             ts = e.get( "ts" )
             # ISO-8601 strings in one zone compare lexicographically.
             if tenure_floor and isinstance( ts, str ) and ts < tenure_floor:
                 continue
-            if qid in handled:
+            if qid in handled:                           # (b) my threaded reply cleared it
                 continue
-            open_inbound.append( {
+            candidates.append( {
                 "question_id" : qid,
                 "ts"          : ts,
                 "sender"      : e.get( "sender_session_id" ),   # for the poke-abstract receipt
             } )
-        return open_inbound
+        owed, stale = partition_inbound_by_age( candidates, time.time() )   # (e) age-out
+        return { "owed": owed, "stale": stale }
     except Exception:
-        return [ ]
+        return empty
 
 
 def _run_heartbeat( session_id, transcript_path ):
@@ -1246,7 +1286,9 @@ def _run_heartbeat( session_id, transcript_path ):
     # assignment DMs not yet answered with a threaded reply. Both gatherers are
     # degrade-safe IO shells (any error ⇒ [] ⇒ signal silent, never block).
     delegations = _gather_outstanding_delegations( session_id )
-    open_inbound = _gather_unanswered_inbound_questions( session_id )
+    inbound       = _gather_unanswered_inbound_questions( session_id )
+    open_inbound  = inbound[ "owed" ]    # fresh, reply-expected, un-acked → owed
+    stale_inbound = inbound[ "stale" ]   # aged-out → surfaced for review, NOT owed
     verdict    = evaluate_work_owed(
         todo_items                   = owed_items,
         unanswered_inbound_questions = open_inbound,
@@ -1282,7 +1324,8 @@ def _run_heartbeat( session_id, transcript_path ):
         "work_owed"    : verdict[ "work_owed" ],
         "owed_items"   : len( owed_items ),
         "delegations"  : len( delegations ),
-        "open_inbound" : len( open_inbound ),
+        "open_inbound"  : len( open_inbound ),
+        "stale_inbound" : len( stale_inbound ),   # surfaced-for-review, not owed
         "poke_count"   : get_poke_count( session_id ),
         "cap"          : settings[ "poke_cap" ],
         "awaiting"     : ( hold.get( "awaiting" ) if hold else None ),
@@ -1332,7 +1375,7 @@ def _run_heartbeat( session_id, transcript_path ):
         # de-dup rides the poke-cap. Fires for BOTH branches (shared adapter).
         total_owed = len( owed_items ) + len( delegations ) + len( open_inbound )
         abstract   = _build_poke_abstract_safe(
-            verdict, task_state, transcript_path, delegations, open_inbound, result
+            verdict, task_state, transcript_path, delegations, open_inbound, stale_inbound, result
         )
         _announce_poke( session_id, persona_name, total_owed, abstract=abstract )
         return result[ "hook_output" ]

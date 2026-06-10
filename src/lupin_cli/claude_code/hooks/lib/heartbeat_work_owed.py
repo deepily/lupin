@@ -41,10 +41,19 @@ artifact's `awaiting` field, not this oracle. Flagged to María for
 confirmation; cheap to adjust since the list is injected.
 """
 
+import datetime
+
 # TODO item status vocabulary (mirrors TodoWrite / TODO.md conventions)
 TODO_IN_PROGRESS = "in_progress"
 TODO_PENDING     = "pending"        # unstarted / owned-but-not-begun
 TODO_COMPLETED   = "completed"
+
+# Inbound age-out threshold (acked-inbound ledger spec part (e), Rick 2026-06-10):
+# an unanswered inbound DM older than this surfaces as "stale, review" — NOT as
+# owed work that pokes. 24h: a full day un-actioned ⇒ it is backlog to triage at
+# leisure, not a live obligation. The gatherer (IO shell) supplies `now`; this
+# threshold + the partition itself are PURE (clock injected, never read here).
+INBOUND_STALE_AFTER_SECONDS = 86400
 
 # Poke reason template (rides the top-level `reason` field — NEVER systemMessage;
 # see 01-…-seam-analysis.md §ERRATA).
@@ -103,6 +112,60 @@ def _actionable_pending_decisions( pending_decisions ):
         d for d in pending_decisions
         if isinstance( d, dict ) and not d.get( "blocked_on_user", False )
     ]
+
+
+def _inbound_age_seconds( entry, now_epoch ):
+    """
+    Age in seconds of one inbound entry, or None when it cannot be dated.
+
+    Requires:
+        - entry is a dict that may carry a "ts" ISO-8601 string
+        - now_epoch is a float/int POSIX timestamp ("now", injected by caller)
+
+    Ensures:
+        - Returns ( now_epoch - parsed_ts ) in seconds for a parseable ts
+        - Returns None when ts is missing / non-string / unparseable
+        - PURE: parses the injected string + arithmetic only; reads no clock
+        - Trailing "Z" is normalized to "+00:00" so UTC stamps parse on 3.10
+    """
+    ts = entry.get( "ts" ) if isinstance( entry, dict ) else None
+    if not isinstance( ts, str ):
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat( ts.replace( "Z", "+00:00" ) )
+    except ValueError:
+        return None
+    return now_epoch - parsed.timestamp()
+
+
+def partition_inbound_by_age( inbound, now_epoch,
+                              stale_after_seconds=INBOUND_STALE_AFTER_SECONDS ):
+    """
+    Split inbound entries into (fresh, stale) by age — spec part (e).
+
+    Requires:
+        - inbound is an iterable of dicts (each may carry a "ts" ISO string)
+        - now_epoch is the caller's injected "now" (POSIX seconds)
+        - stale_after_seconds is a positive number
+
+    Ensures:
+        - Returns ( fresh, stale ): an entry is STALE iff its age strictly
+          exceeds stale_after_seconds; otherwise FRESH
+        - An undateable entry (missing/unparseable ts) is FRESH — bias-to-owed,
+          consistent with the gatherer's missing-tenure-floor philosophy; the
+          poke cap bounds the cost
+        - Input order is preserved within each bucket
+        - PURE: no clock, no IO; never raises on well-formed dict input
+    """
+    fresh = [ ]
+    stale = [ ]
+    for entry in inbound:
+        age = _inbound_age_seconds( entry, now_epoch )
+        if age is not None and age > stale_after_seconds:
+            stale.append( entry )
+        else:
+            fresh.append( entry )
+    return fresh, stale
 
 
 def evaluate_work_owed( todo_items=None, pending_decisions=None,
