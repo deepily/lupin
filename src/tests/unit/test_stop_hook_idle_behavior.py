@@ -58,10 +58,10 @@ class TestIdleBehaviorReader:
 
 class TestIdleSentence:
     def test_with_persona( self ):
-        assert _idle_sentence( "Rio" ) == "I'm Rio. Idle — nothing owed."
+        assert _idle_sentence( "Rio" ) == "Momentarily idle."
 
     def test_without_persona( self ):
-        assert _idle_sentence( None ) == "I'm a worker. Idle — nothing owed."
+        assert _idle_sentence( None ) == "Momentarily idle."
 
 
 # ── _announce_idle ────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ class TestAnnounceIdle:
 
         mock_notify.assert_called_once()
         request = mock_notify.call_args[ 0 ][ 0 ]
-        assert request.message  == "I'm Rio. Idle — nothing owed."
+        assert request.message  == "Momentarily idle."
         assert request.priority == NotificationPriority.LOW
         assert request.sender_id == "claude.code@lupin.deepily.ai#abc12345"
 

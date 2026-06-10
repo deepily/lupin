@@ -277,10 +277,10 @@ def _idle_sentence( persona_name ) -> str:
     (seeded from the dropped poke-scaffold's NOT_OWED case). Pure.
 
     Ensures:
-        - returns "I'm <persona>. Idle — nothing owed." ("a worker" when the
-          persona name is missing)
+        - returns "Momentarily idle." (persona-agnostic; the sender_id already
+          renders the card AS the persona, so the sentence need not name itself)
     """
-    return f"I'm {persona_name or 'a worker'}. Idle — nothing owed."
+    return "Momentarily idle."
 
 
 def _announce_idle( session_id, persona_name ):
