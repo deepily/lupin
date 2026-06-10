@@ -16,6 +16,15 @@ resource "google_service_account" "runtime_sa" {
   display_name = "Lupin VM runtime SA (least-privilege app identity)"
 }
 
+locals {
+  # The IAM member that carries the data-plane runtime roles. When an external VM
+  # SA is supplied (the standalone terraforming-vms vm_sa attached to lupin-host-test),
+  # bind the roles to IT; otherwise fall back to the module-created runtime_sa.
+  # coalesce returns the first non-empty string → external wins when set.
+  # build-sa is ALWAYS module-owned (image push), independent of this.
+  runtime_sa_member = "serviceAccount:${coalesce(var.external_vm_sa_email, google_service_account.runtime_sa.email)}"
+}
+
 # --- runtime-sa: per-bucket storage.objectUser (create/read/update/delete OBJECTS,
 #     but NOT delete-bucket / admin) ---
 resource "google_storage_bucket_iam_member" "runtime_objectuser" {
@@ -23,7 +32,7 @@ resource "google_storage_bucket_iam_member" "runtime_objectuser" {
 
   bucket = each.value
   role   = "roles/storage.objectUser"
-  member = "serviceAccount:${google_service_account.runtime_sa.email}"
+  member = local.runtime_sa_member
 }
 
 # --- runtime-sa: per-secret accessor ---
@@ -33,7 +42,7 @@ resource "google_secret_manager_secret_iam_member" "runtime_secret_accessor" {
   project   = var.project_id
   secret_id = each.value
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.runtime_sa.email}"
+  member    = local.runtime_sa_member
 }
 
 # --- Artifact Registry: runtime reads, build writes ---
@@ -42,7 +51,7 @@ resource "google_artifact_registry_repository_iam_member" "runtime_ar_reader" {
   location   = var.ar_location
   repository = var.ar_repository_id
   role       = "roles/artifactregistry.reader"
-  member     = "serviceAccount:${google_service_account.runtime_sa.email}"
+  member     = local.runtime_sa_member
 }
 
 resource "google_artifact_registry_repository_iam_member" "build_ar_writer" {
@@ -57,17 +66,17 @@ resource "google_artifact_registry_repository_iam_member" "build_ar_writer" {
 resource "google_project_iam_member" "runtime_cloudsql_client" {
   project = var.project_id
   role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_service_account.runtime_sa.email}"
+  member  = local.runtime_sa_member
 }
 
 resource "google_project_iam_member" "runtime_log_writer" {
   project = var.project_id
   role    = "roles/logging.logWriter"
-  member  = "serviceAccount:${google_service_account.runtime_sa.email}"
+  member  = local.runtime_sa_member
 }
 
 resource "google_project_iam_member" "runtime_metric_writer" {
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
-  member  = "serviceAccount:${google_service_account.runtime_sa.email}"
+  member  = local.runtime_sa_member
 }

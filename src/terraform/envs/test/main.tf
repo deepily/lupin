@@ -32,8 +32,10 @@ module "iam" {
   secret_names     = module.secret_manager.secret_ids
   ar_repository_id = module.artifact_registry.repository_id
   ar_location      = var.region
-  # NOTE (integration follow-up): bind these data-plane roles to the app's
-  # vm_sa instead of the runtime-sa this module currently creates.
+  # Phase B (2026-06-10): bind the data-plane runtime roles to the standalone
+  # terraforming-vms VM's attached vm_sa. Email constructed from project_id so the
+  # project literal stays out of source (the "no hardcoded sandbox project" lock).
+  external_vm_sa_email = "${var.vm_sa_account_id}@${var.project_id}.iam.gserviceaccount.com"
 }
 
 # --- Bridge: private-services peering on the APP's VPC, so Cloud SQL gets a

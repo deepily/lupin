@@ -58,6 +58,29 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+@test "iam exposes an optional external_vm_sa_email (Phase B repoint)" {
+  grep -q 'variable "external_vm_sa_email"' "${MODULES}/iam/variables.tf"
+  # Optional → must carry an empty-string default so validate runs without it.
+  run bash -c "awk '/variable \"external_vm_sa_email\"/{f=1} f{print} /^}/{if(f)exit}' '${MODULES}/iam/variables.tf' | grep -cE 'default[[:space:]]*=[[:space:]]*\"\"'"
+  [ "$output" -eq 1 ]
+}
+
+@test "iam binds runtime roles via coalesce(external_vm_sa_email, runtime_sa) local" {
+  # The repoint local must coalesce external over the module SA…
+  grep -q 'coalesce(var.external_vm_sa_email, google_service_account.runtime_sa.email)' "${MODULES}/iam/main.tf"
+  # …and the runtime role bindings must reference that local, not the SA directly.
+  grep -q 'member = local.runtime_sa_member' "${MODULES}/iam/main.tf"
+  # No runtime binding may still pin the module SA email directly (build-sa is separate).
+  run grep -E 'member[[:space:]]*=[[:space:]]*"serviceAccount:\$\{google_service_account.runtime_sa.email\}"' "${MODULES}/iam/main.tf"
+  [ "$status" -ne 0 ]
+}
+
+@test "envs/test repoints iam to the VM vm_sa without a hardcoded project literal" {
+  # Email is constructed from var.project_id (the project literal stays out of source).
+  grep -q 'external_vm_sa_email = "${var.vm_sa_account_id}@${var.project_id}.iam.gserviceaccount.com"' "${ENV_TEST}/main.tf"
+  grep -q 'variable "vm_sa_account_id"' "${ENV_TEST}/variables.tf"
+}
+
 @test "artifact-registry uses immutable tags" {
   grep -q 'immutable_tags = true' "${MODULES}/artifact-registry/main.tf"
 }

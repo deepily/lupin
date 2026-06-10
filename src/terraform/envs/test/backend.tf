@@ -15,7 +15,7 @@
 
 terraform {
   backend "gcs" {
-    # bucket = supplied via -backend-config (reuse hello-world-foo-423219-tf-state)
+    # bucket = supplied via -backend-config (reuse the project's <proj>-tf-state bucket)
     prefix = "lupin/envs/test"
   }
 }

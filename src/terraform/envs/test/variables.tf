@@ -31,3 +31,9 @@ variable "create_buckets" {
   description = "False reuses the pre-existing GCS buckets (Phase-0 V4 found the -test buckets already present in us-central1). Set true to provision fresh."
   default     = false
 }
+
+variable "vm_sa_account_id" {
+  type        = string
+  description = "Account-id (local part) of the terraforming-vms VM's attached service account. The full email is constructed as <id>@<project_id>.iam.gserviceaccount.com, so the project literal never appears in source (Phase B IAM repoint — bind data-plane roles to the VM vm_sa)."
+  default     = "lupin-host-test-sa"
+}

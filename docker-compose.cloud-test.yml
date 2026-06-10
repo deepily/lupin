@@ -55,6 +55,11 @@ services:
     user: "1001:1001"                       # matches the image's rruiz UID/GID (Dockerfile:37-38)
     ports:
       - "7999:7999"
+    # host.docker.internal → host gateway so the in-container :7999 reverse-proxy
+    # (GET /api/arbiter/fleet-state) can PULL /state from the HOST-side arbiter on
+    # :8001 (Option B, host systemd --user; mirrors the local dev/test services).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./src:/var/lupin/src                # mount model — code from the on-VM checkout (Decision 3)
       - ./io:/var/lupin/io
@@ -75,6 +80,12 @@ services:
       LUPIN_MODEL_SERVER_URL: http://lupin-model-server:7998
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
       LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
+      # Claude Code OAuth (M1 Phase F): the Agent SDK inside this container reads
+      # CLAUDE_CODE_OAUTH_TOKEN for bounded-CC jobs (Max-subscription, zero per-token
+      # cost). Seeded from Rick's `claude setup-token` via cloud-test.env. Empty
+      # default keeps the stack bootable before the token is seeded (bounded-CC
+      # jobs simply fail-loud until it's present — they are not on the boot path).
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       PYTHONUNBUFFERED: "1"
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]

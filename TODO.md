@@ -1,5 +1,29 @@
 # TODO
 
+## ⏸️▶ 2026-06-10 MIDDAY ROTATION (Tiberius 👑, session 4f7a7ab8 → harvested at Rick's direction)
+
+> **RESUME HERE**: full rehydration memento → `io/mementos/tiberius-session-resume-2026.06.10-midday.md` (fleet roster, 10-item priority queue, Rick's gates, merge-train record). Headline: **MERGE TRAIN COMPLETE** on `wip-v0.1.8` (8 merges, all held/unpushed, 8/8 reviews APPROVE, all gates green: mux 1108/1108 · arbiter 428 · heartbeat 473). Next: Lane E color delta → Mr. Radio's E2E triage → SenderCardRecorder branch gap (Cheech) → :8000 batch → SATURDAY CUTOVER. Rick's open gates: GCP gitleaks in-band clearance (key rotation + dotfile audit) · :8001 restart offer · push.
+
+## 🔝🔝 2026-06-10 RICK'S MORNING DIRECTIVE (Tiberius 👑, session 4f7a7ab8) — two top priorities; sprint close ~Sunday 2026-06-14
+
+> Rick (voice, 2026-06-10 AM): shortening sprints 4wk → 2wk. Close out + merge `wip-v0.1.8` perhaps as soon as **Sunday 2026-06-14**. Two workers spawned for the two items below; ALL other TODO items rank beneath them. Remaining-backlog re-prioritization happens with Rick after these are in flight.
+
+1. **[LUPIN] 🥇 Notifications-UI → Multiplexer gap-bridge — deprecate the JS notifications UI by THIS WEEKEND.** Worker assigned 2026-06-10. Analyze every functional change to the current JS notifications client (`src/lupin_app/static/js/notifications.js` + html/css) since multiplexer implementation work paused (~2026-05-29, v0.1.7 merge `26898e1`; ~20 functional commits since: Reading Pane + iframe embed/bust-out, scroll-position preservation, reap→focus-bar badge drop, manager-lineage badges + live-patch, abstract-icon pane toggle, action-required-in-reader, Fleet-Status table + context columns + offline toggle, prediction-hint thumbs-vote, missed-badge Reset, TTS preview slider, STT insert-at-caret, messaging-plane inbox surfacing). Deliverables: (a) functional-change summary, (b) gap analysis vs multiplexer current state, (c) bridging WORK PLAN in `src/rnd/` sized for completion by the weekend.
+2. **[LUPIN] 🥈 GCP deployment — working demonstrable Lupin + ALL accompanying services (incl. `lupin-arbiter-app`).** Worker assigned 2026-06-10. Resume M1 from Mr. Radio's RETURN-TO + Sam's resume list (both below): bind data-plane IAM to `vm_sa`, seed the 12 provider-key secrets, push `lupin:1.1.0` to `lupin-images`, VM bring-up (`docker-compose.cloud-test.yml`), CC OAuth setup-token (Rick-gated), `/health` + bounded-CC E2E. **NEW scope:** the deployed composition must include the arbiter (`lupin-arbiter-app`) and all accompanying services — extend the cloud-test compose accordingly.
+3. Everything else below is subordinate to these two until the branch close-out/merge.
+
+**📋 FLEET TRACKING — Tiberius 👑 follows through on every delegation (Rick's mandate 2026-06-10):**
+- [~] **[LUPIN]** **MULTIPLEXER FULL-PARITY SPRINT** (recalibrated: Rick 2026-06-10 — Claude lanes = human-days ÷ 10-20; full parity + hard redirect by SAT if green). Rachel's r2 plan: critical path 2.2-4.4 lane-hrs. **5 lanes BUILDING** (`cc-author-tiberius-5..9`): A Foundation (auth `lupin_*` migrate + sender-send + boot.ts mount-slot, merges first) · B CC-strip keystone (→WP10/7/8/9) · C Reading Pane (critical path; X-Frame-Options first-action) · D Commons panel (WP7 contract via manager) · E Quartet (keep-at-all-costs). Tiberius = integration owner (mount-slot relay, D↔B arbitration, reviewer-per-lane, :8000 E2E batching, merge order, cutover redirect). Friday-night fallback: MVD-no-redirect, cut C then D. Rachel 🕊️ (`36b35962`) = consulting author on standby. Idiom rule to relay at each lane's first contact: NO inline-onclick — store-action + addEventListener delegation.
+- [~] **[LUPIN]** Track **Rio ⚡** (`227134b4`) — GCP M2: ALL automatable work DONE (Option-B arbiter artifacts + provision script · IAM repoint coded, fmt+validate clean · (f)+(g) closed: model-server = sole L4 consumer · OAuth wired into cloud-test). **GATED BATCH awaits Rick**: ADC re-auth (`gcloud auth application-default login` — stale, blocks even Rick) → terraform apply → seed 12 secrets → push lupin:1.1.0 → VM bring-up → arbiter unit → CC OAuth setup-token. Rio writing the copy-paste Rick runbook, then idling.
+- [x] **[LUPIN]** Worker 3 — MCP worktree mis-detection fix ✅ DONE (Clayton 😎 built; real bug in shared `sender_id.py`, gitlink-aware detect_project; Sam 🎙️ fresh-critical APPROVE, 7/7 adversarial probes) — **COMMITTED HELD `6879937`** on wip-v0.1.8, not pushed. New spawns load the fix at boot; live sessions on next MCP restart. Crew reaped.
+- [x] **[LUPIN]** Track **worker 4** — `history.md` archival ✅ DONE (Mr. Radio 🦉 `0102cf69`, 2026-06-10): 23,684 → 12,208 tokens (48.8%, HEALTHY); 11,476 tokens → `history/2026-05-19-to-22-history.md`; conservation EXACT, index updated. HELD uncommitted — rides Tiberius's selective commit gate.
+- [~] **[LUPIN]** **Tiberius-owned:** batched :8000 E2E run — ✅ SUBMITTED 2026-06-10 ~10:25 EDT as job `ts-ea182db9` (scope `e2e`, `--update-snapshots`; verified-idle protocol: todo+run queues empty → bounced `lupin-rest-test` → healthy → queued pos 1). REMAINING: collect results (~17-40 min) + triage the 6 expected visual rebaselines (doc_viewer ×2, claude_plans listing, dm_badge, multiplexer_phase5, notifications) vs real regressions.
+- [~] **[LUPIN]** **Fleet-status worker** (spawned 2026-06-10 PM, Rick-directed, `wt-fleet-colors`): (1) legacy fleet-table liveness COLOR-CODING + % window heat-tint (was never tasked — Tiberius's miss, owned); (2) "unmanaged" lineage bug — reaped sessions drop to unmanaged because reap deletes bridge+manifest lineage while focus-bar badge is event-cached; fix = offline rows retain last-known manager. Color scheme → relay to Lane E for multiplexer WP12 parity.
+- [ ] **[LUPIN]** **Repo-hygiene follow-ups from the 2026-06-10 uncommitted-work audit** (Rick-directed): (a) triage 2 ORPHANS from prior sessions — untracked `src/scripts/purge-offline-heartbeat-events.py` + deleted-but-uncommitted `src/ephemera/dead-letters/__init__.py` (both pre-date this session; identify owner/intent, commit or discard); (b) commit the 06-09 stop-hook brief doc `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.09-stop-hook-speakerphone-poke-fix-and-poked-rename.md` (canon of the deployed poke-fix, still untracked); (c) Rick's stash decision — `git stash drop` the superseded poke→poked drift stash@{0}; (d) `.claude-session.md` is tracked but CLAUDE.md mandates it be gitignored — add to .gitignore + `git rm --cached` at a quiet moment.
+- [ ] **[LUPIN]** **Tiberius-owned:** broadcast-miss **listener-layer root cause** — investigate the duplicate `cc_notification_listener` anomaly (one session, two live listeners; USER BROADCAST silently skipped while DMs land — see 06-06 block below + memory `reference_broadcast_miss_is_listener_layer`) and deliver Rick a PLAIN-ENGLISH report: what the bug is, why it matters, proposed fix. Rick explicitly wants this explained — he doesn't know what it is yet.
+
+---
+
 ## 🌙 2026-06-09 LATE (Tiberius 👑, session 7b76ad86) — heartbeat-oracle + fleet fixes deployed; MCP follow-ups
 
 > Tonight, all on `wip-v0.1.8` (reviewed + deployed, **NOT pushed**): stop-hook poke-fix, Fleet-Status §5.1/§5.2 + nit, manager-resolution `spawned_by` fix, worker-roster phantom guard, heartbeat-v3 dual-signal oracle (manager outstanding-delegations + worker inbound-DM), idle string → "Momentarily idle." (`366c43e`). Plus the brevity kill-switch (uncommitted).
@@ -7,7 +31,7 @@
 **▶ NEXT SESSION — FIRST ACTIONS (descending priority):**
 1. **[LUPIN] Fix cosa-voice MCP project mis-detection in git worktrees** — a session whose cwd is a git worktree (e.g. `/tmp/wt-delegation-signal`) makes `src/lupin_mcp/cosa_voice_mcp.py` detect `project=<worktree-basename>` → strict account-validation fails → recurring **URGENT "No credentials for project '<name>'" TTS**. **Fix:** make project detection worktree-aware — resolve a worktree cwd to its MAIN repo's registered project via `git rev-parse --git-common-dir` (or the main worktree's `--show-toplevel`), not the dir basename. Files: `src/lupin_mcp/cosa_voice_mcp.py` + `test_mcp_account_validation.py`. Worktree crews are the norm now → fires on every build until fixed. (Diagnosed tonight; emitter session reaped to stop the noise.)
 2. **[LUPIN] Brevity kill-switch — verify on MCP boot.** `cosa voice enforce spoken char cap = False` set + code landed (UNCOMMITTED on disk in `cosa_voice_mcp.py` + tests). The running MCP keeps the OLD code until restarted; tomorrow's fresh start loads it → spoken-length guard OFF for all callers. Confirm on boot; decide whether to commit it (vs the idle-string already committed at `366c43e`).
-3. **[LUPIN] Push `wip-v0.1.8`** (Rick's gate) — held commits ahead of origin: stop-hook `24f85fb` · Fleet-Status `cd36378`/`04aa652`/`a96f213` · manager-resolver `ace0665` · phantom-guard `fc657e4` · idle-string `366c43e` · heartbeat-v3 `c9b5eb8`. All reviewed + deployed. (Also parked: a reversible `git stash` of the superseded poke→poked drift — `git stash drop` to purge.)
+3. ✅ **DONE 2026-06-09 — [LUPIN] Push `wip-v0.1.8`** — PUSHED (Rick confirmed 2026-06-10; git-verified: branch 0 ahead of origin). Stale-entry lesson: verify `git rev-list --count origin/<branch>..HEAD` before citing this list. (Still parked: the reversible `git stash` of the superseded poke→poked drift — `git stash drop` to purge.)
 
 ---
 
@@ -17,7 +41,7 @@
 
 **▶ FOLLOW-UPS (descending priority):**
 1. **🚨 [LUPIN] history.md archival — CRITICAL (~93% of 25k).** Archive older entries FIRST next session, before adding new content (well past the 19k line).
-2. **[LUPIN] Live-push API key** — the arbiter's live-push-to-Rick (2b-1) is WIRED but OFF until `LUPIN_ARBITER_NOTIFY_API_KEY` env credential is provisioned (Rick's). Until then escalations stay durable-commons-only.
+2. ~~**[LUPIN] Live-push API key**~~ ✅ STALE ENTRY, RESOLVED 2026-06-09/10 — superseded by the `~/.lupin/config` config-loader design (`2026.06.09-arbiter-notify-key-from-lupin-config`); key resolver verified True 2026-06-10, INI `arbiter live notify enabled = true`. No env var needed. (Rick caught the staleness during the 06-10 walkthrough.)
 3. **[LUPIN] Manual-poker make-before-break stand-down** — the manual cascade-poker stopgap stays LIVE until the deployed auto-poke (2b-3) is proven in prod; then stand the manual one down.
 4. **[LUPIN] Deploy allow-rule** — add a `settings.json` allow-rule for `systemctl --user restart lupin-arbiter-app` so the manager can deploy :8001 without the auto-mode classifier gate (per the session-end deploy-permission explanation).
 
@@ -97,7 +121,7 @@
 - Krishna 🦚 APPROVED (B1/B2/N1/B3 closed); vote-flow E2E green (`ts-852bb878`, 2/2); `prediction_engine.py` 100% line+branch.
 
 **PICK UP TOMORROW:**
-- [ ] **[LUPIN]** PUSH `bbde599` (held for María's push wave + Rick's word — do NOT push solo).
+- [x] **[LUPIN]** PUSH `bbde599` — DONE (branch 0-ahead of origin, verified 2026-06-10).
 - [ ] **[LUPIN]** Thumbs-vote **Stage 3**: extend ratification weighting to multi-select + open-ended paths (Stage 1 covered yes_no + MC single-select only); add a :8000 integration test (DB-backed 👍 → approved case steers a later prediction; 👎 → steer-away).
 - [ ] **[LUPIN]** Tidy (Krishna non-blocking nit): `MIN_PCT=50` hardcoded in `notifications.js` mirrors the INI `prediction hint vote min confidence threshold` — fold the threshold into the hint payload / expose to client so they can't drift.
 - [ ] **[LUPIN]** Still mine (PG-D4): Global hermetic-config autouse fixture (FM-21) — design + isolation-verify; land only on a clean full-suite gate.
@@ -144,7 +168,7 @@ Design docs: `src/rnd/v0.1.8/2026.06.03-prediction-hint-thumbs-vote-training-sig
 - [ ] **[LUPIN]** Seed the 12 empty provider-key secret versions from `src/conf/keys/` (anthropic/openai/groq/google/gemini/mistral/elevenlabs/kagi/hf/jwt/smtp×2). `lupin-db-password` + `lupin-notification-api-key` are already populated.
 - [ ] **[LUPIN]** Deploy Lupin to the VM: build/push image → `lupin-images`, IAP-SSH, `docker compose up` with `LUPIN_CLOUD_BACKED=true` + `CLOUD_SQL_CONNECTION_NAME=hello-world-foo-423219:us-central1:lupin-pg16-test`.
 - [ ] **[LUPIN]** ⚠️ **Re-enforce Secure Boot** + adopt a proper signed-driver GPU path — current Secure-Boot-OFF is a TEMPORARY exception (Rick 2026-06-02; integration doc §8). Re-enable: `gcloud resource-manager org-policies enable-enforce compute.requireShieldedVm --project=hello-world-foo-423219`.
-- [ ] **[LUPIN]** PUSH the held GCP commits (Lupin `baba032`→`32c0373`; `terraforming-vms` wip-2026.06.02-deploying-lupin-to-gcp: `9310741`, `7304dab`) — awaiting Rick's word.
+- [x] **[LUPIN]** PUSH the held GCP commits — Lupin side DONE (branch 0-ahead, verified 2026-06-10). NOTE: `terraforming-vms` repo commits (`9310741`, `7304dab`) are a SEPARATE repo — verify there independently.
 
 Filed 2026-06-03 by Mr. Radio 🦉 at Rick's request.
 
@@ -157,7 +181,7 @@ Filed 2026-06-03 by Mr. Radio 🦉 at Rick's request.
 - **`lupin:1.1.0` built + verified** (candidate tag; working `1.0.0` untouched): `claude --version`→2.1.161 via symlink; SDK + all 7 CC call-site symbols import; full app import OK (168 routes); compose lints.
 
 **🔁 RESUME HERE (continues Mr. Radio's GCP RETURN-TO above):**
-- [ ] **[LUPIN]** PUSH commit `2637e01` (+ Mr. Radio's held GCP commits) — awaiting Rick's word.
+- [x] **[LUPIN]** PUSH commit `2637e01` (+ Mr. Radio's held GCP commits) — DONE (branch 0-ahead of origin, verified 2026-06-10).
 - [ ] **[LUPIN]** Rick: generate CC OAuth token (`claude setup-token` on home box) → seed into the VM like the keys.
 - [ ] **[LUPIN]** Phase B — repoint data-plane IAM to `vm_sa` (TF `coalesce(external_vm_sa_email, runtime_sa)`; plan §Phase B).
 - [ ] **[LUPIN]** Phase D2 — push `lupin:1.1.0` to `lupin-images` (secret-scan gate).
@@ -203,6 +227,11 @@ Filed 2026-06-03 by Sam 🎙️ at Rick's session-end request.
 
 > ADR-lite: `YYYY-MM-DD — decision → ruling. Why: …`. Appended by `/plan-decide` and ad-hoc.
 
+- 2026-06-10 — `/plan-decide` walkthrough (5 rulings, Rick): (1) GCP gated batch → **GO now** (ADC re-auth Rick's hands; Rio executes runbook §9). (2) Arbiter Option B host-systemd → **CONFIRMED** (veto window closed). (3) Arbiter live-push key → **MOOT** — already reads `~/.lupin/config` via config_loader (06-09 design); resolver verified True on this box; the `LUPIN_ARBITER_NOTIFY_API_KEY` env-var TODO entry was STALE. Rick caught it. (4) `systemctl --user restart lupin-arbiter-app` allow-rule → **YES**; Rick adding via /permissions (paste: `Bash(systemctl --user restart lupin-arbiter-app:*)`, project-local scope). (5) Manager-TODO oracle practice → **RATIFIED** (per-session artifact + María's PostToolUse(TodoWrite) hook mirror; blocked_on + next-chase; fail-open + flag-once).
+- 2026-06-10 — Multiplexer sprint integration rulings (Tiberius): transport flat-frame fix + auth_success frame-shape ownership → Lane A (Cheech); Lane E's websocket.py:509 mirror dropped. All new stores join createStores() at boot-wiring. FocusTrayRenderer → RETIRED (strip focus supersedes; clean removal diff). WP9 cold-reload hydration → Lane B follow-on post-A-merge. Lane D recipient-refresh ← subscribes `store_session_strip_changed` (no new event).
+- 2026-06-10 — GCP-M2 arbiter ride-along → Option B: host `systemd --user` on the VM (NOT a compose service). Why: lupin image ships no docker CLI (arbiter shells out to `docker inspect`), zero heavy deps in the import chain, truest out-of-band, mirrors local prod :8001. Ratified by Tiberius (manager-level, Rick veto window open); condition: host-side prereqs scripted, not tribal. Rio's plan doc: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.10-m2-arbiter-ride-along-and-vm-cutover.md`.
+- 2026-06-10 — GCP-M2 (f) `LUPIN_ENV` testing-vs-production tension → RESOLVED, no residual gate. Why: `is_cloud_backed()` (`database.py:32-51`) gates SOLELY on `LUPIN_CLOUD_BACKED`, never on the env name; with `LUPIN_ENV=testing`+cloud-backed, `get_database_url()` builds the correct Cloud-SQL socket URL + `lupin_db_test`. Full grep of `LUPIN_ENV`/`=="production"` sites shows no production hard-gate that bites cloud-backed-testing. `LUPIN_ENV=testing` is correct.
+- 2026-06-10 — GCP-M2 (g) single-L4 model double-load → RESOLVED: model-server is sole L4 consumer. Why: cloud-test `lupin-rest` has NO GPU reservation; Baseline already sets `speech to text provider = model-server`; added `embedding provider = model-server` to `[Lupin: Testing-GCS]` so the rest app loads NO models in-process (STT + embeddings both deferred to `lupin-model-server:7998`). Zero double-load/contention.
 - 2026-06-02 — TTS spoken-cap location → enforce caller-side in the cosa-voice MCP layer, NOT the notifications REST API. Why: limit agent verbosity at the tool boundary; keep the shared delivery API free for jobs/system.
 - 2026-06-02 — TTS cap default + tunability → 500 chars in lupin-app.ini, ConfigurationManager mtime-gated (runtime-tunable). Why: Rick's call; adjustable without code edit or restart.
 - 2026-06-02 — Over-cap behavior → REJECT (raise), not truncate; `override_size_limitation=True` bypasses. Why: no silent content loss; long-is-opt-in-and-intentional.
