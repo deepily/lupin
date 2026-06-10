@@ -136,3 +136,27 @@
   border-color : rgb(255, 255, 255, 0.4);
   color : #fff;
 }
+
+/* ----------------------------------------------------------------------------
+   WP10 / F3 — focus-mode card height boost.
+
+   In focus mode the single focused sender card should get more vertical room.
+   The legacy client did 250→500px; the multiplexer's default
+   `.date-accordion-messages` baseline is 60vh (notifications-list.css:243), so
+   porting the literal 250px would REGRESS the default — instead we implement
+   the behavior (focused card grows taller) by overriding to 80vh in focus mode.
+
+   Selector anchors on #cc-session-strip:has(toggle[data-focus-active]) and
+   reaches #notifications-pane via the `~` sibling combinator (both are direct
+   children of <main.container>) — this AVOIDS a bare `body` selector so the
+   no-global-selector stylelint gate for this file holds. The card-hiding that
+   makes "the focused card" the only visible one is owned by focus-tray.css
+   (.sender-card[data-focus-hidden] { display:none }), which the strip reuses.
+
+   CSS-only (no JS branch) — verified by E2E height assertion on :8000 per the
+   WP10 test plan, not by a c8 unit (the 100% mandate is TS/JS).
+   ---------------------------------------------------------------------------- */
+#cc-session-strip:has( #cc-strip-toggle[data-focus-active="true"] ) ~ #notifications-pane
+  .sender-card:not( [data-focus-hidden] ) .date-accordion-messages {
+  max-height : 80vh;
+}

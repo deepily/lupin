@@ -221,6 +221,71 @@ test("re-render updates an existing icon in place (persona change)", () => {
 });
 
 // ===========================================================================
+// WP8 — spin-up persona symmetry (idempotent strip icon on re-assign)
+// ===========================================================================
+
+test("WP8: re-assigning a session does not create a duplicate icon", () => {
+  const { root, iconsEl } = makeRoot();
+  const bus = createEventBusForTesting();
+  const store = makeStore([session({ sender_id: "s1" })]);
+  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
+  r.mount(root);
+  assert.equal(iconsEl.querySelectorAll('[data-sender-id="s1"]').length, 1);
+  // a second voice_persona_assigned for the same sender (store emits "updated")
+  emit(bus, { changeKind: "updated", sender_id: "s1" });
+  assert.equal(iconsEl.querySelectorAll('[data-sender-id="s1"]').length, 1);
+});
+
+// ===========================================================================
+// WP7 — reap → badge drop (icon removed from the strip)
+// ===========================================================================
+
+test("WP7: reaping a non-focused session drops its icon from the strip", () => {
+  const { root, iconsEl } = makeRoot();
+  const bus = createEventBusForTesting();
+  const store = makeStore([session({ sender_id: "keep" }), session({ sender_id: "reap", assigned_at: 2000 })]);
+  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
+  r.mount(root);
+  assert.equal(iconsEl.querySelectorAll(".cc-strip-icon").length, 2);
+  store.setList([session({ sender_id: "keep" })]);
+  emit(bus, { changeKind: "removed", sender_id: "reap" });
+  assert.equal(iconsEl.querySelector('[data-sender-id="reap"]'), null);
+  assert.equal(iconsEl.querySelectorAll(".cc-strip-icon").length, 1);
+});
+
+// ===========================================================================
+// WP9 — manager-lineage badge (live add + clear through the store→renderer path)
+// ===========================================================================
+
+test("WP9: a session added with a manager renders the lineage badge on its icon", () => {
+  const { root, iconsEl } = makeRoot();
+  const bus = createEventBusForTesting();
+  const store = makeStore();
+  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
+  r.mount(root);
+  store.setList([session({ sender_id: "s1", manager_persona: { name: "Tiberius", icon: "👑", color: "#FFD700" } })]);
+  emit(bus, { changeKind: "added", sender_id: "s1" });
+  const icon = iconsEl.querySelector('[data-sender-id="s1"]')!;
+  const badge = icon.querySelector(".cc-strip-manager-badge");
+  assert.ok(badge);
+  assert.equal(badge!.textContent, "T");
+  assert.equal(icon.getAttribute("data-has-manager"), "true");
+});
+
+test("WP9: re-assign dropping the manager clears the lineage badge in place", () => {
+  const { root, iconsEl } = makeRoot();
+  const bus = createEventBusForTesting();
+  const store = makeStore([session({ sender_id: "s1", manager_persona: { name: "Tiberius", icon: "👑", color: "#FFD700" } })]);
+  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
+  r.mount(root);
+  assert.ok(iconsEl.querySelector(".cc-strip-manager-badge"));
+  store.setList([session({ sender_id: "s1" })]);   // manager dropped
+  emit(bus, { changeKind: "updated", sender_id: "s1" });
+  assert.equal(iconsEl.querySelector(".cc-strip-manager-badge"), null);
+  assert.equal(iconsEl.querySelector('[data-sender-id="s1"]')!.getAttribute("data-has-manager"), null);
+});
+
+// ===========================================================================
 // focus model
 // ===========================================================================
 
