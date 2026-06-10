@@ -12,6 +12,7 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-05-19-to-22](2026-05-19-to-22-history.md) | May 19-22, 2026 | ~13 sessions | Multiplexer Phase 6c/7/7a authoring cascades (Nodes A-D, Runs 3-4), Voice-persona pool expansion + per-repo preferred-persona env-var allocator, Heartbeat-poker abstraction + CJ Flow ingestion wiring + TTS limiter boundary-scan fix, `request_persona` MCP tool + compaction carry-forward fix, Recent-Activity filter strip + Focus-bar chronological lock + Master-detail two-pane layout experiment, websocket-events.md doc fix (`speakerphone_changed` / `conversation_mode_changed`), Persona resuscitation + Run-4 post-game + Heartbeat-Poker design WIP |
 | [2026-05-16-to-18](2026-05-16-to-18-history.md) | May 16-18, 2026 | ~12 sessions | Model-server carve-out (Whisper + 2 encoders → lupin-model-server:7998), Daily LoC Delta tool (`cosa.repo.git_loc_delta`), cosa-voice MCP discovery-surface expansion, Doc viewer SPA dispatcher 404 fix, Voice persona stale-bridge pool-exhaustion fix + Sam-as-overflow, Coordinator dispatch + Phase 5 unit tests, Multiplexer Phase 6c implementation (Nodes A-D) + cascade runs 1-3, Voice persona pool expansion (+2, Sam→pool/Arnold→overflow), Recent-activity panel UX polish |
 | [2026-05-12-to-15](2026-05-12-to-15-history.md) | May 12-15, 2026 | 25 sessions | Inter-Session Commons Phase 2-3 + Phase 0 DM landing, Multi-Repo Doc Viewer + Doc-Viewer Scope Unification, Speakerphone refactor Phases 5b/6/7 + solo/chorus design, Multiplexer Phase 6b CLOSED + 6c launch, Notifications UI three-fix arc (Recent-Activity refresh / focus-tray persistence / header-toggle children-wipe), Broadcast-acks consumer-side dedupe, Commons Blackboard summary, Bounded-CC migration audit, TTS preview-and-advance + runtime percentage slider, Mr. Radio prior-archive meta-session |
 | [2026-05-07-to-11](2026-05-07-to-11-history.md) | May 7-12 AM, 2026 | 12 sessions | Inter-Session Commons Phase 1 wrap + Phase 2 backend, Multiplexer Phase 6b Pass 1 Fitness ratification, CC Card Normalization Phases 1-5a, ask_yes_no "Neither" affordance, Voice Persona Rename Domi→Rio, CC notifications-card normalization plan-review, Multiplexer Phase 6a final closure on :8000 + Phase 6b planning launch, Bug Fix Mode notification 503 cascade reconciliation |
@@ -67,10 +68,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 23 files
+- **Total Archives**: 24 files
 - **Date Range**: May 2025 - May 2026
-- **Total Sessions Documented**: 409+
+- **Total Sessions Documented**: 422+
 
 ---
 
-*Last updated: 2026-05-17*
+*Last updated: 2026-06-10*
