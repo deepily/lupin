@@ -17,6 +17,16 @@ const KEY_PREFIX        = "lupin:";
 const SESSION_ID_KEY    = "session_id";
 const SESSION_ID_SCHEMA = 1;
 
+// Canonical cross-client auth-token keys. UNLIKE every other StorageService
+// key, these are NOT `lupin:`-prefixed and NOT schema-versioned JSON envelopes:
+// they hold RAW JWT strings under the exact key names the rest of the app uses
+// (auth.js, notifications.js, lupin-nav.js, broadcast-panel.js). The WP0 token
+// migration routes the multiplexer onto these same keys (no dual-read) so a
+// user authenticated via /app/auth/login is authenticated in the multiplexer.
+// StorageService still owns the access (DC2 — no raw localStorage elsewhere).
+const ACCESS_TOKEN_KEY  = "lupin_access_token";
+const REFRESH_TOKEN_KEY = "lupin_refresh_token";
+
 // Minimal Storage shape for dependency injection. `localStorage` satisfies
 // this in browser; tests provide an in-memory implementation.
 export interface StorageBackend {
@@ -35,6 +45,12 @@ export interface StorageService {
 
   getSessionId(): string | null;
   setSessionId(sessionId: string): void;
+
+  // Canonical cross-client auth tokens (WP0 migration).
+  getAccessToken(): string | null;
+  getRefreshToken(): string | null;
+  setTokens(accessToken: string, refreshToken: string): void;
+  clearTokens(): void;
 }
 
 class StorageServiceImpl implements StorageService {
@@ -108,6 +124,26 @@ class StorageServiceImpl implements StorageService {
   setSessionId(sessionId: string): void {
     const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
     this.setJSON<SessionIdEnvelope>(SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
+  }
+
+  // Raw cross-client token accessors — read/write the unprefixed canonical
+  // `lupin_access_token` / `lupin_refresh_token` keys directly (no envelope).
+  getAccessToken(): string | null {
+    return this.backend.getItem(ACCESS_TOKEN_KEY);
+  }
+
+  getRefreshToken(): string | null {
+    return this.backend.getItem(REFRESH_TOKEN_KEY);
+  }
+
+  setTokens(accessToken: string, refreshToken: string): void {
+    this.backend.setItem(ACCESS_TOKEN_KEY, accessToken);
+    this.backend.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  }
+
+  clearTokens(): void {
+    this.backend.removeItem(ACCESS_TOKEN_KEY);
+    this.backend.removeItem(REFRESH_TOKEN_KEY);
   }
 
   // Synchronous emission per Phase 1 finding #7: storage_corrupt fires in the
