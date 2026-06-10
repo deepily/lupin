@@ -36,7 +36,6 @@ import {
   createActionRequiredRenderer,
   createTtsChromeRenderer,
   createConversationModePinRenderer,
-  createFocusTrayRenderer,
   createPersonaModalRenderer,
   createSenderCardRecorderRenderer,
   createSessionStripRenderer,
@@ -309,29 +308,22 @@ function bootMultiplexer(): void {
   });
   conversationModePinRenderer.mount(mountEl);
 
-  // Phase 6c Node B Step B5 — focus-tray renderer mounts AFTER
-  // conversationModePinRenderer per canonical boot order. Mount root must
-  // contain BOTH `#focus-mode-toggle` (inside `#notifications-pane`) and
-  // `#focus-tray` (sibling of `#notifications-pane`); `<main.container>`
-  // is the natural parent of both. Subscribes to store_senders_changed
-  // and writes data-focus-hidden on non-pinned sender cards when focus
-  // mode is ON.
-  const focusTrayRenderer = createFocusTrayRenderer({
-    eventBus,
-    stores : { senders: stores.senders },
-  });
-  const focusTrayMountEl = document.querySelector<HTMLElement>("main.container");
-  if (focusTrayMountEl === null) throw new Error("multiplexer: <main.container> not found");
-  focusTrayRenderer.mount(focusTrayMountEl);
+  // WP2 retire (2026-06-10): FocusTrayRenderer is RETIRED — the CC-session
+  // strip's icon-click focus supersedes the interim conversation-mode tray
+  // (Tiberius ruling, one-mechanism rule). The strip is the sole writer of
+  // data-focus-hidden now (see SessionStripRenderer). We still resolve
+  // <main.container> here for PersonaModalRenderer (#persona-modal-portal
+  // lives at main level).
+  const mainContainerEl = document.querySelector<HTMLElement>("main.container");
+  if (mainContainerEl === null) throw new Error("multiplexer: <main.container> not found");
 
-  // Phase 6c Node A Step A5 — persona-modal renderer mounts AFTER
-  // focusTrayRenderer per canonical boot order. Uses the same
-  // <main.container> root because #persona-modal-portal lives at main level.
+  // Phase 6c Node A Step A5 — persona-modal renderer. Uses the <main.container>
+  // root because #persona-modal-portal lives at main level.
   const personaModalRenderer = createPersonaModalRenderer({
     eventBus,
     stores : { senders: stores.senders },
   });
-  personaModalRenderer.mount(focusTrayMountEl);
+  personaModalRenderer.mount(mainContainerEl);
 
   // Phase 6c Node C Step C5 — sender-card recorder renderer mounts LAST.
   // Per F-Arnold-C4 + Recon-C7: AuthManager must resolve before this renderer
@@ -403,7 +395,6 @@ function bootMultiplexer(): void {
       actionRequiredRenderer      : "mounted",
       ttsChromeRenderer           : "mounted",
       conversationModePinRenderer : "mounted",
-      focusTrayRenderer           : "mounted",
       personaModalRenderer        : "mounted",
       senderCardRecorderRenderer  : "mounted",
       sessionStripRenderer        : "mounted",
@@ -424,7 +415,6 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] actionRequiredRenderer:mounted");
   console.log("[multiplexer] ttsChromeRenderer:mounted");
   console.log("[multiplexer] conversationModePinRenderer:mounted");
-  console.log("[multiplexer] focusTrayRenderer:mounted");
   console.log("[multiplexer] personaModalRenderer:mounted");
   console.log("[multiplexer] senderCardRecorderRenderer:mounted");
   console.log("[multiplexer] sessionStripRenderer:mounted");

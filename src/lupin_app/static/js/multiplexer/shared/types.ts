@@ -537,12 +537,6 @@ export interface BootCompletePayload {
     // asserts the canonical 5-line console-mount order (with this 5th line
     // appended after ttsChromeRenderer).
     conversationModePinRenderer? : string;
-    // Phase 6c Node B Step B5 (2026-05-19): literal string "mounted" emitted
-    // after `focusTrayRenderer.mount(root)` completes. Sixth line in the
-    // canonical boot handshake (notifications → jobs → actionRequired →
-    // ttsChrome → conversationModePin → focusTray); AC-B11 boot handshake
-    // smoke asserts this position.
-    focusTrayRenderer?           : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →

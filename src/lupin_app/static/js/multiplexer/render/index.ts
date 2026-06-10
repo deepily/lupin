@@ -43,11 +43,6 @@ export {
   type ConversationModePinRendererOptions,
 } from "./ConversationModePinRenderer";
 export {
-  createFocusTrayRenderer,
-  type FocusTrayRenderer,
-  type FocusTrayRendererOptions,
-} from "./FocusTrayRenderer";
-export {
   createPersonaModalRenderer,
   type PersonaModalRenderer,
   type PersonaModalRendererOptions,

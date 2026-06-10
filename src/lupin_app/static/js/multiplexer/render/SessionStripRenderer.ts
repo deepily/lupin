@@ -20,13 +20,13 @@
 // focused card's height boost (WP10 / F3) keys off
 // `#cc-strip-toggle[data-focus-active="true"]`.
 //
-// ⚠️ INTEGRATION CONTRACT (route through Tiberius): `data-focus-hidden` is ALSO
-// written by the existing FocusTrayRenderer (a separate interim focus
-// affordance keyed on conversation_mode_active). Two live writers of the same
-// attribute will fight on every reconcile. This renderer is intentionally NOT
-// wired into boot.ts in this lane; at integration the strip's icon-click focus
-// should SUPERSEDE / retire FocusTrayRenderer (the strip is the always-on
-// parity affordance). Unit-tested in isolation (no FocusTrayRenderer present).
+// FOCUS OWNERSHIP (resolved 2026-06-10, Tiberius ruling): this strip is the
+// SOLE writer of `data-focus-hidden`. The interim FocusTrayRenderer — which
+// previously also wrote that attribute (keyed on conversation_mode_active) —
+// was RETIRED when the strip was wired into boot (one-mechanism rule). The
+// `.sender-card[data-focus-hidden]` display:none rule it defined survives in
+// focus-tray.css (kept for the AC-B15 focus-flash SSOT) and is now driven only
+// by this renderer's focus mode.
 //
 // Out of WP2 core (flagged follow-ons): per-session speakerphone "conv-mode"
 // badge; localStorage persistence of focus + hide-inactive state; cold-reload
