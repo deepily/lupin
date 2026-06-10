@@ -570,4 +570,15 @@ test( "toggleFleetShowOffline flips state and re-renders from the cached composi
   assert.ok( !html.includes( "Krishna" ), "offline hidden again" );
 } );
 
+test( "toggleFleetShowOffline does NOT re-stamp the 'updated' label (a view-toggle is not a fetch)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  let stamps = 0;
+  ui._stampFleetStatusUpdated = () => { stamps++; };
+  ui.renderFleetStatus( { status: "ok", fleet_arbiter: { sessions: [ TIBERIUS, RIO, OFFLINE ] } } );
+  assert.equal( stamps, 1, "the real (fetch) render stamps once" );
+  ui.toggleFleetShowOffline();   // pure view re-render from the cached composite
+  assert.equal( stamps, 1, "the toggle re-render did NOT re-stamp freshness" );
+} );
+
 if ( typeof process !== "undefined" && process.argv.includes( "--run" ) ) { /* node --test entry */ }

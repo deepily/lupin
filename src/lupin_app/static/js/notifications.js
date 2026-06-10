@@ -8648,9 +8648,11 @@ class NotificationsUI {
          * Ensures:
          *     - this.fleetShowOffline is negated
          *     - the panel re-renders from this._lastFleetComposite (no network call)
+         *     - the "updated HH:MM:SS" label is NOT re-stamped — a view-toggle is not
+         *       a fetch, so it must not claim fresh data (stampUpdated=false)
          */
         this.fleetShowOffline = !this.fleetShowOffline;
-        this.renderFleetStatus( this._lastFleetComposite );
+        this.renderFleetStatus( this._lastFleetComposite, false );
     }
 
     renderFleetStatusTable( model ) {
@@ -8743,7 +8745,7 @@ class NotificationsUI {
             </tr>`;
     }
 
-    renderFleetStatus( composite ) {
+    renderFleetStatus( composite, stampUpdated = true ) {
         /**
          * Dispatch the fetched composite to the correct render state (§6.4) and
          * stamp the last-updated time. This is the DOM-touching orchestrator;
@@ -8753,6 +8755,9 @@ class NotificationsUI {
          * Requires:
          *     - composite is the object returned by fetchFleetState()
          *     - #fleet-status-container / #fleet-status-count exist (no-op if absent)
+         *     - stampUpdated: true on a real fetch (refreshFleetStatus); false on a
+         *       pure view re-render (the offline toggle) so the "updated" label keeps
+         *       reflecting the last actual fetch, not a no-fetch re-paint
          *
          * Ensures:
          *     - auth_required → "sign-in required" message
@@ -8804,7 +8809,7 @@ class NotificationsUI {
             container.innerHTML = toggleHtml + this.renderFleetStatusTable( model );
         }
 
-        this._stampFleetStatusUpdated( composite.app_timezone );
+        if ( stampUpdated ) this._stampFleetStatusUpdated( composite.app_timezone );
     }
 
     _formatFleetTimestamp( date, ianaZone ) {
