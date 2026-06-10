@@ -39,6 +39,7 @@ import {
   createFocusTrayRenderer,
   createPersonaModalRenderer,
   createSenderCardRecorderRenderer,
+  createCommonsActivityRenderer,
   configureMetaDisplayCap,
 } from "./render";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
@@ -364,6 +365,20 @@ function bootMultiplexer(): void {
   // each lane also updates bootCompletePayload.handlers + the AC9 console line.
   // ===============================================================
 
+  // Lane D WP3 — commons "Recent Activity" panel. Carries `api` (third field,
+  // Tiberius-approved — JobsPaneRenderer precedent) for REST hydrate
+  // (/api/commons/broadcast-history) + the persona-pool filter dropdown. The
+  // renderer also subscribes to store_session_strip_changed (WP7) to refresh
+  // its persona filter when Lane B's strip changes.
+  const commonsActivityRenderer = createCommonsActivityRenderer({
+    eventBus,
+    stores : { commons: stores.commons },
+    api    : apiClient,
+  });
+  const commonsActivityMountEl = document.getElementById("commons-activity-pane");
+  if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found");
+  commonsActivityRenderer.mount(commonsActivityMountEl);
+
   attachLifecycleListeners();
 
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
@@ -392,6 +407,7 @@ function bootMultiplexer(): void {
       focusTrayRenderer           : "mounted",
       personaModalRenderer        : "mounted",
       senderCardRecorderRenderer  : "mounted",
+      commonsActivityRenderer     : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -412,6 +428,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] focusTrayRenderer:mounted");
   console.log("[multiplexer] personaModalRenderer:mounted");
   console.log("[multiplexer] senderCardRecorderRenderer:mounted");
+  console.log("[multiplexer] commonsActivityRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

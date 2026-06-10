@@ -575,6 +575,17 @@ test("persona dropdown clears a now-stale prior selection (write-through to stor
   assert.equal(h.store.getFilter().persona, null);
 });
 
+test("WP7: store_session_strip_changed re-runs the persona dropdown population", async () => {
+  const h = makeHarness();
+  await flush();
+  const before = h.state.paths.filter(p => p.includes("voice-persona/pool")).length;
+  // Lane B's SessionStripStore signal (added/removed a strip icon).
+  h.bus.emit({ type: "store_session_strip_changed", payload: { changeKind: "added" }, source: "SessionStripStore", ts: 0 } as never);
+  await flush();
+  const after = h.state.paths.filter(p => p.includes("voice-persona/pool")).length;
+  assert.equal(after, before + 1);   // dropdown refreshed exactly once
+});
+
 test("persona-pool fetch rejection is swallowed", async () => {
   const h = makeHarness();
   h.state.poolErr = new Error("pool-down");

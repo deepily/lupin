@@ -77,6 +77,14 @@ export type LupinEventType =
   | "store_audio_chunk_decoded"
   | "store_action_required_changed"
   | "store_senders_changed"
+  // Lane B (CC-session strip — owns this member): SessionStripStore emits
+  // `store_session_strip_changed` on icon add/remove. Lane D (WP7) subscribes to
+  // it as the canonical recipient-change signal to refresh its persona filter
+  // dropdown (Tiberius-arbitrated 2026-06-10). Added provisionally from Lane D's
+  // boot-wiring pass because Lane B had not yet merged — Tiberius flagged to
+  // dedupe at Lane B's merge if they also add it. Harmless until an emitter
+  // exists (the subscription simply never fires).
+  | "store_session_strip_changed"
   // Lane D (commons activity panel — WP3, 2026-06-10): CommonsStore emits this
   // on every mutation (hydrate / live-prepend / filter-change). The renderer
   // subscribes and repaints the filtered entry list. Carries a `changeKind`
@@ -510,6 +518,10 @@ export interface BootCompletePayload {
     // in the canonical boot handshake; AC-C11 boot handshake smoke asserts
     // this position.
     senderCardRecorderRenderer?  : string;
+    // Lane D (WP3, 2026-06-10): literal "mounted" emitted after the commons
+    // activity renderer mounts at the NEW-LANE MOUNT SLOT. Optional per the
+    // Phase 6a forward/backward-compat pattern.
+    commonsActivityRenderer?     : string;
   };
 }
 

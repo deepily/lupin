@@ -40,6 +40,8 @@ import type { ActionRequiredStore, ActionRequiredApiClient } from "./ActionRequi
 import { createActionRequiredStore } from "./ActionRequiredStore";
 import type { AudioStore, AudioStoreOptions } from "./AudioStore";
 import { createAudioStore } from "./AudioStore";
+import type { CommonsStore } from "./CommonsStore";
+import { createCommonsStore } from "./CommonsStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -47,6 +49,10 @@ export interface StoreSet {
   actionRequired : ActionRequiredStore;
   audio          : AudioStore;
   jobs           : JobStore;
+  // Lane D (WP3) — commons "Recent Activity" panel store. No inter-store
+  // dependency (consumes notification_queue_update independently), so it
+  // constructs last; subscription order of the pinned 5 is unaffected.
+  commons        : CommonsStore;
 }
 
 export interface CreateStoresOptions {
@@ -83,8 +89,9 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
     audioContextFactory : opts.audioContextFactory,
   });
   const jobs           = createJobStore          ({ bus: opts.eventBus });
+  const commons        = createCommonsStore      ({ bus: opts.eventBus, storage: opts.storage });
 
-  return { notifications, senders, actionRequired, audio, jobs };
+  return { notifications, senders, actionRequired, audio, jobs, commons };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -102,4 +109,6 @@ export type {
 export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
+export type { CommonsStore, CommonsStoreOptions, CommonsHistoryApiClient } from "./CommonsStore";
+export { createCommonsStore } from "./CommonsStore";
 /* c8 ignore stop */

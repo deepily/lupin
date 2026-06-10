@@ -208,6 +208,15 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
     this.unsubscribers.push(
       this.bus.on<StoreCommonsChangedPayload>("store_commons_changed", (e) => this.onCommonsChanged(e)),
     );
+    // WP7 (Tiberius-arbitrated 2026-06-10): the CC-session strip is the canonical
+    // recipient-change signal. When Lane B's SessionStripStore adds/removes an
+    // icon it emits `store_session_strip_changed`; we re-run the persona filter
+    // dropdown so a freshly-spawned / just-reaped peer appears/disappears in the
+    // filter without a reload. No-op until Lane B's emitter merges (the event
+    // simply never fires until then).
+    this.unsubscribers.push(
+      this.bus.on("store_session_strip_changed", () => this.populatePersonaDropdown()),
+    );
   }
 
   private attachDelegation(): void {

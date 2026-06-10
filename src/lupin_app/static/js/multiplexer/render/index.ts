@@ -57,6 +57,13 @@ export {
   type SenderCardRecorderRenderer,
   type SenderCardRecorderRendererOptions,
 } from "./SenderCardRecorderRenderer";
+export {
+  createCommonsActivityRenderer,
+  type CommonsActivityRenderer,
+  type CommonsActivityRendererOptions,
+  type CommonsActivityRendererStores,
+  type CommonsActivityApiClient,
+} from "./CommonsActivityRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";
