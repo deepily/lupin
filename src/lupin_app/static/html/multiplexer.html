@@ -14,12 +14,31 @@
     <link rel="stylesheet" href="/static/css/multiplexer/focus-tray.css">
     <link rel="stylesheet" href="/static/css/multiplexer/persona-modal.css">
     <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/session-strip.css">
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
 </head>
 <body>
     <main class="container">
         <h1>Multiplexer</h1>
+
+        <!-- WP2 (parity bridge) CC-session strip mount point. Inert until
+             SessionStripRenderer is wired in boot.ts (deferred thin step
+             against Lane A's mount-slot convention); the renderer lifts the
+             data-phase6-pending markers, drives #cc-session-strip visibility,
+             and keyed-merges icons into #cc-strip-icons. -->
+        <div id="cc-session-strip" class="cc-session-strip"
+             data-testid="multiplexer-cc-session-strip"
+             data-phase6-pending="true" hidden>
+            <div id="cc-strip-icons"
+                 data-testid="multiplexer-cc-strip-icons"></div>
+            <button id="cc-strip-toggle" type="button" class="cc-strip-toggle"
+                    data-testid="multiplexer-cc-strip-focus-toggle"
+                    data-phase6-pending="true" data-focus-active="false">👁 Focus</button>
+            <button id="cc-hide-inactive-toggle" type="button" class="cc-strip-toggle"
+                    data-testid="multiplexer-cc-hide-inactive-toggle"
+                    data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
+        </div>
 
         <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
         <section id="notifications-pane" class="notifications-pane"

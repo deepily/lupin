@@ -1,0 +1,138 @@
+/* ============================================================================
+   Multiplexer WP2 (parity bridge, 2026-06-10) — CC-session strip stylesheet.
+
+   Owns:
+   - #cc-session-strip                 — the sticky always-on strip container
+   - #cc-strip-icons + .cc-strip-icon  — the per-session persona icon row
+   - .cc-strip-initial                 — the persona initial inside an icon
+   - .cc-strip-manager-badge           — the manager-lineage badge (WP9 / F11)
+   - .cc-strip-toggle                  — the focus + hide-inactive toggle pills
+   - data-active / data-focused / data-inactive-hidden icon state styling
+
+   Does NOT own (deliberately):
+   - .sender-card[data-focus-hidden]   — owned by focus-tray.css (the strip's
+     focus reuses that existing rule; see SessionStripRenderer integration note)
+   - the focus-mode card-height boost (WP10/F3) — added in a later WP.
+
+   Scope-leak protection (matching the Phase 6a/6b/6c CSS file pattern):
+   - NO global selectors (*, html, body, :root) — fail-build via the
+     .stylelintrc.json override for this file.
+   - All rules scoped under #cc-session-strip / .cc-strip-* selectors.
+   ============================================================================ */
+
+#cc-session-strip {
+  position       : sticky;
+  top            : 0;
+  z-index        : 20;
+  display        : flex;
+  align-items    : center;
+  gap            : 0.5rem;
+  padding        : 0.5rem 0.75rem;
+  background     : rgb(20, 20, 24, 0.92);
+  border-bottom  : 1px solid rgb(255, 255, 255, 0.08);
+}
+
+#cc-session-strip[hidden] {
+  display : none;
+}
+
+#cc-strip-icons {
+  display     : flex;
+  align-items : center;
+  gap         : 0.4rem;
+  flex        : 1 1 auto;
+  flex-wrap   : wrap;
+}
+
+.cc-strip-icon {
+  position        : relative;
+  inline-size     : 40px;
+  block-size      : 40px;
+  border          : none;
+  border-radius   : 50%;
+  cursor          : pointer;
+  display         : flex;
+  align-items     : center;
+  justify-content : center;
+  padding         : 0;
+  background-color: var(--persona-color, #888);
+  transition      : transform 0.12s ease-out, box-shadow 0.12s ease-out, opacity 0.12s ease-out;
+}
+
+.cc-strip-initial {
+  font-size   : 1rem;
+  font-weight : 700;
+  line-height : 1;
+  color       : #fff;
+  text-shadow : 0 1px 2px rgb(0, 0, 0, 0.45);
+  user-select : none;
+}
+
+/* Inactive (persona released) — dimmed but still present until hide-inactive
+   filter removes it from layout. */
+.cc-strip-icon[data-active="false"] {
+  opacity : 0.45;
+  filter  : grayscale(0.6);
+}
+
+/* Hide-inactive filter ON + this icon inactive → drop from layout entirely. */
+.cc-strip-icon[data-inactive-hidden="true"] {
+  display : none;
+}
+
+/* Focused session — white ring + slight scale, mirroring the legacy strip. */
+.cc-strip-icon[data-focused="true"] {
+  transform  : scale(1.1);
+  box-shadow : 0 0 0 2px #fff, 0 0 8px 2px var(--persona-color, rgb(255, 255, 255, 0.5));
+}
+
+/* Manager-lineage badge (WP9 / legacy F11) — docked top-left (135° from
+   center), small circle carrying the manager's initial. */
+.cc-strip-manager-badge {
+  position        : absolute;
+  top             : -6px;
+  inset-inline-start : -6px;
+  inline-size     : 18px;
+  block-size      : 18px;
+  border-radius   : 50%;
+  display         : flex;
+  align-items     : center;
+  justify-content : center;
+  font-size       : 0.6875rem;
+  font-weight     : 700;
+  line-height     : 1;
+  color           : #fff;
+  background-color: var(--manager-color, #555);
+  border          : 2px solid #fff;
+  box-shadow      : 0 1px 2px rgb(0, 0, 0, 0.4);
+  pointer-events  : none;
+}
+
+/* Strip toggle pills (focus + hide-inactive). */
+.cc-strip-toggle {
+  flex            : 0 0 auto;
+  border          : 1px solid rgb(255, 255, 255, 0.18);
+  border-radius   : 999px;
+  background      : rgb(255, 255, 255, 0.06);
+  color           : #e8e8ec;
+  font-size       : 0.75rem;
+  padding         : 0.25rem 0.6rem;
+  cursor          : pointer;
+  white-space     : nowrap;
+}
+
+.cc-strip-toggle:hover {
+  background : rgb(255, 255, 255, 0.12);
+}
+
+.cc-strip-toggle[data-focus-active="true"] {
+  background : var(--persona-color, rgb(80, 160, 255, 0.35));
+  border-color : rgb(255, 255, 255, 0.4);
+  color : #fff;
+}
+
+.cc-strip-toggle[data-hide-inactive="true"] {
+  background : rgb(80, 160, 255, 0.28);
+  border-color : rgb(255, 255, 255, 0.4);
+  color : #fff;
+}

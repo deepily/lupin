@@ -102,4 +102,10 @@ export type {
 export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
+// WP2 (parity bridge) — SessionStripStore is re-exported for direct import but
+// is deliberately NOT folded into createStores() here. Wiring it into the
+// canonical store set is part of the deferred boot-integration step (against
+// Lane A's mount-slot convention), kept out of this lane's held commit.
+export type { SessionStripStore, SessionStripStoreOptions } from "./SessionStripStore";
+export { createSessionStripStore } from "./SessionStripStore";
 /* c8 ignore stop */

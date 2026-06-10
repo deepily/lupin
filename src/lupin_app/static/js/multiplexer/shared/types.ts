@@ -77,6 +77,15 @@ export type LupinEventType =
   | "store_audio_chunk_decoded"
   | "store_action_required_changed"
   | "store_senders_changed"
+  // WP2 (multiplexer parity bridge, 2026-06-10) — SessionStripStore emission.
+  // The CC-session strip is a distinct subsystem from SenderStore: it reduces
+  // the SAME `notification_queue_update` state-update branch but captures the
+  // two fields SenderStore drops (`manager_persona` for the lineage badge,
+  // `assigned_at` for chronological icon ordering) plus an `active` flag.
+  // Multiple stores over one wire event is the established pattern (see
+  // NotificationStore + SenderStore both consuming notification_queue_update).
+  // See: src/rnd/v0.1.8/2026.06.10-notifications-ui-multiplexer-gap-bridge/02-bridging-work-plan.md (WP2)
+  | "store_session_strip_changed"
   // boot.ts one-shot signal (Phase 4 per D-C ratification 2026-05-04 PM).
   // Emitted at end of bootMultiplexer() with the resolved binary handler
   // identity so AC9's Playwright check can verify the wiring without the
@@ -350,6 +359,48 @@ export type SenderChangeKind = "added" | "updated" | "removed";
 
 export interface StoreSendersChangedPayload {
   changeKind : SenderChangeKind;
+  sender_id  : string;
+}
+
+// ---------------------------------------------------------------------------
+// WP2 (multiplexer parity bridge, 2026-06-10) — CC-session strip types.
+//
+// The CC-session strip is the always-on horizontal row of per-session persona
+// icons in the legacy `notifications.js` client (the `#cc-session-strip`
+// surface). It is NET-NEW to the multiplexer — the existing FocusTrayRenderer
+// is a separate, interim focus affordance. WP2 ports the strip as a dedicated
+// SessionStripStore + SessionStripRenderer.
+//
+// `ManagerPersona` — the lineage badge data (WP9 / legacy F11). Stamped on the
+// strip icon's top-left corner ("spawned by <manager>"). The renderer derives
+// the displayed initial from `name` (one uppercase char), matching how the
+// icon derives its own initial from the session persona name.
+// ---------------------------------------------------------------------------
+
+export interface ManagerPersona {
+  name  : string;   // manager persona name (e.g., "Tiberius") — initial derived from this
+  icon  : string;   // emoji or icon id
+  color : string;   // hex color for the lineage badge background
+}
+
+// One CC-session strip icon's backing model. Keyed by `sender_id` in the
+// store map. `voice_persona` is RETAINED after `voice_persona_released`
+// (active flips false) so the icon stays visible-but-inactive, exactly like
+// the legacy `senderPersonaMap`-membership inactivity model
+// (`notifications.js:_isStripIconInactive`). `session_reaped` removes the
+// record outright.
+export interface StripSession {
+  sender_id        : string;
+  voice_persona    : VoicePersona;
+  manager_persona? : ManagerPersona;
+  assigned_at      : number;    // ms epoch — chronological anchor for icon ordering
+  active           : boolean;   // false after voice_persona_released; hide-inactive filter targets !active
+}
+
+export type SessionStripChangeKind = "added" | "updated" | "removed";
+
+export interface StoreSessionStripChangedPayload {
+  changeKind : SessionStripChangeKind;
   sender_id  : string;
 }
 
