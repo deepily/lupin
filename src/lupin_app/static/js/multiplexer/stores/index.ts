@@ -8,7 +8,7 @@
 // for the c8-ignore exception clause.
 // Multiplexer Phase 4 — stores barrel.
 //
-// `createStores(opts)` returns the canonical 5-store set. Boot.ts wires its
+// `createStores(opts)` returns the canonical 6-store set. Boot.ts wires its
 // resolved dependencies through this factory.
 //
 // Per Pass 1 F12 — CANONICAL SUBSCRIPTION ORDER PINNED:
@@ -40,6 +40,8 @@ import type { ActionRequiredStore, ActionRequiredApiClient } from "./ActionRequi
 import { createActionRequiredStore } from "./ActionRequiredStore";
 import type { AudioStore, AudioStoreOptions } from "./AudioStore";
 import { createAudioStore } from "./AudioStore";
+import type { ReadingPaneStore } from "./ReadingPaneStore";
+import { createReadingPaneStore } from "./ReadingPaneStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -47,6 +49,10 @@ export interface StoreSet {
   actionRequired : ActionRequiredStore;
   audio          : AudioStore;
   jobs           : JobStore;
+  // WP4 (2026-06-10) — ReadingPaneStore is action-driven (renderer gestures +
+  // AR-store changes), NOT a server-frame subscriber, so it sits OUTSIDE the
+  // pinned subscription-order chain below; construction order is irrelevant.
+  readingPane    : ReadingPaneStore;
 }
 
 export interface CreateStoresOptions {
@@ -59,7 +65,7 @@ export interface CreateStoresOptions {
 }
 
 /**
- * Construct the canonical 5-store set. Subscription order is pinned at
+ * Construct the canonical 6-store set. Subscription order is pinned at
  * construction time — see file-header comment.
  *
  * Requires:
@@ -68,7 +74,7 @@ export interface CreateStoresOptions {
  *   - opts.api is an ApiClient (or stub satisfying ActionRequiredApiClient)
  *
  * Ensures:
- *   - Returns the 5-store set with subscriptions wired in canonical order
+ *   - Returns the 6-store set (the 5 server-frame subscribers in pinned order + the action-driven ReadingPaneStore)
  *   - Each store's constructor is fully synchronous; the StoreSet is
  *     immediately usable on return
  */
@@ -83,8 +89,11 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
     audioContextFactory : opts.audioContextFactory,
   });
   const jobs           = createJobStore          ({ bus: opts.eventBus });
+  // ReadingPaneStore (WP4) — order-independent (no server-frame subscription);
+  // hydrates persisted layout mode + split ratio from storage at construction.
+  const readingPane    = createReadingPaneStore  ({ bus: opts.eventBus, storage: opts.storage });
 
-  return { notifications, senders, actionRequired, audio, jobs };
+  return { notifications, senders, actionRequired, audio, jobs, readingPane };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -102,9 +111,9 @@ export type {
 export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
-// WP4 (2026-06-10) — ReadingPaneStore is NOT part of the canonical 5-store set
-// wired via createStores(); it is constructed directly in boot.ts (the thin
-// Lane-C wiring step). Re-exported here for the integration owner's import.
+// WP4 (2026-06-10) — ReadingPaneStore IS part of the canonical store set built
+// by createStores() (Tiberius uniform ruling 2026-06-10: one store registry, no
+// boot-direct stragglers). Re-exported here for direct consumers/tests too.
 export type { ReadingPaneStore, ReadingPaneStoreOptions } from "./ReadingPaneStore";
 export { createReadingPaneStore } from "./ReadingPaneStore";
 /* c8 ignore stop */

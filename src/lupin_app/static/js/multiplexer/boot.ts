@@ -39,6 +39,7 @@ import {
   createFocusTrayRenderer,
   createPersonaModalRenderer,
   createSenderCardRecorderRenderer,
+  createReadingPaneRenderer,
   configureMetaDisplayCap,
 } from "./render";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
@@ -364,6 +365,18 @@ function bootMultiplexer(): void {
   // each lane also updates bootCompletePayload.handlers + the AC9 console line.
   // ===============================================================
 
+  // Lane C WP4+WP5 — master-detail Reading Pane renderer. Mounts on the
+  // `.content-shell` root (contains .left-column + #content-pane* + splitter +
+  // #layout-mode-toggle). Reads the readingPane store (gesture/AR-driven) and
+  // the actionRequired store (count only, for the WP5 lift/drain).
+  const readingPaneRenderer = createReadingPaneRenderer({
+    eventBus,
+    stores : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
+  });
+  const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
+  if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
+  readingPaneRenderer.mount(readingPaneMountEl);
+
   attachLifecycleListeners();
 
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
@@ -392,6 +405,7 @@ function bootMultiplexer(): void {
       focusTrayRenderer           : "mounted",
       personaModalRenderer        : "mounted",
       senderCardRecorderRenderer  : "mounted",
+      readingPaneRenderer         : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -412,6 +426,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] focusTrayRenderer:mounted");
   console.log("[multiplexer] personaModalRenderer:mounted");
   console.log("[multiplexer] senderCardRecorderRenderer:mounted");
+  console.log("[multiplexer] readingPaneRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose
