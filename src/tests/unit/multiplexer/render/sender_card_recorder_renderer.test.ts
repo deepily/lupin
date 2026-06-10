@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createSenderCardRecorderRenderer } from "../../../../lupin_app/static/js/multiplexer/render/SenderCardRecorderRenderer";
+import { recordingManager } from "../../../../lupin_app/static/js/multiplexer/audio/recordingManager";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -204,6 +205,62 @@ test("Re-record click (a .record-button in ready_to_send state) re-invokes the r
   const errorEl = voiceInput.querySelector(".cc-voice-input-error");
   assert.ok(state === "recording" || (state === "idle" && errorEl !== null),
     `expected re-record to traverse pipeline; got state=${state} error=${errorEl !== null}`);
+});
+
+// Coverage backfill (inherited gap) — a .cc-voice-input footer WITHOUT a
+// data-session-hash attribute. Exercises the `getAttribute(...) ?? ""` nullish
+// arms in BOTH paintVoiceInput (at mount) AND handleRecordClick (on click).
+test("footer missing data-session-hash: paint + record-click both fall back to empty sessionHash", () => {
+  const bus  = createEventBusForTesting();
+  const root = document.createElement("div");
+  root.id = "sender-cards-container";
+  const card = document.createElement("div");
+  card.className = "sender-card";
+  const voiceInput = document.createElement("div");
+  voiceInput.className = "cc-voice-input";
+  // Deliberately NO data-session-hash (and no data-sender-id) — the defensive
+  // `?? ""` fallbacks must hold.
+  card.appendChild(voiceInput);
+  root.appendChild(card);
+  document.body.appendChild(root);
+
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root); // paintVoiceInput runs on the attr-less footer → `?? ""` arm
+  // Idle paint still produced a Record button despite the missing hash.
+  const button = voiceInput.querySelector(".record-button") as HTMLButtonElement;
+  assert.notEqual(button, null);
+  button.click(); // handleRecordClick → sessionHash "" → early return (ignored)
+  // No recording started; state stays idle.
+  assert.equal(voiceInput.getAttribute("data-recorder-state"), "idle");
+});
+
+// Coverage backfill (inherited gap) — drive the recorder into ready_to_send so
+// the paintVoiceInput else-arm (textarea + Re-record + Send) actually renders.
+// recordingManager is a singleton; stub startRecording to fire onComplete
+// synchronously (the real mic→transcription round-trip is the smoke tier).
+test("ready_to_send paint: onComplete transitions to ready_to_send and renders textarea + Send", () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+
+  const original = recordingManager.startRecording.bind(recordingManager);
+  ( recordingManager as unknown as { startRecording: (o: { onComplete?: (t: string, b: Blob) => void }) => Promise<void> } )
+    .startRecording = async (opts) => { opts.onComplete?.("hello world", new Blob()); };
+  try {
+    const button = root.querySelector(".record-button") as HTMLButtonElement;
+    button.click(); // → handleRecordClick → startRecording(stub) → onComplete → ready_to_send paint
+  } finally {
+    ( recordingManager as unknown as { startRecording: typeof original } ).startRecording = original;
+  }
+
+  const voiceInput = root.querySelector(".cc-voice-input") as HTMLElement;
+  assert.equal(voiceInput.getAttribute("data-recorder-state"), "ready_to_send");
+  const textarea = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  assert.notEqual(textarea, null);
+  assert.equal(textarea.value, "hello world");
+  assert.notEqual(voiceInput.querySelector(".send-button"), null);
+  assert.equal(voiceInput.querySelector(".record-button")!.textContent, "Re-record");
 });
 
 // AC-C4 #12 — Permission-denied error surface
