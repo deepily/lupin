@@ -68,6 +68,7 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_events
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import evaluate_work_owed
 from lupin_cli.claude_code.hooks.lib.heartbeat_task_state import (
     replay_task_state, owed_items_from_state, is_empty_state,
+    replay_task_subjects, OWED_STATUSES,
 )
 
 
@@ -323,22 +324,25 @@ def _poke_sentence( persona_name, owed_count ) -> str:
 
     Requires:
         - persona_name is a string or None
-        - owed_count is an int >= 0 (0 ⇒ the poke was hold-declared owed, the
-          oracle had no Task* specifics to count)
+        - owed_count is an int >= 0 — the TOTAL owed referents across ALL fired
+          signals (Task items + outstanding delegations + unanswered inbound),
+          NOT just the Task count (Mr. Radio cosmetic, 2026-06-10: a
+          delegation-only poke used to count zero Task items and mis-read as
+          "self-declared"). 0 ⇒ a hold-declared owed poke with no referents.
 
     Ensures:
-        - owed_count > 0  → "<who> stopped — N owed Task item(s), poked."
+        - owed_count > 0  → "<who> stopped — N owed item(s), poked."
         - owed_count == 0 → "<who> stopped — work owed (self-declared), poked."
         - "A worker" when the persona name is missing
     """
     who = persona_name or "A worker"
     if owed_count > 0:
         plural = "" if owed_count == 1 else "s"
-        return f"{who} stopped — {owed_count} owed Task item{plural}, poked."
+        return f"{who} stopped — {owed_count} owed item{plural}, poked."
     return f"{who} stopped — work owed (self-declared), poked."
 
 
-def _announce_poke( session_id, persona_name, owed_count ):
+def _announce_poke( session_id, persona_name, owed_count, abstract=None ):
     """
     Fire ONE low-priority, non-blocking poke breadcrumb to the user's card
     (§4): the hook caught a stopped-with-owed worker and poked it.
@@ -348,6 +352,12 @@ def _announce_poke( session_id, persona_name, owed_count ):
     so this composes with the silent decision:block poke without double-speak
     (María Q2); (b) it never dings. De-dup rides the poke-cap: each breadcrumb
     is a REAL poke event and the cap bounds them at poke_cap per session.
+
+    Requires:
+        - abstract is the receipts string (signals + referents + verbatim poke
+          text) composed degrade-safe by the caller, or None ⇒ fall back to the
+          generic line. The spoken `message` stays SHORT (TTS rule); all the
+          receipt detail rides the abstract (UI card only, never spoken).
 
     Ensures:
         - posts a low-priority AsyncNotificationRequest carrying _poke_sentence,
@@ -360,7 +370,7 @@ def _announce_poke( session_id, persona_name, owed_count ):
             message   = _poke_sentence( persona_name, owed_count ),
             priority  = NotificationPriority.LOW,
             sender_id = build_sender_id_for_cc( session_id ),
-            abstract  = "Heartbeat: stopped with work owed — self-poke fired.",
+            abstract  = abstract or "Heartbeat: stopped with work owed — self-poke fired.",
         )
         notify_user_async( request )
     except Exception as e:
@@ -369,6 +379,104 @@ def _announce_poke( session_id, persona_name, owed_count ):
             "session_id" : session_id,
             "error"      : str( e ),
         } )
+
+
+# ── §4 poke-abstract receipts (Rick 2026-06-10) ──────────────────────────────
+# The breadcrumb's spoken message stays short; the ABSTRACT carries the receipts:
+# (a) the oracle's fired signals + their actual referents (task subjects,
+# delegation session names, sender+qid for inbound), and (b) the verbatim poke
+# text injected into the worker. Composition is PURE; the caller wraps it
+# degrade-safe (any failure ⇒ None ⇒ the generic fallback line). Capped so a
+# runaway list can never bloat the card.
+_POKE_ABSTRACT_HEADER = "Heartbeat: stopped with work owed — self-poke fired."
+_MAX_RECEIPT_ITEMS    = 8          # per-list cap; overflow folds into "+N more"
+_MAX_ABSTRACT_CHARS   = 4000       # ~4KB ceiling on the whole abstract
+
+
+def _receipt_lines( label, items ):
+    """A labeled bullet list, truncated at _MAX_RECEIPT_ITEMS with '+N more'. Pure."""
+    shown = items[ :_MAX_RECEIPT_ITEMS ]
+    lines = [ label ]
+    lines.extend( f"  • {it}" for it in shown )
+    extra = len( items ) - len( shown )
+    if extra > 0:
+        lines.append( f"  • …+{extra} more" )
+    return lines
+
+
+def _format_inbound( q ):
+    """'from <sender> (qid <short>)' for one open-inbound entry. Pure."""
+    sender = q.get( "sender" ) or "unknown"
+    qid    = q.get( "question_id" )
+    short  = qid[ :8 ] if isinstance( qid, str ) else "?"
+    return f"from {sender} (qid {short})"
+
+
+def _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbound, poke_text ):
+    """
+    Build the receipts abstract for the poke breadcrumb (PURE; caller wraps it
+    degrade-safe). Lists the fired signals + their referents and the verbatim
+    poke text; caps the whole string at ~_MAX_ABSTRACT_CHARS.
+
+    Requires:
+        - verdict is the evaluate_work_owed dict (or None)
+        - owed_task_subjects is a list[str]; delegations is a list[dict] with
+          session_name/session_id; open_inbound is a list[dict] (_format_inbound)
+        - poke_text is the verbatim reason injected into the worker (or None)
+
+    Ensures:
+        - returns a non-empty string headed by _POKE_ABSTRACT_HEADER
+        - truncates each referent list with "+N more" and the whole abstract at
+          the char ceiling
+    """
+    parts   = [ _POKE_ABSTRACT_HEADER ]
+    signals = ( verdict or { } ).get( "signals" ) or [ ]
+    if signals:
+        parts.append( "Signals (strongest first): " + ", ".join( signals ) )
+    if owed_task_subjects:
+        parts.extend( _receipt_lines( "Owed Task items:", owed_task_subjects ) )
+    if delegations:
+        names = [ ( d.get( "session_name" ) or d.get( "session_id" ) or "?" ) for d in delegations ]
+        parts.extend( _receipt_lines( "Outstanding delegations (live workers):", names ) )
+    if open_inbound:
+        parts.extend( _receipt_lines( "Unanswered inbound questions:",
+                                      [ _format_inbound( q ) for q in open_inbound ] ) )
+    if poke_text:
+        parts.append( "" )
+        parts.append( "Poke text injected into the worker:" )
+        parts.append( poke_text )
+    text = "  \n".join( parts )
+    if len( text ) > _MAX_ABSTRACT_CHARS:
+        text = text[ :_MAX_ABSTRACT_CHARS - 1 ] + "…"
+    return text
+
+
+def _build_poke_abstract_safe( verdict, task_state, transcript_path, delegations, open_inbound, result ):
+    """
+    Degrade-safe wrapper around _compose_poke_abstract (§4, Rick 2026-06-10).
+
+    Resolves the owed Task* subjects (replays the transcript for TaskCreate
+    subjects, keyed to the owed task ids) and composes the receipts abstract.
+    ANY failure ⇒ None — the breadcrumb then falls back to the generic line.
+    NEVER raises: the poke must never break on an enrichment error.
+
+    Ensures:
+        - returns the composed abstract string on success, or None on any error
+        - replays subjects ONLY when there is ≥1 owed task (delegation/inbound-
+          only pokes skip the extra transcript pass)
+    """
+    try:
+        owed_ids = [ tid for tid, status in task_state.items() if status in OWED_STATUSES ]
+        subjects = replay_task_subjects( transcript_path ) if owed_ids else { }
+        owed_task_subjects = [ ( subjects.get( tid ) or f"task {tid}" ) for tid in owed_ids ]
+        poke_text = ( result.get( "hook_output" ) or { } ).get( "reason" )
+        return _compose_poke_abstract( verdict, owed_task_subjects, delegations, open_inbound, poke_text )
+    except Exception as e:
+        log_to_stream( "stop", { }, extra={
+            "phase"      : "poke_abstract_error",
+            "error"      : str( e ),
+        } )
+        return None
 
 
 def _has_pending_voice( session_id ) -> bool:
@@ -1011,10 +1119,11 @@ def _gather_unanswered_inbound_questions( session_id ):
         - session_id is this session's (stable) id string
 
     Ensures:
-        - Returns [ { "question_id", "ts" }, ... ] for each unhandled inbound
-          DM that carries a question_id (qid-less entries cannot be
+        - Returns [ { "question_id", "ts", "sender" }, ... ] for each unhandled
+          inbound DM that carries a question_id (qid-less entries cannot be
           thread-matched and are excluded as untrackable — every send_to /
-          ask_async DM carries one)
+          ask_async DM carries one). `sender` is the originating session id (for
+          the poke-abstract receipt); it never affects the oracle verdict.
         - Entries authored by this session never count as inbound
         - Returns [] when the session has no persona, no LUPIN_ROOT, or no
           DM topic — and on ANY error (never raises, never blocks the Stop)
@@ -1051,7 +1160,11 @@ def _gather_unanswered_inbound_questions( session_id ):
                 continue
             if qid in handled:
                 continue
-            open_inbound.append( { "question_id": qid, "ts": ts } )
+            open_inbound.append( {
+                "question_id" : qid,
+                "ts"          : ts,
+                "sender"      : e.get( "sender_session_id" ),   # for the poke-abstract receipt
+            } )
         return open_inbound
     except Exception:
         return [ ]
@@ -1210,12 +1323,18 @@ def _run_heartbeat( session_id, transcript_path ):
         _emit_genuine_idle( session_id, persona_name, settings[ "poke_cap" ] )
 
     if result[ "outcome" ] == OUTCOME_POKE:
-        # §4 breadcrumb (Rick 2026-06-09): the hook caught a stopped-with-owed
-        # worker → low-pri card notify ("<persona> stopped — <specifics>,
-        # poked"). Fires for BOTH branches (speakerphone and not) since this
-        # adapter is shared; failsafe inside _announce_poke (never blocks the
-        # poke). De-dup rides the poke-cap.
-        _announce_poke( session_id, persona_name, len( owed_items ) )
+        # §4 breadcrumb (Rick 2026-06-09 + receipts 2026-06-10): the hook caught
+        # a stopped-with-owed worker → low-pri card notify. The SHORT spoken
+        # message counts ALL owed referents (Task + delegation + inbound — the
+        # Mr. Radio cosmetic fix), and the ABSTRACT carries the receipts (fired
+        # signals + their referents + the verbatim poke text). Both the abstract
+        # build and _announce_poke are degrade-safe (never block the poke);
+        # de-dup rides the poke-cap. Fires for BOTH branches (shared adapter).
+        total_owed = len( owed_items ) + len( delegations ) + len( open_inbound )
+        abstract   = _build_poke_abstract_safe(
+            verdict, task_state, transcript_path, delegations, open_inbound, result
+        )
+        _announce_poke( session_id, persona_name, total_owed, abstract=abstract )
         return result[ "hook_output" ]
     return None
 
