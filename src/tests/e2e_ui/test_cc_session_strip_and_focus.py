@@ -524,8 +524,15 @@ class TestConvModeOrthogonality:
         with `payload.on` (the 2026.05.11 speakerphone refactor — see the
         handleNotificationUpdate case that maps payload.on → conversation_mode_active);
         the retired `conversation_mode_changed`/`payload.active` shape has no switch
-        case, so the prior wording drove a DEAD path (its ON assertion was a
-        false-positive off the icon's born state). Updated to the real contract.
+        case, so the prior wording drove a DEAD path. Updated to the real contract.
+
+        NOTE (2026-06-10 review, Tiffany): the strip icon is BORN
+        data-conv-mode="speakerphone" (notifications.js ~10058-10062 default; the
+        fixture does not seed conversationModes for this session), so an ON-first
+        assertion is a FALSE POSITIVE — it passes even with the handler neutered.
+        Fix: drive OFF first (a genuine speakerphone→quiet transition — the
+        stranded-icon clear this test guards), THEN ON (a genuine quiet→speakerphone
+        flip). Now NEITHER assertion can pass off the born state.
         """
         page         = notifications_page_with_strip
         sender_a     = "claude.code@lupin.deepily.ai#offtest1"
@@ -533,29 +540,14 @@ class TestConvModeOrthogonality:
         full_uuid    = "offtest1-aaaa-bbbb-cccc-deadbeef0001"  # matches 8-char prefix
 
         _inject_cc_sender_card( page, sender_a, session_hash=session_hash )
-
-        # Drive the WS-router path with full UUID (server-canonical shape).
-        # handleNotificationUpdate expects { notification: {...} } envelope.
-        page.evaluate(
-            """( fullUuid ) => {
-                window.notificationsUI.handleNotificationUpdate( {
-                    notification: {
-                        type    : "speakerphone_changed",
-                        payload : { session_id: fullUuid, on: true }
-                    }
-                } );
-            }""",
-            full_uuid
-        )
-        page.wait_for_timeout( 50 )
-
         sanitized = sender_a.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
         icon = page.locator( f"#cc-strip-icon-{sanitized}" )
-        assert icon.get_attribute( "data-conv-mode" ) == "speakerphone", \
-            "ON transition must set data-conv-mode='speakerphone' despite full-UUID payload"
 
-        # OFF transition — same full UUID, on=false. This is the path that
-        # used to silently miss before the fix.
+        # OFF FIRST — the icon is born "speakerphone", so on=false is a GENUINE
+        # speakerphone→quiet transition (the stranded-icon clear this test guards).
+        # Drive the WS-router path with the full UUID (server-canonical shape);
+        # handleNotificationUpdate expects a { notification: {...} } envelope. This
+        # is the path that used to silently miss (full-UUID vs 8-char-prefix selector).
         page.evaluate(
             """( fullUuid ) => {
                 window.notificationsUI.handleNotificationUpdate( {
@@ -571,6 +563,24 @@ class TestConvModeOrthogonality:
 
         assert icon.get_attribute( "data-conv-mode" ) == "quiet", \
             "OFF transition must set data-conv-mode='quiet' (3-state badge since 2026-05-14) — mic icon must not strand"
+
+        # ON — same full UUID, on=true. Now a GENUINE quiet→speakerphone flip (not
+        # the born state), so this cannot false-positive if the handler is neutered.
+        page.evaluate(
+            """( fullUuid ) => {
+                window.notificationsUI.handleNotificationUpdate( {
+                    notification: {
+                        type    : "speakerphone_changed",
+                        payload : { session_id: fullUuid, on: true }
+                    }
+                } );
+            }""",
+            full_uuid
+        )
+        page.wait_for_timeout( 50 )
+
+        assert icon.get_attribute( "data-conv-mode" ) == "speakerphone", \
+            "ON transition must set data-conv-mode='speakerphone' despite full-UUID payload"
 
 
 # ---------------------------------------------------------------------------
