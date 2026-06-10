@@ -119,7 +119,7 @@ services:
   # Always runs [Lupin: Development] config with lupin_db_dev.
   # uvicorn --reload enabled for live code changes during development.
   lupin-rest-dev:
-    image: lupin:1.0.0                       # 2026-04-28: retagged from 1.0.0-fonts → 1.0.0 after WG-1 verification
+    image: lupin:1.1.0                       # 2026-06-10: local 1.1.0 soak (SDK 0.2.88 + bundled-CLI) before the GCP push — Rick/Tiberius gate. Prior: 1.0.0 (retagged from 1.0.0-fonts after WG-1).
     container_name: lupin-rest-dev
     restart: unless-stopped
     user: "1001:1001"
@@ -201,7 +201,7 @@ services:
   # Companion credentials (admin user + API key) auto-seeded from dev DB
   # on every startup via seed_test_companions.py.
   lupin-rest-test:
-    image: lupin:1.0.0
+    image: lupin:1.1.0                       # 2026-06-10: local 1.1.0 soak (cutover FIRST per stagger) before the GCP push — Rick/Tiberius gate. Prior: 1.0.0.
     container_name: lupin-rest-test
     restart: unless-stopped
     user: "1001:1001"
