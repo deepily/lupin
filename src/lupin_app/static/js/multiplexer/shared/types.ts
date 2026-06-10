@@ -553,6 +553,11 @@ export interface BootCompletePayload {
     // in the canonical boot handshake; AC-C11 boot handshake smoke asserts
     // this position.
     senderCardRecorderRenderer?  : string;
+    // WP2 (parity bridge, 2026-06-10): literal string "mounted" emitted after
+    // `sessionStripRenderer.mount(root)` completes. Appended at the NEW-LANE
+    // MOUNT SLOT (after the Phase 5/6 mounts), so it follows
+    // senderCardRecorderRenderer in the console handshake order.
+    sessionStripRenderer?        : string;
   };
 }
 

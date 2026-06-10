@@ -39,6 +39,7 @@ import {
   createFocusTrayRenderer,
   createPersonaModalRenderer,
   createSenderCardRecorderRenderer,
+  createSessionStripRenderer,
   configureMetaDisplayCap,
 } from "./render";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
@@ -364,6 +365,19 @@ function bootMultiplexer(): void {
   // each lane also updates bootCompletePayload.handlers + the AC9 console line.
   // ===============================================================
 
+  // Lane B WP2 — CC-session strip renderer. Mounts on <main.container> (like
+  // FocusTrayRenderer) because the renderer queries #cc-session-strip AND its
+  // child controls as descendants of root — it cannot mount on
+  // #cc-session-strip itself (querySelector can't match the root element).
+  // Store-action + addEventListener delegation only (no inline onclick).
+  const sessionStripRenderer = createSessionStripRenderer({
+    eventBus,
+    stores : { strip: stores.sessionStrip },
+  });
+  const sessionStripMountEl = document.querySelector<HTMLElement>("main.container");
+  if (sessionStripMountEl === null) throw new Error("multiplexer: <main.container> not found");
+  sessionStripRenderer.mount(sessionStripMountEl);
+
   attachLifecycleListeners();
 
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
@@ -392,6 +406,7 @@ function bootMultiplexer(): void {
       focusTrayRenderer           : "mounted",
       personaModalRenderer        : "mounted",
       senderCardRecorderRenderer  : "mounted",
+      sessionStripRenderer        : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -412,6 +427,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] focusTrayRenderer:mounted");
   console.log("[multiplexer] personaModalRenderer:mounted");
   console.log("[multiplexer] senderCardRecorderRenderer:mounted");
+  console.log("[multiplexer] sessionStripRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose
