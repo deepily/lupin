@@ -40,6 +40,13 @@ import type { ActionRequiredStore, ActionRequiredApiClient } from "./ActionRequi
 import { createActionRequiredStore } from "./ActionRequiredStore";
 import type { AudioStore, AudioStoreOptions } from "./AudioStore";
 import { createAudioStore } from "./AudioStore";
+// Lane E full-parity quartet stores (2026-06-10).
+import type { MissedStore } from "./MissedStore";
+import { createMissedStore } from "./MissedStore";
+import type { PredictionVoteStore } from "./PredictionVoteStore";
+import { createPredictionVoteStore } from "./PredictionVoteStore";
+import type { FleetStatusStore, FleetApiClient } from "./FleetStatusStore";
+import { createFleetStatusStore } from "./FleetStatusStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -47,12 +54,19 @@ export interface StoreSet {
   actionRequired : ActionRequiredStore;
   audio          : AudioStore;
   jobs           : JobStore;
+  // Lane E quartet — Missed (auth_success surfacing), PredictionVote (vote
+  // POST), FleetStatus (60s poll; boot starts polling AFTER mount).
+  missed         : MissedStore;
+  predictionVote : PredictionVoteStore;
+  fleetStatus    : FleetStatusStore;
 }
 
 export interface CreateStoresOptions {
   eventBus            : EventBus;
   storage             : StorageService;
-  api                 : ActionRequiredApiClient;
+  // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus). The
+  // production ApiClient satisfies both structurally.
+  api                 : ActionRequiredApiClient & FleetApiClient;
   // Forward AudioStore options so boot.ts can pass production-side
   // `audioContextFactory`. Tests usually omit (default factory is browser-only).
   audioContextFactory?: AudioStoreOptions["audioContextFactory"];
@@ -84,7 +98,15 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   });
   const jobs           = createJobStore          ({ bus: opts.eventBus });
 
-  return { notifications, senders, actionRequired, audio, jobs };
+  // Lane E quartet — appended AFTER the canonical 5 (order-neutral: Missed
+  // listens only to auth_success; PredictionVote + FleetStatus subscribe to no
+  // server frames). FleetStatus does NOT start polling here — boot.ts kicks
+  // startPolling() AFTER the renderer mounts (Cheech's rule).
+  const missed         = createMissedStore        ({ bus: opts.eventBus, api: opts.api });
+  const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
+  const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
+
+  return { notifications, senders, actionRequired, audio, jobs, missed, predictionVote, fleetStatus };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -102,4 +124,15 @@ export type {
 export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
+export type { MissedStore, MissedStoreOptions, MissedApiClient } from "./MissedStore";
+export { createMissedStore } from "./MissedStore";
+export type {
+  PredictionVoteStore,
+  PredictionVoteStoreOptions,
+  PredictionVoteApiClient,
+  PredictionVoteContext,
+} from "./PredictionVoteStore";
+export { createPredictionVoteStore } from "./PredictionVoteStore";
+export type { FleetStatusStore, FleetStatusStoreOptions, FleetApiClient } from "./FleetStatusStore";
+export { createFleetStatusStore } from "./FleetStatusStore";
 /* c8 ignore stop */

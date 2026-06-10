@@ -1,0 +1,58 @@
+/* ============================================================================
+   Multiplexer Lane E WP14 — prediction-vote.css
+
+   Per-component CSS for the prediction-hint thumbs vote controls rendered by
+   templates/predictionVoteControls.ts. Ports the legacy `.prediction-hint-vote`
+   / `.prediction-vote-btn` styling (notifications.css:987-1024) verbatim.
+
+   Class taxonomy (from templates/predictionVoteControls.ts):
+   - `.prediction-hint-vote`           — flex row holding the two vote buttons
+   - `.prediction-hint-vote.voted`     — set once a vote is cast (dims buttons)
+   - `.prediction-vote-btn`            — base button
+       `.prediction-vote-up` / `.prediction-vote-down` — direction variants
+       `.selected`                     — the cast direction (highlighted)
+   ============================================================================ */
+
+.prediction-hint-vote {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.prediction-vote-btn {
+    font-size: 1.05em;
+    line-height: 1;
+    padding: 2px 8px;
+    background: transparent;
+    border: 1px solid #d8d2ec;
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: 0.75;
+    transition: opacity 0.12s ease, background 0.12s ease, transform 0.05s ease;
+}
+
+.prediction-vote-btn:hover {
+    opacity: 1;
+    background: #f3f0ff;
+}
+
+.prediction-vote-btn:active {
+    transform: scale(0.92);
+}
+
+.prediction-vote-btn:focus-visible {
+    outline: 2px solid rgba(120, 100, 200, 0.6);
+    outline-offset: 2px;
+}
+
+/* Once a vote is cast, dim the unselected button and highlight the selected one. */
+.prediction-hint-vote.voted .prediction-vote-btn {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.prediction-hint-vote.voted .prediction-vote-btn.selected {
+    opacity: 1;
+    background: #ece7ff;
+    border-color: #b8b0d8;
+}

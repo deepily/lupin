@@ -1,0 +1,53 @@
+/* ============================================================================
+   Multiplexer Lane E WP15 — missed-badge.css
+
+   Per-component CSS for the "N missed while away" badge rendered by
+   MissedBadgeRenderer.ts via templates/missedBadge.ts. The renderer paints an
+   empty root when count === 0, so there is no explicit hidden rule here —
+   absence of `.missed-badge` IS the hidden state.
+
+   Class taxonomy (from templates/missedBadge.ts):
+   - `.missed-badge`         — inline-flex pill container (`.missed-visible`
+                               always co-applied; reserved for future
+                               enter/exit animation hooks)
+   - `.missed-status`        — "N missed while away" text
+   - `.missed-reset-button`  — soft-dismiss (Reset) action
+   ============================================================================ */
+
+.missed-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border: 1px solid #ffe69c;
+    border-radius: 12px;
+    background: #fff3cd; /* bootstrap warning-subtle */
+    color: #664d03;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.missed-status {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.missed-reset-button {
+    cursor: pointer;
+    padding: 2px 10px;
+    border: 1px solid #997404;
+    border-radius: 8px;
+    background: #ffda6a;
+    color: #332701;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.missed-reset-button:hover {
+    background: #ffc720;
+}
+
+.missed-reset-button:focus-visible {
+    outline: 2px solid rgba(153, 116, 4, 0.6);
+    outline-offset: 2px;
+}

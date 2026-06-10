@@ -327,6 +327,11 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] focusTrayRenderer:mounted",
                 "[multiplexer] personaModalRenderer:mounted",
                 "[multiplexer] senderCardRecorderRenderer:mounted",
+                # Lane E full-parity quartet (2026-06-10) — appended at the
+                # NEW-LANE MOUNT SLOT after the Phase 6c mounts, in this order.
+                "[multiplexer] ttsPreviewSliderRenderer:mounted",
+                "[multiplexer] missedBadgeRenderer:mounted",
+                "[multiplexer] fleetStatusRenderer:mounted",
             ]
             assert mount_lines == expected, (
                 f"boot handshake mismatch:\nexpected={expected}\ngot     ={mount_lines}"

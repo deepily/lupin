@@ -22,8 +22,13 @@ import type {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeApiStub(): ActionRequiredApiClient {
-  return { post: async () => ({ ok: true }) };
+function makeApiStub(): ActionRequiredApiClient & { get: <T>(path: string) => Promise<T> } {
+  // post (ActionRequired/Missed/PredictionVote) + get (FleetStatus) — the
+  // widened createStores api contract (Lane E quartet wiring).
+  return {
+    post: async () => ({ ok: true }),
+    get : async <T,>(): Promise<T> => ({} as T),
+  };
 }
 
 class StubAudioContext implements AudioContextLike {
