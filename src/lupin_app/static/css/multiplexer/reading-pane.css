@@ -1,0 +1,190 @@
+/* ==========================================================================
+   MULTIPLEXER — MASTER-DETAIL READING PANE (WP4, 2026-06-10)
+   ==========================================================================
+   Ports the notifications.js master-detail two-pane layout into the
+   multiplexer. All horizontal-mode rules gate on
+   body[data-layout-mode="horizontal"]; vertical mode (default) is a no-op
+   block pass-through so the page looks single-column.
+   Owned by ReadingPaneRenderer. Source of truth:
+   src/lupin_app/static/css/notifications.css (master-detail section).
+   ========================================================================== */
+
+/* Layout-mode toggle button + its toolbar wrapper. In vertical mode the toolbar
+   is a quiet block at the top of the left column; in horizontal mode it floats
+   over the top-center of the left column (positioned via --toolbar-center-x). */
+.reading-pane-toolbar {
+    display       : flex;
+    margin-bottom : 8px;
+}
+.layout-mode-btn {
+    background    : transparent;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    padding       : 4px 8px;
+    cursor        : pointer;
+    font-size     : 18px;
+    line-height   : 1;
+    color         : #495057;
+    transition    : background-color 0.15s, opacity 0.15s;
+}
+.layout-mode-btn:hover {
+    background-color: rgba( 0, 0, 0, 0.04 );
+}
+
+/* Reading Pane — hidden by default (vertical mode + pane-closed). */
+.content-pane[hidden] {
+    display: none;
+}
+.content-pane {
+    display       : flex;
+    flex-direction: column;
+    background    : #fafbfc;
+    border-left   : 1px solid #dee2e6;
+}
+.content-pane-header {
+    display       : flex;
+    align-items   : center;
+    gap           : 8px;
+    padding       : 8px 10px;
+    border-bottom : 1px solid #dee2e6;
+    background    : #f1f3f5;
+    position      : sticky;
+    top           : 0;
+    z-index       : 5;
+}
+.content-pane-back,
+.content-pane-bustout,
+.content-pane-close {
+    background    : transparent;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    padding       : 2px 8px;
+    cursor        : pointer;
+    font-size     : 14px;
+    line-height   : 1.2;
+    color         : #495057;
+}
+.content-pane-back:disabled {
+    opacity: 0.4;
+    cursor : not-allowed;
+}
+.content-pane-back:hover:not(:disabled),
+.content-pane-bustout:hover,
+.content-pane-close:hover {
+    background-color: rgba( 0, 0, 0, 0.04 );
+}
+.content-pane-title {
+    flex          : 1;
+    font-size     : 13px;
+    font-weight   : 600;
+    color         : #495057;
+    overflow      : hidden;
+    white-space   : nowrap;
+    text-overflow : ellipsis;
+}
+.content-pane-body {
+    flex            : 1;
+    min-height      : 0;     /* let flex:1 resolve a real height so the iframe's height:100% fills + scrolls */
+    padding         : 18px 22px 22px 22px;
+    overflow-y      : auto;
+    scrollbar-gutter: stable;
+    font-size       : 13px;
+    line-height     : 1.5;
+    color           : #212529;
+}
+.content-pane-body iframe {
+    width  : 100%;
+    height : 100%;
+    border : 0;
+    display: block;
+}
+/* Doc iframe fills edge-to-edge (the doc-viewer brings its own chrome); the
+   gutter stays for abstract (markdown) content. */
+.content-pane-body:has( iframe ) {
+    padding: 0;
+}
+/* Action-required widget lifted into the pane (WP5): drop the section's inner
+   padding + overflow clip so it flows and scrolls inside the pane body. */
+.content-pane-body #action-required-section.in-reading-pane {
+    padding   : 0;
+    max-height: none;
+    overflow  : visible;
+    transition: none;
+}
+
+/* ---- Horizontal mode + pane-open activates the two-pane split ----
+   Pane-closed in horizontal mode is visually identical to vertical mode. */
+body[data-layout-mode="horizontal"] .content-shell.pane-open {
+    display    : flex;
+    align-items: stretch;
+    gap        : 0;
+    min-height : calc( 100vh - 100px );
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .left-column {
+    flex          : 2;
+    display       : flex;
+    flex-direction: column;
+    min-width     : 0;
+    overflow-y    : auto;
+    max-height    : calc( 100vh - 100px );
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .container {
+    /* ~10% breathing room each side inside the left column. */
+    max-width: 80%;
+    margin   : 0 auto;
+    width    : auto;
+}
+
+/* Draggable splitter — hidden when the pane is closed; shows with the split. */
+.content-pane-splitter {
+    display: none;
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter {
+    display    : block;
+    flex       : 0 0 6px;
+    background : #dee2e6;
+    cursor     : col-resize;
+    transition : background 0.15s;
+    position   : sticky;
+    top        : 100px;
+    align-self : stretch;
+    max-height : calc( 100vh - 100px );
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter:hover,
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane-splitter.dragging {
+    background: #adb5bd;
+}
+/* While dragging, force col-resize everywhere + suppress text selection. */
+body.splitter-dragging,
+body.splitter-dragging * {
+    cursor      : col-resize !important;
+    user-select : none !important;
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .content-pane {
+    flex       : 1;
+    min-width  : 360px;
+    max-width  : 50%;
+    position   : sticky;
+    top        : 100px;
+    align-self : flex-start;
+    /* DEFINITE height so the flex:1 body + iframe height:100% resolve (avoids
+       the collapsed "postage stamp" iframe). */
+    height     : calc( 100vh - 100px );
+    overflow-y : auto;
+}
+
+/* Layout-mode toolbar: in horizontal mode it floats fixed over the top-center
+   of the left column. JS pushes the center percentage into --toolbar-center-x;
+   transform self-centers the toolbar around that `left` coordinate. */
+body[data-layout-mode="horizontal"] .reading-pane-toolbar {
+    position  : fixed;
+    top       : 56px;                                  /* below the 56px nav strip */
+    left      : var( --toolbar-center-x, 50% );
+    transform : translateX( -50% );
+    z-index   : 10;
+    margin    : 0;
+}
+body[data-layout-mode="horizontal"] .content-shell.pane-open .container {
+    /* Clear the fixed toolbar row (~40px tall + breathing room). */
+    padding-top: 52px;
+}

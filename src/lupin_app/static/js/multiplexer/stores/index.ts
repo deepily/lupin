@@ -8,7 +8,7 @@
 // for the c8-ignore exception clause.
 // Multiplexer Phase 4 — stores barrel.
 //
-// `createStores(opts)` returns the canonical 5-store set. Boot.ts wires its
+// `createStores(opts)` returns the canonical 6-store set. Boot.ts wires its
 // resolved dependencies through this factory.
 //
 // Per Pass 1 F12 — CANONICAL SUBSCRIPTION ORDER PINNED:
@@ -42,6 +42,8 @@ import type { AudioStore, AudioStoreOptions } from "./AudioStore";
 import { createAudioStore } from "./AudioStore";
 import type { SessionStripStore } from "./SessionStripStore";
 import { createSessionStripStore } from "./SessionStripStore";
+import type { ReadingPaneStore } from "./ReadingPaneStore";
+import { createReadingPaneStore } from "./ReadingPaneStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -55,6 +57,10 @@ export interface StoreSet {
   // asserts (sessionStrip emits its own store_session_strip_changed, which is
   // not in that watched set).
   sessionStrip   : SessionStripStore;
+  // WP4 (2026-06-10) — ReadingPaneStore is action-driven (renderer gestures +
+  // AR-store changes), NOT a server-frame subscriber, so it sits OUTSIDE the
+  // pinned subscription-order chain below; construction order is irrelevant.
+  readingPane    : ReadingPaneStore;
 }
 
 export interface CreateStoresOptions {
@@ -67,7 +73,7 @@ export interface CreateStoresOptions {
 }
 
 /**
- * Construct the canonical 5-store set. Subscription order is pinned at
+ * Construct the canonical 6-store set. Subscription order is pinned at
  * construction time — see file-header comment.
  *
  * Requires:
@@ -76,7 +82,7 @@ export interface CreateStoresOptions {
  *   - opts.api is an ApiClient (or stub satisfying ActionRequiredApiClient)
  *
  * Ensures:
- *   - Returns the 5-store set with subscriptions wired in canonical order
+ *   - Returns the 7-store set (the 5 server-frame subscribers in pinned order + sessionStrip + the action-driven ReadingPaneStore)
  *   - Each store's constructor is fully synchronous; the StoreSet is
  *     immediately usable on return
  */
@@ -94,8 +100,11 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // WP2 — LAST (see StoreSet comment): registers after the canonical five so
   // the integration test's pinned fanout order is preserved.
   const sessionStrip   = createSessionStripStore  ({ bus: opts.eventBus });
+  // ReadingPaneStore (WP4) — order-independent (no server-frame subscription);
+  // hydrates persisted layout mode + split ratio from storage at construction.
+  const readingPane    = createReadingPaneStore  ({ bus: opts.eventBus, storage: opts.storage });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -113,10 +122,14 @@ export type {
 export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
-// WP2 (parity bridge) — SessionStripStore is re-exported for direct import but
-// is deliberately NOT folded into createStores() here. Wiring it into the
-// canonical store set is part of the deferred boot-integration step (against
-// Lane A's mount-slot convention), kept out of this lane's held commit.
+// WP2 (parity bridge) — SessionStripStore IS part of the canonical store set
+// built by createStores() (folded at the boot-integration step per Lane A's
+// mount-slot convention); re-exported here for direct consumers/tests too.
 export type { SessionStripStore, SessionStripStoreOptions, ServerSenderHydrationRecord } from "./SessionStripStore";
 export { createSessionStripStore } from "./SessionStripStore";
+// WP4 (2026-06-10) — ReadingPaneStore IS part of the canonical store set built
+// by createStores() (Tiberius uniform ruling 2026-06-10: one store registry, no
+// boot-direct stragglers). Re-exported here for direct consumers/tests too.
+export type { ReadingPaneStore, ReadingPaneStoreOptions } from "./ReadingPaneStore";
+export { createReadingPaneStore } from "./ReadingPaneStore";
 /* c8 ignore stop */

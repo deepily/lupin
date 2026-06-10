@@ -14,11 +14,33 @@
     <link rel="stylesheet" href="/static/css/multiplexer/focus-tray.css">
     <link rel="stylesheet" href="/static/css/multiplexer/persona-modal.css">
     <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
+<<<<<<< HEAD
     <link rel="stylesheet" href="/static/css/multiplexer/session-strip.css">
+=======
+    <link rel="stylesheet" href="/static/css/multiplexer/reading-pane.css">
+>>>>>>> wt-mux-laneC
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
 </head>
 <body>
+    <!-- WP4 master-detail two-pane shell (multiplexer parity, 2026-06-10 —
+         ports notifications.js master-detail; ReadingPaneRenderer mounts on
+         .content-shell). In vertical mode (default) .content-shell + .left-column
+         are no-op block pass-throughs — the page looks single-column. In
+         horizontal mode (body[data-layout-mode="horizontal"]) + .pane-open, the
+         shell becomes a flex-row split: left column ~2/3, Reading Pane ~1/3.
+         Toggled via #layout-mode-toggle. -->
+    <div class="content-shell">
+    <div class="left-column">
+        <!-- Layout-mode toggle — floats over the top-center of the left column
+             in horizontal mode (positioned via --toolbar-center-x). -->
+        <div class="reading-pane-toolbar" id="reading-pane-toolbar">
+            <button class="layout-mode-btn"
+                    id="layout-mode-toggle"
+                    data-testid="multiplexer-layout-mode-toggle"
+                    type="button"
+                    title="Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.">⇆</button>
+        </div>
     <main class="container">
         <h1>Multiplexer</h1>
 
@@ -82,6 +104,47 @@
              card header. -->
         <div id="persona-modal-portal" data-testid="multiplexer-persona-modal-portal"></div>
     </main>
+    </div><!-- /.left-column -->
+
+    <!-- Draggable splitter between left column and Reading Pane. Hidden by CSS
+         when the pane is closed; ReadingPaneRenderer wires mousedown + persists
+         the ratio. -->
+    <div class="content-pane-splitter"
+         id="content-pane-splitter"
+         data-testid="multiplexer-content-pane-splitter"
+         role="separator"
+         aria-orientation="vertical"
+         title="Drag to resize"></div>
+
+    <!-- Reading Pane (WP4). Hidden until populated. In horizontal mode + open,
+         becomes a sticky-top scrollable surface holding rendered abstract
+         markdown OR an iframe at /app/docs?path=... for doc-viewer links. -->
+    <aside class="content-pane" id="content-pane" hidden>
+        <div class="content-pane-header">
+            <button class="content-pane-back"
+                    id="content-pane-back"
+                    data-testid="multiplexer-content-pane-back"
+                    type="button"
+                    title="Back to previous content"
+                    disabled>←</button>
+            <span class="content-pane-title" id="content-pane-title"></span>
+            <button class="content-pane-bustout"
+                    id="content-pane-bustout"
+                    data-testid="multiplexer-content-pane-bustout"
+                    type="button"
+                    title="Open in new tab">⤢</button>
+            <button class="content-pane-close"
+                    id="content-pane-close"
+                    data-testid="multiplexer-content-pane-close"
+                    type="button"
+                    title="Close pane">×</button>
+        </div>
+        <div class="content-pane-body" id="content-pane-body"
+             data-testid="multiplexer-content-pane-body">
+            <!-- Dynamic: rendered markdown for abstracts, or an iframe for doc-links -->
+        </div>
+    </aside>
+    </div><!-- /.content-shell -->
     <script type="module" src="/static/dist/multiplexer/boot.js"></script>
 </body>
 </html>
