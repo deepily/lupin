@@ -8754,6 +8754,52 @@ class NotificationsUI {
         return `${pct}%`;
     }
 
+    _fleetVerdictClass( verdict ) {
+        /**
+         * Map a liveness verdict to its row-level CSS class (TASK 1, 2026-06-10).
+         * The verdict carries an age ("stale 12m"), so we key off the FIRST token,
+         * case-insensitively. Drives BOTH the status dot (in the Liveness cell) and
+         * the row's left-edge accent — one class on the <tr>, CSS does the rest.
+         *
+         * Requires:
+         *     - verdict is the raw liveness.verdict string (or anything; defended)
+         *
+         * Ensures:
+         *     - "LIVE"→fleet-verdict-live, "quiet …"→…-quiet, "stale …"→…-stale,
+         *       "offline"→…-offline; anything else (incl. non-string/"unknown")→…-unknown
+         *     - color is reinforcement only — the verdict word is always shown too
+         *       (WCAG 1.4.1); Pure: no DOM, no side effects
+         */
+        const word = ( typeof verdict === "string" ? verdict.trim().split( /\s+/ )[ 0 ] : "" ).toLowerCase();
+        if ( word === "live" )    return "fleet-verdict-live";
+        if ( word === "quiet" )   return "fleet-verdict-quiet";
+        if ( word === "stale" )   return "fleet-verdict-stale";
+        if ( word === "offline" ) return "fleet-verdict-offline";
+        return "fleet-verdict-unknown";
+    }
+
+    _fleetPctClass( pct ) {
+        /**
+         * Map a "% of context window consumed" value to a heat-tint CSS class for
+         * the % Window cell (TASK 1, 2026-06-10). Documented breakpoints:
+         *     low  : pct < 50   (green — healthy headroom)
+         *     mid  : 50 ≤ pct < 80 (amber — watch)
+         *     high : pct ≥ 80   (red — near the budget line)
+         *
+         * Requires:
+         *     - pct is a number, or null/undefined for unmeasured
+         *
+         * Ensures:
+         *     - numeric → fleet-pct-low|mid|high; a measured 0 tints low (healthy)
+         *     - null/undefined/non-number/NaN → "" (the em-dash cell stays untinted)
+         *     - Pure: no DOM, no side effects
+         */
+        if ( pct === null || pct === undefined || typeof pct !== "number" || Number.isNaN( pct ) ) return "";
+        if ( pct < 50 ) return "fleet-pct-low";
+        if ( pct < 80 ) return "fleet-pct-mid";
+        return "fleet-pct-high";
+    }
+
     _renderFleetRow( session, indented, personas = {} ) {
         /**
          * Render a single session row (one <tr>) for the fleet-status table.
@@ -8781,19 +8827,21 @@ class NotificationsUI {
         const liveness = session.liveness || {};
         const verdict  = this.escapeHtml( liveness.verdict || "unknown" );
         const tooltip  = this.escapeHtml( this._fleetLivenessTooltip( session.liveness ) );
-        const ctx      = ( session.persona && personas[ session.persona ] ) || {};
-        const pctCell  = this.escapeHtml( this._formatConsumptionPct( ctx.consumption_pct_of_window ) );
-        const winCell  = this.escapeHtml( this._formatWindowSize( ctx.window_size ) );
+        const ctx          = ( session.persona && personas[ session.persona ] ) || {};
+        const pctCell      = this.escapeHtml( this._formatConsumptionPct( ctx.consumption_pct_of_window ) );
+        const winCell      = this.escapeHtml( this._formatWindowSize( ctx.window_size ) );
+        const verdictClass = this._fleetVerdictClass( liveness.verdict );
+        const pctClass     = this._fleetPctClass( ctx.consumption_pct_of_window );
 
         return `
-            <tr class="fleet-row${indented ? " fleet-row-worker" : " fleet-row-manager"}${isStuck ? " fleet-row-stuck" : ""}">
+            <tr class="fleet-row${indented ? " fleet-row-worker" : " fleet-row-manager"}${isStuck ? " fleet-row-stuck" : ""} ${verdictClass}">
                 <td class="fleet-col-who">${who}</td>
                 <td class="fleet-col-role"><span class="fleet-role-badge fleet-role-${role}">${role}</span></td>
                 <td class="fleet-col-state">${state}</td>
                 <td class="fleet-col-holding">${holding}</td>
                 <td class="fleet-col-stuck${isStuck ? " fleet-stuck-yes" : ""}">${stuckCell}</td>
-                <td class="fleet-col-liveness" title="${tooltip}">${verdict}</td>
-                <td class="fleet-col-window-pct">${pctCell}</td>
+                <td class="fleet-col-liveness" title="${tooltip}"><span class="fleet-liveness-dot"></span>${verdict}</td>
+                <td class="fleet-col-window-pct${pctClass ? " " + pctClass : ""}">${pctCell}</td>
                 <td class="fleet-col-window">${winCell}</td>
             </tr>`;
     }

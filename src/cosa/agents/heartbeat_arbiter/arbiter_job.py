@@ -48,7 +48,7 @@ from cosa.agents.heartbeat_arbiter import ping_throttle
 # v2.1 direct-state visibility (design 03 §10.2-§10.4): per-session liveness off
 # the bridge-mtime clock, change-or-tick render, and the queryable snapshot push.
 from cosa.agents.heartbeat_arbiter.fleet_render import (
-    build_snapshot, frame_signature, render_fleet_table, render_tick,
+    build_snapshot, carry_forward_lineage, frame_signature, render_fleet_table, render_tick,
 )
 from cosa.rest.arbiter_snapshot_store import set_snapshot as _default_snapshot_sink
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -350,6 +350,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._poke_stuck_since = { }                               # sid -> episode-start datetime
         self._poke_count       = { }                               # sid -> pokes fired this episode
         self._poke_escalated   = set()                             # sids whose reap-rec already fired
+        # Fleet-Status offline-lineage carry (2026-06-10): last poll's resolved
+        # { session_id -> manager_persona }. A reaped worker loses BOTH lineage
+        # sources at once (bridge unlink + manifest drop), so without this its
+        # still-decaying row would wrongly drop to "Unmanaged". Threaded through
+        # carry_forward_lineage each poll; pruned to the published sids (eviction).
+        self._manager_lineage  = { }                               # sid -> manager_persona (last-known)
 
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI (QueueableJob protocol)."""
@@ -454,6 +460,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
             list_managers_fn   = _default_list_manager_session_ids,
             process_dead       = process_dead,
         )
+        # Fleet-Status offline-lineage carry (2026-06-10): a reaped worker loses both
+        # lineage sources at once (bridge unlink + manifest drop), so its still-decaying
+        # row would otherwise drop to "Unmanaged". Replay the last-known manager until
+        # the row evicts. Pure + degrade-safe (never raises, never invents); manager is
+        # orthogonal to frame_signature, so this never triggers a spurious re-render.
+        snapshot, self._manager_lineage = carry_forward_lineage( snapshot, self._manager_lineage )
 
         sig = frame_signature( snapshot )
         if sig != self._last_frame_sig:

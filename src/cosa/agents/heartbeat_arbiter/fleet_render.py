@@ -300,6 +300,66 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
     }
 
 
+def carry_forward_lineage( snapshot, prior_lineage ):
+    """
+    Retain last-known manager lineage across polls — the "Unmanaged" offline-row fix
+    (Fleet-Status, 2026-06-10).
+
+    A reaped worker loses BOTH lineage sources in the SAME instant
+    (`session_spawner.dismiss_sessions`): its bridge file is unlinked (kills the
+    PRIMARY `spawned_by` path) AND its spawn-manifest entry is dropped (kills the
+    FALLBACK manifest-name scan). So the very next poll's resolve_manager misses on
+    both paths → SOURCE_UNRESOLVED → build_snapshot sets manager=None → the row drops
+    to the "Unmanaged" group, even though it lingers in its ~1h "stale Nm" decay
+    window (published, not yet offline-pruned). The focus-bar badge — event-sourced
+    at spawn, client-cached — still shows the manager, so the table contradicting it
+    reads as a bug.
+
+    This replays the manager from the most recent poll that DID resolve it, until the
+    row evicts from the published snapshot.
+
+    Requires:
+        - snapshot is a build_snapshot() result (or falsy / non-dict → returned as-is
+          with an empty next-lineage)
+        - prior_lineage is { session_id: manager_persona } carried from the prior poll
+          (caller-owned, threaded across polls); None / non-dict → treated as {}
+
+    Ensures:
+        - returns ( snapshot, next_lineage ):
+            * a row with a non-None manager REFRESHES next_lineage[sid]; row untouched
+              (fresh lineage always wins over a carried value)
+            * a row with manager None whose sid is in prior_lineage is FILLED —
+              row["manager"] = prior_lineage[sid], row["manager_retained"] = True
+              (honest transparency flag) — and keeps carrying in next_lineage
+            * a row with manager None and no prior entry stays genuinely Unmanaged
+            * next_lineage is PRUNED to the snapshot's CURRENT sids — a row gone from
+              the published snapshot (evicted: offline-pruned, or left the fleet)
+              FORGETS its lineage. Bounded; matches "until row eviction".
+        - NEVER invents lineage — only ever replays a persona THIS fleet resolved
+          before — and NEVER raises (a malformed snapshot/row degrades to a skipped
+          row / an empty carry); the manager field stays orthogonal to the semantic
+          frame_signature, so the carry causes NO spurious table re-render
+    """
+    prior        = prior_lineage if isinstance( prior_lineage, dict ) else { }
+    next_lineage = { }
+    rows         = ( snapshot or { } ).get( "sessions", [ ] ) if isinstance( snapshot, dict ) else [ ]
+    for row in rows:
+        if not isinstance( row, dict ):
+            continue
+        sid = row.get( "session_id" )
+        if not sid:
+            continue
+        manager = row.get( "manager" )
+        if manager is not None:
+            next_lineage[ sid ] = manager                      # fresh lineage refreshes the carry
+        elif sid in prior:
+            row[ "manager" ]          = prior[ sid ]           # replay last-known (never invented)
+            row[ "manager_retained" ] = True
+            next_lineage[ sid ]       = prior[ sid ]
+        # else: genuinely unmanaged — no carry, no invention
+    return snapshot, next_lineage
+
+
 def frame_signature( snapshot ):
     """
     A hashable signature over the SEMANTIC fields only — NOT the liveness ages.
@@ -461,6 +521,25 @@ def quick_smoke_test():
     assert "no changes for 12m" in tick and "5 session(s)" in tick
     assert "no changes yet" in render_tick( now, None, 0 )
     assert _fmt_age( None ) == "—" and _fmt_age( -5 ) == "0s" and _fmt_age( 90000 ) == "1d"
+
+    # offline-lineage carry (2026-06-10): poll-1 resolves s2→Ann (lineage); poll-2's
+    # resolver misses (reaped: bridge+manifest gone) → s2 carries Ann + retained flag.
+    snap_p1 = build_snapshot(
+        view, bridge_mtimes, now, include_offline=True,
+        resolve_manager_fn = lambda sid: (
+            { "manager_persona": "Ann", "source": SOURCE_LINEAGE } if sid == "s2"
+            else { "manager_persona": None, "source": "unresolved" }
+        ),
+    )
+    snap_p1, lineage = carry_forward_lineage( snap_p1, { } )
+    assert lineage == { "s2": "Ann" }
+    snap_p2 = build_snapshot( view, bridge_mtimes, now, include_offline=True )   # resolver gone
+    snap_p2, lineage = carry_forward_lineage( snap_p2, lineage )
+    s2_p2 = { r[ "session_id" ]: r for r in snap_p2[ "sessions" ] }[ "s2" ]
+    assert s2_p2[ "manager" ] == "Ann" and s2_p2[ "manager_retained" ] is True
+    # a row gone from the snapshot forgets its lineage (eviction prune)
+    _, pruned = carry_forward_lineage( { "sessions": [ ] }, lineage )
+    assert pruned == { }
     return True
 
 
