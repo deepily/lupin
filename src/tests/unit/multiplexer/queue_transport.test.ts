@@ -161,7 +161,7 @@ test("on auth_success: emits transport_ready with payload.transport=QueueTranspo
   assert.equal(ready[0]?.source, "QueueTransport");
 });
 
-test("envelope mapping (Pass 1 finding #15): server {type, data} → EventBus emit", async () => {
+test("envelope mapping (finding #15 REVISED): FLAT server frame → EventBus payload = frame minus type+timestamp", async () => {
   const Ctor = freshMockCtor();
   const bus  = createEventBusForTesting();
   const seen: LupinEvent<unknown>[] = [];
@@ -178,16 +178,56 @@ test("envelope mapping (Pass 1 finding #15): server {type, data} → EventBus em
   ws.fireOpen();
   await new Promise((r) => setTimeout(r, 10));
 
+  // EXACTLY the shape websocket_manager.py emits: { type, timestamp, ...data }.
+  // The data keys (id, title) are spread at the TOP level — NOT under `data`.
   ws.receive(JSON.stringify({
-    type : "notification_received",
-    data : { id: "notif-1", title: "hello" },
+    type      : "notification_received",
+    timestamp : "2026-06-10T12:00:00Z",
+    id        : "notif-1",
+    title     : "hello",
   }));
 
   assert.equal(seen.length, 1);
   assert.equal(seen[0]?.source, "QueueTransport");
-  const payload = seen[0]?.payload as { id: string; title: string };
+  const payload = seen[0]?.payload as { id: string; title: string; type?: unknown; timestamp?: unknown };
   assert.equal(payload.id, "notif-1");
   assert.equal(payload.title, "hello");
+  // Envelope keys are stripped — payload is the server `data` dict, nothing more.
+  assert.equal(payload.type, undefined, "type must not leak into payload");
+  assert.equal(payload.timestamp, undefined, "timestamp must not leak into payload");
+});
+
+test("flat-frame mapping: auth_success top-level keys (undelivered_count) reach the payload", async () => {
+  // Server sends auth_success FLAT (websocket.py): no `data` wrapper, no
+  // `timestamp`. WP15 reads payload.undelivered_count — prove it arrives. This
+  // is the contract that lets Lane E drop its server-side `data`-mirror.
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const seen: LupinEvent<unknown>[] = [];
+  bus.on("auth_success", (e) => seen.push(e));
+
+  const t = createQueueTransport({
+    authManager   : makeMockAuth(),
+    bus,
+    baseUrl       : "",
+    WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  const ws = MockWebSocket.instances[0]!;
+  ws.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+
+  ws.receive(JSON.stringify({
+    type              : "auth_success",
+    user_id           : "u-123",
+    session_id        : "wise_penguin",
+    undelivered_count : 7,
+  }));
+
+  assert.equal(seen.length, 1);
+  const payload = seen[0]?.payload as { user_id: string; undelivered_count: number };
+  assert.equal(payload.undelivered_count, 7);
+  assert.equal(payload.user_id, "u-123");
 });
 
 test("transport_ready emits ONCE even on multiple auth_success frames", async () => {
