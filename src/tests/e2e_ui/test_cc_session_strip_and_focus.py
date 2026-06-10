@@ -1043,3 +1043,153 @@ class TestStripOrdering:
         )
         assert leftmost == first, \
             f"Runtime injection should append rightmost (oldest stays leftmost); got {leftmost!r}, expected {first!r}"
+
+
+# ---------------------------------------------------------------------------
+# Multiplexer WP10 (Lane B / Krishna) — focus-mode 80vh height contract
+# ---------------------------------------------------------------------------
+#
+# Distinct from the legacy /app/notifications 250→500px boost tested above:
+# the MULTIPLEXER strip (session-strip.css) overrides the focused card's
+# `.date-accordion-messages` from the 60vh baseline (notifications-list.css)
+# to **80vh** while focus mode is ON, via the strip selector
+#   #cc-session-strip:has( #cc-strip-toggle[data-focus-active="true"] ) ~
+#     #notifications-pane .sender-card:not([data-focus-hidden]) .date-accordion-messages
+# (NOT the retired FocusTray #focus-mode-toggle — removed in c87f066).
+#
+# Harness (Clayton review fix, 4bac3ce → this revision): the strip only
+# populates from STRIP_STATE_TYPES (SessionStripStore.ts:45) — a plain
+# `notification_queue_update` of type 'task' does NOT add a strip icon. So per
+# sender we inject the message (builds the card + its .date-accordion-messages)
+# AND a `voice_persona_assigned` carrying a non-released voice_persona (adds the
+# strip icon), mirroring test_multiplexer_phase6c_section_a_visual.py. Focus is
+# entered by clicking the KNOWN sender's strip icon — selected by
+# `.cc-strip-icon[data-sender-id=...]` (the multiplexer icon has NO `id` attr;
+# it carries data-sender-id per sessionStripIcon.ts:94, so Clayton's
+# id-form `#cc-strip-icon-...` is the legacy shape) — NOT the generic
+# `#cc-strip-toggle`, which focuses sorted[0] and would measure an ambient
+# (hydrated-server) card. We then assert the measured card's identity.
+#
+# Runtime proof rides the :8000 batch / fresh review (this lane is collect-only).
+
+_MUX_SENDER_A = "wp10-height-a"
+_MUX_SENDER_B = "wp10-height-b"
+
+_MUX_INJECT_TWO_SENDERS_JS = """
+() => {
+    const hook = window.__multiplexerTestHook;
+    if ( !hook || !hook.eventBus ) throw new Error( "multiplexer test hook missing" );
+    const bus = hook.eventBus;
+    const seeds = [
+        { id: 'wp10-height-a', ts: '2026-06-10T15:00:00.000Z', msg: 'sender A', name: 'Cheech',  color: '#FFCC80', icon: '🌿' },
+        { id: 'wp10-height-b', ts: '2026-06-10T16:00:00.000Z', msg: 'sender B', name: 'Tiberius', color: '#3F51B5', icon: '🌑' },
+    ];
+    for ( const s of seeds ) {
+        // (1) A real message — builds the sender card + its .date-accordion-messages.
+        bus.emit({
+            type    : 'notification_queue_update',
+            payload : { notification: {
+                id_hash   : 'n-' + s.id,
+                message   : s.msg,
+                sender_id : s.id,
+                timestamp : s.ts,
+                type      : 'task',
+            } },
+            source : 'wp10-height',
+            ts     : 1781449200000,
+        });
+        // (2) voice_persona_assigned — the ONLY event that adds a strip icon.
+        bus.emit({
+            type    : 'notification_queue_update',
+            payload : { notification: {
+                type          : 'voice_persona_assigned',
+                sender_id     : s.id,
+                timestamp     : s.ts,
+                voice_persona : {
+                    name        : s.name,
+                    voice_id    : 'vid_' + s.id,
+                    icon        : s.icon,
+                    color       : s.color,
+                    borrowed    : false,
+                    assigned_at : s.ts,
+                },
+            } },
+            source : 'wp10-height',
+            ts     : 1781449260000,
+        });
+    }
+    return true;
+}
+"""
+
+
+class TestMultiplexerFocusHeight80vh:
+    """WP10 (multiplexer): focus mode boosts the FOCUSED card's message list to 80vh."""
+
+    def test_focused_card_messages_grow_to_80vh_in_focus_mode( self, logged_in_page ):
+        page = logged_in_page
+        page.goto( f"{BASE_URL}/app/multiplexer" )
+        page.wait_for_load_state( "networkidle" )
+        page.wait_for_function(
+            "() => window.__multiplexerTestHook !== undefined && window.__multiplexerTestHook.eventBus !== undefined",
+            timeout=15000,
+        )
+
+        page.evaluate( _MUX_INJECT_TWO_SENDERS_JS )
+        # Strip reveals (icon added via voice_persona_assigned); the known
+        # sender's card + its scrollable per-date region must exist to measure.
+        page.wait_for_selector( "#cc-session-strip:not([hidden])", timeout=3000 )
+        page.wait_for_selector( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]', timeout=3000 )
+        card_a = f'#notifications-pane .sender-card[data-sender-id="{_MUX_SENDER_A}"]'
+        page.wait_for_selector( f"{card_a} .date-accordion-messages", timeout=3000 )
+
+        def _card_a_max_height():
+            return page.evaluate(
+                """( sel ) => {
+                    const card = document.querySelector( sel );
+                    if ( !card ) return null;
+                    const msgs = card.querySelector( '.date-accordion-messages' );
+                    return msgs ? getComputedStyle( msgs ).maxHeight : null;
+                }""",
+                card_a,
+            )
+
+        def _expected_vh_px( fraction ):
+            return page.evaluate( "( f ) => Math.round( window.innerHeight * f )", fraction )
+
+        def _px( value ):
+            return float( value.replace( "px", "" ) )
+
+        # Baseline (focus OFF): 60vh default from notifications-list.css.
+        before = _card_a_max_height()
+        assert before is not None, "sender A's .date-accordion-messages must exist to measure"
+        assert abs( _px( before ) - _expected_vh_px( 0.60 ) ) <= 2, \
+            f"outside focus mode the multiplexer card keeps the 60vh baseline; got {before}"
+
+        # Enter focus on the KNOWN sender by clicking ITS strip icon (not the
+        # generic toggle — that would focus sorted[0], an ambient card).
+        page.locator( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]' ).click()
+        page.wait_for_selector( '#cc-strip-toggle[data-focus-active="true"]', timeout=2000 )
+
+        # The single visible (not focus-hidden) card must be the one we injected.
+        focused_sender = page.evaluate(
+            """() => {
+                const card = Array.from(
+                    document.querySelectorAll( '#notifications-pane .sender-card' )
+                ).find( c => !c.hasAttribute( 'data-focus-hidden' ) );
+                return card ? card.getAttribute( 'data-sender-id' ) : null;
+            }"""
+        )
+        assert focused_sender == _MUX_SENDER_A, \
+            f"focus must land on the injected sender, not an ambient card; got {focused_sender!r}"
+
+        boosted = _card_a_max_height()
+        assert abs( _px( boosted ) - _expected_vh_px( 0.80 ) ) <= 2, \
+            f"focused card message list must grow to 80vh in focus mode; got {boosted}"
+
+        # Exit focus (click the focused icon again) → revert to the 60vh baseline.
+        page.locator( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]' ).click()
+        page.wait_for_selector( '#cc-strip-toggle[data-focus-active="false"]', timeout=2000 )
+        after = _card_a_max_height()
+        assert abs( _px( after ) - _expected_vh_px( 0.60 ) ) <= 2, \
+            f"exiting focus mode reverts to the 60vh baseline; got {after}"
