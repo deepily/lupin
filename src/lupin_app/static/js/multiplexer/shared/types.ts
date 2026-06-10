@@ -77,6 +77,12 @@ export type LupinEventType =
   | "store_audio_chunk_decoded"
   | "store_action_required_changed"
   | "store_senders_changed"
+  // WP4 (multiplexer-parity Reading Pane, 2026-06-10) — ReadingPaneStore emits
+  // this on every pane-state mutation (open/close/back/layout-mode/ratio/AR-pane
+  // enter+exit/hydrate). ReadingPaneRenderer subscribes and repaints the pane
+  // DOM. Ports the legacy `notifications.js` master-detail behavior (commits
+  // cd6cc99, 9211e5c, 97bfb8c, e1ed26a, 498e98e) into the store/renderer split.
+  | "store_reading_pane_changed"
   // boot.ts one-shot signal (Phase 4 per D-C ratification 2026-05-04 PM).
   // Emitted at end of bootMultiplexer() with the resolved binary handler
   // identity so AC9's Playwright check can verify the wiring without the
@@ -516,4 +522,42 @@ export interface HydrationFailedPayload {
   source : string;
   /** The Error that caused the rejection. */
   error  : Error;
+}
+
+// ---------------------------------------------------------------------------
+// WP4 — Master-Detail Reading Pane (multiplexer parity, 2026-06-10).
+//
+// Ports the legacy `notifications.js` master-detail two-pane layout into the
+// multiplexer's store/renderer split. ReadingPaneStore owns the pure logical
+// state (layout mode, history stack, split ratio, action-required-in-pane
+// flag); ReadingPaneRenderer owns all DOM (iframe embedding, scroll-anchor
+// preservation, splitter drag, toolbar centering). Legacy source of truth:
+// `notifications.js:10889-11496` + state init `:181-205`, `:295-300`.
+// ---------------------------------------------------------------------------
+
+/** Horizontal = master-detail two-pane; vertical = legacy single column. */
+export type LayoutMode = "vertical" | "horizontal";
+
+/**
+ * A single Reading-Pane history entry.
+ *   - "abstract" → `payload` is markdown text (rendered via renderMarkdown)
+ *   - "doc"      → `payload` is a `/app/docs?path=…` href (embedded in iframe)
+ */
+export interface ContentPaneEntry {
+  type    : "abstract" | "doc";
+  payload : string;
+  title   : string;
+}
+
+export type ReadingPaneChangeKind =
+  | "opened"        // open(): pushed a new entry; pane now shows it
+  | "closed"        // close(): history cleared, pane hidden
+  | "back"          // back(): popped one entry, pane shows the prior one
+  | "layout-mode"   // toggleLayoutMode(): vertical ⇄ horizontal
+  | "ratio"         // setSplitRatio(): divider moved
+  | "ar-enter"      // enterActionRequiredPane(): AR widget lifted into pane @50/50
+  | "ar-exit";      // exitActionRequiredPane(): AR widget restored to home
+
+export interface StoreReadingPaneChangedPayload {
+  changeKind : ReadingPaneChangeKind;
 }

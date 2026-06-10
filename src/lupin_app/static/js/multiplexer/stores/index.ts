@@ -102,4 +102,9 @@ export type {
 export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
+// WP4 (2026-06-10) — ReadingPaneStore is NOT part of the canonical 5-store set
+// wired via createStores(); it is constructed directly in boot.ts (the thin
+// Lane-C wiring step). Re-exported here for the integration owner's import.
+export type { ReadingPaneStore, ReadingPaneStoreOptions } from "./ReadingPaneStore";
+export { createReadingPaneStore } from "./ReadingPaneStore";
 /* c8 ignore stop */

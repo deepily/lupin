@@ -57,6 +57,15 @@ export {
   type SenderCardRecorderRenderer,
   type SenderCardRecorderRendererOptions,
 } from "./SenderCardRecorderRenderer";
+export {
+  createReadingPaneRenderer,
+  type ReadingPaneRenderer,
+  type ReadingPaneRendererOptions,
+  type ReadingPaneStoreLike,
+  type ActionRequiredCountLike,
+  type WindowLike,
+  type WindowDocLike,
+} from "./ReadingPaneRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";
