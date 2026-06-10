@@ -8655,17 +8655,21 @@ class NotificationsUI {
         this.renderFleetStatus( this._lastFleetComposite, false );
     }
 
-    renderFleetStatusTable( model ) {
+    renderFleetStatusTable( model, personas = {} ) {
         /**
          * Render the grouped hierarchy model (§7) as a read-only table (mirrors the
          * renderJobCard template-literal pattern). Managers are group headers;
          * workers are indented beneath; the Unmanaged group renders last.
          *
-         * Six columns (§5): Who · Role · State · Holding-on · Stuck · Liveness verdict.
-         * The Liveness cell carries the raw 4 ages as a hover tooltip (§5).
+         * Eight columns: Who · Role · State · Holding-on · Stuck · Liveness verdict ·
+         * % Window (context consumed) · Window (size). The Liveness cell carries the
+         * raw 4 ages as a hover tooltip (§5); the two context columns are joined in
+         * per-persona from the composite's context_pressure section.
          *
          * Requires:
          *     - model is the { totalCount, groups } shape from groupFleetByManager
+         *     - personas is the context_pressure.personas map (persona → record), or
+         *       {} when the arbiter has not yet published context pressure
          *
          * Ensures:
          *     - Returns an HTML string (caller assigns to innerHTML)
@@ -8681,6 +8685,8 @@ class NotificationsUI {
                     <th class="fleet-col-holding">Holding on</th>
                     <th class="fleet-col-stuck">Stuck</th>
                     <th class="fleet-col-liveness">Liveness</th>
+                    <th class="fleet-col-window-pct">% Window</th>
+                    <th class="fleet-col-window">Window</th>
                 </tr>
             </thead>`;
 
@@ -8691,7 +8697,7 @@ class NotificationsUI {
 
             const groupHeaderHtml = `
                 <tr class="fleet-group-header${group.isUnmanaged ? " fleet-group-unmanaged" : ""}">
-                    <td colspan="6">${headerLabel}</td>
+                    <td colspan="8">${headerLabel}</td>
                 </tr>`;
 
             // For a real manager, render the manager's own row first (as the header's
@@ -8699,9 +8705,9 @@ class NotificationsUI {
             // manager row — only its collected workers.
             const memberRows = [];
             if ( !group.isUnmanaged && group.manager ) {
-                memberRows.push( this._renderFleetRow( group.manager, false ) );
+                memberRows.push( this._renderFleetRow( group.manager, false, personas ) );
             }
-            group.workers.forEach( w => memberRows.push( this._renderFleetRow( w, true ) ) );
+            group.workers.forEach( w => memberRows.push( this._renderFleetRow( w, true, personas ) ) );
 
             return groupHeaderHtml + memberRows.join( "" );
         } ).join( "" );
@@ -8709,18 +8715,60 @@ class NotificationsUI {
         return `<table class="fleet-status-table">${headerRow}<tbody>${body}</tbody></table>`;
     }
 
-    _renderFleetRow( session, indented ) {
+    _formatWindowSize( windowSize ) {
+        /**
+         * Format a context-window size for compact display: 1000000 → "1M",
+         * 200000 → "200K". Exact millions render with an "M" suffix, exact
+         * thousands with a "K" suffix; any other positive value renders as its
+         * integer string. Unknown/unmeasured → "—".
+         *
+         * Requires:
+         *     - windowSize is a positive integer, or null/undefined/0 for unknown
+         *
+         * Ensures:
+         *     - 1000000 → "1M", 200000 → "200K"
+         *     - exact-million → "<n>M"; exact-thousand → "<n>K"; else integer string
+         *     - falsy / non-positive → "—"
+         *     - Pure: no DOM, no side effects
+         */
+        if ( !windowSize || windowSize <= 0 ) return "—";
+        if ( windowSize % 1000000 === 0 ) return `${windowSize / 1000000}M`;
+        if ( windowSize % 1000 === 0 ) return `${windowSize / 1000}K`;
+        return String( windowSize );
+    }
+
+    _formatConsumptionPct( pct ) {
+        /**
+         * Format the "% of context window consumed" for display. The backend
+         * pre-rounds to 1 decimal; an unmeasured row (idle/dead/missing persona)
+         * carries null → "—".
+         *
+         * Requires:
+         *     - pct is a number, or null/undefined for unmeasured
+         *
+         * Ensures:
+         *     - numeric → "<pct>%"; null/undefined → "—"
+         *     - Pure: no DOM, no side effects
+         */
+        if ( pct === null || pct === undefined ) return "—";
+        return `${pct}%`;
+    }
+
+    _renderFleetRow( session, indented, personas = {} ) {
         /**
          * Render a single session row (one <tr>) for the fleet-status table.
          *
          * Requires:
          *     - session is a row object (defensively handles missing fields)
          *     - indented: true for workers (visual nesting), false for manager rows
+         *     - personas is the context_pressure.personas map (persona → record), {} if absent
          *
          * Ensures:
-         *     - Returns one <tr> HTML string with the six §5 columns
+         *     - Returns one <tr> HTML string with the eight columns
          *     - "none" holding_on renders as "—"; stuck renders ✓ (red) / —
          *     - Liveness cell carries the raw-4-ages tooltip via title=
+         *     - % Window + Window are joined per-persona from `personas`; an
+         *       unmeasured or missing persona renders "—" (never breaks the row)
          *     - Pure: no DOM access, no side effects
          */
         const who      = this.escapeHtml( this._fleetLabelOf( session ) );
@@ -8733,6 +8781,9 @@ class NotificationsUI {
         const liveness = session.liveness || {};
         const verdict  = this.escapeHtml( liveness.verdict || "unknown" );
         const tooltip  = this.escapeHtml( this._fleetLivenessTooltip( session.liveness ) );
+        const ctx      = ( session.persona && personas[ session.persona ] ) || {};
+        const pctCell  = this.escapeHtml( this._formatConsumptionPct( ctx.consumption_pct_of_window ) );
+        const winCell  = this.escapeHtml( this._formatWindowSize( ctx.window_size ) );
 
         return `
             <tr class="fleet-row${indented ? " fleet-row-worker" : " fleet-row-manager"}${isStuck ? " fleet-row-stuck" : ""}">
@@ -8742,6 +8793,8 @@ class NotificationsUI {
                 <td class="fleet-col-holding">${holding}</td>
                 <td class="fleet-col-stuck${isStuck ? " fleet-stuck-yes" : ""}">${stuckCell}</td>
                 <td class="fleet-col-liveness" title="${tooltip}">${verdict}</td>
+                <td class="fleet-col-window-pct">${pctCell}</td>
+                <td class="fleet-col-window">${winCell}</td>
             </tr>`;
     }
 
@@ -8805,8 +8858,9 @@ class NotificationsUI {
             container.innerHTML = toggleHtml +
                 `<p class="fleet-status-message fleet-status-empty">No live sessions.</p>`;
         } else {
-            const model = this.groupFleetByManager( visible );
-            container.innerHTML = toggleHtml + this.renderFleetStatusTable( model );
+            const model    = this.groupFleetByManager( visible );
+            const personas = ( composite.context_pressure && composite.context_pressure.personas ) || {};
+            container.innerHTML = toggleHtml + this.renderFleetStatusTable( model, personas );
         }
 
         if ( stampUpdated ) this._stampFleetStatusUpdated( composite.app_timezone );

@@ -5850,6 +5850,16 @@ body[data-layout-mode="horizontal"] .container {
     text-align: center;
 }
 
+/* Context columns (% of window consumed, window size) — numeric, right-aligned */
+.fleet-status-table .fleet-col-window-pct,
+.fleet-status-table th.fleet-col-window-pct,
+.fleet-status-table .fleet-col-window,
+.fleet-status-table th.fleet-col-window {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
 /* Group header rows (managers / Unmanaged bucket) */
 .fleet-group-header td {
     padding: 8px 10px;

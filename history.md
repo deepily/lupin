@@ -2,6 +2,12 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
 
+### 2026.06.09 - Session 110ff47d (Rio ⚡) | Fleet-Status table: +2 context columns ("% Window" + "Window size")
+
+**Added two columns to the read-only Fleet-Status table (6 → 8 cols), per Rick's request.** A **% Window** column (each session's context consumption) and a **Window** column (window size formatted `1000000 → "1M"`, `200000 → "200K"`). The fleet roster and the context-pressure metrics ship as **separate sections** of the `/api/arbiter/fleet-state` composite, so the values are **joined in the frontend by persona name** (`composite.context_pressure.personas[ session.persona ]`) — no backend change. New pure formatters `_formatWindowSize` / `_formatConsumptionPct`; the `personas` map threaded through `renderFleetStatus → renderFleetStatusTable → _renderFleetRow`; group-header `colspan` 6 → 8. **Degrade-safe**: absent section / missing persona / unmeasured (idle/dead) → `"—"` (a measured `0%` still renders `"0%"`). CSS right-aligns the two numeric columns (`tabular-nums`). **58 JS unit tests green (+11); 100% L/B/F on the changed surface** (c8 over `notifications.js` 8640–8835, zero uncovered). Files: `notifications.js`, `fleet_status_panel.test.ts`, `notifications.css`; doc `src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/02-context-window-columns.md`. Client-side static only — browser refresh picks it up, no bounce. **Selective-staged (mine only — excluded the in-flight stop-hook work). HELD — not pushed.**
+
+---
+
 ### 2026.06.09 - Session d9e65cd8 (Tiberius 👑) | Arbiter liveness fix + operator loop (Phase 1, Round 2a, Round 2b) — built, committed, deployed
 
 **Drove the heartbeat-arbiter from blind sensor to a closed operator loop across three engagements** (manager seat: serialize → spawn crew → review → commit, per Rick's "drive to completion, commit as I see fit, push gated"):

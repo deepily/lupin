@@ -51,8 +51,10 @@ type FleetUI = Record<string, unknown> & {
   _lastFleetComposite: unknown;
   _fleetLabelOf: ( session: unknown ) => string;
   _fleetLivenessTooltip: ( liveness: unknown ) => string;
-  renderFleetStatusTable: ( model: { groups: GroupModel[] } ) => string;
-  _renderFleetRow: ( session: Record<string, unknown>, indented: boolean ) => string;
+  _formatWindowSize: ( windowSize: number | null | undefined ) => string;
+  _formatConsumptionPct: ( pct: number | null | undefined ) => string;
+  renderFleetStatusTable: ( model: { groups: GroupModel[] }, personas?: Record<string, unknown> ) => string;
+  _renderFleetRow: ( session: Record<string, unknown>, indented: boolean, personas?: Record<string, unknown> ) => string;
   renderFleetStatus: ( composite: unknown ) => void;
   _formatFleetTimestamp: ( date: Date, ianaZone: string | null | undefined ) => string;
   _stampFleetStatusUpdated: ( ianaZone: string | null | undefined ) => void;
@@ -121,6 +123,16 @@ const OFFLINE  = { session_id: "ee55ff66", persona: "Krishna", state: "idle", ho
                    stuck: false, role: "worker", manager: "Tiberius",
                    liveness: { bridge_age_s: null, event_age_s: 300000, commons_age_s: null,
                                idle_prompt_age_s: null, freshest_age_s: 300000, verdict: "offline" } };
+
+// The context_pressure.personas map (keyed by persona) joined into the table for the
+// "% Window" + "Window" columns. Tiberius rides a 1M window; Rio a 200K window; María
+// is present but unmeasured (idle → null consumption). Mr. Radio is intentionally absent
+// (no record) to exercise the missing-persona → "—" path.
+const CONTEXT_PERSONAS = {
+  "Tiberius" : { window_size: 1000000, consumption_pct_of_window: 21.9 },
+  "Rio"      : { window_size: 200000,  consumption_pct_of_window: 8.4 },
+  "María"    : { window_size: 1000000, consumption_pct_of_window: null },
+};
 
 beforeEach( () => { document.body.replaceChildren(); } );
 
@@ -239,10 +251,12 @@ test( "renderFleetStatusTable emits a group header per manager, indented workers
   assert.match( html, /\(Unmanaged\)/ );
   assert.match( html, /fleet-row-worker/ );
   assert.match( html, /fleet-row-manager/ );
-  // six column headers present
-  for ( const col of [ "Who", "Role", "State", "Holding on", "Stuck", "Liveness" ] ) {
+  // eight column headers present (six original + the two context columns)
+  for ( const col of [ "Who", "Role", "State", "Holding on", "Stuck", "Liveness", "% Window", "Window" ] ) {
     assert.ok( html.includes( col ), `header "${col}" present` );
   }
+  // group-header row now spans all eight columns
+  assert.match( html, /colspan="8"/ );
   // Unmanaged header appears after the manager header
   assert.ok( html.indexOf( "Tiberius" ) < html.indexOf( "(Unmanaged)" ), "Unmanaged group renders last" );
 } );
@@ -282,6 +296,70 @@ test( "_renderFleetRow: defensively fills missing fields (no role/state/liveness
   assert.match( html, />unknown</ );           // state + verdict default to unknown
   assert.match( html, /bare0001/ );            // short sid label
   assert.match( html, /title="no liveness data"/ );
+} );
+
+// ─────────────────────────── % Window + Window columns (context-pressure join) ───────────────────────────
+
+test( "_formatWindowSize: 1000000 → 1M, 200000 → 200K, exact thousands → <n>K, other → integer, falsy → —", () => {
+  const ui = newUI();
+  assert.equal( ui._formatWindowSize( 1000000 ), "1M" );
+  assert.equal( ui._formatWindowSize( 200000 ), "200K" );
+  assert.equal( ui._formatWindowSize( 2000000 ), "2M" );
+  assert.equal( ui._formatWindowSize( 128000 ), "128K" );
+  assert.equal( ui._formatWindowSize( 1234 ), "1234" );   // not an exact thousand/million
+  assert.equal( ui._formatWindowSize( null ), "—" );
+  assert.equal( ui._formatWindowSize( undefined ), "—" );
+  assert.equal( ui._formatWindowSize( 0 ), "—" );
+  assert.equal( ui._formatWindowSize( -5 ), "—" );
+} );
+
+test( "_formatConsumptionPct: numeric → <pct>%, null/undefined → —", () => {
+  const ui = newUI();
+  assert.equal( ui._formatConsumptionPct( 21.9 ), "21.9%" );
+  assert.equal( ui._formatConsumptionPct( 0 ), "0%" );    // a measured 0 is NOT em-dash
+  assert.equal( ui._formatConsumptionPct( null ), "—" );
+  assert.equal( ui._formatConsumptionPct( undefined ), "—" );
+} );
+
+test( "_renderFleetRow: joins % Window + Window from the personas map by persona", () => {
+  const ui = newUI();
+  const html = ui._renderFleetRow( TIBERIUS, false, CONTEXT_PERSONAS );
+  assert.match( html, /<td class="fleet-col-window-pct">21\.9%<\/td>/ );
+  assert.match( html, /<td class="fleet-col-window">1M<\/td>/ );
+  const rioHtml = ui._renderFleetRow( RIO, true, CONTEXT_PERSONAS );
+  assert.match( rioHtml, /<td class="fleet-col-window-pct">8\.4%<\/td>/ );
+  assert.match( rioHtml, /<td class="fleet-col-window">200K<\/td>/ );
+} );
+
+test( "_renderFleetRow: a measured window but null consumption → '—' pct, window still shown", () => {
+  const ui = newUI();
+  const html = ui._renderFleetRow( MARIA, true, CONTEXT_PERSONAS );  // María: window 1M, consumption null
+  assert.match( html, /<td class="fleet-col-window-pct">—<\/td>/ );
+  assert.match( html, /<td class="fleet-col-window">1M<\/td>/ );
+} );
+
+test( "_renderFleetRow: a persona absent from the map → both context cells '—'", () => {
+  const ui = newUI();
+  const html = ui._renderFleetRow( RADIO, true, CONTEXT_PERSONAS );  // Mr. Radio not in CONTEXT_PERSONAS
+  assert.match( html, /<td class="fleet-col-window-pct">—<\/td>/ );
+  assert.match( html, /<td class="fleet-col-window">—<\/td>/ );
+} );
+
+test( "_renderFleetRow: no personas arg (default {}) → both context cells '—' (never throws)", () => {
+  const ui = newUI();
+  const html = ui._renderFleetRow( TIBERIUS, false );
+  assert.match( html, /<td class="fleet-col-window-pct">—<\/td>/ );
+  assert.match( html, /<td class="fleet-col-window">—<\/td>/ );
+} );
+
+test( "renderFleetStatusTable: threads the personas map through to every rendered row", () => {
+  const ui = newUI();
+  const model = ui.groupFleetByManager( [ TIBERIUS, RIO ] );
+  const html = ui.renderFleetStatusTable( model, CONTEXT_PERSONAS );
+  assert.match( html, /21\.9%/ );   // Tiberius manager row
+  assert.match( html, />1M</ );
+  assert.match( html, /8\.4%/ );    // Rio worker row
+  assert.match( html, />200K</ );
 } );
 
 // ─────────────────────────── renderFleetStatus (DOM dispatch, §6.4) ───────────────────────────
@@ -334,6 +412,47 @@ test( "renderFleetStatus: populated → grouped table, count set, last-updated s
   assert.match( container.innerHTML, /fleet-status-table/ );
   assert.equal( document.getElementById( "fleet-status-count" )!.textContent, "3" );
   assert.match( document.getElementById( "fleet-status-updated" )!.textContent, /updated \d{2}:\d{2}:\d{2}/ );
+} );
+
+test( "renderFleetStatus: joins the context_pressure section → % Window + Window cells populated", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderFleetStatus( {
+    status: "ok", app_timezone: "America/New_York",
+    fleet_arbiter: { sessions: [ TIBERIUS, RIO ] },
+    context_pressure: { personas: CONTEXT_PERSONAS }
+  } );
+  const html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.match( html, /21\.9%/ );   // Tiberius (1M window)
+  assert.match( html, />1M</ );
+  assert.match( html, /8\.4%/ );    // Rio (200K window)
+  assert.match( html, />200K</ );
+} );
+
+test( "renderFleetStatus: no context_pressure section → context cells degrade to '—' (no throw)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderFleetStatus( {
+    status: "ok", app_timezone: "America/New_York",
+    fleet_arbiter: { sessions: [ TIBERIUS, RIO ] }
+    // context_pressure intentionally absent (arbiter has not published it yet)
+  } );
+  const html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.match( html, /<td class="fleet-col-window-pct">—<\/td>/ );
+  assert.match( html, /<td class="fleet-col-window">—<\/td>/ );
+} );
+
+test( "renderFleetStatus: context_pressure section present but personas key absent → cells degrade to '—'", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderFleetStatus( {
+    status: "ok", app_timezone: "America/New_York",
+    fleet_arbiter: { sessions: [ TIBERIUS ] },
+    context_pressure: { status: "awaiting" }   // section exists, no personas map yet
+  } );
+  const html = document.getElementById( "fleet-status-container" )!.innerHTML;
+  assert.match( html, /<td class="fleet-col-window-pct">—<\/td>/ );
+  assert.match( html, /<td class="fleet-col-window">—<\/td>/ );
 } );
 
 test( "renderFleetStatus: sessions key absent → treated as empty (count 0)", () => {
