@@ -190,6 +190,53 @@ export function formatConsumptionPct( pct: number | null | undefined ): string {
   return `${pct}%`;
 }
 
+// ---------------------------------------------------------------------------
+// Color-coding helpers (WP12 color follow-on — mirror legacy _fleetVerdictClass
+// + _fleetPctClass, commit f2733cf). Color is ALWAYS redundant with the verdict
+// WORD / numeric % in the rendered cell (WCAG 1.4.1); these only pick a class.
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a liveness verdict to its status-dot + row-accent color class. Pure.
+ *
+ * Requires:
+ *   - verdict is a string (e.g. "live", "quiet (idle)"), or null/undefined
+ * Ensures:
+ *   - keys on the FIRST whitespace-delimited word, trimmed + lowercased:
+ *     "live"→fleet-verdict-live, "quiet …"→…-quiet, "stale …"→…-stale,
+ *     "offline"→…-offline
+ *   - anything else (empty / non-string / unrecognized) → fleet-verdict-unknown
+ *   - never throws
+ */
+export function fleetVerdictClass( verdict: string | null | undefined ): string {
+  const tokens = typeof verdict === "string" ? verdict.trim().split( /\s+/ ) : [];
+  const word   = ( tokens.shift() ?? "" ).toLowerCase();
+  if ( word === "live" )    return "fleet-verdict-live";
+  if ( word === "quiet" )   return "fleet-verdict-quiet";
+  if ( word === "stale" )   return "fleet-verdict-stale";
+  if ( word === "offline" ) return "fleet-verdict-offline";
+  return "fleet-verdict-unknown";
+}
+
+/**
+ * Map a "% of context window consumed" to its heat-tint cell class. Pure.
+ *
+ * Requires:
+ *   - pct is a number, or null/undefined for unmeasured
+ * Ensures:
+ *   - low  : pct < 50        → "fleet-pct-low"   (green — healthy headroom; 0% tints low)
+ *   - mid  : 50 ≤ pct < 80   → "fleet-pct-mid"   (amber — watch)
+ *   - high : pct ≥ 80        → "fleet-pct-high"  (red + bold — pressure)
+ *   - null/undefined/non-number/NaN → "" (the em-dash cell stays UNTINTED)
+ *   - never throws
+ */
+export function fleetHeatClass( pct: number | null | undefined ): string {
+  if ( pct === null || pct === undefined || typeof pct !== "number" || Number.isNaN( pct ) ) return "";
+  if ( pct < 50 ) return "fleet-pct-low";
+  if ( pct < 80 ) return "fleet-pct-mid";
+  return "fleet-pct-high";
+}
+
 /**
  * Format a Date as "HH:MM:SS TZ" in the configured IANA zone via
  * Intl.DateTimeFormat (DST-aware). Invalid/absent zone → browser-local. Pure.

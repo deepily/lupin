@@ -7,9 +7,10 @@
 //
 // Two inputs mutate the count:
 //   1. `auth_success` — on (re)connect the server includes `undelivered_count`.
-//      The multiplexer QueueTransport emits the EventBus payload as `env.data`
-//      (transport/QueueTransport.ts:259); the server mirrors the count under
-//      `data` for exactly this consumer (websocket.py auth_success frame).
+//      Post-WP0 the WS frame is FLAT (`{type, timestamp, ...data}`, no nested
+//      `data` key); QueueTransport.onMessage emits the EventBus payload as the
+//      frame minus `type`+`timestamp`, so this consumer reads the count directly
+//      off `payload.undelivered_count` (shared/types.ts ServerFrameEnvelope).
 //   2. `reset()` — soft-dismiss (`is_hidden=True`, reversible, NO confirm per
 //      Rick / commit bbde599). POSTs the dismiss endpoint and adopts the
 //      post-dismiss `undelivered_count` (0 on success).
@@ -23,8 +24,8 @@ export interface MissedApiClient {
   post<T>( path: string, body: unknown ): Promise<T>;
 }
 
-// auth_success payload — the count lives under `undelivered_count` (mirrored
-// into `data` server-side so QueueTransport's `env.data` carries it).
+// auth_success payload — the count lives flat under `undelivered_count` (the
+// transport emits the frame minus `type`+`timestamp`; no nested `data` envelope).
 interface AuthSuccessPayload {
   undelivered_count? : unknown;
 }
@@ -110,8 +111,8 @@ class MissedStoreImpl implements MissedStore {
   // -------------------------------------------------------------------------
 
   private onAuthSuccess( e: LupinEvent<AuthSuccessPayload> ): void {
-    // payload may be undefined if the server frame carried no `data` — coerce
-    // handles undefined → 0 (defensive; the live frame mirrors the count).
+    // payload may be undefined if the server frame carried no count — coerce
+    // handles undefined → 0 (defensive; the live flat frame carries the count).
     const next = coerceCount( e.payload?.undelivered_count );
     this.setCount( next );
   }

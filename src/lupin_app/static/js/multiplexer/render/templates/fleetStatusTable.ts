@@ -17,8 +17,10 @@
 // hover tooltip) · % Window · Window.
 
 import {
+  fleetHeatClass,
   fleetLabelOf,
   fleetLivenessTooltip,
+  fleetVerdictClass,
   formatConsumptionPct,
   formatWindowSize,
   type FleetModel,
@@ -71,9 +73,13 @@ export function renderFleetOfflineToggle(
  *
  * Ensures:
  *   - "none"/empty holding_on → "—"; stuck → "✓" else "—"
- *   - Liveness cell carries the raw-4-ages tooltip via title=
+ *   - Liveness cell carries the raw-4-ages tooltip via title= AND a leading
+ *     `.fleet-liveness-dot` span color-keyed by the row's verdict class
  *   - % Window + Window joined per-persona from `personas`; unmeasured/missing → "—"
  *   - indented=true adds .fleet-row-worker, else .fleet-row-manager; stuck adds .fleet-row-stuck
+ *   - the row carries a `fleet-verdict-*` class (verdict→color); the % Window cell
+ *     carries a `fleet-pct-*` heat class when measured (unmeasured "—" stays untinted).
+ *     Color is redundant with the verdict WORD / % text (WCAG 1.4.1).
  */
 export function renderFleetRow(
   session  : FleetSession,
@@ -89,10 +95,13 @@ export function renderFleetRow(
   const verdict  = liveness.verdict || "unknown";
   const ctx      = ( session.persona && personas[ session.persona ] ) || {};
 
+  const verdictClass = fleetVerdictClass( verdict );
+
   const tr = document.createElement( "tr" );
   tr.className = "fleet-row"
     + ( indented ? " fleet-row-worker" : " fleet-row-manager" )
-    + ( isStuck ? " fleet-row-stuck" : "" );
+    + ( isStuck ? " fleet-row-stuck" : "" )
+    + ` ${verdictClass}`;
 
   tr.appendChild( td( "fleet-col-who", fleetLabelOf( session ) ) );
 
@@ -110,11 +119,22 @@ export function renderFleetRow(
   const stuckCell = td( "fleet-col-stuck" + ( isStuck ? " fleet-stuck-yes" : "" ), isStuck ? "✓" : "—" );
   tr.appendChild( stuckCell );
 
-  const livenessCell = td( "fleet-col-liveness", verdict );
+  // Status-dot prepended in the Liveness cell — color-keyed via the row's
+  // `fleet-verdict-*` class (createElement keeps it safe-write; no innerHTML).
+  const livenessCell = document.createElement( "td" );
+  livenessCell.className = "fleet-col-liveness";
+  const dot = document.createElement( "span" );
+  dot.className = "fleet-liveness-dot";
+  livenessCell.appendChild( dot );
+  livenessCell.appendChild( document.createTextNode( verdict ) );
   livenessCell.setAttribute( "title", fleetLivenessTooltip( session.liveness ) );
   tr.appendChild( livenessCell );
 
-  tr.appendChild( td( "fleet-col-window-pct", formatConsumptionPct( ctx.consumption_pct_of_window ) ) );
+  const heatClass = fleetHeatClass( ctx.consumption_pct_of_window );
+  tr.appendChild( td(
+    "fleet-col-window-pct" + ( heatClass ? ` ${heatClass}` : "" ),
+    formatConsumptionPct( ctx.consumption_pct_of_window ),
+  ) );
   tr.appendChild( td( "fleet-col-window", formatWindowSize( ctx.window_size ) ) );
 
   return tr;

@@ -102,6 +102,46 @@ test("row: % Window + Window joined per-persona; missing persona → em-dash", (
 });
 
 // ---------------------------------------------------------------------------
+// Color follow-on: verdict class + status-dot + heat-tint
+// ---------------------------------------------------------------------------
+
+test("row: carries the verdict color class (live / offline / unknown default)", () => {
+  assert.ok(renderFleetRow({ persona: "A", liveness: { verdict: "live" } }, false, {})
+    .classList.contains("fleet-verdict-live"));
+  assert.ok(renderFleetRow({ persona: "B", liveness: { verdict: "offline" } }, true, {})
+    .classList.contains("fleet-verdict-offline"));
+  // No liveness → verdict defaults to "unknown" → fleet-verdict-unknown.
+  assert.ok(renderFleetRow({ persona: "C" }, true, {})
+    .classList.contains("fleet-verdict-unknown"));
+});
+
+test("row: liveness cell has a leading .fleet-liveness-dot span; text is still the verdict word", () => {
+  const r = renderFleetRow({ persona: "X", liveness: { verdict: "live" } }, true, {});
+  const cell = r.querySelector(".fleet-col-liveness")!;
+  assert.equal(cell.querySelector(".fleet-liveness-dot") !== null, true);
+  // The empty dot span contributes no text — the cell text remains the verdict.
+  assert.equal(cell.textContent, "live");
+});
+
+test("row: % Window cell carries the heat class per bucket; unmeasured stays untinted", () => {
+  const personas: FleetPersonaMap = {
+    Lo: { consumption_pct_of_window: 10, window_size: 200000 },
+    Mid: { consumption_pct_of_window: 65, window_size: 200000 },
+    Hi: { consumption_pct_of_window: 90, window_size: 200000 },
+  };
+  const lo = renderFleetRow({ persona: "Lo" }, false, personas).querySelector(".fleet-col-window-pct")!;
+  assert.ok(lo.classList.contains("fleet-pct-low"));
+  const mid = renderFleetRow({ persona: "Mid" }, false, personas).querySelector(".fleet-col-window-pct")!;
+  assert.ok(mid.classList.contains("fleet-pct-mid"));
+  const hi = renderFleetRow({ persona: "Hi" }, false, personas).querySelector(".fleet-col-window-pct")!;
+  assert.ok(hi.classList.contains("fleet-pct-high"));
+  // Unmeasured (persona not in map) → em-dash, no heat class.
+  const none = renderFleetRow({ persona: "Absent" }, false, personas).querySelector(".fleet-col-window-pct")!;
+  assert.equal(none.textContent, "—");
+  assert.equal(none.className.includes("fleet-pct-"), false);
+});
+
+// ---------------------------------------------------------------------------
 // renderFleetStatusTable
 // ---------------------------------------------------------------------------
 

@@ -18,6 +18,8 @@
                           .fleet-stuck-yes
    - Toggle (template):   .fleet-offline-toggle · .fleet-offline-toggle-btn
    - Banners (renderer):  .fleet-status-message (+ -offline / -empty / -signin)
+   - Color (WP12 f-on):   .fleet-liveness-dot · .fleet-verdict-{live,quiet,stale,
+                          offline,unknown} · .fleet-pct-{low,mid,high}
    ============================================================================ */
 
 /* ---- Panel chrome ---- */
@@ -202,6 +204,49 @@
 .fleet-col-liveness {
     cursor: help;
 }
+
+/* ---- Liveness verdict colors (WP12 color follow-on) ----
+   Status-dot + 3px row left-accent, color-keyed by the verdict word. Mirrors
+   the legacy scheme (notifications.css, commit f2733cf). Color is ALWAYS
+   redundant with the verdict WORD in the Liveness cell (WCAG 1.4.1). */
+.fleet-status-table {
+    --fleet-live:    #2e7d32;  /* green  — fresh signal within the live window  */
+    --fleet-quiet:   #1565c0;  /* blue   — recently active, within alive window */
+    --fleet-stale:   #f57f17;  /* amber  — aging, still within the ~1h decay    */
+    --fleet-offline: #9e9e9e;  /* grey   — no recent signal / reaped / dead     */
+    --fleet-unknown: #bdbdbd;  /* l.grey — no liveness data at all              */
+}
+
+/* Status dot prepended in the Liveness cell */
+.fleet-liveness-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    border-radius: 50%;
+    vertical-align: middle;
+    background: var( --fleet-unknown );
+}
+
+.fleet-verdict-live    .fleet-liveness-dot { background: var( --fleet-live ); }
+.fleet-verdict-quiet   .fleet-liveness-dot { background: var( --fleet-quiet ); }
+.fleet-verdict-stale   .fleet-liveness-dot { background: var( --fleet-stale ); }
+.fleet-verdict-offline .fleet-liveness-dot { background: var( --fleet-offline ); }
+.fleet-verdict-unknown .fleet-liveness-dot { background: var( --fleet-unknown ); }
+
+/* Row left-edge accent (3px) on the first cell, keyed to the verdict class */
+.fleet-row.fleet-verdict-live    td:first-child { box-shadow: inset 3px 0 0 var( --fleet-live ); }
+.fleet-row.fleet-verdict-quiet   td:first-child { box-shadow: inset 3px 0 0 var( --fleet-quiet ); }
+.fleet-row.fleet-verdict-stale   td:first-child { box-shadow: inset 3px 0 0 var( --fleet-stale ); }
+.fleet-row.fleet-verdict-offline td:first-child { box-shadow: inset 3px 0 0 var( --fleet-offline ); }
+.fleet-row.fleet-verdict-unknown td:first-child { box-shadow: inset 3px 0 0 var( --fleet-unknown ); }
+
+/* ---- %-Window heat-tint (cell background) ----
+   Breakpoints mirror fleetHeatClass: low < 50 · mid 50–79 · high ≥ 80 (bold).
+   An unmeasured "—" cell carries no class → untinted. 0% tints low (green). */
+.fleet-status-table .fleet-pct-low  { background: rgba(  46, 125,  50, 0.12 ); }
+.fleet-status-table .fleet-pct-mid  { background: rgba( 245, 127,  23, 0.16 ); }
+.fleet-status-table .fleet-pct-high { background: rgba( 198,  40,  40, 0.16 ); color: #8b1a1a; font-weight: 600; }
 
 /* State-message banners (offline / empty / sign-in) — §6.4 */
 .fleet-status-message {

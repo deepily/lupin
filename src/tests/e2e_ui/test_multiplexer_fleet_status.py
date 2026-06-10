@@ -8,10 +8,11 @@ render states + count + offline toggle) end-to-end in a real browser. The
 §6.4 states is driven deterministically without a live arbiter; the renderer
 runs the real store.refresh() → fetchState() → render path.
 
-COLOR NOTE: a fleet-status color-coding scheme (verdict-based row colors + %
-window heat-tint) is being designed in the legacy table (Rick's ask). Per
-Tiberius's directive these assertions are render-STRUCTURE only — NO color
-assertions yet; color assertions land as a follow-on once the scheme relays.
+COLOR (WP12 follow-on, landed): the verdict-based color scheme (status-dot +
+row left-accent + %-window heat-tint) is now asserted by CLASS PRESENCE — the
+class is the WCAG-1.4.1 redundancy carrier (always paired with the verdict WORD
+/ numeric %), so a class assertion is exactly the right check, not a brittle
+computed-pixel-color read. See `fleetVerdictClass` / `fleetHeatClass`.
 
 Venue: :8000 (monopolize, scheduled) — `test_multiplexer_*` E2E batch. These
 use page.route stubs (no real state mutation) but run via the manager's :8000
@@ -133,6 +134,33 @@ _ALL_OFFLINE  = {
     },
 }
 
+# Color follow-on fixture: one live manager + quiet / stale / (no-liveness=unknown)
+# workers — all NON-offline so all stay visible under the live-only default. Heat
+# buckets: 12%→low, 65%→mid, 88%→high, and WkrUnknown omitted from personas →
+# unmeasured "—" (must stay UNTINTED).
+_COLOR_STATES = {
+    "app_timezone"  : "UTC",
+    "fleet_arbiter" : {
+        "sessions" : [
+            { "persona": "MgrLive", "role": "manager",
+              "liveness": { "verdict": "live", "bridge_age_s": 1, "freshest_age_s": 1 } },
+            { "persona": "WkrQuiet", "role": "worker", "manager": "MgrLive",
+              "liveness": { "verdict": "quiet (idle)", "bridge_age_s": 120, "freshest_age_s": 120 } },
+            { "persona": "WkrStale", "role": "worker", "manager": "MgrLive",
+              "liveness": { "verdict": "stale", "bridge_age_s": 1800, "freshest_age_s": 1800 } },
+            { "persona": "WkrUnknown", "role": "worker", "manager": "MgrLive" },  # no liveness → unknown
+        ],
+    },
+    "context_pressure" : {
+        "personas" : {
+            "MgrLive"  : { "consumption_pct_of_window": 12.0, "window_size": 200000 },  # low
+            "WkrQuiet" : { "consumption_pct_of_window": 65.0, "window_size": 200000 },  # mid
+            "WkrStale" : { "consumption_pct_of_window": 88.0, "window_size": 200000 },  # high
+            # WkrUnknown intentionally absent → unmeasured → untinted "—"
+        },
+    },
+}
+
 
 # ---------------------------------------------------------------------------
 # §6.4 render states
@@ -201,6 +229,11 @@ def test_fleet_populated_renders_grouped_table_with_context_columns():
             row = page.locator( "tbody .fleet-row-manager" )
             assert row.locator( ".fleet-col-window-pct" ).text_content() == "33.3%"
             assert row.locator( ".fleet-col-window" ).text_content() == "200K"
+            # Color follow-on: the live manager row carries the verdict-live class,
+            # a status-dot, and a low (green) heat-tint at 33.3% (class, not pixels).
+            assert "fleet-verdict-live" in ( row.get_attribute( "class" ) or "" )
+            assert row.locator( ".fleet-col-liveness .fleet-liveness-dot" ).count() == 1
+            assert row.locator( ".fleet-col-window-pct.fleet-pct-low" ).count() == 1
             # An "updated HH:MM:SS" stamp is set on a real fetch.
             assert page.locator( ".fleet-status-updated" ).text_content().startswith( "updated " )
         finally:
@@ -241,6 +274,40 @@ def test_fleet_all_offline_shows_no_live_sessions_with_toggle():
             assert page.locator( ".fleet-status-empty" ).text_content() == "No live sessions."
             assert page.locator( ".fleet-offline-toggle-btn" ).count() == 1
             assert page.locator( ".fleet-status-count" ).text_content() == "0"
+        finally:
+            browser.close()
+
+
+# ---------------------------------------------------------------------------
+# Color follow-on — verdict classes + heat-tint buckets (class presence only)
+# ---------------------------------------------------------------------------
+
+def test_fleet_color_coding_verdict_and_heat_classes():
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        browser, page = _open_with_fleet( pw, _COLOR_STATES )
+        try:
+            page.wait_for_selector( ".fleet-status-table", timeout=3000 )
+            # All four rows are non-offline → visible under the live-only default.
+            page.wait_for_function(
+                "() => document.querySelectorAll('.fleet-row-worker').length === 3",
+                timeout=2000,
+            )
+            # Verdict color classes — redundant with the Liveness WORD (WCAG 1.4.1).
+            assert page.locator( "tr.fleet-verdict-live" ).count()    == 1   # MgrLive
+            assert page.locator( "tr.fleet-verdict-quiet" ).count()   == 1   # WkrQuiet
+            assert page.locator( "tr.fleet-verdict-stale" ).count()   == 1   # WkrStale
+            assert page.locator( "tr.fleet-verdict-unknown" ).count() == 1   # WkrUnknown (no liveness)
+            # Each visible row's Liveness cell carries a status-dot.
+            assert page.locator( ".fleet-col-liveness .fleet-liveness-dot" ).count() == 4
+            # Heat-tint buckets — class presence, NOT computed pixel color.
+            assert page.locator( ".fleet-col-window-pct.fleet-pct-low" ).count()  == 1   # 12%
+            assert page.locator( ".fleet-col-window-pct.fleet-pct-mid" ).count()  == 1   # 65%
+            assert page.locator( ".fleet-col-window-pct.fleet-pct-high" ).count() == 1   # 88%
+            # Unmeasured "—" cell (WkrUnknown) stays UNTINTED — no fleet-pct-* class.
+            unknown_pct = page.locator( "tr.fleet-verdict-unknown .fleet-col-window-pct" )
+            assert unknown_pct.text_content() == "—"
+            assert "fleet-pct-" not in ( unknown_pct.get_attribute( "class" ) or "" )
         finally:
             browser.close()
 

@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
   fleetLabelOf,
   fleetLivenessTooltip,
+  fleetVerdictClass,
+  fleetHeatClass,
   groupFleetByManager,
   splitFleetByLiveness,
   formatWindowSize,
@@ -177,6 +179,62 @@ test("formatConsumptionPct: numeric → '%'; null/undefined → em-dash", () => 
   assert.equal(formatConsumptionPct(0), "0%");
   assert.equal(formatConsumptionPct(null), "—");
   assert.equal(formatConsumptionPct(undefined), "—");
+});
+
+// ---------------------------------------------------------------------------
+// fleetVerdictClass
+// ---------------------------------------------------------------------------
+
+test("fleetVerdictClass: each recognized verdict word → its class", () => {
+  assert.equal(fleetVerdictClass("live"), "fleet-verdict-live");
+  assert.equal(fleetVerdictClass("quiet"), "fleet-verdict-quiet");
+  assert.equal(fleetVerdictClass("stale"), "fleet-verdict-stale");
+  assert.equal(fleetVerdictClass("offline"), "fleet-verdict-offline");
+});
+
+test("fleetVerdictClass: keys on the first word, case-insensitive, trimmed", () => {
+  assert.equal(fleetVerdictClass("LIVE"), "fleet-verdict-live");
+  assert.equal(fleetVerdictClass("  Quiet  "), "fleet-verdict-quiet");
+  assert.equal(fleetVerdictClass("stale (decaying ~1h)"), "fleet-verdict-stale");
+});
+
+test("fleetVerdictClass: empty / whitespace / unrecognized → unknown", () => {
+  assert.equal(fleetVerdictClass(""), "fleet-verdict-unknown");
+  assert.equal(fleetVerdictClass("   "), "fleet-verdict-unknown");
+  assert.equal(fleetVerdictClass("weird"), "fleet-verdict-unknown");
+});
+
+test("fleetVerdictClass: non-string (null/undefined/number) → unknown", () => {
+  assert.equal(fleetVerdictClass(null), "fleet-verdict-unknown");
+  assert.equal(fleetVerdictClass(undefined), "fleet-verdict-unknown");
+  assert.equal(fleetVerdictClass(123 as unknown as string), "fleet-verdict-unknown");
+});
+
+// ---------------------------------------------------------------------------
+// fleetHeatClass
+// ---------------------------------------------------------------------------
+
+test("fleetHeatClass: low (<50, incl. 0%) → fleet-pct-low", () => {
+  assert.equal(fleetHeatClass(0), "fleet-pct-low");
+  assert.equal(fleetHeatClass(12.5), "fleet-pct-low");
+  assert.equal(fleetHeatClass(49.9), "fleet-pct-low");
+});
+
+test("fleetHeatClass: mid (50–79) → fleet-pct-mid", () => {
+  assert.equal(fleetHeatClass(50), "fleet-pct-mid");
+  assert.equal(fleetHeatClass(79.9), "fleet-pct-mid");
+});
+
+test("fleetHeatClass: high (≥80) → fleet-pct-high", () => {
+  assert.equal(fleetHeatClass(80), "fleet-pct-high");
+  assert.equal(fleetHeatClass(100), "fleet-pct-high");
+});
+
+test("fleetHeatClass: unmeasured (null/undefined/non-number/NaN) → '' (untinted)", () => {
+  assert.equal(fleetHeatClass(null), "");
+  assert.equal(fleetHeatClass(undefined), "");
+  assert.equal(fleetHeatClass(NaN), "");
+  assert.equal(fleetHeatClass("60" as unknown as number), "");
 });
 
 // ---------------------------------------------------------------------------
