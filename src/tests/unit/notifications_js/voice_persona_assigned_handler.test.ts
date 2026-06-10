@@ -63,6 +63,10 @@ function makeUI( opts: { broadcastPanel?: boolean; seedExisting?: boolean } = {}
   ui.debug                       = false;
   ui.log                         = (): void => {};                 // silence Design-by-Contract logging
   ui.senderPersonaMap            = new Map();
+  // managerPersonaMap: the voice_persona / session_reaped handlers now also touch
+  // the manager-badge map (manager-badge work) — stub it so the production handler's
+  // .delete() doesn't throw on this Object.create()-bypassed instance.
+  ui.managerPersonaMap           = new Map();
   ui.ccFocusState                = { enabled: false, focused_sender_id: null };
   ui.ccHideInactiveStrip         = false;
   ui.conversationModes           = {};

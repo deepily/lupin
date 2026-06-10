@@ -509,7 +509,7 @@ class TestConvModeOrthogonality:
         """
         Regression for the stranded-mic-icon bug (Session a6b318ea, 2026-05-01).
 
-        The conversation_mode_changed WS payload carries the full session UUID,
+        The speakerphone_changed WS payload carries the full session UUID,
         but strip-icon data-session-id is the 8-char prefix. The WS-router used
         to call _setStripIconConvMode with the un-normalized full UUID, so the
         querySelector missed and the OFF transition never cleared the mic
@@ -519,6 +519,13 @@ class TestConvModeOrthogonality:
         This test simulates the full WS path (handleNotificationUpdate switch
         case) for ON then OFF, using the full UUID in the payload, and asserts
         the icon overlay matches the expected state after each transition.
+
+        NOTE (2026-06-10 triage): the live WS event is `speakerphone_changed`
+        with `payload.on` (the 2026.05.11 speakerphone refactor — see the
+        handleNotificationUpdate case that maps payload.on → conversation_mode_active);
+        the retired `conversation_mode_changed`/`payload.active` shape has no switch
+        case, so the prior wording drove a DEAD path (its ON assertion was a
+        false-positive off the icon's born state). Updated to the real contract.
         """
         page         = notifications_page_with_strip
         sender_a     = "claude.code@lupin.deepily.ai#offtest1"
@@ -533,8 +540,8 @@ class TestConvModeOrthogonality:
             """( fullUuid ) => {
                 window.notificationsUI.handleNotificationUpdate( {
                     notification: {
-                        type    : "conversation_mode_changed",
-                        payload : { session_id: fullUuid, active: true }
+                        type    : "speakerphone_changed",
+                        payload : { session_id: fullUuid, on: true }
                     }
                 } );
             }""",
@@ -547,14 +554,14 @@ class TestConvModeOrthogonality:
         assert icon.get_attribute( "data-conv-mode" ) == "speakerphone", \
             "ON transition must set data-conv-mode='speakerphone' despite full-UUID payload"
 
-        # OFF transition — same full UUID, active=false. This is the path that
+        # OFF transition — same full UUID, on=false. This is the path that
         # used to silently miss before the fix.
         page.evaluate(
             """( fullUuid ) => {
                 window.notificationsUI.handleNotificationUpdate( {
                     notification: {
-                        type    : "conversation_mode_changed",
-                        payload : { session_id: fullUuid, active: false }
+                        type    : "speakerphone_changed",
+                        payload : { session_id: fullUuid, on: false }
                     }
                 } );
             }""",

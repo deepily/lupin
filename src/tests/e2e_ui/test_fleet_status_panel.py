@@ -2,7 +2,9 @@
 E2E UI (Playwright) — read-only Fleet-Status panel in the notifications client.
 
 Design: src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md
-  §5 (six columns) · §6 (panel + states) · §7 (hierarchy) · §8 (E2E row).
+  §5 (columns) · §6 (panel + states) · §7 (hierarchy) · §8 (E2E row).
+  NOTE: the table is now EIGHT columns — the six §5 columns + the two
+  context-pressure columns (% Window + Window) added by 02-context-window-columns.md.
 Frontend under test: P2 (held 5f52cfd) — `window.notificationsUI` fleet-status methods.
 
 Strategy: the panel reads `GET /api/arbiter/fleet-state` (P1's enriched composite).
@@ -15,7 +17,7 @@ Asserts (per Tiberius's P3 brief):
   1. #section-fleet-status accordion + the fleet-status-toolbar-btn render.
   2. Grouped table from a seeded composite — managers as group headers, workers
      nested, Unmanaged group LAST (§7).
-  3. The six columns (§5).
+  3. All eight columns (the six §5 columns + % Window + Window).
   4. READ-ONLY — no mutating controls / no action column; ⟳ only re-fetches.
   5. The §6.4 states: unreachable/null → offline banner; empty → "No active
      sessions"; populated → table.
@@ -150,14 +152,16 @@ class TestFleetStatusHierarchy:
         # Manager row carries the manager class (not a worker).
         assert container.locator( "tr.fleet-row-manager" ).count() == 1
 
-    def test_six_columns_present_and_no_action_column( self, logged_in_page ):
+    def test_all_columns_present_and_no_action_column( self, logged_in_page ):
         page = logged_in_page
         _open_panel( page, _composite( _POPULATED_SESSIONS ) )
 
         headers = page.get_by_test_id( "fleet-status-container" ).locator( "thead th" )
         texts = [ headers.nth( i ).text_content().strip() for i in range( headers.count() ) ]
-        assert texts == [ "Who", "Role", "State", "Holding on", "Stuck", "Liveness" ], \
-            f"exactly the six §5 columns, in order — got {texts}"
+        # Eight columns, in order: the six §5 columns + the two context-pressure
+        # columns added by 02-context-window-columns.md (% Window + Window).
+        assert texts == [ "Who", "Role", "State", "Holding on", "Stuck", "Liveness", "% Window", "Window" ], \
+            f"exactly the eight columns, in order — got {texts}"
         assert not any( "action" in t.lower() for t in texts ), "no Action column (read-only)"
 
     def test_liveness_cell_carries_raw_ages_tooltip( self, logged_in_page ):

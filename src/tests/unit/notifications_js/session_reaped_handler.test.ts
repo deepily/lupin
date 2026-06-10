@@ -68,6 +68,10 @@ function makeUI( opts: { broadcastPanel?: boolean } = {} ): {
   ui.debug                = false;
   ui.log                  = (): void => {};                 // silence Design-by-Contract logging
   ui.senderPersonaMap     = new Map( [ [ WORKER, { name: "Worker" } ], [ SURVIVOR, { name: "Survivor" } ] ] );
+  // managerPersonaMap: the session_reaped / voice_persona handlers now also clear
+  // the manager-badge map (manager-badge work) — stub it so the .delete() call in
+  // the production handler doesn't throw on this Object.create()-bypassed instance.
+  ui.managerPersonaMap    = new Map();
   ui.ccFocusState         = { enabled: false, focused_sender_id: null };
   ui.ccStripUnreadCounts  = {};
   ui.ccHideInactiveStrip  = false;
