@@ -100,6 +100,22 @@ export interface LupinEvent<T = unknown> {
   ts      : number;   // ms epoch
 }
 
+// Wire shape of a server WebSocket frame on /ws/queue (and /ws/audio). The
+// server (websocket_manager.py broadcast_event / emit_to_session) builds frames
+// FLAT — `{ type, timestamp, ...data }` — spreading the event's `data` dict at
+// the TOP level; there is NO nested `data` key. auth_success is likewise flat
+// (`{ type, user_id, session_id, undelivered_count }`, no `timestamp`).
+// QueueTransport.onMessage maps this to a LupinEvent by lifting `type` and
+// dropping the envelope keys (`type` + `timestamp`); the remaining keys become
+// the event `payload` (i.e. the server's `data` dict), which is what every store
+// reads. This is the single client-side frame-shape contract (WP0 flat-frame
+// fix) — no per-event server `data`-mirroring.
+export interface ServerFrameEnvelope {
+  type       : string;
+  timestamp? : string;            // present on broadcast frames, absent on auth_success
+  [dataKey: string]: unknown;     // spread `**data` — becomes the LupinEvent payload
+}
+
 // ---------------------------------------------------------------------------
 // Auth types — token shape + state machine states.
 // ---------------------------------------------------------------------------

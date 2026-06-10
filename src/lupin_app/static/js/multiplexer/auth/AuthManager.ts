@@ -8,6 +8,7 @@
 
 import { createActor, setup, assign } from "xstate";
 
+import { jwtExpiryMs, jwtEmail } from "./jwt";
 import type { EventBus } from "../shared/EventBus";
 import type { StorageService } from "../shared/StorageService";
 import type {
@@ -145,6 +146,9 @@ const authMachine = setup({
 export interface AuthManager {
   getToken(): Promise<Token>;
   invalidate(): void;
+  // Current-user email from the access-token `email` claim (WP1). Reads the
+  // stored token even before hydration; null when no/malformed token present.
+  getCurrentUserEmail(): string | null;
   // Test-only state introspection.
   readonly state: AuthState;
 }
@@ -162,9 +166,7 @@ export interface AuthManagerOptions {
   expiryBufferMs?  : number;
 }
 
-const TOKEN_STORAGE_KEY    = "auth_token";
-const TOKEN_SCHEMA_VERSION = 1;
-const LOCK_NAME            = "lupin-token-refresh";
+const LOCK_NAME = "lupin-token-refresh";
 
 export class AuthManagerImpl implements AuthManager {
   private readonly refreshUrl       : string;
@@ -198,9 +200,9 @@ export class AuthManagerImpl implements AuthManager {
     });
     this.actor.start();
 
-    // Hydrate from storage on boot. If a valid token sits on disk, jump to
-    // "ready" without firing a refresh.
-    const stored = this.storage.getJSON<Token>(TOKEN_STORAGE_KEY, TOKEN_SCHEMA_VERSION);
+    // Hydrate from the canonical cross-client token keys on boot. If a valid
+    // token sits on disk, jump to "ready" without firing a refresh.
+    const stored = this.readStoredToken();
     if (stored && this.isStillValid(stored)) {
       this.actor.send({ type: "READY", token: stored });
     }
@@ -212,6 +214,28 @@ export class AuthManagerImpl implements AuthManager {
 
   invalidate(): void {
     this.actor.send({ type: "INVALIDATE" });
+  }
+
+  getCurrentUserEmail(): string | null {
+    // Prefer the in-memory token; fall back to the stored access token. The
+    // email claim is stable across refresh, so an expired-but-present token
+    // still yields the correct address — usable before hydration completes.
+    const accessToken =
+      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    if (accessToken === null) return null;
+    return jwtEmail(accessToken);
+  }
+
+  // Reconstruct a Token from the canonical raw token strings, deriving expiry
+  // from the access-token JWT `exp` claim. Returns null unless BOTH tokens are
+  // present AND the access token carries a decodable expiry.
+  private readStoredToken(): Token | null {
+    const accessToken  = this.storage.getAccessToken();
+    const refreshToken = this.storage.getRefreshToken();
+    if (accessToken === null || refreshToken === null) return null;
+    const expiresAt = jwtExpiryMs(accessToken);
+    if (expiresAt === null) return null;
+    return { accessToken, refreshToken, expiresAt };
   }
 
   async getToken(): Promise<Token> {
@@ -262,7 +286,7 @@ export class AuthManagerImpl implements AuthManager {
     }
 
     this.actor.send({ type: "REFRESH_SUCCESS", token });
-    this.storage.setJSON<Token>(TOKEN_STORAGE_KEY, token, TOKEN_SCHEMA_VERSION);
+    this.storage.setTokens(token.accessToken, token.refreshToken);
     this.bus.emit<RefreshCompletedPayload>({
       type    : "refresh_completed",
       payload : { expiresAt: token.expiresAt },
@@ -278,8 +302,8 @@ export class AuthManagerImpl implements AuthManager {
     // through ApiClient: ApiClient consumes AuthManager.getToken() and would
     // create a circular dep. Implementation deviation from design §AuthManager
     // captured in execution log Phase 2 Notes.
-    const stored = this.storage.getJSON<Token>(TOKEN_STORAGE_KEY, TOKEN_SCHEMA_VERSION);
-    const refreshToken = stored?.refreshToken ?? this.actor.getSnapshot().context.token?.refreshToken;
+    const refreshToken =
+      this.storage.getRefreshToken() ?? this.actor.getSnapshot().context.token?.refreshToken;
     if (!refreshToken) {
       throw new Error("no refresh token available");
     }
@@ -300,7 +324,10 @@ export class AuthManagerImpl implements AuthManager {
     const body = (await response.json()) as {
       tokens: { access_token: string; refresh_token: string; expires_in: number };
     };
-    const expiresAt = Date.now() + body.tokens.expires_in * 1000;
+    // Prefer the access-token JWT `exp` claim (single source of truth, matching
+    // hydration); fall back to the `expires_in` field if the token isn't a
+    // decodable JWT (e.g. test fixtures / opaque tokens).
+    const expiresAt = jwtExpiryMs(body.tokens.access_token) ?? Date.now() + body.tokens.expires_in * 1000;
     return {
       accessToken  : body.tokens.access_token,
       refreshToken : body.tokens.refresh_token,

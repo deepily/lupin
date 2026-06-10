@@ -26,6 +26,7 @@
 import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
 import { createAuthManager } from "./auth/AuthManager";
+import { redirectToLoginIfUnauthenticated } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
@@ -121,6 +122,12 @@ function attachLifecycleListeners(): void {
 function bootMultiplexer(): void {
   document.title = "Multiplexer";
 
+  // WP0 login bounce — if no access token is present, redirect to the login
+  // page (with a redirect-back) and HALT boot. Mirrors notifications.js +
+  // auth.js `isAuthenticated()` (presence-only; an expired token still proceeds
+  // and AuthManager refreshes it). `window.location` satisfies RedirectTarget.
+  if (redirectToLoginIfUnauthenticated(storage, window.location)) return;
+
   // Session ID: read or generate via StorageService (DC2).
   let sessionId = storage.getSessionId();
   if (sessionId === null) {
@@ -190,6 +197,37 @@ function bootMultiplexer(): void {
       return new Ctor({ sampleRate: 24000 });
     },
   });
+
+  // =====================================================================
+  // boot.ts MOUNT-SLOT CONVENTION (Lane A deliverable — multiplexer parity)
+  // ---------------------------------------------------------------------
+  // Every renderer is wired into boot via the SAME 8-line handshake (the
+  // Phase 6c mount template). New parity lanes (strip / reading-pane /
+  // commons / fleet / quartet) append their slot in the NEW-LANE MOUNT SLOT
+  // marked below — never interleaved among the existing Phase 5/6 mounts —
+  // so worktree merges stay conflict-free and the canonical mount ORDER is
+  // preserved.
+  //
+  // The 8-line handshake (copy verbatim, fill <Name>/<#mount-id>):
+  //   // Lane <X> WP<NN> — <feature> renderer.
+  //   const <name>Renderer = create<Name>Renderer({
+  //     eventBus,
+  //     stores : { <store>: stores.<store> },   // narrow stores per Pass 2 F4
+  //   });
+  //   const <name>MountEl = document.getElementById("<#mount-id>");
+  //   if (<name>MountEl === null) throw new Error("multiplexer: #<#mount-id> not found");
+  //   <name>Renderer.mount(<name>MountEl);
+  //
+  // Then ALSO, in lockstep (both required, same canonical order):
+  //   (a) add `<name>Renderer : "mounted"` to bootCompletePayload.handlers;
+  //   (b) add `console.log("[multiplexer] <name>Renderer:mounted")` in the
+  //       AC9 console-line block (after the existing lines, before the JSON).
+  // A renderer needing a poll timer (e.g. Fleet) starts it AFTER mount and
+  // stops it on unmount — it does NOT ride the WS transports below.
+  //
+  // INVARIANT: renderers mount FIRST, transports start LAST (Pass 2 A8) — a
+  // new slot goes ABOVE `attachLifecycleListeners()` / `transports.*.start`.
+  // =====================================================================
 
   // Phase 5 — notifications-list renderer mounts BEFORE transports start
   // (per F13 ordering invariant): subscribe to store_*_changed events first
@@ -295,19 +333,15 @@ function bootMultiplexer(): void {
   personaModalRenderer.mount(focusTrayMountEl);
 
   // Phase 6c Node C Step C5 — sender-card recorder renderer mounts LAST.
-  // Per F-Arnold-C4 + Recon-C7: AuthManager must resolve before this
-  // renderer instantiates. AuthManager exposes getToken() (async, returns
-  // Token with accessToken). User email plumbing is a follow-on — the
-  // current AuthManager does NOT yet expose getCurrentUserEmail(); the
-  // renderer accepts an empty string placeholder and the wrapper's send
-  // POST will fail validation until that's wired (which is acceptable for
-  // Phase 6c since the Node C user-flow itself is gated by mic permission
-  // at runtime).
+  // Per F-Arnold-C4 + Recon-C7: AuthManager must resolve before this renderer
+  // instantiates. AuthManager exposes getToken() (async) + getCurrentUserEmail()
+  // (sync, decodes the access-token email claim).
   //
-  // TODO Phase 6c follow-on: extend AuthManager with `getCurrentUserEmail()`
-  // so the SenderCardRecorderRenderer's outbound POST `sender_id` field can
-  // be filled correctly. Tracked as part of the same TODO bundle as
-  // mic-monopoly indicator (both touch the same auth/session pipeline).
+  // WP1 — the recorder's outbound user_initiated_message POST stamps
+  // `sender_id` with the current user's email. The WP0 login bounce above
+  // guarantees a token is present by this point, so getCurrentUserEmail()
+  // resolves the address from the stored token (email claim is stable across
+  // refresh). `?? ""` is a defensive floor for a malformed-token edge.
   console.log("[multiplexer] authManager:ready");
   // Read cached access token via getToken() — wrap into a sync getter that
   // returns the most-recently-resolved token string. Initial value is null
@@ -317,12 +351,18 @@ function bootMultiplexer(): void {
   void authManager.getToken().then(t => { cachedAccessToken = t.accessToken; }).catch(() => { /* refresh path handles */ });
   const senderCardRecorderRenderer = createSenderCardRecorderRenderer({
     eventBus,
-    currentUserEmail : "",  // TODO follow-on: wire from AuthManager when getCurrentUserEmail() lands
+    currentUserEmail : authManager.getCurrentUserEmail() ?? "",
     getAuthToken     : () => cachedAccessToken,
   });
   const recorderMountEl = document.getElementById("sender-cards-container");
   if (recorderMountEl === null) throw new Error("multiplexer: #sender-cards-container not found");
   senderCardRecorderRenderer.mount(recorderMountEl);
+
+  // ===================== NEW-LANE MOUNT SLOT =====================
+  // Parity lanes append their 8-line mount handshake HERE (see the MOUNT-SLOT
+  // CONVENTION block above). Order between independent lanes does not matter;
+  // each lane also updates bootCompletePayload.handlers + the AC9 console line.
+  // ===============================================================
 
   attachLifecycleListeners();
 

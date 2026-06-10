@@ -7,8 +7,10 @@
 //
 // Per design Pass 1 finding #11: each transport owns its own
 // ConnectionStateMachine — a disconnect on one socket does NOT reset the
-// others' backoff. Per Pass 1 finding #15: server frames map to EventBus
-// emissions as `{type: env.type, payload: env.data, source, ts}`.
+// others' backoff. Per Pass 1 finding #15 (REVISED — flat-frame fix): the live
+// server sends FLAT frames `{type, timestamp, ...data}` (NOT a nested `data`
+// key), so emissions map as `{type: env.type, payload: <env minus type+timestamp>,
+// source, ts}`. See onMessage + types.ts ServerFrameEnvelope.
 //
 // The wrapper does NOT own DOM lifecycle (Claude analysis §2.2); boot.ts
 // emits page_hidden / page_visible / network_online / network_offline on
@@ -239,7 +241,7 @@ export abstract class BaseTransportImpl implements Transport {
 
   protected onMessage(envelope: unknown): void {
     if (typeof envelope !== "object" || envelope === null) return;
-    const env = envelope as { type?: unknown; data?: unknown };
+    const env = envelope as Record<string, unknown>;
     if (typeof env.type !== "string") return;
 
     const eventType = env.type;
@@ -254,9 +256,24 @@ export abstract class BaseTransportImpl implements Transport {
       });
     }
 
+    // FLAT-FRAME mapping. The live server sends `{ type, timestamp, ...data }`
+    // (websocket_manager.py broadcast_event / emit_to_session spread `**data`;
+    // auth_success is sent flat too — undelivered_count etc. are top-level). The
+    // EventBus payload is therefore the frame MINUS the envelope keys (`type` +
+    // server `timestamp`) — i.e. the server's `data` dict reconstructed, which
+    // is exactly what the stores read (payload.notification, payload.value,
+    // payload.undelivered_count, ...). The pre-migration `payload: env.data`
+    // read a key the server NEVER sends → every store got `undefined` and live
+    // WS reactivity silently never worked. (Frame-shape contract: see types.ts
+    // ServerFrameEnvelope.)
+    const payload: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(env)) {
+      if (key !== "type" && key !== "timestamp") payload[key] = value;
+    }
+
     this.bus.emit<unknown>({
       type    : eventType as LupinEventType,
-      payload : env.data,
+      payload,
       source  : this.transportName,
       ts      : Date.now(),
     });
