@@ -43,7 +43,13 @@ import {
   createReadingPaneRenderer,
   createCommonsActivityRenderer,
   configureMetaDisplayCap,
+  // Lane E full-parity quartet renderers.
+  createTtsPreviewSliderRenderer,
+  createMissedBadgeRenderer,
+  createFleetStatusRenderer,
+  type TtsPreviewSliderRenderer,
 } from "./render";
+import { DEFAULT_TTS_FRACTION } from "./render/TtsPreviewSliderRenderer";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
 // Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
@@ -162,11 +168,22 @@ function bootMultiplexer(): void {
   // default that covers the gap if the user clicks before the fetch resolves
   // (or if the endpoint is briefly unreachable). Boundary `.catch(() => null)`
   // avoids unhandled rejection while preserving the default cap.
+  // Lane E WP13 — forward-declared so the config `.then` (resolving AFTER the
+  // synchronous mount block) can seed the slider's INI default. A stored
+  // localStorage override always wins; seedIniDefault no-ops then.
+  let ttsPreviewSliderRenderer: TtsPreviewSliderRenderer | null = null;
+
   fetch(`${apiBaseUrl}/api/multiplexer/config`)
     .then(r => r.ok ? r.json() : null)
     .catch(() => null)
-    .then((serverConfig: { multiplexer_max_meta_display_bytes?: number } | null) => {
-      if (serverConfig !== null) configureMetaDisplayCap(serverConfig);
+    .then((serverConfig: { multiplexer_max_meta_display_bytes?: number; tts_preview_fraction?: number } | null) => {
+      if (serverConfig !== null) {
+        configureMetaDisplayCap(serverConfig);
+        // Lane E WP13 — seed the TTS preview slider's INI default (F6).
+        if (serverConfig.tts_preview_fraction !== undefined && ttsPreviewSliderRenderer !== null) {
+          ttsPreviewSliderRenderer.seedIniDefault(serverConfig.tts_preview_fraction);
+        }
+      }
     });
 
   // ---------------------------------------------------------------------
@@ -412,6 +429,42 @@ function bootMultiplexer(): void {
   const commonsActivityMountEl = document.getElementById("commons-activity-pane");
   if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found");
   commonsActivityRenderer.mount(commonsActivityMountEl);
+  // Lane E WP13 — TTS preview-fraction slider. Storage-backed (no store): the
+  // StorageService override is layered on the INI default seeded late via the
+  // /api/multiplexer/config `.then` above (seedIniDefault).
+  ttsPreviewSliderRenderer = createTtsPreviewSliderRenderer({
+    storage,
+    iniDefaultFraction : DEFAULT_TTS_FRACTION,   // refined by the config-fetch seed when it resolves
+  });
+  const ttsPreviewSliderMountEl = document.getElementById("tts-preview-slider-mount");
+  if (ttsPreviewSliderMountEl === null) throw new Error("multiplexer: #tts-preview-slider-mount not found");
+  ttsPreviewSliderRenderer.mount(ttsPreviewSliderMountEl);
+
+  // Lane E WP15 — missed-while-away badge + Reset.
+  const missedBadgeRenderer = createMissedBadgeRenderer({
+    eventBus,
+    stores : { missed: stores.missed },
+  });
+  const missedBadgeMountEl = document.getElementById("missed-badge-mount");
+  if (missedBadgeMountEl === null) throw new Error("multiplexer: #missed-badge-mount not found");
+  missedBadgeRenderer.mount(missedBadgeMountEl);
+
+  // Lane E WP12 — read-only Fleet-Status table. startPolling() AFTER mount and
+  // OFF the WS transports (Cheech's rule): it polls /api/arbiter/fleet-state on
+  // its own 60s timer.
+  const fleetStatusRenderer = createFleetStatusRenderer({
+    eventBus,
+    stores : { fleet: stores.fleetStatus },
+  });
+  const fleetStatusMountEl = document.getElementById("fleet-status-pane");
+  if (fleetStatusMountEl === null) throw new Error("multiplexer: #fleet-status-pane not found");
+  fleetStatusRenderer.mount(fleetStatusMountEl);
+  stores.fleetStatus.startPolling();
+
+  // Lane E WP14 — prediction-hint vote: the PredictionVoteStore is wired into
+  // createStores(); the vote CONTROLS template (predictionVoteControls) is
+  // invoked by the notification-item render path (NotificationsListRenderer),
+  // which is the integration owner's surface — no standalone mount here.
 
   attachLifecycleListeners();
 
@@ -443,6 +496,11 @@ function bootMultiplexer(): void {
       sessionStripRenderer        : "mounted",
       readingPaneRenderer         : "mounted",
       commonsActivityRenderer     : "mounted",
+      // Lane E full-parity quartet (WP13/WP15/WP12 renderers; WP14 has no
+      // standalone renderer — its store rides createStores()).
+      ttsPreviewSliderRenderer    : "mounted",
+      missedBadgeRenderer         : "mounted",
+      fleetStatusRenderer         : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -465,6 +523,9 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] sessionStripRenderer:mounted");
   console.log("[multiplexer] readingPaneRenderer:mounted");
   console.log("[multiplexer] commonsActivityRenderer:mounted");
+  console.log("[multiplexer] ttsPreviewSliderRenderer:mounted");
+  console.log("[multiplexer] missedBadgeRenderer:mounted");
+  console.log("[multiplexer] fleetStatusRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

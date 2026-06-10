@@ -92,14 +92,6 @@ export type LupinEventType =
   // DOM. Ports the legacy `notifications.js` master-detail behavior (commits
   // cd6cc99, 9211e5c, 97bfb8c, e1ed26a, 498e98e) into the store/renderer split.
   | "store_reading_pane_changed"
-  // Lane B (CC-session strip — owns this member): SessionStripStore emits
-  // `store_session_strip_changed` on icon add/remove. Lane D (WP7) subscribes to
-  // it as the canonical recipient-change signal to refresh its persona filter
-  // dropdown (Tiberius-arbitrated 2026-06-10). Added provisionally from Lane D's
-  // boot-wiring pass because Lane B had not yet merged — Tiberius flagged to
-  // dedupe at Lane B's merge if they also add it. Harmless until an emitter
-  // exists (the subscription simply never fires).
-  | "store_session_strip_changed"
   // Lane D (commons activity panel — WP3, 2026-06-10): CommonsStore emits this
   // on every mutation (hydrate / live-prepend / filter-change). The renderer
   // subscribes and repaints the filtered entry list. Carries a `changeKind`
@@ -118,7 +110,19 @@ export type LupinEventType =
   // discriminate (e.g. `source: "jobs"` for JobsPaneRenderer's hydrateHistory
   // failure). Subscribers (deferred to 6b) can paint a "Could not load
   // history" retry affordance.
-  | "hydration_failed";
+  | "hydration_failed"
+  // Lane E full-parity sprint (2026-06-10) — self-contained quartet store
+  // emissions. Each store emits exactly one type per state mutation; its
+  // renderer subscribes by store.
+  // WP15 (F7): MissedStore emits when the "N missed while away" count changes
+  //   (auth_success surfacing OR Reset dismiss).
+  | "store_missed_changed"
+  // WP14 (F8): PredictionVoteStore emits when a vote is cast / cleared for a
+  //   prediction-hint notification.
+  | "store_prediction_vote_changed"
+  // WP12 (F12): FleetStatusStore emits when a fleet-state poll resolves
+  //   (success, unreachable, or error) or the live-only/offline toggle flips.
+  | "store_fleet_status_changed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -585,6 +589,12 @@ export interface BootCompletePayload {
     // activity renderer mounts at the NEW-LANE MOUNT SLOT. Optional per the
     // Phase 6a forward/backward-compat pattern.
     commonsActivityRenderer?     : string;
+    // Lane E full-parity quartet (2026-06-10): literal "mounted" per renderer,
+    // appended at the NEW-LANE MOUNT SLOT after the Phase 6c mounts. Optional
+    // (Phase 6a F12 forward/backward-compat) + runtime-unconditional (F11).
+    ttsPreviewSliderRenderer?    : string;
+    missedBadgeRenderer?         : string;
+    fleetStatusRenderer?         : string;
   };
 }
 
@@ -692,4 +702,32 @@ export interface StoreCommonsChangedPayload {
   // Present on "prepended" — true when the live entry passes the active filter
   // (so the renderer can prepend a single row instead of a full re-render).
   matchesFilter? : boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Lane E full-parity sprint (2026-06-10) — quartet store payloads.
+// ---------------------------------------------------------------------------
+
+// WP15 (F7) — MissedStore. Surfaces the "N missed while away" count from
+// auth_success.undelivered_count and the Reset (soft-dismiss) round-trip.
+export interface StoreMissedChangedPayload {
+  count : number;   // non-negative integer; 0 hides the badge + Reset button
+}
+
+// WP14 (F8) — PredictionVoteStore. Thumbs up/down training signal on a
+// prediction hint (up = reinforce, down = steer away). Emitted after a vote
+// is recorded server-side so the controls highlight the cast direction.
+export type PredictionVoteDir = "up" | "down";
+
+export interface StorePredictionVoteChangedPayload {
+  notificationId : string;
+  vote           : PredictionVoteDir;
+}
+
+// WP12 (F12) — FleetStatusStore. Emitted when a poll resolves or the
+// live-only/offline view toggle flips. `stampUpdated` distinguishes a real
+// fetch (re-stamp the "updated HH:MM:SS" label) from a pure view re-render
+// (the toggle — must NOT claim fresh data).
+export interface StoreFleetStatusChangedPayload {
+  stampUpdated : boolean;
 }

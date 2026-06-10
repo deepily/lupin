@@ -32,6 +32,10 @@ class MultiplexerConfigResponse( BaseModel ):
     `configureMetaDisplayCap(serverConfig)` per Phase 6a design F20.
     """
     multiplexer_max_meta_display_bytes: int
+    # Lane E WP13 (F6) — INI default seed for the TTS preview-fraction slider.
+    # The slider renderer layers a localStorage override on top of this default
+    # (parity with notifications.js:791,804-811). Float in [0, 1]; default 0.25.
+    tts_preview_fraction: float
 
 
 # ============================================================================
@@ -59,8 +63,9 @@ async def get_multiplexer_config(
           `[Lupin: Baseline]` section (defaults to 256000 if missing).
 
     Ensures:
-        - Returns MultiplexerConfigResponse with `multiplexer_max_meta_display_bytes`.
-        - Defaults to 256000 if the INI key is unset.
+        - Returns MultiplexerConfigResponse with `multiplexer_max_meta_display_bytes`
+          and `tts_preview_fraction`.
+        - Defaults to 256000 / 0.25 respectively if the INI keys are unset.
     """
     max_meta_bytes = config_mgr.get(
         "multiplexer max meta display bytes",
@@ -68,8 +73,17 @@ async def get_multiplexer_config(
         return_type = "int"
     )
 
+    # Lane E WP13 (F6) — TTS preview-fraction INI default seed (key shared with
+    # the legacy /api/get-client-config payload at system.py:663-666).
+    tts_preview_fraction = config_mgr.get(
+        "tts preview fraction",
+        default     = 0.25,
+        return_type = "float"
+    )
+
     return MultiplexerConfigResponse(
-        multiplexer_max_meta_display_bytes = max_meta_bytes
+        multiplexer_max_meta_display_bytes = max_meta_bytes,
+        tts_preview_fraction               = float( tts_preview_fraction )
     )
 
 
@@ -92,8 +106,12 @@ def quick_smoke_test():
 
         # Test 2: Response model accepts the expected field
         print( "\nTesting MultiplexerConfigResponse model..." )
-        resp = MultiplexerConfigResponse( multiplexer_max_meta_display_bytes=256000 )
+        resp = MultiplexerConfigResponse(
+            multiplexer_max_meta_display_bytes=256000,
+            tts_preview_fraction=0.25
+        )
         assert resp.multiplexer_max_meta_display_bytes == 256000
+        assert resp.tts_preview_fraction == 0.25
         print( "✓ MultiplexerConfigResponse works" )
 
         # Test 3: Listed endpoints

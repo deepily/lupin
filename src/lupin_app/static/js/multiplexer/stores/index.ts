@@ -46,6 +46,13 @@ import type { ReadingPaneStore } from "./ReadingPaneStore";
 import { createReadingPaneStore } from "./ReadingPaneStore";
 import type { CommonsStore } from "./CommonsStore";
 import { createCommonsStore } from "./CommonsStore";
+// Lane E full-parity quartet stores (2026-06-10).
+import type { MissedStore } from "./MissedStore";
+import { createMissedStore } from "./MissedStore";
+import type { PredictionVoteStore } from "./PredictionVoteStore";
+import { createPredictionVoteStore } from "./PredictionVoteStore";
+import type { FleetStatusStore, FleetApiClient } from "./FleetStatusStore";
+import { createFleetStatusStore } from "./FleetStatusStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -67,12 +74,19 @@ export interface StoreSet {
   // dependency (consumes notification_queue_update independently), so it
   // constructs last; subscription order of the pinned 5 is unaffected.
   commons        : CommonsStore;
+  // Lane E quartet — Missed (auth_success surfacing), PredictionVote (vote
+  // POST), FleetStatus (60s poll; boot starts polling AFTER mount).
+  missed         : MissedStore;
+  predictionVote : PredictionVoteStore;
+  fleetStatus    : FleetStatusStore;
 }
 
 export interface CreateStoresOptions {
   eventBus            : EventBus;
   storage             : StorageService;
-  api                 : ActionRequiredApiClient;
+  // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus). The
+  // production ApiClient satisfies both structurally.
+  api                 : ActionRequiredApiClient & FleetApiClient;
   // Forward AudioStore options so boot.ts can pass production-side
   // `audioContextFactory`. Tests usually omit (default factory is browser-only).
   audioContextFactory?: AudioStoreOptions["audioContextFactory"];
@@ -88,7 +102,7 @@ export interface CreateStoresOptions {
  *   - opts.api is an ApiClient (or stub satisfying ActionRequiredApiClient)
  *
  * Ensures:
- *   - Returns the 8-store set (the 5 server-frame subscribers in pinned order + sessionStrip + readingPane + commons)
+ *   - Returns the 11-store set (the 5 server-frame subscribers in pinned order + sessionStrip/readingPane/commons + the Lane E quartet stores)
  *   - Each store's constructor is fully synchronous; the StoreSet is
  *     immediately usable on return
  */
@@ -112,7 +126,15 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // Lane D (WP3) — commons store, also order-independent of the pinned five.
   const commons        = createCommonsStore      ({ bus: opts.eventBus, storage: opts.storage });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons };
+  // Lane E quartet — appended AFTER the canonical 5 (order-neutral: Missed
+  // listens only to auth_success; PredictionVote + FleetStatus subscribe to no
+  // server frames). FleetStatus does NOT start polling here — boot.ts kicks
+  // startPolling() AFTER the renderer mounts (Cheech's rule).
+  const missed         = createMissedStore        ({ bus: opts.eventBus, api: opts.api });
+  const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
+  const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
+
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -142,4 +164,15 @@ export type { ReadingPaneStore, ReadingPaneStoreOptions } from "./ReadingPaneSto
 export { createReadingPaneStore } from "./ReadingPaneStore";
 export type { CommonsStore, CommonsStoreOptions, CommonsHistoryApiClient } from "./CommonsStore";
 export { createCommonsStore } from "./CommonsStore";
+export type { MissedStore, MissedStoreOptions, MissedApiClient } from "./MissedStore";
+export { createMissedStore } from "./MissedStore";
+export type {
+  PredictionVoteStore,
+  PredictionVoteStoreOptions,
+  PredictionVoteApiClient,
+  PredictionVoteContext,
+} from "./PredictionVoteStore";
+export { createPredictionVoteStore } from "./PredictionVoteStore";
+export type { FleetStatusStore, FleetStatusStoreOptions, FleetApiClient } from "./FleetStatusStore";
+export { createFleetStatusStore } from "./FleetStatusStore";
 /* c8 ignore stop */

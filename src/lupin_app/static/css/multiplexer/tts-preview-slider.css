@@ -1,0 +1,54 @@
+/* ============================================================================
+   Multiplexer Lane E WP13 — tts-preview-slider.css
+
+   Per-component CSS for the TTS preview-fraction slider rendered by
+   TtsPreviewSliderRenderer.ts via templates/ttsPreviewSlider.ts.
+
+   Ports the legacy `.cc-tts-fraction-*` styling (notifications.css:2399-2434)
+   to multiplexer class names. Nine-stop (12.5%) slider with a datalist tick
+   track and a tabular-nums value label.
+
+   Class taxonomy (from templates/ttsPreviewSlider.ts):
+   - `.tts-preview-slider`        — inline-flex root container
+   - `.tts-preview-slider-label`  — leading "TTS preview" caption
+   - `.tts-preview-slider-input`  — the <input type="range"> control
+   - `.tts-preview-slider-ticks`  — the <datalist> (visually inert; UA-rendered)
+   - `.tts-preview-slider-value`  — the live "NN%" readout
+   ============================================================================ */
+
+.tts-preview-slider {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 12px;
+    background: #f8f9fa;
+    color: #495057;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.tts-preview-slider-label {
+    font-weight: 600;
+    opacity: 0.7;
+}
+
+.tts-preview-slider-input {
+    width: 80px;
+    cursor: pointer;
+    accent-color: rgba(25, 135, 84, 0.85); /* matches existing is-active green */
+}
+
+.tts-preview-slider-input:focus-visible {
+    outline: 2px solid rgba(25, 135, 84, 0.6);
+    outline-offset: 2px;
+}
+
+.tts-preview-slider-value {
+    min-width: 38px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: #198754; /* green to match the slider accent */
+}
