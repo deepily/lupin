@@ -137,3 +137,4 @@ coverage/
 # Heartbeat Hook — per-session hold artifacts (runtime state; multi-writer safe)
 # See src/rnd/v0.1.8/2026.06.04-heartbeat-hook/ + PIP design §0 decision #7
 .heartbeat-hold-*.json
+.claude-session.md
