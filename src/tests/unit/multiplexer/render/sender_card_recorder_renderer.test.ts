@@ -263,6 +263,30 @@ test("ready_to_send paint: onComplete transitions to ready_to_send and renders t
   assert.equal(voiceInput.querySelector(".record-button")!.textContent, "Re-record");
 });
 
+// Covers the `entry.transcription ?? ""` null-arm in the ready_to_send paint:
+// onComplete invoked WITHOUT a transcription → textarea falls back to empty.
+test("ready_to_send paint with undefined transcription falls back to an empty textarea value", () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+
+  const original = recordingManager.startRecording.bind(recordingManager);
+  ( recordingManager as unknown as { startRecording: (o: { onComplete?: (t: string, b: Blob) => void }) => Promise<void> } )
+    .startRecording = async (opts) => { opts.onComplete?.(undefined as unknown as string, new Blob()); };
+  try {
+    (root.querySelector(".record-button") as HTMLButtonElement).click();
+  } finally {
+    ( recordingManager as unknown as { startRecording: typeof original } ).startRecording = original;
+  }
+
+  const voiceInput = root.querySelector(".cc-voice-input") as HTMLElement;
+  assert.equal(voiceInput.getAttribute("data-recorder-state"), "ready_to_send");
+  const textarea = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  assert.notEqual(textarea, null);
+  assert.equal(textarea.value, "", "undefined transcription falls back to empty string");
+});
+
 // AC-C4 #12 — Permission-denied error surface
 test("permission-denied error path renders the error message in the .cc-voice-input footer", async () => {
   const bus  = createEventBusForTesting();

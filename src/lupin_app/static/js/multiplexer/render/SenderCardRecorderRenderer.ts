@@ -137,7 +137,8 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     /* c8 ignore next */ // defensive: record button only renders inside .cc-voice-input footers.
     if (voiceInput === null) return;
     const sessionHash = voiceInput.getAttribute("data-session-hash") ?? "";
-    /* c8 ignore next */ // defensive: data-session-hash is always set by senderCard.ts Step C1.
+    // Defensive: senderCard.ts Step C1 always sets data-session-hash; the
+    // missing-attribute path is unit-tested (footer without the attr).
     if (sessionHash === "") return;
 
     const current = this.states.get(sessionHash);
@@ -154,12 +155,13 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     void recordingManager.startRecording({
       contextId : sessionHash,
       authToken : this.getAuthToken(),
-      /* c8 ignore start */ // onComplete fires only after successful transcription; exercised at smoke tier.
+      // onComplete: transcription succeeded → ready_to_send + repaint. Plain
+      // state-set + repaint; unit-tested via a stubbed recordingManager (the
+      // real mic→STT round-trip that drives it is the smoke tier).
       onComplete: (transcription, _blob) => {
         this.states.set(sessionHash, { state: "ready_to_send", transcription });
         this.paintVoiceInput(voiceInput);
       },
-      /* c8 ignore stop */
       onError   : (err) => {
         // Order matters: paintVoiceInput's replaceChildren wipes the
         // container, so we MUST paint first (state→idle) and THEN append
@@ -252,7 +254,9 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
       stopBtn.textContent = "Stop";
       voiceInput.appendChild(stopBtn);
     } else {
-      /* c8 ignore start */ // ready_to_send paint branch: requires a successful recording → onComplete callback to set state. Exercised at smoke tier with real microphone + transcription round-trip.
+      // ready_to_send paint (textarea + Re-record + Send). Unit-tested by
+      // driving onComplete via a stubbed recordingManager — both the
+      // transcription-present and undefined-transcription (`?? ""`) arms.
       const textarea = document.createElement("textarea");
       textarea.className = "cc-voice-input-textarea";
       textarea.value = entry.transcription ?? "";
@@ -269,7 +273,6 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
       sendBtn.className = "send-button";
       sendBtn.textContent = "Send";
       voiceInput.appendChild(sendBtn);
-      /* c8 ignore stop */
     }
   }
 
