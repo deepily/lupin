@@ -182,10 +182,12 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     quiet_seconds      = DEFAULT_QUIET_SECONDS,
                     stale_seconds      = DEFAULT_STALE_SECONDS,
                     resolve_manager_fn = None,
-                    list_managers_fn   = None ):
+                    list_managers_fn   = None,
+                    include_offline    = False ):
     """
     Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
-    with per-session hierarchy (Fleet-Status P1, design §4).
+    with per-session hierarchy (Fleet-Status P1, design §4) and live-only-by-default
+    (Fleet-Status D6 / §5.2).
 
     Requires:
         - fleet_view is { session_id: VIEW } (build_fleet_view output)
@@ -195,6 +197,13 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
     Ensures:
         - returns { generated_at(iso), session_count, sessions: [row, ...] }
           sorted by session_id for stable rendering/diffing
+        - PUBLISHED-VIEW PRUNE (D6 / §5.2): by default (include_offline=False) a
+          session whose computed liveness verdict is "offline" is OMITTED — the
+          published snapshot carries only the live fleet (LIVE/quiet/stale), so the
+          multi-day dead-session graveyard never reaches consumers. Pass
+          include_offline=True to retain offline rows (audit/back-compat). This
+          prunes the PUBLISHED snapshot ONLY — the arbiter's decision logic reads
+          `fleet_view`, not this snapshot, so routing/stall-detection are untouched.
         - each row keeps STATE and LIVENESS as separate keys (C4) PLUS the two
           hierarchy keys (role, manager):
           { session_id, persona, state, holding_on, stuck, liveness{...},
@@ -209,6 +218,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
           testable with fakes, mirroring arbiter_job's resolve_active_managers_fn
           injection. With neither injected → role="worker", manager=None for every
           row (back-compatible flat snapshot)
+        - session_count reflects the EMITTED rows (post-prune), not the input size
         - never raises — a throwing list_managers_fn degrades to an empty manager
           set (all workers); a throwing resolve_manager_fn degrades that row to
           manager=None
@@ -229,6 +239,9 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             view, ( bridge_mtimes or { } ).get( sid ), now,
             live_seconds, quiet_seconds, stale_seconds,
         )
+        # D6 / §5.2: omit offline sessions from the PUBLISHED snapshot by default.
+        if not include_offline and liveness.get( "verdict" ) == "offline":
+            continue
         role    = "manager" if any( _sid_matches( sid, mid ) for mid in manager_ids ) else "worker"
         manager = None
         if resolve_manager_fn is not None:
@@ -357,7 +370,9 @@ def quick_smoke_test():
     }
     bridge_mtimes = { "s1": now.timestamp() - 4, "s2": None }   # s1 fresh bridge, s2 dark
 
-    snap = build_snapshot( view, bridge_mtimes, now )
+    # include_offline=True keeps the offline s2 so the index-based assertions below
+    # still exercise the offline path (the DEFAULT prune is asserted separately).
+    snap = build_snapshot( view, bridge_mtimes, now, include_offline=True )
     assert snap[ "session_count" ] == 4
     s1 = snap[ "sessions" ][ 0 ]
     # s1: bridge 4s ⇒ LIVE, even though its event ts is 35m old (bridge is PRIMARY)
@@ -389,14 +404,21 @@ def quick_smoke_test():
             { "manager_persona": "Ann", "source": SOURCE_LINEAGE } if sid == "s2"
             else { "manager_persona": None, "source": "unresolved" }
         ),
+        include_offline    = True,                                   # keep s2 for the lineage assertion
     )
     e = { r[ "session_id" ]: r for r in enriched[ "sessions" ] }
     assert e[ "s1" ][ "role" ] == "manager" and e[ "s1" ][ "manager" ] is None
     assert e[ "s2" ][ "role" ] == "worker"  and e[ "s2" ][ "manager" ] == "Ann"
 
+    # D6 / §5.2: the DEFAULT published snapshot OMITS the offline s2 (live-only),
+    # while include_offline=True (above) retained it. Count reflects emitted rows.
+    default_snap = build_snapshot( view, bridge_mtimes, now )
+    assert default_snap[ "session_count" ] == 3
+    assert { r[ "session_id" ] for r in default_snap[ "sessions" ] } == { "s1", "s3", "s4" }
+
     # change signature ignores the ticking ages (same buckets ⇒ same sig)
     later = now + datetime.timedelta( seconds=10 )
-    snap2 = build_snapshot( view, { "s1": later.timestamp() - 9, "s2": None }, later )
+    snap2 = build_snapshot( view, { "s1": later.timestamp() - 9, "s2": None }, later, include_offline=True )
     assert frame_signature( snap ) == frame_signature( snap2 ), "tick must not be a change"
 
     table = render_fleet_table( snap )

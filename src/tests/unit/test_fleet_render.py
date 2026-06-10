@@ -111,7 +111,8 @@ class TestBuildSnapshot:
                     "holding_on": "none", "stuck": False,
                     "last_event_ts": NOW - datetime.timedelta( minutes=35 ) },
         }
-        snap = fr.build_snapshot( view, { "s1": NOW.timestamp() - 4, "s2": None }, NOW )
+        # include_offline=True so the offline, stuck s2 row is retained for the sort/column check.
+        snap = fr.build_snapshot( view, { "s1": NOW.timestamp() - 4, "s2": None }, NOW, include_offline=True )
         assert snap[ "session_count" ] == 2
         assert [ r[ "session_id" ] for r in snap[ "sessions" ] ] == [ "s1", "s2" ]  # sorted
         r1 = snap[ "sessions" ][ 0 ]
@@ -121,7 +122,9 @@ class TestBuildSnapshot:
         assert snap[ "generated_at" ] == NOW.isoformat()
 
     def test_non_dict_view_skipped( self ):
-        snap = fr.build_snapshot( { "bad": "not-a-dict", "ok": { "session_id": "ok" } }, { }, NOW )
+        # include_offline=True so the (signal-less → offline) "ok" row survives the prune,
+        # keeping the focus on non-dict skipping.
+        snap = fr.build_snapshot( { "bad": "not-a-dict", "ok": { "session_id": "ok" } }, { }, NOW, include_offline=True )
         assert snap[ "session_count" ] == 1 and snap[ "sessions" ][ 0 ][ "session_id" ] == "ok"
 
     def test_empty_fleet( self ):
@@ -136,7 +139,7 @@ class TestBuildSnapshot:
         # Neither seam injected → back-compatible flat snapshot, but the two new
         # keys are ALWAYS present (the frontend row shape depends on them).
         view = { "s1": { "session_id": "s1", "persona": "Ann", "state": "working",
-                         "holding_on": "none", "stuck": False } }
+                         "holding_on": "none", "stuck": False, "last_event_ts": NOW } }  # LIVE → survives prune
         row = fr.build_snapshot( view, { }, NOW )[ "sessions" ][ 0 ]
         assert row[ "role" ] == "worker" and row[ "manager" ] is None
 
@@ -158,11 +161,13 @@ class TestSidMatches:
 
 class TestBuildSnapshotEnrichment:
     def _view( self ):
+        # Fresh last_event_ts → LIVE, so the §5.2 default prune keeps these rows and
+        # the hierarchy (role/manager) assertions below stay non-vacuous.
         return {
             "mgr0001": { "session_id": "mgr0001", "persona": "Tiberius", "state": "working",
-                         "holding_on": "none", "stuck": False },
+                         "holding_on": "none", "stuck": False, "last_event_ts": NOW },
             "wkr0001": { "session_id": "wkr0001", "persona": "Rio", "state": "working",
-                         "holding_on": "none", "stuck": False },
+                         "holding_on": "none", "stuck": False, "last_event_ts": NOW },
         }
 
     def test_role_manager_via_prefix_match( self ):
@@ -249,7 +254,9 @@ class TestFrameSignature:
 
     def test_verdict_bucket_transition_is_a_change( self ):
         snap_live = fr.build_snapshot( self._view(), { "s1": NOW.timestamp() - 4 }, NOW )
-        snap_off  = fr.build_snapshot( self._view(), { "s1": None }, NOW )  # no bridge, old event → offline
+        # include_offline=True keeps s1 present-but-offline so this exercises a verdict
+        # BUCKET transition (LIVE→offline), not the §5.2 prune (which would drop the row).
+        snap_off  = fr.build_snapshot( self._view(), { "s1": None }, NOW, include_offline=True )  # → offline
         assert fr.frame_signature( snap_live ) != fr.frame_signature( snap_off )
 
     def test_none_snapshot( self ):
@@ -268,7 +275,7 @@ class TestRender:
     def test_table_has_columns_and_stuck( self ):
         view = { "s1": { "session_id": "s1", "persona": "Ann", "state": "stuck",
                          "holding_on": "peer:Bo", "stuck": True, "last_event_ts": None } }
-        snap  = fr.build_snapshot( view, { "s1": None }, NOW )
+        snap  = fr.build_snapshot( view, { "s1": None }, NOW, include_offline=True )  # offline row retained for render
         table = fr.render_fleet_table( snap )
         assert "Fleet arbiter" in table and "verdict" in table
         assert "Ann" in table and "STUCK" in table
@@ -282,7 +289,7 @@ class TestRender:
     def test_table_row_falls_back_to_sid_when_no_persona( self ):
         view = { "s9": { "session_id": "s9", "persona": None, "state": "idle",
                          "holding_on": "none", "stuck": False, "last_event_ts": None } }
-        table = fr.render_fleet_table( fr.build_snapshot( view, { "s9": None }, NOW ) )
+        table = fr.render_fleet_table( fr.build_snapshot( view, { "s9": None }, NOW, include_offline=True ) )
         assert "s9" in table
 
     def test_tick_with_change_shows_duration( self ):
@@ -291,6 +298,46 @@ class TestRender:
 
     def test_tick_never_changed( self ):
         assert "no changes yet" in fr.render_tick( NOW, None, 0 )
+
+
+# ── D6 / §5.2 published-snapshot offline prune ────────────────────────────────
+
+class TestPublishedOfflinePrune:
+    def _view( self, *, last_event_ts=None, commons_ts=None ):
+        v = { "s1": { "session_id": "s1", "persona": "Ann", "state": "idle",
+                      "holding_on": "none", "stuck": False, "last_event_ts": last_event_ts } }
+        if commons_ts is not None:
+            v[ "s1" ][ "commons_ts" ] = commons_ts
+        return v
+
+    def test_default_omits_offline_session( self ):
+        # No bridge + no recent signal → verdict "offline" → pruned from the published snapshot.
+        snap = fr.build_snapshot( self._view(), { "s1": None }, NOW )
+        assert snap[ "session_count" ] == 0
+        assert snap[ "sessions" ] == [ ]
+
+    def test_include_offline_true_retains_offline_session( self ):
+        snap = fr.build_snapshot( self._view(), { "s1": None }, NOW, include_offline=True )
+        assert snap[ "session_count" ] == 1
+        assert snap[ "sessions" ][ 0 ][ "liveness" ][ "verdict" ] == "offline"
+
+    def test_live_session_survives_default_prune( self ):
+        # Fresh bridge → LIVE → kept even with the default (include_offline=False).
+        snap = fr.build_snapshot( self._view(), { "s1": NOW.timestamp() - 4 }, NOW )
+        assert snap[ "session_count" ] == 1
+        assert snap[ "sessions" ][ 0 ][ "liveness" ][ "verdict" ] == "LIVE"
+
+    def test_count_reflects_post_prune_rows_in_a_mixed_fleet( self ):
+        view = {
+            "live": { "session_id": "live", "persona": "L", "state": "working",
+                      "holding_on": "none", "stuck": False, "last_event_ts": None,
+                      "commons_ts": NOW - datetime.timedelta( seconds=5 ) },   # LIVE by commons
+            "dead": { "session_id": "dead", "persona": "D", "state": "idle",
+                      "holding_on": "none", "stuck": False, "last_event_ts": None },  # offline
+        }
+        snap = fr.build_snapshot( view, { }, NOW )
+        assert { r[ "session_id" ] for r in snap[ "sessions" ] } == { "live" }
+        assert snap[ "session_count" ] == 1
 
 
 def test_quick_smoke_test():
