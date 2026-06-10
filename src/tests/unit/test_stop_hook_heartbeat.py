@@ -744,6 +744,10 @@ class TestMainSpeakerphonePokeMatrix:
              patch( "lupin_cli.claude_code.hooks.stop.heartbeat_events" ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona",
                     return_value={ "name": "Tiberius" } ), \
+             patch( "lupin_cli.claude_code.hooks.stop._gather_outstanding_delegations",
+                    return_value=[] ), \
+             patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
+                    return_value=[] ), \
              patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
                     return_value="claude.code@lupin.deepily.ai#abc12345" ), \
              patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" ) as mock_async, \
