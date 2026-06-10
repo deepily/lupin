@@ -6,9 +6,18 @@ Resolve a stuck worker's MANAGER for the manager-tap DM (B2) from spawn-lineage,
 so — with multiple groups — each stuck worker routes to ITS OWN manager
 automatically. **Never hardcode a persona name** (D5).
 
-The join is multi-hop because the spawn-lineage manifest is keyed by tmux
-session_NAME, not the child's CC session_id, and stores neither the manager's
-session_id nor the child's:
+The PRIMARY lineage source is the child bridge's `spawned_by` field — the
+manager's real session id, globally unique, collision-proof:
+
+    worker session_id
+      → bridge.spawned_by              (find_session_by_id)
+      → manager persona                (get_voice_persona)
+
+For LEGACY bridges that predate `spawned_by`, the resolver falls back to the
+original multi-hop manifest join. That join is keyed by tmux session_NAME,
+which is persona-indexed and REUSED (`cc-<role>-<persona>-<N>` recurs across
+every same-persona manager session and survives in stale manifests), so it is
+structurally ambiguous — the multi-match guard below then refuses to guess:
 
     worker session_id
       → bridge.tmux_session            (find_session_by_id)
@@ -232,9 +241,13 @@ def resolve_manager(
     Ensures:
         - returns { manager_session_id, manager_persona, source } where source ∈
           { "lineage", "declared", "unresolved" }
-        - "lineage" requires BOTH a manager_session_id (via the spawn-lineage
-          join) AND a DM-able manager persona; a hit without a usable persona
-          degrades (never DM a None persona)
+        - the manager_session_id comes from the child bridge's `spawned_by`
+          (PRIMARY — authoritative, globally unique), falling back to the
+          tmux_session → manifest-name scan ONLY when `spawned_by` is
+          absent/empty (legacy bridges that predate the field)
+        - "lineage" requires BOTH a manager_session_id (via either source) AND
+          a DM-able manager persona; a hit without a usable persona degrades
+          (never DM a None persona)
         - on a lineage miss → "declared" (the config manager-on-duty fallback) if
           provided, else "unresolved"
         - on ANY error/brittle hop → degrades the same way (declared else
@@ -252,8 +265,15 @@ def resolve_manager(
 
     try:
         bridge = bridge_lookup( worker_session_id )
-        tmux   = bridge.get( "tmux_session" ) if isinstance( bridge, dict ) else None
-        manager_id = manifest_scan( tmux, session_dir ) if tmux else None
+        # PRIMARY: spawned_by = the manager's real session id — unique, so the
+        # persona-indexed-name collision (cc-<role>-<persona>-<N> reused across
+        # sessions + stale manifests) cannot arise on this path.
+        manager_id = bridge.get( "spawned_by" ) if isinstance( bridge, dict ) else None
+        if not manager_id:
+            # FALLBACK (legacy bridges without spawned_by): manifest-name scan,
+            # multi-match-guarded — ambiguity still degrades, never guesses.
+            tmux       = bridge.get( "tmux_session" ) if isinstance( bridge, dict ) else None
+            manager_id = manifest_scan( tmux, session_dir ) if tmux else None
         if not manager_id:
             return _fallback()
         persona = persona_lookup( manager_id )
@@ -267,7 +287,26 @@ def resolve_manager(
 
 def quick_smoke_test():
     """Self-contained smoke test with injected seams. Returns True or raises."""
-    # lineage hit
+    # lineage hit via spawned_by (PRIMARY) — manifest scan must NOT be consulted
+    scan_calls = [ ]
+    out = resolve_manager(
+        "worker-0",
+        bridge_lookup  = lambda sid: { "tmux_session": "cc-reviewer-tib-1", "spawned_by": "tib-uuid-real" },
+        manifest_scan  = lambda tmux, sd: scan_calls.append( tmux ),
+        persona_lookup = lambda mid: { "name": "Tiberius" } if mid == "tib-uuid-real" else None,
+    )
+    assert out == { "manager_session_id": "tib-uuid-real", "manager_persona": "Tiberius", "source": "lineage" }, out
+    assert scan_calls == [ ], scan_calls   # spawned_by short-circuits the manifest scan
+
+    # spawned_by present but persona un-DM-able → degrade, never guess
+    out = resolve_manager(
+        "worker-0",
+        bridge_lookup  = lambda sid: { "spawned_by": "dead-mgr-uuid" },
+        persona_lookup = lambda mid: None,
+    )
+    assert out[ "source" ] == "unresolved", out
+
+    # lineage hit via manifest-scan FALLBACK (legacy bridge, no spawned_by)
     out = resolve_manager(
         "worker-1",
         bridge_lookup  = lambda sid: { "tmux_session": "cc-reviewer-tib-0" },

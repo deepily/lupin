@@ -77,6 +77,64 @@ class TestFindManager:
 # ── resolve_manager ────────────────────────────────────────────────────────────
 
 class TestResolveManager:
+    # ── spawned_by PRIMARY path (collision fix, 2026-06-09) ──────────────────
+
+    def test_spawned_by_primary_lineage_hit( self ):
+        """spawned_by present → lineage hit from it; manifest scan NOT consulted."""
+        scan_calls = [ ]
+        def _scan( tmux, sd ):
+            scan_calls.append( tmux )
+            return "WRONG-mgr-uuid"
+        out = resolve_manager(
+            "worker-1",
+            bridge_lookup  = lambda sid: { "tmux_session": "cc-rev-tib-1", "spawned_by": "tib-uuid-real" },
+            manifest_scan  = _scan,
+            persona_lookup = lambda mid: { "name": "Tiberius" } if mid == "tib-uuid-real" else { "name": "WRONG" },
+        )
+        assert out == { "manager_session_id": "tib-uuid-real", "manager_persona": "Tiberius", "source": SOURCE_LINEAGE }
+        assert scan_calls == [ ]   # PRIMARY short-circuits the ambiguous name join
+
+    def test_spawned_by_beats_manifest_collision( self, tmp_path ):
+        """The production bug: reused child name in 3 manifests would collide →
+        None on the scan path, but spawned_by resolves it unambiguously."""
+        _write_manifest( tmp_path, "aaaaaaaa-0000-0000-0000-000000000000", [ "cc-reviewer-tiberius-1" ] )
+        _write_manifest( tmp_path, "bbbbbbbb-0000-0000-0000-000000000000", [ "cc-reviewer-tiberius-1" ] )
+        _write_manifest( tmp_path, "cccccccc-0000-0000-0000-000000000000", [ "cc-reviewer-tiberius-1" ] )
+        out = resolve_manager(
+            "worker-1",
+            bridge_lookup  = lambda sid: { "tmux_session" : "cc-reviewer-tiberius-1",
+                                           "spawned_by"   : "aaaaaaaa-0000-0000-0000-000000000000" },
+            persona_lookup = lambda mid: { "name": "Tiberius" },
+            session_dir    = tmp_path,
+        )
+        assert out[ "source" ] == SOURCE_LINEAGE
+        assert out[ "manager_session_id" ] == "aaaaaaaa-0000-0000-0000-000000000000"
+
+    def test_spawned_by_but_no_persona_degrades_declared( self ):
+        # spawned_by resolves but persona is un-DM-able → declared, never guess
+        out = resolve_manager( "w", declared_manager="dut",
+                               bridge_lookup=lambda sid: { "spawned_by": "dead-mgr-uuid" },
+                               persona_lookup=lambda mid: None )
+        assert out == { "manager_session_id": None, "manager_persona": "dut", "source": SOURCE_DECLARED }
+
+    def test_spawned_by_but_no_persona_degrades_unresolved( self ):
+        out = resolve_manager( "w",
+                               bridge_lookup=lambda sid: { "spawned_by": "dead-mgr-uuid" },
+                               persona_lookup=lambda mid: { "no_name": True } )
+        assert out[ "source" ] == SOURCE_UNRESOLVED
+
+    def test_empty_spawned_by_falls_back_to_manifest_scan( self ):
+        """Legacy-shaped bridge (spawned_by empty) → the original scan path."""
+        out = resolve_manager(
+            "worker-1",
+            bridge_lookup  = lambda sid: { "tmux_session": "cc-rev-tib-0", "spawned_by": "" },
+            manifest_scan  = lambda tmux, sd: "tib-uuid" if tmux == "cc-rev-tib-0" else None,
+            persona_lookup = lambda mid: { "name": "Tiberius" },
+        )
+        assert out == { "manager_session_id": "tib-uuid", "manager_persona": "Tiberius", "source": SOURCE_LINEAGE }
+
+    # ── manifest-scan FALLBACK path (legacy bridges, unchanged behavior) ─────
+
     def test_lineage_hit( self ):
         out = resolve_manager(
             "worker-1",
