@@ -11,9 +11,14 @@ the pytest `tmp_path` fixture to build synthetic repo trees with real .git
 markers and mock os.getcwd to point inside them.
 """
 
+import subprocess
+
+from pathlib import Path
 from unittest.mock import patch
 
-from cosa.agents.utils.sender_id import detect_project, build_sender_id
+import pytest
+
+from cosa.agents.utils.sender_id import detect_project, build_sender_id, _worktree_owner_basename
 from cosa.utils.notification_utils import is_known_project, KNOWN_PROJECTS
 
 
@@ -142,6 +147,134 @@ class TestDetectProject:
         ( mixed_case / ".git" ).mkdir()
         with patch( "os.getcwd", return_value=str( mixed_case ) ):
             assert detect_project() == "myproject"
+
+
+class _FakeCompleted:
+    """Minimal stand-in for subprocess.CompletedProcess used in branch tests."""
+
+    def __init__( self, returncode, stdout ):
+        self.returncode = returncode
+        self.stdout     = stdout
+
+
+class TestWorktreeOwnerBasename:
+    """Branch-coverage suite for the _worktree_owner_basename() helper."""
+
+    def test_oserror_returns_none( self, monkeypatch ):
+        """git binary missing (OSError) → None (fail toward existing behavior)."""
+        def _raise( *a, **k ):
+            raise OSError( "git not found" )
+        monkeypatch.setattr( "cosa.agents.utils.sender_id.subprocess.run", _raise )
+        assert _worktree_owner_basename( Path( "/tmp/whatever" ) ) is None
+
+    def test_subprocess_error_returns_none( self, monkeypatch ):
+        """git timeout (SubprocessError subclass) → None."""
+        def _raise( *a, **k ):
+            raise subprocess.TimeoutExpired( cmd="git", timeout=5 )
+        monkeypatch.setattr( "cosa.agents.utils.sender_id.subprocess.run", _raise )
+        assert _worktree_owner_basename( Path( "/tmp/whatever" ) ) is None
+
+    def test_nonzero_returncode_returns_none( self, monkeypatch ):
+        """git rev-parse fatal (rc != 0) → None."""
+        monkeypatch.setattr(
+            "cosa.agents.utils.sender_id.subprocess.run",
+            lambda *a, **k: _FakeCompleted( 128, "" )
+        )
+        assert _worktree_owner_basename( Path( "/tmp/whatever" ) ) is None
+
+    def test_empty_stdout_returns_none( self, monkeypatch ):
+        """rc 0 but empty stdout → None."""
+        monkeypatch.setattr(
+            "cosa.agents.utils.sender_id.subprocess.run",
+            lambda *a, **k: _FakeCompleted( 0, "   \n" )
+        )
+        assert _worktree_owner_basename( Path( "/tmp/whatever" ) ) is None
+
+    def test_submodule_common_dir_returns_none( self, monkeypatch ):
+        """Submodule common-dir (.git/modules/<name>) basename != '.git' → None."""
+        monkeypatch.setattr(
+            "cosa.agents.utils.sender_id.subprocess.run",
+            lambda *a, **k: _FakeCompleted( 0, "/home/x/lupin/.git/modules/cosa\n" )
+        )
+        assert _worktree_owner_basename( Path( "/home/x/lupin/src/cosa" ) ) is None
+
+    def test_worktree_absolute_common_dir( self, monkeypatch ):
+        """Worktree absolute common-dir → MAIN repo basename (lowercased)."""
+        monkeypatch.setattr(
+            "cosa.agents.utils.sender_id.subprocess.run",
+            lambda *a, **k: _FakeCompleted( 0, "/home/x/Lupin/.git\n" )
+        )
+        assert _worktree_owner_basename( Path( "/tmp/wt-foo" ) ) == "lupin"
+
+    def test_worktree_relative_common_dir_is_resolved( self, monkeypatch, tmp_path ):
+        """Relative common-dir is resolved against candidate before basename check."""
+        main = tmp_path / "lupin"
+        ( main / ".git" ).mkdir( parents=True )
+        candidate = tmp_path / "lupin" / "wt"
+        candidate.mkdir()
+        # git reports a RELATIVE common dir ("../.git") from the worktree candidate
+        monkeypatch.setattr(
+            "cosa.agents.utils.sender_id.subprocess.run",
+            lambda *a, **k: _FakeCompleted( 0, "../.git\n" )
+        )
+        assert _worktree_owner_basename( candidate ) == "lupin"
+
+
+class TestDetectProjectWorktree:
+    """detect_project() worktree-aware resolution via REAL git worktrees."""
+
+    @staticmethod
+    def _git( *args, cwd ):
+        subprocess.run(
+            [ "git", *args ], cwd=str( cwd ),
+            check=True, capture_output=True, text=True
+        )
+
+    def _make_main_repo( self, root, name ):
+        main = root / name
+        main.mkdir()
+        self._git( "init", "-q", cwd=main )
+        self._git( "config", "user.email", "t@test.local", cwd=main )
+        self._git( "config", "user.name", "t", cwd=main )
+        self._git( "commit", "-q", "--allow-empty", "-m", "init", cwd=main )
+        return main
+
+    def test_worktree_resolves_to_main_repo( self, tmp_path ):
+        """A worktree of 'lupin' detects as 'lupin', NOT the worktree dir name."""
+        main = self._make_main_repo( tmp_path, "lupin" )
+        link = tmp_path / "wt-delegation-signal"
+        self._git( "worktree", "add", "-q", str( link ), cwd=main )
+        with patch( "os.getcwd", return_value=str( link ) ):
+            assert detect_project() == "lupin"
+
+    def test_worktree_applies_alias( self, tmp_path ):
+        """A worktree of 'planning-is-prompting' maps through the alias to 'plan'."""
+        main = self._make_main_repo( tmp_path, "planning-is-prompting" )
+        link = tmp_path / "wt-pip"
+        self._git( "worktree", "add", "-q", str( link ), cwd=main )
+        with patch( "os.getcwd", return_value=str( link ) ):
+            assert detect_project() == "plan"
+
+    def test_subdir_inside_worktree_still_resolves_main( self, tmp_path ):
+        """cwd in a SUBDIR of a worktree still walks up + resolves to main repo."""
+        main = self._make_main_repo( tmp_path, "lupin" )
+        link = tmp_path / "wt-sub"
+        self._git( "worktree", "add", "-q", str( link ), cwd=main )
+        sub = link / "src" / "deep"
+        sub.mkdir( parents=True )
+        with patch( "os.getcwd", return_value=str( sub ) ):
+            assert detect_project() == "lupin"
+
+    def test_normal_repo_unaffected_no_subprocess( self, tmp_path, monkeypatch ):
+        """A normal repo (.git is a dir) never invokes git — fast path preserved."""
+        repo = tmp_path / "lupin"
+        repo.mkdir()
+        ( repo / ".git" ).mkdir()
+        def _boom( *a, **k ):
+            raise AssertionError( "subprocess.run must NOT fire for a normal .git dir" )
+        monkeypatch.setattr( "cosa.agents.utils.sender_id.subprocess.run", _boom )
+        with patch( "os.getcwd", return_value=str( repo ) ):
+            assert detect_project() == "lupin"
 
 
 class TestBuildSenderId:

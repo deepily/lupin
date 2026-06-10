@@ -16,7 +16,9 @@ Examples:
 """
 
 import os
+import subprocess
 from pathlib import Path
+from typing import Optional
 
 
 # Short-name aliases applied after basename resolution.
@@ -27,10 +29,71 @@ _PROJECT_ALIASES = {
 }
 
 
+def _worktree_owner_basename( candidate: Path ) -> Optional[ str ]:
+    """
+    Resolve the MAIN repo basename when `candidate` is a git worktree.
+
+    A worktree and a submodule both store `.git` as a FILE (a gitlink), so the
+    bare walk-up in detect_project() cannot tell them apart. Git itself can:
+    `git rev-parse --git-common-dir` reports the SHARED main-repo `.git` for a
+    worktree (basename ".git") but the per-submodule `.git/modules/<name>` for a
+    submodule (basename != ".git"). That distinction is the disambiguator.
+
+    Requires:
+        - candidate is a Path whose `.git` child is a file (a gitlink); the
+          caller guarantees this before invoking
+
+    Ensures:
+        - Returns the lowercased basename of the MAIN repo root when candidate
+          is a linked worktree (e.g. a worktree of /…/lupin -> "lupin")
+        - Returns None when candidate is NOT a worktree — i.e. a submodule
+          gitlink (common-dir basename != ".git"), git is unavailable, git
+          returns non-zero, or stdout is empty — so the caller falls back to
+          the existing basename behavior (fail toward existing behavior)
+        - Never raises: every subprocess failure mode maps to None
+
+    Args:
+        candidate: Directory whose `.git` gitlink file is being resolved
+
+    Returns:
+        Optional[str]: MAIN repo basename (lowercased) for a worktree, else None
+    """
+    try:
+        result = subprocess.run(
+            [ "git", "rev-parse", "--git-common-dir" ],
+            cwd            = str( candidate ),
+            capture_output = True,
+            text           = True,
+            timeout        = 5
+        )
+    except ( OSError, subprocess.SubprocessError ):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    raw = result.stdout.strip()
+    if not raw:
+        return None
+
+    common_dir = Path( raw )
+    if not common_dir.is_absolute():
+        common_dir = ( candidate / common_dir ).resolve()
+
+    # Worktrees share the main repo's `<main>/.git` (basename ".git"); submodules
+    # report `<main>/.git/modules/<name>` (basename != ".git"). Only the former
+    # should resolve to a different (main-repo) identity.
+    if common_dir.name != ".git":
+        return None
+
+    return common_dir.parent.name.lower()
+
+
 def detect_project() -> str:
     """
     Detect project name as the basename of the nearest enclosing
-    git repository — walking up from cwd until a .git entry is found.
+    git repository — walking up from cwd until a .git entry is found,
+    with worktree-aware resolution to the MAIN repo.
 
     Requires:
         - Current working directory is accessible
@@ -40,8 +103,14 @@ def detect_project() -> str:
         - Walks up from cwd; first ancestor containing .git wins
         - .git may be a directory (normal repo), file (worktree/submodule
           gitlink), or any other FS entry — any form satisfies the check
+        - WORKTREE-AWARE: when the found .git is a gitlink FILE and git
+          reports a worktree, returns the MAIN repo basename (e.g. a worktree
+          of lupin returns "lupin", NOT the worktree dir name). This prevents
+          the MCP server from mis-detecting worktree crews as bogus projects.
         - Handles nested repos correctly: cwd inside src/cosa (which has
-          its own .git) returns "cosa", not "lupin"
+          its own .git gitlink) still returns "cosa", not "lupin" — submodule
+          gitlinks are NOT treated as worktrees
+        - Normal repos (.git is a directory) keep a zero-subprocess fast path
         - Falls back to basename of cwd if no .git ancestor is found
         - Applies _PROJECT_ALIASES for legacy short names (e.g.
           "planning-is-prompting" -> "plan")
@@ -51,7 +120,12 @@ def detect_project() -> str:
     """
     cwd = Path( os.getcwd() ).resolve()
     for candidate in [ cwd, *cwd.parents ]:
-        if ( candidate / ".git" ).exists():
+        git_entry = candidate / ".git"
+        if git_entry.exists():
+            if git_entry.is_file():
+                owner = _worktree_owner_basename( candidate )
+                if owner is not None:
+                    return _PROJECT_ALIASES.get( owner, owner )
             name = candidate.name.lower()
             return _PROJECT_ALIASES.get( name, name )
     basename = cwd.name.lower()
@@ -148,6 +222,26 @@ def quick_smoke_test():
             print( "  /lupin/src/lupin-plugin-firefox -> lupin-plugin-firefox (FIX)" )
             _assert_detect_for_cwd( no_repo,     "no-repo-here" )
             print( "  /no-repo-here/                  -> no-repo-here (basename fallback)" )
+
+        # Test 2b: detect_project with a REAL git worktree (worktree-aware fix)
+        print( "Testing detect_project (real git worktree -> MAIN repo)..." )
+        with tempfile.TemporaryDirectory() as wt_tmp:
+            wt_root = Path( wt_tmp )
+            main    = wt_root / "lupin"
+            link    = wt_root / "wt-delegation-signal"
+            main.mkdir()
+            def _git( *args, cwd ):
+                subprocess.run(
+                    [ "git", *args ], cwd=str( cwd ),
+                    check=True, capture_output=True, text=True
+                )
+            _git( "init", "-q", cwd=main )
+            _git( "config", "user.email", "smoke@test.local", cwd=main )
+            _git( "config", "user.name", "smoke", cwd=main )
+            _git( "commit", "-q", "--allow-empty", "-m", "init", cwd=main )
+            _git( "worktree", "add", "-q", str( link ), cwd=main )
+            _assert_detect_for_cwd( link, "lupin" )
+            print( "  /…/wt-delegation-signal/ (worktree) -> lupin (FIX)" )
 
         # Test 3: build_sender_id basic
         print( "Testing build_sender_id (basic)..." )
