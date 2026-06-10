@@ -651,6 +651,104 @@ def find_session_path_by_id( session_id ):
     return None
 
 
+def _pid_confirmed_dead( pid ):
+    """
+    True ONLY when `pid` is DEFINITIVELY gone (ProcessLookupError on kill -0).
+
+    The bias-to-alive companion to _is_pid_alive: where _is_pid_alive answers
+    "is this signalable by us" (EPERM ⇒ dead), this answers the stricter
+    "is this process CONFIRMED gone". A non-int, an EPERM (exists-but-not-ours),
+    or any other OSError returns False — we never confirm death on ambiguity.
+    Used by the fleet-status force-offline path, where a false-dead is the costly
+    error (it would hide a live session).
+
+    Requires:
+        - pid is an int or anything (non-int ⇒ not-confirmed-dead)
+
+    Ensures:
+        - True iff os.kill( pid, 0 ) raises ProcessLookupError
+        - False for non-int, alive pid, EPERM, or any other OSError
+        - pure (stdlib only); never raises
+    """
+    if not isinstance( pid, int ):
+        return False
+    try:
+        os.kill( pid, 0 )
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def find_dead_sessions( candidate_ids ):
+    """
+    Return the subset of `candidate_ids` whose worker process is CONFIRMED dead.
+
+    Unlike find_session_path_by_id / find_active_voice_persona_sessions (which
+    SKIP dead-PID bridges, so they can never surface a dead session), this scans
+    bridges UNFILTERED and positively confirms death via kill -0. Built for the
+    fleet-status "offline" override (drop a /exit'd session in ~1 poll, not ~1h).
+
+    A candidate is dead iff its bridge file is found AND it carries ≥1 known pid
+    (filename pid, listener_pid, cc_pid) and EVERY known pid is _pid_confirmed_dead.
+
+    BIAS-TO-ALIVE (never over-report death):
+        - host-PID-trust gated — returns empty inside a container (host pids are
+          invisible there, so kill -0 would read the whole fleet as dead)
+        - a candidate with no readable/matching bridge is NOT dead (absence ≠ death)
+        - a bridge with no known int pid is NOT dead (no evidence)
+        - EPERM / ambiguous kill -0 counts as alive (see _pid_confirmed_dead)
+
+    Requires:
+        - candidate_ids is an iterable of session-id strings (full uuid or 8-char prefix)
+
+    Ensures:
+        - returns a set[str], a subset of the truthy candidate_ids
+        - never raises (a bad bridge file is skipped)
+    """
+    if not _can_trust_host_pids() or not SESSION_DIR.exists():
+        return set()
+    candidates = { c for c in ( candidate_ids or () ) if c }
+    if not candidates:
+        return set()
+
+    dead = set()
+    for path in SESSION_DIR.glob( "cc-*.json" ):
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+        except ( json.JSONDecodeError, OSError ):
+            continue
+
+        all_ids = list( data.get( "session_ids", [] ) )
+        for field in ( "session_id", "stable_session_id" ):
+            val = data.get( field, "" )
+            if val and val not in all_ids:
+                all_ids.append( val )
+
+        matched = None
+        for known_id in all_ids:
+            for cand in candidates:
+                if known_id == cand or known_id[ :8 ] == cand[ :8 ]:
+                    matched = cand
+                    break
+            if matched:
+                break
+        if matched is None:
+            continue
+
+        pids = [ p for p in ( _extract_pid_from_filename( path.name ),
+                              data.get( "listener_pid" ),
+                              data.get( "cc_pid" ) ) if isinstance( p, int ) ]
+        if pids and all( _pid_confirmed_dead( p ) for p in pids ):
+            dead.add( matched )
+
+    return dead
+
+
 # ── v2.1 liveness-stamp observability (arbiter design 03 §10.6 rider) ──────────
 # A swallowed bridge-touch failure must be DIAGNOSABLE, never silently dropped —
 # a dropped stamp would read as false-idle in the arbiter, the exact dishonesty

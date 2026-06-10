@@ -187,6 +187,28 @@ def test_default_bridge_discovery_swallows_errors( monkeypatch ):
     assert aj._default_bridge_discovery() == { }
 
 
+def test_default_dead_session_ids_delegates_to_find_dead( monkeypatch ):
+    """The kill-0 death probe forwards the fleet-view's sids and returns the dead set."""
+    from cosa.agents.heartbeat_arbiter import arbiter_job as aj
+    seen = {}
+    def _fake( ids ):
+        seen[ "ids" ] = set( ids )
+        return { "deadguy" }
+    monkeypatch.setattr( aj, "_find_dead_sessions", _fake )
+    out = aj._default_dead_session_ids( { "deadguy": {}, "liveguy": {} } )
+    assert out == { "deadguy" }
+    assert seen[ "ids" ] == { "deadguy", "liveguy" }
+
+
+def test_default_dead_session_ids_swallows_errors( monkeypatch ):
+    """A probe hiccup yields an empty set — snapshot falls back to staleness (never raises)."""
+    from cosa.agents.heartbeat_arbiter import arbiter_job as aj
+    def _boom( ids ):
+        raise RuntimeError( "probe failed" )
+    monkeypatch.setattr( aj, "_find_dead_sessions", _boom )
+    assert aj._default_dead_session_ids( { "s1": {} } ) == set()
+
+
 def test_poll_once_folds_bridge_only_session_into_union( tmp_path ):
     """A session with NO events and NO commons — ONLY a live bridge — must enter
     the UNION roster AND read LIVE via its fresh bridge_age (the false-offline fix)."""

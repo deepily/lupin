@@ -54,6 +54,7 @@ from cosa.rest.arbiter_snapshot_store import set_snapshot as _default_snapshot_s
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_bridge_mtime as _default_bridge_mtime_fn,
     find_active_voice_persona_sessions as _find_active_voice_persona_sessions,
+    find_dead_sessions as _find_dead_sessions,
 )
 from cosa.agents.heartbeat_arbiter.manager_resolver import (
     resolve_manager as _default_resolve_manager,
@@ -113,6 +114,27 @@ def _default_bridge_discovery():
     except Exception:
         return { }
     return out
+
+
+def _default_dead_session_ids( fleet_view ):
+    """
+    Confirmed-dead session-ids among the fleet view → set[str] (the §kill-0 source).
+
+    The IMPURE death probe for `_publish_fleet_snapshot`: delegates to
+    session_bridge.find_dead_sessions (unfiltered bridge scan + kill -0), which is
+    itself host-PID-trust gated + bias-to-alive. Wrapped degrade-safe so a probe
+    hiccup yields an empty set — the snapshot then falls back to staleness exactly
+    as before (the §0 #2 observer invariant).
+
+    Ensures:
+        - returns a set[str] subset of fleet_view's session-ids (empty on any error,
+          in a container, or when nothing is positively dead)
+        - never raises
+    """
+    try:
+        return _find_dead_sessions( fleet_view.keys() )
+    except Exception:
+        return set()
 
 
 @runtime_checkable
@@ -417,6 +439,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - returns "table" or "tick" (for the poll summary)
         """
         bridge_mtimes = { sid: self._bridge_mtime_fn( sid ) for sid in fleet_view }
+        # PID fast-death (kill-0): confirmed-dead sessions among the fleet view, so
+        # a /exit'd worker is forced "offline" in ~1 poll instead of aging out over
+        # ~1h. Host-PID-trust gated + bias-to-alive inside find_dead_sessions (empty
+        # set in a container, on any error, or when no pid is positively dead).
+        process_dead  = _default_dead_session_ids( fleet_view )
         # Fleet-Status P1 (design §4): enrich each row with role + manager via the
         # already-injected resolver seam + the manager-manifest lister. Both are
         # degrade-safe inside build_snapshot (never raises), so a brittle hop can
@@ -425,6 +452,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             fleet_view, bridge_mtimes, now,
             resolve_manager_fn = self._resolve_manager_fn,
             list_managers_fn   = _default_list_manager_session_ids,
+            process_dead       = process_dead,
         )
 
         sig = frame_signature( snapshot )

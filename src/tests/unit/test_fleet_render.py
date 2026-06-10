@@ -157,6 +157,67 @@ class TestSidMatches:
     def test_falsy_b( self ):          assert fr._sid_matches( "x", None ) is False
 
 
+# ── _lookup_dead (prefix-tolerant dead-set membership) ──────────────────────────
+
+class TestLookupDead:
+    def test_none_or_empty_never_matches( self ):
+        assert fr._lookup_dead( None, "s1" ) is False
+        assert fr._lookup_dead( set(), "s1" ) is False
+        assert fr._lookup_dead( [], "s1" ) is False
+
+    def test_exact_match( self ):
+        assert fr._lookup_dead( { "s1" }, "s1" ) is True
+
+    def test_prefix_tolerant_match( self ):
+        # 8-char fleet_view key vs full-uuid dead entry (and vice-versa)
+        assert fr._lookup_dead( { "d9e65cd8-bb24-4656" }, "d9e65cd8" ) is True
+        assert fr._lookup_dead( { "d9e65cd8" }, "d9e65cd8-bb24-4656" ) is True
+
+    def test_no_match( self ):
+        assert fr._lookup_dead( { "other" }, "s1" ) is False
+
+
+# ── build_snapshot PID fast-death override (process_dead) ───────────────────────
+
+class TestBuildSnapshotProcessDead:
+    def _live_view( self ):
+        # Fresh event → would be LIVE absent any override.
+        return { "s1": { "session_id": "s1", "persona": "Ann", "state": "working",
+                         "holding_on": "none", "stuck": False, "last_event_ts": NOW } }
+
+    def test_confirmed_dead_forces_offline_despite_fresh_age( self ):
+        # s1 is LIVE by age, but listed dead → forced offline (and pruned by default).
+        snap = fr.build_snapshot( self._live_view(), { "s1": NOW.timestamp() }, NOW,
+                                  process_dead = { "s1" } )
+        assert snap[ "session_count" ] == 0   # offline → pruned from published snapshot
+
+    def test_dead_row_carries_offline_verdict_and_flag_when_retained( self ):
+        snap = fr.build_snapshot( self._live_view(), { "s1": NOW.timestamp() }, NOW,
+                                  process_dead = { "s1" }, include_offline = True )
+        row = snap[ "sessions" ][ 0 ]
+        assert row[ "liveness" ][ "verdict" ] == "offline"
+        assert row[ "liveness" ][ "process_dead" ] is True
+
+    def test_non_dead_session_keeps_age_verdict( self ):
+        snap = fr.build_snapshot( self._live_view(), { "s1": NOW.timestamp() }, NOW,
+                                  process_dead = { "other" } )
+        row = snap[ "sessions" ][ 0 ]
+        assert row[ "liveness" ][ "verdict" ] == "LIVE"
+        assert "process_dead" not in row[ "liveness" ]
+
+    def test_none_process_dead_is_back_compat_noop( self ):
+        # No process_dead → identical to today (LIVE row retained, no flag).
+        row = fr.build_snapshot( self._live_view(), { "s1": NOW.timestamp() }, NOW )[ "sessions" ][ 0 ]
+        assert row[ "liveness" ][ "verdict" ] == "LIVE"
+        assert "process_dead" not in row[ "liveness" ]
+
+    def test_prefix_tolerant_dead_key( self ):
+        # dead-set carries the full uuid; the fleet_view key is the short form.
+        snap = fr.build_snapshot( self._live_view(), { "s1": NOW.timestamp() }, NOW,
+                                  process_dead = { "s1-full-uuid-form" }, include_offline = True )
+        assert snap[ "sessions" ][ 0 ][ "liveness" ][ "verdict" ] == "offline"
+
+
 # ── build_snapshot hierarchy enrichment (Fleet-Status P1 §4) ────────────────────
 
 class TestBuildSnapshotEnrichment:

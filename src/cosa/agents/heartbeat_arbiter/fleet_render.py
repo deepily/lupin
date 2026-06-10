@@ -177,12 +177,28 @@ def _sid_matches( a, b ):
     return a == b or a.startswith( b ) or b.startswith( a )
 
 
+def _lookup_dead( process_dead, sid ):
+    """
+    Prefix-tolerant membership test for the confirmed-dead session set.
+
+    Mirrors _sid_matches' short-id/full-uuid tolerance so a `fleet_view` key
+    (often an 8-char id) matches a dead-set entry carrying the full uuid, and
+    vice-versa. A falsy / empty `process_dead` is never a match.
+
+    Ensures:
+        - True iff some entry of process_dead prefix-matches sid; else False
+        - pure; never raises
+    """
+    return any( _sid_matches( sid, dead_sid ) for dead_sid in ( process_dead or () ) )
+
+
 def build_snapshot( fleet_view, bridge_mtimes, now,
                     live_seconds       = DEFAULT_LIVE_SECONDS,
                     quiet_seconds      = DEFAULT_QUIET_SECONDS,
                     stale_seconds      = DEFAULT_STALE_SECONDS,
                     resolve_manager_fn = None,
                     list_managers_fn   = None,
+                    process_dead       = None,
                     include_offline    = False ):
     """
     Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
@@ -204,6 +220,14 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
           include_offline=True to retain offline rows (audit/back-compat). This
           prunes the PUBLISHED snapshot ONLY — the arbiter's decision logic reads
           `fleet_view`, not this snapshot, so routing/stall-detection are untouched.
+        - PID FAST-DEATH OVERRIDE (kill-0): `process_dead` is an optional iterable
+          of CONFIRMED-dead session-ids (default None). A row whose sid prefix-
+          matches one is forced verdict="offline" + liveness.process_dead=True,
+          regardless of its signal ages — so a /exit'd session drops in ~1 poll
+          instead of aging out over ~1h. Bias-to-alive: only a positive dead
+          reading overrides; an absent sid keeps its age verdict. The verdict
+          STRING set is unchanged (the frontend offline-split is untouched);
+          `process_dead` is an additive transparency flag on the liveness block.
         - each row keeps STATE and LIVENESS as separate keys (C4) PLUS the two
           hierarchy keys (role, manager):
           { session_id, persona, state, holding_on, stuck, liveness{...},
@@ -239,6 +263,14 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             view, ( bridge_mtimes or { } ).get( sid ), now,
             live_seconds, quiet_seconds, stale_seconds,
         )
+        # PID fast-death override (kill-0): a CONFIRMED-dead process forces
+        # "offline" now, regardless of how recent its last signal was — so a
+        # /exit'd session drops in ~1 poll, not after the ~1h stale window. Only a
+        # positive dead reading overrides (bias-to-alive); the additive
+        # process_dead flag keeps the verdict STRING set unchanged.
+        if _lookup_dead( process_dead, sid ):
+            liveness[ "process_dead" ] = True
+            liveness[ "verdict" ]      = "offline"
         # D6 / §5.2: omit offline sessions from the PUBLISHED snapshot by default.
         if not include_offline and liveness.get( "verdict" ) == "offline":
             continue
