@@ -38,6 +38,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_speakerphone, get_session_metadata, get_voice_persona,
     get_idle_detection, set_idle_detection_field, kill_idle_waiter,
     get_last_autonarrated_turn_id, set_last_autonarrated_turn_id,
+    find_active_voice_persona_sessions,
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notify_user_async import notify_user_async
@@ -902,6 +903,160 @@ def _emit_genuine_idle( session_id, persona_name, cap ):
         } )
 
 
+def _dm_topic_for( persona_name ):
+    """
+    Derive the commons DM-topic name for a persona.
+
+    Mirrors `cosa_voice_mcp._dm_topic` / `arbiter_gateway.dm_topic_for` (the
+    canonical sluggers): lowercase, then collapse non-word chars to "_" with
+    re.UNICODE so non-ASCII personas survive ("mr radio" → "dm-mr_radio",
+    "María" → "dm-maría").
+
+    Requires:
+        - persona_name is a non-empty string
+
+    Ensures:
+        - Returns "dm-<slug>" matching the server-side topic pattern
+    """
+    import re
+    slug = re.sub( r"[^\w-]+", "_", persona_name.strip().lower(), flags=re.UNICODE )
+    return f"dm-{slug}"
+
+
+def _gather_outstanding_delegations( session_id ):
+    """
+    MANAGER-side live signal (Rick 2026-06-09): this session's spawned workers
+    that are STILL ALIVE and not yet reaped.
+
+    An alive, un-reaped child = owed work — the manager still owes review/reap,
+    so it must never idle-announce while workers are out. Mechanism: this
+    session's lineage manifest (spawned-<session_id>.json, the same single
+    source the spawner writes and `dismiss_sessions` prunes) gives the child
+    tmux session_names; intersect with the LIVE bridge discovery
+    (find_active_voice_persona_sessions — the same PID+mtime liveness the
+    arbiter uses). All children dead/reaped ⇒ [] ⇒ no delegation signal ⇒
+    idle allowed.
+
+    Requires:
+        - session_id is this session's (stable) id string
+
+    Ensures:
+        - Returns [ { "session_name", "session_id" }, ... ] for each manifest
+          child whose bridge is LIVE; [] for non-managers (no manifest)
+        - Degrade-safe: ANY error ⇒ [] — never raises, never blocks the Stop
+        - The bridge scan runs ONLY when the manifest is non-empty (workers
+          pay a single cheap manifest stat per Stop)
+    """
+    try:
+        import json
+        from lupin_mcp.session_spawner import _manifest_path, _read_manifest
+        names = { r.get( "session_name" )
+                  for r in _read_manifest( _manifest_path( session_id ) )
+                  if isinstance( r, dict ) and r.get( "session_name" ) }
+        if not names:
+            return [ ]
+        alive = [ ]
+        for path, child_sid, _persona in find_active_voice_persona_sessions():
+            try:
+                with open( path ) as f:
+                    bridge = json.load( f )
+            except ( OSError, ValueError ):
+                continue
+            tmux = bridge.get( "tmux_session" ) if isinstance( bridge, dict ) else None
+            if tmux in names:
+                alive.append( { "session_name": tmux, "session_id": child_sid } )
+        return alive
+    except Exception:
+        return [ ]
+
+
+def _is_same_session( entry_sid, session_id ):
+    """
+    Prefix-tolerant session-id match (commons entries carry short 8-char ids,
+    the hook holds the full stable uuid). Mirrors the arbiter/resolver matchers.
+
+    Ensures:
+        - True when either id equals or is a prefix of the other; False if
+          either is falsy
+    """
+    if not entry_sid or not session_id:
+        return False
+    return ( entry_sid == session_id
+             or entry_sid.startswith( session_id )
+             or session_id.startswith( entry_sid ) )
+
+
+def _gather_unanswered_inbound_questions( session_id ):
+    """
+    WORKER-side live signal (Rick 2026-06-09, broadened same day): UNHANDLED
+    inbound commons DMs — ANY directed message on this persona's dm-<persona>
+    topic, not authored by this session, that this session has not yet HANDLED.
+
+    "Handled" = this session posted a threaded reply (a commons entry authored
+    by this session whose metadata.in_reply_to == that DM's question_id). An
+    unhandled inbound DM — unread OR read-but-unanswered, question or
+    assignment alike — is owed work ⇒ poke to resume/finish. Once the worker
+    delivers (threads its reply to the brief) it is handled ⇒ not owed ⇒
+    legitimately idle (blocked on the manager). This feeds the oracle's
+    EXISTING unanswered_inbound_question signal, never populated in production
+    before.
+
+    TENURE FLOOR: persona names are pooled/reused across sessions, so the
+    dm-topic carries prior holders' briefs. Only DMs stamped at/after THIS
+    session's voice_persona.assigned_at count — a prior Mr. Radio's unhandled
+    debt must not poke this one. A missing assigned_at disables the floor
+    (bias-to-poke; the poke cap bounds the cost).
+
+    Requires:
+        - session_id is this session's (stable) id string
+
+    Ensures:
+        - Returns [ { "question_id", "ts" }, ... ] for each unhandled inbound
+          DM that carries a question_id (qid-less entries cannot be
+          thread-matched and are excluded as untrackable — every send_to /
+          ask_async DM carries one)
+        - Entries authored by this session never count as inbound
+        - Returns [] when the session has no persona, no LUPIN_ROOT, or no
+          DM topic — and on ANY error (never raises, never blocks the Stop)
+    """
+    try:
+        persona = get_voice_persona( session_id )
+        name    = persona.get( "name" ) if isinstance( persona, dict ) else None
+        if not name:
+            return [ ]
+        commons_root = os.environ.get( "LUPIN_ROOT" )
+        if not commons_root:
+            return [ ]
+        from lupin_mcp.commons_store import CommonsStore
+        entries = CommonsStore( commons_root ).read( _dm_topic_for( name ), limit=50 )
+
+        tenure_floor = persona.get( "assigned_at" )    # ISO-8601 str or None
+        # "Handled" keys: in_reply_to of entries THIS session authored.
+        handled = { ( e.get( "metadata" ) or { } ).get( "in_reply_to" )
+                    for e in entries
+                    if isinstance( e, dict )
+                    and _is_same_session( e.get( "sender_session_id" ), session_id ) }
+        open_inbound = [ ]
+        for e in entries:
+            if not isinstance( e, dict ):
+                continue
+            if _is_same_session( e.get( "sender_session_id" ), session_id ):
+                continue                                 # my own post — not inbound
+            qid = ( e.get( "metadata" ) or { } ).get( "question_id" )
+            if not qid:
+                continue                                 # untrackable (no thread key)
+            ts = e.get( "ts" )
+            # ISO-8601 strings in one zone compare lexicographically.
+            if tenure_floor and isinstance( ts, str ) and ts < tenure_floor:
+                continue
+            if qid in handled:
+                continue
+            open_inbound.append( { "question_id": qid, "ts": ts } )
+        return open_inbound
+    except Exception:
+        return [ ]
+
+
 def _run_heartbeat( session_id, transcript_path ):
     """
     Branch-C heartbeat self-poke adapter (thin; composes the pure leaf modules).
@@ -971,7 +1126,19 @@ def _run_heartbeat( session_id, transcript_path ):
     # fires every turn — halves the per-Stop transcript reads).
     task_state = replay_task_state( transcript_path )
     owed_items = owed_items_from_state( task_state )
-    verdict    = evaluate_work_owed( todo_items=owed_items )
+    # v3 (Rick 2026-06-09): feed the two live signals the oracle defined but
+    # production never populated — (a) MANAGER: alive un-reaped spawned workers
+    # (a supervising manager owes review/reap even with zero Task* items, so it
+    # must never idle-announce while workers are out); (b) WORKER: open inbound
+    # assignment DMs not yet answered with a threaded reply. Both gatherers are
+    # degrade-safe IO shells (any error ⇒ [] ⇒ signal silent, never block).
+    delegations = _gather_outstanding_delegations( session_id )
+    open_inbound = _gather_unanswered_inbound_questions( session_id )
+    verdict    = evaluate_work_owed(
+        todo_items                   = owed_items,
+        unanswered_inbound_questions = open_inbound,
+        outstanding_delegations      = delegations,
+    )
     result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
 
     if result[ "should_increment" ]:
@@ -998,12 +1165,14 @@ def _run_heartbeat( session_id, transcript_path ):
         "phase"      : "heartbeat_oracle",
         "session_id" : session_id,
         "persona"    : persona_name,
-        "outcome"    : result[ "outcome" ],
-        "work_owed"  : verdict[ "work_owed" ],
-        "owed_items" : len( owed_items ),
-        "poke_count" : get_poke_count( session_id ),
-        "cap"        : settings[ "poke_cap" ],
-        "awaiting"   : ( hold.get( "awaiting" ) if hold else None ),
+        "outcome"      : result[ "outcome" ],
+        "work_owed"    : verdict[ "work_owed" ],
+        "owed_items"   : len( owed_items ),
+        "delegations"  : len( delegations ),
+        "open_inbound" : len( open_inbound ),
+        "poke_count"   : get_poke_count( session_id ),
+        "cap"          : settings[ "poke_cap" ],
+        "awaiting"     : ( hold.get( "awaiting" ) if hold else None ),
     } )
 
     try:

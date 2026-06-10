@@ -103,6 +103,34 @@ def test_falsy_inbound_question_entries_dropped():
     assert v[ "work_owed" ] is False
 
 
+# ── outstanding-delegation signal (manager side, 2026-06-09) ──────────────────
+
+def test_outstanding_delegation_owes_work():
+    # The bug fix: a manager with NO Task* items but one live spawned worker
+    # still owes work (review/reap duty) — must never idle-announce.
+    v = o.evaluate_work_owed( outstanding_delegations=[ { "session_name": "cc-reviewer-x-1" } ] )
+    assert v[ "work_owed" ] is True
+    assert v[ "signals" ] == [ "outstanding_delegation" ]
+    assert "1 live worker(s) still out" in v[ "specifics" ]
+
+
+def test_outstanding_delegation_counts_multiple_workers():
+    v = o.evaluate_work_owed( outstanding_delegations=[
+        { "session_name": "cc-reviewer-x-1" }, { "session_name": "cc-tester-x-1" } ] )
+    assert "2 live worker(s) still out" in v[ "specifics" ]
+
+
+def test_all_workers_reaped_owes_nothing():
+    # Empty list = every spawned worker dead/reaped → idle allowed.
+    v = o.evaluate_work_owed( outstanding_delegations=[ ] )
+    assert v[ "work_owed" ] is False
+
+
+def test_falsy_delegation_entries_dropped():
+    v = o.evaluate_work_owed( outstanding_delegations=[ { }, None, 0 ] )
+    assert v[ "work_owed" ] is False
+
+
 # ── ordering + composition ────────────────────────────────────────────────────
 
 def test_all_signals_fire_strongest_first():
@@ -113,13 +141,15 @@ def test_all_signals_fire_strongest_first():
         ],
         pending_decisions            = [ { "blocked_on_user": False } ],
         unanswered_inbound_questions = [ { "question_id": "q1" } ],
+        outstanding_delegations      = [ { "session_name": "cc-reviewer-x-1" } ],
     )
     assert v[ "work_owed" ] is True
     assert v[ "signals" ] == [
-        "todo_in_progress", "todo_unstarted", "pending_decision", "unanswered_inbound_question"
+        "todo_in_progress", "todo_unstarted", "pending_decision",
+        "unanswered_inbound_question", "outstanding_delegation"
     ]
-    # specifics carries all four counts
-    assert v[ "specifics" ].count( ";" ) == 3
+    # specifics carries all five counts
+    assert v[ "specifics" ].count( ";" ) == 4
 
 
 # ── build_poke_reason ─────────────────────────────────────────────────────────

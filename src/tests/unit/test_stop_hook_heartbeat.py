@@ -90,6 +90,10 @@ class TestRunHeartbeat:
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=None ) as vp, \
              patch( "lupin_cli.claude_code.hooks.stop.replay_task_state", return_value={ } ) as rt, \
              patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" ) as na, \
+             patch( "lupin_cli.claude_code.hooks.stop._gather_outstanding_delegations",
+                    return_value=[ ] ) as gd, \
+             patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
+                    return_value=[ ] ) as gq, \
              patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
                     return_value="claude.code@lupin.deepily.ai#sid" ):
             # owed_items_from_state + is_empty_state run REAL on the replayed
@@ -99,10 +103,12 @@ class TestRunHeartbeat:
             # asserted via self.mock_notify) — only the network call is cut.
             ev.EVENT_IDLE = "idle"
             ev.is_idle_transition.return_value = True
-            self.mock_events  = ev
-            self.mock_persona = vp
-            self.mock_replay  = rt
-            self.mock_notify  = na
+            self.mock_events      = ev
+            self.mock_persona     = vp
+            self.mock_replay      = rt
+            self.mock_notify      = na
+            self.mock_delegations = gd
+            self.mock_inbound     = gq
             yield
 
     # ── gate / fail-safe ──
@@ -248,6 +254,236 @@ class TestRunHeartbeat:
         out = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "heartbeat_emit_error" in [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
+
+    # ── v3 live signals (Rick 2026-06-09): manager delegations + worker inbound ──
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3 } )
+    def test_manager_with_alive_worker_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
+        """The manager bug fix: zero Task* items, one live spawned worker → poke."""
+        self.mock_delegations.return_value = [ { "session_name": "cc-reviewer-x-1", "session_id": "c1" } ]
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out[ "decision" ] == "block"
+        assert "1 live worker(s) still out" in out[ "reason" ]
+        _, kwargs = self.mock_events.emit_outcome.call_args
+        assert kwargs[ "work_owed" ] is True
+
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3 } )
+    def test_manager_all_workers_reaped_idles( self, mock_load, mock_read, mock_count ):
+        """All children reaped (gatherer returns []) → no delegation signal → idle path."""
+        self.mock_delegations.return_value = [ ]
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3 } )
+    def test_worker_with_open_inbound_dm_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
+        """The worker fix: an unhandled inbound assignment DM → poke to resume/finish."""
+        self.mock_inbound.return_value = [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ]
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out[ "decision" ] == "block"
+        assert "unanswered inbound question" in out[ "reason" ]
+        _, kwargs = self.mock_events.emit_outcome.call_args
+        assert kwargs[ "work_owed" ] is True
+
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3 } )
+    def test_oracle_log_carries_live_signal_counts( self, mock_load, mock_read, mock_count, mock_log ):
+        """Observability: the heartbeat_oracle log line carries both new counts."""
+        self.mock_delegations.return_value = [ ]
+        self.mock_inbound.return_value     = [ ]
+        _run_heartbeat( "sid", "/t.jsonl" )
+        oracle = [ c.kwargs[ "extra" ] for c in mock_log.call_args_list
+                   if c.kwargs[ "extra" ].get( "phase" ) == "heartbeat_oracle" ]
+        assert oracle and oracle[ 0 ][ "delegations" ] == 0 and oracle[ 0 ][ "open_inbound" ] == 0
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _gather_outstanding_delegations — manager-side live IO shell (v3)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestGatherOutstandingDelegations:
+
+    def _bridge_file( self, tmp_path, name, tmux ):
+        p = tmp_path / name
+        p.write_text( __import__( "json" ).dumps( { "tmux_session": tmux } ) )
+        return p
+
+    @patch( "lupin_cli.claude_code.hooks.stop.find_active_voice_persona_sessions" )
+    @patch( "lupin_mcp.session_spawner._read_manifest" )
+    def test_alive_child_returned( self, mock_manifest, mock_disc, tmp_path ):
+        from lupin_cli.claude_code.hooks.stop import _gather_outstanding_delegations
+        mock_manifest.return_value = [ { "session_name": "cc-reviewer-x-1" } ]
+        mock_disc.return_value     = [ ( self._bridge_file( tmp_path, "b1.json", "cc-reviewer-x-1" ), "c1", { } ) ]
+        out = _gather_outstanding_delegations( "mgr-sid" )
+        assert out == [ { "session_name": "cc-reviewer-x-1", "session_id": "c1" } ]
+
+    @patch( "lupin_cli.claude_code.hooks.stop.find_active_voice_persona_sessions" )
+    @patch( "lupin_mcp.session_spawner._read_manifest", return_value=[ ] )
+    def test_no_manifest_skips_bridge_scan( self, mock_manifest, mock_disc ):
+        """Workers (no manifest) pay one manifest read per Stop — no bridge scan."""
+        from lupin_cli.claude_code.hooks.stop import _gather_outstanding_delegations
+        assert _gather_outstanding_delegations( "worker-sid" ) == [ ]
+        mock_disc.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.find_active_voice_persona_sessions" )
+    @patch( "lupin_mcp.session_spawner._read_manifest" )
+    def test_dead_child_excluded( self, mock_manifest, mock_disc, tmp_path ):
+        """A manifest child with no live bridge (reaped/crashed) is NOT outstanding."""
+        from lupin_cli.claude_code.hooks.stop import _gather_outstanding_delegations
+        mock_manifest.return_value = [ { "session_name": "cc-reviewer-x-1" } ]
+        mock_disc.return_value     = [ ( self._bridge_file( tmp_path, "b1.json", "cc-OTHER-9" ), "z9", { } ) ]
+        assert _gather_outstanding_delegations( "mgr-sid" ) == [ ]
+
+    @patch( "lupin_cli.claude_code.hooks.stop.find_active_voice_persona_sessions" )
+    @patch( "lupin_mcp.session_spawner._read_manifest" )
+    def test_unreadable_or_non_dict_bridge_skipped( self, mock_manifest, mock_disc, tmp_path ):
+        from lupin_cli.claude_code.hooks.stop import _gather_outstanding_delegations
+        mock_manifest.return_value = [ { "session_name": "cc-reviewer-x-1" }, "not-a-dict", { } ]
+        listfile = tmp_path / "list.json"
+        listfile.write_text( "[]" )                              # parses, but not a dict
+        mock_disc.return_value = [
+            ( tmp_path / "absent.json", "a1", { } ),             # open fails → skipped
+            ( listfile, "a2", { } ),                             # non-dict → tmux None
+        ]
+        assert _gather_outstanding_delegations( "mgr-sid" ) == [ ]
+
+    @patch( "lupin_cli.claude_code.hooks.stop.find_active_voice_persona_sessions",
+            side_effect=RuntimeError( "discovery exploded" ) )
+    @patch( "lupin_mcp.session_spawner._read_manifest" )
+    def test_degrade_safe_on_any_error( self, mock_manifest, mock_disc ):
+        from lupin_cli.claude_code.hooks.stop import _gather_outstanding_delegations
+        mock_manifest.return_value = [ { "session_name": "cc-reviewer-x-1" } ]
+        assert _gather_outstanding_delegations( "mgr-sid" ) == [ ]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# _gather_unanswered_inbound_questions — worker-side live IO shell (v3)
+# ═════════════════════════════════════════════════════════════════════════════
+
+MY_SID = "6acfa341-1dcd-4240-96d5-9bc39ae58861"
+
+
+def _dm( qid, sender="7b76ad86", ts="2026-06-10T01:30:00+00:00", in_reply_to=None, with_md=True ):
+    md = { }
+    if qid:
+        md[ "question_id" ] = qid
+    if in_reply_to:
+        md[ "in_reply_to" ] = in_reply_to
+    return { "sender_session_id": sender, "ts": ts, "body": "x",
+             "metadata": ( md if with_md else None ) }
+
+
+class TestGatherUnansweredInbound:
+
+    def _run( self, entries, persona=None, monkeypatch=None ):
+        from lupin_cli.claude_code.hooks.stop import _gather_unanswered_inbound_questions
+        persona = persona if persona is not None else { "name": "mr radio" }
+        store   = MagicMock()
+        store.read.return_value = entries
+        with patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=persona ), \
+             patch( "lupin_mcp.commons_store.CommonsStore", return_value=store ) as cs:
+            out = _gather_unanswered_inbound_questions( MY_SID )
+        if entries is not None and persona and persona.get( "name" ):
+            cs.assert_called_once()
+            assert store.read.call_args[ 0 ][ 0 ] == "dm-mr_radio"
+        return out
+
+    def test_open_inbound_dm_is_owed( self ):
+        out = self._run( [ _dm( "q1" ) ] )
+        assert out == [ { "question_id": "q1", "ts": "2026-06-10T01:30:00+00:00" } ]
+
+    def test_broadened_rule_no_kind_required( self ):
+        """Rick's broadening: ANY inbound DM counts — no kind=question filter."""
+        entry = _dm( "q1" )
+        entry[ "metadata" ][ "kind" ] = "arbiter-ping"           # not a question
+        assert len( self._run( [ entry ] ) ) == 1
+
+    def test_handled_by_my_threaded_reply_not_owed( self ):
+        entries = [
+            _dm( "q1" ),
+            _dm( None, sender=MY_SID[ :8 ], in_reply_to="q1" ),  # my short-id reply
+        ]
+        assert self._run( entries ) == [ ]
+
+    def test_peer_reply_does_not_count_as_mine( self ):
+        """Handled = a threaded reply from THIS session — a third party's doesn't clear it."""
+        entries = [ _dm( "q1" ), _dm( None, sender="42954f0b", in_reply_to="q1" ) ]
+        assert len( self._run( entries ) ) == 1
+
+    def test_my_own_posts_are_not_inbound( self ):
+        assert self._run( [ _dm( "q9", sender=MY_SID[ :8 ] ) ] ) == [ ]
+
+    def test_qid_less_and_md_less_entries_untrackable( self ):
+        assert self._run( [ _dm( None ), _dm( None, with_md=False ), "not-a-dict" ] ) == [ ]
+
+    def test_tenure_floor_excludes_prior_holder_debt( self ):
+        """A prior persona-holder's unanswered brief must not poke this session."""
+        persona = { "name": "mr radio", "assigned_at": "2026-06-10T00:17:34+00:00" }
+        entries = [ _dm( "old", ts="2026-06-09T23:51:13+00:00" ),    # prior tenure
+                    _dm( "new", ts="2026-06-10T01:29:26+00:00" ) ]   # mine
+        out = self._run( entries, persona=persona )
+        assert [ e[ "question_id" ] for e in out ] == [ "new" ]
+
+    def test_missing_assigned_at_disables_floor( self ):
+        out = self._run( [ _dm( "old", ts="2020-01-01T00:00:00+00:00" ) ] )
+        assert len( out ) == 1                                   # bias-to-poke, cap-bounded
+
+    def test_no_persona_returns_empty( self ):
+        assert self._run( [ _dm( "q1" ) ], persona={ } ) == [ ]
+
+    def test_no_lupin_root_returns_empty( self, monkeypatch ):
+        from lupin_cli.claude_code.hooks.stop import _gather_unanswered_inbound_questions
+        monkeypatch.delenv( "LUPIN_ROOT", raising=False )
+        with patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona",
+                    return_value={ "name": "mr radio" } ):
+            assert _gather_unanswered_inbound_questions( MY_SID ) == [ ]
+
+    def test_degrade_safe_on_store_error( self ):
+        from lupin_cli.claude_code.hooks.stop import _gather_unanswered_inbound_questions
+        with patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona",
+                    return_value={ "name": "mr radio" } ), \
+             patch( "lupin_mcp.commons_store.CommonsStore",
+                    side_effect=RuntimeError( "store exploded" ) ):
+            assert _gather_unanswered_inbound_questions( MY_SID ) == [ ]
+
+
+class TestDmTopicFor:
+
+    def test_space_collapses_to_underscore( self ):
+        from lupin_cli.claude_code.hooks.stop import _dm_topic_for
+        assert _dm_topic_for( "mr radio" ) == "dm-mr_radio"
+
+    def test_lowercases_and_strips( self ):
+        from lupin_cli.claude_code.hooks.stop import _dm_topic_for
+        assert _dm_topic_for( " Tiberius " ) == "dm-tiberius"
+
+    def test_unicode_persona_survives( self ):
+        from lupin_cli.claude_code.hooks.stop import _dm_topic_for
+        assert _dm_topic_for( "María" ) == "dm-maría"
+
+
+class TestIsSameSession:
+
+    def test_prefix_tolerant_both_directions_and_falsy( self ):
+        from lupin_cli.claude_code.hooks.stop import _is_same_session
+        assert _is_same_session( MY_SID[ :8 ], MY_SID ) is True
+        assert _is_same_session( MY_SID, MY_SID[ :8 ] ) is True
+        assert _is_same_session( MY_SID, MY_SID ) is True
+        assert _is_same_session( "7b76ad86", MY_SID ) is False
+        assert _is_same_session( None, MY_SID ) is False
+        assert _is_same_session( MY_SID, "" ) is False
 
 
 # ═════════════════════════════════════════════════════════════════════════════

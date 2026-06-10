@@ -28,6 +28,10 @@ this oracle is the "else" branch after no fresh hold):
     3. Pending-Decisions that are NOT blocked on the user
     4. Unanswered INBOUND questions (expect_reply DMs addressed to you that
        you have not yet answered — work you owe a peer)
+    5. Outstanding delegations (2026-06-09, Rick): spawned workers of yours
+       that are STILL ALIVE and not yet reaped — a manager supervising a live
+       crew owes review/reap duty even with zero Task* items filed, so it must
+       never idle-announce while workers are out
 
 NOTE on signal #4 interpretation: "open expect_reply DM" (§0 #3) is read here
 as an *inbound* question you owe a reply to (⇒ work owed ⇒ poke). An
@@ -102,13 +106,15 @@ def _actionable_pending_decisions( pending_decisions ):
 
 
 def evaluate_work_owed( todo_items=None, pending_decisions=None,
-                        unanswered_inbound_questions=None ):
+                        unanswered_inbound_questions=None,
+                        outstanding_delegations=None ):
     """
     Pure work-owed verdict over injected state (§0 step 3).
 
     Requires:
-        - todo_items, pending_decisions, unanswered_inbound_questions are each
-          an iterable of dicts, or None (treated as empty)
+        - todo_items, pending_decisions, unanswered_inbound_questions and
+          outstanding_delegations are each an iterable of dicts, or None
+          (treated as empty)
 
     Ensures:
         - Returns a verdict dict:
@@ -118,16 +124,23 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
         - work_owed is True iff at least one signal fired
         - signals order is fixed strongest-first:
           todo_in_progress, todo_unstarted, pending_decision,
-          unanswered_inbound_question
+          unanswered_inbound_question, outstanding_delegation
+        - outstanding_delegation fires iff ≥1 truthy entry is injected — an
+          ALIVE, un-reaped spawned worker is owed work (the manager still owes
+          review/reap); all-dead/reaped ⇒ empty ⇒ no signal ⇒ idle allowed.
+          The live gathering (manifest ∩ live bridges) is the CALLER's IO, not
+          this oracle's (pure-core discipline unchanged)
         - Never fetches live data; never raises on well-formed list input
     """
     todo_items                   = todo_items or [ ]
     pending_decisions            = pending_decisions or [ ]
     unanswered_inbound_questions = unanswered_inbound_questions or [ ]
+    outstanding_delegations      = outstanding_delegations or [ ]
 
     in_progress, unstarted = _actionable_todos( todo_items )
     actionable_decisions   = _actionable_pending_decisions( pending_decisions )
     unanswered             = [ q for q in unanswered_inbound_questions if q ]
+    outstanding            = [ d for d in outstanding_delegations if d ]
 
     signals   = [ ]
     specifics = [ ]
@@ -144,6 +157,9 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
     if unanswered:
         signals.append( "unanswered_inbound_question" )
         specifics.append( f"{len( unanswered )} unanswered inbound question(s) awaiting your reply" )
+    if outstanding:
+        signals.append( "outstanding_delegation" )
+        specifics.append( f"{len( outstanding )} live worker(s) still out" )
 
     return {
         "work_owed" : bool( signals ),
@@ -180,7 +196,7 @@ def quick_smoke_test():
     assert v[ "signals" ] == [ ],                "empty state should fire no signals"
     assert v[ "specifics" ] == NO_WORK_SPECIFICS
 
-    # All four signals fire → strongest-first ordering
+    # All five signals fire → strongest-first ordering
     v = evaluate_work_owed(
         todo_items = [
             { "status": TODO_IN_PROGRESS, "owned_by_me": True },
@@ -190,13 +206,25 @@ def quick_smoke_test():
         ],
         pending_decisions            = [ { "blocked_on_user": False }, { "blocked_on_user": True } ],
         unanswered_inbound_questions = [ { "question_id": "q1" } ],
+        outstanding_delegations      = [ { "session_name": "cc-reviewer-x-1" } ],
     )
     assert v[ "work_owed" ] is True
     assert v[ "signals" ] == [
-        "todo_in_progress", "todo_unstarted", "pending_decision", "unanswered_inbound_question"
+        "todo_in_progress", "todo_unstarted", "pending_decision",
+        "unanswered_inbound_question", "outstanding_delegation"
     ], "signal ordering drift"
+    assert "1 live worker(s) still out" in v[ "specifics" ]
 
-    reason = build_poke_reason( v )
+    # Delegation-ONLY manager: no Task* items, one live worker ⇒ owed (the bug fix)
+    v = evaluate_work_owed( outstanding_delegations=[ { "session_name": "cc-reviewer-x-1" } ] )
+    assert v[ "work_owed" ] is True and v[ "signals" ] == [ "outstanding_delegation" ]
+
+    # All workers reaped (falsy entries filtered) ⇒ idle allowed
+    v = evaluate_work_owed( outstanding_delegations=[ None, { } ] )
+    assert v[ "work_owed" ] is False
+
+    reason = build_poke_reason( evaluate_work_owed(
+        todo_items=[ { "status": TODO_IN_PROGRESS, "owned_by_me": True } ] ) )
     assert reason.startswith( "Do not stop yet" )
     assert "work_owed: false" in reason
 
