@@ -74,6 +74,39 @@ def replay_task_state( transcript_path, _iter=iter_tool_uses ):
     return state
 
 
+def replay_task_subjects( transcript_path, _iter=iter_tool_uses ):
+    """
+    Replay the session's TaskCreate calls into { taskId(str): subject(str) }.
+
+    PURE — no I/O beyond the injected iterator (which never raises). Additive
+    companion to replay_task_state: same SEQUENTIAL-ordinal model (the Nth
+    TaskCreate ⇒ taskId str(N)), so the ids returned here align 1:1 with
+    replay_task_state's keys. Lets the Stop-hook poke breadcrumb name the OWED
+    task items by subject without changing replay_task_state's shape (and thus
+    without touching its consumers / the pure oracle).
+
+    Requires:
+        - transcript_path is a path-like / string / None
+        - _iter is the tool-use iterator (injectable for tests)
+
+    Ensures:
+        - Returns { taskId(str): subject(str) } for every TaskCreate that
+          carried a non-empty `subject` (the tool's required title field)
+        - A TaskCreate with a missing/blank subject is skipped (its ordinal is
+          still consumed, so later ids stay aligned with replay_task_state)
+        - Empty / missing transcript → {}
+        - NEVER raises
+    """
+    subjects = { }
+    next_ord = 0
+    for name, inp, _id in _iter( transcript_path, names={ TASK_CREATE } ):
+        next_ord += 1
+        subject = inp.get( "subject" )
+        if subject:
+            subjects[ str( next_ord ) ] = subject
+    return subjects
+
+
 def owed_items_from_state( state ):
     """
     Derive the work-owed `todo_items` list from an already-replayed task state.

@@ -31,6 +31,33 @@ def _iter_from( events ):
     return _it
 
 
+# ── replay_task_subjects (poke-abstract receipts, 2026-06-10) ──────────────────
+
+def test_subjects_captured_by_creation_ordinal():
+    it = _iter_from( [
+        ( "TaskCreate", { "subject": "Wire the pane" }, "c1" ),
+        ( "TaskCreate", { "subject": "Add the splitter" }, "c2" ),
+    ] )
+    assert ts.replay_task_subjects( "x", _iter=it ) == {
+        "1": "Wire the pane", "2": "Add the splitter",
+    }
+
+
+def test_subjects_blank_or_missing_skipped_but_ordinal_consumed():
+    # Task #1 has no subject (skipped); #2's subject still keys to ordinal "2"
+    # — alignment with replay_task_state's ids is preserved.
+    it = _iter_from( [
+        ( "TaskCreate", { }, "c1" ),
+        ( "TaskCreate", { "subject": "Second" }, "c2" ),
+        ( "TaskCreate", { "subject": "" }, "c3" ),
+    ] )
+    assert ts.replay_task_subjects( "x", _iter=it ) == { "2": "Second" }
+
+
+def test_subjects_empty_transcript_empty_dict():
+    assert ts.replay_task_subjects( "x", _iter=_iter_from( [ ] ) ) == { }
+
+
 # ── replay_task_state ─────────────────────────────────────────────────────────
 
 def test_create_assigns_sequential_pending_ids():

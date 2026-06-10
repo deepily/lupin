@@ -35,6 +35,7 @@ if _src_path not in sys.path:
 from lupin_cli.claude_code.hooks.stop import (
     main, _run_heartbeat, _emit_genuine_idle, _notify_cap_reached,
     _poke_sentence, _announce_poke, _has_pending_voice,
+    _compose_poke_abstract, _build_poke_abstract_safe, _format_inbound, _receipt_lines,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     DECLARED_OWED_REASON, OUTCOME_POKE, OUTCOME_NOT_OWED,
@@ -152,7 +153,7 @@ class TestRunHeartbeat:
         # §4 breadcrumb rides the poke: ONE low-pri card notify with specifics
         self.mock_notify.assert_called_once()
         crumb = self.mock_notify.call_args[ 0 ][ 0 ]
-        assert crumb.message  == "A worker stopped — 1 owed Task item, poked."
+        assert crumb.message  == "A worker stopped — 1 owed item, poked."
         assert crumb.priority == NotificationPriority.LOW
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
@@ -402,7 +403,7 @@ class TestGatherUnansweredInbound:
 
     def test_open_inbound_dm_is_owed( self ):
         out = self._run( [ _dm( "q1" ) ] )
-        assert out == [ { "question_id": "q1", "ts": "2026-06-10T01:30:00+00:00" } ]
+        assert out == [ { "question_id": "q1", "ts": "2026-06-10T01:30:00+00:00", "sender": "7b76ad86" } ]
 
     def test_broadened_rule_no_kind_required( self ):
         """Rick's broadening: ANY inbound DM counts — no kind=question filter."""
@@ -752,7 +753,7 @@ class TestMainSpeakerphonePokeMatrix:
             assert emitted[ "decision" ] == "block"             # the poke owns the stop
             mock_async.assert_called_once()                     # the breadcrumb fired
             crumb = mock_async.call_args[ 0 ][ 0 ]
-            assert crumb.message  == "Tiberius stopped — 2 owed Task items, poked."
+            assert crumb.message  == "Tiberius stopped — 2 owed items, poked."
             assert crumb.priority == NotificationPriority.LOW   # silent card bubble — no double-speak
 
 
@@ -763,17 +764,17 @@ class TestMainSpeakerphonePokeMatrix:
 class TestPokeSentence:
 
     def test_singular_count( self ):
-        assert _poke_sentence( "Krishna", 1 ) == "Krishna stopped — 1 owed Task item, poked."
+        assert _poke_sentence( "Krishna", 1 ) == "Krishna stopped — 1 owed item, poked."
 
     def test_plural_count( self ):
-        assert _poke_sentence( "Krishna", 2 ) == "Krishna stopped — 2 owed Task items, poked."
+        assert _poke_sentence( "Krishna", 2 ) == "Krishna stopped — 2 owed items, poked."
 
     def test_zero_count_self_declared( self ):
         """A hold-declared poke has no oracle specifics to count."""
         assert _poke_sentence( "Krishna", 0 ) == "Krishna stopped — work owed (self-declared), poked."
 
     def test_missing_persona( self ):
-        assert _poke_sentence( None, 3 ) == "A worker stopped — 3 owed Task items, poked."
+        assert _poke_sentence( None, 3 ) == "A worker stopped — 3 owed items, poked."
 
 
 class TestAnnouncePoke:
@@ -785,7 +786,7 @@ class TestAnnouncePoke:
         _announce_poke( "abc12345", "Rio", 2 )
         mock_notify.assert_called_once()
         request = mock_notify.call_args[ 0 ][ 0 ]
-        assert request.message   == "Rio stopped — 2 owed Task items, poked."
+        assert request.message   == "Rio stopped — 2 owed items, poked."
         assert request.priority  == NotificationPriority.LOW
         assert request.sender_id == "claude.code@lupin.deepily.ai#abc12345"
 
@@ -798,6 +799,124 @@ class TestAnnouncePoke:
         _announce_poke( "abc12345", "Rio", 2 )
         mock_log.assert_called_once()
         assert mock_log.call_args[ 1 ][ "extra" ][ "phase" ] == "poke_announce_error"
+
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
+            return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" )
+    def test_uses_provided_receipts_abstract( self, mock_notify, mock_sender ):
+        _announce_poke( "abc12345", "Rio", 2, abstract="RECEIPTS HERE" )
+        assert mock_notify.call_args[ 0 ][ 0 ].abstract == "RECEIPTS HERE"
+
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
+            return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" )
+    def test_none_abstract_falls_back_to_generic( self, mock_notify, mock_sender ):
+        _announce_poke( "abc12345", "Rio", 2 )
+        assert mock_notify.call_args[ 0 ][ 0 ].abstract == "Heartbeat: stopped with work owed — self-poke fired."
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# §4 poke-abstract receipts (Rick 2026-06-10) — compose / format / builder
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestComposePokeAbstract:
+
+    def test_full_receipts_all_sections( self ):
+        out = _compose_poke_abstract(
+            { "signals": [ "todo_in_progress", "outstanding_delegation", "unanswered_inbound_question" ] },
+            [ "Subj A", "Subj B" ],
+            [ { "session_name": "wise-penguin" } ],
+            [ { "sender": "7b76ad86", "question_id": "q1234567" } ],
+            "Do not stop yet.",
+        )
+        assert out.startswith( "Heartbeat: stopped with work owed — self-poke fired." )
+        assert "Signals (strongest first): todo_in_progress, outstanding_delegation, unanswered_inbound_question" in out
+        assert "• Subj A" in out and "• Subj B" in out
+        assert "• wise-penguin" in out
+        assert "from 7b76ad86 (qid q1234567)" in out
+        assert "Poke text injected into the worker:" in out
+        assert "Do not stop yet." in out
+
+    def test_none_verdict_no_referents_just_header( self ):
+        out = _compose_poke_abstract( None, [ ], [ ], [ ], None )
+        assert out == "Heartbeat: stopped with work owed — self-poke fired."
+
+    def test_delegation_name_falls_back_session_id_then_placeholder( self ):
+        out = _compose_poke_abstract( { "signals": [ ] }, [ ],
+                                      [ { "session_id": "sid-1" }, { } ], [ ], None )
+        assert "• sid-1" in out      # session_name absent → session_id
+        assert "• ?" in out          # both absent → placeholder
+
+    def test_list_truncation_plus_n_more( self ):
+        out = _compose_poke_abstract( { "signals": [ ] }, [ f"t{i}" for i in range( 12 ) ], [ ], [ ], None )
+        assert "…+4 more" in out     # 12 − 8 shown
+        assert "• t0" in out
+        assert "• t8" not in out     # beyond the 8-item cap
+
+    def test_abstract_capped_at_ceiling( self ):
+        out = _compose_poke_abstract( { "signals": [ ] }, [ ], [ ], [ ], "x" * 9000 )
+        assert len( out ) <= 4000
+        assert out.endswith( "…" )
+
+
+class TestFormatInbound:
+
+    def test_sender_and_qid_shortened( self ):
+        assert _format_inbound( { "sender": "abcdef12-xyz", "question_id": "q1234567890" } ) \
+            == "from abcdef12-xyz (qid q1234567)"
+
+    def test_missing_sender_unknown( self ):
+        assert _format_inbound( { "question_id": "q1" } ) == "from unknown (qid q1)"
+
+    def test_missing_qid_placeholder( self ):
+        assert _format_inbound( { "sender": "s" } ) == "from s (qid ?)"
+
+    def test_non_str_qid_placeholder( self ):
+        assert _format_inbound( { "sender": "s", "question_id": 12345 } ) == "from s (qid ?)"
+
+
+class TestReceiptLines:
+
+    def test_no_truncation_under_cap( self ):
+        assert _receipt_lines( "L:", [ "a", "b" ] ) == [ "L:", "  • a", "  • b" ]
+
+    def test_truncation_over_cap( self ):
+        lines = _receipt_lines( "L:", [ str( i ) for i in range( 10 ) ] )
+        assert lines[ 0 ] == "L:"
+        assert lines[ -1 ] == "  • …+2 more"     # 10 − 8
+
+
+class TestBuildPokeAbstractSafe:
+
+    def test_success_owed_subjects_with_fallback( self ):
+        task_state = { "1": "in_progress", "2": "completed", "3": "pending" }
+        result     = { "hook_output": { "reason": "POKE TEXT" } }
+        with patch( "lupin_cli.claude_code.hooks.stop.replay_task_subjects",
+                    return_value={ "1": "First subj" } ):
+            out = _build_poke_abstract_safe(
+                { "signals": [ "todo_in_progress" ] }, task_state, "/t.jsonl", [ ], [ ], result )
+        assert "First subj" in out      # owed task 1 has a subject
+        assert "task 3" in out           # owed task 3 subject missing → fallback
+        assert "POKE TEXT" in out
+        assert "completed" not in out    # task 2 is terminal → not owed → not listed
+
+    def test_owed_ids_empty_skips_subject_replay( self ):
+        with patch( "lupin_cli.claude_code.hooks.stop.replay_task_subjects" ) as rps:
+            out = _build_poke_abstract_safe(
+                { "signals": [ "outstanding_delegation" ] }, { }, "/t.jsonl",
+                [ { "session_name": "w1" } ], [ ], { "hook_output": { "reason": "r" } } )
+        rps.assert_not_called()          # delegation-only poke → no transcript re-read
+        assert "• w1" in out
+
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    def test_compose_failure_returns_none_and_logs( self, mock_log ):
+        with patch( "lupin_cli.claude_code.hooks.stop._compose_poke_abstract",
+                    side_effect=RuntimeError( "boom" ) ):
+            out = _build_poke_abstract_safe(
+                { "signals": [ ] }, { "1": "in_progress" }, "/t.jsonl", [ ], [ ],
+                { "hook_output": { "reason": "r" } } )
+        assert out is None               # degrade-safe → caller falls back to generic
+        assert mock_log.call_args[ 1 ][ "extra" ][ "phase" ] == "poke_abstract_error"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
