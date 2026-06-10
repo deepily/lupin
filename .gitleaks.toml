@@ -1,0 +1,55 @@
+# .gitleaks.toml — secret-scan gate config (authored 2026-06-10, GCP-M2, Rio ⚡).
+#
+# PURPOSE: make `secret-scan-gate.sh` (gitleaks) a MEANINGFUL build-context gate by
+# allow-listing ONLY documented documentation/test EXAMPLE credentials — which are
+# illustrative placeholders, never live secrets. Every real-secret rule (openai-api-key,
+# aws, gcp-*, private-key, slack, stripe, etc.) stays FULLY ENFORCED everywhere via
+# `useDefault = true`. Each allowlist below is rule-scoped + path/pattern-scoped so a
+# REAL secret — even in a doc or test file — still trips the gate. This is a scoping
+# correction, NOT a bypass (ratified by Tiberius 2026-06-10; auditable per-entry).
+#
+# Origin: the gate's first real run (2026-06-10) flagged 125 findings = 1 real
+# (a live OpenAI key in an ephemera notebook — rotated + scrubbed + ignorelisted;
+# see .gitleaksignore) + 124 doc/test examples (this file). Design of record:
+# src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.10-m2-arbiter-ride-along-and-vm-cutover.md §10
+
+[extend]
+useDefault = true
+
+# --- Allowlist 1: documentation example credentials -------------------------
+# Markdown docs (API refs, websocket/auth guides, R&D notes) carry illustrative
+# `curl -H "Authorization: Bearer <token>"` and `api_key: "..."` examples using
+# mock tokens (mock_token_email_*, <token>, ${VAR}). Scoped to the two example-prone
+# rules; real-secret rules remain enforced in .md files.
+[[allowlists]]
+description = "Documentation example Bearer tokens / api-keys in Markdown + R&D docs"
+targetRules = ["curl-auth-header", "generic-api-key"]
+paths = [
+  '''.*\.md$''',
+]
+
+# --- Allowlist 2: test fixtures / mock credentials --------------------------
+# Hard-coded test doubles in test code + smoke scripts (e.g. test_kagi_api_key_123,
+# self.test_api_key = "..."). Same two rules only.
+[[allowlists]]
+description = "Mock credentials in test files + smoke scripts"
+targetRules = ["curl-auth-header", "generic-api-key"]
+paths = [
+  '''.*/tests?/.*''',
+  '''.*/test_[^/]*\.py$''',
+  '''.*_test\.py$''',
+  '''.*smoke_test\.sh$''',
+]
+
+# --- Allowlist 3: curl docstring examples embedded in source modules --------
+# A router/source docstring may show `curl -H "Authorization: Bearer mock_token_…"`.
+# condition=AND: allowed ONLY when the curl-auth-header rule fires AND the captured
+# token matches a known PLACEHOLDER shape — so a REAL bearer token in source still trips.
+[[allowlists]]
+description = "curl docstring examples with placeholder bearer tokens in source"
+condition = "AND"
+targetRules = ["curl-auth-header"]
+regexTarget = "secret"
+regexes = [
+  '''(?i)^(mock_token|mock_|test_|your_|example|placeholder|<[^>]+>|\$\{?[a-z_]+\}?|redacted|changeme|x{3,}).*''',
+]

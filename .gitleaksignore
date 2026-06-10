@@ -1,0 +1,15 @@
+# .gitleaksignore — specific KNOWN + REMEDIATED finding fingerprints to skip.
+# Format: <commit>:<file>:<rule>:<startline>  (gitleaks auto-loads this file)
+#
+# Historical OpenAI API key committed in an ephemera notebook (commit e4ee364f,
+# 2025-06-28). Remediation (2026-06-10, GCP-M2):
+#   - The key was ROTATED on the OpenAI account (Rick) → the historical copy is DEAD.
+#   - The working-tree copy was SCRUBBED to a placeholder (held edit).
+#   - It NEVER entered any image: src/ephemera is .dockerignore'd AND omitted from
+#     the Dockerfile COPY list.
+# A git HISTORY purge (git-filter-repo) of the dead key is a BACKLOGGED Rick-decision
+# (plan §10) — NOT actioned here. These two fingerprints are the immutable
+# historical-commit occurrences; ignoring them is tracking a remediated secret,
+# not suppressing a live one (every real-secret rule stays enforced via .gitleaks.toml).
+e4ee364fcadaaa4bf0adab5f8b889539da58325f:src/ephemera/notebooks/utterance-embeddings.ipynb:openai-api-key:20
+e4ee364fcadaaa4bf0adab5f8b889539da58325f:src/ephemera/notebooks/utterance-embeddings.ipynb:openai-api-key:56
