@@ -30,15 +30,16 @@ import { redirectToLoginIfUnauthenticated } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
+import type { ServerSenderHydrationRecord } from "./stores";
 import {
   createNotificationsListRenderer,
   createJobsPaneRenderer,
   createActionRequiredRenderer,
   createTtsChromeRenderer,
   createConversationModePinRenderer,
-  createFocusTrayRenderer,
   createPersonaModalRenderer,
   createSenderCardRecorderRenderer,
+  createSessionStripRenderer,
   configureMetaDisplayCap,
 } from "./render";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
@@ -308,29 +309,22 @@ function bootMultiplexer(): void {
   });
   conversationModePinRenderer.mount(mountEl);
 
-  // Phase 6c Node B Step B5 — focus-tray renderer mounts AFTER
-  // conversationModePinRenderer per canonical boot order. Mount root must
-  // contain BOTH `#focus-mode-toggle` (inside `#notifications-pane`) and
-  // `#focus-tray` (sibling of `#notifications-pane`); `<main.container>`
-  // is the natural parent of both. Subscribes to store_senders_changed
-  // and writes data-focus-hidden on non-pinned sender cards when focus
-  // mode is ON.
-  const focusTrayRenderer = createFocusTrayRenderer({
-    eventBus,
-    stores : { senders: stores.senders },
-  });
-  const focusTrayMountEl = document.querySelector<HTMLElement>("main.container");
-  if (focusTrayMountEl === null) throw new Error("multiplexer: <main.container> not found");
-  focusTrayRenderer.mount(focusTrayMountEl);
+  // WP2 retire (2026-06-10): FocusTrayRenderer is RETIRED — the CC-session
+  // strip's icon-click focus supersedes the interim conversation-mode tray
+  // (Tiberius ruling, one-mechanism rule). The strip is the sole writer of
+  // data-focus-hidden now (see SessionStripRenderer). We still resolve
+  // <main.container> here for PersonaModalRenderer (#persona-modal-portal
+  // lives at main level).
+  const mainContainerEl = document.querySelector<HTMLElement>("main.container");
+  if (mainContainerEl === null) throw new Error("multiplexer: <main.container> not found");
 
-  // Phase 6c Node A Step A5 — persona-modal renderer mounts AFTER
-  // focusTrayRenderer per canonical boot order. Uses the same
-  // <main.container> root because #persona-modal-portal lives at main level.
+  // Phase 6c Node A Step A5 — persona-modal renderer. Uses the <main.container>
+  // root because #persona-modal-portal lives at main level.
   const personaModalRenderer = createPersonaModalRenderer({
     eventBus,
     stores : { senders: stores.senders },
   });
-  personaModalRenderer.mount(focusTrayMountEl);
+  personaModalRenderer.mount(mainContainerEl);
 
   // Phase 6c Node C Step C5 — sender-card recorder renderer mounts LAST.
   // Per F-Arnold-C4 + Recon-C7: AuthManager must resolve before this renderer
@@ -364,6 +358,35 @@ function bootMultiplexer(): void {
   // each lane also updates bootCompletePayload.handlers + the AC9 console line.
   // ===============================================================
 
+  // Lane B WP2 — CC-session strip renderer. Mounts on <main.container> (like
+  // FocusTrayRenderer) because the renderer queries #cc-session-strip AND its
+  // child controls as descendants of root — it cannot mount on
+  // #cc-session-strip itself (querySelector can't match the root element).
+  // Store-action + addEventListener delegation only (no inline onclick).
+  const sessionStripRenderer = createSessionStripRenderer({
+    eventBus,
+    stores : { strip: stores.sessionStrip },
+  });
+  const sessionStripMountEl = document.querySelector<HTMLElement>("main.container");
+  if (sessionStripMountEl === null) throw new Error("multiplexer: <main.container> not found");
+  sessionStripRenderer.mount(sessionStripMountEl);
+
+  // Lane B WP9 — cold-reload lineage hydration. The server resolves
+  // voice_persona + manager_persona per sender (notifications.py
+  // get_visible_senders), so on a fresh page load we hydrate the strip store
+  // from that snapshot — existing sessions' icons + manager-lineage badges
+  // paint on first load instead of waiting for the next live
+  // voice_persona_assigned. Floated non-blocking (mirrors the config fetch);
+  // boundary .catch avoids an unhandled rejection — hydration is best-effort,
+  // live events still populate the strip. Skipped when no email resolves yet.
+  const hydrationEmail = authManager.getCurrentUserEmail();
+  if (hydrationEmail !== null && hydrationEmail !== "") {
+    apiClient
+      .get<ServerSenderHydrationRecord[]>(`/api/notifications/senders-visible/${encodeURIComponent(hydrationEmail)}`)
+      .then(records => stores.sessionStrip.hydrate(records))
+      .catch(() => { /* best-effort cold-reload hydration; live events still populate */ });
+  }
+
   attachLifecycleListeners();
 
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
@@ -389,9 +412,9 @@ function bootMultiplexer(): void {
       actionRequiredRenderer      : "mounted",
       ttsChromeRenderer           : "mounted",
       conversationModePinRenderer : "mounted",
-      focusTrayRenderer           : "mounted",
       personaModalRenderer        : "mounted",
       senderCardRecorderRenderer  : "mounted",
+      sessionStripRenderer        : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -409,9 +432,9 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] actionRequiredRenderer:mounted");
   console.log("[multiplexer] ttsChromeRenderer:mounted");
   console.log("[multiplexer] conversationModePinRenderer:mounted");
-  console.log("[multiplexer] focusTrayRenderer:mounted");
   console.log("[multiplexer] personaModalRenderer:mounted");
   console.log("[multiplexer] senderCardRecorderRenderer:mounted");
+  console.log("[multiplexer] sessionStripRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

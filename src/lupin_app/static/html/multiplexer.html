@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="/static/css/multiplexer/focus-tray.css">
     <link rel="stylesheet" href="/static/css/multiplexer/persona-modal.css">
     <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/session-strip.css">
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
 </head>
@@ -21,16 +22,30 @@
     <main class="container">
         <h1>Multiplexer</h1>
 
+        <!-- WP2 (parity bridge) CC-session strip mount point. Inert until
+             SessionStripRenderer is wired in boot.ts (deferred thin step
+             against Lane A's mount-slot convention); the renderer lifts the
+             data-phase6-pending markers, drives #cc-session-strip visibility,
+             and keyed-merges icons into #cc-strip-icons. -->
+        <div id="cc-session-strip" class="cc-session-strip"
+             data-testid="multiplexer-cc-session-strip"
+             data-phase6-pending="true" hidden>
+            <div id="cc-strip-icons"
+                 data-testid="multiplexer-cc-strip-icons"></div>
+            <button id="cc-strip-toggle" type="button" class="cc-strip-toggle"
+                    data-testid="multiplexer-cc-strip-focus-toggle"
+                    data-phase6-pending="true" data-focus-active="false">👁 Focus</button>
+            <button id="cc-hide-inactive-toggle" type="button" class="cc-strip-toggle"
+                    data-testid="multiplexer-cc-hide-inactive-toggle"
+                    data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
+        </div>
+
         <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
         <section id="notifications-pane" class="notifications-pane"
                  data-testid="multiplexer-notifications-pane">
-            <!-- Phase 6c Node B mount point (Step B1): focus-mode toggle at
-                 top of notifications-pane. FocusTrayRenderer lifts the hidden
-                 + data-phase6-pending markers when it mounts; until then the
-                 toggle is inert. -->
-            <button id="focus-mode-toggle" type="button"
-                    data-testid="multiplexer-focus-mode-toggle"
-                    data-phase6-pending="true" hidden>Focus mode OFF</button>
+            <!-- WP2 retire (2026-06-10): the #focus-mode-toggle (FocusTrayRenderer)
+                 was removed — the CC-session strip's focus toggle (#cc-strip-toggle,
+                 above) supersedes it. -->
             <!-- D-L: action-required widgets render here, ABOVE sender cards -->
             <div id="action-required-section"
                  data-testid="multiplexer-action-required-section"></div>
@@ -56,12 +71,9 @@
                  data-testid="multiplexer-tts-pane"
                  data-phase6-pending="true"></section>
 
-        <!-- Phase 6c Node B mount point (Step B1): focus-tray container.
-             FocusTrayRenderer populates this with .focus-tray-row buttons
-             when focus mode is active; lifts hidden + data-phase6-pending
-             when it mounts. -->
-        <aside id="focus-tray" data-testid="multiplexer-focus-tray"
-               data-phase6-pending="true" hidden></aside>
+        <!-- WP2 retire (2026-06-10): #focus-tray (FocusTrayRenderer) removed —
+             the CC-session strip supersedes the interim focus tray. -->
+
 
         <!-- Phase 6c Node A mount point (Step A5): persona-modal portal.
              PersonaModalRenderer appends one <div popover> per sender with a

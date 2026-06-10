@@ -1,24 +1,32 @@
 /* ============================================================================
-   Multiplexer Phase 6c Node B — focus-tray stylesheet.
+   Multiplexer focus-flash + focus-hidden stylesheet.
+
+   HISTORY: this file was Phase 6c Node B's focus-tray stylesheet. The
+   FocusTrayRenderer it styled was RETIRED (WP2 parity bridge, 2026-06-10) —
+   the CC-session strip's icon-click focus supersedes the interim tray
+   (one-mechanism rule, Tiberius ruling). The dead `#focus-mode-toggle` /
+   `#focus-tray` / `.focus-tray-*` rules were removed. The file SURVIVES (kept
+   under this name to preserve the AC-B15 SSOT invariant) for the two rules
+   other components still depend on:
 
    Owns:
    - `@keyframes focus-flash` definition (SSOT per AC-B15 hard-gate). The
      animation REFERENCE lives in conversation-mode-pin.css (D-CSS); D-CSS
      has ZERO `@keyframes focus-flash` declarations. AC-B15 grep-gate
-     enforces this invariant at Node B code-write time.
-   - `#focus-mode-toggle` styling (the toggle button at the top of
-     notifications-pane)
-   - `#focus-tray` + descendants styling (the aside list of focus-hidden
-     senders)
-   - `.sender-card[data-focus-hidden="true"]` styling (display:none preferred
-     over visibility:hidden per AC-B12 perf gate — display:none keeps the
-     hidden cards out of the layout/paint tree)
+     enforces this invariant — the keyframe stays HERE.
+   - `.sender-card[data-focus-hidden="true"]` styling (display:none per the
+     AC-B12 perf gate). The CC-session strip's focus mode is now the sole
+     writer of data-focus-hidden (see SessionStripRenderer).
 
    Scope-leak protection (matching the Phase 6a/6b/6c CSS file pattern):
    - NO global selectors (*, html, body, :root) — fail-build rule in
-     .stylelintrc.json override for this file
-   - All rules scoped under #focus-mode-toggle / #focus-tray /
-     .focus-tray-* / .sender-card[data-focus-hidden] selectors
+     .stylelintrc.json override for this file.
+
+   FOLLOW-ON (integration cleanup, flagged to Tiberius): rename this file to
+   reflect its surviving contents + relocate the two rules to their natural
+   owners (keyframe → conversation-mode-pin.css, data-focus-hidden →
+   session-strip.css). Deferred because it touches the AC-B15 grep-gate
+   expectation + the .stylelintrc.json override + the multiplexer.html <link>.
    ============================================================================ */
 
 
@@ -49,98 +57,13 @@
 
 
 /* ============================================================================
-   Focus-mode toggle button
-   ============================================================================ */
-
-#focus-mode-toggle {
-    display       : inline-block;
-    margin        : 8px 0;
-    padding       : 6px 14px;
-    background    : #f8f9fa;
-    border        : 1px solid #ced4da;
-    border-radius : 4px;
-    font-size     : 13px;
-    color         : #212529;
-    cursor        : pointer;
-}
-
-#focus-mode-toggle:hover {
-    background : #e9ecef;
-}
-
-#focus-mode-toggle[aria-pressed="true"] {
-    background : #4a90e2;
-    color      : #fff;
-    border-color: #2c6cb2;
-}
-
-#focus-mode-toggle:disabled {
-    opacity : 0.55;
-    cursor  : not-allowed;
-}
-
-
-/* ============================================================================
-   Focus tray container + rows
-
-   The tray surfaces senders that are currently hidden by focus-mode so the
-   user can preview activity without leaving focus on the pinned card. Each
-   row is a button; clicking exits focus mode (per OSQ-B-2 ratification).
-   ============================================================================ */
-
-#focus-tray {
-    display       : flex;
-    flex-direction: column;
-    gap           : 4px;
-    margin-top    : 12px;
-    padding       : 8px;
-    background    : #f8f9fa;
-    border        : 1px solid #dee2e6;
-    border-radius : 4px;
-}
-
-.focus-tray-list {
-    display       : flex;
-    flex-direction: column;
-    gap           : 4px;
-}
-
-.focus-tray-row {
-    display       : flex;
-    align-items   : center;
-    gap           : 8px;
-    padding       : 6px 10px;
-    background    : #fff;
-    border        : 1px solid #e9ecef;
-    border-radius : 3px;
-    font-size     : 13px;
-    cursor        : pointer;
-    text-align    : left;
-    /* per F-Arnold-B-Stage2-2: persona-color via currentColor fallback so
-       a personaless sender doesn't crash to undefined. */
-    color         : var(--persona-color, currentColor);
-}
-
-.focus-tray-row:hover {
-    background : #f1f3f5;
-}
-
-.focus-tray-empty {
-    padding    : 8px 10px;
-    font-style : italic;
-    font-size  : 12px;
-    color      : #6c757d;
-}
-
-
-/* ============================================================================
    Focus-hidden sender cards — `.sender-card[data-focus-hidden="true"]`
 
    Per AC-B12 perf gate: prefer `display: none` over `visibility: hidden`.
    `display: none` removes the element from layout/paint, while `visibility:
    hidden` still consumes layout space + paint cycles. With 20+ hidden
    senders the layout savings are meaningful (~10x faster repaint per
-   Phase 6c perf measurements).
+   Phase 6c perf measurements). Written by SessionStripRenderer's focus mode.
    ============================================================================ */
 
 .sender-card[data-focus-hidden="true"] {

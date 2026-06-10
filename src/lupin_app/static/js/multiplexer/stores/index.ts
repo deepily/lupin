@@ -40,6 +40,8 @@ import type { ActionRequiredStore, ActionRequiredApiClient } from "./ActionRequi
 import { createActionRequiredStore } from "./ActionRequiredStore";
 import type { AudioStore, AudioStoreOptions } from "./AudioStore";
 import { createAudioStore } from "./AudioStore";
+import type { SessionStripStore } from "./SessionStripStore";
+import { createSessionStripStore } from "./SessionStripStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -47,6 +49,12 @@ export interface StoreSet {
   actionRequired : ActionRequiredStore;
   audio          : AudioStore;
   jobs           : JobStore;
+  // WP2 (parity bridge) — CC-session strip model. Constructed LAST so its
+  // notification_queue_update listener registers after the canonical five,
+  // preserving the pinned cross-store fanout order the integration test
+  // asserts (sessionStrip emits its own store_session_strip_changed, which is
+  // not in that watched set).
+  sessionStrip   : SessionStripStore;
 }
 
 export interface CreateStoresOptions {
@@ -83,8 +91,11 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
     audioContextFactory : opts.audioContextFactory,
   });
   const jobs           = createJobStore          ({ bus: opts.eventBus });
+  // WP2 — LAST (see StoreSet comment): registers after the canonical five so
+  // the integration test's pinned fanout order is preserved.
+  const sessionStrip   = createSessionStripStore  ({ bus: opts.eventBus });
 
-  return { notifications, senders, actionRequired, audio, jobs };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -102,4 +113,10 @@ export type {
 export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
+// WP2 (parity bridge) — SessionStripStore is re-exported for direct import but
+// is deliberately NOT folded into createStores() here. Wiring it into the
+// canonical store set is part of the deferred boot-integration step (against
+// Lane A's mount-slot convention), kept out of this lane's held commit.
+export type { SessionStripStore, SessionStripStoreOptions, ServerSenderHydrationRecord } from "./SessionStripStore";
+export { createSessionStripStore } from "./SessionStripStore";
 /* c8 ignore stop */
