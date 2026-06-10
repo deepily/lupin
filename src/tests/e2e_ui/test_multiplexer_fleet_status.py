@@ -86,18 +86,20 @@ def _fulfill_fleet( body: dict ):
     return _handler
 
 
-def _open_with_fleet( pw, fleet_body: dict ):
-    """Launch a browser, stub the fleet endpoint with `fleet_body`, navigate."""
+def _open_with_fleet( page, fleet_body: dict ):
+    """Seed auth on the managed page's context, stub the fleet endpoint, navigate.
+
+    Uses the pytest-playwright `page` fixture (loop-managed) — NOT a manual
+    `sync_playwright()` launch, which trips "Sync API inside the asyncio loop"
+    under the plugin's event loop. `_seed_auth` uses add_init_script, so the
+    raw lupin_* tokens are set before app boot on goto; routing before goto
+    keeps the boot startPolling() immediate refresh on the stub.
+    """
     access, refresh = _login_tokens()
-    browser = pw.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
-    context = browser.new_context()
-    _seed_auth( context, access, refresh )
-    page = context.new_page()
-    # Route BEFORE goto so the boot startPolling() immediate refresh uses the stub.
+    _seed_auth( page.context, access, refresh )
     page.route( FLEET_ROUTE, _fulfill_fleet( fleet_body ) )
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
-    return browser, page
 
 
 # ---------------------------------------------------------------------------
@@ -166,158 +168,118 @@ _COLOR_STATES = {
 # §6.4 render states
 # ---------------------------------------------------------------------------
 
-def test_fleet_unreachable_shows_offline_banner():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open_with_fleet( pw, _UNREACHABLE )
-        try:
-            page.wait_for_selector( ".fleet-status-container .fleet-status-offline", timeout=3000 )
-            assert page.locator( ".fleet-status-count" ).text_content() == "0"
-        finally:
-            browser.close()
+def test_fleet_unreachable_shows_offline_banner( page ):
+    _open_with_fleet( page, _UNREACHABLE )
+    page.wait_for_selector( ".fleet-status-container .fleet-status-offline", timeout=3000 )
+    assert page.locator( ".fleet-status-count" ).text_content() == "0"
 
 
-def test_fleet_auth_required_shows_signin_banner():
-    from playwright.sync_api import sync_playwright
-
+def test_fleet_auth_required_shows_signin_banner( page ):
     def _handler( route ):
         route.fulfill( status=401, content_type="application/json", body=json.dumps( { "detail": "unauthorized" } ) )
 
     access, refresh = _login_tokens()
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
-        try:
-            context = browser.new_context()
-            _seed_auth( context, access, refresh )
-            page = context.new_page()
-            page.route( FLEET_ROUTE, _handler )
-            page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
-            _wait_for_test_hook( page )
-            page.wait_for_selector( ".fleet-status-container .fleet-status-signin", timeout=3000 )
-        finally:
-            browser.close()
+    _seed_auth( page.context, access, refresh )
+    page.route( FLEET_ROUTE, _handler )
+    page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
+    _wait_for_test_hook( page )
+    page.wait_for_selector( ".fleet-status-container .fleet-status-signin", timeout=3000 )
 
 
-def test_fleet_empty_shows_no_active_sessions():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open_with_fleet( pw, _EMPTY )
-        try:
-            el = page.wait_for_selector( ".fleet-status-container .fleet-status-empty", timeout=3000 )
-            assert el.text_content() == "No active sessions."
-            assert page.locator( ".fleet-offline-toggle" ).count() == 0
-        finally:
-            browser.close()
+def test_fleet_empty_shows_no_active_sessions( page ):
+    _open_with_fleet( page, _EMPTY )
+    el = page.wait_for_selector( ".fleet-status-container .fleet-status-empty", timeout=3000 )
+    assert el.text_content() == "No active sessions."
+    assert page.locator( ".fleet-offline-toggle" ).count() == 0
 
 
-def test_fleet_populated_renders_grouped_table_with_context_columns():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open_with_fleet( pw, _POPULATED )
-        try:
-            page.wait_for_selector( ".fleet-status-table", timeout=3000 )
-            # Manager group header carries the 👑 marker.
-            header = page.locator( ".fleet-group-header" ).first
-            assert "Tiberius" in header.text_content()
-            assert "👑" in header.text_content()
-            # Manager row + worker row(s); offline worker hidden by default (live-only).
-            assert page.locator( ".fleet-row-manager" ).count() == 1
-            assert page.locator( ".fleet-row-worker" ).count() == 1   # Ghost is offline → hidden
-            # Live-only count excludes the offline Ghost (2 live of 3).
-            assert page.locator( ".fleet-status-count" ).text_content() == "2"
-            # Context columns joined per-persona for Tiberius.
-            row = page.locator( "tbody .fleet-row-manager" )
-            assert row.locator( ".fleet-col-window-pct" ).text_content() == "33.3%"
-            assert row.locator( ".fleet-col-window" ).text_content() == "200K"
-            # Color follow-on: the live manager row carries the verdict-live class,
-            # a status-dot, and a low (green) heat-tint at 33.3% (class, not pixels).
-            assert "fleet-verdict-live" in ( row.get_attribute( "class" ) or "" )
-            assert row.locator( ".fleet-col-liveness .fleet-liveness-dot" ).count() == 1
-            assert row.locator( ".fleet-col-window-pct.fleet-pct-low" ).count() == 1
-            # An "updated HH:MM:SS" stamp is set on a real fetch.
-            assert page.locator( ".fleet-status-updated" ).text_content().startswith( "updated " )
-        finally:
-            browser.close()
+def test_fleet_populated_renders_grouped_table_with_context_columns( page ):
+    _open_with_fleet( page, _POPULATED )
+    page.wait_for_selector( ".fleet-status-table", timeout=3000 )
+    # Manager group header carries the 👑 marker.
+    header = page.locator( ".fleet-group-header" ).first
+    assert "Tiberius" in header.text_content()
+    assert "👑" in header.text_content()
+    # Manager row + worker row(s); offline worker hidden by default (live-only).
+    assert page.locator( ".fleet-row-manager" ).count() == 1
+    assert page.locator( ".fleet-row-worker" ).count() == 1   # Ghost is offline → hidden
+    # Live-only count excludes the offline Ghost (2 live of 3).
+    assert page.locator( ".fleet-status-count" ).text_content() == "2"
+    # Context columns joined per-persona for Tiberius.
+    row = page.locator( "tbody .fleet-row-manager" )
+    assert row.locator( ".fleet-col-window-pct" ).text_content() == "33.3%"
+    assert row.locator( ".fleet-col-window" ).text_content() == "200K"
+    # Color follow-on: the live manager row carries the verdict-live class,
+    # a status-dot, and a low (green) heat-tint at 33.3% (class, not pixels).
+    assert "fleet-verdict-live" in ( row.get_attribute( "class" ) or "" )
+    assert row.locator( ".fleet-col-liveness .fleet-liveness-dot" ).count() == 1
+    assert row.locator( ".fleet-col-window-pct.fleet-pct-low" ).count() == 1
+    # An "updated HH:MM:SS" stamp is set on a real fetch.
+    assert page.locator( ".fleet-status-updated" ).text_content().startswith( "updated " )
 
 
 # ---------------------------------------------------------------------------
 # Live-only default + offline toggle
 # ---------------------------------------------------------------------------
 
-def test_fleet_offline_toggle_reveals_hidden_sessions():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open_with_fleet( pw, _POPULATED )
-        try:
-            page.wait_for_selector( ".fleet-status-table", timeout=3000 )
-            toggle = page.locator( ".fleet-offline-toggle-btn" )
-            assert toggle.count() == 1
-            assert "Show offline (1)" in toggle.text_content()
-            toggle.click()
-            # After revealing, the offline Ghost worker appears (2 workers now).
-            page.wait_for_function(
-                "() => document.querySelectorAll('.fleet-row-worker').length === 2",
-                timeout=2000,
-            )
-            assert "Hide offline (1)" in page.locator( ".fleet-offline-toggle-btn" ).text_content()
-            assert page.locator( ".fleet-status-count" ).text_content() == "3"
-        finally:
-            browser.close()
+def test_fleet_offline_toggle_reveals_hidden_sessions( page ):
+    _open_with_fleet( page, _POPULATED )
+    page.wait_for_selector( ".fleet-status-table", timeout=3000 )
+    toggle = page.locator( ".fleet-offline-toggle-btn" )
+    assert toggle.count() == 1
+    assert "Show offline (1)" in toggle.text_content()
+    toggle.click()
+    # After revealing, the offline Ghost worker appears (2 workers now).
+    page.wait_for_function(
+        "() => document.querySelectorAll('.fleet-row-worker').length === 2",
+        timeout=2000,
+    )
+    assert "Hide offline (1)" in page.locator( ".fleet-offline-toggle-btn" ).text_content()
+    assert page.locator( ".fleet-status-count" ).text_content() == "3"
 
 
-def test_fleet_all_offline_shows_no_live_sessions_with_toggle():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open_with_fleet( pw, _ALL_OFFLINE )
-        try:
-            page.wait_for_selector( ".fleet-status-container .fleet-status-empty", timeout=3000 )
-            assert page.locator( ".fleet-status-empty" ).text_content() == "No live sessions."
-            assert page.locator( ".fleet-offline-toggle-btn" ).count() == 1
-            assert page.locator( ".fleet-status-count" ).text_content() == "0"
-        finally:
-            browser.close()
+def test_fleet_all_offline_shows_no_live_sessions_with_toggle( page ):
+    _open_with_fleet( page, _ALL_OFFLINE )
+    page.wait_for_selector( ".fleet-status-container .fleet-status-empty", timeout=3000 )
+    assert page.locator( ".fleet-status-empty" ).text_content() == "No live sessions."
+    assert page.locator( ".fleet-offline-toggle-btn" ).count() == 1
+    assert page.locator( ".fleet-status-count" ).text_content() == "0"
 
 
 # ---------------------------------------------------------------------------
 # Color follow-on — verdict classes + heat-tint buckets (class presence only)
 # ---------------------------------------------------------------------------
 
-def test_fleet_color_coding_verdict_and_heat_classes():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open_with_fleet( pw, _COLOR_STATES )
-        try:
-            page.wait_for_selector( ".fleet-status-table", timeout=3000 )
-            # All four rows are non-offline → visible under the live-only default.
-            page.wait_for_function(
-                "() => document.querySelectorAll('.fleet-row-worker').length === 3",
-                timeout=2000,
-            )
-            # Verdict color classes — redundant with the Liveness WORD (WCAG 1.4.1).
-            assert page.locator( "tr.fleet-verdict-live" ).count()    == 1   # MgrLive
-            assert page.locator( "tr.fleet-verdict-quiet" ).count()   == 1   # WkrQuiet
-            assert page.locator( "tr.fleet-verdict-stale" ).count()   == 1   # WkrStale
-            assert page.locator( "tr.fleet-verdict-unknown" ).count() == 1   # WkrUnknown (no liveness)
-            # Each visible row's Liveness cell carries a status-dot.
-            assert page.locator( ".fleet-col-liveness .fleet-liveness-dot" ).count() == 4
-            # Heat-tint buckets — class presence, NOT computed pixel color.
-            assert page.locator( ".fleet-col-window-pct.fleet-pct-low" ).count()  == 1   # 12%
-            assert page.locator( ".fleet-col-window-pct.fleet-pct-mid" ).count()  == 1   # 65%
-            assert page.locator( ".fleet-col-window-pct.fleet-pct-high" ).count() == 1   # 88%
-            # Unmeasured "—" cell (WkrUnknown) stays UNTINTED — no fleet-pct-* class.
-            unknown_pct = page.locator( "tr.fleet-verdict-unknown .fleet-col-window-pct" )
-            assert unknown_pct.text_content() == "—"
-            assert "fleet-pct-" not in ( unknown_pct.get_attribute( "class" ) or "" )
-        finally:
-            browser.close()
+def test_fleet_color_coding_verdict_and_heat_classes( page ):
+    _open_with_fleet( page, _COLOR_STATES )
+    page.wait_for_selector( ".fleet-status-table", timeout=3000 )
+    # All four rows are non-offline → visible under the live-only default.
+    page.wait_for_function(
+        "() => document.querySelectorAll('.fleet-row-worker').length === 3",
+        timeout=2000,
+    )
+    # Verdict color classes — redundant with the Liveness WORD (WCAG 1.4.1).
+    assert page.locator( "tr.fleet-verdict-live" ).count()    == 1   # MgrLive
+    assert page.locator( "tr.fleet-verdict-quiet" ).count()   == 1   # WkrQuiet
+    assert page.locator( "tr.fleet-verdict-stale" ).count()   == 1   # WkrStale
+    assert page.locator( "tr.fleet-verdict-unknown" ).count() == 1   # WkrUnknown (no liveness)
+    # Each visible row's Liveness cell carries a status-dot.
+    assert page.locator( ".fleet-col-liveness .fleet-liveness-dot" ).count() == 4
+    # Heat-tint buckets — class presence, NOT computed pixel color.
+    assert page.locator( ".fleet-col-window-pct.fleet-pct-low" ).count()  == 1   # 12%
+    assert page.locator( ".fleet-col-window-pct.fleet-pct-mid" ).count()  == 1   # 65%
+    assert page.locator( ".fleet-col-window-pct.fleet-pct-high" ).count() == 1   # 88%
+    # Unmeasured "—" cell (WkrUnknown) stays UNTINTED — no fleet-pct-* class.
+    unknown_pct = page.locator( "tr.fleet-verdict-unknown .fleet-col-window-pct" )
+    assert unknown_pct.text_content() == "—"
+    assert "fleet-pct-" not in ( unknown_pct.get_attribute( "class" ) or "" )
 
 
 # ---------------------------------------------------------------------------
 # Manual ⟳ refresh re-fetches
 # ---------------------------------------------------------------------------
 
-def test_fleet_manual_refresh_button_refetches():
-    from playwright.sync_api import sync_playwright
+def test_fleet_manual_refresh_button_refetches( page ):
     hits = { "n": 0 }
 
     def _counting_handler( route ):
@@ -325,24 +287,13 @@ def test_fleet_manual_refresh_button_refetches():
         route.fulfill( status=200, content_type="application/json", body=json.dumps( _EMPTY ) )
 
     access, refresh = _login_tokens()
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
-        try:
-            context = browser.new_context()
-            _seed_auth( context, access, refresh )
-            page = context.new_page()
-            page.route( FLEET_ROUTE, _counting_handler )
-            page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
-            _wait_for_test_hook( page )
-            page.wait_for_selector( ".fleet-status-empty", timeout=3000 )
-            before = hits[ "n" ]
-            page.locator( ".fleet-status-refresh" ).click()
-            # Debounced single fetch — the click yields exactly one more hit.
-            page.wait_for_function(
-                f"() => true",  # allow the click's async refresh to flush
-                timeout=1000,
-            )
-            time.sleep( 0.3 )
-            assert hits[ "n" ] >= before + 1
-        finally:
-            browser.close()
+    _seed_auth( page.context, access, refresh )
+    page.route( FLEET_ROUTE, _counting_handler )
+    page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
+    _wait_for_test_hook( page )
+    page.wait_for_selector( ".fleet-status-empty", timeout=3000 )
+    before = hits[ "n" ]
+    page.locator( ".fleet-status-refresh" ).click()
+    # Allow the click's async refresh to flush, then assert one more hit.
+    time.sleep( 0.3 )
+    assert hits[ "n" ] >= before + 1

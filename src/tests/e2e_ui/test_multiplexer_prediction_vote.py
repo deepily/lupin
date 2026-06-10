@@ -94,12 +94,14 @@ def _wait_for_test_hook( page, timeout_ms: int = 10_000 ) -> None:
     )
 
 
-def _open( pw, hits: dict ):
+def _open( page, hits: dict ):
+    """Seed auth on the managed page + stub the vote endpoint, then navigate.
+
+    Uses the pytest-playwright `page` fixture (loop-managed) instead of a manual
+    `sync_playwright()` launch, which trips "Sync API inside the asyncio loop".
+    """
     access, refresh = _login_tokens()
-    browser = pw.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
-    context = browser.new_context()
-    _seed_auth( context, access, refresh )
-    page = context.new_page()
+    _seed_auth( page.context, access, refresh )
 
     def _vote_handler( route ):
         hits[ "n" ] += 1
@@ -110,39 +112,28 @@ def _open( pw, hits: dict ):
     page.route( VOTE_ROUTE, _vote_handler )
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
-    return browser, page
 
 
-def test_vote_round_trip_posts_and_records():
-    from playwright.sync_api import sync_playwright
+def test_vote_round_trip_posts_and_records( page ):
     hits = { "n": 0, "last_url": "", "last_body": "" }
-    with sync_playwright() as pw:
-        browser, page = _open( pw, hits )
-        try:
-            result = page.evaluate( _VOTE_VIA_STORE_JS, { "id": "n1", "dir": "up", "withContext": True } )
-            assert result[ "ok" ] is True
-            assert result[ "recorded" ] == "up"
-            assert hits[ "n" ] == 1
-            assert "/api/notify/prediction-vote/n1" in hits[ "last_url" ]
-            body = json.loads( hits[ "last_body" ] )
-            assert body[ "vote" ] == "up"
-            assert body[ "response_type" ] == "yes_no"
-        finally:
-            browser.close()
+    _open( page, hits )
+    result = page.evaluate( _VOTE_VIA_STORE_JS, { "id": "n1", "dir": "up", "withContext": True } )
+    assert result[ "ok" ] is True
+    assert result[ "recorded" ] == "up"
+    assert hits[ "n" ] == 1
+    assert "/api/notify/prediction-vote/n1" in hits[ "last_url" ]
+    body = json.loads( hits[ "last_body" ] )
+    assert body[ "vote" ] == "up"
+    assert body[ "response_type" ] == "yes_no"
 
 
-def test_vote_without_context_is_rejected_no_post():
-    from playwright.sync_api import sync_playwright
+def test_vote_without_context_is_rejected_no_post( page ):
     hits = { "n": 0, "last_url": "", "last_body": "" }
-    with sync_playwright() as pw:
-        browser, page = _open( pw, hits )
-        try:
-            result = page.evaluate( _VOTE_VIA_STORE_JS, { "id": "unknown", "dir": "up", "withContext": False } )
-            assert result[ "ok" ] is False
-            assert result[ "recorded" ] is None
-            assert hits[ "n" ] == 0
-        finally:
-            browser.close()
+    _open( page, hits )
+    result = page.evaluate( _VOTE_VIA_STORE_JS, { "id": "unknown", "dir": "up", "withContext": False } )
+    assert result[ "ok" ] is False
+    assert result[ "recorded" ] is None
+    assert hits[ "n" ] == 0
 
 
 @pytest.mark.skip(

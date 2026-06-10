@@ -81,13 +81,14 @@ def _wait_for_test_hook( page, timeout_ms: int = 10_000 ) -> None:
     )
 
 
-def _open( pw, *, dismiss_remaining: int = 0 ):
-    """Launch + auth + stub the dismiss endpoint (returns `dismiss_remaining`)."""
+def _open( page, *, dismiss_remaining: int = 0 ):
+    """Seed auth on the managed page + stub the dismiss endpoint, then navigate.
+
+    Uses the pytest-playwright `page` fixture (loop-managed) instead of a manual
+    `sync_playwright()` launch, which trips "Sync API inside the asyncio loop".
+    """
     access, refresh = _login_tokens()
-    browser = pw.chromium.launch( headless=True, args=[ "--autoplay-policy=no-user-gesture-required" ] )
-    context = browser.new_context()
-    _seed_auth( context, access, refresh )
-    page = context.new_page()
+    _seed_auth( page.context, access, refresh )
 
     def _dismiss_handler( route ):
         route.fulfill(
@@ -98,47 +99,31 @@ def _open( pw, *, dismiss_remaining: int = 0 ):
     page.route( DISMISS_ROUTE, _dismiss_handler )
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
-    return browser, page
 
 
-def test_missed_badge_hidden_when_count_zero():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open( pw )
-        try:
-            page.evaluate( _SEED_AUTH_SUCCESS_JS, 0 )
-            # Badge stays absent at 0.
-            page.wait_for_timeout( 200 )
-            assert page.locator( "#missed-badge-mount .missed-badge" ).count() == 0
-        finally:
-            browser.close()
+def test_missed_badge_hidden_when_count_zero( page ):
+    _open( page )
+    page.evaluate( _SEED_AUTH_SUCCESS_JS, 0 )
+    # Badge stays absent at 0.
+    page.wait_for_timeout( 200 )
+    assert page.locator( "#missed-badge-mount .missed-badge" ).count() == 0
 
 
-def test_missed_badge_shows_count_when_nonzero():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open( pw )
-        try:
-            page.evaluate( _SEED_AUTH_SUCCESS_JS, 4 )
-            el = page.wait_for_selector( "#missed-badge-mount .missed-badge", timeout=2000 )
-            assert page.locator( ".missed-status" ).text_content() == "4 missed while away"
-            assert page.locator( ".missed-reset-button" ).count() == 1
-        finally:
-            browser.close()
+def test_missed_badge_shows_count_when_nonzero( page ):
+    _open( page )
+    page.evaluate( _SEED_AUTH_SUCCESS_JS, 4 )
+    page.wait_for_selector( "#missed-badge-mount .missed-badge", timeout=2000 )
+    assert page.locator( ".missed-status" ).text_content() == "4 missed while away"
+    assert page.locator( ".missed-reset-button" ).count() == 1
 
 
-def test_missed_reset_dismisses_and_zeroes_badge_live():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser, page = _open( pw, dismiss_remaining=0 )
-        try:
-            page.evaluate( _SEED_AUTH_SUCCESS_JS, 4 )
-            page.wait_for_selector( "#missed-badge-mount .missed-badge", timeout=2000 )
-            page.locator( ".missed-reset-button" ).click()
-            # POST resolves with undelivered_count=0 → badge disappears live.
-            page.wait_for_function(
-                "() => document.querySelectorAll('#missed-badge-mount .missed-badge').length === 0",
-                timeout=2000,
-            )
-        finally:
-            browser.close()
+def test_missed_reset_dismisses_and_zeroes_badge_live( page ):
+    _open( page, dismiss_remaining=0 )
+    page.evaluate( _SEED_AUTH_SUCCESS_JS, 4 )
+    page.wait_for_selector( "#missed-badge-mount .missed-badge", timeout=2000 )
+    page.locator( ".missed-reset-button" ).click()
+    # POST resolves with undelivered_count=0 → badge disappears live.
+    page.wait_for_function(
+        "() => document.querySelectorAll('#missed-badge-mount .missed-badge').length === 0",
+        timeout=2000,
+    )
