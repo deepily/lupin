@@ -816,19 +816,21 @@ mcp.add_middleware( BridgeLivenessMiddleware() )
 # changes — no MCP restart required. A spoken field over the cap is REJECTED unless
 # the caller sets override_size_limitation=True (long is opt-in-and-intentional).
 SPOKEN_CHAR_CAP_DEFAULT = 500
+SPOKEN_ENFORCE_DEFAULT  = True   # default: guard ON. INI may flip it OFF for ALL callers.
 _SPOKEN_CAP_INI_KEY     = "cosa voice spoken char cap"
-_spoken_cap_cache       = { "value": SPOKEN_CHAR_CAP_DEFAULT, "ini_mtime": None }
+_SPOKEN_ENFORCE_INI_KEY = "cosa voice enforce spoken char cap"
+_spoken_cap_cache       = { "value": SPOKEN_CHAR_CAP_DEFAULT, "enforce": SPOKEN_ENFORCE_DEFAULT, "ini_mtime": None }
 
 
-def _get_spoken_char_cap():
+def _refresh_spoken_cfg():
     """
-    Resolve the spoken-char cap from lupin-app.ini at call time (runtime-tunable).
+    Re-read the spoken cap + enforce flag from lupin-app.ini, mtime-gated.
 
     Ensures:
-        - returns an int cap
-        - re-reads via ConfigurationManager (atomic _reset_singleton) ONLY when the
-          INI file mtime has changed since the last read — cheap on the hot path
-        - falls back to the last good value (else SPOKEN_CHAR_CAP_DEFAULT) on any error
+        - updates _spoken_cap_cache["value"] (int cap) AND ["enforce"] (bool) ONLY
+          when the INI file mtime changed since the last read — cheap on the hot path
+          (one ConfigurationManager re-read, atomic _reset_singleton)
+        - never raises; on any error leaves the last good cached values in place
     """
     try:
         import os
@@ -839,11 +841,34 @@ def _get_spoken_char_cap():
             from cosa.config.configuration_manager import ConfigurationManager
             cm = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS", _reset_singleton=True )
             _spoken_cap_cache[ "value" ]     = cm.get( _SPOKEN_CAP_INI_KEY, default=SPOKEN_CHAR_CAP_DEFAULT, return_type="int", silent=True )
+            _spoken_cap_cache[ "enforce" ]   = cm.get( _SPOKEN_ENFORCE_INI_KEY, default=SPOKEN_ENFORCE_DEFAULT, return_type="boolean", silent=True )
             _spoken_cap_cache[ "ini_mtime" ] = mtime
-        return _spoken_cap_cache[ "value" ]
     except Exception as e:
-        logger.warning( f"[brevity] cap read failed; using {_spoken_cap_cache.get( 'value', SPOKEN_CHAR_CAP_DEFAULT )}. Reason: {e}" )
-        return _spoken_cap_cache.get( "value", SPOKEN_CHAR_CAP_DEFAULT )
+        logger.warning( f"[brevity] cfg read failed; using last good cached values. Reason: {e}" )
+
+
+def _get_spoken_char_cap():
+    """
+    Resolve the spoken-char cap (int) from lupin-app.ini at call time (runtime-tunable).
+
+    Ensures:
+        - returns an int cap (last good cached value, else SPOKEN_CHAR_CAP_DEFAULT)
+    """
+    _refresh_spoken_cfg()
+    return _spoken_cap_cache.get( "value", SPOKEN_CHAR_CAP_DEFAULT )
+
+
+def _get_spoken_enforce():
+    """
+    Resolve the global brevity-enforce flag (bool) from lupin-app.ini at call time.
+
+    Ensures:
+        - returns True when the spoken-length guard is ON (default), False to GLOBALLY
+          disable it for ALL callers (Rick 2026-06-09 kill-switch). Runtime-tunable,
+          mtime-gated — no MCP restart to flip once this code is loaded.
+    """
+    _refresh_spoken_cfg()
+    return _spoken_cap_cache.get( "enforce", SPOKEN_ENFORCE_DEFAULT )
 
 
 def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" ):
@@ -858,13 +883,18 @@ def _enforce_spoken_brevity( spoken, override_size_limitation, field="message" )
 
     Ensures:
         - returns None when override_size_limitation is True
+        - returns None when the global enforce flag is OFF (kill-switch)
         - returns None when every spoken unit is <= the configured cap
         - raises ValueError naming the over-cap unit + its measured length otherwise
 
     Raises:
         - ValueError if a spoken unit exceeds the configured cap and override is False
+          and the global enforce flag is ON
     """
     if override_size_limitation:
+        return
+
+    if not _get_spoken_enforce():   # global kill-switch (Rick 2026-06-09): brevity guard OFF for all callers
         return
 
     cap = _get_spoken_char_cap()

@@ -1,5 +1,16 @@
 # TODO
 
+## 🌙 2026-06-09 LATE (Tiberius 👑, session 7b76ad86) — heartbeat-oracle + fleet fixes deployed; MCP follow-ups
+
+> Tonight, all on `wip-v0.1.8` (reviewed + deployed, **NOT pushed**): stop-hook poke-fix, Fleet-Status §5.1/§5.2 + nit, manager-resolution `spawned_by` fix, worker-roster phantom guard, heartbeat-v3 dual-signal oracle (manager outstanding-delegations + worker inbound-DM), idle string → "Momentarily idle." (`366c43e`). Plus the brevity kill-switch (uncommitted).
+
+**▶ NEXT SESSION — FIRST ACTIONS (descending priority):**
+1. **[LUPIN] Fix cosa-voice MCP project mis-detection in git worktrees** — a session whose cwd is a git worktree (e.g. `/tmp/wt-delegation-signal`) makes `src/lupin_mcp/cosa_voice_mcp.py` detect `project=<worktree-basename>` → strict account-validation fails → recurring **URGENT "No credentials for project '<name>'" TTS**. **Fix:** make project detection worktree-aware — resolve a worktree cwd to its MAIN repo's registered project via `git rev-parse --git-common-dir` (or the main worktree's `--show-toplevel`), not the dir basename. Files: `src/lupin_mcp/cosa_voice_mcp.py` + `test_mcp_account_validation.py`. Worktree crews are the norm now → fires on every build until fixed. (Diagnosed tonight; emitter session reaped to stop the noise.)
+2. **[LUPIN] Brevity kill-switch — verify on MCP boot.** `cosa voice enforce spoken char cap = False` set + code landed (UNCOMMITTED on disk in `cosa_voice_mcp.py` + tests). The running MCP keeps the OLD code until restarted; tomorrow's fresh start loads it → spoken-length guard OFF for all callers. Confirm on boot; decide whether to commit it (vs the idle-string already committed at `366c43e`).
+3. **[LUPIN] Push `wip-v0.1.8`** (Rick's gate) — held commits ahead of origin: stop-hook `24f85fb` · Fleet-Status `cd36378`/`04aa652`/`a96f213` · manager-resolver `ace0665` · phantom-guard `fc657e4` · idle-string `366c43e` · heartbeat-v3 `c9b5eb8`. All reviewed + deployed. (Also parked: a reversible `git stash` of the superseded poke→poked drift — `git stash drop` to purge.)
+
+---
+
 ## 🌙 2026-06-09 SESSION-END (Tiberius 👑, session d9e65cd8) — arbiter OPERATOR LOOP done + DEPLOYED
 
 > Heartbeat-arbiter Phase-1 liveness fix + Round 2a rename + Round 2b operator loop (live-push + Part-6 routing + bounded auto-poke) all BUILT, committed, **deployed live on :8001**, María-verified 3-for-3, and PUSHED at session-end. Commits: `852ab83` (Phase 1) · `21189d4` (2a) · `06fb0b3`+`b4441d7`+`ba57416` (2b). Resume memento: `io/mementos/tiberius-session-resume-2026.06.08-night.md`.
