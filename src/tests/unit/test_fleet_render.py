@@ -401,6 +401,66 @@ class TestPublishedOfflinePrune:
         assert snap[ "session_count" ] == 1
 
 
+# ── carry_forward_lineage (offline-lineage retention, 2026-06-10) ──────────────
+
+def _snap( *rows ):
+    """Minimal build_snapshot-shaped result for carry tests."""
+    return { "generated_at": NOW.isoformat(), "session_count": len( rows ), "sessions": list( rows ) }
+
+
+def _row( sid, manager=None ):
+    return { "session_id": sid, "persona": sid.upper(), "manager": manager }
+
+
+class TestCarryForwardLineage:
+
+    def test_fresh_manager_refreshes_carry( self ):
+        snap = _snap( _row( "w1", manager="Tiberius" ) )
+        out, nxt = fr.carry_forward_lineage( snap, { } )
+        # fresh lineage left untouched (no retained flag) and recorded for next poll
+        assert out[ "sessions" ][ 0 ][ "manager" ] == "Tiberius"
+        assert "manager_retained" not in out[ "sessions" ][ 0 ]
+        assert nxt == { "w1": "Tiberius" }
+
+    def test_none_with_prior_is_filled_and_flagged( self ):
+        snap = _snap( _row( "w1", manager=None ) )                 # resolver missed (reaped)
+        out, nxt = fr.carry_forward_lineage( snap, { "w1": "Tiberius" } )
+        row = out[ "sessions" ][ 0 ]
+        assert row[ "manager" ] == "Tiberius"                      # replayed last-known
+        assert row[ "manager_retained" ] is True                  # honest transparency flag
+        assert nxt == { "w1": "Tiberius" }                        # keeps carrying
+
+    def test_none_without_prior_stays_unmanaged( self ):
+        snap = _snap( _row( "w1", manager=None ) )
+        out, nxt = fr.carry_forward_lineage( snap, { } )
+        assert out[ "sessions" ][ 0 ][ "manager" ] is None
+        assert "manager_retained" not in out[ "sessions" ][ 0 ]
+        assert nxt == { }                                         # never invents lineage
+
+    def test_eviction_prunes_carry_to_current_sids( self ):
+        # w2 was carried last poll but is gone from THIS snapshot → forgotten.
+        snap = _snap( _row( "w1", manager="Tiberius" ) )
+        _, nxt = fr.carry_forward_lineage( snap, { "w1": "Tiberius", "w2": "Tiberius" } )
+        assert nxt == { "w1": "Tiberius" }                        # w2 evicted
+
+    def test_non_dict_prior_treated_as_empty( self ):
+        snap = _snap( _row( "w1", manager=None ) )
+        out, nxt = fr.carry_forward_lineage( snap, None )         # prior None → {}
+        assert out[ "sessions" ][ 0 ][ "manager" ] is None
+        assert nxt == { }
+
+    def test_falsy_or_non_dict_snapshot_degrades( self ):
+        assert fr.carry_forward_lineage( None, { "w1": "T" } ) == ( None, { } )
+        assert fr.carry_forward_lineage( "nope", { } ) == ( "nope", { } )
+
+    def test_malformed_rows_are_skipped( self ):
+        snap = _snap( "not-a-dict", { }, _row( "w1", manager=None ) )  # non-dict row + sid-less row
+        out, nxt = fr.carry_forward_lineage( snap, { "w1": "Tiberius" } )
+        # only the well-formed sid'd row is processed (filled from prior)
+        assert out[ "sessions" ][ 2 ][ "manager" ] == "Tiberius"
+        assert nxt == { "w1": "Tiberius" }
+
+
 def test_quick_smoke_test():
     assert fr.quick_smoke_test() is True
 

@@ -5933,6 +5933,54 @@ body[data-layout-mode="horizontal"] .container {
     cursor: help;
 }
 
+/* ============================================================================
+   Fleet-Status liveness + context-pressure color-coding
+   (TASK 1, 2026-06-10 — src/rnd/v0.1.8/2026.06.10-fleet-status-colors-and-offline-lineage.md §TASK 1)
+   Color is ALWAYS redundant with a text label already in the cell (the verdict
+   word / the numeric %), so it reinforces — never replaces — the signal
+   (WCAG 1.4.1). Dot colors sit ≥3:1 on the white row; heat tints are low-alpha
+   so the dark numeric text keeps ≥4.5:1 contrast.
+   ============================================================================ */
+.fleet-status-table {
+    --fleet-live:    #2e7d32;  /* green  — fresh signal within the live window  */
+    --fleet-quiet:   #1565c0;  /* blue   — recently active, within alive window */
+    --fleet-stale:   #f57f17;  /* amber  — aging, still within the ~1h decay    */
+    --fleet-offline: #9e9e9e;  /* grey   — no recent signal / reaped / dead     */
+    --fleet-unknown: #bdbdbd;  /* l.grey — no liveness data at all              */
+}
+
+/* (a) Liveness status dot — leads the verdict word in the Liveness cell. Its
+   color comes from the row's verdict class, so one class drives dot + accent. */
+.fleet-liveness-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: baseline;
+    background: var( --fleet-unknown );   /* default; overridden per verdict below */
+}
+
+.fleet-verdict-live    .fleet-liveness-dot { background: var( --fleet-live ); }
+.fleet-verdict-quiet   .fleet-liveness-dot { background: var( --fleet-quiet ); }
+.fleet-verdict-stale   .fleet-liveness-dot { background: var( --fleet-stale ); }
+.fleet-verdict-offline .fleet-liveness-dot { background: var( --fleet-offline ); }
+.fleet-verdict-unknown .fleet-liveness-dot { background: var( --fleet-unknown ); }
+
+/* Row left-edge accent reinforces the dot (inset box-shadow: no layout shift, and
+   it composes cleanly over the orthogonal fleet-row-stuck background tint). */
+.fleet-row.fleet-verdict-live    td:first-child { box-shadow: inset 3px 0 0 var( --fleet-live ); }
+.fleet-row.fleet-verdict-quiet   td:first-child { box-shadow: inset 3px 0 0 var( --fleet-quiet ); }
+.fleet-row.fleet-verdict-stale   td:first-child { box-shadow: inset 3px 0 0 var( --fleet-stale ); }
+.fleet-row.fleet-verdict-offline td:first-child { box-shadow: inset 3px 0 0 var( --fleet-offline ); }
+.fleet-row.fleet-verdict-unknown td:first-child { box-shadow: inset 3px 0 0 var( --fleet-unknown ); }
+
+/* (b) % Window consumption heat-tint — green <50, amber 50–79, red ≥80
+   (breakpoints mirror _fleetPctClass). An unmeasured "—" cell carries no class. */
+.fleet-status-table .fleet-pct-low  { background: rgba(  46, 125,  50, 0.12 ); }
+.fleet-status-table .fleet-pct-mid  { background: rgba( 245, 127,  23, 0.16 ); }
+.fleet-status-table .fleet-pct-high { background: rgba( 198,  40,  40, 0.16 ); color: #8b1a1a; font-weight: 600; }
+
 /* State-message banners (offline / empty / sign-in) — §6.4 */
 .fleet-status-message {
     padding: 14px 12px;

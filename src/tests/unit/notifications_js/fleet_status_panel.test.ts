@@ -53,6 +53,8 @@ type FleetUI = Record<string, unknown> & {
   _fleetLivenessTooltip: ( liveness: unknown ) => string;
   _formatWindowSize: ( windowSize: number | null | undefined ) => string;
   _formatConsumptionPct: ( pct: number | null | undefined ) => string;
+  _fleetVerdictClass: ( verdict: unknown ) => string;
+  _fleetPctClass: ( pct: number | null | undefined ) => string;
   renderFleetStatusTable: ( model: { groups: GroupModel[] }, personas?: Record<string, unknown> ) => string;
   _renderFleetRow: ( session: Record<string, unknown>, indented: boolean, personas?: Record<string, unknown> ) => string;
   renderFleetStatus: ( composite: unknown ) => void;
@@ -324,10 +326,11 @@ test( "_formatConsumptionPct: numeric → <pct>%, null/undefined → —", () =>
 test( "_renderFleetRow: joins % Window + Window from the personas map by persona", () => {
   const ui = newUI();
   const html = ui._renderFleetRow( TIBERIUS, false, CONTEXT_PERSONAS );
-  assert.match( html, /<td class="fleet-col-window-pct">21\.9%<\/td>/ );
+  // 21.9% < 50 → the cell now carries the low heat-tint class (TASK 1)
+  assert.match( html, /<td class="fleet-col-window-pct fleet-pct-low">21\.9%<\/td>/ );
   assert.match( html, /<td class="fleet-col-window">1M<\/td>/ );
   const rioHtml = ui._renderFleetRow( RIO, true, CONTEXT_PERSONAS );
-  assert.match( rioHtml, /<td class="fleet-col-window-pct">8\.4%<\/td>/ );
+  assert.match( rioHtml, /<td class="fleet-col-window-pct fleet-pct-low">8\.4%<\/td>/ );
   assert.match( rioHtml, /<td class="fleet-col-window">200K<\/td>/ );
 } );
 
@@ -360,6 +363,71 @@ test( "renderFleetStatusTable: threads the personas map through to every rendere
   assert.match( html, />1M</ );
   assert.match( html, /8\.4%/ );    // Rio worker row
   assert.match( html, />200K</ );
+} );
+
+// ─────────────────────────── liveness + %-window color-coding (TASK 1) ───────────────────────────
+
+test( "_fleetVerdictClass: maps each verdict band to its row class (age-bearing verdicts key off the first token)", () => {
+  const ui = newUI();
+  assert.equal( ui._fleetVerdictClass( "LIVE" ),       "fleet-verdict-live" );
+  assert.equal( ui._fleetVerdictClass( "quiet 6m" ),   "fleet-verdict-quiet" );
+  assert.equal( ui._fleetVerdictClass( "stale 12m" ),  "fleet-verdict-stale" );
+  assert.equal( ui._fleetVerdictClass( "offline" ),    "fleet-verdict-offline" );
+  assert.equal( ui._fleetVerdictClass( "live" ),       "fleet-verdict-live" );   // case-insensitive
+} );
+
+test( "_fleetVerdictClass: an unrecognized string and a non-string both fall back to unknown", () => {
+  const ui = newUI();
+  assert.equal( ui._fleetVerdictClass( "bananas" ),  "fleet-verdict-unknown" );  // recognized-none string
+  assert.equal( ui._fleetVerdictClass( undefined ),  "fleet-verdict-unknown" );  // non-string (ternary false branch)
+  assert.equal( ui._fleetVerdictClass( null ),       "fleet-verdict-unknown" );
+  assert.equal( ui._fleetVerdictClass( 42 as unknown as string ), "fleet-verdict-unknown" );
+} );
+
+test( "_fleetPctClass: green <50, amber 50–79, red ≥80; unmeasured → '' (all OR-guards exercised)", () => {
+  const ui = newUI();
+  // each guard operand, in order: null → undefined → non-number → NaN
+  assert.equal( ui._fleetPctClass( null ),      "" );
+  assert.equal( ui._fleetPctClass( undefined ), "" );
+  assert.equal( ui._fleetPctClass( "60" as unknown as number ), "" );
+  assert.equal( ui._fleetPctClass( NaN ),       "" );
+  // bands (incl. the boundaries + a measured 0)
+  assert.equal( ui._fleetPctClass( 0 ),    "fleet-pct-low" );
+  assert.equal( ui._fleetPctClass( 49.9 ), "fleet-pct-low" );
+  assert.equal( ui._fleetPctClass( 50 ),   "fleet-pct-mid" );
+  assert.equal( ui._fleetPctClass( 79.9 ), "fleet-pct-mid" );
+  assert.equal( ui._fleetPctClass( 80 ),   "fleet-pct-high" );
+  assert.equal( ui._fleetPctClass( 99.9 ), "fleet-pct-high" );
+} );
+
+test( "_renderFleetRow: the <tr> carries the verdict class and the Liveness cell leads with a status dot", () => {
+  const ui = newUI();
+  const live = ui._renderFleetRow( TIBERIUS, false );          // verdict LIVE
+  assert.match( live, /<tr class="fleet-row fleet-row-manager fleet-verdict-live">/ );
+  assert.match( live, /<td class="fleet-col-liveness" title="[^"]*"><span class="fleet-liveness-dot"><\/span>LIVE<\/td>/ );
+  const stale = ui._renderFleetRow( RADIO, true );             // verdict "stale 12m"
+  assert.match( stale, /fleet-verdict-stale/ );
+  const off = ui._renderFleetRow( OFFLINE, true );             // verdict offline
+  assert.match( off, /fleet-verdict-offline/ );
+  const bare = ui._renderFleetRow( { session_id: "bare0002x" }, true );  // no liveness
+  assert.match( bare, /fleet-verdict-unknown/ );
+  assert.match( bare, /<span class="fleet-liveness-dot"><\/span>/ );      // dot always present
+} );
+
+test( "_renderFleetRow: % Window cell gets the heat-tint class by band; unmeasured stays untinted", () => {
+  const ui = newUI();
+  const personas = {
+    "Tiberius" : { window_size: 1000000, consumption_pct_of_window: 85.0 },  // high
+    "Rio"      : { window_size: 200000,  consumption_pct_of_window: 62.0 },  // mid
+    "María"    : { window_size: 1000000, consumption_pct_of_window: null },  // unmeasured
+  };
+  const hi = ui._renderFleetRow( TIBERIUS, false, personas );
+  assert.match( hi, /<td class="fleet-col-window-pct fleet-pct-high">85%<\/td>/ );
+  const mid = ui._renderFleetRow( RIO, true, personas );
+  assert.match( mid, /<td class="fleet-col-window-pct fleet-pct-mid">62%<\/td>/ );
+  const none = ui._renderFleetRow( MARIA, true, personas );
+  assert.match( none, /<td class="fleet-col-window-pct">—<\/td>/ );     // null → no class, no tint
+  assert.ok( !none.includes( "fleet-pct-" ), "unmeasured cell carries no heat-tint class" );
 } );
 
 // ─────────────────────────── renderFleetStatus (DOM dispatch, §6.4) ───────────────────────────

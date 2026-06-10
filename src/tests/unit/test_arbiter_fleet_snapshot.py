@@ -119,6 +119,47 @@ class TestPublishFleetSnapshot:
         assert seen == [ "s1" ]
 
 
+# ── offline-lineage carry across polls (2026-06-10) ───────────────────────────
+
+class TestOfflineLineageCarry:
+
+    def test_reaped_worker_retains_manager_across_polls( self ):
+        # poll 1: resolver returns lineage → manager set + cached. poll 2: resolver
+        # MISSES (reaped: bridge+manifest gone) → the row would drop to "Unmanaged",
+        # but carry_forward_lineage replays the last-known manager + flags it retained.
+        pushed = [ ]
+        resolves = [ { "manager_persona": "Tiberius", "source": "lineage" },   # poll 1
+                     { "manager_persona": None,        "source": "unresolved" } ]  # poll 2
+        calls = { "n": 0 }
+        def resolver( sid, **_kw ):
+            r = resolves[ min( calls[ "n" ], len( resolves ) - 1 ) ]
+            return r
+        job = _make_job(
+            bridge_mtime_fn    = lambda sid: None,                 # no bridge → "quiet 2m" (published)
+            resolve_manager_fn = resolver,
+            render_sink        = lambda s: None,
+            snapshot_sink      = pushed.append,
+        )
+        # poll 1
+        job._publish_fleet_snapshot( _view(), NOW )
+        calls[ "n" ] = 1
+        row1 = pushed[ 0 ][ "sessions" ][ 0 ]
+        assert row1[ "manager" ] == "Tiberius" and "manager_retained" not in row1
+        assert job._manager_lineage == { "s1": "Tiberius" }       # cached for next poll
+
+        # poll 2 — resolver now misses, but the carry holds the line
+        later = NOW + datetime.timedelta( seconds=30 )
+        job._publish_fleet_snapshot( _view(), later )
+        row2 = pushed[ 1 ][ "sessions" ][ 0 ]
+        assert row2[ "manager" ] == "Tiberius"                    # NOT dropped to Unmanaged
+        assert row2[ "manager_retained" ] is True                 # honest: last-known, not fresh
+        assert job._manager_lineage == { "s1": "Tiberius" }       # still carrying
+
+    def test_lineage_carry_initialized_empty( self ):
+        job = _make_job( bridge_mtime_fn=lambda sid: None, render_sink=lambda s: None, snapshot_sink=lambda s: None )
+        assert job._manager_lineage == { }
+
+
 # ── _poll_once integration (the "rendered" key + real push) ───────────────────
 
 class TestPollOnceWiring:
