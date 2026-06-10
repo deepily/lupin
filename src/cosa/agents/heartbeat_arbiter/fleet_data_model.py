@@ -13,7 +13,12 @@ event-file ts is `:7999`-free (local read), so liveness degrades gracefully
 when `:7999` saturates; commons_who only enriches it. `last_activity_ts` is the
 most-recent of either signal — used for both alive (broad window) and quiet
 (narrow window, idle_roster). The commons_who secondary signal is matched by
-**session_id** (persona can be borrowed/duplicated — Rachel's catch).
+**session_id** (persona can be borrowed/duplicated — Rachel's catch) and is
+PHANTOM-GUARDED by live-bridge presence (Fleet-Status §5.2(b), 2026-06-09): a
+commons echo from a session absent from the live-bridge discovery is retention
+residue of a reaped process, not liveness — it is nulled so the session reads
+offline and the publish-prune evicts it (mirrors the manager-roster guard in
+manager_resolver.resolve_active_managers).
 
 Input contract (Rachel's wiring): `events_by_session` is the ACCUMULATED tail
 per session (oldest→newest, ~50 records) — `[-1]` is the current state; the
@@ -194,9 +199,19 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
           REAL signal (an event record, an idle_prompt record, a commons match,
           or a bridge presence); a bare empty event list with no other signal is
           NOT a member (preserves the old "skip empty/untrackable" behavior)
+        - PHANTOM GUARD (Fleet-Status §5.2(b)): a session ABSENT from
+          bridge_sessions has its commons_ts NULLED — the commons echo of a
+          reaped/dead process (commons_who retention) must not count as
+          liveness, so such a session's verdict rests on its event/idle_prompt
+          ages alone and reads "offline" once those age out (a commons-ONLY
+          bridge-absent member is offline immediately). Membership is judged on
+          the RAW signal, so the phantom remains an auditable (offline) roster
+          row. Bridge-present sessions keep commons as a secondary signal —
+          unchanged. Mirrors manager_resolver.resolve_active_managers.
         - VIEW (flat dict): session_id · persona · last_outcome ·
           last_event_ts(datetime|None — STOP/non-idle_prompt) ·
-          commons_ts(datetime|None) · idle_prompt_ts(datetime|None) ·
+          commons_ts(datetime|None; None when bridge-absent, see guard) ·
+          idle_prompt_ts(datetime|None) ·
           last_activity_ts(datetime|None; max of the three) · alive(bool) ·
           state · holding_on · stuck · poke_count · cap
         - the three distinct ts fields stay SEPARATE so the verdict seam
@@ -253,10 +268,28 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
 
         # Membership: a session is a member iff it has a REAL signal. An empty
         # event list with no commons/idle/bridge signal is NOT trackable.
+        # Judged on the RAW commons signal (pre-guard) so a phantom stays an
+        # auditable roster row instead of vanishing without trace.
         has_signal = bool( activity_recs ) or bool( idleprompt_recs ) \
                      or commons_ts is not None or bridge_present
         if not has_signal:
             continue
+
+        # PHANTOM GUARD (worker-roster mirror of manager_resolver.
+        # resolve_active_managers): a commons echo from a session ABSENT from the
+        # live-bridge discovery is retention residue of a reaped/dead process,
+        # NOT liveness — a reap deletes the bridge file, but commons_who keeps
+        # listing the session for its retention window, which pinned reaped
+        # workers at "quiet" on the roster. Null the echo so the verdict seam
+        # (fleet_render.compute_liveness) sees no commons age and the §5.2
+        # publish-prune (build_snapshot include_offline=False) evicts the row as
+        # soon as its real signals age out. A LIVE bridge keeps commons as a
+        # legitimate secondary signal (the Part-7 union doctrine is unchanged
+        # for bridge-present sessions); event/idle_prompt signals still count
+        # either way (degrade-safe: a bridge-discovery hiccup can only mute the
+        # commons echo, never kill event-based liveness).
+        if not bridge_present:
+            commons_ts = None
 
         last_event_ts  = _parse_iso( last_activity.get( "ts" ) ) if last_activity else None
         last_outcome   = last_activity.get( "outcome" ) if last_activity else None
@@ -306,7 +339,7 @@ def quick_smoke_test():
         # two cap_reached+owed episodes ⇒ REPEATED ⇒ stuck
         "s2": [ ev( OUTCOME_CAP_REACHED, old, work_owed=True, poke_count=3 ),
                 ev( OUTCOME_CAP_REACHED, recent, work_owed=True, poke_count=3 ) ],
-        "s3": [ ev( EVENT_IDLE, old ) ],      # old event, but session active on commons
+        "s3": [ ev( EVENT_IDLE, old ) ],      # old event, but session active on commons (live bridge)
         "s4": [ ],                            # empty + no other signal → skipped
         # idle_prompt-ONLY session: kind-tagged, NO outcome → enters the roster
         # via the idle_prompt signal but stays OFF the activity axis (N2)
@@ -314,10 +347,15 @@ def quick_smoke_test():
         # canonicalization (N3): a SHORT event id that prefixes the full bridge uuid
         "abcd1234": [ ev( OUTCOME_POKE, recent, persona="Eve", poke_count=2 ) ],
     }
-    who_rows = [ { "session_id": "s3", "persona_name": "Cal", "last_post_ts": recent } ]
+    who_rows = [
+        { "session_id": "s3", "persona_name": "Cal", "last_post_ts": recent },
+        # PHANTOM: reaped worker — commons echo recent, but NO live bridge
+        { "session_id": "ph", "persona_name": "Gus", "last_post_ts": recent },
+    ]
     bridge_sessions = {
         full_uuid                : "Eve",     # SAME session as short event id "abcd1234"
         "bridgeonly-no-events"   : "Fred",    # bridge-only member (no events at all)
+        "s3"                     : "Cal",     # s3 has a LIVE bridge ⇒ commons counts
     }
 
     view = build_fleet_view(
@@ -325,12 +363,21 @@ def quick_smoke_test():
     )
 
     # UNION membership: stop-event (s1/s2/s3) ∪ idle_prompt (ip) ∪ canonical
-    # bridge⊕event (full_uuid) ∪ bridge-only (bridgeonly) — s4 (no signal) skipped
-    assert set( view ) == { "s1", "s2", "s3", "ip", full_uuid, "bridgeonly-no-events" }, set( view )
+    # bridge⊕event (full_uuid) ∪ bridge-only (bridgeonly) ∪ commons phantom (ph)
+    # — s4 (no signal) skipped
+    assert set( view ) == { "s1", "s2", "s3", "ip", full_uuid, "bridgeonly-no-events", "ph" }, set( view )
     assert view[ "s1" ][ "state" ] == "working" and view[ "s1" ][ "holding_on" ] == "peer:Bob"
     assert view[ "s2" ][ "stuck" ] is True and view[ "s2" ][ "state" ] == "stuck"
-    # s3: old event ts but recent commons ts (matched by session_id) ⇒ alive
+    # s3: old event ts but recent commons ts + LIVE bridge ⇒ commons counts ⇒ alive
     assert view[ "s3" ][ "alive" ] is True and view[ "s3" ][ "last_outcome" ] == EVENT_IDLE
+
+    # PHANTOM GUARD (§5.2(b)): ph is commons-recent but bridge-ABSENT — a reaped
+    # worker's retention echo. Still a roster member (auditable), but its commons
+    # echo is nulled ⇒ no liveness signal at all ⇒ alive False (and the verdict
+    # seam reads it "offline", so the publish-prune evicts it).
+    phv = view[ "ph" ]
+    assert phv[ "commons_ts" ] is None and phv[ "alive" ] is False
+    assert phv[ "last_activity_ts" ] is None and phv[ "state" ] == "unknown"
 
     # idle_prompt-only: kind filter keeps it OFF the activity axis, ON idle_prompt_ts
     ipv = view[ "ip" ]

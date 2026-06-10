@@ -181,10 +181,77 @@ def test_build_view_bridge_present_but_persona_none():
     assert "b" in v and v[ "b" ][ "persona" ] is None     # present (bridge signal) but unnamed
 
 
-def test_build_view_commons_only_member():
+def test_build_view_commons_only_member_is_phantom_without_bridge():
+    # §5.2(b) PHANTOM GUARD: a commons-only session with NO live bridge is the
+    # reaped-worker retention echo — still a roster member (auditable), but its
+    # commons echo is nulled so it carries no liveness signal at all.
     who = [ { "session_id": "c1", "last_post_ts": _iso( 10 ) } ]
     v = m.build_fleet_view( { }, who, NOW, 3600 )
-    assert "c1" in v and v[ "c1" ][ "commons_ts" ] is not None and v[ "c1" ][ "alive" ] is True
+    assert "c1" in v                                     # membership survives (raw signal)
+    assert v[ "c1" ][ "commons_ts" ] is None             # echo nulled by the guard
+    assert v[ "c1" ][ "alive" ] is False                 # no liveness signal remains
+    assert v[ "c1" ][ "last_activity_ts" ] is None
+
+
+def test_build_view_commons_only_member_with_live_bridge_stays_alive():
+    # The legitimate twin: same commons signal, but the bridge is LIVE — commons
+    # counts as the secondary signal (Part-7 union doctrine unchanged).
+    who = [ { "session_id": "c1", "last_post_ts": _iso( 10 ) } ]
+    v = m.build_fleet_view( { }, who, NOW, 3600, bridge_sessions={ "c1": "Cal" } )
+    assert v[ "c1" ][ "commons_ts" ] is not None and v[ "c1" ][ "alive" ] is True
+
+
+# ── build_fleet_view — §5.2(b) phantom guard (commons vs live-bridge) ─────────
+
+def test_phantom_guard_old_event_plus_recent_commons_no_bridge_not_alive():
+    # The reaped-worker shape: stale stop-events + a recent commons echo, bridge
+    # deleted by the reap. Pre-guard this read alive=True (pinned "quiet" on the
+    # roster); the guard nulls the echo so liveness rests on the stale event only.
+    events = { "rw": [ _ev( "poked", _iso( 9000 ), sid="rw" ) ] }
+    who    = [ { "session_id": "rw", "last_post_ts": _iso( 10 ) } ]
+    v = m.build_fleet_view( events, who, NOW, 3600 )[ "rw" ]
+    assert v[ "commons_ts" ] is None
+    assert v[ "alive" ] is False                         # 9000s event > 3600s threshold
+    assert v[ "last_event_ts" ] is not None              # event signal untouched (honest)
+
+
+def test_phantom_guard_recent_event_still_counts_when_bridge_absent():
+    # Degrade-safety: the guard mutes ONLY the commons echo — a genuinely recent
+    # stop-event keeps the session alive even if bridge discovery missed it.
+    events = { "s": [ _ev( "poked", _iso( 30 ) ) ] }
+    who    = [ { "session_id": "s", "last_post_ts": _iso( 10 ) } ]
+    v = m.build_fleet_view( events, who, NOW, 3600 )[ "s" ]
+    assert v[ "commons_ts" ] is None and v[ "alive" ] is True
+
+
+def test_phantom_guard_prefix_tolerant_bridge_match_keeps_commons():
+    # Canonicalization (N3) composes with the guard: a short-id commons row and a
+    # full-uuid live bridge are the SAME session → bridge_present → commons kept.
+    full = "cafe1234-aaaa-bbbb-cccc-dddddddddddd"
+    who  = [ { "session_id": "cafe1234", "last_post_ts": _iso( 10 ) } ]
+    v = m.build_fleet_view( { }, who, NOW, 3600, bridge_sessions={ full: "Eve" } )
+    assert v[ full ][ "commons_ts" ] is not None and v[ full ][ "alive" ] is True
+
+
+def test_phantom_guard_evicted_from_published_snapshot():
+    # End-to-end through the verdict seam (§5.2 composition): the phantom reads
+    # "offline" in compute_liveness ⇒ build_snapshot's default publish-prune
+    # evicts it, while the live-bridge peer survives. include_offline=True
+    # retains the phantom as an auditable offline row.
+    from cosa.agents.heartbeat_arbiter import fleet_render as fr
+    who     = [ { "session_id": "phantom", "last_post_ts": _iso( 10 ) },
+                { "session_id": "live",    "last_post_ts": _iso( 10 ) } ]
+    bridges = { "live": "Cal" }
+    view    = m.build_fleet_view( { }, who, NOW, 3600, bridge_sessions=bridges )
+
+    published = fr.build_snapshot( view, { "live": NOW.timestamp() - 4 }, NOW )
+    assert { r[ "session_id" ] for r in published[ "sessions" ] } == { "live" }
+    assert published[ "session_count" ] == 1
+
+    audit = fr.build_snapshot( view, { "live": NOW.timestamp() - 4 }, NOW, include_offline=True )
+    rows  = { r[ "session_id" ]: r for r in audit[ "sessions" ] }
+    assert rows[ "phantom" ][ "liveness" ][ "verdict" ] == "offline"
+    assert rows[ "live" ][ "liveness" ][ "verdict" ] == "LIVE"
 
 
 def test_build_view_stuck_threshold():
