@@ -40,21 +40,15 @@ from typing import Any, Callable, Optional
 
 from lupin_arbiter_app.health_watcher import SystemClock
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
 
 ESCALATION_TOPIC = "fleet-escalations"
 
 
-def _default_log_fn( event: str, **fields: Any ) -> None:
-    """Structured JSON line (loop:fleet_arbiter) to stdout → systemd journal (flushed)."""
-    line : dict = {
-        "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
-        "service" : "lupin-arbiter-app",
-        "loop"    : "fleet_arbiter",
-        "event"   : event,
-    }
-    line.update( fields )
-    print( json.dumps( line, default=str ), flush=True )
+# Item A (2026.06.11 receipts design §2.3): the line shape has ONE owner —
+# arbiter_journal.make_log_fn (ts + ts_local).
+_default_log_fn = make_log_fn( loop="fleet_arbiter" )
 
 
 # ── escalation output sink (ruling A) ───────────────────────────────────────
@@ -62,33 +56,49 @@ def _default_log_fn( event: str, **fields: Any ) -> None:
 def make_escalation_notify_fn(
     gateway       : Any,
     *,
-    live_notify_fn : Optional[ Callable[ [ str ], None ] ] = None,
+    live_notify_fn : Optional[ Callable[ [ str ], dict ] ] = None,
     log_fn         : Optional[ Callable ]                  = None,
     topic          : str                                   = ESCALATION_TOPIC,
-) -> Callable[ [ str ], None ]:
+) -> Callable[ [ str ], list ]:
     """
-    Build the escalation-OUTPUT notify_fn: durable-primary + best-effort live.
+    Build the escalation-OUTPUT notify_fn: durable-primary + best-effort live —
+    OUTCOME-RETURNING since the 2026.06.11 receipts design (§3.2: pre-design
+    this swallowed every failure into a lone log line one journal entry before
+    `arbiter_outreach` claimed Rick was reached — root-cause R3/R4).
 
     Ensures:
         - ALWAYS posts `message` to the durable commons `topic` via the bridge-less
-          gateway; a write failure is swallowed+logged (the PRIMARY channel must
-          not kill the loop any more than the best-effort one — note 3)
-        - if live_notify_fn is provided, best-effort fires it (swallowed+logged on
-          failure) — this is the ONLY :7999-capable hop, escalation-path only
-        - never raises
+          gateway; returns [{channel:"durable", outcome:"posted"}] on success,
+          outcome "post_error" (+ detail) on failure — still logged, still
+          non-fatal (the PRIMARY channel must not kill the loop — note 3)
+        - if live_notify_fn is provided, appends its live-channel outcome dict
+          (a blow-up degrades to outcome "http_error" — logged, never raised);
+          if ABSENT, appends {channel:"live", outcome:"disabled"} — a disabled
+          live hop is a VISIBLE per-outreach fact, not a silent gap (§3.6)
+        - never raises; the caller journals one arbiter_outreach_result per
+          returned outcome under the outreach_id
     """
     log_fn = log_fn if log_fn is not None else _default_log_fn
 
-    def notify_fn( message: str ) -> None:
+    def notify_fn( message: str ) -> list:
+        results = [ ]
         try:
             gateway.post( topic, message )
+            results.append( { "channel": "durable", "outcome": "posted" } )
         except Exception as e:                       # durable post degrade-safe (note 3)
             log_fn( "escalation_post_error", error=str( e ) )
+            results.append( { "channel": "durable", "outcome": "post_error",
+                              "detail": str( e )[ :160 ] } )
         if live_notify_fn is not None:
             try:
-                live_notify_fn( message )
-            except Exception as e:                   # best-effort live delivery, swallowed
+                results.append( live_notify_fn( message ) )
+            except Exception as e:                   # best-effort live delivery, degraded to an outcome
                 log_fn( "escalation_live_notify_error", error=str( e ) )
+                results.append( { "channel": "live", "outcome": "http_error",
+                                  "detail": str( e )[ :160 ] } )
+        else:
+            results.append( { "channel": "live", "outcome": "disabled" } )
+        return results
 
     return notify_fn
 
@@ -96,27 +106,30 @@ def make_escalation_notify_fn(
 # ── warm-up suppressor (ruling B) ───────────────────────────────────────────
 
 def make_warmup_notify_fn(
-    inner                : Callable[ [ str ], None ],
+    inner                : Callable[ [ str ], list ],
     job_started_at       : datetime.datetime,
     start_period_seconds : int,
     clock                : Any,
     log_fn               : Callable,
-) -> Callable[ [ str ], None ]:
+) -> Callable[ [ str ], list ]:
     """
     Wrap an escalation notify_fn to SUPPRESS escalations during the warm-up window
-    of a single job (keyed on that job's start time).
+    of a single job (keyed on that job's start time) — outcome-returning (§3.2).
 
     Ensures:
         - while (clock.now() − job_started_at) < start_period_seconds → suppress
-          (log `escalation_suppressed_warmup`, do NOT call inner)
-        - at/after the window → pass through to inner
+          (log `escalation_suppressed_warmup`, do NOT call inner) and return
+          [{channel:"all", outcome:"suppressed_warmup"}] — pre-design this
+          returned None and the caller journaled "rick" as reached anyway (the
+          §1.3 L3 leg of the journal-lies bug)
+        - at/after the window → pass through to inner and return its outcomes
         - never raises
     """
-    def notify_fn( message: str ) -> None:
+    def notify_fn( message: str ) -> list:
         if ( clock.now() - job_started_at ).total_seconds() < start_period_seconds:
             log_fn( "escalation_suppressed_warmup", message=message )
-            return
-        inner( message )
+            return [ { "channel": "all", "outcome": "suppressed_warmup" } ]
+        return inner( message )
 
     return notify_fn
 
@@ -145,6 +158,14 @@ def build_fleet_arbiter_job_factory(
     manager_stale_poke_threshold : int          = 2700,
     manager_stale_poke_max_age : int            = 7200,
     start_period_seconds : int                  = 120,
+    # Item B (2026.06.11 receipts design): the delivery-receipt seams + knobs,
+    # threaded verbatim to the job. None seams keep their tier inert.
+    dm_push_fn           : Optional[ Callable ] = None,
+    live_retry_fn        : Optional[ Callable ] = None,
+    outreach_ack_window  : int                  = 900,
+    reannounce_interval  : int                  = 300,
+    reannounce_ttl       : int                  = 86400,
+    pending_ledger_path  : Optional[ str ]      = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -181,6 +202,12 @@ def build_fleet_arbiter_job_factory(
             poke_max_per_episode         = poke_max_per_episode,
             manager_stale_poke_threshold_seconds = manager_stale_poke_threshold,   # post-game F2
             manager_stale_poke_max_age_seconds   = manager_stale_poke_max_age,     # corpse ceiling
+            dm_push_fn                  = dm_push_fn,                              # Item B §3.3
+            live_retry_fn               = live_retry_fn,                           # Item B §3.5
+            outreach_ack_window_seconds = outreach_ack_window,
+            reannounce_interval_seconds = reannounce_interval,
+            reannounce_ttl_seconds      = reannounce_ttl,
+            pending_ledger_path         = pending_ledger_path,
             snapshot_sink              = lambda snap: store.set_section( "fleet_arbiter", snap ),
             render_sink                = lambda line: log_fn( "fleet_arbiter_render", line=line ),
             notify_fn                  = warmup_notify,

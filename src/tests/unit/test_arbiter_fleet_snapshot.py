@@ -27,7 +27,7 @@ NOW = datetime.datetime( 2026, 6, 6, 22, 41, 0, tzinfo=datetime.timezone.utc )
 
 class _FakeGateway:
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, recipient, body ): pass
+    def send_to( self, recipient, body, metadata=None ): pass
     def post( self, topic, body ): pass
 
 

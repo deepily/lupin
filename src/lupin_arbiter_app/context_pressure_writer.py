@@ -40,27 +40,15 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from lupin_arbiter_app.health_watcher import SystemClock
+from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
 
 SECTION_NAME = "context_pressure"
 
 
-def _default_log_fn( event: str, **fields: Any ) -> None:
-    """
-    Default structured logger: ONE JSON line (ts/service/loop/event/fields) to
-    stdout → captured by the systemd journal (mirrors the health-watcher idiom).
-
-    Ensures:
-        - prints a single json.dumps line; non-serialisable values fall back to str
-    """
-    line : Dict[ str, Any ] = {
-        "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
-        "service" : "lupin-arbiter-app",
-        "loop"    : "context_pressure_writer",
-        "event"   : event,
-    }
-    line.update( fields )
-    print( json.dumps( line, default=str ), flush=True )
+# Item A (2026.06.11 receipts design §2.3): the line shape has ONE owner —
+# arbiter_journal.make_log_fn (ts + ts_local).
+_default_log_fn = make_log_fn( loop="context_pressure_writer" )
 
 
 def _budget_fraction_for( window_size: int, budget_fractions: Dict[ Any, float ] ) -> float:

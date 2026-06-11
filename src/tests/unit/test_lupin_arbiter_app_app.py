@@ -127,7 +127,7 @@ class _FakeCfg:
 class _FakeGateway:
     """Minimal ArbiterGateway stand-in (assemble_app only captures it — no calls)."""
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, recipient, body ): pass
+    def send_to( self, recipient, body, metadata=None ): pass
     def post( self, topic, body ): pass
     def read( self, topic, since=None, limit=50 ): return [ ]
 

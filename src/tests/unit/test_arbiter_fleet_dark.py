@@ -37,7 +37,7 @@ class _GW:
     def __init__( self ):
         self.sent = [ ]
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, r, b ): self.sent.append( ( r, b ) )
+    def send_to( self, r, b, metadata=None ): self.sent.append( ( r, b ) )
     def post( self, t, b ): pass
     def read( self, topic, since=None, limit=50 ): return [ ]
 

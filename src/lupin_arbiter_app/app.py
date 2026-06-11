@@ -210,6 +210,8 @@ def assemble_app(
     *,
     store          : Optional[ LocalSnapshotStore ] = None,
     live_notify_fn : Optional[ Callable ]           = None,
+    live_retry_fn  : Optional[ Callable ]           = None,
+    dm_push_fn     : Optional[ Callable ]           = None,
     log_fn         : Optional[ Callable ]           = None,
     clock          : Optional[ Any ]                = None,
 ) -> FastAPI:
@@ -235,12 +237,26 @@ def assemble_app(
           with a fake cfg + fake gateway)
     """
     from lupin_arbiter_app.health_watcher import HealthWatcherLoop, docker_inspect_health
-    from lupin_arbiter_app.health_watcher import _default_log_fn as _log_default
     from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop, build_fleet_arbiter_job_factory
+    from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
     from cosa.agents.heartbeat_arbiter.manager_resolver import pick_declared_managers_from_env
 
-    store  = store  if store  is not None else LocalSnapshotStore()
-    log_fn = log_fn if log_fn is not None else _log_default
+    store = store if store is not None else LocalSnapshotStore()
+
+    # ── journal log_fns (Item A §2.2 + §3.8 of the 2026.06.11 receipts design):
+    # tz from the INI (deploy-tunable); each loop journals under its OWN label —
+    # pre-design, every fleet-arbiter event wore the health watcher's loop label
+    # because ONE health-watcher default was passed everywhere (the §1.4 lie).
+    # An injected log_fn (test seam) still overrides all of them.
+    tz_name = cfg.get( "arbiter journal local timezone", default="America/New_York" ) or "America/New_York"
+    if log_fn is None:
+        wiring_log_fn  = make_log_fn( loop="app_wiring",              tz_name=tz_name )
+        arbiter_log_fn = make_log_fn( loop="fleet_arbiter",           tz_name=tz_name )
+        health_log_fn  = make_log_fn( loop="health_watcher",          tz_name=tz_name )
+        cp_log_fn      = make_log_fn( loop="context_pressure_writer", tz_name=tz_name )
+    else:
+        wiring_log_fn = arbiter_log_fn = health_log_fn = cp_log_fn = log_fn
+    log_fn = wiring_log_fn
 
     # ── declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, Rick 2026-06-11):
     # multi-manager-per-repo support. Role-only — feeds fanout, badging, and the
@@ -259,7 +275,7 @@ def assemble_app(
     fleet_arbiter_factory = build_fleet_arbiter_job_factory(
         gateway, store,
         clock                = clock,
-        log_fn               = log_fn,
+        log_fn               = arbiter_log_fn,
         live_notify_fn       = live_notify_fn,
         poll_seconds         = int( cfg.get( "arbiter poll seconds", default=60, return_type="int" ) ),
         manager_on_duty      = cfg.get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty",
@@ -276,11 +292,21 @@ def assemble_app(
         manager_stale_poke_threshold = int( cfg.get( "arbiter manager stale poke threshold seconds", default=2700, return_type="int" ) ),
         manager_stale_poke_max_age   = int( cfg.get( "arbiter manager stale poke max age seconds", default=7200, return_type="int" ) ),
         start_period_seconds = int( cfg.get( "arbiter start period seconds", default=120, return_type="int" ) ),
+        # Item B (2026.06.11 receipts design): delivery-receipt seams + knobs.
+        # Ledger path: relative INI value combined with the project root at
+        # runtime (PATH MANAGEMENT) — file-backed so re-announce survives both
+        # the 12h recycle and a service restart.
+        dm_push_fn           = dm_push_fn,
+        live_retry_fn        = live_retry_fn,
+        outreach_ack_window  = int( cfg.get( "arbiter outreach ack window seconds", default=900, return_type="int" ) ),
+        reannounce_interval  = int( cfg.get( "arbiter outreach reannounce interval seconds", default=300, return_type="int" ) ),
+        reannounce_ttl       = int( cfg.get( "arbiter outreach reannounce ttl seconds", default=86400, return_type="int" ) ),
+        pending_ledger_path  = _pending_ledger_path( cfg ),
     )
-    fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=log_fn )
+    fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=arbiter_log_fn )
 
     # ── context-headroom writer: gated on `arbiter context watch enabled` ──
-    context_pressure_loop = _build_context_pressure_loop( cfg, store, clock=clock, log_fn=log_fn )
+    context_pressure_loop = _build_context_pressure_loop( cfg, store, clock=clock, log_fn=cp_log_fn )
 
     # ── health watcher (L2): gated on the master enable ──
     if not cfg.get( "arbiter health watch enabled", default=True, return_type="boolean" ):
@@ -295,9 +321,9 @@ def assemble_app(
     health_loop = HealthWatcherLoop(
         containers            = _csv( "arbiter health watch containers", "lupin-rest-dev,lupin-rest-test,lupin-model-server,lupin-postgres" ),
         inspect_fn            = lambda name: docker_inspect_health( name, int( cfg.get( "arbiter health inspect timeout seconds", default=5, return_type="int" ) ) ),
-        notify_fn             = _make_health_notify_fn( gateway, live_notify_fn, log_fn ),   # Part-6 #1/2/3 → Rick
+        notify_fn             = _make_health_notify_fn( gateway, live_notify_fn, health_log_fn ),   # Part-6 #1/2/3 → Rick
         store                 = store,
-        log_fn                = log_fn,
+        log_fn                = health_log_fn,
         interval_seconds      = int( cfg.get( "arbiter health watch interval seconds", default=30, return_type="int" ) ),
         flap_window_seconds   = int( cfg.get( "arbiter health flap window seconds", default=600, return_type="int" ) ),
         flap_threshold        = int( cfg.get( "arbiter health flap threshold transitions", default=3, return_type="int" ) ),
@@ -308,34 +334,59 @@ def assemble_app(
                        context_pressure_loop=context_pressure_loop )
 
 
-def _build_live_notify_fn( cfg ):   # pragma: no cover - literal external IO boundary (config, env credential, urllib)
+def _pending_ledger_path( cfg ):
     """
-    Build the best-effort live-push-to-Rick notify_fn (2b-1), or None.
+    Resolve the §3.5 pending-ledger file path: relative INI value combined with
+    the canonical project root at runtime (PATH MANAGEMENT mandate).
 
-    The IO boundary for the :7999 live hop: reads the gating INI knobs + the
-    X-API-Key from `~/.lupin/config` (reusing the canonical cosa.utils.config_loader)
-    and assembles a DEDUP-guarded urllib transport. Returns None (live push OFF —
-    escalations still land durably on the commons topic) when the feature is disabled
-    OR the credential cannot be resolved, so a missing/bad key degrades safe rather
-    than spamming failed POSTs (or crashing startup). The request SHAPE
-    (build_notify_request), the dedup guard (make_live_notify_fn), and the degrade-safe
-    key resolver (resolve_arbiter_api_key) are unit-tested; only this wiring + the
-    urllib round-trip are no-cover.
+    Ensures:
+        - returns <project_root> + <`arbiter outreach pending ledger path`>
+    """
+    import cosa.utils.util as cu
+    rel = ( cfg.get( "arbiter outreach pending ledger path",
+                     default="/io/arbiter/outreach-pending.json" )
+            or "/io/arbiter/outreach-pending.json" )
+    return cu.get_project_root() + rel
+
+
+def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal external IO boundary (config, env credential, urllib)
+    """
+    Build the best-effort :7999 outreach hops (2026.06.11 receipts design):
+    ( live_notify_fn, live_retry_fn, dm_push_fn ) — each None when unavailable.
+
+    The IO boundary for the :7999 hops: reads the gating INI knobs + the
+    X-API-Key from `~/.lupin/config` (canonical cosa.utils.config_loader) and
+    assembles the outcome-returning transports. The request SHAPES, outcome
+    parsing, dedup guard, misconfig validator, and key resolver are unit-tested;
+    only this wiring + the urllib round-trips are no-cover.
+
+    Ensures:
+        - feature disabled or credential unresolvable → ( None, None, None )
+          (logged; escalations stay durable on the commons topic)
+        - §3.6 misconfig guard: an empty / env-skeleton target_user (tonight's
+          R1: literal ${LUPIN_DEV_EMAIL}) logs `live_notify_misconfigured`
+          LOUDLY, best-effort posts the misconfiguration to fleet-escalations,
+          and disables the live hops — no doomed-404 spam, and every subsequent
+          Rick-bound outreach journals outcome "disabled" (visible, not silent)
+        - happy path → live_notify_fn = dedup-guarded transport (first sends);
+          live_retry_fn = the RAW transport (re-announce bypasses content-dedup
+          by design — it re-sends the same text); dm_push_fn = the §3.3
+          register-question hop (or None when its gate is off)
     """
     from cosa.utils.config_loader import get_api_config, load_api_key
     from lupin_arbiter_app.arbiter_live_notify import (
-        build_notify_request, make_live_notify_fn, _http_post, _default_log_fn,
-        resolve_arbiter_api_key,
+        make_notify_transport, make_live_notify_fn, make_dm_push_fn,
+        resolve_arbiter_api_key, validate_live_notify_target, _default_log_fn,
     )
 
     if not cfg.get( "arbiter live notify enabled", default=True, return_type="boolean" ):
         _default_log_fn( "live_notify_disabled", reason="arbiter live notify enabled = false" )
-        return None
+        return None, None, None
 
     config_env = cfg.get( "arbiter live notify config env", default="development" ) or "development"
     api_key    = resolve_arbiter_api_key( get_api_config, load_api_key, env=config_env )
     if not api_key:
-        return None   # resolver already logged live_notify_disabled with the cause
+        return None, None, None   # resolver already logged live_notify_disabled with the cause
 
     base_url     = cfg.get( "arbiter live notify url", default="http://127.0.0.1:7999" ) or "http://127.0.0.1:7999"
     target_user  = cfg.get( "arbiter live notify target user", default="" ) or ""
@@ -344,31 +395,49 @@ def _build_live_notify_fn( cfg ):   # pragma: no cover - literal external IO bou
     dedup_window = int( cfg.get( "arbiter live notify dedup window seconds", default=900, return_type="int" ) )
     timeout      = int( cfg.get( "arbiter live notify timeout seconds", default=5, return_type="int" ) )
 
-    def transport( message ):
-        url, headers = build_notify_request(
-            message, base_url=base_url, target_user=target_user,
-            sender_id=sender_id, api_key=api_key,
+    dm_push_fn = None
+    if cfg.get( "arbiter outreach dm push enabled", default=True, return_type="boolean" ):
+        dm_push_fn = make_dm_push_fn(
+            base_url         = base_url,
+            api_key          = api_key,
+            asker_session_id = "lupin-arbiter-app-8001",
+            ttl_seconds      = int( cfg.get( "arbiter outreach ack window seconds", default=900, return_type="int" ) ),
+            timeout_seconds  = timeout,
         )
-        status = _http_post( url, headers, timeout_seconds=timeout )
-        _default_log_fn( "live_notify_sent", status=status, target_user=target_user )
 
-    return make_live_notify_fn( transport, dedup_window_seconds=dedup_window )
+    target_error = validate_live_notify_target( target_user )
+    if target_error:
+        _default_log_fn( "live_notify_misconfigured", error=target_error )
+        try:
+            gateway.post( "fleet-escalations",
+                          f"ARBITER MISCONFIGURED — live push to Rick is DISABLED: {target_error}" )
+        except Exception as e:
+            _default_log_fn( "escalation_post_error", error=str( e ) )
+        return None, None, dm_push_fn
+
+    transport = make_notify_transport(
+        base_url=base_url, target_user=target_user, sender_id=sender_id,
+        api_key=api_key, timeout_seconds=timeout,
+    )
+    return ( make_live_notify_fn( transport, dedup_window_seconds=dedup_window ),
+             transport, dm_push_fn )
 
 
 def create_production_app() -> FastAPI:   # pragma: no cover - literal external construction (config, gateway)
     """
     uvicorn `--factory` target: build the literal externals (ConfigurationManager,
-    the bridge-less commons gateway, the live-notify hop) and delegate ALL
-    wiring/branching to the testable assemble_app. live_notify_fn (2b-1) pushes
-    each escalation to Rick via POST :7999/api/notify when enabled + credentialed;
-    None otherwise — escalations always land durably on the fleet-escalations
-    commons topic regardless (the live push is best-effort, escalation-path only).
+    the bridge-less commons gateway, the :7999 outreach hops) and delegate ALL
+    wiring/branching to the testable assemble_app. The hops are best-effort,
+    escalation-path only; escalations always land durably on the
+    fleet-escalations commons topic regardless.
     """
     from cosa.config.configuration_manager import ConfigurationManager
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
     cfg     = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     gateway = LupinArbiterGateway.from_environment( sender_session_id="lupin-arbiter-app-8001" )
-    return assemble_app( cfg, gateway, live_notify_fn=_build_live_notify_fn( cfg ) )
+    live_notify_fn, live_retry_fn, dm_push_fn = _build_arbiter_outreach_hops( cfg, gateway )
+    return assemble_app( cfg, gateway, live_notify_fn=live_notify_fn,
+                         live_retry_fn=live_retry_fn, dm_push_fn=dm_push_fn )
 
 
 # Module-level loop-less ASGI entrypoint (safe to import; used by /health-only boots

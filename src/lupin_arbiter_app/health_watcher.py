@@ -39,6 +39,8 @@ import time
 from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
+from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
+
 
 # ── seams ───────────────────────────────────────────────────────────────────
 
@@ -54,25 +56,11 @@ class SystemClock:
         time.sleep( seconds )
 
 
-def _default_log_fn( event: str, **fields: Any ) -> None:
-    """
-    Default structured logger: emit ONE JSON line (ts/service/loop/event/fields)
-    to stdout → captured by the systemd journal (deploy §7 — structured, not bare
-    prints).
-
-    Ensures:
-        - prints a single json.dumps line; non-serialisable values fall back to str
-    """
-    line : Dict[ str, Any ] = {
-        "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
-        "service" : "lupin-arbiter-app",
-        "loop"    : "health_watcher",
-        "event"   : event,
-    }
-    line.update( fields )
-    # flush=True so structured lines reach the systemd journal promptly (stdout is
-    # block-buffered under a pipe; an unflushed watcher log is a silent watcher).
-    print( json.dumps( line, default=str ), flush=True )
+# Item A (2026.06.11 receipts design §2.3): the line shape has ONE owner —
+# arbiter_journal.make_log_fn (ts + ts_local). This module-level default keeps
+# the historical name; production wiring (assemble_app) builds INI-tz'd,
+# per-loop log_fns from the same builder.
+_default_log_fn = make_log_fn( loop="health_watcher" )
 
 
 def _parse_inspect_result( returncode: int, stdout: Optional[ str ] ) -> Optional[ dict ]:

@@ -26,7 +26,7 @@ class _Gateway:
         self.sent = [ ]   # (recipient, body)
         self.posts = [ ]
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, recipient, body ): self.sent.append( ( recipient, body ) )
+    def send_to( self, recipient, body, metadata=None ): self.sent.append( ( recipient, body ) )
     def post( self, topic, body ): self.posts.append( ( topic, body ) )
 
 

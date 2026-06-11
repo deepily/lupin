@@ -1,33 +1,35 @@
 #!/usr/bin/env python3
 """
-lupin-arbiter-app — the live-push-to-Rick hop (2b-1).
+lupin-arbiter-app — the live-push-to-Rick hop (2b-1), outcome-returning since the
+2026.06.11 outreach-receipts design (Item B §3.2/§3.3).
 
-The arbiter's escalations land durably on the `fleet-escalations` commons topic,
-but until 2b-1 nobody consumed them (the consumption gap, design Part 3:
-`live_notify_fn = None`, never fires). This module builds the BEST-EFFORT live
-notify_fn that fleet_arbiter_loop injects as `live_notify_fn` — the ONLY
-:7999-capable hop, ESCALATION-PATH ONLY (never per-poll; the detection path stays
-:7999-free, R4). Each escalation becomes a `POST :7999/api/notify` so the alert
-reaches Rick instead of rotting on a topic nobody polls.
+The arbiter's escalations land durably on the `fleet-escalations` commons topic;
+this module builds the BEST-EFFORT :7999 hops that fleet_arbiter_loop injects —
+escalation-path ONLY (never per-poll; detection stays :7999-free, R4):
 
-Two seams keep the logic 100% unit-testable — only the literal urllib POST
-(`_http_post`) and the config/credential read (in app.create_production_app) are
-the IO boundary, pragma'd there:
+  • the LIVE notify transport (`make_notify_transport`) — POST /api/notify to
+    Rick. Pre-design, `_http_post` discarded the response BODY, so a
+    `user_not_available` miss (HTTP 200!) was invisible — the latent L1 failure
+    behind the 2026-06-11 21:28/22:01 silent misses. The transport now parses
+    the body's `status` into a structured OUTCOME dict and NEVER raises:
+    failures become outcome values, journaled by the caller under the
+    outreach_id (no hop may fail silently — §1.5).
 
-  • `build_notify_request` — PURE: the exact request SHAPE of the :7999 hop
-    (url + headers); fully tested.
-  • `make_live_notify_fn` — a content+window DEDUP guard (2b-1 receipt b):
-    identical escalation text within `dedup_window_seconds` is pushed ONCE. The
-    arbiter's detectors already escalate-once-per-episode (`_stall_escalated` /
-    `_manager_down_escalated` / the decision cursor); this is belt-and-suspenders
-    against a recycle re-emit, two detectors emitting the same line, or a retry
-    storm — so Rick never gets the same alert twice in a window. The injected
-    `transport( message )` is the real sender (urllib) in production, a recorder
-    in tests.
+  • the DM PUSH hop (`make_dm_push_fn`) — POST /api/commons/register-question
+    with recipient_persona, the same machinery `commons_send_to` uses: the
+    recipient's listener gets `commons_question_received` → tmux injection →
+    the manager WAKES. Pre-design the arbiter's manager DMs were board-only
+    writes (root-cause R6 — Tiberius never got pushed).
 
-Degrade-safe: a transport failure propagates to make_escalation_notify_fn's
-swallow (escalation_live_notify_error) and the escalation still lands durably on
-the commons topic — the live push never gates detection.
+Outcome contract (every hop returns one dict):
+    { "channel": "live"|"dm_push", "outcome": <vocabulary>, ...detail fields }
+Delivered outcomes for the live channel: DELIVERED_OUTCOMES — ONLY these enter
+the dedup window (the L2 kill: a user_not_available no longer suppresses
+retries), and only these count as a Rick-side delivery receipt.
+
+Two seams keep the logic 100% unit-testable — only the literal urllib round
+trips (`_http_post`, `_http_post_json`) and the config/credential read (in
+app.create_production_app) are the IO boundary, pragma'd there.
 """
 import datetime
 import json
@@ -35,22 +37,18 @@ from typing import Any, Callable, Optional
 from urllib.parse import urlencode
 
 from lupin_arbiter_app.health_watcher import SystemClock
+from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn, DELIVERED_OUTCOMES
 
 
 # the :7999 notification ingress (POST /api/notify; X-API-Key or JWT auth)
-NOTIFY_PATH = "/api/notify"
+NOTIFY_PATH            = "/api/notify"
+# the :7999 DM-push ingress (POST /api/commons/register-question — §3.3)
+REGISTER_QUESTION_PATH = "/api/commons/register-question"
 
 
-def _default_log_fn( event: str, **fields: Any ) -> None:
-    """Structured JSON line (loop:fleet_arbiter_live_notify) → systemd journal."""
-    line : dict = {
-        "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
-        "service" : "lupin-arbiter-app",
-        "loop"    : "fleet_arbiter_live_notify",
-        "event"   : event,
-    }
-    line.update( fields )
-    print( json.dumps( line, default=str ), flush=True )
+# Item A (2026.06.11 receipts design §2.3): the line shape has ONE owner —
+# arbiter_journal.make_log_fn (ts + ts_local).
+_default_log_fn = make_log_fn( loop="fleet_arbiter_live_notify" )
 
 
 def build_notify_request(
@@ -97,37 +95,123 @@ def build_notify_request(
     return url, headers
 
 
+def parse_notify_outcome( http_status: int, body: Any ) -> dict:
+    """
+    Map a /api/notify HTTP response (status + parsed JSON body) to the live-
+    channel outcome dict — PURE (§3.2: the body carries the REAL delivery state;
+    all three delivery states ride HTTP 200).
+
+    Requires:
+        - http_status is an int
+        - body is the parsed response body (dict) or None/non-dict on parse fail
+
+    Ensures:
+        - body status "queued" / "delivered_via_listener" / "user_not_available"
+          → that outcome verbatim (+ connection_count when present)
+        - any other body / unparseable body on a 2xx → outcome
+          "unexpected_response" with the body head as detail (visible, never
+          silently assumed delivered)
+        - non-2xx http_status → outcome "http_error" (+ http_status)
+        - never raises
+    """
+    if not ( 200 <= http_status < 300 ):
+        return { "channel": "live", "outcome": "http_error", "http_status": http_status }
+    status = body.get( "status" ) if isinstance( body, dict ) else None
+    if status in ( "queued", "delivered_via_listener", "user_not_available" ):
+        outcome = { "channel": "live", "outcome": status, "http_status": http_status }
+        if isinstance( body.get( "connection_count" ), int ):
+            outcome[ "connection_count" ] = body[ "connection_count" ]
+        return outcome
+    return { "channel": "live", "outcome": "unexpected_response",
+             "http_status": http_status, "detail": str( body )[ :160 ] }
+
+
+def make_notify_transport(
+    *,
+    base_url        : str,
+    target_user     : str,
+    sender_id       : str,
+    api_key         : str,
+    timeout_seconds : int                  = 5,
+    http_post_fn    : Optional[ Callable ] = None,
+    log_fn          : Optional[ Callable ] = None,
+) -> Callable[ [ str ], dict ]:
+    """
+    Build the live transport: transport( message ) -> live-channel outcome dict.
+
+    Requires:
+        - base_url / target_user / sender_id / api_key are strings
+        - http_post_fn (if given) is ( url, headers, timeout_seconds ) ->
+          ( http_status, parsed_body ) — test seam; default the urllib boundary
+
+    Ensures:
+        - POSTs the build_notify_request shape and returns
+          parse_notify_outcome( status, body )
+        - ANY transport exception (HTTPError 4xx/5xx, timeout, refused) becomes
+          { channel: "live", outcome: "http_error", detail } — NEVER raises
+          (failures are outcome VALUES per §1.5; tonight's swallowed 404 becomes
+          a per-outreach journaled result instead)
+        - logs `live_notify_sent` with the outcome on every attempt (the
+          loop-level trace; the per-outreach result event is the caller's)
+    """
+    http_post_fn = http_post_fn if http_post_fn is not None else _http_post
+    log_fn       = log_fn       if log_fn       is not None else _default_log_fn
+
+    def transport( message: str ) -> dict:
+        url, headers = build_notify_request(
+            message, base_url=base_url, target_user=target_user,
+            sender_id=sender_id, api_key=api_key,
+        )
+        try:
+            status, body = http_post_fn( url, headers, timeout_seconds )
+            outcome = parse_notify_outcome( status, body )
+        except Exception as e:
+            http_status = getattr( e, "code", None )
+            outcome = { "channel": "live", "outcome": "http_error", "detail": str( e )[ :160 ] }
+            if http_status is not None: outcome[ "http_status" ] = http_status
+        log_fn( "live_notify_sent", outcome=outcome[ "outcome" ],
+                http_status=outcome.get( "http_status" ), target_user=target_user )
+        return outcome
+
+    return transport
+
+
 def make_live_notify_fn(
-    transport            : Callable[ [ str ], None ],
+    transport            : Callable[ [ str ], dict ],
     *,
     dedup_window_seconds : int                  = 900,
     clock                : Optional[ Any ]      = None,
     log_fn               : Optional[ Callable ] = None,
-) -> Callable[ [ str ], None ]:
+) -> Callable[ [ str ], dict ]:
     """
-    Wrap a one-arg `transport(message)` with a content+window DEDUP guard.
+    Wrap an outcome-returning transport with a content+window DEDUP guard.
+
+    The arbiter's detectors already escalate-once-per-episode; this is
+    belt-and-suspenders against a recycle re-emit, two detectors emitting the
+    same line, or a retry storm — Rick never gets the same alert twice in a
+    window.
 
     Requires:
-        - transport is a callable taking the escalation message string
+        - transport is a callable taking the message and returning a live-
+          channel outcome dict
         - dedup_window_seconds is a positive int
 
     Ensures:
-        - the FIRST occurrence of a given message calls transport(message); an
-          identical message seen again within dedup_window_seconds is SKIPPED
-          (logged `live_notify_deduped`) — N identical escalations in a window →
-          exactly 1 push (receipt b)
-        - the send is recorded ONLY after transport returns, so a FAILED push
-          (transport raises) is NOT deduped away — the failure propagates to the
-          caller's swallow (make_escalation_notify_fn) and a later retry can
-          re-send
+        - the FIRST occurrence of a given message calls transport(message) and
+          returns its outcome; an identical message seen again within the window
+          is SKIPPED (logged `live_notify_deduped`, outcome "deduped")
+        - a send is recorded into the window ONLY on a DELIVERED outcome — a
+          user_not_available / http_error / unexpected_response attempt is NOT
+          deduped away (the §1.3 L2 kill: pre-design, ANY non-raising call was
+          recorded, so an offline-Rick miss suppressed retries for 15 min)
         - entries older than the window are pruned on each call (bounded memory)
-        - returns the wrapped `live_notify( message ) -> None`
+        - never raises; returns the outcome dict
     """
     clock  = clock  if clock  is not None else SystemClock()
     log_fn = log_fn if log_fn is not None else _default_log_fn
-    sent   : dict = { }    # message -> last-sent aware datetime
+    sent   : dict = { }    # message -> last-DELIVERED aware datetime
 
-    def live_notify( message: str ) -> None:
+    def live_notify( message: str ) -> dict:
         now = clock.now()
         # prune expired entries first — anything that survives is within the window
         for stale in [ m for m, t in sent.items()
@@ -135,11 +219,41 @@ def make_live_notify_fn(
             del sent[ stale ]
         if message in sent:
             log_fn( "live_notify_deduped", message=message )
-            return
-        transport( message )            # may raise → propagate to caller's swallow
-        sent[ message ] = now           # record ONLY after a successful push
+            return { "channel": "live", "outcome": "deduped" }
+        try:
+            outcome = transport( message )
+        except Exception as e:              # a raising transport degrades to an outcome (never raises)
+            outcome = { "channel": "live", "outcome": "http_error", "detail": str( e )[ :160 ] }
+        if isinstance( outcome, dict ) and outcome.get( "outcome" ) in DELIVERED_OUTCOMES:
+            sent[ message ] = now           # record ONLY a delivered push
+        return outcome
 
     return live_notify
+
+
+def validate_live_notify_target( target_user: str ) -> Optional[ str ]:
+    """
+    Pre-flight validation of the live-push target_user — the §3.6 misconfig
+    guard (PURE).
+
+    Tonight's root cause R1: the systemd unit env lacked LUPIN_DEV_EMAIL, so
+    `os.path.expandvars` left the LITERAL `${LUPIN_DEV_EMAIL}` in the INI value
+    and every push 404'd, silently, forever. This catches that class at startup.
+
+    Ensures:
+        - returns None when target_user looks usable (non-empty, no surviving
+          `${` env-var skeleton, has an @)
+        - returns a human-readable error string otherwise; never raises
+    """
+    if not target_user or not target_user.strip():
+        return "target_user is empty — set `arbiter live notify target user` (or the env var it references)"
+    if "${" in target_user:
+        return ( f"target_user {target_user!r} contains an UNRESOLVED env-var skeleton — "
+                 f"the referenced variable is not set in the service environment "
+                 f"(the 2026-06-11 R1 root cause: systemd's clean env lacked it)" )
+    if "@" not in target_user:
+        return f"target_user {target_user!r} is not an email address"
+    return None
 
 
 def resolve_arbiter_api_key( get_api_config_fn, load_api_key_fn, *, env, log_fn=None ):
@@ -178,18 +292,135 @@ def resolve_arbiter_api_key( get_api_config_fn, load_api_key_fn, *, env, log_fn=
         return None
 
 
+# ── the DM-push hop (§3.3 — manager-bound register-question) ─────────────────
+
+def build_register_question_payload(
+    *,
+    recipient_persona : str,
+    outreach_id       : str,
+    asker_session_id  : str,
+    ttl_seconds       : int,
+):
+    """
+    Build the JSON payload for the register-question DM-push hop — PURE.
+
+    Ensures:
+        - question_id == outreach_id (the dot-connect key: the manager's
+          threaded reply `in_reply_to` therefore names the outreach directly)
+        - topic mirrors the gateway's dm-topic slug for the persona (same
+          board the durable send_to wrote to)
+        - expect_reply=False — the push (commons_question_received → tmux
+          injection) is what we want; the arbiter has no tmux for an
+          asker-side answer push, receipts come from §3.4 board polling
+    """
+    from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
+    return {
+        "topic"             : LupinArbiterGateway.dm_topic_for( recipient_persona ),
+        "question_id"       : outreach_id,
+        "asker_session_id"  : asker_session_id,
+        "ttl_seconds"       : ttl_seconds,
+        "recipient_persona" : recipient_persona,
+        "expect_reply"      : False,
+    }
+
+
+def make_dm_push_fn(
+    *,
+    base_url          : str,
+    api_key           : str,
+    asker_session_id  : str,
+    ttl_seconds       : int                  = 900,
+    timeout_seconds   : int                  = 5,
+    http_post_json_fn : Optional[ Callable ] = None,
+    log_fn            : Optional[ Callable ] = None,
+) -> Callable[ [ str, str ], dict ]:
+    """
+    Build the manager DM-push seam: dm_push( recipient_persona, outreach_id ) ->
+    dm_push-channel outcome dict.
+
+    Requires:
+        - http_post_json_fn (if given) is ( url, headers, payload_dict,
+          timeout_seconds ) -> ( http_status, parsed_body ) — test seam;
+          default the urllib boundary
+
+    Ensures:
+        - POSTs :7999/api/commons/register-question; a 201 with
+          dm_dispatched=true → outcome "dispatched" (the manager's listener got
+          commons_question_received → tmux injection — they WAKE); a 201
+          without dispatch → "registered_no_push" (tracker took it but no live
+          listener push — visible, distinct)
+        - ANY failure (422 recipient-resolution, timeout, refused, non-2xx) →
+          outcome "push_unavailable" with detail — the caller degrades to the
+          durable board write it already made, VISIBLY (never raises)
+        - logs `dm_push_attempted` with the outcome on every call
+    """
+    http_post_json_fn = http_post_json_fn if http_post_json_fn is not None else _http_post_json
+    log_fn            = log_fn            if log_fn            is not None else _default_log_fn
+    url               = f"{base_url.rstrip( '/' )}{REGISTER_QUESTION_PATH}"
+    headers           = { "X-API-Key": api_key, "Content-Type": "application/json" }
+
+    def dm_push( recipient_persona: str, outreach_id: str ) -> dict:
+        payload = build_register_question_payload(
+            recipient_persona=recipient_persona, outreach_id=outreach_id,
+            asker_session_id=asker_session_id, ttl_seconds=ttl_seconds,
+        )
+        try:
+            status, body = http_post_json_fn( url, headers, payload, timeout_seconds )
+            if status == 201 and isinstance( body, dict ) and body.get( "dm_dispatched" ):
+                outcome = { "channel": "dm_push", "outcome": "dispatched" }
+            elif status == 201:
+                outcome = { "channel": "dm_push", "outcome": "registered_no_push",
+                            "detail": str( body )[ :160 ] }
+            else:
+                outcome = { "channel": "dm_push", "outcome": "push_unavailable",
+                            "http_status": status, "detail": str( body )[ :160 ] }
+        except Exception as e:
+            http_status = getattr( e, "code", None )
+            outcome = { "channel": "dm_push", "outcome": "push_unavailable",
+                        "detail": str( e )[ :160 ] }
+            if http_status is not None: outcome[ "http_status" ] = http_status
+        log_fn( "dm_push_attempted", recipient=recipient_persona,
+                outreach_id=outreach_id, outcome=outcome[ "outcome" ] )
+        return outcome
+
+    return dm_push
+
+
+# ── the literal urllib IO boundaries ─────────────────────────────────────────
+
 def _http_post( url, headers, timeout_seconds=5 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)
     """
-    POST to `url` with `headers` (empty body) and return the HTTP status.
+    POST to `url` with `headers` (empty body); return ( status, parsed_body ).
 
-    The literal urllib round-trip — the ONLY IO in this module. Marked no-cover;
-    exercised live against :7999, never in unit tests (the request SHAPE it sends
-    is `build_notify_request`, which IS tested).
+    The literal urllib round-trip. Marked no-cover; exercised live against
+    :7999, never in unit tests (the request SHAPE is `build_notify_request` and
+    the response MAPPING is `parse_notify_outcome` — both ARE tested). Unlike
+    the pre-design version this READS the body: /api/notify reports the real
+    delivery state there (§1.3 L1).
     """
     import urllib.request
     req = urllib.request.Request( url, data=b"", headers=headers, method="POST" )
     with urllib.request.urlopen( req, timeout=timeout_seconds ) as resp:
-        return resp.status
+        raw = resp.read()
+        try:
+            body = json.loads( raw ) if raw else None
+        except ValueError:
+            body = None
+        return resp.status, body
+
+
+def _http_post_json( url, headers, payload, timeout_seconds=5 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)
+    """POST a JSON payload; return ( status, parsed_body ). Same boundary contract as _http_post."""
+    import urllib.request
+    data = json.dumps( payload ).encode( "utf-8" )
+    req  = urllib.request.Request( url, data=data, headers=headers, method="POST" )
+    with urllib.request.urlopen( req, timeout=timeout_seconds ) as resp:
+        raw = resp.read()
+        try:
+            body = json.loads( raw ) if raw else None
+        except ValueError:
+            body = None
+        return resp.status, body
 
 
 def quick_smoke_test():
@@ -204,19 +435,52 @@ def quick_smoke_test():
     assert "type=alert" in url and "priority=high" in url and "target_user=rick" in url
     assert headers[ "X-API-Key" ] == "k-123"
 
-    # dedup: N identical → 1 transport call
+    # body-status mapping — the L1 kill: user_not_available is now VISIBLE
+    assert parse_notify_outcome( 200, { "status": "queued", "connection_count": 2 } )[ "outcome" ] == "queued"
+    assert parse_notify_outcome( 200, { "status": "user_not_available" } )[ "outcome" ] == "user_not_available"
+    assert parse_notify_outcome( 200, { "weird": True } )[ "outcome" ] == "unexpected_response"
+    assert parse_notify_outcome( 404, None )[ "outcome" ] == "http_error"
+
+    # dedup-on-DELIVERED-only — the L2 kill
     class _Clk:
         def __init__( self ): self.t = datetime.datetime( 2026, 6, 9, 0, 0, 0, tzinfo=datetime.timezone.utc )
         def now( self ): return self.t
-    clk  = _Clk()
-    sent = [ ]
-    live = make_live_notify_fn( sent.append, dedup_window_seconds=600, clock=clk )
-    for _ in range( 5 ):
-        live( "same alert" )
-    assert sent == [ "same alert" ]                                  # deduped 5 → 1
-    clk.t = clk.t + datetime.timedelta( seconds=601 )                # past the window
-    live( "same alert" )
-    assert sent == [ "same alert", "same alert" ]                    # window elapsed → re-sent
+    clk      = _Clk()
+    answers  = [ { "channel": "live", "outcome": "user_not_available" },
+                 { "channel": "live", "outcome": "queued" } ]
+    calls    = [ ]
+    def fake_transport( message ):
+        calls.append( message )
+        return answers[ min( len( calls ) - 1, 1 ) ]
+    quiet = lambda event, **f: None
+    live  = make_live_notify_fn( fake_transport, dedup_window_seconds=600, clock=clk, log_fn=quiet )
+    assert live( "alert" )[ "outcome" ] == "user_not_available"       # miss → NOT recorded
+    assert live( "alert" )[ "outcome" ] == "queued"                   # retry NOT deduped (L2 kill)
+    assert live( "alert" )[ "outcome" ] == "deduped"                  # delivered → now deduped
+    clk.t = clk.t + datetime.timedelta( seconds=601 )                  # past the window
+    assert live( "alert" )[ "outcome" ] == "queued"                   # window elapsed → re-sent
+
+    # misconfig guard — tonight's R1 class
+    assert validate_live_notify_target( "rick@x.com" ) is None
+    assert "UNRESOLVED" in validate_live_notify_target( "${LUPIN_DEV_EMAIL}" )
+    assert validate_live_notify_target( "" ) is not None
+    assert validate_live_notify_target( "not-an-email" ) is not None
+
+    # dm_push outcome mapping
+    payload = build_register_question_payload(
+        recipient_persona="Mr Radio", outreach_id="o-1",
+        asker_session_id="lupin-arbiter-app-8001", ttl_seconds=900,
+    )
+    assert payload[ "topic" ] == "dm-mr_radio" and payload[ "question_id" ] == "o-1"
+    assert payload[ "expect_reply" ] is False
+    push = make_dm_push_fn( base_url="http://x", api_key="k", asker_session_id="s",
+                            http_post_json_fn=lambda u, h, p, t: ( 201, { "dm_dispatched": True } ),
+                            log_fn=quiet )
+    assert push( "Tiberius", "o-2" )[ "outcome" ] == "dispatched"
+    push = make_dm_push_fn( base_url="http://x", api_key="k", asker_session_id="s",
+                            http_post_json_fn=lambda u, h, p, t: ( 422, { "detail": "recipient_not_found" } ),
+                            log_fn=quiet )
+    assert push( "Ghost", "o-3" )[ "outcome" ] == "push_unavailable"
     return True
 
 
