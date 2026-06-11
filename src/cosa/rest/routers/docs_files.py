@@ -208,14 +208,20 @@ async def get_docs_file(
     # we ever reach this point (aggressive-deprecation policy, 2026-05-21).
     # ---------------------------------------------------------------------
     if "/" not in decoded_path:
-        raise HTTPException(
-            status_code = 400,
-            detail      = "Missing project prefix; URL format: `?path=<project>/<rel>`"
-        )
+        # Bare registered-project name (`?path=claude-plans`) lists that
+        # project's root — parity with the trailing-slash form
+        # (`?path=claude-plans/`) and with the built-in `io` scope, which both
+        # list at the bare name. Unregistered bare names keep the 400.
+        if decoded_path not in _get_scope_registry():
+            raise HTTPException(
+                status_code = 400,
+                detail      = "Missing project prefix; URL format: `?path=<project>/<rel>`"
+            )
+        project_name, rel_path = decoded_path, ""
+    else:
+        project_name, rel_path = decoded_path.split( "/", 1 )
 
-    project_name, rel_path = decoded_path.split( "/", 1 )
-
-    if not project_name:  # pragma: no cover - unreachable: decoded_path is lstrip('/')'d (L192), guarded non-empty (L195) and guaranteed to contain '/' (L210), so its first char is non-slash → split('/',1)[0] is always a non-empty pre-slash segment → project_name is always truthy
+    if not project_name:  # pragma: no cover - unreachable: decoded_path is lstrip('/')'d (L192) and guarded non-empty (L195); the bare branch assigns it whole, and in the split branch its first char is non-slash → split('/',1)[0] is a non-empty pre-slash segment → project_name is always truthy
         raise HTTPException(
             status_code = 400,
             detail      = "Empty project prefix"

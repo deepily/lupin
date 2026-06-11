@@ -29,7 +29,7 @@ class TestTimeSavedLayout:
         Ensures:
             - Total time saved element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-time-total" ).count() > 0
@@ -44,7 +44,7 @@ class TestTimeSavedLayout:
         Ensures:
             - Others time saved element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-time-others" ).count() > 0
@@ -59,7 +59,7 @@ class TestTimeSavedLayout:
         Ensures:
             - Solutions created element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-solutions-created" ).count() > 0
@@ -74,7 +74,7 @@ class TestTimeSavedLayout:
         Ensures:
             - Replays benefited element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-replays-benefited" ).count() > 0
@@ -89,7 +89,7 @@ class TestTimeSavedLayout:
         Ensures:
             - Top solutions element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-top-solutions" ).count() > 0
@@ -104,7 +104,7 @@ class TestTimeSavedLayout:
         Ensures:
             - Total time element exists and shows initial value
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         total = logged_in_page.get_by_test_id( "notifications-time-total" )

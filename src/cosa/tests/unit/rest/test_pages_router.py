@@ -10,6 +10,9 @@ Covers:
   `Cache-Control: no-cache` header, rooted under the resolved static dir.
 - Every registered `/app/*` endpoint — invoked through the router's route table
   so each one-line handler is exercised and asserted against `_ROUTE_TABLE`.
+- `/app/notifications` cutover redirect — all branches of the
+  `legacy notifications redirect enabled` flag × `?classic` escape hatch,
+  plus an HTTP-layer 302 assertion through TestClient.
 
 Zero external dependencies — `FileResponse` is boundary-mocked so no file is
 read from disk; we assert the construction arguments, not real I/O.
@@ -76,6 +79,9 @@ class TestPagesEndpoints( unittest.TestCase ):
             - Invoking each registered endpoint calls FileResponse with the
               static path that `_ROUTE_TABLE` maps its URL to
         """
+        config_off = MagicMock()
+        config_off.get.return_value = False
+
         with patch( "cosa.rest.routers.pages.FileResponse" ) as mock_fr:
             mock_fr.side_effect = lambda path, **kw: path
 
@@ -83,7 +89,10 @@ class TestPagesEndpoints( unittest.TestCase ):
             for route in router.routes:
                 if not isinstance( route, APIRoute ):
                     continue
-                returned_path = asyncio.run( route.endpoint() )
+                if route.path == "/app/notifications":
+                    returned_path = asyncio.run( route.endpoint( classic=False, config_mgr=config_off ) )
+                else:
+                    returned_path = asyncio.run( route.endpoint() )
                 served[ route.path ] = returned_path
 
         # Every route in _ROUTE_TABLE was served with the correct static path
@@ -110,6 +119,96 @@ class TestPagesEndpoints( unittest.TestCase ):
         self.assertTrue( _static_dir.endswith( os.path.join( "lupin_app", "static" ) ) )
 
 
+class TestNotificationsRedirect( unittest.TestCase ):
+    """
+    Unit tests for the `/app/notifications` Saturday-cutover redirect.
+
+    Requires:
+        - page_notifications gates on the `legacy notifications redirect enabled`
+          INI key (boundary-mocked ConfigurationManager)
+
+    Ensures:
+        - Flag OFF serves the legacy file
+        - Flag ON returns a 302 RedirectResponse to /app/multiplexer
+        - Flag ON + classic=True serves the legacy file (escape hatch)
+        - The HTTP layer surfaces the 302 + Location header end-to-end
+    """
+
+    def _config_returning( self, enabled ):
+        config_mgr = MagicMock()
+        config_mgr.get.return_value = enabled
+        return config_mgr
+
+    def test_flag_off_serves_legacy_file( self ):
+        """
+        Ensures:
+            - With the flag False, the legacy notifications.html path is served
+            - The flag is read with the documented key, default, and type
+        """
+        config_mgr = self._config_returning( False )
+        with patch( "cosa.rest.routers.pages.FileResponse" ) as mock_fr:
+            mock_fr.side_effect = lambda path, **kw: path
+            result = asyncio.run( pages.page_notifications( classic=False, config_mgr=config_mgr ) )
+
+        self.assertEqual( result, os.path.join( _static_dir, "html/notifications.html" ) )
+        config_mgr.get.assert_called_once_with(
+            "legacy notifications redirect enabled", default=False, return_type="boolean"
+        )
+
+    def test_flag_on_redirects_to_multiplexer( self ):
+        """
+        Ensures:
+            - With the flag True and no classic escape, a 302 RedirectResponse
+              targeting /app/multiplexer is returned
+        """
+        from fastapi.responses import RedirectResponse
+
+        config_mgr = self._config_returning( True )
+        result     = asyncio.run( pages.page_notifications( classic=False, config_mgr=config_mgr ) )
+
+        self.assertIsInstance( result, RedirectResponse )
+        self.assertEqual( result.status_code, 302 )
+        self.assertEqual( result.headers[ "location" ], "/app/multiplexer" )
+
+    def test_flag_on_classic_escape_serves_legacy_file( self ):
+        """
+        Ensures:
+            - With the flag True but classic=True, the legacy page is still
+              served (E2E-suite / "Classic UI" escape hatch)
+        """
+        config_mgr = self._config_returning( True )
+        with patch( "cosa.rest.routers.pages.FileResponse" ) as mock_fr:
+            mock_fr.side_effect = lambda path, **kw: path
+            result = asyncio.run( pages.page_notifications( classic=True, config_mgr=config_mgr ) )
+
+        self.assertEqual( result, os.path.join( _static_dir, "html/notifications.html" ) )
+
+    def test_redirect_via_http_layer( self ):
+        """
+        Ensures:
+            - A real GET /app/notifications through TestClient returns 302 with
+              Location: /app/multiplexer when the flag is on
+            - Adding ?classic=1 suppresses the redirect (200, text/html)
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from cosa.rest.dependencies.config import get_config_manager
+
+        app = FastAPI()
+        app.include_router( router )
+        app.dependency_overrides[ get_config_manager ] = lambda: self._config_returning( True )
+
+        client   = TestClient( app )
+        redirect = client.get( "/app/notifications", follow_redirects=False )
+        self.assertEqual( redirect.status_code, 302 )
+        self.assertEqual( redirect.headers[ "location" ], "/app/multiplexer" )
+
+        classic = client.get( "/app/notifications?classic=1", follow_redirects=False )
+        self.assertEqual( classic.status_code, 200 )
+        self.assertTrue( classic.headers[ "content-type" ].startswith( "text/html" ) )
+
+
 def isolated_unit_test():
     """
     Run the pages router unit tests in isolation.
@@ -125,6 +224,7 @@ def isolated_unit_test():
         suite  = unittest.TestSuite()
         suite.addTests( loader.loadTestsFromTestCase( TestServeFile ) )
         suite.addTests( loader.loadTestsFromTestCase( TestPagesEndpoints ) )
+        suite.addTests( loader.loadTestsFromTestCase( TestNotificationsRedirect ) )
         result = unittest.TextTestRunner( verbosity=2 ).run( suite )
 
         duration  = time.time() - start_time

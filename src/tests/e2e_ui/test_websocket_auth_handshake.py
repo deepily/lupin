@@ -76,7 +76,7 @@ class TestAuthHandshakeSent:
         """
         _, sent_frames, _ = _capture_ws_frames( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -107,7 +107,7 @@ class TestAuthHandshakeSent:
         """
         _, sent_frames, _ = _capture_ws_frames( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -140,7 +140,7 @@ class TestAuthHandshakeSent:
         """
         _, sent_frames, _ = _capture_ws_frames( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -175,7 +175,7 @@ class TestAuthHandshakeSent:
         """
         _, sent_frames, _ = _capture_ws_frames( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -271,7 +271,7 @@ class TestAuthHandshakeResponse:
         page.evaluate( "localStorage.clear()" )
 
         # Try to access notifications without auth
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_timeout( 3000 )
 
         assert "/login" in page.url, \

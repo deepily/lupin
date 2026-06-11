@@ -48,7 +48,7 @@ class TestConversationModeCacheHydration:
             - notifications_conversation_modes key is readable as JSON object
               (may be empty {} on first visit, never undefined)
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         # Read the key — should be valid JSON, even if empty
@@ -75,7 +75,7 @@ class TestConversationModeCacheHydration:
             - When cache active=False, renders 🔔 without .is-active class
         """
         # Seed cache for an arbitrary session_id BEFORE first navigation
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         # Find any rendered sender card with a session_id
@@ -135,7 +135,7 @@ class TestConversationModeWidgetPresence:
             - Each sender card with data-session-id has exactly one toggle button
             - The button has data-session-id matching the parent card
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         cards = logged_in_page.locator( '[data-session-id]' ).all()
@@ -162,7 +162,7 @@ class TestConversationModeWidgetPresence:
             - Default text content is 🔔
             - Default class does NOT include .is-active
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         # Force-clear cache and reload

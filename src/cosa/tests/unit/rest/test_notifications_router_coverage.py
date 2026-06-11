@@ -533,6 +533,73 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
             out = await self._call( nq, ws, response_requested=True, response_type="yes_no", response_default="no" )
         self.assertIsInstance( out, StreamingResponse )   # metadata None + conf<threshold false arms
 
+    # ---- vote-gate stamp (Stage 3 — threshold carried IN the hint payload) ----
+    def _vote_engine( self, voting_enabled=True, threshold=0.5 ):
+        pred = Mock(); pred.metadata = {}; pred.confidence = 0.9; pred.category = "yes"
+        pred.to_hint_dict.return_value = { "predicted_value": "yes" }
+        engine = Mock(); engine.enabled = True; engine.confidence_threshold = 0.5
+        engine.hint_voting_enabled                = voting_enabled
+        engine.hint_vote_min_confidence_threshold = threshold
+        engine.predict.return_value = pred
+        return engine
+
+    async def test_vote_gate_stamped_when_voting_enabled( self ):
+        nq = Mock(); nq.push_notification.return_value = self._online_item()
+        ws = _ws_manager( is_connected=True, connection_count=1 )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=self._online_repo() ), \
+             patch( "cosa.agents.prediction_engine.get_prediction_engine", return_value=self._vote_engine() ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            await self._call( nq, ws, response_requested=True, response_type="yes_no", response_default="no" )
+        pushed_hint = nq.push_notification.call_args.kwargs[ "prediction_hint" ]
+        self.assertEqual( pushed_hint[ "vote_min_confidence_threshold" ], 0.5 )
+
+    async def test_vote_gate_not_stamped_when_voting_disabled( self ):
+        nq = Mock(); nq.push_notification.return_value = self._online_item()
+        ws = _ws_manager( is_connected=True, connection_count=1 )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=self._online_repo() ), \
+             patch( "cosa.agents.prediction_engine.get_prediction_engine",
+                    return_value=self._vote_engine( voting_enabled=False ) ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            await self._call( nq, ws, response_requested=True, response_type="yes_no", response_default="no" )
+        pushed_hint = nq.push_notification.call_args.kwargs[ "prediction_hint" ]
+        self.assertNotIn( "vote_min_confidence_threshold", pushed_hint )
+
+    async def test_vote_gate_respects_override_preset( self ):
+        # An override hint that pre-sets the gate keeps its value — the stamp block
+        # must not second-guess it (and must not even need the engine).
+        nq = Mock(); nq.push_notification.return_value = self._online_item()
+        ws = _ws_manager( is_connected=True, connection_count=1 )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=self._online_repo() ), \
+             patch( "cosa.agents.prediction_engine.get_prediction_engine",
+                    side_effect=Exception( "engine must not be consulted" ) ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            await self._call( nq, ws, response_requested=True, response_type="yes_no", response_default="no",
+                              prediction_hint_override='{"predicted_value": "yes", "vote_min_confidence_threshold": 0.25}' )
+        pushed_hint = nq.push_notification.call_args.kwargs[ "prediction_hint" ]
+        self.assertEqual( pushed_hint[ "vote_min_confidence_threshold" ], 0.25 )
+
+    async def test_vote_gate_stamp_error_nonfatal( self ):
+        # predict succeeds (first get_prediction_engine call), the stamp's second
+        # call blows up → notification still goes out, hint just lacks the gate.
+        nq = Mock(); nq.push_notification.return_value = self._online_item()
+        ws = _ws_manager( is_connected=True, connection_count=1 )
+        with patch( "cosa.rest.user_service.get_user_by_email", return_value={ "id": UID_STR } ), \
+             patch.object( N, "get_db", _ctx_db( Mock() ) ), \
+             patch.object( N, "NotificationRepository", return_value=self._online_repo() ), \
+             patch( "cosa.agents.prediction_engine.get_prediction_engine",
+                    side_effect=[ self._vote_engine(), Exception( "gate down" ) ] ), \
+             _patch_fastapi_main( self._user_main() ), patch( "builtins.print" ):
+            out = await self._call( nq, ws, response_requested=True, response_type="yes_no", response_default="no" )
+        self.assertIsInstance( out, StreamingResponse )
+        pushed_hint = nq.push_notification.call_args.kwargs[ "prediction_hint" ]
+        self.assertNotIn( "vote_min_confidence_threshold", pushed_hint )
+
     async def _drain( self, response ):
         chunks = []
         async for c in response.body_iterator:

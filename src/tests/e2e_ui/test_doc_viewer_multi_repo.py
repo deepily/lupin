@@ -119,14 +119,26 @@ class TestAuthGateRedirect:
 
 
 class TestExternalScopeVisual:
-    """Visual regression for the new external-scope listing chrome."""
+    """Visual regression for the directory-listing chrome.
 
-    def test_visual_claude_plans_listing( self, logged_in_page, assert_snapshot ):
-        """Snapshot the claude-plans listing for visual regression."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=claude-plans/" )
+    ts-127620e1 fix: snapshots a FROZEN fixture directory (deterministic by
+    construction) instead of the live `claude-plans/` repo, whose growing file
+    count changed the listing height between baseline capture and run
+    (unstable-baseline-by-construction → ValueError: Image sizes do not match).
+    The listing renderer is scope-agnostic, so the frozen fixture exercises the
+    same chrome; scope-specific behavior for external repos stays covered by the
+    non-snapshot tests in TestExternalScopeRendering above.
+    """
+
+    # Frozen fixture served via the lupin scope (its .docview.yml whitelists src/).
+    _FIXTURE_PATH = "lupin/src/tests/e2e_ui/fixtures/docview_listing_fixture_external"
+
+    def test_visual_external_scope_listing( self, logged_in_page, assert_snapshot ):
+        """Snapshot the directory-listing chrome via a frozen fixture dir."""
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path={self._FIXTURE_PATH}" )
         logged_in_page.wait_for_load_state( "networkidle" )
         listing_container = logged_in_page.locator( ".doc-viewer-container" )
         assert_snapshot(
             listing_container,
-            name = "doc_viewer_multi_repo_claude_plans_listing.png",
+            name = "doc_viewer_external_scope_listing_frozen.png",
         )

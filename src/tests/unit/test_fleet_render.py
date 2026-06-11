@@ -505,6 +505,45 @@ class TestCarryForwardLineage:
         assert nxt == { "w1": "Tiberius" }
 
 
+class TestPruneOfflineRows:
+    """Post-game 2026-06-11: the D6/§5.2 offline-prune extracted as a pure helper
+    so the arbiter can detect on the FULL snapshot and publish the live-only view."""
+
+    def _live_row( self, sid, verdict="LIVE" ):
+        return { "session_id": sid, "liveness": { "verdict": verdict } }
+
+    def test_prunes_offline_and_recounts( self ):
+        snap = _snap( self._live_row( "a" ), self._live_row( "b", "offline" ),
+                      self._live_row( "c", "stale 45m" ) )
+        out = fr.prune_offline_rows( snap )
+        assert [ r[ "session_id" ] for r in out[ "sessions" ] ] == [ "a", "c" ]
+        assert out[ "session_count" ] == 2
+        assert out[ "generated_at" ] == snap[ "generated_at" ]
+        # the INPUT snapshot is untouched (new top-level dict; rows shared)
+        assert snap[ "session_count" ] == 3 and len( snap[ "sessions" ] ) == 3
+        assert out[ "sessions" ][ 0 ] is snap[ "sessions" ][ 0 ]       # rows SHARED, not copied
+
+    def test_non_dict_rows_dropped_and_malformed_liveness_kept( self ):
+        snap = _snap( "not-a-dict",
+                      { "session_id": "x", "liveness": "bad" },        # malformed liveness → kept (verdict None)
+                      { "session_id": "y" } )                          # no liveness at all → kept
+        out = fr.prune_offline_rows( snap )
+        assert [ r[ "session_id" ] for r in out[ "sessions" ] ] == [ "x", "y" ]
+        assert out[ "session_count" ] == 2
+
+    def test_falsy_or_non_dict_snapshot_degrades_to_empty( self ):
+        for bad in ( None, "nope", 7 ):
+            out = fr.prune_offline_rows( bad )
+            assert out == { "generated_at": None, "session_count": 0, "sessions": [ ] }
+
+    def test_all_live_passthrough_and_all_offline_empty( self ):
+        live = _snap( self._live_row( "a" ), self._live_row( "b", "quiet 6m" ) )
+        assert fr.prune_offline_rows( live )[ "session_count" ] == 2
+        dark = _snap( self._live_row( "a", "offline" ) )
+        out  = fr.prune_offline_rows( dark )
+        assert out[ "sessions" ] == [ ] and out[ "session_count" ] == 0
+
+
 def test_quick_smoke_test():
     assert fr.quick_smoke_test() is True
 

@@ -36,7 +36,7 @@ from .conftest import BASE_URL
 
 def _nav_notifications( page ):
     """Load the notifications page and wait for the UI to be idle."""
-    page.goto( f"{BASE_URL}/app/notifications" )
+    page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
     # Ensure window.notificationsUI is initialized
     page.wait_for_function( "() => window.notificationsUI !== undefined", timeout=5000 )

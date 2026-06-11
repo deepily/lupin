@@ -89,6 +89,53 @@ def _worktree_owner_basename( candidate: Path ) -> Optional[ str ]:
     return common_dir.parent.name.lower()
 
 
+def _dangling_gitlink_owner_basename( git_entry: Path ) -> Optional[ str ]:
+    """
+    Static-parse fallback: resolve the MAIN repo basename from the gitlink
+    FILE's content when live git cannot answer.
+
+    `git rev-parse --git-common-dir` fails ("not a git repository") in a
+    worktree whose `<main>/.git/worktrees/<name>` admin dir has been deleted
+    (e.g. an over-eager prune while the worktree is still in use — the
+    2026-06-11 fleet incident). The gitlink file itself still says where the
+    admin dir WAS:
+
+        gitdir: <main>/.git/worktrees/<name>
+
+    which is enough to recover the main-repo identity WITHOUT git: the path
+    segment before `/.git/worktrees/` is the main repo root. Submodule
+    gitlinks point at `<main>/.git/modules/<name>` instead and return None
+    (same submodule semantics as the live-git path).
+
+    Requires:
+        - git_entry is a Path to a `.git` FILE (a gitlink); caller guarantees
+
+    Ensures:
+        - Returns the lowercased main-repo basename when the gitlink targets
+          `<main>/.git/worktrees/<name>` (whether or not that dir still exists)
+        - Returns None for submodule gitlinks, unreadable/malformed gitlink
+          files, or a `.git/worktrees` with no parent segment
+        - Never raises: every failure mode maps to None
+    """
+    try:
+        content = git_entry.read_text()
+    except OSError:
+        return None
+
+    if not content.startswith( "gitdir:" ):
+        return None
+
+    target = Path( content[ len( "gitdir:" ): ].strip() )
+    if not target.is_absolute():
+        target = ( git_entry.parent / target ).resolve()
+
+    parts = target.parts
+    for i in range( 1, len( parts ) - 1 ):
+        if parts[ i ] == ".git" and parts[ i + 1 ] == "worktrees":
+            return parts[ i - 1 ].lower()
+    return None
+
+
 def detect_project() -> str:
     """
     Detect project name as the basename of the nearest enclosing
@@ -107,6 +154,13 @@ def detect_project() -> str:
           reports a worktree, returns the MAIN repo basename (e.g. a worktree
           of lupin returns "lupin", NOT the worktree dir name). This prevents
           the MCP server from mis-detecting worktree crews as bogus projects.
+        - DANGLING-GITLINK-SAFE: when live git CANNOT answer (the worktree's
+          admin dir under `<main>/.git/worktrees/` was deleted while the
+          worktree dir survives — 2026-06-11 fleet incident), the gitlink
+          file's `gitdir:` target is parsed statically and still yields the
+          MAIN repo basename. A broken worktree never degrades to its own
+          dir basename (which spammed urgent "no credentials for project
+          'sam-debt-sweep'" notifications).
         - Handles nested repos correctly: cwd inside src/cosa (which has
           its own .git gitlink) still returns "cosa", not "lupin" — submodule
           gitlinks are NOT treated as worktrees
@@ -124,6 +178,11 @@ def detect_project() -> str:
         if git_entry.exists():
             if git_entry.is_file():
                 owner = _worktree_owner_basename( candidate )
+                if owner is None:
+                    # Live git failed — dangling worktree admin dir. Parse the
+                    # gitlink content directly so a broken worktree still
+                    # resolves to its MAIN repo, never to its own basename.
+                    owner = _dangling_gitlink_owner_basename( git_entry )
                 if owner is not None:
                     return _PROJECT_ALIASES.get( owner, owner )
             name = candidate.name.lower()

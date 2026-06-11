@@ -142,6 +142,7 @@ def build_fleet_arbiter_job_factory(
     auto_poke_enabled    : bool                 = True,
     poke_stall_threshold : int                  = 720,
     poke_max_per_episode : int                  = 3,
+    manager_stale_poke_threshold : int          = 2700,
     start_period_seconds : int                  = 120,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
@@ -177,9 +178,11 @@ def build_fleet_arbiter_job_factory(
             auto_poke_enabled            = auto_poke_enabled,
             poke_stall_threshold_seconds = poke_stall_threshold,
             poke_max_per_episode         = poke_max_per_episode,
+            manager_stale_poke_threshold_seconds = manager_stale_poke_threshold,   # post-game F2
             snapshot_sink              = lambda snap: store.set_section( "fleet_arbiter", snap ),
             render_sink                = lambda line: log_fn( "fleet_arbiter_render", line=line ),
             notify_fn                  = warmup_notify,
+            log_fn                     = log_fn,                                   # post-game F1: outreach + gate events → journal
             user_id                    = "system",
             user_email                 = "system@lupin.deepily.ai",
             session_id                 = "lupin-arbiter-app-8001",

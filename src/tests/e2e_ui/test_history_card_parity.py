@@ -47,7 +47,7 @@ class TestHistoryCardParity:
         path replaces the old `_isHistory` flag.
         """
         page, records = seeded_history_page
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         expand_history_section( page )
 
@@ -63,7 +63,7 @@ class TestHistoryCardParity:
         gate added in Phase 2.
         """
         page, records = seeded_history_page
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         expand_history_section( page )
 
@@ -76,7 +76,7 @@ class TestHistoryCardParity:
         A failed/interrupted job in history shows the ✗ completion badge.
         """
         page, records = seeded_history_page
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         expand_history_section( page )
 
@@ -97,7 +97,7 @@ class TestHistoryCardParity:
         Post-Phase-2: the section renders explicitly for history queueName.
         """
         page, records = seeded_history_page
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         expand_history_section( page )
 
@@ -116,7 +116,7 @@ class TestHistoryCardParity:
         double-delete UX complaint).
         """
         page, records = seeded_history_page
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         expand_history_section( page )
 
@@ -155,7 +155,7 @@ class TestHistoryCardParity:
         queueName === 'history' is correctly passed through).
         """
         page, records = seeded_history_page
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         expand_history_section( page )
 
@@ -195,7 +195,7 @@ class TestDeleteHandlerRouting:
         the small ✕ button is no longer rendered for history per Q1 fix 2026-04-26).
         """
         page, records = seeded_history_page
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         expand_history_section( page )
 

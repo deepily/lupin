@@ -367,6 +367,45 @@ def carry_forward_lineage( snapshot, prior_lineage ):
     return snapshot, next_lineage
 
 
+def prune_offline_rows( snapshot ):
+    """
+    The D6/§5.2 offline-prune as a standalone PURE helper (post-game 2026-06-11).
+
+    The arbiter now builds ONE full snapshot (include_offline=True) so its
+    post-game detectors (manager-staleness F2, fleet-dark F3) can see offline
+    rows, then derives the PUBLISHED live-only view through this helper — the
+    published contract (live rows only, recounted) is unchanged from the old
+    in-build prune. Design: src/rnd/v0.1.8/
+    2026.06.11-arbiter-missed-poke-postgame-and-outreach-logging.md §3.2.
+
+    Requires:
+        - snapshot is a build_snapshot() result (or any malformed value)
+
+    Ensures:
+        - returns a NEW top-level dict: same generated_at, `sessions` filtered to
+          rows whose liveness verdict != "offline" (non-dict rows dropped), and
+          `session_count` recounted to the EMITTED rows
+        - row dicts are SHARED with the input (not copied) — callers must not
+          mutate rows after the split
+        - a falsy / non-dict snapshot degrades to an empty snapshot dict
+        - never raises
+    """
+    if not isinstance( snapshot, dict ):
+        return { "generated_at": None, "session_count": 0, "sessions": [ ] }
+    rows = [ ]
+    for row in snapshot.get( "sessions", [ ] ):
+        if not isinstance( row, dict ):
+            continue
+        liveness = row.get( "liveness" )
+        verdict  = liveness.get( "verdict" ) if isinstance( liveness, dict ) else None
+        if verdict != "offline":
+            rows.append( row )
+    out = dict( snapshot )
+    out[ "sessions" ]      = rows
+    out[ "session_count" ] = len( rows )
+    return out
+
+
 def frame_signature( snapshot ):
     """
     A hashable signature over the SEMANTIC fields only — NOT the liveness ages.

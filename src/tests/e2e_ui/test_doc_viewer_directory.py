@@ -119,9 +119,20 @@ class TestDocViewerDirectoryVisual:
         listing_container = logged_in_page.locator( ".doc-viewer-container" )
         assert_snapshot( listing_container, name="doc_viewer_directory_listing_docs.png" )
 
-    def test_visual_io_scope_listing( self, logged_in_page, assert_snapshot ):
-        """Visual regression for the io directory listing."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=io" )
+    # Frozen fixture served via the lupin scope (its .docview.yml whitelists src/).
+    _FIXTURE_PATH = "lupin/src/tests/e2e_ui/fixtures/docview_listing_fixture_io"
+
+    def test_visual_directory_listing_frozen_fixture( self, logged_in_page, assert_snapshot ):
+        """Visual regression for the directory-listing chrome via a FROZEN fixture.
+
+        ts-127620e1 fix: replaces the former `?path=io` snapshot, which was
+        unstable-by-construction — the io scope grows every run (the harness writes
+        its own results into io/), so the listing height changed between baseline
+        capture and run (ValueError: Image sizes do not match). The renderer is
+        scope-agnostic; the frozen fixture exercises the same chrome. Functional
+        coverage of the real io scope stays in TestDocViewerDirectoryListing above.
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path={self._FIXTURE_PATH}" )
         logged_in_page.wait_for_load_state( "networkidle" )
         listing_container = logged_in_page.locator( ".doc-viewer-container" )
-        assert_snapshot( listing_container, name="doc_viewer_directory_listing_io.png" )
+        assert_snapshot( listing_container, name="doc_viewer_directory_listing_frozen.png" )

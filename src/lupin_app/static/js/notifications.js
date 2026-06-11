@@ -1730,6 +1730,7 @@ class NotificationsUI {
 
         // CC Session voice input (sender card delegation)
         this._setupCCSessionVoiceDelegation();
+        this._setupPredictionVoteDelegation();
 
         // Job Submission (Research + Podcast) event listeners
         this.setupJobSubmitEventListeners();
@@ -16934,7 +16935,7 @@ class NotificationsUI {
             };
         }
 
-        const voteControls = this._buildPredictionVoteControls( notification, confidence );
+        const voteControls = this._buildPredictionVoteControls( notification, confidence, hint );
 
         return `
             <div class="prediction-hint">
@@ -16947,22 +16948,40 @@ class NotificationsUI {
 
     // Thumbs up/down vote controls under a prediction hint. Shown only when the hint's
     // confidence meets the minimum threshold (so the user does not train on noise). The
-    // 👍🏼/👎🏼 use the medium-light skin tone (U+1F3FC — Rick's preference, NOT default yellow).
-    _buildPredictionVoteControls( notification, confidencePct ) {
-        const MIN_PCT = 50;   // mirrors INI "prediction hint vote min confidence threshold" = 0.50
+    // threshold rides IN the hint payload (vote_min_confidence_threshold, 0.0-1.0 —
+    // stamped server-side from INI "prediction hint vote min confidence threshold") so
+    // this file cannot drift from the server config. A hint without the gate gets no
+    // controls: the server omits it when voting is disabled, and we never train on an
+    // unknown gate. Buttons are wired via _setupPredictionVoteDelegation (data attrs,
+    // no inline onclick). 👍🏼/👎🏼 use the medium-light skin tone (U+1F3FC — Rick's
+    // preference, NOT default yellow).
+    _buildPredictionVoteControls( notification, confidencePct, hint ) {
         if ( !notification || !notification.id ) return '';
-        if ( Number( confidencePct ) < MIN_PCT ) return '';
+        const minThreshold = hint ? Number( hint.vote_min_confidence_threshold ) : NaN;
+        if ( !Number.isFinite( minThreshold ) ) return '';
+        if ( Number( confidencePct ) < minThreshold * 100 ) return '';
         const id = notification.id;
         return `
             <div class="prediction-hint-vote" data-testid="prediction-hint-vote">
                 <button type="button" class="prediction-vote-btn prediction-vote-up"
                         data-testid="prediction-vote-up" title="Good prediction — reinforce it"
-                        onclick="window.notificationsUI.votePrediction('${id}', 'up')">👍🏼</button>
+                        data-notification-id="${id}" data-vote="up">👍🏼</button>
                 <button type="button" class="prediction-vote-btn prediction-vote-down"
                         data-testid="prediction-vote-down" title="Bad prediction — steer away from it"
-                        onclick="window.notificationsUI.votePrediction('${id}', 'down')">👎🏼</button>
+                        data-notification-id="${id}" data-vote="down">👎🏼</button>
             </div>
         `;
+    }
+
+    // Delegated click wiring for the prediction vote buttons (replaces inline onclick —
+    // frontend idiom). Delegates on document because hinted cards can render in multiple
+    // dynamic hosts, all sharing the .prediction-vote-btn + data-attr contract.
+    _setupPredictionVoteDelegation() {
+        document.addEventListener( 'click', ( e ) => {
+            const voteBtn = e.target.closest( '.prediction-vote-btn' );
+            if ( !voteBtn ) return;
+            this.votePrediction( voteBtn.dataset.notificationId, voteBtn.dataset.vote );
+        } );
     }
 
     // Send a thumbs up/down vote on a prediction hint to the capture endpoint, then reflect
@@ -16991,7 +17010,7 @@ class NotificationsUI {
                 return;
             }
             this.log( `[PRED-VOTE] recorded ${vote} for ${notificationId}` );
-            const btn       = document.querySelector( `.prediction-hint-vote button[onclick*="${notificationId}"]` );
+            const btn       = document.querySelector( `.prediction-hint-vote button[data-notification-id="${notificationId}"]` );
             const container = btn ? btn.closest( '.prediction-hint-vote' ) : null;
             if ( container ) {
                 container.classList.add( 'voted' );

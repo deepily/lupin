@@ -59,7 +59,7 @@ class TestSttInsertAtCursor:
         (i.e. on the recordingManager), throwing "is not a function" at runtime.
         The direct-helper tests below would NOT catch that — this one does.
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         wiring = logged_in_page.evaluate(
@@ -77,7 +77,7 @@ class TestSttInsertAtCursor:
 
     def test_insert_into_empty_field( self, logged_in_page ):
         """Empty field → value is exactly the transcription, caret at end."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         result = self._insert( logged_in_page, "", 0, 0, "hello world" )
@@ -86,7 +86,7 @@ class TestSttInsertAtCursor:
 
     def test_insert_at_caret_in_middle( self, logged_in_page ):
         """Caret mid-text, no selection → text spliced in, surrounding text intact."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         # "Hello world" with caret after "Hello " (index 6), insert "brave ".
@@ -96,7 +96,7 @@ class TestSttInsertAtCursor:
 
     def test_insert_at_end( self, logged_in_page ):
         """Caret at end → text appended, nothing lost."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         result = self._insert( logged_in_page, "Hello", 5, 5, " there" )
@@ -105,7 +105,7 @@ class TestSttInsertAtCursor:
 
     def test_insert_at_start( self, logged_in_page ):
         """Caret at start → text prepended, original text preserved after it."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         result = self._insert( logged_in_page, "world", 0, 0, "hello " )
@@ -114,7 +114,7 @@ class TestSttInsertAtCursor:
 
     def test_highlighted_selection_is_replaced( self, logged_in_page ):
         """A highlighted range IS replaced (the one documented overwrite case)."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         # "Hello world" with "world" selected (indices 6..11), insert "everyone".
@@ -124,7 +124,7 @@ class TestSttInsertAtCursor:
 
     def test_full_selection_replaced_not_appended( self, logged_in_page ):
         """Whole-field selection → behaves like the old overwrite (back-compat)."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         result = self._insert( logged_in_page, "throw this away", 0, 15, "keep this" )
@@ -139,7 +139,7 @@ class TestSttInsertAtCursor:
         so the fallback branch is exercised deterministically, independent of
         any browser quirk around number/email input selection semantics.
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         result = logged_in_page.evaluate(

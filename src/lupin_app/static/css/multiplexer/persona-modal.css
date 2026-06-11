@@ -90,6 +90,12 @@
     letter-spacing   : 0.5px;
 }
 
+/* `display: inline-block` above beats the UA stylesheet's `[hidden] { display: none }`,
+   so the non-borrowed badge rendered despite personaModal.ts setting `hidden`. */
+.persona-popover-borrowed[hidden] {
+    display : none;
+}
+
 /* ============================================================================
    Close button — top-right corner
    ============================================================================ */

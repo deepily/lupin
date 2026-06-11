@@ -35,6 +35,8 @@ from cosa.agents.prediction_engine.config import (
     DEFAULT_OPEN_ENDED_CBR_TOP_K,
     DEFAULT_OPEN_ENDED_CBR_THRESHOLD,
     DEFAULT_OPEN_ENDED_LLM_SPEC_KEY,
+    DEFAULT_HINT_VOTING_ENABLED,
+    DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD,
     DEFAULT_HINT_VOTE_APPROVED_WEIGHT,
     DEFAULT_HINT_VOTE_REJECTED_WEIGHT,
     STRATEGY_CBR_MAJORITY,
@@ -112,6 +114,9 @@ class PredictionEngine:
             # Thumbs vote weights (human-confirmed training signal)
             self.hint_vote_approved_weight = config_mgr.get( "prediction hint vote approved weight", default=str( DEFAULT_HINT_VOTE_APPROVED_WEIGHT ), return_type="float" )
             self.hint_vote_rejected_weight = config_mgr.get( "prediction hint vote rejected weight", default=str( DEFAULT_HINT_VOTE_REJECTED_WEIGHT ), return_type="float" )
+            # Vote-control gate, carried IN the hint payload so the client cannot drift from INI
+            self.hint_voting_enabled                = config_mgr.get( "prediction hint voting enabled", default=str( DEFAULT_HINT_VOTING_ENABLED ), return_type="boolean" )
+            self.hint_vote_min_confidence_threshold = config_mgr.get( "prediction hint vote min confidence threshold", default=str( DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD ), return_type="float" )
         else:
             self.enabled              = DEFAULT_ENABLED
             self.cbr_top_k            = DEFAULT_CBR_TOP_K
@@ -126,6 +131,8 @@ class PredictionEngine:
             self._synthesis_prompt_path   = "/src/conf/prompts/prediction-engine-open-ended-synthesis.txt"
             self.hint_vote_approved_weight = DEFAULT_HINT_VOTE_APPROVED_WEIGHT
             self.hint_vote_rejected_weight = DEFAULT_HINT_VOTE_REJECTED_WEIGHT
+            self.hint_voting_enabled                = DEFAULT_HINT_VOTING_ENABLED
+            self.hint_vote_min_confidence_threshold = DEFAULT_HINT_VOTE_MIN_CONFIDENCE_THRESHOLD
 
         # Initialize classifier
         self.classifier = NotificationCategoryClassifier( debug=self.debug )
@@ -267,6 +274,46 @@ class PredictionEngine:
         positive_mass = sum( v for v in votes.values() if v > 0 )
         if positive_mass <= 0: return 0.0
         return max( 0.0, min( 1.0, votes[ winner ] / positive_mass ) )
+
+    @staticmethod
+    def _is_rejected_case( record ) -> bool:
+        """
+        True when the user thumbs-downed this CBR case (ratification_state="rejected").
+
+        A rejected case must never BE the answer in the open-ended retrieval tiers —
+        the engine steers away from it (Stage 3 of the thumbs-vote training signal).
+        """
+        return ( record.get( "ratification_state" ) or "" ).lower() == "rejected"
+
+    def _select_retrieval_case( self, similar_cases: list, message: str ) -> tuple:
+        """
+        Ratification-aware case selection for the open-ended retrieval tiers.
+
+        Requires:
+            - similar_cases: list of ( similarity_pct, record ), descending similarity
+            - message: the current question text
+
+        Ensures:
+            - Returns ( candidate_cases, exact_case ):
+              - candidate_cases: cases allowed to BE an answer (rejected cases filtered
+                out — steer-away); [] when the user thumbs-downed every case
+              - exact_case: the ( similarity_pct, record ) whose question matches message
+                (normalized), approved cases preferred over ordinary ones, highest
+                similarity first within each tier; None when no non-rejected exact
+                match exists
+        """
+        candidate_cases = [ ( s, r ) for s, r in similar_cases if not self._is_rejected_case( r ) ]
+
+        exact_case = None
+        for similarity_pct, record in candidate_cases:
+            if record.get( "question", "" ).strip().lower() == message.strip().lower():
+                state = ( record.get( "ratification_state" ) or "" ).lower()
+                if state == "approved":
+                    return ( candidate_cases, ( similarity_pct, record ) )
+                if exact_case is None:
+                    exact_case = ( similarity_pct, record )
+
+        return ( candidate_cases, exact_case )
 
     def _predict_yes_no( self, message: str, category: str, embedding: Optional[list] ) -> PredictionResult:
         """
@@ -490,13 +537,17 @@ class PredictionEngine:
 
         # Per-header vote accumulation (type-aware: single vs multi-select)
         # header_votes: { "Header": { "OptionA": count, "OptionB": count } } — raw integer
-        # counts (used by multi-select selection + valid-option fallback, unchanged).
+        # counts (used by metadata + the valid-option fallback, unchanged).
         # header_votes_weighted: same shape with ratification-WEIGHTED floats (approved
-        # up-weight, rejected negative/steer-away) — used for single-select winner + consistency.
+        # up-weight, rejected negative/steer-away) — drives BOTH the single-select winner
+        # + consistency and (Stage 3) the multi-select tally.
+        # positive_case_mass: sum of positive case weights — the weighted analogue of
+        # valid_cases, the multi-select inclusion-threshold denominator.
         header_votes          = {}
         header_votes_weighted = {}
         max_similarity        = 0.0
         valid_cases           = 0
+        positive_case_mass    = 0.0
         is_multi_select       = False
 
         for similarity_pct, record in similar_cases:
@@ -510,22 +561,22 @@ class PredictionEngine:
 
             answers     = parsed.get( "answers", {} )
             case_weight = self._ratified_weight( record )   # +approved / -rejected / 1.0
+            positive_case_mass += max( case_weight, 0.0 )
             for header, option in answers.items():
                 if header not in header_votes:
-                    header_votes[ header ] = {}
+                    header_votes[ header ]          = {}
+                    header_votes_weighted[ header ] = {}
 
                 if isinstance( option, list ):
-                    # Multi-select: raw integer counts only. Ratification weighting is NOT
-                    # wired for multi-select in Stage 1 (the weighted tally below is single-
-                    # select only), so we deliberately do not build a weighted entry here.
+                    # Multi-select: raw count + ratification-WEIGHTED tally (Stage 3 —
+                    # consumed by _tally_multi_select_votes below).
                     is_multi_select = True
                     for item in option:
-                        header_votes[ header ][ item ] = header_votes[ header ].get( item, 0 ) + 1
+                        header_votes[ header ][ item ]          = header_votes[ header ].get( item, 0 ) + 1
+                        header_votes_weighted[ header ][ item ] = header_votes_weighted[ header ].get( item, 0.0 ) + case_weight
                 else:
                     # Single-select: raw count + ratification-WEIGHTED tally (consumed below).
-                    header_votes[ header ][ option ] = header_votes[ header ].get( option, 0 ) + 1
-                    if header not in header_votes_weighted:
-                        header_votes_weighted[ header ] = {}
+                    header_votes[ header ][ option ]          = header_votes[ header ].get( option, 0 ) + 1
                     header_votes_weighted[ header ][ option ] = header_votes_weighted[ header ].get( option, 0.0 ) + case_weight
 
         if not header_votes or valid_cases == 0:
@@ -543,7 +594,18 @@ class PredictionEngine:
 
         # Build predicted answers — branch by single vs multi-select
         if is_multi_select:
-            predicted_answers, avg_consistency = self._tally_multi_select_votes( header_votes, valid_cases )
+            # Ratification-aware (Stage 3): weighted votes + positive-mass denominator.
+            predicted_answers, avg_consistency = self._tally_multi_select_votes( header_votes_weighted, positive_case_mass )
+            if not predicted_answers:
+                # Every option in every header was steered away (thumbs-downed) — no
+                # positive signal survives, so there is nothing to predict.
+                return PredictionResult(
+                    response_type      = RESPONSE_TYPE_MULTIPLE_CHOICE,
+                    category           = category,
+                    strategy           = STRATEGY_COLD_START,
+                    similar_case_count = len( similar_cases ),
+                    metadata           = { "reason": "all_multi_select_options_steered_away", "valid_cases": valid_cases }
+                )
         else:
             predicted_answers  = {}
             consistency_sum    = 0.0
@@ -639,38 +701,51 @@ class PredictionEngine:
             }
         )
 
-    def _tally_multi_select_votes( self, header_option_counts: Dict[str, Dict[str, int]],
-                                      valid_cases: int ) -> tuple:
+    def _tally_multi_select_votes( self, header_option_votes: Dict[str, Dict[str, float]],
+                                      positive_case_mass: float ) -> tuple:
         """
-        Tally multi-select votes: select options chosen by >= 50% of cases.
+        Tally multi-select votes (ratification-aware): select options whose weighted
+        vote reaches >= 50% of the positive case mass.
+
+        Approved cases contribute +approved_weight per option they selected, rejected
+        cases a NEGATIVE weight (steer-away), ordinary cases +1.0 — see _ratified_weight().
+        With no ratified cases this reduces exactly to the original raw-count behavior
+        (all weights 1.0, positive_case_mass == valid_cases).
 
         Requires:
-            - header_option_counts: { "Header": { "OptionA": count, "OptionB": count } }
-            - valid_cases: int, total number of valid cases (> 0)
+            - header_option_votes: { "Header": { "OptionA": signed_weight, ... } }
+            - positive_case_mass: sum of positive case weights across valid cases (>= 0)
 
         Ensures:
             - Returns ( predicted_answers, avg_consistency ) tuple
             - predicted_answers: { "Header": ["OptionA", "OptionB"] } (list values)
-            - Options included if count / valid_cases >= 0.5
-            - At least one option per header (highest count as fallback)
-            - avg_consistency based on mean inclusion rate of selected options
+            - Options included if weighted_vote / positive_case_mass >= 0.5
+            - Options with non-positive weighted votes are NEVER selected (steered away)
+            - Headers where every option was steered away are omitted entirely —
+              predicted_answers may be {} when everything was thumbs-downed
+            - Fallback: highest positively-weighted option when none meets the threshold
+            - avg_consistency based on mean inclusion rate of selected options, in [0,1]
         """
         predicted_answers = {}
         consistency_sum   = 0.0
         header_count      = 0
 
-        for header, option_counts in header_option_counts.items():
-            threshold = valid_cases * 0.5
-            selected  = [ opt for opt, count in option_counts.items() if count >= threshold ]
+        for header, option_votes in header_option_votes.items():
+            threshold = positive_case_mass * 0.5
+            selected  = [ opt for opt, weight in option_votes.items() if weight > 0 and weight >= threshold ]
 
-            # Fallback: if no option meets threshold, pick the highest-count option
+            # Fallback: no option meets the threshold — pick the highest positively-weighted
+            # option. A header with NO positive option was steered away entirely → omit it.
             if not selected:
-                best_option = max( option_counts, key=option_counts.get )
-                selected    = [ best_option ]
+                positive_votes = { opt: weight for opt, weight in option_votes.items() if weight > 0 }
+                if not positive_votes:
+                    continue
+                selected = [ max( positive_votes, key=positive_votes.get ) ]
 
-            # Consistency = mean inclusion rate of selected options
-            inclusion_rates = [ option_counts[ opt ] / valid_cases for opt in selected ]
-            consistency     = sum( inclusion_rates ) / len( inclusion_rates ) if inclusion_rates else 0.0
+            # Consistency = mean inclusion rate of selected options (clamped: float noise
+            # in summed config weights could nudge a vote a hair above the positive mass).
+            inclusion_rates = [ min( option_votes[ opt ] / positive_case_mass, 1.0 ) for opt in selected ]
+            consistency     = sum( inclusion_rates ) / len( inclusion_rates )
 
             predicted_answers[ header ] = sorted( selected )
             consistency_sum += consistency
@@ -734,27 +809,43 @@ class PredictionEngine:
                 metadata           = { "reason": "no_similar_cases" }
             )
 
-        max_similarity = similar_cases[ 0 ][ 0 ] / 100.0
-        top_case       = similar_cases[ 0 ][ 1 ]
+        # Ratification-aware (Stage 3): rejected (thumbs-downed) cases can never BE the
+        # answer; approved exact matches are preferred. Rejected cases still reach LLM
+        # synthesis as anti-exemplars via user_verdict annotations (_build_synthesis_prompt).
+        candidate_cases, exact_case = self._select_retrieval_case( similar_cases, message )
 
-        # Tier 1 — Exact match check (normalized)
-        top_question = top_case.get( "question", "" )
-        if top_question.strip().lower() == message.strip().lower():
-            decision_value = top_case.get( "decision_value", "" )
+        if not candidate_cases:
+            return PredictionResult(
+                response_type      = RESPONSE_TYPE_OPEN_ENDED,
+                category           = category,
+                strategy           = STRATEGY_COLD_START,
+                similar_case_count = len( similar_cases ),
+                metadata           = { "reason": "all_cases_rejected" }
+            )
+
+        max_similarity = candidate_cases[ 0 ][ 0 ] / 100.0
+        top_case       = candidate_cases[ 0 ][ 1 ]
+        top_question   = top_case.get( "question", "" )
+
+        # Tier 1 — Exact match (normalized; approved-preferred, rejected never)
+        if exact_case is not None:
+            exact_similarity = exact_case[ 0 ] / 100.0
+            exact_question   = exact_case[ 1 ].get( "question", "" )
+            decision_value   = exact_case[ 1 ].get( "decision_value", "" )
 
             if self.debug:
-                print( f"[PredictionEngine] OE exact match: q='{top_question[:60]}', answer='{decision_value[:60]}'" )
+                print( f"[PredictionEngine] OE exact match: q='{exact_question[:60]}', answer='{decision_value[:60]}'" )
 
             return PredictionResult(
                 response_type      = RESPONSE_TYPE_OPEN_ENDED,
                 category           = category,
                 strategy           = STRATEGY_CBR_RETRIEVAL,
                 predicted_value    = decision_value,
-                confidence         = max_similarity,
+                confidence         = exact_similarity,
                 similar_case_count = len( similar_cases ),
                 metadata           = {
-                    "max_similarity"    : round( max_similarity, 3 ),
-                    "top_case_question" : top_question[ :100 ],
+                    "max_similarity"    : round( exact_similarity, 3 ),
+                    "top_case_question" : exact_question[ :100 ],
                     "case_count"        : len( similar_cases ),
                     "tier"              : "exact_match",
                     "original_message"  : message,
@@ -842,14 +933,18 @@ class PredictionEngine:
         xml_with_stop  = xml_example.rstrip() + "</stop>"
         template_ready = template_raw.replace( "{{PYDANTIC_XML_EXAMPLE}}", xml_with_stop )
 
-        # Format cases as numbered XML blocks
+        # Format cases as numbered XML blocks. Ratified cases carry a user_verdict
+        # attribute (Stage 3): "approved" = human-confirmed (weight heavily);
+        # "rejected" = explicitly thumbs-downed (anti-exemplar — steer away).
         case_lines = []
         for i, ( similarity_pct, record ) in enumerate( similar_cases, 1 ):
             question       = record.get( "question", "" )
             decision_value = record.get( "decision_value", "" )
             sim_score      = round( similarity_pct / 100.0, 2 )
+            state          = ( record.get( "ratification_state" ) or "" ).lower()
+            verdict_attr   = f' user_verdict="{state}"' if state in ( "approved", "rejected" ) else ""
             case_lines.append(
-                f'<case n="{i}" similarity="{sim_score}">\n'
+                f'<case n="{i}" similarity="{sim_score}"{verdict_attr}>\n'
                 f'    <question>{question}</question>\n'
                 f'    <response>{decision_value}</response>\n'
                 f'</case>'
@@ -919,30 +1014,46 @@ class PredictionEngine:
                 metadata           = { "reason": "no_similar_cases" }
             )
 
-        max_similarity = similar_cases[ 0 ][ 0 ] / 100.0
-        top_case       = similar_cases[ 0 ][ 1 ]
+        # Ratification-aware (Stage 3): rejected (thumbs-downed) cases can never BE the
+        # answer; approved exact matches are preferred. Rejected cases still reach LLM
+        # synthesis as anti-exemplars via user_verdict annotations (_build_synthesis_prompt).
+        candidate_cases, exact_case = self._select_retrieval_case( similar_cases, message )
 
-        # Tier 1 — Exact match check (normalized)
-        top_question = top_case.get( "question", "" )
-        if top_question.strip().lower() == message.strip().lower():
-            decision_value = top_case.get( "decision_value", "" )
+        if not candidate_cases:
+            return PredictionResult(
+                response_type      = RESPONSE_TYPE_OPEN_ENDED_BATCH,
+                category           = category,
+                strategy           = STRATEGY_COLD_START,
+                similar_case_count = len( similar_cases ),
+                metadata           = { "reason": "all_cases_rejected" }
+            )
+
+        max_similarity = candidate_cases[ 0 ][ 0 ] / 100.0
+        top_case       = candidate_cases[ 0 ][ 1 ]
+        top_question   = top_case.get( "question", "" )
+
+        # Tier 1 — Exact match (normalized; approved-preferred, rejected never)
+        if exact_case is not None:
+            exact_similarity = exact_case[ 0 ] / 100.0
+            exact_question   = exact_case[ 1 ].get( "question", "" )
+            decision_value   = exact_case[ 1 ].get( "decision_value", "" )
 
             # Parse JSON to get dict with answers
             predicted = self._parse_batch_decision_value( decision_value )
 
             if self.debug:
-                print( f"[PredictionEngine] OEB exact match: q='{top_question[:60]}'" )
+                print( f"[PredictionEngine] OEB exact match: q='{exact_question[:60]}'" )
 
             return PredictionResult(
                 response_type      = RESPONSE_TYPE_OPEN_ENDED_BATCH,
                 category           = category,
                 strategy           = STRATEGY_CBR_RETRIEVAL,
                 predicted_value    = predicted,
-                confidence         = max_similarity,
+                confidence         = exact_similarity,
                 similar_case_count = len( similar_cases ),
                 metadata           = {
-                    "max_similarity"    : round( max_similarity, 3 ),
-                    "top_case_question" : top_question[ :100 ],
+                    "max_similarity"    : round( exact_similarity, 3 ),
+                    "top_case_question" : exact_question[ :100 ],
                     "case_count"        : len( similar_cases ),
                     "tier"              : "exact_match",
                     "original_message"  : message,

@@ -14,7 +14,7 @@ import pytest
 from .conftest import BASE_URL, wait_for_ws_connected
 
 
-NOTIFICATIONS_URL = f"{BASE_URL}/app/notifications"
+NOTIFICATIONS_URL = f"{BASE_URL}/app/notifications?classic=1"
 
 
 def goto_notifications( page ):

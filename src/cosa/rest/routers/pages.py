@@ -9,10 +9,12 @@ Generated on: 2026-02-21
 
 import os
 
-from fastapi import APIRouter
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends
+from fastapi.responses import FileResponse, RedirectResponse
 
 import cosa.utils.util as cu
+from cosa.config.configuration_manager import ConfigurationManager
+from cosa.rest.dependencies.config import get_config_manager
 
 router = APIRouter( tags=[ "pages" ] )
 
@@ -79,7 +81,27 @@ async def page_app():
     return _serve_file( _ROUTE_TABLE[ "/app" ] )
 
 @router.get( "/app/notifications", include_in_schema=False )
-async def page_notifications():
+async def page_notifications( classic: bool = False, config_mgr: ConfigurationManager = Depends( get_config_manager ) ):
+    """
+    Serve the legacy notifications page, or 302-redirect to the multiplexer.
+
+    Saturday-cutover (2026-06-14) mechanics: the redirect is gated on the
+    `legacy notifications redirect enabled` INI key (default False) so the flip
+    is a one-line config change, not a code change. The route stays alive so
+    bookmarks keep working (plan §02 checklist row 1).
+
+    Requires:
+        - `legacy notifications redirect enabled` is a boolean INI key (default False)
+
+    Ensures:
+        - Flag OFF (default): serves notifications.html unchanged
+        - Flag ON: returns 302 RedirectResponse to /app/multiplexer
+        - Flag ON + `?classic=1`: serves notifications.html (escape hatch for the
+          held-back JS-client E2E suites + the MVD "Classic UI" link)
+    """
+    redirect_enabled = config_mgr.get( "legacy notifications redirect enabled", default=False, return_type="boolean" )
+    if redirect_enabled and not classic:
+        return RedirectResponse( url="/app/multiplexer", status_code=302 )
     return _serve_file( _ROUTE_TABLE[ "/app/notifications" ] )
 
 @router.get( "/app/multiplexer", include_in_schema=False )

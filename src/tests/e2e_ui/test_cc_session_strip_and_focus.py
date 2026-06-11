@@ -37,7 +37,7 @@ def notifications_page_with_strip( logged_in_page ):
         - networkidle reached
         - cc-session-strip element exists in DOM (may be hidden until first CC card)
     """
-    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     logged_in_page.wait_for_load_state( "networkidle" )
 
     # Strip element should always be present in markup, even when hidden.

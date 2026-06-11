@@ -363,7 +363,7 @@ class TestPauseButtonRendering:
         _pause_job( page, job_id )
 
         # Reload to render paused card with both buttons
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( page )
         _expand_todo_queue( page )
@@ -409,7 +409,7 @@ class TestPauseResumeFlow:
         _pause_job( page, job_id )
 
         # Reload the queue to pick up paused state
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( page )
         _expand_todo_queue( page )
@@ -456,7 +456,7 @@ class TestPauseResumeFlow:
         _resume_job( page, job_id )
 
         # Reload queue
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( page )
         _expand_todo_queue( page )
@@ -503,7 +503,7 @@ class TestPauseResumeFlow:
         _pause_job( page, job_id )
 
         # Reload the page completely
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( page )
         _expand_todo_queue( page )
@@ -650,7 +650,7 @@ class TestCombinedStates:
         _pause_job( page, job_id )
 
         # Reload to see both states
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( page )
         _expand_todo_queue( page )
