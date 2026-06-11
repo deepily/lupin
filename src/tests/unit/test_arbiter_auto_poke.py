@@ -78,7 +78,18 @@ def _pokes( gw ):
 ] )
 def test_stall_not_quiet_these_are_never_poked( fleet, desc ):
     """STALL≠QUIET: a live-but-not-stuck session (busy/holding/idle) AND a
-    dead-but-stuck session are NEVER poked. Only LIVE+stuck qualifies."""
+    dead-but-stuck session are NEVER poked. Only LIVE+stuck qualifies.
+
+    POST-GAME SPLIT (2026-06-11, AC7 — the deliberate calibration flip): this
+    test's scope is now the STUCK-TIER for WORKER-role sessions ONLY. The
+    2026-06-10 silent stall showed the (working, not-stuck, alive) shape is
+    EXACTLY a dark manager's — this test used to RATIFY that silence fleet-wide.
+    The zero-poke assertions below stand VERBATIM for the stuck tier (workers'
+    quiet≠stall protection is untouched); the MANAGER-role companion case now
+    asserts the OPPOSITE outcome via the staleness tier — see
+    test_arbiter_manager_staleness.py (unit) + test_arbiter_scenarios.py (S1/S5).
+    Retired-by-decision, never by drift. Design:
+    src/rnd/v0.1.8/2026.06.11-arbiter-missed-poke-postgame-and-outreach-logging.md §2.2/AC7."""
     gw  = _GW()
     job = _job( gw, poke_stall_threshold_seconds=0 )
     # drive several polls past any threshold — still no poke

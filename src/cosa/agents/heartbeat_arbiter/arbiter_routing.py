@@ -62,6 +62,17 @@ ALL_TIERS = frozenset( {
 # _route(case) dispatcher; it is NOT one of the original Part-6 12 outputs.
 CASE_AUTO_POKE_REAP_REC = 13
 
+# Post-game ADDITIONS (2026-06-11, missed-poke post-game — design
+# src/rnd/v0.1.8/2026.06.11-arbiter-missed-poke-postgame-and-outreach-logging.md):
+#   14  MANAGER-STALE advisory — a MANAGER-role session silent past the staleness
+#       threshold (F2). Rick + ALL active managers: the dark manager's crew is
+#       leaderless-in-waiting; any manager could step in. (The bounded staleness
+#       POKE itself is a direct send_to, like the stuck-tier wake-nudge.)
+#   15  FLEET-DARK — the published roster decayed to ZERO (F3). Rick ONLY: by
+#       definition no managers remain to fan out to.
+CASE_MANAGER_STALE_ADVISORY = 14
+CASE_FLEET_DARK             = 15
+
 CASE_TIERS = {
     1  : TIER_RICK_ONLY,
     2  : TIER_RICK_ONLY,
@@ -76,6 +87,8 @@ CASE_TIERS = {
     11 : TIER_RICK_AND_MANAGERS,
     12 : TIER_LOG_THEN_RICK,
     CASE_AUTO_POKE_REAP_REC : TIER_RICK_AND_MANAGERS,   # 2b-3 auto-poke escalation
+    CASE_MANAGER_STALE_ADVISORY : TIER_RICK_AND_MANAGERS,   # post-game F2 (2026-06-11)
+    CASE_FLEET_DARK             : TIER_RICK_ONLY,           # post-game F3 (2026-06-11)
 }
 
 
@@ -96,10 +109,15 @@ def tier_for( case: int ) -> str:
 
 def quick_smoke_test():
     """Self-contained smoke test. Returns True or raises AssertionError."""
-    # every case maps to a known tier (Part-6 1..12 + the 2b-3 reap-rec case 13)
-    assert set( CASE_TIERS ) == set( range( 1, 14 ) )
+    # every case maps to a known tier (Part-6 1..12 + the 2b-3 reap-rec case 13
+    # + the post-game cases 14/15)
+    assert set( CASE_TIERS ) == set( range( 1, 16 ) )
     assert all( t in ALL_TIERS for t in CASE_TIERS.values() )
     assert tier_for( CASE_AUTO_POKE_REAP_REC ) == TIER_RICK_AND_MANAGERS   # 2b-3
+    # post-game (2026-06-11): manager-stale fans to Rick + managers; fleet-dark
+    # is Rick-only (no managers remain by definition)
+    assert tier_for( CASE_MANAGER_STALE_ADVISORY ) == TIER_RICK_AND_MANAGERS
+    assert tier_for( CASE_FLEET_DARK )             == TIER_RICK_ONLY
     # the three tiers + two cuts land where Part 6 says
     assert tier_for( 1 ) == tier_for( 2 ) == tier_for( 3 ) == TIER_RICK_ONLY
     assert tier_for( 6 ) == TIER_DROP                       # roster broadcast cut
