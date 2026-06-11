@@ -16,6 +16,9 @@ exists), driven through the COMPOSED `_poll_once` — not a single detector bran
   S3 — the outreach-accounting invariant: every push has a journal event.
   S4 — the 2026-06-10 journal replay (the forensic case study as a regression pin).
   S5 — an equally-stale WORKER gets NOTHING (quiet≠stall survives the fix).
+  S6 — boot over a >=20h CORPSE manager row → zero staleness pokes/advisories,
+       while a 50-min-dark LIVE manager in the same snapshot still fires
+       (the 10:52 EDT 2026-06-11 boot-burst, pinned: corpse-ceiling fix).
 
 Venue: :7999-eligible / local — pure + fully mocked (tmp events dir, fake clock,
 fake bridges; no server, no real IO).
@@ -266,6 +269,49 @@ def test_s5_worker_quiet_50m_is_not_poked_by_staleness_tier( tmp_path ):
     worker_gates = [ f for f in log.of( "arbiter_poke_gate" )
                      if f.get( "session_id" ) == "wkr-uuid" and not f.get( "evicted" ) ]
     assert worker_gates and worker_gates[ -1 ][ "stale_why_not" ] == [ "not_manager" ]
+
+
+# ── S6: boot over a corpse → silence about it; a live dark manager still fires ─
+
+def test_s6_boot_over_yesterday_corpse_manager_silent_while_live_dark_manager_fires( tmp_path ):
+    """THE CORPSE-CEILING PIN (10:52 EDT 2026-06-11): on every :8001 process
+    start, detection rebuilt over the include_offline=True snapshot (43 rows
+    scanned vs 13 live) and the staleness tier poked YESTERDAY'S dead Tiberius
+    session 4f7a7ab8 ("silent 1134m") + advised Rick — bounded per corpse sid,
+    but re-bursting on every restart. A fresh-boot arbiter over a >=20h corpse
+    manager row must stay SILENT about it, while a genuinely-dark (50m) LIVE
+    manager in the very same snapshot still draws the F2 poke + advisory."""
+    clock, notify, log = _FakeClock( T0 ), [ ], _Log()
+    fleet = Fleet( clock )
+    # yesterday's corpse: the bridge file is still on disk (discovery returns
+    # it) but its last signal is 20h old — exactly how 4f7a7ab8 looked at boot
+    fleet.add( "mgr-corpse-uuid", "Tiberius", manager=True )
+    fleet.mtimes[ "mgr-corpse-uuid" ] = ( clock.t - datetime.timedelta( hours=20 ) ).timestamp()
+    # today's fleet: a manager dark 50 minutes + a fresh worker
+    fleet.add( "mgr-live-uuid", "Rio", manager=True )
+    fleet.mtimes[ "mgr-live-uuid" ] = ( clock.t - datetime.timedelta( minutes=50 ) ).timestamp()
+    fleet.add( "wkr-uuid", "Rachel" )
+    job, gw = _build( tmp_path, clock, fleet, notify, log )
+
+    job._poll_once()                                                  # the boot poll
+    # the corpse drew NOTHING — no poke, no Rick advisory, no boot-burst
+    assert [ s for s in gw.sent if s[ 0 ] == "Tiberius" ] == [ ]
+    assert [ m for m in notify if "Tiberius" in m ] == [ ]
+    # the LIVE dark manager still fired: poke + advisory, same poll
+    pokes = [ s for s in gw.sent if s[ 0 ] == "Rio" and "manager-staleness poke" in s[ 1 ] ]
+    assert len( pokes ) == 1
+    advisories = [ m for m in notify if "MANAGER-STALE" in m ]
+    assert len( advisories ) == 1 and "Rio" in advisories[ 0 ]
+    # the journal EXPLAINS the corpse silence: its gate vector reads beyond_max_age
+    corpse_gates = [ f for f in log.of( "arbiter_poke_gate" )
+                     if f.get( "session_id" ) == "mgr-corpse-uuid" and not f.get( "evicted" ) ]
+    assert corpse_gates and corpse_gates[ -1 ][ "stale_why_not" ] == [ "beyond_max_age" ]
+    # the bug was a re-burst per process start; within a process, further polls
+    # must stay corpse-silent too (no episode state ever opens for it)
+    for _ in range( 3 ):
+        _advance( clock, fleet, job, 1, touch=( "wkr-uuid", ) )
+    assert [ s for s in gw.sent if s[ 0 ] == "Tiberius" ] == [ ]
+    assert "mgr-corpse-uuid" not in job._mgr_stale_since
 
 
 if __name__ == "__main__":

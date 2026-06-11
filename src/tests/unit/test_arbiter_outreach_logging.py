@@ -246,17 +246,18 @@ def test_gate_disabled_and_tier_disabled_and_mgr_capped_and_not_stale():
     job2._emit_poke_gates( _view( "m1" ), snap_fresh, NOW )
     assert log2.of( "arbiter_poke_gate" )[ -1 ][ "stale_why_not" ] == [ "not_stale" ]
     snap_stale = _snap_rows( { "session_id": "m1", "role": "manager",
-                               "liveness": { "freshest_age_s": 9999 } } )
+                               "liveness": { "freshest_age_s": 5000 } } )   # in [threshold, max_age]
     job2._check_manager_staleness( snap_stale, NOW, [ ] )            # poke 1 → capped
     job2._emit_poke_gates( _view( "m1" ), snap_stale, NOW )
     assert log2.of( "arbiter_poke_gate" )[ -1 ][ "stale_why_not" ] == [ "mgr_capped" ]
-    # liveness-malformed manager row: age None → eligible (no why_not). The same
-    # emission also EVICTS m1 (it left the fleet view), so select m2's gate event.
+    # liveness-malformed manager row: age None → no_signal (corpse-ceiling flip
+    # 2026-06-11; was eligible/no-why_not). The same emission also EVICTS m1 (it
+    # left the fleet view), so select m2's gate event.
     snap_bad = _snap_rows( { "session_id": "m2", "role": "manager", "liveness": "bad" } )
     job2._emit_poke_gates( _view( "m2" ), snap_bad, NOW )
     m2_gates = [ g for g in log2.of( "arbiter_poke_gate" )
                  if g.get( "session_id" ) == "m2" and not g.get( "evicted" ) ]
-    assert m2_gates[ -1 ][ "stale_why_not" ] == [ ]
+    assert m2_gates[ -1 ][ "stale_why_not" ] == [ "no_signal" ]
     evictions = [ g for g in log2.of( "arbiter_poke_gate" ) if g.get( "evicted" ) ]
     assert evictions == [ { "session_id": "m1", "evicted": True } ]
 
