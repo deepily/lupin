@@ -245,6 +245,10 @@ def test_step9_two_session_e2e_persona_targeted_broadcast():
             raw_sessions_fn                  = raw_sessions_fn,
             bridge_loader                    = bridge_loader,
             build_sender_id                  = build_sender_id,
+            # Fixture bridge "paths" are plain strings — inject a fresh mtime
+            # so the 2026-06-05 mtime liveness filter passes (the default
+            # mtime_fn calls path.stat(), which strings don't have).
+            mtime_fn                         = lambda p: time.time(),
         )
 
         # ─── (a) endpoint response ──────────────────────────────────────────

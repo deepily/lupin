@@ -45,6 +45,7 @@ from cosa.agents.utils.proxy_agents.base_config import (
     DEFAULT_SERVER_PORT,
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+from lupin_cli.claude_code.hooks.lib.listener_processes import tmux_injection_lock
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -577,6 +578,10 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Types message text into the CC prompt
             - Presses Enter after 250ms delay
             - CC receives a non-empty prompt and processes it
+            - The text+Enter pair is atomic against any other lock-honoring
+              injector on the same tmux session (F4 injection mutex — two
+              racing injectors previously interleaved keystrokes into
+              "text A, text B, Enter, Enter", silently corrupting delivery)
             - Never raises exceptions (injection failure is non-fatal)
         """
         tmux_session = self._resolve_tmux_session()
@@ -600,26 +605,33 @@ class CCNotificationListener( BaseWebSocketListener ):
                 # Wrap failure is non-fatal — fall through with raw text
                 self._log( f"{self.LOG_PREFIX} speakerphone_wrap failed (passing through unwrapped): {e}" )
 
-        try:
-            # Step 1: Type the message text (literal mode — no key interpretation)
-            subprocess.run(
-                [ "tmux", "send-keys", "-t", tmux_session, "-l", message_text ],
-                capture_output=True, timeout=2
-            )
+        # F4 injection mutex: serialize the 2-step send-keys sequence per tmux
+        # session so concurrent injections cannot interleave. Fail-open — a
+        # lock failure logs but never blocks injection.
+        with tmux_injection_lock( tmux_session ) as lock_held:
+            if not lock_held:
+                self._log( f"{self.LOG_PREFIX} injection lock unavailable -- injecting unlocked" )
 
-            # Step 2: Brief delay — tmux needs separation between text and Enter
-            time.sleep( 0.25 )
+            try:
+                # Step 1: Type the message text (literal mode — no key interpretation)
+                subprocess.run(
+                    [ "tmux", "send-keys", "-t", tmux_session, "-l", message_text ],
+                    capture_output=True, timeout=2
+                )
 
-            # Step 3: Press Enter separately
-            subprocess.run(
-                [ "tmux", "send-keys", "-t", tmux_session, "Enter" ],
-                capture_output=True, timeout=2
-            )
+                # Step 2: Brief delay — tmux needs separation between text and Enter
+                time.sleep( 0.25 )
 
-            self._log( f"{self.LOG_PREFIX} Injected message via tmux '{tmux_session}'" )
+                # Step 3: Press Enter separately
+                subprocess.run(
+                    [ "tmux", "send-keys", "-t", tmux_session, "Enter" ],
+                    capture_output=True, timeout=2
+                )
 
-        except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ) as e:
-            self._log( f"{self.LOG_PREFIX} tmux injection failed: {e}" )
+                self._log( f"{self.LOG_PREFIX} Injected message via tmux '{tmux_session}'" )
+
+            except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ) as e:
+                self._log( f"{self.LOG_PREFIX} tmux injection failed: {e}" )
 
     def _send_gist_response( self, notification ):
         """

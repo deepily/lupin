@@ -323,9 +323,18 @@ def filter_and_project_sessions(
     originator_session_id             : Optional[ str ] = None,
     include_originator                : bool            = True,
     mtime_fn                          : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
-) -> List[ Dict[ str, Any ] ]:
+) -> Tuple[ List[ Dict[ str, Any ] ], List[ Dict[ str, Any ] ] ]:
     """
     Apply all AC2 filters + T7 + T8 projection to the raw 3-tuple list.
+
+    Returns `( included, filtered_out )` — fanout receipts (F3, 2026-06-11).
+    Every gate that previously dropped a session SILENTLY now emits a
+    `filtered_out` entry `{ "session_id", "reason" }` (the mtime gate adds
+    `age_seconds` + `threshold_seconds`) so a broadcast miss is visible to the
+    sender instead of vanishing. Reasons: `bridge_unreadable`,
+    `owner_mismatch`, `stale_bridge_mtime`, `bridge_vanished`,
+    `originator_excluded` (intentional, reported for completeness).
+    See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §3
 
     1. Open each bridge via `bridge_loader` — skip on parse fail
     2. Filter by `owner_user_id == authenticated_user_id` (T7 + Q9 same-user scoping).
@@ -354,10 +363,12 @@ def filter_and_project_sessions(
     4. Optionally exclude originator's session (when `include_originator=False`)
     5. Project to response shape via `project_session_response` (T8 — no Path leak)
     """
-    out: List[ Dict[ str, Any ] ] = [ ]
+    out          : List[ Dict[ str, Any ] ] = [ ]
+    filtered_out : List[ Dict[ str, Any ] ] = [ ]
     for path, sid, persona in raw_sessions:
         bridge = bridge_loader( path )
         if bridge is None:
+            filtered_out.append( { "session_id": sid, "reason": "bridge_unreadable" } )
             continue
         bridge_owner_user_id = bridge.get( "owner_user_id" )
         # Graceful: include sessions whose bridge has NO owner_user_id field
@@ -366,6 +377,7 @@ def filter_and_project_sessions(
         # `_stamp_owner_user_id_on_bridge` lands listener-side, the equality
         # branch tightens to strict cross-user isolation.
         if bridge_owner_user_id is not None and bridge_owner_user_id != authenticated_user_id:
+            filtered_out.append( { "session_id": sid, "reason": "owner_mismatch" } )
             continue
         # Liveness filter (2026-06-05): key on bridge-file MTIME, not the bridge's
         # `idle_detection.last_interaction_at`. The idle-waiter heartbeat rewrites
@@ -380,13 +392,21 @@ def filter_and_project_sessions(
             mtime_epoch = mtime_fn( path )
         except OSError:
             # TOCTOU: bridge vanished between enumeration and stat → treat as gone.
+            filtered_out.append( { "session_id": sid, "reason": "bridge_vanished" } )
             continue
         if ( now_epoch - mtime_epoch ) > active_session_threshold_seconds:
+            filtered_out.append( {
+                "session_id"        : sid,
+                "reason"            : "stale_bridge_mtime",
+                "age_seconds"       : round( now_epoch - mtime_epoch, 1 ),
+                "threshold_seconds" : active_session_threshold_seconds,
+            } )
             continue
         if not include_originator and originator_session_id is not None and sid == originator_session_id:
+            filtered_out.append( { "session_id": sid, "reason": "originator_excluded" } )
             continue
         out.append( project_session_response( sid, persona, bridge ) )
-    return out
+    return ( out, filtered_out )
 
 
 def perform_fanout(
@@ -472,7 +492,14 @@ def execute_broadcast(
       {"http_status": 400, "detail": "..."}
       {"http_status": 429, "retry_after": float}
       {"http_status": 409, "detail": "broadcast_id collision"}
-      {"http_status": 200, "broadcast_id": "...", "recipients": int, "failed_recipients": [...], "status": "..."}
+      {"http_status": 200, "broadcast_id": "...", "recipients": int, "failed_recipients": [...],
+       "filtered_out": [...], "status": "..."}
+
+    `filtered_out` (F3 fanout receipts, 2026-06-11) lists every enumerated
+    session the recipient filter dropped, with the reason — so a silent
+    broadcast miss (e.g. the 8h mtime gate) is visible to the sender. Present
+    in BOTH 200 shapes; the zero-recipient response is the case the receipts
+    exist for.
 
     Raises nothing — all error states are returned as dicts for the route
     handler to translate into FastAPI responses.
@@ -498,8 +525,8 @@ def execute_broadcast(
         except ValueError:
             return { "http_status": 409, "detail": "broadcast_id collision" }
 
-    # AC2: enumerate + filter recipients
-    sessions = filter_and_project_sessions(
+    # AC2: enumerate + filter recipients (filtered_out = F3 fanout receipts)
+    sessions, filtered_out = filter_and_project_sessions(
         raw_sessions                     = raw_sessions_fn(),
         authenticated_user_id            = authenticated_user_id,
         active_session_threshold_seconds = active_session_threshold_seconds,
@@ -519,6 +546,7 @@ def execute_broadcast(
             "broadcast_id"      : broadcast_id,
             "recipients"        : 0,
             "failed_recipients" : [ ],
+            "filtered_out"      : filtered_out,
             "status"            : "no-active-sessions",
         }
 
@@ -544,6 +572,7 @@ def execute_broadcast(
         "broadcast_id"      : broadcast_id,
         "recipients"        : successful,
         "failed_recipients" : failed_recipients,
+        "filtered_out"      : filtered_out,
         "status"            : "queued",
     }
 
@@ -896,7 +925,7 @@ def _resolve_dm_recipient(
       {"http_status": 200, "session_id": str, "persona_name": str | None}
       {"http_status": 422, "detail": <RecipientResolutionError model_dump>}
     """
-    active_sessions = filter_and_project_sessions(
+    active_sessions, _filtered_out = filter_and_project_sessions(
         raw_sessions                     = raw_sessions_fn(),
         authenticated_user_id            = authenticated_user_id,
         active_session_threshold_seconds = active_session_threshold_seconds,
@@ -1185,7 +1214,7 @@ async def get_active_sessions(   # pragma: no cover
     # I/O; run them OFF the event loop (asyncio.to_thread) so the commons-who flood
     # can't stall the shared :7999 loop under fleet load. Mirrors broadcast (below).
     def _collect_sessions():
-        return filter_and_project_sessions(
+        included, _filtered_out = filter_and_project_sessions(
             raw_sessions                     = find_active_voice_persona_sessions(),
             authenticated_user_id            = authenticated_user_id,
             active_session_threshold_seconds = _active_session_threshold_seconds,
@@ -1194,6 +1223,7 @@ async def get_active_sessions(   # pragma: no cover
             originator_session_id            = None,
             include_originator               = True,
         )
+        return included
     sessions = await asyncio.to_thread( _collect_sessions )
     return JSONResponse( content={ "sessions": sessions } )
 

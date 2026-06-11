@@ -41,42 +41,71 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 )
 
 
-def _find_listener_pid( session_id, session_dir=None ):
+def _find_all_listener_pids( session_id, session_dir=None ):
     """
-    Find the listener PID from the session bridge file.
+    Find EVERY live listener serving this session — bridge PID + cmdline matches.
+
+    Reap-all fix (F2, 2026-06-11): the bridge remembers only the LAST spawned
+    listener's PID, so when the `--continue` double-fire produced duplicates,
+    killing just the bridge PID orphaned the other listener permanently (the
+    broadcast-miss root cause). This collects the union of:
+        1. The bridge-recorded listener_pid (if any)
+        2. Live processes whose cmdline matches `--session-id <hash>` for ANY
+           hash associated with the session (session_id, stable_session_id,
+           every session_ids[] entry — the listener is started with the STABLE
+           hash while this hook receives the transient ID)
+    See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §4
 
     Requires:
         - session_id is a non-empty string
 
     Ensures:
-        - Returns listener PID as int if found in session bridge file
-        - Returns None if no bridge file or no listener_pid key
+        - Returns a sorted list of unique int PIDs (possibly empty)
+        - Falls back to a cmdline scan on session_id[:8] when no bridge matches
+        - Never raises exceptions
 
     Args:
         session_id: Claude Code session ID (full or truncated)
         session_dir: Optional override for session directory (for testing)
 
     Returns:
-        int or None: Listener PID if found
+        list[int]: sorted unique listener PIDs, [] if none
     """
+    from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids
+
     if session_dir is None:
         session_dir = os.path.expanduser( "~/.claude/sessions" )
 
-    if not os.path.isdir( session_dir ):
-        return None
+    pids   = set()
+    hashes = set()
 
-    for entry in os.listdir( session_dir ):
-        if entry.startswith( "cc-" ) and entry.endswith( ".json" ):
-            fpath = os.path.join( session_dir, entry )
-            try:
-                with open( fpath ) as f:
-                    data = json.load( f )
-                if data.get( "session_id" ) == session_id:
-                    return data.get( "listener_pid" )
-            except ( json.JSONDecodeError, OSError ):
-                continue
+    if os.path.isdir( session_dir ):
+        for entry in os.listdir( session_dir ):
+            if entry.startswith( "cc-" ) and entry.endswith( ".json" ):
+                fpath = os.path.join( session_dir, entry )
+                try:
+                    with open( fpath ) as f:
+                        data = json.load( f )
+                except ( json.JSONDecodeError, OSError ):
+                    continue
+                if data.get( "session_id" ) != session_id:
+                    continue
+                listener_pid = data.get( "listener_pid" )
+                if isinstance( listener_pid, int ):
+                    pids.add( listener_pid )
+                for sid in [ data.get( "session_id" ), data.get( "stable_session_id" ), *( data.get( "session_ids" ) or [ ] ) ]:
+                    if isinstance( sid, str ) and sid:
+                        hashes.add( sid[ :8 ] )
 
-    return None
+    # No bridge match → still sweep by the hook's own session hash so a
+    # bridge-less orphan is reapable.
+    if not hashes:
+        hashes.add( session_id[ :8 ] )
+
+    for session_hash in hashes:
+        pids.update( find_live_listener_pids( session_hash ) )
+
+    return sorted( pids )
 
 
 def _release_voice_persona( session_id ):
@@ -250,10 +279,12 @@ def main():
             print( f"[session_end] WARNING: idle waiter kill failed ({type( e ).__name__}: {e})",
                    file=sys.stderr )
 
-    # ── Phase 2: Stop CC Notification Listener ────────────────────────────
+    # ── Phase 2: Stop CC Notification Listener(s) ─────────────────────────
+    # Reap-all (F2): kill every listener serving this session's hashes, not
+    # just the single bridge-recorded PID — duplicates from the SessionStart
+    # double-fire would otherwise outlive the session as orphans.
     if session_id:
-        listener_pid = _find_listener_pid( session_id )
-        if listener_pid:
+        for listener_pid in _find_all_listener_pids( session_id ):
             _stop_listener( listener_pid )
 
     # ── Phase 3: Clean up empty buffer files ──────────────────────────────
