@@ -52,7 +52,7 @@ those are now built, tested to the 100% gate, and held **inactive** behind an IN
 | 1 | Route/redirect (`pages.py` → RedirectResponse, route alive) | ✅ **BUILT, held inactive** | This session. INI-keyed, 302, `?classic=1` hatch, 100% L/B, live probe unchanged. |
 | 2 | Landing card repoint (`landing.html:116`) | 🟡 **Transitively covered at flip** | Direct href edit = 1-line post-soak cleanup (would change live default if applied now). |
 | 3 | Server bits stay (multiplexer_config, undelivered*, prediction-vote, fleet-state) | ✅ **VERIFIED present** | `multiplexer_config.py`, `notifications.py:1350`, `arbiter.py` fleet-state — all client-agnostic, no action. |
-| 4 | E2E migration (~12 JS suites gain `test_multiplexer_*` counterparts) | 🟡 **PARTIAL** | Exist: WP4/5 (4 suites), WP12–15 quartet (4 suites), WP10/WP2-partial (mux section in `test_cc_session_strip_and_focus.py`). **Missing named counterparts ×7**: auth_bounce (WP0), session_strip full (WP2), stt_insert_at_cursor (WP6), reap_badge_drop (WP7), spin-up symmetry (WP8), manager_badge (WP9), commons_activity_toggle (WP3/11). All 7 have 100% c8 **unit** coverage; the 06-10 gate was declared green without them. Legacy suites remain the guard via `?classic=1`. Recommend: post-cutover fast-follows, not Saturday blockers. |
+| 4 | E2E migration (~12 JS suites gain `test_multiplexer_*` counterparts) | ✅ **6 of 7 BUILT 2026-06-11 evening** (Rick's tonight ruling) | New suites (22 tests, all `:7999` pre-flight green first-run, element-anchored): `test_multiplexer_auth_bounce` (WP0, 3) · `test_multiplexer_session_strip` (WP2, 5) · `test_multiplexer_reap_badge_drop` (WP7, 4) · `test_multiplexer_spinup_symmetry` (WP8, 3) · `test_multiplexer_manager_badge` (WP9, 4) · `test_multiplexer_commons_activity_toggle` (WP3/11, 3). Held commits `3aaf740b`/`0e11cfbe`/`74ad168b`. Consolidated `:8000` run `ts-2c5e5deb` (all 15 `test_multiplexer_*` suites): **64 passed, 0 failed, 0 errors, 1 skipped** (the skip is pre-existing: `test_multiplexer_prediction_vote.py::test_vote_controls_dom_render_and_gate`, Lane E's surface, in-flight Stage-3 vote work). **WP6 carve-out: see finding below — Tiberius ruled PORT-before-Saturday (Rick override window open).** |
 | 5 | Docs (notification-api, rest-api-reference Pages, websocket-events, CLAUDE.md touchpoints → multiplexer canonical) | 🔴 **NOT DONE — GO-day ride-along** | Deliberately deferred: the content asserts post-cutover state ("canonical", "deprecated") that is false until the flip. Files enumerated; ~30 min of edits Saturday. |
 | 6 | Build/cache-bust (`npm run build`, verify hash, bump `?v=`) | ✅ **Current** / 🟡 note | `dist/multiplexer/manifest.json` hash `4c444ae676b8` built 2026-06-10T17:35Z; dist clean in git; no mux source changes since. Note: `multiplexer.html:237` loads **unhashed** `boot.js` with **no `?v=` param** — HTML is no-cache and static files carry ETag revalidation, so risk is low, but row 6's "bump ?v=" has nothing to bump; consider adding one at flip or switching the script tag to the hashed filename. |
 | 7 | Coverage gate (100% L/B/F after every WP) | ✅ **Holding** | Mux c8 100% at merge-train (1108/1108); this session's `pages.py` at 100% L+B. |
@@ -70,6 +70,24 @@ those are now built, tested to the 100% gate, and held **inactive** behind an IN
    anchored on the element-level surface each test actually exercises (computed state/handler
    effects — not bare DOM presence, the false-pass lesson). Held commits, fresh-critical review
    per batch, `:8000` runs queued behind pending work.
+
+## FINDING (2026-06-11 evening): WP6 insert-at-caret is a FEATURE gap, not a test gap
+
+Discovered while building the WP6 counterpart: **the insert-at-caret feature was never ported to
+the multiplexer.** No `insertTranscriptionText`/caret/`selectionStart` logic exists anywhere in
+the mux TS tree, and no WP6 commit exists in history. (This also corrects this report's earlier
+"all 7 have 100% c8 unit coverage" claim — true for the other six, **not** for WP6.)
+
+What the multiplexer does instead: `SenderCardRecorderRenderer` paints the transcription into a
+**fresh textarea** on `ready_to_send` (`textarea.value = entry.transcription ?? ""`). For the
+plain record→review→send flow that is arguably fine — there is no pre-existing user text to
+preserve. The regression risk is **Re-record after editing**: the user edits the transcription,
+clicks Re-record, and the new transcription **overwrites their edits** — exactly the legacy
+overwrite bug (2026-06-01, Rick) that F5's insert-at-caret was created to fix.
+
+**Decision needed (Tiberius/Rick):** (a) accept replace-on-re-record as intended mux design and
+write the E2E against that contract, or (b) port the caret-splice into the mux textarea path as
+a feature task (+ unit + E2E). No counterpart suite was faked against the wrong contract.
 
 ## Residual risk
 
