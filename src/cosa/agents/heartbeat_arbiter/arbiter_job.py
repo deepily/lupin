@@ -271,6 +271,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         poke_stall_threshold_seconds : int              = 720,    # ~12 min
         poke_max_per_episode     : int                  = 3,
         manager_stale_poke_threshold_seconds : int      = 2700,   # post-game F2 (~45 min; 0 disables)
+        manager_stale_poke_max_age_seconds : int        = 7200,   # corpse ceiling (~2h; must be > threshold)
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
@@ -357,6 +358,19 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if manager_stale_poke_threshold_seconds < 0:
             raise ValueError( f"manager_stale_poke_threshold_seconds must be >= 0, "
                               f"got {manager_stale_poke_threshold_seconds}" )
+        # corpse ceiling (2026-06-11): F2 means "this manager went dark RECENTLY",
+        # not "a corpse exists" — the eligibility window is [threshold, max_age].
+        # A ceiling at or below the threshold makes that window EMPTY and silently
+        # config-deads the tier — fail fast, same bug-class guard as quiet < alive
+        # above. Only enforced while the tier is enabled (threshold > 0).
+        if manager_stale_poke_threshold_seconds > 0 and \
+           manager_stale_poke_max_age_seconds <= manager_stale_poke_threshold_seconds:
+            raise ValueError(
+                f"manager_stale_poke_max_age_seconds ({manager_stale_poke_max_age_seconds}) "
+                f"must be > manager_stale_poke_threshold_seconds "
+                f"({manager_stale_poke_threshold_seconds}) — else the staleness "
+                f"eligibility window is empty and the tier is config-dead"
+            )
         if not manager_recipient:
             raise ValueError( "manager_recipient must be a non-empty string" )
 
@@ -418,6 +432,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # session whose freshest union signal is older than this is poked + Rick-
         # advised even with zero stuck workers (the 2026-06-10 gap). 0 disables.
         self.manager_stale_poke_threshold_seconds = manager_stale_poke_threshold_seconds
+        # corpse ceiling (2026-06-11): ages beyond this are corpse rows resurfaced
+        # by the include_offline detection snapshot (the 10:52 EDT boot-burst:
+        # yesterday's dead manager session poked with a bogus 1134m age on every
+        # process start), never a live manager going dark — NOT eligible.
+        self.manager_stale_poke_max_age_seconds   = manager_stale_poke_max_age_seconds
         # post-game F1: the structured-log seam — every outreach + gate evaluation
         # lands in the journal so silence is diagnosable (Rick's verbatim ask).
         self._log_fn           = log_fn           if log_fn           is not None else _default_log_fn
@@ -1356,10 +1375,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - no-op (returns 0) when the threshold is 0 (tier disabled)
-            - a row is eligible iff role == "manager" AND (freshest_age_s is None
-              OR >= threshold) — None = no signal at all = maximally stale; an
-              offline-verdict manager STAYS eligible (offline is maximal
-              staleness, not an exit)
+            - a row is eligible iff role == "manager" AND freshest_age_s is not
+              None AND threshold <= freshest_age_s <= max_age. This FLIPS the
+              original None-age choice (corpse-ceiling fix, 2026-06-11): None =
+              no signal EVER = a corpse/malformed row → NOT eligible (was:
+              None = maximally stale = eligible). The ceiling exists for the
+              same reason — F2 means "this manager went dark RECENTLY", not "a
+              corpse exists": the include_offline detection snapshot resurfaces
+              yesterday's dead manager rows on every process start (the 10:52
+              EDT boot-burst poked a 1134m-old corpse and advised Rick), and an
+              age beyond max_age is a corpse, not a dark manager
             - ≤ poke_max_per_episode pokes + exactly ONE advisory per episode
             - returns the count of staleness pokes fired this poll; never raises
         """
@@ -1375,7 +1400,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 continue
             liveness = row.get( "liveness" )
             age      = liveness.get( "freshest_age_s" ) if isinstance( liveness, dict ) else None
-            if age is None or age >= self.manager_stale_poke_threshold_seconds:
+            # corpse ceiling: eligible iff the age lands inside [threshold, max_age];
+            # None (no signal ever) is a corpse/malformed row, never a dark manager.
+            if age is not None and \
+               self.manager_stale_poke_threshold_seconds <= age <= self.manager_stale_poke_max_age_seconds:
                 eligible[ sid ] = ( row, age )
 
         # episode end: a manager freshened (or left the roster) → clear state so
@@ -1393,7 +1421,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 self._mgr_poke_count[ sid ]  = 0
             if sid not in self._mgr_advised:                      # Rick advisory: FIRST crossing, same poll as poke #1
                 self._mgr_advised.add( sid )
-                last_seen = now - datetime.timedelta( seconds=age ) if age is not None else None
+                # age is never None here — the corpse-ceiling eligibility gate
+                # excludes None-age rows, so last_seen is always computable.
+                last_seen = now - datetime.timedelta( seconds=age )
                 self._route(
                     CASE_MANAGER_STALE_ADVISORY,
                     f"MANAGER-STALE: {persona} silent {_fmt_minutes( age )} "
@@ -1522,8 +1552,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - returns [] iff a staleness poke would fire; else the failed
-              preconditions from { tier_disabled, not_manager, not_stale,
-                mgr_capped }; never raises
+              preconditions from { tier_disabled, not_manager, no_signal,
+                not_stale, beyond_max_age, mgr_capped }; never raises
+            - corpse-ceiling fix (2026-06-11): a None age reads `no_signal`
+              (corpse/malformed — flipped from eligible) and an age past the
+              ceiling reads `beyond_max_age` (a corpse resurfaced by the
+              include_offline snapshot, not a recently-dark manager)
         """
         why = [ ]
         if self.manager_stale_poke_threshold_seconds <= 0:
@@ -1534,8 +1568,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return why
         liveness = row.get( "liveness" )
         age      = liveness.get( "freshest_age_s" ) if isinstance( liveness, dict ) else None
-        if age is not None and age < self.manager_stale_poke_threshold_seconds:
+        if age is None:
+            return [ "no_signal" ]
+        if age < self.manager_stale_poke_threshold_seconds:
             return [ "not_stale" ]
+        if age > self.manager_stale_poke_max_age_seconds:
+            return [ "beyond_max_age" ]
         if self._mgr_poke_count.get( sid, 0 ) >= self.poke_max_per_episode:
             return [ "mgr_capped" ]
         return [ ]
