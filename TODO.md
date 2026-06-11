@@ -1,5 +1,43 @@
 # TODO
 
+## 🔄 2026-06-11 LIVE BOARD (Tiberius 👑, session f557aab9) — updated 18:05 EDT; ~47+ held commits on wip-v0.1.8, NOTHING pushed
+
+> Day shape: 10-worker fleet ran Rick's morning directives; manager wedged in a hung MCP call 10:55–17:26 EDT (the new arbiter caught it — 45m advisory + 3 pokes + noon fleet-dark, journal receipts: `src/rnd/v0.1.8/2026.06.11-arbiter-loop-closure-journal-receipts.md`). 4 workers harvested complete (Sam 🎙️, Arnold 🪨, Rio ⚡, Extra 1 🪨); 6 live.
+
+**✅ DONE TODAY (held on wip-v0.1.8 unless noted):**
+- [x] **Arbiter missed-poke post-game** (Cheech 🌿): F1 outreach logging + F2 manager-staleness tier (INI 2700s) + F3 fleet-dark — Rick-ratified, reviewed, MERGED (`c89c13d6`), **DEPLOYED :8001 10:52 EDT**, organically validated same day. Design: `2026.06.11-arbiter-missed-poke-postgame-and-outreach-logging.md`.
+- [x] **Sam's debt sweep** MERGED: roster-aware broadcast matcher + review fixes (`99d6577b`+`c7821ca4`), dangling-gitlink fail-safe (`73fd67df`), bare-scope listing (`930981d5`), shlex pytest_args (`9a17fda4`).
+- [x] **Thumbs-vote Stage 3** (Arnold): multi-select + open-ended steering + threshold-in-payload, landed `5914586d`, :8000 E2E 3/3 green (`ts-34d2a9d8`).
+- [x] **Rachel's visual-fix harvest** (Rio): `ca1f3d5f` merged (`bf424d54`) + BONUS product fix `562e8cb8` (borrowed-badge CSS `[hidden]` override), 4/4 :8000 verify green.
+- [x] **Broadcast-miss F1–F4** (Mr. Radio 🦉): reviewed APPROVE (`18f1164e`) — landing merge in progress.
+- [x] **Saturday cutover prep** (Clayton 😎): GO-READY — redirect built flag-OFF (`baa7e7e7`+doc `86b83203`), 153 e2e sites pre-patched, :8000 11/11 ×2.
+- [x] **Fleet-panel colors + lineage**: verified already-landed (`f2733cf8`); baseline rebaselined+verified (Extra 1).
+- [x] **svllmr/svllmc**: resolved — user-error double-launch; both healthy; Rachel's port-guard line queued for Rick's dotfiles.
+- [x] **:7999 wedge** 10:48 EDT: bounced (queues verified empty), healthy in 25s; recurrence-watch: HTTP starvation while background work continues.
+- [x] **GCP Steps 0–2** (Krishna 🦚): auth verified, gitleaks green (held `483abf9f`+`3c0142e6`), `lupin:1.1.0` IN Artifact Registry, compose already arbiter-complete.
+
+**🔄 IN FLIGHT:**
+- [ ] **Cheech: corpse-ceiling fix** (P1 — gates next :8001 restart; spec DM'd 10:54 EDT: ceiling INI key + None-age flip + S6 test). ⚠️ SILENT since 17:30 status-check — chase/respawn at next tick.
+- [ ] **Tiffany: multi-manager + persona-transport** — BOTH items built (20 files, 100% ×8 modules); RECONCILING her branch onto wip HEAD (Cheech-merge overlap on 4 arbiter files); my full review after receipts. Activation checklist in design doc §Activation (incl. MCP restart + :8001 env + Rick's bashrc chains HELD until post-landing).
+- [ ] **Krishna: GCP Step 3+** — VM start blocked by `ZONE_RESOURCE_POOL_EXHAUSTED` (us-central1-a L4 stockout); 10-min retry cadence, time-box 19:15 EDT → then decision-ready summary (retry-overnight vs -b recreate); also running Rick's L4-availability web search.
+- [ ] **Rachel: FM-21 hermetic fixture + F2 decision_proxy isolation** — Fix 1 (asyncio.run ×3) building; Fix 2 nod granted w/ constraints (no-op proof + fails-before receipt; land only on clean full-suite gate).
+- [ ] **Mr. Radio: landing DM** for 18f1164e merge confirmation.
+
+**🎯 RICK'S DECISIONS — RESOLVED via /plan-decide walkthrough 18:00-18:05 EDT (see Decisions Log). Still standing (not decisions):** OAuth `claude setup-token` when the GCP VM comes up (Step 6) · PUSH of held commits (Rick-initiated only, never prompted) · Rick pastes the port-guard into both aliases (his dotfiles).
+
+**🆕 NEW PROJECT (Rick, D2 ruling):** [LUPIN] **JS-vs-TS client code-quality comparison study** — preserve the JS notifications client + its ENTIRE test suite long-term as a research corpus. Compare client 1 (JS, organic "hot collection of changes" accretion) vs client 2 (TS, serialized review → cascade review midway). Methodology TBD; planned: submit both implementations to Claude + GPT-5 for qualitative code analysis. Implication: cutover ≠ deletion; `?classic=1` + JS suites retained indefinitely (Clayton updating the readiness-report deprecation language).
+
+## Decisions Log
+- 2026-06-11 — Saturday cutover → **GO as planned (Sat 06-14 AM: INI flip + :8000 bounce)**. Why: gate green, redirect reviewed, 153 sites pre-patched, receipts 11/11 ×2.
+- 2026-06-11 — `?classic=1` hatch + JS client retention → **KEEP LONG-TERM as research corpus** (beyond soak; see new project above). Why: planned JS-vs-TS quality study needs both implementations + suites intact.
+- 2026-06-11 — 7 `test_multiplexer_*` e2e counterparts → **BUILD PRE-SATURDAY, starting tonight** (Rick override of fast-follow rec: "plenty of bandwidth"). Clayton re-activated, 3 batches.
+- 2026-06-11 — R1 frozen-fixture visual snapshots → **RATIFIED**. Why: live-data drift produced 4 false reds in one day; functional siblings keep real scopes covered.
+- 2026-06-11 — svllm port-guard aliases → **ADOPT** (Rick pastes into svllmr+svllmc; line on Rachel's 10:00 card + walkthrough abstract). Why: this morning's OOM was exactly the unguarded double-launch.
+
+**📋 FILED DEBT (non-blocking):** wedged-turn detection tier (arbiter can't wake a hung-tool-call session — today's gap) · report-filename minute-collision in test-suite results · smoke `hasAttribute('hidden')` false-pass hardening · `.git/worktrees/` deletion incident UNATTRIBUTED (bounded 09:55–10:03 EDT; Extra 1 ruled out by verbatim log; leads: rm-rf signature + 09:54:45 merge timing) · commons register_network_error flakiness during server stress · sender_id.py 4 pre-fold smoke-helper lines (96% whole-file, grandfathered ramp).
+
+---
+
 ## 🌙 2026-06-10 SESSION-END (Tiberius 👑, session 4f7a7ab8) — pushed + backed up; SAT cutover next
 
 > **RESUME HERE TOMORROW** — memento: `io/mementos/tiberius-session-resume-2026.06.10-evening.md`. Headline: merge-train r2 complete (~50 commits PUSHED at session-end), **both servers on validated 1.1.0**, final flagless e2e **560/3/1/3 = cutover gate functionally GREEN**, oracle acked-ledger live (self-poke 46→~0). NOTE: the visible TaskCreate list does NOT persist — rebuild from this block + memento (this morning's pattern).
