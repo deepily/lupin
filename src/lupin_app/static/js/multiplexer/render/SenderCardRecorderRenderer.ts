@@ -28,6 +28,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { StoreSendersChangedPayload } from "../shared/types";
 import { recordingManager } from "../audio/recordingManager";
+import { insertTranscriptionText } from "./insertTranscriptionText";
 
 export interface SenderCardRecorderRenderer {
   mount( root: HTMLElement ): void;
@@ -44,12 +45,22 @@ export interface SenderCardRecorderRendererOptions {
 
 type RecorderState = "idle" | "recording" | "ready_to_send";
 
+// WP6 (F5 insert-at-caret port) — the textarea snapshot captured when a
+// Re-record starts, BEFORE the recording-state repaint destroys the element.
+// `selStart`/`selEnd` are null when the element exposed no caret.
+interface RerecordStash {
+  text     : string;
+  selStart : number | null;
+  selEnd   : number | null;
+}
+
 class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
   private readonly bus              : EventBus;
   private readonly currentUserEmail : string;
   private readonly getAuthToken     : () => string | null;
   // sessionHash → state (idle/recording/ready_to_send) + pending transcription
-  private readonly states           : Map<string, { state: RecorderState; transcription?: string }> = new Map();
+  // + WP6 re-record stash (caret-splice source) + caret to restore post-paint.
+  private readonly states           : Map<string, { state: RecorderState; transcription?: string; stash?: RerecordStash; caret?: number | null }> = new Map();
   private readonly unsubscribers    : Array<() => void> = [];
 
   private root         : HTMLElement | null = null;
@@ -149,8 +160,24 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     }
     /* c8 ignore stop */
 
+    // WP6 (F5 insert-at-caret port): a Re-record from ready_to_send must NOT
+    // clobber the user's edits — the repaint below destroys the textarea, so
+    // snapshot its value + selection FIRST. Selection survives the button
+    // click stealing focus (legacy contract, proven by the F5 e2e suite).
+    let stash: RerecordStash | undefined;
+    if (current !== undefined && current.state === "ready_to_send") {
+      const liveTextarea = voiceInput.querySelector<HTMLTextAreaElement>(".cc-voice-input-textarea");
+      if (liveTextarea !== null) {
+        stash = {
+          text     : liveTextarea.value,
+          selStart : liveTextarea.selectionStart,
+          selEnd   : liveTextarea.selectionEnd,
+        };
+      }
+    }
+
     // Start a new recording. transitions to recording state immediately.
-    this.states.set(sessionHash, { state: "recording" });
+    this.states.set(sessionHash, { state: "recording", stash });
     this.paintVoiceInput(voiceInput);
     void recordingManager.startRecording({
       contextId : sessionHash,
@@ -158,9 +185,21 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
       // onComplete: transcription succeeded → ready_to_send + repaint. Plain
       // state-set + repaint; unit-tested via a stubbed recordingManager (the
       // real mic→STT round-trip that drives it is the smoke tier).
+      // WP6: with a re-record stash, the new transcription is CARET-SPLICED
+      // into the preserved text (replace selected range / insert at caret /
+      // append when caret unknown) instead of replacing the user's edits.
       onComplete: (transcription, _blob) => {
-        this.states.set(sessionHash, { state: "ready_to_send", transcription });
+        const pending = this.states.get(sessionHash)?.stash;
+        if (pending !== undefined) {
+          const spliced = insertTranscriptionText(
+            pending.text, pending.selStart, pending.selEnd, transcription ?? "",
+          );
+          this.states.set(sessionHash, { state: "ready_to_send", transcription: spliced.value, caret: spliced.caret });
+        } else {
+          this.states.set(sessionHash, { state: "ready_to_send", transcription });
+        }
         this.paintVoiceInput(voiceInput);
+        this.restoreCaret(voiceInput, sessionHash);
       },
       onError   : (err) => {
         // Order matters: paintVoiceInput's replaceChildren wipes the
@@ -273,6 +312,23 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
       sendBtn.className = "send-button";
       sendBtn.textContent = "Send";
       voiceInput.appendChild(sendBtn);
+    }
+  }
+
+  // WP6 — after a re-record splice repaint, return focus to the textarea and
+  // place the caret immediately after the inserted text (legacy F5 parity).
+  // No-op when the state carries no caret entry (plain first-record path —
+  // its behavior is deliberately unchanged) or when the element exposed no
+  // caret at stash time (caret === null → focus only, skip setSelectionRange).
+  private restoreCaret(voiceInput: HTMLElement, sessionHash: string): void {
+    const entry = this.states.get(sessionHash);
+    if (entry === undefined || entry.caret === undefined) return;
+    const textarea = voiceInput.querySelector<HTMLTextAreaElement>(".cc-voice-input-textarea");
+    /* c8 ignore next */ // defensive: ready_to_send paint always renders the textarea before this runs.
+    if (textarea === null) return;
+    textarea.focus();
+    if (entry.caret !== null) {
+      textarea.setSelectionRange(entry.caret, entry.caret);
     }
   }
 
