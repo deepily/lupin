@@ -387,7 +387,7 @@ class TestDecisionResponder:
             }
         }
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             responder.handle_event( "notification_queue_update", event_data )
         )
         assert responder.stats[ "skipped" ] == 1
@@ -407,7 +407,7 @@ class TestDecisionResponder:
             }
         }
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             responder.handle_event( "notification_queue_update", event_data )
         )
         assert responder.stats[ "sender_rejected" ] == 1
@@ -425,7 +425,7 @@ class TestDecisionResponder:
             }
         }
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             responder.handle_event( "notification_queue_update", event_data )
         )
         assert responder.stats[ "decisions_shadowed" ] == 1
