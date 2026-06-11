@@ -13,6 +13,8 @@ Used by:
     - routers/mock_job.py (expeditor test mode)
 """
 
+import shlex
+
 from typing import Optional
 
 _SEMANTIC_NONE = { "default", "no limit", "none", "skip", "no", "" }
@@ -274,12 +276,21 @@ def create_agentic_job( command, args_dict, user_id, user_email, session_id, deb
         else:
             test_types = test_types_raw
 
-        # Parse pytest_args: JSON list or space-separated string → list
+        # Parse pytest_args: JSON list or quote-aware string → list.
+        # shlex.split, NOT str.split: a quoted expression like -k "a or b" must
+        # survive as ONE -k value. The naive word-split shattered it — pytest
+        # read the bare `or` as a file arg and exited 4, a silent zero-test run
+        # that LOOKED submitted (2026-06-11, found independently by two sessions).
         pytest_args_raw = args_dict.get( "pytest_args", "" )
         if isinstance( pytest_args_raw, list ):
             pytest_args = pytest_args_raw
         elif pytest_args_raw and pytest_args_raw.lower() not in _SEMANTIC_NONE:
-            pytest_args = pytest_args_raw.split()
+            try:
+                pytest_args = shlex.split( pytest_args_raw )
+            except ValueError as e:
+                # Unbalanced quotes must fail LOUD at submit time — the silent
+                # alternative is exactly the zero-test run this fix removes.
+                raise ValueError( f"Malformed pytest_args {pytest_args_raw!r}: {e}" )
         else:
             pytest_args = []
 
