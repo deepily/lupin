@@ -31,6 +31,8 @@ Lane: Rachel (wiring). Pure leaves: Tiffany. Design owner: María. Manager: Tibe
 """
 import asyncio
 import datetime
+import json
+import zoneinfo
 from typing import Callable, List, Optional, Protocol, runtime_checkable
 
 from cosa.agents.agentic_job_base import AgenticJobBase
@@ -48,7 +50,8 @@ from cosa.agents.heartbeat_arbiter import ping_throttle
 # v2.1 direct-state visibility (design 03 §10.2-§10.4): per-session liveness off
 # the bridge-mtime clock, change-or-tick render, and the queryable snapshot push.
 from cosa.agents.heartbeat_arbiter.fleet_render import (
-    build_snapshot, carry_forward_lineage, frame_signature, render_fleet_table, render_tick,
+    build_snapshot, carry_forward_lineage, frame_signature, prune_offline_rows,
+    render_fleet_table, render_tick,
 )
 from cosa.rest.arbiter_snapshot_store import set_snapshot as _default_snapshot_sink
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -66,6 +69,7 @@ from cosa.agents.heartbeat_arbiter.manager_resolver import (
 from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS, TIER_OWNING_MANAGER,
     TIER_BLOCKER_AND_MANAGER, TIER_DROP, tier_for, CASE_AUTO_POKE_REAP_REC,
+    CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
 )
 
 
@@ -85,6 +89,83 @@ PING_MESSAGE_TEMPLATE = ( "You're blocking worker {holder} — they're waiting o
 # circular), so the throttle key uses a stable constant — one ping per
 # (holder, awaited) blocker pair per backoff window.
 PING_REASON           = "blocked"
+
+# ── post-game constants (2026-06-11 missed-poke post-game — design src/rnd/
+#    v0.1.8/2026.06.11-arbiter-missed-poke-postgame-and-outreach-logging.md) ──
+# F1: full why-not-poked gate dump every N polls (hourly at the 60s default), so
+# a long outreach silence is self-explaining even when no gate vector changes.
+GATE_DUMP_INTERVAL_POLLS = 60
+# F3 recovery arm: "the fleet JUST died" horizon — a boot straight into an empty
+# published roster fires the fleet-dark advisory ONLY if some session still shows
+# a signal younger than this (a cold morning boot over last evening's reaped
+# roster has none → silent; the page-Rick-every-morning failure mode can't occur).
+DARK_LOOKBACK_SECONDS    = 7200
+# F1: arbiter_outreach carries a truncated message head, not the full body.
+OUTREACH_SUMMARY_MAXLEN  = 160
+
+# F1: routed-case → log `kind` vocabulary (the direct-send kinds — poke,
+# manager_stale_poke, decision_cc, poll_error_escalation — are literals at their
+# emission sites).
+CASE_KINDS = {
+    4                           : "ping",
+    5                           : "deadlock",
+    7                           : "tap",
+    8                           : "orphan_worker",
+    9                           : "manager_down",
+    10                          : "decision",
+    11                          : "stall",
+    CASE_AUTO_POKE_REAP_REC     : "reap_rec",
+    CASE_MANAGER_STALE_ADVISORY : "manager_stale_advisory",
+    CASE_FLEET_DARK             : "fleet_dark",
+}
+
+
+def _default_log_fn( event, **fields ):
+    """
+    Structured JSON log line to stdout (flushed) — the F1 default log seam.
+
+    Mirrors the lupin_arbiter_app loops' `_default_log_fn` shape so events from
+    an in-pool arbiter land in the same greppable vocabulary; the :8001 factory
+    injects the app's own log_fn instead (adding service/loop fields).
+
+    Ensures:
+        - prints one JSON object: { ts, service, event, **fields }
+        - non-serializable field values are stringified (default=str)
+    """
+    line = {
+        "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
+        "service" : "heartbeat-arbiter",
+        "event"   : event,
+    }
+    line.update( fields )
+    print( json.dumps( line, default=str ), flush=True )
+
+
+def _fmt_minutes( seconds ):
+    """Compact whole-minutes age for Rick-facing text: 2700 → '45m'; None → 'unknown'."""
+    if seconds is None:
+        return "unknown"
+    return f"{int( seconds ) // 60}m"
+
+
+def _fmt_eastern( dt ):
+    """
+    Rick-facing wall-clock: aware datetime → 'HH:MM EDT/EST' (America/New_York).
+
+    The journal + commons speak UTC; every human-facing advisory converts and
+    LABELS the zone (project doctrine — bare-UTC times in Rick-facing text are
+    a known footgun).
+
+    Ensures:
+        - returns the zone-labeled local time string; None / unusable input
+          degrades to 'unknown'; never raises
+    """
+    if dt is None:
+        return "unknown"
+    try:
+        return dt.astimezone( zoneinfo.ZoneInfo( "America/New_York" ) ).strftime( "%H:%M %Z" )
+    except Exception:
+        return "unknown"
 
 
 def _default_bridge_discovery():
@@ -188,6 +269,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         auto_poke_enabled        : bool                 = True,
         poke_stall_threshold_seconds : int              = 720,    # ~12 min
         poke_max_per_episode     : int                  = 3,
+        manager_stale_poke_threshold_seconds : int      = 2700,   # post-game F2 (~45 min; 0 disables)
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
@@ -196,6 +278,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         render_sink              : Optional[ Callable ] = None,
         resolve_manager_fn       : Optional[ Callable ] = None,
         resolve_active_managers_fn : Optional[ Callable ] = None,
+        list_managers_fn         : Optional[ Callable ] = None,
+        log_fn                   : Optional[ Callable ] = None,
         user_id      : str  = None,
         user_email   : str  = None,
         session_id   : str  = None,
@@ -268,6 +352,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
             raise ValueError( f"poke_stall_threshold_seconds must be >= 0, got {poke_stall_threshold_seconds}" )
         if poke_max_per_episode < 1:
             raise ValueError( f"poke_max_per_episode must be >= 1, got {poke_max_per_episode}" )
+        # post-game F2: 0 disables the manager-staleness tier; negative is a config bug.
+        if manager_stale_poke_threshold_seconds < 0:
+            raise ValueError( f"manager_stale_poke_threshold_seconds must be >= 0, "
+                              f"got {manager_stale_poke_threshold_seconds}" )
         if not manager_recipient:
             raise ValueError( "manager_recipient must be a non-empty string" )
 
@@ -310,6 +398,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self.auto_poke_enabled             = auto_poke_enabled
         self.poke_stall_threshold_seconds  = poke_stall_threshold_seconds
         self.poke_max_per_episode          = poke_max_per_episode
+        # post-game F2: the SECOND, role-gated pokeable criterion — a MANAGER-role
+        # session whose freshest union signal is older than this is poked + Rick-
+        # advised even with zero stuck workers (the 2026-06-10 gap). 0 disables.
+        self.manager_stale_poke_threshold_seconds = manager_stale_poke_threshold_seconds
+        # post-game F1: the structured-log seam — every outreach + gate evaluation
+        # lands in the journal so silence is diagnosable (Rick's verbatim ask).
+        self._log_fn           = log_fn           if log_fn           is not None else _default_log_fn
+        # post-game F2: manager-manifest role source, injectable for tests (was a
+        # hardcoded _default_list_manager_session_ids inside _publish_fleet_snapshot).
+        self._list_managers_fn = list_managers_fn if list_managers_fn is not None else _default_list_manager_session_ids
 
         # --- consumer state (carried across polls) ---
         self._offsets       = { }                                  # sid -> byte offset
@@ -356,6 +454,26 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # still-decaying row would wrongly drop to "Unmanaged". Threaded through
         # carry_forward_lineage each poll; pruned to the published sids (eviction).
         self._manager_lineage  = { }                               # sid -> manager_persona (last-known)
+        # post-game F2: manager-staleness EPISODE state (mirrors the stuck-tier
+        # _poke_* trio): keyed by session_id; cleared when the manager freshens
+        # below the threshold (or leaves the roster) → the cap + advisory re-arm.
+        self._mgr_stale_since  = { }                               # sid -> episode-start datetime
+        self._mgr_poke_count   = { }                               # sid -> staleness pokes this episode
+        self._mgr_advised      = set()                             # sids whose Rick advisory fired this episode
+        # post-game F3: fleet-dark hybrid trigger state. The edge (prev>0 → 0) is
+        # primary; the recovery arm (boot straight into 0 with recent corpses) only
+        # runs while NO nonzero roster has been seen this process.
+        self._published_count_prev = None                          # last poll's PUBLISHED row count
+        self._fleet_dark_escalated = False                         # once per dark episode
+        self._saw_nonzero_roster   = False                         # gates the recovery arm OFF after any live poll
+        self._last_manager_seen    = None                          # { persona, at: datetime } freshest manager signal observed
+        # post-game F1: per-session why-not-poked gate signatures (emit-on-change).
+        self._gate_state           = { }                           # sid -> (stuck_why tuple, stale_why tuple)
+        # post-game: the FULL (include_offline=True) detection snapshot + published
+        # row count of the current poll — set by _publish_fleet_snapshot, consumed
+        # by the F2/F3 detectors in the same _poll_once pass.
+        self._last_full_snapshot   = None
+        self._last_published_n     = 0
 
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI (QueueableJob protocol)."""
@@ -409,21 +527,37 @@ class ArbiterConsumerJob( AgenticJobBase ):
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers )  # #11 Rick + all mgrs
         pokes_fired   = self._auto_poke( fleet_view, now, active_managers )          # 2b-3 auto-poke
         rendered      = self._publish_fleet_snapshot( fleet_view, now )
+        # post-game F2/F3 detectors read the FULL (include_offline=True) detection
+        # snapshot + published count the publish step just stashed on the instance.
+        manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers )
+        fleet_dark          = self._check_fleet_dark( self._last_full_snapshot, self._last_published_n, now )
+        # post-game F1: why-not-poked gate evaluation — runs AFTER both poke tiers
+        # so the emitted vectors reflect this poll's episode state.
+        self._emit_poke_gates( fleet_view, self._last_full_snapshot, now )
 
         self._poll_count += 1
-        return {
-            "sessions"      : len( fleet_view ),
-            "edges"         : len( graph[ "edges" ] ),
-            "cycles"        : len( graph[ "cycles" ] ),
-            "pings_fired"   : pings_fired,
-            "roster"        : len( roster ),
-            "taps_fired"    : taps_fired,
-            "managers_down" : managers_down,
-            "decisions"     : decisions,
-            "stalled"       : stalled,
-            "pokes_fired"   : pokes_fired,
-            "rendered"      : rendered,
+        summary = {
+            "sessions"            : len( fleet_view ),
+            "edges"               : len( graph[ "edges" ] ),
+            "cycles"              : len( graph[ "cycles" ] ),
+            "pings_fired"         : pings_fired,
+            "roster"              : len( roster ),
+            "taps_fired"          : taps_fired,
+            "managers_down"       : managers_down,
+            "decisions"           : decisions,
+            "stalled"             : stalled,
+            "pokes_fired"         : pokes_fired,
+            "manager_stale_pokes" : manager_stale_pokes,
+            "fleet_dark"          : fleet_dark,
+            "rendered"            : rendered,
         }
+        # post-game F1: promote the summary to the journal whenever ANY outreach
+        # counter is nonzero — a poll that communicated is never invisible.
+        if any( summary[ k ] for k in (
+                "pings_fired", "taps_fired", "managers_down", "decisions",
+                "stalled", "pokes_fired", "manager_stale_pokes", "fleet_dark", "cycles" ) ):
+            self._log( "arbiter_poll_activity", **summary )
+        return summary
 
     def _publish_fleet_snapshot( self, fleet_view, now ):
         """
@@ -437,11 +571,17 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - reads each session's bridge-mtime (the wedge-resilient liveness
               clock, §10.1) via the injected reader and builds the snapshot with
               STATE and LIVENESS kept as orthogonal columns (C4)
+            - post-game split (2026-06-11): builds ONE FULL snapshot
+              (include_offline=True) and stashes it on self._last_full_snapshot
+              for the F2/F3 detectors, then derives the PUBLISHED live-only view
+              via prune_offline_rows — render, frame signature, and sink payload
+              ride the PUBLISHED view, so the D6/§5.2 published contract is
+              unchanged; self._last_published_n carries its row count
             - renders the FULL table when the semantic frame changed (or on the
               first poll), else a one-line tick with the duration-since-change
               (§10.3 / D1) — to the injected render sink (greppable log)
-            - pushes the snapshot to the injected sink (the in-pool arbiter's
-              server singleton, surfaced by GET /api/arbiter/fleet-snapshot)
+            - pushes the published snapshot to the injected sink (the in-pool
+              arbiter's server singleton, surfaced by GET /api/arbiter/fleet-snapshot)
             - returns "table" or "tick" (for the poll summary)
         """
         bridge_mtimes = { sid: self._bridge_mtime_fn( sid ) for sid in fleet_view }
@@ -457,28 +597,79 @@ class ArbiterConsumerJob( AgenticJobBase ):
         snapshot      = build_snapshot(
             fleet_view, bridge_mtimes, now,
             resolve_manager_fn = self._resolve_manager_fn,
-            list_managers_fn   = _default_list_manager_session_ids,
+            list_managers_fn   = self._list_managers_fn,
             process_dead       = process_dead,
+            include_offline    = True,        # FULL view for the post-game F2/F3 detectors
         )
         # Fleet-Status offline-lineage carry (2026-06-10): a reaped worker loses both
         # lineage sources at once (bridge unlink + manifest drop), so its still-decaying
         # row would otherwise drop to "Unmanaged". Replay the last-known manager until
         # the row evicts. Pure + degrade-safe (never raises, never invents); manager is
         # orthogonal to frame_signature, so this never triggers a spurious re-render.
+        # (Post-game note: the carry now runs on the FULL snapshot, so lineage is
+        # retained until FULL-snapshot eviction — published rows are a subset and
+        # receive identical fills, so the published view is unchanged.)
         snapshot, self._manager_lineage = carry_forward_lineage( snapshot, self._manager_lineage )
+        self._last_full_snapshot = snapshot
+        published                = prune_offline_rows( snapshot )   # the D6/§5.2 published contract
+        self._last_published_n   = published[ "session_count" ]
 
-        sig = frame_signature( snapshot )
+        sig = frame_signature( published )
         if sig != self._last_frame_sig:
             self._last_frame_sig = sig
             self._last_change_at = now
-            self._render_sink( render_fleet_table( snapshot ) )
+            self._render_sink( render_fleet_table( published ) )
             rendered = "table"
         else:
-            self._render_sink( render_tick( now, self._last_change_at, snapshot[ "session_count" ] ) )
+            self._render_sink( render_tick( now, self._last_change_at, published[ "session_count" ] ) )
             rendered = "tick"
 
-        self._snapshot_sink( snapshot )
+        self._snapshot_sink( published )
         return rendered
+
+    # ── post-game F1: structured outreach + gate logging ────────────────────────
+
+    def _log( self, event, **fields ):
+        """
+        Emit one structured log event via the injected log seam.
+
+        Ensures:
+            - calls self._log_fn( event, **fields )
+            - a log_fn blow-up is swallowed (observer invariant — telemetry must
+              never kill a poll); never raises
+        """
+        try:
+            self._log_fn( event, **fields )
+        except Exception:
+            pass
+
+    def _log_outreach( self, kind, via, recipients, message,
+                       case=None, tier=None, session_id=None, persona=None ):
+        """
+        Emit the `arbiter_outreach` event — fired at EVERY outbound communication
+        (Rick's verbatim ask: "a log so we can see when it's attempting to reach
+        out and communicate").
+
+        Accounting contract (the S3 invariant): `recipients` lists ONE entry per
+        actual emission — "rick" for a notify_fn push, the persona name for each
+        send_to — so the journal's recipient total equals the gateway+notify total.
+
+        Ensures:
+            - logs kind/via/recipients + a truncated message head (full bodies
+              stay out of the journal); optional case/tier/session/persona fields
+              attach when given; never raises
+        """
+        fields = {
+            "kind"       : kind,
+            "via"        : via,
+            "recipients" : list( recipients ),
+            "summary"    : ( message or "" )[ :OUTREACH_SUMMARY_MAXLEN ],
+        }
+        if case is not None: fields[ "case" ] = case
+        if tier is not None: fields[ "tier" ] = tier
+        if session_id:       fields[ "session_id" ] = session_id
+        if persona:          fields[ "persona" ]    = persona
+        self._log( "arbiter_outreach", **fields )
 
     # ── 2b-2 Part-6 recipient routing ───────────────────────────────────────────
 
@@ -520,24 +711,38 @@ class ArbiterConsumerJob( AgenticJobBase ):
         Ensures:
             - emits exactly the recipients its tier prescribes; absent optional
               recipients (no manager resolved, empty active set) degrade silently
+            - post-game F1: every routed emission is journaled as ONE
+              `arbiter_outreach` event whose `recipients` lists each actual push
+              ("rick" = notify_fn, persona = send_to); a no-emission route (empty
+              tier inputs / TIER_DROP) logs nothing — the journal mirrors reality
             - never raises out (gateway send hiccups propagate to the caller's guard)
         """
-        tier = tier_for( case )
+        tier       = tier_for( case )
+        recipients = [ ]
         if tier == TIER_RICK_ONLY:
             self._notify_fn( message )
+            recipients.append( "rick" )
         elif tier == TIER_RICK_AND_MANAGERS:
             self._notify_fn( message )
+            recipients.append( "rick" )
             for manager in active_managers or [ ]:
                 self._commons.send_to( manager, message )
+                recipients.append( manager )
         elif tier == TIER_OWNING_MANAGER:
             if owning_manager:
                 self._commons.send_to( owning_manager, message )
+                recipients.append( owning_manager )
         elif tier == TIER_BLOCKER_AND_MANAGER:
             if blocker:
                 self._commons.send_to( blocker, message )
+                recipients.append( blocker )
             if owning_manager and cc_message:
                 self._commons.send_to( owning_manager, cc_message )
+                recipients.append( owning_manager )
         # TIER_DROP → intentional no-op (the #6 roster broadcast is cut)
+        if recipients:
+            self._log_outreach( CASE_KINDS.get( case, f"case_{case}" ), "route",
+                                recipients, message, case=case, tier=tier )
 
     def _auto_ping( self, edges, now, persona_to_sid=None ):
         """
@@ -893,11 +1098,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         except Exception:
             manager = None
         if manager:
-            self._commons.send_to(
-                manager,
-                f"Heartbeat arbiter (cc): your crew posted a decision-needed — "
-                f"{entry.get( 'body', '' )}. Rick has it; weigh in if it's yours."
-            )
+            cc_body = ( f"Heartbeat arbiter (cc): your crew posted a decision-needed — "
+                        f"{entry.get( 'body', '' )}. Rick has it; weigh in if it's yours." )
+            self._commons.send_to( manager, cc_body )
+            self._log_outreach( "decision_cc", "send_to", [ manager ], cc_body, persona=manager )
 
     @staticmethod
     def _fleet_progress_signature( fleet_view ):
@@ -1081,7 +1285,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 continue                                          # not stuck long enough yet
             if self._poke_count[ sid ] < self.poke_max_per_episode:
                 recipient = view.get( "persona" ) or sid
-                self._commons.send_to( recipient, self._format_poke( view ) )
+                body      = self._format_poke( view )
+                self._commons.send_to( recipient, body )
+                self._log_outreach( "poke", "send_to", [ recipient ], body,    # post-game F1
+                                    session_id=sid, persona=view.get( "persona" ) )
                 self._poke_count[ sid ] += 1
                 fired += 1
             elif sid not in self._poke_escalated:
@@ -1091,6 +1298,275 @@ class ArbiterConsumerJob( AgenticJobBase ):
                              active_managers=active_managers )
             # else: capped AND already escalated → silence (anti-storm)
         return fired
+
+    # ── post-game F2: manager-staleness poke tier (2026-06-11) ──────────────────
+
+    def _format_manager_stale_poke( self, row, age ):
+        """The bounded, non-destructive staleness nudge sent to a dark MANAGER session."""
+        who = row.get( "persona" ) or row.get( "session_id" )
+        return (
+            f"Heartbeat arbiter (manager-staleness poke): {who}, no signal from your "
+            f"session for {_fmt_minutes( age )} (threshold "
+            f"{self.manager_stale_poke_threshold_seconds}s). Are you wedged or idle-dark? "
+            f"Post your status or resume. Rick has been advised. (Non-destructive nudge.)"
+        )
+
+    def _check_manager_staleness( self, snapshot, now, active_managers ):
+        """
+        F2: the SECOND, role-gated pokeable criterion — a MANAGER-role session
+        whose freshest union signal is older than the threshold gets a bounded
+        poke AND a Rick advisory, even with ZERO stuck workers (the 2026-06-10
+        gap: stale 27m/34m/30m+ manager verdicts produced no outreach because the
+        stuck-tier requires alive∧stuck and taps require attention workers).
+
+        Workers are UNTOUCHED — the gate is role == "manager" (manager-manifest
+        via the injected list_managers_fn, surfaced on the snapshot row), so
+        María's quiet≠stall doctrine for heads-down workers is preserved intact.
+
+        The Rick advisory (case 14, Rick + active managers) fires on the FIRST
+        threshold crossing — the SAME poll as poke #1, NOT after poke exhaustion:
+        pokes at a dark session are best-effort (it may have no self-wake); the
+        advisory is the load-bearing output. Pokes continue bounded
+        (≤ poke_max_per_episode); episode state clears when the manager freshens
+        below the threshold (or leaves the roster) → cap + advisory re-arm.
+
+        Requires:
+            - snapshot is the FULL (include_offline=True) detection snapshot
+            - now is an aware datetime; active_managers a list or None
+
+        Ensures:
+            - no-op (returns 0) when the threshold is 0 (tier disabled)
+            - a row is eligible iff role == "manager" AND (freshest_age_s is None
+              OR >= threshold) — None = no signal at all = maximally stale; an
+              offline-verdict manager STAYS eligible (offline is maximal
+              staleness, not an exit)
+            - ≤ poke_max_per_episode pokes + exactly ONE advisory per episode
+            - returns the count of staleness pokes fired this poll; never raises
+        """
+        if self.manager_stale_poke_threshold_seconds <= 0:
+            return 0
+
+        eligible = { }
+        for row in ( snapshot or { } ).get( "sessions", [ ] ):
+            if not isinstance( row, dict ) or row.get( "role" ) != "manager":
+                continue
+            sid = row.get( "session_id" )
+            if not sid:
+                continue
+            liveness = row.get( "liveness" )
+            age      = liveness.get( "freshest_age_s" ) if isinstance( liveness, dict ) else None
+            if age is None or age >= self.manager_stale_poke_threshold_seconds:
+                eligible[ sid ] = ( row, age )
+
+        # episode end: a manager freshened (or left the roster) → clear state so
+        # the cap + advisory re-arm for any future episode (mirrors _auto_poke).
+        for sid in [ s for s in self._mgr_stale_since if s not in eligible ]:
+            del self._mgr_stale_since[ sid ]
+            self._mgr_poke_count.pop( sid, None )
+            self._mgr_advised.discard( sid )
+
+        fired = 0
+        for sid, ( row, age ) in eligible.items():
+            persona = row.get( "persona" ) or sid
+            if sid not in self._mgr_stale_since:
+                self._mgr_stale_since[ sid ] = now                # episode start
+                self._mgr_poke_count[ sid ]  = 0
+            if sid not in self._mgr_advised:                      # Rick advisory: FIRST crossing, same poll as poke #1
+                self._mgr_advised.add( sid )
+                last_seen = now - datetime.timedelta( seconds=age ) if age is not None else None
+                self._route(
+                    CASE_MANAGER_STALE_ADVISORY,
+                    f"MANAGER-STALE: {persona} silent {_fmt_minutes( age )} "
+                    f"(last signal {_fmt_eastern( last_seen )}, threshold "
+                    f"{self.manager_stale_poke_threshold_seconds}s) — poking (bounded, "
+                    f"≤{self.poke_max_per_episode}/episode); outreach only, no action taken.",
+                    active_managers=active_managers,
+                )
+            if self._mgr_poke_count[ sid ] < self.poke_max_per_episode:
+                body = self._format_manager_stale_poke( row, age )
+                self._commons.send_to( persona, body )
+                self._log_outreach( "manager_stale_poke", "send_to", [ persona ], body,
+                                    session_id=sid, persona=persona )
+                self._mgr_poke_count[ sid ] += 1
+                fired += 1
+            # else: poke-capped — the advisory already fired; silence (anti-storm)
+        return fired
+
+    # ── post-game F3: fleet-dark advisory (hybrid trigger, 2026-06-11) ──────────
+
+    def _check_fleet_dark( self, snapshot, published_count, now ):
+        """
+        F3: the published roster decayed to ZERO → ONE Rick advisory per dark
+        episode (case 15, Rick-only — no managers remain by definition). The
+        2026-06-10 failure: 4→3→2→1→0 then 6+ hours of "no changes · 0 session(s)"
+        ticks with zero outreach — full-fleet death was silence BY DESIGN
+        (_has_live_owed_work requires live owed work; a dead/empty roster can
+        never stall-escalate).
+
+        HYBRID trigger (Tiberius review NIT-1): a pure >0→0 edge loses its state
+        on a service restart (LocalSnapshotStore is in-memory — it dies with the
+        process). So:
+          - PRIMARY (edge): previous published count > 0 and current == 0.
+          - RECOVERY (state; evaluated only while NO nonzero roster has been seen
+            this process — i.e. a boot/recycle straight into darkness): fire iff
+            some session in the FULL snapshot still shows a signal younger than
+            DARK_LOOKBACK_SECONDS ("the fleet JUST died" leaves recent corpses).
+            A cold morning boot over a roster reaped the previous evening has no
+            signal that fresh → silent (no daily page).
+
+        Ensures:
+            - tracks the freshest MANAGER signal ever observed (persona + wall
+              time) for the advisory body, EDT-labeled
+            - fires at most once per dark episode (flag re-arms on count > 0);
+              a mid-dark restart re-fires at most once per process
+            - returns 1 on a new advisory else 0; never raises
+        """
+        rows = ( snapshot or { } ).get( "sessions", [ ] )
+        # harvest the freshest manager signal observed (for the advisory body)
+        for row in rows:
+            if not isinstance( row, dict ) or row.get( "role" ) != "manager":
+                continue
+            liveness = row.get( "liveness" )
+            age      = liveness.get( "freshest_age_s" ) if isinstance( liveness, dict ) else None
+            if age is None:
+                continue
+            at = now - datetime.timedelta( seconds=age )
+            if self._last_manager_seen is None or at > self._last_manager_seen[ "at" ]:
+                self._last_manager_seen = { "persona": row.get( "persona" ) or row.get( "session_id" ),
+                                            "at"     : at }
+
+        prev = self._published_count_prev
+        self._published_count_prev = published_count
+
+        if published_count > 0:
+            self._saw_nonzero_roster   = True
+            self._fleet_dark_escalated = False                    # re-arm for the next dark episode
+            return 0
+        if self._fleet_dark_escalated:
+            return 0
+
+        edge     = prev is not None and prev > 0
+        recovery = ( not self._saw_nonzero_roster ) and any(
+            isinstance( r, dict ) and isinstance( r.get( "liveness" ), dict )
+            and r[ "liveness" ].get( "freshest_age_s" ) is not None
+            and r[ "liveness" ][ "freshest_age_s" ] <= DARK_LOOKBACK_SECONDS
+            for r in rows
+        )
+        if not ( edge or recovery ):
+            return 0
+
+        self._fleet_dark_escalated = True
+        seen  = self._last_manager_seen
+        last  = f"{seen[ 'persona' ]} at {_fmt_eastern( seen[ 'at' ] )}" if seen else "unknown"
+        decay = f"{prev}→0" if edge else "0 at startup (recent signals within lookback)"
+        self._route(
+            CASE_FLEET_DARK,
+            f"FLEET-DARK: published roster {decay}; last manager signal {last}. "
+            f"The arbiter keeps watching; this fires once per dark episode.",
+        )
+        return 1
+
+    # ── post-game F1: why-not-poked gate evaluation (2026-06-11) ────────────────
+
+    def _stuck_gate_why_not( self, sid, view, now ):
+        """
+        The stuck-tier gate vector for one session: which precondition blocks a
+        wake-nudge THIS poll. Runs after _auto_poke, so episode state is current.
+
+        Ensures:
+            - returns [] iff a stuck-tier poke would fire; else the failed
+              preconditions in evaluation order, from
+              { disabled, not_alive, not_stuck, below_threshold, capped,
+                already_escalated }; never raises
+        """
+        why = [ ]
+        if not self.auto_poke_enabled:
+            why.append( "disabled" )
+        if not isinstance( view, dict ) or view.get( "alive" ) is not True:
+            why.append( "not_alive" )
+        if not isinstance( view, dict ) or view.get( "stuck" ) is not True:
+            why.append( "not_stuck" )
+        if why:
+            return why
+        since = self._poke_stuck_since.get( sid )
+        if since is not None and ( now - since ).total_seconds() < self.poke_stall_threshold_seconds:
+            return [ "below_threshold" ]
+        if self._poke_count.get( sid, 0 ) >= self.poke_max_per_episode:
+            return [ "already_escalated" ] if sid in self._poke_escalated else [ "capped" ]
+        return [ ]
+
+    def _stale_gate_why_not( self, sid, row ):
+        """
+        The manager-staleness-tier gate vector for one session (off its FULL-
+        snapshot row, which carries role + freshest_age_s).
+
+        Ensures:
+            - returns [] iff a staleness poke would fire; else the failed
+              preconditions from { tier_disabled, not_manager, not_stale,
+                mgr_capped }; never raises
+        """
+        why = [ ]
+        if self.manager_stale_poke_threshold_seconds <= 0:
+            why.append( "tier_disabled" )
+        if not isinstance( row, dict ) or row.get( "role" ) != "manager":
+            why.append( "not_manager" )
+        if why:
+            return why
+        liveness = row.get( "liveness" )
+        age      = liveness.get( "freshest_age_s" ) if isinstance( liveness, dict ) else None
+        if age is not None and age < self.manager_stale_poke_threshold_seconds:
+            return [ "not_stale" ]
+        if self._mgr_poke_count.get( sid, 0 ) >= self.poke_max_per_episode:
+            return [ "mgr_capped" ]
+        return [ ]
+
+    def _emit_poke_gates( self, fleet_view, snapshot, now ):
+        """
+        F1 gate-evaluation visibility: journal WHY each session was (not) poked,
+        on CHANGE of its gate vector + a full dump every GATE_DUMP_INTERVAL_POLLS
+        polls — so an outreach silence is always diagnosable ("evaluated and
+        correctly declined" vs "never evaluated" vs "fired and delivery failed").
+
+        Ensures:
+            - emits `arbiter_poke_gate` per session whose (stuck_why, stale_why)
+              signature changed since its last emission, or unconditionally on a
+              dump poll (poll 0 = the baseline dump)
+            - a session leaving the fleet view emits ONE { evicted: True } event
+              and drops its signature
+            - never raises (the _log seam swallows)
+        """
+        rows_by_sid = {
+            r.get( "session_id" ): r
+            for r in ( snapshot or { } ).get( "sessions", [ ] )
+            if isinstance( r, dict ) and r.get( "session_id" )
+        }
+        dump    = ( self._poll_count % GATE_DUMP_INTERVAL_POLLS == 0 )
+        current = set()
+        for sid, view in ( fleet_view or { } ).items():
+            if not isinstance( view, dict ):
+                continue
+            current.add( sid )
+            row       = rows_by_sid.get( sid, { } )
+            stuck_why = self._stuck_gate_why_not( sid, view, now )
+            stale_why = self._stale_gate_why_not( sid, row )
+            sig       = ( tuple( stuck_why ), tuple( stale_why ) )
+            if dump or self._gate_state.get( sid ) != sig:
+                self._gate_state[ sid ] = sig
+                self._log(
+                    "arbiter_poke_gate",
+                    session_id       = sid,
+                    persona          = view.get( "persona" ),
+                    role             = row.get( "role", "worker" ),
+                    stuck_pokeable   = not stuck_why,
+                    stuck_why_not    = stuck_why,
+                    stale_pokeable   = not stale_why,
+                    stale_why_not    = stale_why,
+                    stuck_poke_count = self._poke_count.get( sid, 0 ),
+                    mgr_poke_count   = self._mgr_poke_count.get( sid, 0 ),
+                )
+        for sid in [ s for s in self._gate_state if s not in current ]:
+            del self._gate_state[ sid ]
+            self._log( "arbiter_poke_gate", session_id=sid, evicted=True )
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -1139,11 +1615,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if ( self._poll_error_streak >= self.poll_error_escalate_threshold
              and not self._poll_error_escalated ):
             self._poll_error_escalated = True
-            self._notify_fn(
-                f"ARBITER POLL-ERROR persistent: {self._poll_error_streak} consecutive poll "
-                f"failures (≥{self.poll_error_escalate_threshold}) — escalating to Rick "
-                f"(arbiter effectively down): {error}"
-            )
+            body = ( f"ARBITER POLL-ERROR persistent: {self._poll_error_streak} consecutive poll "
+                     f"failures (≥{self.poll_error_escalate_threshold}) — escalating to Rick "
+                     f"(arbiter effectively down): {error}" )
+            self._notify_fn( body )
+            self._log_outreach( "poll_error_escalation", "notify", [ "rick" ], body )   # post-game F1
         else:
             self._render_sink(
                 f"arbiter poll-error (transient, streak {self._poll_error_streak}/"

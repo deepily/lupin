@@ -29,7 +29,7 @@ from cosa.agents.heartbeat_arbiter import arbiter_routing as R
 from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     CASE_TIERS, tier_for, TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS,
     TIER_OWNING_MANAGER, TIER_BLOCKER_AND_MANAGER, TIER_DROP, TIER_LOG_THEN_RICK,
-    CASE_AUTO_POKE_REAP_REC,
+    CASE_AUTO_POKE_REAP_REC, CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
 )
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 from cosa.agents.heartbeat_arbiter import manager_resolver as MR
@@ -94,7 +94,8 @@ def test_case_tiers_mirror_part6_table( case ):
 
 def test_case_tiers_is_exhaustive_part6_plus_2b3_reap_rec():
     # Part-6 outputs 1..12 + the 2b-3 auto-poke reap-recommendation (case 13)
-    assert set( CASE_TIERS ) == set( range( 1, 14 ) )
+    # + the post-game cases (14 manager-stale advisory, 15 fleet-dark — 2026-06-11)
+    assert set( CASE_TIERS ) == set( range( 1, 16 ) )
 
 
 def test_auto_poke_reap_rec_routes_rick_and_managers():
@@ -102,6 +103,15 @@ def test_auto_poke_reap_rec_routes_rick_and_managers():
     managers (same tier as the fleet crises) — recommendation, never a reap."""
     assert CASE_AUTO_POKE_REAP_REC == 13
     assert tier_for( CASE_AUTO_POKE_REAP_REC ) == TIER_RICK_AND_MANAGERS
+
+
+def test_postgame_cases_route_per_design():
+    """Post-game (2026-06-11): the manager-stale advisory fans to Rick + all
+    active managers (the dark manager's crew is leaderless-in-waiting); the
+    fleet-dark advisory is Rick-ONLY (no managers remain by definition)."""
+    assert CASE_MANAGER_STALE_ADVISORY == 14 and CASE_FLEET_DARK == 15
+    assert tier_for( CASE_MANAGER_STALE_ADVISORY ) == TIER_RICK_AND_MANAGERS
+    assert tier_for( CASE_FLEET_DARK )             == TIER_RICK_ONLY
 
 
 def test_tier_for_unknown_case_raises():
