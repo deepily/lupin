@@ -45,7 +45,7 @@ class _GW:
     def __init__( self ):
         self.sent = [ ]
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, r, b ): self.sent.append( ( r, b ) )
+    def send_to( self, r, b, metadata=None ): self.sent.append( ( r, b ) )
     def post( self, t, b ): pass
     def read( self, topic, since=None, limit=50 ): return [ ]
 
@@ -312,6 +312,83 @@ def test_s6_boot_over_yesterday_corpse_manager_silent_while_live_dark_manager_fi
         _advance( clock, fleet, job, 1, touch=( "wkr-uuid", ) )
     assert [ s for s in gw.sent if s[ 0 ] == "Tiberius" ] == [ ]
     assert "mgr-corpse-uuid" not in job._mgr_stale_since
+
+
+# ── S7: Rick offline → pending ledger → RECYCLE → re-announce delivered ───────
+
+def test_s7_undelivered_advisory_survives_recycle_and_reannounces( tmp_path ):
+    """THE MILESTONE-MUST-LAND REQUIREMENT (2026.06.11 receipts design §3.5,
+    Tiberius review constraint 2): an advisory that fires while Rick's WS is
+    OFFLINE (user_not_available — tonight's latent miss) must survive a JOB
+    RECYCLE and re-announce when he returns. Driven through the composed
+    `_poll_once` on BOTH sides of the boundary: job A (escalates, misses, files
+    the ledger entry) is discarded; a FRESH job B — new in-memory state, same
+    ledger FILE — re-announces and closes the receipt. The clock crosses the
+    boundary; only the file carries the obligation."""
+    from cosa.agents.heartbeat_arbiter.outreach_ledger import read_pending
+
+    ledger = tmp_path / "io" / "outreach-pending.json"
+    clock, log_a = _FakeClock( T0 ), _Log()
+    fleet = Fleet( clock )
+    fleet.add( "mgr-tiberius-uuid", "Tiberius", manager=True )
+    fleet.add( "wkr-rio-uuid", "Rio" )
+
+    def _job_with( log, notify_fn, live_retry_fn=None ):
+        return ArbiterConsumerJob(
+            commons                    = _GW(),
+            poll_seconds               = 60,
+            manager_recipient          = "manager-on-duty",
+            events_dir                 = str( tmp_path ),
+            clock                      = clock,
+            notify_fn                  = notify_fn,
+            live_retry_fn              = live_retry_fn,
+            pending_ledger_path        = str( ledger ),
+            log_fn                     = log,
+            bridge_discovery_fn        = lambda: dict( fleet.bridges ),
+            bridge_mtime_fn            = lambda sid: fleet.mtimes.get( sid ),
+            list_managers_fn           = lambda: set( fleet.managers ),
+            resolve_manager_fn         = lambda sid, declared_manager=None: {
+                                             "manager_persona": None, "source": "unresolved" },
+            resolve_active_managers_fn = lambda who, bridges: [ ],
+            render_sink                = lambda s: None,
+            snapshot_sink              = lambda s: None,
+        )
+
+    # ── before the boundary: job A escalates while Rick is OFFLINE ──
+    rick_offline = lambda m: [ { "channel": "live", "outcome": "user_not_available" } ]
+    job_a = _job_with( log_a, rick_offline )
+    job_a._poll_once()                                                # t0: fresh fleet, quiet
+    clock.t = clock.t + datetime.timedelta( minutes=30 ); fleet.touch( "wkr-rio-uuid" )
+    job_a._poll_once()                                                # manager under threshold
+    clock.t = clock.t + datetime.timedelta( minutes=16 ); fleet.touch( "wkr-rio-uuid" )
+    job_a._poll_once()                                                # 46m dark → case-14 advisory fires
+    miss = [ f for f in log_a.of( "arbiter_outreach_result" )
+             if f[ "recipient" ] == "rick" and f[ "outcome" ] == "user_not_available" ]
+    assert miss, "the advisory must journal the user_not_available miss"
+    pending = read_pending( ledger )
+    assert len( pending ) == 1                                        # the obligation is ON DISK
+    oid = next( iter( pending ) )
+    assert log_a.of( "arbiter_outreach_receipt" ) == [ ]              # not terminal — pending
+
+    # ── THE RECYCLE BOUNDARY: job A is discarded; job B has FRESH in-memory state ──
+    del job_a
+    log_b      = _Log()
+    deliveries = [ ]
+    def rick_back( message ):                                         # Rick's WS reconnected
+        deliveries.append( message )
+        return { "channel": "live", "outcome": "queued" }
+    job_b = _job_with( log_b, rick_offline, live_retry_fn=rick_back )
+
+    # advance past the reannounce interval ACROSS the boundary; fresh fleet so no new advisory
+    clock.t = clock.t + datetime.timedelta( minutes=6 )
+    fleet.touch( "mgr-tiberius-uuid" ); fleet.touch( "wkr-rio-uuid" )
+    job_b._poll_once()
+
+    assert len( deliveries ) == 1 and "MANAGER-STALE" in deliveries[ 0 ]
+    receipt = [ f for f in log_b.of( "arbiter_outreach_receipt" )
+                if f[ "outreach_id" ] == oid ][ 0 ]
+    assert receipt[ "outcome" ] == "reannounced_delivered" and receipt[ "attempts" ] == 2
+    assert read_pending( ledger ) == { }                              # obligation discharged
 
 
 if __name__ == "__main__":

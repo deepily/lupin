@@ -32,7 +32,7 @@ class SettableClock:
 class FakeGateway:
     def __init__( self ): self.posts = [ ]; self.sends = [ ]
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, recipient, body ): self.sends.append( ( recipient, body ) )
+    def send_to( self, recipient, body, metadata=None ): self.sends.append( ( recipient, body ) )
     def post( self, topic, body ): self.posts.append( ( topic, body ) )
     def read( self, topic, since=None, limit=50 ): return [ ]
 

@@ -28,7 +28,7 @@ class _GW:
         self.sent, self.posts, self.read_calls = [ ], [ ], [ ]
         self._read, self._raises = read_entries or [ ], read_raises
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, r, b ): self.sent.append( ( r, b ) )
+    def send_to( self, r, b, metadata=None ): self.sent.append( ( r, b ) )
     def post( self, t, b ): self.posts.append( ( t, b ) )
     def read( self, topic, since=None, limit=50 ):
         self.read_calls.append( ( topic, since ) )

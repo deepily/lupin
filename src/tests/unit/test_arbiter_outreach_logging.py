@@ -45,7 +45,7 @@ class _GW:
     def __init__( self ):
         self.sent = [ ]
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, r, b ): self.sent.append( ( r, b ) )
+    def send_to( self, r, b, metadata=None ): self.sent.append( ( r, b ) )
     def post( self, t, b ): pass
     def read( self, topic, since=None, limit=50 ): return [ ]
 
@@ -101,9 +101,10 @@ def test_log_seam_swallows_log_fn_blowup():
 # ── arbiter_outreach: every emission path is journaled ───────────────────────
 
 def test_route_tiers_log_actual_recipients():
-    """The S3 accounting contract at the _route layer: recipients mirror the
-    actual pushes — 'rick' per notify_fn, persona per send_to; no-emission
-    routes log nothing."""
+    """The S3 accounting contract at the _route layer — RESTATED by the
+    2026.06.11 receipts design: `recipients` is the PLANNED set; per-hop reality
+    lives in arbiter_outreach_result events (test_arbiter_outreach_receipts).
+    No-emission routes still log nothing."""
     gw, log = _GW(), _Log()
     job = _job( gw, log=log )
     job._route( 5, "deadlock!", active_managers=[ "M1", "M2" ] )     # RICK_AND_MANAGERS

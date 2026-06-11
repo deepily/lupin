@@ -61,15 +61,21 @@ class LupinArbiterGateway:
         """
         return self._store.who( retention_hours=retention_hours )
 
-    def send_to( self, recipient: str, body: str ) -> None:
+    def send_to( self, recipient: str, body: str, metadata: Optional[ dict ] = None ) -> None:
         """
-        Auto-ping a blocker by posting to their DM topic.
+        DM a session by posting to their DM topic.
 
         Ensures:
             - Appends `body` to dm-<recipient> via the store, stamped with the
               arbiter persona + a {kind: "arbiter-ping", recipient_persona}
               metadata envelope (so the recipient's UI renders a DM badge)
+            - caller `metadata` (2026.06.11 receipts design: outreach_id /
+              question_id / expects_ack — the §3.4 threading keys) is merged
+              OVER the defaults
         """
+        envelope = { "kind": "arbiter-ping", "recipient_persona": recipient }
+        if metadata:
+            envelope.update( metadata )
         self._store.post(
             self.dm_topic_for( recipient ),
             body,
@@ -77,7 +83,7 @@ class LupinArbiterGateway:
             persona_name  = self.persona_name,
             persona_icon  = self.persona_icon,
             persona_color = self.persona_color,
-            metadata      = { "kind": "arbiter-ping", "recipient_persona": recipient },
+            metadata      = envelope,
         )
 
     def post( self, topic: str, body: str ) -> None:
@@ -153,6 +159,12 @@ def quick_smoke_test():
     gw.send_to( "Bob", "ping" )
     assert store.posts[ -1 ][ 0 ] == "dm-bob"
     assert store.posts[ -1 ][ 3 ][ "kind" ] == "arbiter-ping"
+
+    # caller metadata merges OVER the defaults (2026.06.11 receipts threading keys)
+    gw.send_to( "Bob", "ping2", metadata={ "outreach_id": "o1", "expects_ack": True } )
+    assert store.posts[ -1 ][ 3 ][ "outreach_id" ] == "o1"
+    assert store.posts[ -1 ][ 3 ][ "kind" ] == "arbiter-ping"
+    assert store.posts[ -1 ][ 3 ][ "recipient_persona" ] == "Bob"
 
     gw.post( "fleet-arbiter", "roster" )
     assert store.posts[ -1 ][ 0 ] == "fleet-arbiter"

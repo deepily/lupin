@@ -21,8 +21,10 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_arbiter_app.arbiter_live_notify import (
-    build_notify_request, make_live_notify_fn, resolve_arbiter_api_key,
-    _default_log_fn, quick_smoke_test, NOTIFY_PATH,
+    build_notify_request, build_register_question_payload, make_dm_push_fn,
+    make_live_notify_fn, make_notify_transport, parse_notify_outcome,
+    resolve_arbiter_api_key, validate_live_notify_target,
+    _default_log_fn, quick_smoke_test, NOTIFY_PATH, REGISTER_QUESTION_PATH,
 )
 from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn, ESCALATION_TOPIC
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
@@ -37,6 +39,15 @@ class FixedClock:
         self.t = t
     def now( self ):
         return self.t
+
+
+def _queued_transport( pushed ):
+    """An outcome-returning fake transport (2026.06.11 receipts contract): records
+    the message and reports a DELIVERED outcome (`queued`)."""
+    def transport( message ):
+        pushed.append( message )
+        return { "channel": "live", "outcome": "queued" }
+    return transport
 
 
 # ── build_notify_request — the :7999 hop request SHAPE ─────────────────────────
@@ -81,52 +92,202 @@ class TestLiveNotifyDedup:
     def test_n_identical_escalations_push_once( self ):
         """RECEIPT (b): N identical escalations within the window → exactly 1 push."""
         clk, pushed = FixedClock(), [ ]
-        live = make_live_notify_fn( pushed.append, dedup_window_seconds=900, clock=clk )
+        live = make_live_notify_fn( _queued_transport( pushed ), dedup_window_seconds=900, clock=clk )
         for _ in range( 7 ):
             live( "WHOLE-FLEET-STALL — escalating to Rick" )
         assert pushed == [ "WHOLE-FLEET-STALL — escalating to Rick" ]     # 7 → 1
 
     def test_distinct_messages_each_push( self ):
         clk, pushed = FixedClock(), [ ]
-        live = make_live_notify_fn( pushed.append, dedup_window_seconds=900, clock=clk )
+        live = make_live_notify_fn( _queued_transport( pushed ), dedup_window_seconds=900, clock=clk )
         live( "alert A" ); live( "alert B" ); live( "alert A" )           # A deduped, B distinct
         assert pushed == [ "alert A", "alert B" ]
 
     def test_window_elapse_allows_resend_and_prunes( self ):
         clk, pushed = FixedClock(), [ ]
-        live = make_live_notify_fn( pushed.append, dedup_window_seconds=600, clock=clk )
+        live = make_live_notify_fn( _queued_transport( pushed ), dedup_window_seconds=600, clock=clk )
         live( "same" )                                                    # pushed
         clk.t = NOW + datetime.timedelta( seconds=601 )                   # past the window
         live( "same" )                                                    # window elapsed → re-send + prune
         assert pushed == [ "same", "same" ]
 
     def test_failed_push_is_not_deduped_away( self ):
-        """A transport that RAISES must not record the message — a later retry of
-        the SAME text can still push (the failure propagates to the caller's
-        swallow in make_escalation_notify_fn)."""
+        """A FAILED push must not record the message — a later retry of the SAME
+        text can still push (2026.06.11 receipts contract: failures are outcome
+        VALUES, never raises; only DELIVERED outcomes enter the dedup window)."""
         clk, calls = FixedClock(), [ ]
         def boom( m ):
             calls.append( m )
             raise RuntimeError( ":7999 unreachable" )
-        live = make_live_notify_fn( boom, dedup_window_seconds=900, clock=clk )
-        with pytest.raises( RuntimeError ):
-            live( "x" )
-        with pytest.raises( RuntimeError ):
-            live( "x" )                                                   # NOT deduped — retried
+        live = make_live_notify_fn( boom, dedup_window_seconds=900, clock=clk,
+                                    log_fn=lambda *a, **k: None )
+        assert live( "x" )[ "outcome" ] == "http_error"                   # degraded, not raised
+        assert live( "x" )[ "outcome" ] == "http_error"                   # NOT deduped — retried
         assert calls == [ "x", "x" ]
+
+    def test_undelivered_outcome_is_not_deduped_away( self ):
+        """The L2 kill, asserted directly: a user_not_available outcome (Rick's WS
+        offline — tonight's latent miss) must NOT enter the dedup window; the next
+        identical send goes out, and only a DELIVERED outcome starts deduping."""
+        clk, answers, calls = FixedClock(), [ "user_not_available", "queued", "queued" ], [ ]
+        def transport( m ):
+            calls.append( m )
+            return { "channel": "live", "outcome": answers[ len( calls ) - 1 ] }
+        live = make_live_notify_fn( transport, dedup_window_seconds=900, clock=clk,
+                                    log_fn=lambda *a, **k: None )
+        assert live( "alert" )[ "outcome" ] == "user_not_available"       # miss → not recorded
+        assert live( "alert" )[ "outcome" ] == "queued"                   # retried, delivered → recorded
+        assert live( "alert" )[ "outcome" ] == "deduped"                  # now deduped
+        assert calls == [ "alert", "alert" ]
 
     def test_default_clock_seam_resolves( self ):
         pushed = [ ]
-        live = make_live_notify_fn( pushed.append )                       # clock=None → SystemClock
+        live = make_live_notify_fn( _queued_transport( pushed ) )         # clock=None → SystemClock
         live( "real-clock alert" )
         assert pushed == [ "real-clock alert" ]
 
     def test_default_log_fn_used_on_dedup( self, capsys ):
         clk, pushed = FixedClock(), [ ]
-        live = make_live_notify_fn( pushed.append, dedup_window_seconds=900, clock=clk )  # log_fn=None
+        live = make_live_notify_fn( _queued_transport( pushed ), dedup_window_seconds=900, clock=clk )  # log_fn=None
         live( "z" ); live( "z" )                                          # 2nd is deduped → default log
         out = capsys.readouterr().out
         assert "live_notify_deduped" in out and pushed == [ "z" ]
+
+
+# ── parse_notify_outcome + make_notify_transport — the §3.2 body-reading hop ───
+
+class TestParseNotifyOutcome:
+    """The L1 kill: /api/notify reports the REAL delivery state in the response
+    BODY (all three states ride HTTP 200) — pre-design the body was discarded."""
+
+    def test_delivery_states_pass_verbatim_with_connection_count( self ):
+        out = parse_notify_outcome( 200, { "status": "queued", "connection_count": 2 } )
+        assert out[ "outcome" ] == "queued" and out[ "connection_count" ] == 2
+        assert parse_notify_outcome( 200, { "status": "user_not_available" } )[ "outcome" ] == "user_not_available"
+        assert parse_notify_outcome( 200, { "status": "delivered_via_listener" } )[ "outcome" ] == "delivered_via_listener"
+
+    def test_non_2xx_is_http_error( self ):
+        out = parse_notify_outcome( 404, None )
+        assert out[ "outcome" ] == "http_error" and out[ "http_status" ] == 404
+
+    def test_unknown_or_unparseable_body_is_unexpected_response( self ):
+        assert parse_notify_outcome( 200, { "weird": True } )[ "outcome" ] == "unexpected_response"
+        assert parse_notify_outcome( 200, None )[ "outcome" ] == "unexpected_response"
+        out = parse_notify_outcome( 200, { "status": "queued", "connection_count": "2" } )
+        assert "connection_count" not in out                          # non-int count not echoed
+
+
+class TestMakeNotifyTransport:
+    _ARGS = dict( base_url="http://x:7999", target_user="rick@x.com",
+                  sender_id="arb@x", api_key="k" )
+
+    def test_success_parses_body_and_logs( self ):
+        logged = [ ]
+        t = make_notify_transport(
+            http_post_fn=lambda u, h, s: ( 200, { "status": "queued" } ),
+            log_fn=lambda e, **f: logged.append( ( e, f ) ), **self._ARGS )
+        out = t( "alert" )
+        assert out[ "outcome" ] == "queued" and out[ "http_status" ] == 200
+        assert logged[ 0 ][ 0 ] == "live_notify_sent" and logged[ 0 ][ 1 ][ "outcome" ] == "queued"
+
+    def test_http_error_with_code_attr_carried( self ):
+        """Tonight's exact 404: urllib.HTTPError carries .code — it must surface."""
+        class _Err( Exception ):
+            code = 404
+        def boom( u, h, s ): raise _Err( "HTTP Error 404: Not Found" )
+        t = make_notify_transport( http_post_fn=boom, log_fn=lambda e, **f: None, **self._ARGS )
+        out = t( "alert" )
+        assert out[ "outcome" ] == "http_error" and out[ "http_status" ] == 404
+        assert "404" in out[ "detail" ]
+
+    def test_plain_exception_without_code( self ):
+        def boom( u, h, s ): raise TimeoutError( "timed out" )
+        t = make_notify_transport( http_post_fn=boom, log_fn=lambda e, **f: None, **self._ARGS )
+        out = t( "alert" )
+        assert out[ "outcome" ] == "http_error" and "http_status" not in out
+
+    def test_default_log_fn_traces_attempt( self, capsys ):
+        t = make_notify_transport( http_post_fn=lambda u, h, s: ( 200, { "status": "queued" } ),
+                                   **self._ARGS )                     # log_fn=None → module default
+        t( "alert" )
+        out = capsys.readouterr().out
+        assert "live_notify_sent" in out and '"outcome": "queued"' in out
+
+
+# ── validate_live_notify_target — the §3.6 misconfig guard (tonight's R1) ──────
+
+class TestValidateLiveNotifyTarget:
+    def test_usable_email_passes( self ):
+        assert validate_live_notify_target( "rick@x.com" ) is None
+
+    def test_unresolved_env_skeleton_caught( self ):
+        err = validate_live_notify_target( "${LUPIN_DEV_EMAIL}" )
+        assert err is not None and "UNRESOLVED" in err and "LUPIN_DEV_EMAIL" in err
+
+    def test_empty_and_whitespace_caught( self ):
+        assert "empty" in validate_live_notify_target( "" )
+        assert "empty" in validate_live_notify_target( "   " )
+
+    def test_non_email_caught( self ):
+        assert "not an email" in validate_live_notify_target( "rick" )
+
+
+# ── make_dm_push_fn + payload — the §3.3 manager wake hop ──────────────────────
+
+class TestDmPush:
+    _ARGS = dict( base_url="http://x:7999/", api_key="k",
+                  asker_session_id="lupin-arbiter-app-8001", ttl_seconds=900 )
+
+    def test_payload_shape_and_qid_threading( self ):
+        p = build_register_question_payload(
+            recipient_persona="Mr Radio", outreach_id="oid-1",
+            asker_session_id="lupin-arbiter-app-8001", ttl_seconds=900 )
+        assert p[ "topic" ] == "dm-mr_radio"                          # same board as the durable write
+        assert p[ "question_id" ] == "oid-1"                          # in_reply_to names the outreach
+        assert p[ "expect_reply" ] is False and p[ "ttl_seconds" ] == 900
+
+    def test_dispatched_201_with_push( self ):
+        seen = [ ]
+        def post( url, headers, payload, timeout ):
+            seen.append( ( url, headers, payload ) )
+            return 201, { "dm_dispatched": True }
+        push = make_dm_push_fn( http_post_json_fn=post, log_fn=lambda e, **f: None, **self._ARGS )
+        assert push( "Tiberius", "oid-1" )[ "outcome" ] == "dispatched"
+        url, headers, payload = seen[ 0 ]
+        assert url == f"http://x:7999{REGISTER_QUESTION_PATH}"        # trailing slash normalised
+        assert headers[ "X-API-Key" ] == "k" and payload[ "recipient_persona" ] == "Tiberius"
+
+    def test_registered_without_push_is_distinct_outcome( self ):
+        push = make_dm_push_fn( http_post_json_fn=lambda u, h, p, t: ( 201, { "dm_dispatched": False } ),
+                                log_fn=lambda e, **f: None, **self._ARGS )
+        assert push( "Tiberius", "oid-1" )[ "outcome" ] == "registered_no_push"
+
+    def test_non_201_is_push_unavailable_with_status( self ):
+        push = make_dm_push_fn( http_post_json_fn=lambda u, h, p, t: ( 422, { "detail": "recipient_not_found" } ),
+                                log_fn=lambda e, **f: None, **self._ARGS )
+        out = push( "Ghost", "oid-1" )
+        assert out[ "outcome" ] == "push_unavailable" and out[ "http_status" ] == 422
+
+    def test_exception_with_code_attr_carried( self ):
+        class _Err( Exception ):
+            code = 401
+        def boom( u, h, p, t ): raise _Err( "auth" )
+        push = make_dm_push_fn( http_post_json_fn=boom, log_fn=lambda e, **f: None, **self._ARGS )
+        out = push( "Tiberius", "oid-1" )
+        assert out[ "outcome" ] == "push_unavailable" and out[ "http_status" ] == 401
+
+    def test_plain_exception_without_code( self ):
+        def boom( u, h, p, t ): raise TimeoutError( "timed out" )
+        push = make_dm_push_fn( http_post_json_fn=boom, log_fn=lambda e, **f: None, **self._ARGS )
+        out = push( "Tiberius", "oid-1" )
+        assert out[ "outcome" ] == "push_unavailable" and "http_status" not in out
+
+    def test_default_log_fn_traces_attempt( self, capsys ):
+        push = make_dm_push_fn( http_post_json_fn=lambda u, h, p, t: ( 201, { "dm_dispatched": True } ),
+                                **self._ARGS )                        # log_fn=None → module default
+        push( "Tiberius", "oid-1" )
+        out = capsys.readouterr().out
+        assert "dm_push_attempted" in out and "dispatched" in out
 
 
 # ── resolve_arbiter_api_key — the §7.4 degrade-safe pure-seam resolver ─────────
@@ -219,7 +380,7 @@ class _FakeGW:
     def __init__( self ):
         self.posts, self.sent = [ ], [ ]
     def who( self, retention_hours=24 ): return [ ]
-    def send_to( self, r, b ): self.sent.append( ( r, b ) )
+    def send_to( self, r, b, metadata=None ): self.sent.append( ( r, b ) )
     def post( self, t, b ): self.posts.append( ( t, b ) )
     def read( self, topic, since=None, limit=50 ): return [ ]
 
@@ -241,7 +402,7 @@ def test_live_push_e2e_real_escalation_reaches_7999_hop():
     gw      = _FakeGW()
     clk     = FixedClock()
     pushed  = [ ]                                          # the captured :7999 hop
-    live    = make_live_notify_fn( pushed.append, dedup_window_seconds=900, clock=clk )
+    live    = make_live_notify_fn( _queued_transport( pushed ), dedup_window_seconds=900, clock=clk )
     # the EXACT production escalation sink: durable-primary + best-effort live
     escalation_notify = make_escalation_notify_fn( gw, live_notify_fn=live, log_fn=lambda *a, **k: None )
 
@@ -277,7 +438,7 @@ def test_live_push_e2e_dedups_repeat_escalation_to_single_push():
     durable topic records each call (the durable channel is intentionally not
     deduped — it's the audit trail)."""
     gw, clk, pushed = _FakeGW(), FixedClock(), [ ]
-    live = make_live_notify_fn( pushed.append, dedup_window_seconds=900, clock=clk )
+    live = make_live_notify_fn( _queued_transport( pushed ), dedup_window_seconds=900, clock=clk )
     notify = make_escalation_notify_fn( gw, live_notify_fn=live, log_fn=lambda *a, **k: None )
     notify( "WHOLE-FLEET-STALL — escalating to Rick" )
     notify( "WHOLE-FLEET-STALL — escalating to Rick" )                 # repeat (recycle re-emit)

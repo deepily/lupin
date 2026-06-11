@@ -79,7 +79,7 @@ class FakeGateway:
     def who( self, retention_hours=24 ):
         return list( self._who_rows )
 
-    def send_to( self, recipient, body ):
+    def send_to( self, recipient, body, metadata=None ):
         self.sent.append( ( recipient, body ) )
 
     def post( self, topic, body ):

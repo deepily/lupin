@@ -32,6 +32,7 @@ Lane: Rachel (wiring). Pure leaves: Tiffany. Design owner: María. Manager: Tibe
 import asyncio
 import datetime
 import json
+import uuid
 import zoneinfo
 from typing import Callable, List, Optional, Protocol, runtime_checkable
 
@@ -52,6 +53,13 @@ from cosa.agents.heartbeat_arbiter import ping_throttle
 from cosa.agents.heartbeat_arbiter.fleet_render import (
     build_snapshot, carry_forward_lineage, frame_signature, prune_offline_rows,
     render_fleet_table, render_tick,
+)
+from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn, DELIVERED_OUTCOMES
+# Item B (§3.4/§3.5): the dm-topic slug (receipt polling reads the SAME board the
+# durable send_to wrote to) + the restart-surviving Rick re-announce ledger.
+from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
+from cosa.agents.heartbeat_arbiter.outreach_ledger import (
+    add_pending, read_pending, record_attempt, remove_pending,
 )
 from cosa.rest.arbiter_snapshot_store import set_snapshot as _default_snapshot_sink
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -120,25 +128,11 @@ CASE_KINDS = {
 }
 
 
-def _default_log_fn( event, **fields ):
-    """
-    Structured JSON log line to stdout (flushed) — the F1 default log seam.
-
-    Mirrors the lupin_arbiter_app loops' `_default_log_fn` shape so events from
-    an in-pool arbiter land in the same greppable vocabulary; the :8001 factory
-    injects the app's own log_fn instead (adding service/loop fields).
-
-    Ensures:
-        - prints one JSON object: { ts, service, event, **fields }
-        - non-serializable field values are stringified (default=str)
-    """
-    line = {
-        "ts"      : datetime.datetime.now( datetime.timezone.utc ).isoformat(),
-        "service" : "heartbeat-arbiter",
-        "event"   : event,
-    }
-    line.update( fields )
-    print( json.dumps( line, default=str ), flush=True )
+# Item A (2026.06.11 receipts design §2.3): the F1 default log seam now delegates
+# to arbiter_journal.make_log_fn — the ONE owner of the line shape (ts + ts_local).
+# In-pool arbiter events keep the historical "heartbeat-arbiter" service tag; the
+# :8001 factory injects the app's own per-loop log_fn instead.
+_default_log_fn = make_log_fn( service="heartbeat-arbiter" )
 
 
 def _fmt_minutes( seconds ):
@@ -229,7 +223,7 @@ class ArbiterGateway( Protocol ):
     100% unit-testable with a FakeGateway.
     """
     def who( self, retention_hours: int = 24 ) -> List[ dict ]: ...
-    def send_to( self, recipient: str, body: str ) -> None: ...
+    def send_to( self, recipient: str, body: str, metadata: Optional[ dict ] = None ) -> None: ...
     def post( self, topic: str, body: str ) -> None: ...
     # v2.2 B3: tail a reserved topic (e.g. fleet-decision-needed). READ is pure
     # OBSERVATION — side-effect-free, redline-safe (NOT actuation). Verb set is
@@ -272,6 +266,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         poke_max_per_episode     : int                  = 3,
         manager_stale_poke_threshold_seconds : int      = 2700,   # post-game F2 (~45 min; 0 disables)
         manager_stale_poke_max_age_seconds : int        = 7200,   # corpse ceiling (~2h; must be > threshold)
+        # Item B (2026.06.11 receipts design): the delivery-receipt seams. All
+        # default None/inert so legacy in-pool construction is unchanged; the
+        # :8001 factory wires the real hops.
+        dm_push_fn               : Optional[ Callable ] = None,   # §3.3 manager wake hop (persona, qid) -> outcome
+        live_retry_fn            : Optional[ Callable ] = None,   # §3.5 dedup-BYPASSING live transport for re-announce
+        outreach_ack_window_seconds : int               = 900,    # §3.4 manager threaded-ack window
+        reannounce_interval_seconds : int               = 300,    # §3.5 Rick re-announce cadence
+        reannounce_ttl_seconds   : int                  = 86400,  # §3.5 re-announce give-up horizon
+        pending_ledger_path      : Optional[ str ]      = None,   # §3.5 file-backed ledger (None → re-announce inert)
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
@@ -371,6 +374,18 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 f"({manager_stale_poke_threshold_seconds}) — else the staleness "
                 f"eligibility window is empty and the tier is config-dead"
             )
+        # Item B: a zero/negative receipt knob silently config-deads its loop-closure
+        # tier — same fail-fast bug-class guard as quiet < alive above.
+        if outreach_ack_window_seconds <= 0:
+            raise ValueError( f"outreach_ack_window_seconds must be positive, got {outreach_ack_window_seconds}" )
+        if reannounce_interval_seconds <= 0:
+            raise ValueError( f"reannounce_interval_seconds must be positive, got {reannounce_interval_seconds}" )
+        if reannounce_ttl_seconds <= reannounce_interval_seconds:
+            raise ValueError(
+                f"reannounce_ttl_seconds ({reannounce_ttl_seconds}) must be > "
+                f"reannounce_interval_seconds ({reannounce_interval_seconds}) — else a "
+                f"pending advisory expires before its first retry (config-dead re-announce)"
+            )
         if not manager_recipient:
             raise ValueError( "manager_recipient must be a non-empty string" )
 
@@ -443,6 +458,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # post-game F2: manager-manifest role source, injectable for tests (was a
         # hardcoded _default_list_manager_session_ids inside _publish_fleet_snapshot).
         self._list_managers_fn = list_managers_fn if list_managers_fn is not None else _default_list_manager_session_ids
+        # Item B (2026.06.11 receipts design): delivery-receipt seams + knobs.
+        # None seams keep their tier inert (legacy in-pool / unit-fake construction);
+        # an inert tier is VISIBLE per-outreach as outcome "disabled" (dm_push) or
+        # by the absence of re-announce results (ledger path None).
+        self._dm_push_fn                 = dm_push_fn
+        self._live_retry_fn              = live_retry_fn
+        self.outreach_ack_window_seconds = outreach_ack_window_seconds
+        self.reannounce_interval_seconds = reannounce_interval_seconds
+        self.reannounce_ttl_seconds      = reannounce_ttl_seconds
+        self._pending_ledger_path        = pending_ledger_path
 
         # --- consumer state (carried across polls) ---
         self._offsets       = { }                                  # sid -> byte offset
@@ -509,6 +534,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # by the F2/F3 detectors in the same _poll_once pass.
         self._last_full_snapshot   = None
         self._last_published_n     = 0
+        # Item B §3.4: manager-bound outreaches awaiting a threaded ack —
+        # outreach_id -> { persona, kind, sent_at, resends, body }. In-memory by
+        # design: the ack window (900s) is far inside the 12h recycle; only a
+        # restart mid-window loses tracking (documented trade).
+        self._awaiting_ack  = { }
+        # Item B §3.4: terminal-unacked facts that ride the NEXT Rick-bound
+        # advisory body (never a fresh escalation loop).
+        self._unacked_notes = [ ]
 
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI (QueueableJob protocol)."""
@@ -569,6 +602,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # post-game F1: why-not-poked gate evaluation — runs AFTER both poke tiers
         # so the emitted vectors reflect this poll's episode state.
         self._emit_poke_gates( fleet_view, self._last_full_snapshot, now )
+        # Item B (2026.06.11): close the delivery loops — manager threaded-ack
+        # receipts (§3.4) + Rick re-announce of pending advisories (§3.5).
+        outreach_acks = self._check_outreach_receipts( now )
+        reannounces   = self._check_pending_outreach( now )
 
         self._poll_count += 1
         summary = {
@@ -584,13 +621,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "pokes_fired"         : pokes_fired,
             "manager_stale_pokes" : manager_stale_pokes,
             "fleet_dark"          : fleet_dark,
+            "outreach_acks"       : outreach_acks,
+            "reannounces"         : reannounces,
             "rendered"            : rendered,
         }
         # post-game F1: promote the summary to the journal whenever ANY outreach
         # counter is nonzero — a poll that communicated is never invisible.
         if any( summary[ k ] for k in (
                 "pings_fired", "taps_fired", "managers_down", "decisions",
-                "stalled", "pokes_fired", "manager_stale_pokes", "fleet_dark", "cycles" ) ):
+                "stalled", "pokes_fired", "manager_stale_pokes", "fleet_dark", "cycles",
+                "outreach_acks", "reannounces" ) ):
             self._log( "arbiter_poll_activity", **summary )
         return summary
 
@@ -680,20 +720,25 @@ class ArbiterConsumerJob( AgenticJobBase ):
             pass
 
     def _log_outreach( self, kind, via, recipients, message,
-                       case=None, tier=None, session_id=None, persona=None ):
+                       case=None, tier=None, session_id=None, persona=None,
+                       outreach_id=None ):
         """
         Emit the `arbiter_outreach` event — fired at EVERY outbound communication
         (Rick's verbatim ask: "a log so we can see when it's attempting to reach
         out and communicate").
 
-        Accounting contract (the S3 invariant): `recipients` lists ONE entry per
-        actual emission — "rick" for a notify_fn push, the persona name for each
-        send_to — so the journal's recipient total equals the gateway+notify total.
+        Accounting contract — RESTATED by the 2026.06.11 receipts design (the S3
+        invariant's reality moved one level down): `recipients` is the PLANNED
+        recipient set for this outreach; what actually happened on each hop lives
+        in the per-recipient per-channel `arbiter_outreach_result` events and the
+        terminal `arbiter_outreach_receipt` events, all chained on `outreach_id`.
+        Pre-design this event claimed delivery it never verified (root-cause R4:
+        "rick" journaled while the live push 404'd one line earlier).
 
         Ensures:
             - logs kind/via/recipients + a truncated message head (full bodies
-              stay out of the journal); optional case/tier/session/persona fields
-              attach when given; never raises
+              stay out of the journal); optional case/tier/session/persona/
+              outreach_id fields attach when given; never raises
         """
         fields = {
             "kind"       : kind,
@@ -705,7 +750,162 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if tier is not None: fields[ "tier" ] = tier
         if session_id:       fields[ "session_id" ] = session_id
         if persona:          fields[ "persona" ]    = persona
+        if outreach_id:      fields[ "outreach_id" ] = outreach_id
         self._log( "arbiter_outreach", **fields )
+
+    # ── Item B (2026.06.11): per-hop results + terminal receipts ────────────────
+
+    def _log_outreach_result( self, outreach_id, kind, recipient, outcome, attempt=1 ):
+        """
+        Emit one `arbiter_outreach_result` event — the ATTEMPT-OUTCOME record for
+        ONE (recipient, channel) hop of an outreach (§3.1: no hop may fail
+        silently; tonight's swallowed 404 becomes this event).
+
+        Requires:
+            - outcome is a channel-outcome dict { channel, outcome, ... }
+
+        Ensures:
+            - logs outreach_id/kind/recipient/channel/outcome/attempt (+
+              http_status/detail/connection_count when the outcome carries them);
+              never raises
+        """
+        fields = {
+            "outreach_id" : outreach_id,
+            "kind"        : kind,
+            "recipient"   : recipient,
+            "channel"     : outcome.get( "channel" ),
+            "outcome"     : outcome.get( "outcome" ),
+            "attempt"     : attempt,
+        }
+        for key in ( "http_status", "detail", "connection_count" ):
+            if key in outcome: fields[ key ] = outcome[ key ]
+        self._log( "arbiter_outreach_result", **fields )
+
+    def _log_outreach_receipt( self, outreach_id, kind, recipient, outcome, **extra ):
+        """
+        Emit one `arbiter_outreach_receipt` event — the per-recipient TERMINAL
+        state of an outreach (§3.1): delivered / reannounced_delivered / expired
+        (Rick) · acked / unacked (manager).
+
+        Ensures:
+            - logs outreach_id/kind/recipient/outcome + any extra fields
+              (latency_s, attempts, resends, detail); never raises
+        """
+        self._log( "arbiter_outreach_receipt", outreach_id=outreach_id, kind=kind,
+                   recipient=recipient, outcome=outcome, **extra )
+
+    def _mint_outreach_id( self ):
+        """Ensures: returns a fresh outreach id (uuid4 hex) — the dot-connect key."""
+        return uuid.uuid4().hex
+
+    @staticmethod
+    def _normalize_notify_results( raw ):
+        """
+        Normalize the injected notify seam's return into a list of channel-outcome
+        dicts — boundary normalization at the injection seam (the ONE place the
+        outcome contract meets seams we don't construct: legacy in-pool defaults
+        and test fakes may still return None).
+
+        Ensures:
+            - None → [{channel:"live", outcome:"legacy_notify"}] (a legacy seam's
+              push is journaled as such, never claimed delivered)
+            - a single outcome dict → wrapped in a list
+            - a list/iterable of outcomes → list as-is; never raises
+        """
+        if raw is None:
+            return [ { "channel": "live", "outcome": "legacy_notify" } ]
+        if isinstance( raw, dict ):
+            return [ raw ]
+        return list( raw )
+
+    def _emit_to_rick( self, outreach_id, kind, message, case=None ):
+        """
+        Emit one Rick-bound advisory through the notify seam and journal what
+        ACTUALLY happened on every channel (§3.2), closing the Rick-side loop:
+        delivered → receipt now; user_not_available → the pending ledger (§3.5
+        re-announce-on-return — milestone-must-land).
+
+        Ensures:
+            - terminal-unacked manager facts (if any) ride THIS advisory's body
+              (§3.4 — never a fresh escalation loop), then clear
+            - every outcome the seam returns is journaled as one
+              arbiter_outreach_result (a seam blow-up degrades to outcome
+              http_error — journaled, never raised)
+            - a DELIVERED live outcome journals receipt "delivered"; a
+              user_not_available outcome enters the pending ledger (when a ledger
+              path is wired); a ledger write failure is journaled
+              (outreach_ledger_error) — visible, never silent
+        """
+        if self._unacked_notes:
+            message = message + " [unacked prior outreach: " + "; ".join( self._unacked_notes ) + "]"
+            self._unacked_notes = [ ]
+        try:
+            results = self._normalize_notify_results( self._notify_fn( message ) )
+        except Exception as e:
+            results = [ { "channel": "live", "outcome": "http_error", "detail": str( e )[ :160 ] } ]
+        for outcome in results:
+            self._log_outreach_result( outreach_id, kind, "rick", outcome )
+        live = next( ( r for r in results if r.get( "channel" ) == "live" ), None )
+        if live is None:
+            return
+        if live.get( "outcome" ) in DELIVERED_OUTCOMES:
+            self._log_outreach_receipt( outreach_id, kind, "rick", "delivered" )
+        elif live.get( "outcome" ) == "user_not_available" and self._pending_ledger_path:
+            try:
+                add_pending( self._pending_ledger_path, outreach_id,
+                             message=message, kind=kind, case=case,
+                             created_ts=self._clock.now_iso(),
+                             last_outcome="user_not_available" )
+            except OSError as e:
+                self._log( "outreach_ledger_error", outreach_id=outreach_id, error=str( e ) )
+
+    def _emit_dm( self, outreach_id, kind, persona, body, case=None,
+                  session_id=None, expects_ack=False, attempt=1 ):
+        """
+        Emit one persona-bound DM: the durable dm-<persona> board write PLUS the
+        best-effort §3.3 push hop (register-question → commons_question_received →
+        listener tmux injection — the recipient WAKES; root-cause R6 was the
+        arbiter never invoking it). Journals one result per channel.
+
+        Ensures:
+            - the board write stamps outreach_id + question_id metadata (the
+              threading key a replying recipient names in in_reply_to) +
+              expects_ack; a resend (attempt > 1) derives a fresh question_id
+              "<outreach_id>-r<attempt>" so the push registration never 409s
+            - dm channel outcome: posted | post_error; dm_push channel outcome:
+              the hop's own (dispatched / registered_no_push / push_unavailable)
+              or "disabled" when no hop is wired — every case journaled
+            - expects_ack=True (manager-bound, first attempt) registers the
+              outreach in the awaiting-ack tracker for §3.4 receipt polling
+            - never raises
+        """
+        qid      = outreach_id if attempt == 1 else f"{outreach_id}-r{attempt}"
+        metadata = { "kind": "arbiter-ping", "recipient_persona": persona,
+                     "outreach_id": outreach_id, "question_id": qid,
+                     "expects_ack": expects_ack }
+        try:
+            self._commons.send_to( persona, body, metadata=metadata )
+            dm_outcome = { "channel": "dm", "outcome": "posted" }
+        except Exception as e:
+            dm_outcome = { "channel": "dm", "outcome": "post_error", "detail": str( e )[ :160 ] }
+        self._log_outreach_result( outreach_id, kind, persona, dm_outcome, attempt=attempt )
+        if self._dm_push_fn is not None:
+            try:
+                push_outcome = self._dm_push_fn( persona, qid )
+            except Exception as e:
+                push_outcome = { "channel": "dm_push", "outcome": "push_unavailable",
+                                 "detail": str( e )[ :160 ] }
+        else:
+            push_outcome = { "channel": "dm_push", "outcome": "disabled" }
+        self._log_outreach_result( outreach_id, kind, persona, push_outcome, attempt=attempt )
+        if expects_ack:
+            self._awaiting_ack[ outreach_id ] = {
+                "persona" : persona,
+                "kind"    : kind,
+                "sent_at" : datetime.datetime.fromisoformat( self._clock.now_iso() ),
+                "resends" : 0,
+                "body"    : body,
+            }
 
     # ── 2b-2 Part-6 recipient routing ───────────────────────────────────────────
 
@@ -736,49 +936,178 @@ class ArbiterConsumerJob( AgenticJobBase ):
         redline test (test_arbiter_redline) guards this structurally.
 
         Tier behaviors:
-            - TIER_RICK_ONLY          → notify_fn(message)  (Rick: durable + live push)
-            - TIER_RICK_AND_MANAGERS  → notify_fn(message) + send_to each active manager
-            - TIER_OWNING_MANAGER     → send_to(owning_manager, message)  (if resolved)
-            - TIER_BLOCKER_AND_MANAGER→ send_to(blocker, message) + send_to(owning_manager,
-                                        cc_message)  (each when present)
+            - TIER_RICK_ONLY          → _emit_to_rick  (durable + live push + receipt/ledger)
+            - TIER_RICK_AND_MANAGERS  → _emit_to_rick + _emit_dm each active manager (ack-tracked)
+            - TIER_OWNING_MANAGER     → _emit_dm(owning_manager)  (if resolved; ack-tracked)
+            - TIER_BLOCKER_AND_MANAGER→ _emit_dm(blocker, no ack owed) + _emit_dm(owning_manager,
+                                        cc_message, ack-tracked)  (each when present)
             - TIER_DROP               → no push (pull-state; #6)
           (TIER_LOG_THEN_RICK #12 is handled by _on_poll_error's streak logic, not here.)
 
-        Ensures:
+        Ensures (2026.06.11 receipts design — the R4 kill):
             - emits exactly the recipients its tier prescribes; absent optional
               recipients (no manager resolved, empty active set) degrade silently
-            - post-game F1: every routed emission is journaled as ONE
-              `arbiter_outreach` event whose `recipients` lists each actual push
-              ("rick" = notify_fn, persona = send_to); a no-emission route (empty
-              tier inputs / TIER_DROP) logs nothing — the journal mirrors reality
-            - never raises out (gateway send hiccups propagate to the caller's guard)
+            - ONE `arbiter_outreach` intent event (recipients = the PLANNED set,
+              stamped with a fresh outreach_id), then one `arbiter_outreach_result`
+              per (recipient, channel) hop recording what ACTUALLY happened, then
+              terminal `arbiter_outreach_receipt` events as loops close — this
+              event no longer claims delivery it didn't verify; a no-emission
+              route (empty tier inputs / TIER_DROP) logs nothing
+            - never raises (the emit helpers convert every hop failure into a
+              journaled outcome)
         """
         tier       = tier_for( case )
-        recipients = [ ]
-        if tier == TIER_RICK_ONLY:
-            self._notify_fn( message )
-            recipients.append( "rick" )
-        elif tier == TIER_RICK_AND_MANAGERS:
-            self._notify_fn( message )
-            recipients.append( "rick" )
-            for manager in active_managers or [ ]:
-                self._commons.send_to( manager, message )
-                recipients.append( manager )
-        elif tier == TIER_OWNING_MANAGER:
-            if owning_manager:
-                self._commons.send_to( owning_manager, message )
-                recipients.append( owning_manager )
+        kind       = CASE_KINDS.get( case, f"case_{case}" )
+        rick_bound = tier in ( TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS )
+        dm_targets = [ ]                          # ( persona, body, expects_ack )
+        if tier == TIER_RICK_AND_MANAGERS:
+            dm_targets = [ ( m, message, True ) for m in active_managers or [ ] ]
+        elif tier == TIER_OWNING_MANAGER and owning_manager:
+            dm_targets = [ ( owning_manager, message, True ) ]
         elif tier == TIER_BLOCKER_AND_MANAGER:
             if blocker:
-                self._commons.send_to( blocker, message )
-                recipients.append( blocker )
+                dm_targets.append( ( blocker, message, False ) )       # worker nudge — no ack owed
             if owning_manager and cc_message:
-                self._commons.send_to( owning_manager, cc_message )
-                recipients.append( owning_manager )
-        # TIER_DROP → intentional no-op (the #6 roster broadcast is cut)
-        if recipients:
-            self._log_outreach( CASE_KINDS.get( case, f"case_{case}" ), "route",
-                                recipients, message, case=case, tier=tier )
+                dm_targets.append( ( owning_manager, cc_message, True ) )
+        # TIER_DROP / empty tier inputs → intentional no-op (the #6 roster cut)
+        if not rick_bound and not dm_targets:
+            return
+        outreach_id = self._mint_outreach_id()
+        planned     = ( [ "rick" ] if rick_bound else [ ] ) + [ p for p, _b, _a in dm_targets ]
+        self._log_outreach( kind, "route", planned, message,
+                            case=case, tier=tier, outreach_id=outreach_id )
+        if rick_bound:
+            self._emit_to_rick( outreach_id, kind, message, case=case )
+        for persona, body, expects_ack in dm_targets:
+            self._emit_dm( outreach_id, kind, persona, body, case=case,
+                           expects_ack=expects_ack )
+
+    def _check_outreach_receipts( self, now ):
+        """
+        §3.4 manager-side receipt polling — the acked-ledger principle (the
+        receipt is an explicit, OWNER-WRITTEN mark, never an inference): an
+        awaited outreach is acked iff the recipient posted a threaded reply
+        (metadata.in_reply_to naming the outreach's question_id) on the SAME
+        dm-<persona> board the durable write landed on. Filesystem read via the
+        gateway — detection-path-safe (R4-clean).
+
+        Ensures:
+            - an in_reply_to match (exact outreach_id or its "-rN" resend
+              derivative) → receipt "acked" (+ latency_s) and the tracker clears
+            - no ack past outreach_ack_window_seconds → exactly ONE re-send
+              (attempt=2, fresh window), then — still nothing — terminal receipt
+              "unacked" + the fact queued to ride the NEXT Rick-bound advisory
+              (§3.4: never an escalation recursion; at most 2 sends total)
+            - a gateway read hiccup degrades to "no ack seen this poll" (the
+              window keeps governing); never raises
+            - returns the count of acks confirmed this poll
+        """
+        acked = 0
+        for outreach_id, state in list( self._awaiting_ack.items() ):
+            topic = LupinArbiterGateway.dm_topic_for( state[ "persona" ] )
+            since = ( state[ "sent_at" ] - datetime.timedelta( seconds=1 ) ).isoformat()
+            try:
+                entries = self._commons.read( topic, since=since ) or [ ]
+            except Exception:
+                entries = [ ]
+            reply = next(
+                ( e for e in entries
+                  if isinstance( e, dict ) and isinstance( e.get( "metadata" ), dict )
+                  and str( e[ "metadata" ].get( "in_reply_to" ) or "" ).startswith( outreach_id ) ),
+                None,
+            )
+            if reply is not None:
+                latency = ( now - state[ "sent_at" ] ).total_seconds()
+                self._log_outreach_receipt( outreach_id, state[ "kind" ], state[ "persona" ],
+                                            "acked", latency_s=int( latency ) )
+                del self._awaiting_ack[ outreach_id ]
+                acked += 1
+                continue
+            if ( now - state[ "sent_at" ] ).total_seconds() < self.outreach_ack_window_seconds:
+                continue
+            if state[ "resends" ] == 0:
+                state[ "resends" ] = 1
+                state[ "sent_at" ] = now
+                self._emit_dm( outreach_id, state[ "kind" ], state[ "persona" ],
+                               state[ "body" ], expects_ack=False, attempt=2 )
+            else:
+                self._log_outreach_receipt( outreach_id, state[ "kind" ], state[ "persona" ],
+                                            "unacked", resends=state[ "resends" ] )
+                self._unacked_notes.append(
+                    f"{state[ 'kind' ]} {outreach_id[ :8 ]} to {state[ 'persona' ]}" )
+                del self._awaiting_ack[ outreach_id ]
+        return acked
+
+    def _check_pending_outreach( self, now ):
+        """
+        §3.5 Rick-side re-announce-on-return — milestone-must-land, mechanized:
+        every pending (user_not_available) advisory is re-pushed through the
+        dedup-BYPASSING live transport at most once per reannounce interval
+        until a DELIVERED outcome or TTL expiry. Escalation-path only (runs only
+        while the ledger is non-empty — R4-clean); the ledger is file-backed so
+        a recycle or restart never drops a pending advisory (S7-pinned).
+
+        Ensures:
+            - inert (returns 0) when no ledger path or no live_retry_fn is wired
+            - TTL-expired entries → terminal receipt "expired" (+ attempts) + removal
+            - malformed entries → the same terminal receipt with a detail + removal
+              (visible, never a silent skip)
+            - due entries (interval elapsed) re-push; every attempt journals an
+              arbiter_outreach_result with attempt=N; a delivered outcome →
+              receipt "reannounced_delivered" (+ attempts) + removal; otherwise
+              the attempt is recorded back to the ledger
+            - any ledger write failure is journaled (outreach_ledger_error);
+              never raises; returns the count of re-announce attempts this poll
+        """
+        if not self._pending_ledger_path or self._live_retry_fn is None:
+            return 0
+        attempts_fired = 0
+        for outreach_id, entry in list( read_pending( self._pending_ledger_path ).items() ):
+            try:
+                created = datetime.datetime.fromisoformat( str( entry[ "created_ts" ] ) )
+                last    = datetime.datetime.fromisoformat( str( entry[ "last_attempt_ts" ] ) )
+                kind    = str( entry.get( "kind" ) or "unknown" )
+                message = entry[ "message" ]
+                prior   = int( entry.get( "attempts", 1 ) )
+            except Exception as e:
+                self._log_outreach_receipt( outreach_id, "unknown", "rick", "expired",
+                                            detail=f"malformed ledger entry: {e}" )
+                try:
+                    remove_pending( self._pending_ledger_path, outreach_id )
+                except OSError as oe:
+                    self._log( "outreach_ledger_error", outreach_id=outreach_id, error=str( oe ) )
+                continue
+            if ( now - created ).total_seconds() >= self.reannounce_ttl_seconds:
+                self._log_outreach_receipt( outreach_id, kind, "rick", "expired", attempts=prior )
+                try:
+                    remove_pending( self._pending_ledger_path, outreach_id )
+                except OSError as oe:
+                    self._log( "outreach_ledger_error", outreach_id=outreach_id, error=str( oe ) )
+                continue
+            if ( now - last ).total_seconds() < self.reannounce_interval_seconds:
+                continue
+            try:
+                outcome = self._live_retry_fn( message )
+            except Exception as e:
+                outcome = { "channel": "live", "outcome": "http_error", "detail": str( e )[ :160 ] }
+            attempt = prior + 1
+            self._log_outreach_result( outreach_id, kind, "rick", outcome, attempt=attempt )
+            attempts_fired += 1
+            if outcome.get( "outcome" ) in DELIVERED_OUTCOMES:
+                self._log_outreach_receipt( outreach_id, kind, "rick",
+                                            "reannounced_delivered", attempts=attempt )
+                try:
+                    remove_pending( self._pending_ledger_path, outreach_id )
+                except OSError as oe:
+                    self._log( "outreach_ledger_error", outreach_id=outreach_id, error=str( oe ) )
+            else:
+                try:
+                    record_attempt( self._pending_ledger_path, outreach_id,
+                                    attempt_ts=self._clock.now_iso(),
+                                    outcome=str( outcome.get( "outcome" ) ) )
+                except OSError as oe:
+                    self._log( "outreach_ledger_error", outreach_id=outreach_id, error=str( oe ) )
+        return attempts_fired
 
     def _auto_ping( self, edges, now, persona_to_sid=None ):
         """
@@ -1136,8 +1465,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if manager:
             cc_body = ( f"Heartbeat arbiter (cc): your crew posted a decision-needed — "
                         f"{entry.get( 'body', '' )}. Rick has it; weigh in if it's yours." )
-            self._commons.send_to( manager, cc_body )
-            self._log_outreach( "decision_cc", "send_to", [ manager ], cc_body, persona=manager )
+            outreach_id = self._mint_outreach_id()
+            self._log_outreach( "decision_cc", "send_to", [ manager ], cc_body,
+                                persona=manager, outreach_id=outreach_id )
+            self._emit_dm( outreach_id, "decision_cc", manager, cc_body, expects_ack=True )
 
     @staticmethod
     def _fleet_progress_signature( fleet_view ):
@@ -1320,14 +1651,19 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if ( now - self._poke_stuck_since[ sid ] ).total_seconds() < self.poke_stall_threshold_seconds:
                 continue                                          # not stuck long enough yet
             if self._poke_count[ sid ] < self.poke_max_per_episode:
-                recipient = view.get( "persona" ) or sid
-                body      = self._format_poke( view )
-                self._commons.send_to( recipient, body )
+                recipient   = view.get( "persona" ) or sid
+                body        = self._format_poke( view )
                 # post-game F1 — kind "stuck_poke", never the bare four-letter literal
                 # (the poked-rename one-name sweep bans quoted bare-poke literals on
                 # production surfaces; also symmetric with "manager_stale_poke")
+                outreach_id = self._mint_outreach_id()
                 self._log_outreach( "stuck_poke", "send_to", [ recipient ], body,
-                                    session_id=sid, persona=view.get( "persona" ) )
+                                    session_id=sid, persona=view.get( "persona" ),
+                                    outreach_id=outreach_id )
+                # no ack owed: a wake-nudge at a STUCK session would spam unacked
+                # receipts by definition — the dm_push hop IS the wake mechanism
+                self._emit_dm( outreach_id, "stuck_poke", recipient, body,
+                               session_id=sid, expects_ack=False )
                 self._poke_count[ sid ] += 1
                 fired += 1
             elif sid not in self._poke_escalated:
@@ -1433,10 +1769,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     active_managers=active_managers,
                 )
             if self._mgr_poke_count[ sid ] < self.poke_max_per_episode:
-                body = self._format_manager_stale_poke( row, age )
-                self._commons.send_to( persona, body )
+                body        = self._format_manager_stale_poke( row, age )
+                outreach_id = self._mint_outreach_id()
                 self._log_outreach( "manager_stale_poke", "send_to", [ persona ], body,
-                                    session_id=sid, persona=persona )
+                                    session_id=sid, persona=persona,
+                                    outreach_id=outreach_id )
+                # no ack owed: the poke targets a DARK session (it may have no
+                # self-wake); the case-14 Rick advisory is the load-bearing output
+                self._emit_dm( outreach_id, "manager_stale_poke", persona, body,
+                               session_id=sid, expects_ack=False )
                 self._mgr_poke_count[ sid ] += 1
                 fired += 1
             # else: poke-capped — the advisory already fired; silence (anti-storm)
@@ -1676,8 +2017,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
             body = ( f"ARBITER POLL-ERROR persistent: {self._poll_error_streak} consecutive poll "
                      f"failures (≥{self.poll_error_escalate_threshold}) — escalating to Rick "
                      f"(arbiter effectively down): {error}" )
-            self._notify_fn( body )
-            self._log_outreach( "poll_error_escalation", "notify", [ "rick" ], body )   # post-game F1
+            outreach_id = self._mint_outreach_id()
+            self._log_outreach( "poll_error_escalation", "notify", [ "rick" ], body,
+                                outreach_id=outreach_id )   # post-game F1
+            self._emit_to_rick( outreach_id, "poll_error_escalation", body )
         else:
             self._render_sink(
                 f"arbiter poll-error (transient, streak {self._poll_error_streak}/"
