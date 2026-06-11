@@ -713,3 +713,18 @@ def test_handle_broadcast_roster_rescues_bogus_sole_directive(
     )
     assert r[ "status" ] == "completed"
     assert "@here goes: x" in captured_injections[ 0 ]
+
+
+def test_directive_to_offline_persona_delivers_as_prose( store, maria_persona, inject_fn, captured_injections ):
+    """DELIBERATE semantics (review NOTE-2): 'Cheech' is a real persona whose
+    bridge went stale, so he is NOT on the live roster — his directive fans out
+    to everyone as prose (legacy silently ignored it). Chosen under
+    bias-toward-delivery: a live peer can relay; silence helps nobody."""
+    live_roster = [ "Maria", "Tiberius" ]   # Cheech offline → absent
+    notif = { "payload": { "broadcast_id": "bid-offline", "body": "@Cheech: do X" } }
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s", persona_roster=live_roster,
+    )
+    assert r[ "status" ] == "completed"
+    assert "@Cheech: do X" in captured_injections[ 0 ]

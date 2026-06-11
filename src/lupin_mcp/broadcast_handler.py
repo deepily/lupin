@@ -29,6 +29,14 @@ the roster). A sole bogus run like `@here goes: x` is prose → default line
 broadcast when it is the only line). `persona_roster=None` preserves the
 roster-blind legacy contract for callers that cannot supply one.
 
+DELIBERATE behavioral delta of the roster gate: a directive to a REAL but
+OFFLINE persona (its bridge gone stale, so it is absent from the live roster —
+e.g. `@Cheech: do X` after Cheech's session died) now fans out to EVERYONE as
+prose, where the legacy parse silently ignored it. Chosen, not missed: under
+bias-toward-delivery a directive nobody will ever receive is worse than one
+the whole fleet sees — a live peer can relay or act, and the sender learns the
+addressee is gone instead of getting silence.
+
 **Sanitization** (T1 + T3): body containing `<system-reminder>` or
 `</system-reminder>` substrings (case-insensitive) is rejected at the
 listener boundary as defense-in-depth — endpoint already rejects at AC1, but
@@ -138,7 +146,9 @@ def _parse_body(
     Requires:
         - `persona_roster` is None (roster-blind legacy parse) OR a list of
           persona name strings; an EMPTY list means "the roster is known and
-          empty", so every directive run is prose (deliver-to-all)
+          empty" — the local persona (when present) is still appended, so a
+          directive addressed to the local persona itself always matches;
+          every OTHER directive run is prose (deliver-to-all)
     """
     default_lines: List[ str ]            = [ ]
     matched_directive_lines: List[ str ]  = [ ]
