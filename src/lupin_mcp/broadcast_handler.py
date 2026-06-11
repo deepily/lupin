@@ -20,6 +20,23 @@ persona). It computes the effective slice for the local persona, builds a
 `<system-reminder>` wrapper, and posts a per-session acknowledgment to the
 `broadcast-acks` reserved topic. Bias = fail toward delivery, not suppression.
 
+**Roster-aware discrimination** (2026-06-11 hardening): when the caller supplies
+`persona_roster` (names of live persona sessions), a clean `@token: msg` run only
+counts as a persona directive if at least ONE mention resembles a roster persona
+(case-insensitive + punctuation-tolerant; the local persona is implicitly part of
+the roster). A sole bogus run like `@here goes: x` is prose → default line
+(delivered), not a directive to a nonexistent persona (which would skip the whole
+broadcast when it is the only line). `persona_roster=None` preserves the
+roster-blind legacy contract for callers that cannot supply one.
+
+DELIBERATE behavioral delta of the roster gate: a directive to a REAL but
+OFFLINE persona (its bridge gone stale, so it is absent from the live roster —
+e.g. `@Cheech: do X` after Cheech's session died) now fans out to EVERYONE as
+prose, where the legacy parse silently ignored it. Chosen, not missed: under
+bias-toward-delivery a directive nobody will ever receive is worse than one
+the whole fleet sees — a live peer can relay or act, and the sender learns the
+addressee is gone instead of getting silence.
+
 **Sanitization** (T1 + T3): body containing `<system-reminder>` or
 `</system-reminder>` substrings (case-insensitive) is rejected at the
 listener boundary as defense-in-depth — endpoint already rejects at AC1, but
@@ -108,6 +125,7 @@ def _directive_mentions( stripped: str ) -> Optional[ List[ str ] ]:
 def _parse_body(
     body                : str,
     local_persona_name  : Optional[ str ],
+    persona_roster      : Optional[ List[ str ] ] = None,
 ) -> Tuple[ List[ str ], List[ str ], int ]:
     """
     Split body into (default_lines, matched_directive_lines, non_matching_directive_count).
@@ -115,16 +133,32 @@ def _parse_body(
     A persona-directive is a leading PURE run of @-mention tokens terminated by a
     colon (`@a @b @c: message`) — see `_directive_mentions`. For such a line:
     - any mention is `@all` / `@everyone` (case-insensitive) → treated as default scope
+    - when `persona_roster` is supplied and NO mention resembles a roster persona
+      (local persona implicitly included), the run is prose, not a directive →
+      default line (deliver-to-all)
     - ANY mention matches the local persona (case-insensitive + punctuation-tolerant) → matched_directives
     - none match → ignored silently (counted for skip-detection)
 
     Every OTHER line — plain text, or prose that merely starts with / contains an
     `@` (colon mid-sentence, an inline email, or no colon) — is a default line
     (inject-to-all). Bias = fail toward delivery, NOT suppression.
+
+    Requires:
+        - `persona_roster` is None (roster-blind legacy parse) OR a list of
+          persona name strings; an EMPTY list means "the roster is known and
+          empty" — the local persona (when present) is still appended, so a
+          directive addressed to the local persona itself always matches;
+          every OTHER directive run is prose (deliver-to-all)
     """
     default_lines: List[ str ]            = [ ]
     matched_directive_lines: List[ str ]  = [ ]
     non_matching_directive_count          = 0
+
+    known_personas: Optional[ List[ str ] ] = None
+    if persona_roster is not None:
+        known_personas = list( persona_roster )
+        if local_persona_name is not None and local_persona_name not in known_personas:
+            known_personas.append( local_persona_name )
 
     for line in body.splitlines():
         stripped = line.strip()
@@ -137,6 +171,12 @@ def _parse_body(
             continue
         # A persona-directive. `@all` / `@everyone` anywhere in the run → default scope.
         if any( m.lower() in _ALL_ALIASES for m in mentions ):
+            default_lines.append( line )
+            continue
+        # Roster-aware discrimination: a run whose mentions resemble NOBODY on the
+        # roster is prose (e.g. "@here goes: x"), not a directive to a nonexistent
+        # persona — deliver to everyone instead of silently skipping.
+        if known_personas is not None and not any( match_persona( m, known_personas ) for m in mentions ):
             default_lines.append( line )
             continue
         # Multi-addressee: the line is for us if ANY mention resolves to the local persona.
@@ -196,6 +236,7 @@ def handle_broadcast(
     inject_fn           : Callable[ [ str ], None ],
     store               : CommonsStore,
     sender_session_id   : str,
+    persona_roster      : Optional[ List[ str ] ] = None,
 ) -> Dict[ str, Any ]:
     """
     Process a `action:broadcast_received` notification end-to-end.
@@ -206,6 +247,8 @@ def handle_broadcast(
         - `inject_fn(text)` injects `text` into the local session's tmux (closes over the listener instance)
         - `store` is a `CommonsStore` rooted at `<LUPIN_ROOT>/io/commons`
         - `sender_session_id` is the local session's id
+        - `persona_roster` is None OR a list of live persona names for
+          roster-aware directive discrimination (see `_parse_body`)
 
     Ensures:
         - On reminder-framing detection: posts ack with `status="rejected-malformed"` + does NOT call inject_fn
@@ -236,7 +279,7 @@ def handle_broadcast(
         return { "status": "rejected-malformed", "broadcast_id": broadcast_id, "ack_entry": ack }
 
     local_persona_name = ( local_persona or { } ).get( "name" )
-    default_lines, matched_directive_lines, _ = _parse_body( body, local_persona_name )
+    default_lines, matched_directive_lines, _ = _parse_body( body, local_persona_name, persona_roster )
 
     if not default_lines and not matched_directive_lines:
         # Empty body or all-non-matching directives → A6 skip-with-ack

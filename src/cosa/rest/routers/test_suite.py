@@ -29,7 +29,7 @@ router = APIRouter( tags=[ "test-suite" ] )
 class TestSuiteSubmitRequest( BaseModel ):
     """Request body for submitting a test suite job."""
     test_types          : str             = Field( "integration,e2e", description="Comma-separated suite types: integration, e2e" )
-    pytest_args         : Optional[ str ] = Field( None, description="Space-separated extra pytest arguments (e.g., '-v -k test_auth')" )
+    pytest_args         : Optional[ str ] = Field( None, description="Extra pytest arguments, shell-style (shlex) parsed — quoting is honored, e.g. '-v -k \"auth or visual\"' reaches pytest as ['-v', '-k', 'auth or visual']. Unbalanced quotes → 400 at submit." )
     dry_run             : bool            = Field( False, description="Simulate execution without running tests" )
     websocket_id        : Optional[ str ] = Field( None, description="WebSocket session ID for notifications" )
     scheduled_at        : Optional[ str ] = Field( None, description="ISO datetime for deferred execution (None = immediate)" )
@@ -179,6 +179,14 @@ async def submit_test_suite(
             message        = f"Test suite job queued: {job.last_question_asked}"
         )
 
+    except ValueError as e:
+        # Malformed submission input (e.g. unbalanced quotes in pytest_args) —
+        # client error, surfaced loudly at submit time, never a silent
+        # zero-test run.
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid test suite submission: {str( e )}"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=500,

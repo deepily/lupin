@@ -594,3 +594,137 @@ def test_regression_multiword_persona_directive_injects(
     )
     assert r[ "status" ] == "completed"
     assert "standup" in captured_injections[ 0 ]
+
+
+# ---------- roster-aware directive discrimination (2026-06-11 hardening) ----------
+#
+# Krishna's nit: the directive discriminator was heuristic — a short prose line
+# like "@here goes: x" parsed as a directive to a NONEXISTENT persona, so a
+# broadcast whose sole line it was got silently SKIPPED. With a persona roster
+# supplied, a clean "@token: msg" run only counts as a directive when at least
+# one mention resembles a registered persona (local persona implicitly included);
+# otherwise it is prose → default line (fail toward delivery).
+# `persona_roster=None` preserves the roster-blind legacy contract.
+
+_ROSTER = [ "Maria", "Tiberius", "Mr. Radio" ]
+
+
+def test_parse_body_roster_bogus_sole_directive_is_delivered():
+    """'@here goes: x' resembles nobody on the roster → prose → default line."""
+    default, matched, non_match = _parse_body( "@here goes: x", "Maria", _ROSTER )
+    assert default   == [ "@here goes: x" ]
+    assert matched   == [ ]
+    assert non_match == 0
+
+
+def test_parse_body_no_roster_bogus_directive_still_skips():
+    """Legacy contract (roster=None): the same bogus run still counts as a
+    non-matching directive — roster-blind callers keep today's behavior."""
+    default, matched, non_match = _parse_body( "@here goes: x", "Maria" )
+    assert default   == [ ]
+    assert matched   == [ ]
+    assert non_match == 1
+
+
+def test_parse_body_roster_genuine_other_directive_still_skipped():
+    """A real roster persona's directive stays TARGETED — no over-delivery."""
+    default, matched, non_match = _parse_body( "@Tiberius: only the boss", "Maria", _ROSTER )
+    assert default   == [ ]
+    assert matched   == [ ]
+    assert non_match == 1
+
+
+def test_parse_body_roster_local_directive_matched():
+    """Directive to the local persona passes the roster gate and matches."""
+    default, matched, non_match = _parse_body( "@Maria: just you", "Maria", _ROSTER )
+    assert default   == [ ]
+    assert matched   == [ "@Maria: just you" ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_local_implicitly_included():
+    """Local persona absent from the supplied roster is still a known persona —
+    a directive to self must never be misread as prose."""
+    default, matched, non_match = _parse_body( "@Maria: just you", "Maria", [ "Tiberius" ] )
+    assert default   == [ ]
+    assert matched   == [ "@Maria: just you" ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_no_local_persona():
+    """Roster supplied but no local persona: roster gate still discriminates;
+    a genuine directive to another persona is counted, not delivered."""
+    default, matched, non_match = _parse_body( "@Tiberius: x\n@bogus thing: y", None, _ROSTER )
+    assert default   == [ "@bogus thing: y" ]
+    assert matched   == [ ]
+    assert non_match == 1
+
+
+def test_parse_body_empty_roster_treats_directives_as_prose():
+    """An EMPTY roster means 'the roster is known and empty' — every clean
+    @-run resembles nobody → prose → delivered (bias toward delivery)."""
+    default, matched, non_match = _parse_body( "@Tiberius: x", None, [ ] )
+    assert default   == [ "@Tiberius: x" ]
+    assert matched   == [ ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_mixed_bogus_and_real_mention_stays_directive():
+    """One real roster mention gates the whole run in as a directive."""
+    default, matched, non_match = _parse_body( "@bogus @Maria: sync", "Maria", _ROSTER )
+    assert default   == [ ]
+    assert matched   == [ "@bogus @Maria: sync" ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_gate_is_punctuation_tolerant():
+    """'@MR RADIO:' resembles roster entry 'Mr. Radio' (normalize-on-match)."""
+    default, matched, non_match = _parse_body( "@MR RADIO: standup", "Mr. Radio", _ROSTER )
+    assert default   == [ ]
+    assert matched   == [ "@MR RADIO: standup" ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_all_alias_checked_before_roster_gate():
+    """'@all:' is default scope even with a roster supplied (alias check first)."""
+    default, matched, non_match = _parse_body( "@all: heads up", "Maria", _ROSTER )
+    assert default   == [ "@all: heads up" ]
+    assert matched   == [ ]
+    assert non_match == 0
+
+
+def test_handle_broadcast_roster_rescues_bogus_sole_directive(
+    store, maria_persona, inject_fn, captured_injections
+):
+    """End-to-end: the sole bogus line '@here goes: x' is SKIPPED roster-blind
+    but DELIVERED roster-aware — the exact failure mode this hardening closes."""
+    notif = { "payload": { "broadcast_id": "bid-roster", "body": "@here goes: x" } }
+
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s",
+    )
+    assert r[ "status" ] == "skipped"
+    assert captured_injections == [ ]
+
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s", persona_roster=_ROSTER,
+    )
+    assert r[ "status" ] == "completed"
+    assert "@here goes: x" in captured_injections[ 0 ]
+
+
+def test_directive_to_offline_persona_delivers_as_prose( store, maria_persona, inject_fn, captured_injections ):
+    """DELIBERATE semantics (review NOTE-2): 'Cheech' is a real persona whose
+    bridge went stale, so he is NOT on the live roster — his directive fans out
+    to everyone as prose (legacy silently ignored it). Chosen under
+    bias-toward-delivery: a live peer can relay; silence helps nobody."""
+    live_roster = [ "Maria", "Tiberius" ]   # Cheech offline → absent
+    notif = { "payload": { "broadcast_id": "bid-offline", "body": "@Cheech: do X" } }
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s", persona_roster=live_roster,
+    )
+    assert r[ "status" ] == "completed"
+    assert "@Cheech: do X" in captured_injections[ 0 ]

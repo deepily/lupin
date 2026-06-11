@@ -291,3 +291,93 @@ class TestBuildSenderId:
     def test_no_suffix_no_hash( self ):
         sid = build_sender_id( "claude.code", project="lupin" )
         assert "#" not in sid
+
+
+# ---------------------------------------------------------------------------
+# Dangling-gitlink fallback (2026-06-11 incident regression)
+#
+# The 2026-06-11 fleet incident deleted the main repo's entire
+# `.git/worktrees/` admin directory while worktree dirs survived. Live git
+# then fails inside each worktree, and pre-fix detect_project() degraded to
+# the WORKTREE dir basename ("sam-debt-sweep") — spamming urgent
+# no-credentials notifications. The static gitlink parse must recover the
+# MAIN repo identity without git.
+# ---------------------------------------------------------------------------
+
+import shutil
+
+from cosa.agents.utils.sender_id import _dangling_gitlink_owner_basename
+
+
+class TestDanglingGitlinkOwnerBasename:
+    """Branch-coverage suite for the _dangling_gitlink_owner_basename() helper."""
+
+    def test_absolute_worktree_gitdir_resolves_main_basename( self, tmp_path ):
+        gitlink = tmp_path / ".git"
+        gitlink.write_text( "gitdir: /home/x/Lupin/.git/worktrees/sam-debt-sweep\n" )
+        assert _dangling_gitlink_owner_basename( gitlink ) == "lupin"
+
+    def test_relative_worktree_gitdir_is_resolved( self, tmp_path ):
+        wt = tmp_path / "wt-foo"
+        wt.mkdir()
+        gitlink = wt / ".git"
+        gitlink.write_text( "gitdir: ../lupin/.git/worktrees/wt-foo\n" )
+        assert _dangling_gitlink_owner_basename( gitlink ) == "lupin"
+
+    def test_submodule_modules_gitdir_returns_none( self, tmp_path ):
+        gitlink = tmp_path / ".git"
+        gitlink.write_text( "gitdir: /home/x/lupin/.git/modules/cosa\n" )
+        assert _dangling_gitlink_owner_basename( gitlink ) is None
+
+    def test_unreadable_gitlink_returns_none( self, tmp_path ):
+        assert _dangling_gitlink_owner_basename( tmp_path / "does-not-exist" ) is None
+
+    def test_malformed_content_returns_none( self, tmp_path ):
+        gitlink = tmp_path / ".git"
+        gitlink.write_text( "this is not a gitlink\n" )
+        assert _dangling_gitlink_owner_basename( gitlink ) is None
+
+    def test_gitdir_without_worktrees_segment_returns_none( self, tmp_path ):
+        gitlink = tmp_path / ".git"
+        gitlink.write_text( "gitdir: /somewhere/else/entirely\n" )
+        assert _dangling_gitlink_owner_basename( gitlink ) is None
+
+
+def _make_main_repo_with_worktree( tmp_path ):
+    """Real-git fixture: main repo `lupin` with one linked worktree."""
+    main = tmp_path / "lupin"
+    main.mkdir()
+    subprocess.run( [ "git", "init", "-q" ], cwd=main, check=True )
+    ( main / "README.md" ).write_text( "x\n" )
+    subprocess.run( [ "git", "add", "." ], cwd=main, check=True )
+    subprocess.run(
+        [ "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init" ],
+        cwd=main, check=True
+    )
+    worktree = tmp_path / "wt-sam-debt-sweep"
+    subprocess.run( [ "git", "worktree", "add", "-q", str( worktree ) ], cwd=main, check=True )
+    return main, worktree
+
+
+class TestDanglingWorktreeRegression:
+    """End-to-end detect_project() against REAL git worktrees."""
+
+    def test_healthy_worktree_resolves_to_main_repo( self, tmp_path ):
+        """Sanity: the live-git path (06-10 fix) answers while the admin dir exists."""
+        _main, worktree = _make_main_repo_with_worktree( tmp_path )
+        with patch( "os.getcwd", return_value=str( worktree ) ):
+            assert detect_project() == "lupin"
+
+    def test_broken_worktree_resolves_to_main_repo_not_basename( self, tmp_path ):
+        """THE 2026-06-11 incident: admin dir deleted under a live worktree —
+        detection must still say 'lupin', NEVER 'wt-sam-debt-sweep'."""
+        main, worktree = _make_main_repo_with_worktree( tmp_path )
+        shutil.rmtree( main / ".git" / "worktrees" )
+        with patch( "os.getcwd", return_value=str( worktree ) ):
+            assert detect_project() == "lupin"
+
+
+def test_build_sender_id_auto_detects_project( monkeypatch ):
+    """project=None triggers detect_project() auto-detection."""
+    monkeypatch.setattr( "cosa.agents.utils.sender_id.detect_project", lambda: "lupin" )
+    assert build_sender_id( "deep.research" ) == "deep.research@lupin.deepily.ai"
