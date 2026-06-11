@@ -56,18 +56,20 @@ those are now built, tested to the 100% gate, and held **inactive** behind an IN
 | 5 | Docs (notification-api, rest-api-reference Pages, websocket-events, CLAUDE.md touchpoints → multiplexer canonical) | 🔴 **NOT DONE — GO-day ride-along** | Deliberately deferred: the content asserts post-cutover state ("canonical", "deprecated") that is false until the flip. Files enumerated; ~30 min of edits Saturday. |
 | 6 | Build/cache-bust (`npm run build`, verify hash, bump `?v=`) | ✅ **Current** / 🟡 note | `dist/multiplexer/manifest.json` hash `4c444ae676b8` built 2026-06-10T17:35Z; dist clean in git; no mux source changes since. Note: `multiplexer.html:237` loads **unhashed** `boot.js` with **no `?v=` param** — HTML is no-cache and static files carry ETag revalidation, so risk is low, but row 6's "bump ?v=" has nothing to bump; consider adding one at flip or switching the script tag to the hashed filename. |
 | 7 | Coverage gate (100% L/B/F after every WP) | ✅ **Holding** | Mux c8 100% at merge-train (1108/1108); this session's `pages.py` at 100% L+B. |
-| 8 | Decommission (delete notifications.js/.html/.css + dist history) | ⛔ **Out of scope** | Post-soak explicit call, per plan. |
+| 8 | Decommission (delete notifications.js/.html/.css + dist history) | ⛔ **RETIRED by Rick's D2 ruling (2026-06-11)** | **Cutover ≠ deletion.** The entire JS client, its E2E test suites, and the `?classic=1` escape hatch are preserved **LONG-TERM as a research corpus** (JS-vs-TS code-quality comparison study, methodology TBD). The JS client is retired from default duty only. Row 4's "until the redirect soaks" deletion framing is superseded — the suites are permanent corpus artifacts. |
 
-## Decision items for Rick (batched — he's out from 10:00 EDT)
+## Decision items for Rick — RULED 2026-06-11 evening (live walkthrough via Tiberius)
 
-1. **The GO itself** — flip Saturday per procedure above (his standing gate).
-2. **Ratify the `?classic=1` escape hatch** — design delta vs. the plan's bare hard redirect.
-   Recommend keep: it is what lets row 4's fallback-guard suites keep running post-flip, and it
-   costs one query-param check at 100% coverage. (Bookmark users are still hard-redirected.)
-3. **The 7 missing `test_multiplexer_*` counterparts** — accept as post-cutover fast-follows
-   (recommended; gate already green without them) or staff before Saturday.
-
-(Items 2–3 are arguably manager-level; Tiberius may rule and present to Rick as FYI.)
+1. **The GO itself** — still open; flip Saturday per procedure above (Rick's standing gate).
+2. **`?classic=1` escape hatch — RATIFIED + elevated (D2 ruling).** Not merely kept for the soak:
+   the hatch, the **entire JS client**, and its test suites are preserved **long-term as a
+   research corpus** for a JS-vs-TS code-quality comparison study (methodology TBD).
+   **Cutover ≠ deletion** — the JS client is retired from default duty only.
+3. **The 7 missing `test_multiplexer_*` counterparts — build TONIGHT (2026-06-11), before
+   Saturday** (Rick rejected the fast-follow option). Owner: Clayton 😎. Quality bar: assertions
+   anchored on the element-level surface each test actually exercises (computed state/handler
+   effects — not bare DOM presence, the false-pass lesson). Held commits, fresh-critical review
+   per batch, `:8000` runs queued behind pending work.
 
 ## Residual risk
 
