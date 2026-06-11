@@ -320,12 +320,18 @@ class CCNotificationListener( BaseWebSocketListener ):
         - `store`: a fresh `CommonsStore` rooted at `<LUPIN_ROOT>/io/commons`
         - `local_persona`: pulled from `get_session_metadata().voice_persona`
         - `sender_session_id`: the local session id from bridge metadata
+        - `persona_roster`: live persona names from the bridge scan, so the
+          handler's directive discriminator only treats `@token:` runs as
+          persona directives when the token resembles a real persona
         """
         import os
         try:
             from lupin_mcp.broadcast_handler import handle_broadcast
             from lupin_mcp.commons_store import CommonsStore
-            from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
+            from lupin_cli.claude_code.hooks.lib.session_bridge import (
+                find_active_voice_persona_sessions,
+                get_session_metadata,
+            )
         except ImportError as e:
             self._log( f"{self.LOG_PREFIX} broadcast_handler import failed: {e}" )
             return
@@ -345,12 +351,24 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._log( f"{self.LOG_PREFIX} CommonsStore init failed at {commons_root}: {e}" )
             return
 
+        # Roster for directive discrimination: name + display_name of every live
+        # persona session. An empty scan carries no roster signal (at minimum the
+        # local session exists), so pass None — roster-blind legacy parse — rather
+        # than an empty list, which would flag EVERY directive run as prose.
+        persona_roster = [ ]
+        for _bridge_path, _session_id, persona in find_active_voice_persona_sessions():
+            for name_key in ( "name", "display_name" ):
+                name_value = persona.get( name_key )
+                if isinstance( name_value, str ) and name_value and name_value not in persona_roster:
+                    persona_roster.append( name_value )
+
         handle_broadcast(
             notification      = notification,
             local_persona     = local_persona,
             inject_fn         = lambda text: self._inject_via_tmux( text, wrap=False ),
             store             = store,
             sender_session_id = sender_session_id,
+            persona_roster    = persona_roster or None,
         )
 
     def _handle_commons_answer_received( self, notification ):
