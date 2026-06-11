@@ -12,6 +12,7 @@ merge anchor `26898e1` (2026-05-29).
 | 00 | [Functional-change summary](00-functional-change-summary.md) | Every user-facing capability added to the JS notifications client since the anchor, grouped into 12 features (F1–F12), with commit refs, front-end surfaces, server deps, and E2E tests. |
 | 01 | [Gap analysis](01-gap-analysis.md) | Which of F1–F12 the multiplexer has / partially has / lacks (read from TS source). Surfaces the **two gap layers**: interim features (Layer A) + pre-existing parity blockers (Layer B). |
 | 02 | [Bridging work plan](02-bridging-work-plan.md) | **r2 (parallel Claude lanes).** Work packages WP0–WP15 in Claude-lane-hours (+ human), dependency spine, crew topology (worktree isolation, per-lane reviewer gating, `:8000` E2E cadence), Friday-night fallback cut-line, and the deprecation cutover checklist. Target = **full parity by Sat 2026-06-14**. |
+| 03 | [Saturday cutover readiness](03-saturday-cutover-readiness.md) | **Go/no-go report (Clayton 😎, 2026-06-11).** Every checklist row status'd; the flip mechanics BUILT + held inactive behind new INI key `legacy notifications redirect enabled` (302 + `?classic=1` escape hatch, 100% L/B); 153 legacy E2E navigation sites future-proofed; Saturday GO procedure; batched Rick decision items. |
 
 ## TL;DR for Tiberius
 

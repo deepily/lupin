@@ -29,7 +29,7 @@ class TestTTSQueueControls:
         Ensures:
             - Pause button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-tts-pause-btn" ).count() > 0
@@ -44,7 +44,7 @@ class TestTTSQueueControls:
         Ensures:
             - Play button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-tts-play-btn" ).count() > 0
@@ -59,7 +59,7 @@ class TestTTSQueueControls:
         Ensures:
             - Clear button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-tts-clear-btn" ).count() > 0
@@ -74,7 +74,7 @@ class TestTTSQueueControls:
         Ensures:
             - Active slot element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-tts-active-slot" ).count() > 0
@@ -89,7 +89,7 @@ class TestTTSQueueControls:
         Ensures:
             - Pending queue element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-tts-pending-queue" ).count() > 0
@@ -112,7 +112,7 @@ class TestDirectTTSInterface:
         Ensures:
             - Direct TTS input element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-direct-tts-input" ).count() > 0
@@ -127,7 +127,7 @@ class TestDirectTTSInterface:
         Ensures:
             - Direct TTS button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-direct-tts-btn" ).count() > 0
@@ -142,7 +142,7 @@ class TestDirectTTSInterface:
         Ensures:
             - Instant TTS test button exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-test-instant-tts-btn" ).count() > 0
@@ -157,7 +157,7 @@ class TestDirectTTSInterface:
         Ensures:
             - Reliable TTS test button exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-test-reliable-tts-btn" ).count() > 0
@@ -172,7 +172,7 @@ class TestDirectTTSInterface:
         Ensures:
             - Stop audio button exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-stop-audio-btn" ).count() > 0
@@ -187,7 +187,7 @@ class TestDirectTTSInterface:
         Ensures:
             - Text can be entered into the direct TTS input
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         tts_input = logged_in_page.get_by_test_id( "notifications-direct-tts-input" )
@@ -209,7 +209,7 @@ class TestTTSFractionSlider:
 
     def test_slider_step_is_twelve_point_five( self, logged_in_page ):
         """The range input's step attribute is 12.5, not 25."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         step = logged_in_page.eval_on_selector(
@@ -219,7 +219,7 @@ class TestTTSFractionSlider:
 
     def test_datalist_has_nine_twelve_point_five_ticks( self, logged_in_page ):
         """The tick datalist enumerates all nine 12.5% stops."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         ticks = logged_in_page.eval_on_selector_all(
@@ -253,7 +253,7 @@ class TestTTSFractionSlider:
         Regression guard: the handler uses parseFloat, so 12.5 must NOT become
         12 (the parseInt bug). Label shows "12.5%", fraction is 0.125.
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         result = self._drive( logged_in_page, 12.5 )
@@ -263,7 +263,7 @@ class TestTTSFractionSlider:
 
     def test_other_half_step_values( self, logged_in_page ):
         """37.5%, 62.5%, 87.5% all round-trip cleanly through the handler."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         for pct, frac in ( ( 37.5, 0.375 ), ( 62.5, 0.625 ), ( 87.5, 0.875 ) ):
@@ -273,7 +273,7 @@ class TestTTSFractionSlider:
 
     def test_integer_stops_still_work( self, logged_in_page ):
         """The pre-existing 25/50/75/100 stops remain valid (no regression)."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         for pct, frac in ( ( 0, 0.0 ), ( 25, 0.25 ), ( 50, 0.5 ), ( 100, 1.0 ) ):

@@ -29,7 +29,7 @@ class TestSystemStatusLayout:
         Ensures:
             - Queue WS status element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-ws-queue-status" ).count() > 0
@@ -44,7 +44,7 @@ class TestSystemStatusLayout:
         Ensures:
             - Audio WS status element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-ws-audio-status" ).count() > 0
@@ -59,7 +59,7 @@ class TestSystemStatusLayout:
         Ensures:
             - Auth status element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-auth-status" ).count() > 0
@@ -82,7 +82,7 @@ class TestSystemStatusActions:
         Ensures:
             - Logout button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-logout-btn" ).count() > 0
@@ -97,7 +97,7 @@ class TestSystemStatusActions:
         Ensures:
             - Refresh button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-status-refresh-btn" ).count() > 0
@@ -112,7 +112,7 @@ class TestSystemStatusActions:
         Ensures:
             - Config reload button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-config-reload-btn" ).count() > 0
@@ -127,7 +127,7 @@ class TestSystemStatusActions:
         Ensures:
             - After logout, URL contains /login
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         logout_btn = logged_in_page.get_by_test_id( "notifications-logout-btn" )
@@ -154,7 +154,7 @@ class TestMissedResetButton:
 
     def test_missed_reset_button_present( self, logged_in_page ):
         """The Reset button element exists in the System Status section."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-missed-reset-btn" ).count() > 0
@@ -170,7 +170,7 @@ class TestMissedResetButton:
             - resetMissedNotifications and logout are functions on it
             - no remaining 'freshQueueUI' reference in the status-section onclicks
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.evaluate( "() => typeof window.notificationsUI" ) == "object"
@@ -198,7 +198,7 @@ class TestNotificationMarkdownRendering:
 
     def test_fenced_code_renders_as_pre_block( self, logged_in_page ):
         """Triple-backtick fenced code → <pre><code>, no raw backticks leak."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         html = logged_in_page.evaluate(
@@ -209,7 +209,7 @@ class TestNotificationMarkdownRendering:
 
     def test_inline_code_stays_inline_no_block( self, logged_in_page ):
         """Single-backtick inline code still renders inline, NOT as a <pre> block."""
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         html = logged_in_page.evaluate(

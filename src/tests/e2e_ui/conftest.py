@@ -483,7 +483,7 @@ def notifications_page( logged_in_page ):
         - Page navigated to /app/notifications
         - Queue WebSocket shows 'Connected' status
     """
-    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     logged_in_page.wait_for_load_state( "networkidle" )
 
     # Wait for queue WS to connect
@@ -550,7 +550,7 @@ def seeded_history_page( logged_in_page ):
     user_email = "e2e_test@example.com"
     records    = seed_standard_job_set( user_id, user_email )
 
-    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     logged_in_page.wait_for_load_state( "networkidle" )
 
     return logged_in_page, records
@@ -575,7 +575,7 @@ def seeded_time_window_page( logged_in_page ):
     user_email = "e2e_test@example.com"
     records    = seed_time_window_jobs( user_id, user_email )
 
-    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     logged_in_page.wait_for_load_state( "networkidle" )
 
     return logged_in_page, records
@@ -600,7 +600,7 @@ def seeded_pagination_page( logged_in_page ):
     user_email = "e2e_test@example.com"
     records    = seed_pagination_jobs( user_id, user_email, count=25 )
 
-    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     logged_in_page.wait_for_load_state( "networkidle" )
 
     return logged_in_page, records

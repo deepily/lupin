@@ -97,7 +97,7 @@ def _open_panel( page, composite ):
         route.fulfill( status=200, content_type="application/json", body=holder[ "body" ] )
 
     page.route( "**/api/arbiter/fleet-state", _route )
-    page.goto( f"{BASE_URL}/app/notifications" )
+    page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
     # Stop the interval so only our explicit refreshes drive the panel (determinism).
     page.evaluate( "() => window.notificationsUI.stopFleetStatusPolling()" )

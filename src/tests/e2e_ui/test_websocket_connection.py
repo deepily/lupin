@@ -44,7 +44,7 @@ class TestWebSocketConnectionEstablishment:
         """
         websockets = capture_websockets( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -64,7 +64,7 @@ class TestWebSocketConnectionEstablishment:
         """
         websockets = capture_websockets( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -84,7 +84,7 @@ class TestWebSocketConnectionEstablishment:
         """
         websockets = capture_websockets( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -112,7 +112,7 @@ class TestWebSocketConnectionEstablishment:
         """
         websockets = capture_websockets( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -140,7 +140,7 @@ class TestWebSocketConnectionEstablishment:
         """
         websockets = capture_websockets( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 
@@ -162,7 +162,7 @@ class TestWebSocketConnectionEstablishment:
         """
         websockets = capture_websockets( logged_in_page )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( logged_in_page )
 

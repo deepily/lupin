@@ -45,7 +45,7 @@ class TestNotificationsToolbar:
         Ensures:
             - All 11 toolbar buttons exist in DOM
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         for testid in self.TOOLBAR_BUTTONS:
@@ -71,7 +71,7 @@ class TestNotificationsToolbar:
         Ensures:
             - Button is visible and can be clicked without error
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         btn = logged_in_page.get_by_test_id( testid )
@@ -97,7 +97,7 @@ class TestNotificationsSectionVisibility:
         Ensures:
             - Page navigates to /app/notifications without crash
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert "/notifications" in logged_in_page.url
@@ -112,7 +112,7 @@ class TestNotificationsSectionVisibility:
         Ensures:
             - Q&A interface core elements present in DOM
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-qa-mode-select" ).count() > 0
@@ -129,7 +129,7 @@ class TestNotificationsSectionVisibility:
         Ensures:
             - CC card element present in DOM
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-cc-card" ).count() > 0
@@ -144,7 +144,7 @@ class TestNotificationsSectionVisibility:
         Ensures:
             - Action section with active slot and pending queue present
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-action-section" ).count() > 0
@@ -161,7 +161,7 @@ class TestNotificationsSectionVisibility:
         Ensures:
             - Pause, play, and clear buttons present
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-tts-pause-btn" ).count() > 0

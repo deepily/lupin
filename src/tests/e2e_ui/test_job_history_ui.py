@@ -79,7 +79,7 @@ class TestJobHistorySectionLayout:
         Ensures:
             - Job History queue category element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-history" ).count() > 0
@@ -94,7 +94,7 @@ class TestJobHistorySectionLayout:
         Ensures:
             - Expand button element exists within history section
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-history-expand-btn" ).count() > 0
@@ -110,7 +110,7 @@ class TestJobHistorySectionLayout:
             - Time window select element exists
             - Has 5 options: 1 day, 7 days, 14 days, 30 days, All
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         select = logged_in_page.get_by_test_id( "history-time-window-select" )
@@ -129,7 +129,7 @@ class TestJobHistorySectionLayout:
         Ensures:
             - Jobs container has 'collapsed' CSS class
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         container = logged_in_page.get_by_test_id( "notifications-queue-history-jobs" )
@@ -146,7 +146,7 @@ class TestJobHistorySectionLayout:
         Ensures:
             - After clicking expand, container no longer has 'collapsed' class
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         expand_btn = logged_in_page.get_by_test_id( "notifications-queue-history-expand-btn" )
@@ -167,7 +167,7 @@ class TestJobHistorySectionLayout:
         Ensures:
             - Count badge element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         badge = logged_in_page.locator( "#history-count-badge" )
@@ -275,7 +275,7 @@ class TestJobHistoryDataDisplay:
         Ensures:
             - Empty message displayed in history container
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         expand_history_section( logged_in_page )
@@ -519,7 +519,7 @@ class TestJobHistoryActions:
             records    = [ { "id_suffix": "del-all-001", "status": "completed" } ]
         )
 
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
         expand_history_section( logged_in_page )
 
@@ -935,7 +935,7 @@ class TestJobHistoryEdgeCases:
             ]
         )
 
-        admin_page.goto( f"{BASE_URL}/app/notifications" )
+        admin_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         admin_page.wait_for_load_state( "networkidle" )
         expand_history_section( admin_page )
 

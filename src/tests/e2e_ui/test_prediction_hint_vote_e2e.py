@@ -50,7 +50,7 @@ class TestPredictionHintVoteE2E:
     def test_thumbs_up_records_approved( self, logged_in_page ):
         """Clicking 👍🏼 POSTs to the vote endpoint and gets 200 / ratification_state=approved."""
         page = logged_in_page
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
 
         rendered = page.evaluate( _RENDER_HINT_JS, { "id": "e2e-hint-up", "message": "E2E: ship the release?" } )
@@ -80,7 +80,7 @@ class TestPredictionHintVoteE2E:
         errors = []
         page.on( "console", lambda m: errors.append( m.text ) if m.type == "error" else None )
 
-        page.goto( f"{BASE_URL}/app/notifications" )
+        page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         page.wait_for_load_state( "networkidle" )
         rendered = page.evaluate( _RENDER_HINT_JS, { "id": "e2e-hint-down", "message": "E2E: ship the release?" } )
         assert rendered == "ok", f"hint render failed: {rendered}"

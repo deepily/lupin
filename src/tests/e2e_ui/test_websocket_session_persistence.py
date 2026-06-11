@@ -155,7 +155,7 @@ class TestSessionIdPersistence:
         notifications_page.wait_for_load_state( "networkidle" )
 
         # Navigate back to notifications
-        notifications_page.goto( f"{BASE_URL}/app/notifications" )
+        notifications_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         notifications_page.wait_for_load_state( "networkidle" )
         wait_for_ws_connected( notifications_page )
 
