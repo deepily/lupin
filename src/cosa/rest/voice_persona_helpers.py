@@ -715,30 +715,39 @@ def allocate_requested_persona_for_session(
     return result
 
 
-# ── Preferred-persona env-var resolution ─────────────────────────────────────
+# ── Persona-chain resolution + allocation ────────────────────────────────────
 
-def pick_preferred_persona_from_env( project: Optional[ str ] ) -> Optional[ str ]:
+PERSONA_CHAIN_WILDCARD = "*"
+
+
+def pick_persona_chain_from_env( project: Optional[ str ], environ=None ) -> Optional[ str ]:
     """
     Read COSA_VOICE_PREFERRED_PERSONA__<PROJECT> from the environment.
 
-    Resolves a per-repo declarative default persona from the user's shell
-    environment. The env var name embeds the project so one universal lookup
-    pattern serves every repo — set
-    `COSA_VOICE_PREFERRED_PERSONA__LUPIN=Tiberius` in your shell rc to claim
-    Tiberius as the default persona for the Lupin repo.
+    Resolves a per-repo declarative persona CHAIN from the user's shell
+    environment. The value is a chain expression — an ordered, comma-separated
+    list of persona names with an optional `*` wildcard meaning "then take
+    anything free" — e.g. `COSA_VOICE_PREFERRED_PERSONA__LUPIN="Mr. Radio,Tiberius,*"`.
+    A bare single name remains valid (a strict chain of one). The env var name
+    embeds the project so one universal lookup pattern serves every repo.
+
+    (Renamed from pick_preferred_persona_from_env 2026-06-11 when the value
+    semantics widened from single soft-preference name to ordered chain —
+    one-name rule, all consumers migrated.)
 
     Requires:
         - project is either a non-empty string (e.g., "plan", "lupin",
           "cosa-voice") or None/empty (the function tolerates both)
 
     Ensures:
-        - Returns the persona-name string from the env var if set, verbatim
-          (does NOT validate against any pool — that's the caller's job;
-          _find_persona_in_pool handles case-insensitive + display-name match)
+        - Returns the chain expression string from the env var if set, verbatim
+          (does NOT parse or validate — parse_persona_chain is the parser;
+          pool validation is the allocator's job)
         - Returns None when project is None, empty, or whitespace-only
         - Returns None when the resolved env var is unset
         - Returns None when the resolved env var is set but empty/whitespace
         - Normalizes project name: strip + UPPER + hyphens→underscores
+        - Reads from `environ` when supplied (testability), else os.environ
         - Never raises
 
     Examples:
@@ -747,19 +756,203 @@ def pick_preferred_persona_from_env( project: Optional[ str ] ) -> Optional[ str
         project="LUPIN"       → reads COSA_VOICE_PREFERRED_PERSONA__LUPIN
         project=None / ""     → returns None silently
 
-    See: planning-is-prompting/src/rnd/2026.05.19-cosa-voice-preferred-persona-env-var.md
+    See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
     """
+    if environ is None:
+        environ = os.environ
     if not project:
         return None
     normalized = project.strip().upper().replace( "-", "_" )
     if not normalized:
         return None
     env_key = f"COSA_VOICE_PREFERRED_PERSONA__{normalized}"
-    value   = os.environ.get( env_key )
+    value   = environ.get( env_key )
     if value is None:
         return None
     stripped = value.strip()
     return stripped if stripped else None
+
+
+def resolve_session_start_persona_chain( project: Optional[ str ], environ ) -> Optional[ str ]:
+    """
+    Resolve which persona-chain expression (if any) a SessionStart should
+    send to the allocate endpoint, encoding the spawn/user precedence.
+
+    Precedence (Rick, 2026-06-11):
+        1. COSA_VOICE_PERSONA_CHAIN — injected by session_spawner when a
+           manager passed spawn_sessions(persona_preference=...). Wins.
+        2. Headless spawned child (COSA_VOICE_HEADLESS == "1") WITHOUT an
+           explicit chain → None (random). The per-repo default is the
+           USER's claim on manager names ("Mr. Radio,Tiberius,*"); letting
+           a preference-less worker inherit it would squat a manager
+           identity. Matches the de-facto pre-chain behavior (workers
+           always fell through to random).
+        3. COSA_VOICE_PREFERRED_PERSONA__<PROJECT> — the user's per-repo
+           shell default, chain syntax.
+        4. Nothing set → None → server random-allocates (unchanged).
+
+    Requires:
+        - project is a project-key string or None
+        - environ is a Mapping (os.environ or a test dict)
+
+    Ensures:
+        - Returns the winning chain expression string, stripped, or None
+        - Never raises
+
+    Args:
+        project: detect_project() result (for the per-repo env var lookup)
+        environ: environment mapping to read from
+
+    Returns:
+        str or None: chain expression for the `persona_chain` query param
+    """
+    spawned_chain = ( environ.get( "COSA_VOICE_PERSONA_CHAIN" ) or "" ).strip()
+    if spawned_chain:
+        return spawned_chain
+    if environ.get( "COSA_VOICE_HEADLESS" ) == "1":
+        return None
+    return pick_persona_chain_from_env( project, environ=environ )
+
+
+def parse_persona_chain( raw ) -> List[ str ]:
+    """
+    Normalize a persona-chain expression into an ordered element list.
+
+    A chain expression is either a comma-separated string or a list of
+    strings; each element is a persona name (multi-word names like
+    "Mr. Radio" pass through verbatim — commas are the only delimiter) or
+    the wildcard `*` meaning "then take anything free".
+
+    Requires:
+        - raw is a str, a list, or None
+
+    Ensures:
+        - Returns an ordered list of stripped, non-empty elements
+        - Duplicate elements (case-insensitive) are dropped, first
+          occurrence wins — a repeated name cannot change the walk outcome
+        - Non-string items inside a list input are skipped
+        - Returns [] for None, empty/whitespace input, or any other type
+        - Never raises
+
+    Examples:
+        "Rio,Krishna,*"            → [ "Rio", "Krishna", "*" ]
+        "Mr. Radio, Tiberius , *"  → [ "Mr. Radio", "Tiberius", "*" ]
+        [ "Rio", "Krishna" ]       → [ "Rio", "Krishna" ]
+        "rio,Rio,*"                → [ "rio", "*" ]
+        None / "" / ",,,"          → []
+    """
+    if isinstance( raw, str ):
+        items = raw.split( "," )
+    elif isinstance( raw, list ):
+        items = [ item for item in raw if isinstance( item, str ) ]
+    else:
+        return []
+
+    chain = []
+    seen  = set()
+    for item in items:
+        stripped = item.strip()
+        if not stripped:
+            continue
+        key = stripped.lower()
+        if key in seen:
+            continue
+        seen.add( key )
+        chain.append( stripped )
+    return chain
+
+
+def allocate_persona_chain_for_session(
+    config_mgr,
+    stable_session_id : str,
+    chain_raw
+) -> Dict[ str, Any ]:
+    """
+    Walk an ordered persona chain, allocating the first FREE element.
+
+    Strict ordered-fallback semantics (Rick, 2026-06-11): try each named
+    element in order via the strict requested-persona path; an occupied or
+    unknown name records an outcome and falls through to the next element.
+    A `*` element allocates randomly from the free pool ("then take
+    anything"). A chain exhausted without `*` is a LOUD predictable fail —
+    no silent random fallback.
+
+    The caller (router) holds the allocation lock; this function performs
+    the whole walk inside one critical section so sibling sessions racing
+    the same chain serialize cleanly (first claims a name, second falls
+    through to the next).
+
+    Requires:
+        - config_mgr is an initialized ConfigurationManager
+        - stable_session_id is a non-empty string
+        - chain_raw is a chain expression (str | list | None — anything
+          parse_persona_chain accepts)
+
+    Ensures:
+        - Returns { "status": "ok", "persona": <dict with assigned_at>,
+          "satisfied_by": <element>, "wildcard_used": bool,
+          "outcomes": [<missed-element records>] } on success
+        - Returns { "status": "exhausted", "persona": None, "outcomes": [...],
+          "available": [...] } when every named element missed and no `*`
+          was present
+        - Returns { "status": "empty_chain", ... } when the expression
+          parses to zero elements (caller decides the error surface)
+        - Returns { "status": "pool_error", ... } when the pool itself is
+          empty/misconfigured (caller treats as 500)
+        - Each missed named element contributes an outcome record
+          { "name", "status" ∈ {"occupied","not_in_pool"},
+            [ "holding_session_id", "holding_persona_name" ] }
+        - Never raises on bridge-scan failures
+
+    Args:
+        config_mgr: ConfigurationManager
+        stable_session_id: Session being allocated
+        chain_raw: Chain expression (see parse_persona_chain)
+
+    Returns:
+        Result dict (see Ensures)
+    """
+    chain = parse_persona_chain( chain_raw )
+    if not chain:
+        return { "status": "empty_chain", "persona": None, "outcomes": [], "available": [] }
+
+    outcomes  = []
+    available = []
+
+    for element in chain:
+        if element == PERSONA_CHAIN_WILDCARD:
+            persona = allocate_persona_for_session( config_mgr, stable_session_id )
+            if persona is None:
+                return { "status": "pool_error", "persona": None, "outcomes": outcomes, "available": available }
+            return {
+                "status"        : "ok",
+                "persona"       : persona,
+                "satisfied_by"  : PERSONA_CHAIN_WILDCARD,
+                "wildcard_used" : True,
+                "outcomes"      : outcomes
+            }
+
+        result = allocate_requested_persona_for_session( config_mgr, stable_session_id, element )
+        if result is None:
+            return { "status": "pool_error", "persona": None, "outcomes": outcomes, "available": available }
+
+        if result[ "status" ] == "ok":
+            return {
+                "status"        : "ok",
+                "persona"       : result[ "persona" ],
+                "satisfied_by"  : element,
+                "wildcard_used" : False,
+                "outcomes"      : outcomes
+            }
+
+        outcome = { "name": element, "status": result[ "status" ] }
+        if result[ "status" ] == "occupied":
+            outcome[ "holding_session_id" ]   = result[ "holding_session_id" ]
+            outcome[ "holding_persona_name" ] = result[ "holding_persona_name" ]
+        outcomes.append( outcome )
+        available = result[ "available" ]
+
+    return { "status": "exhausted", "persona": None, "outcomes": outcomes, "available": available }
 
 
 # ── Quick smoke test ─────────────────────────────────────────────────────────

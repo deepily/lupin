@@ -48,6 +48,7 @@ wrong-manager DM" airtight:
 **Prefer UNRESOLVED over a wrong-manager DM** on any brittle/ambiguous hop.
 Never raises.
 """
+import os
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -143,12 +144,66 @@ def list_manager_session_ids( session_dir: Path = SESSION_DIR ):
     return ids
 
 
+def pick_declared_managers_from_env( project, environ=None ):
+    """
+    Read COSA_VOICE_MANAGERS__<PROJECT> — the user's declared-manager roster
+    for a repo (Rick, 2026-06-11: multi-manager-per-repo support).
+
+    The value is a comma-separated list of persona names; multi-word names
+    pass through verbatim ("Tiberius, Mr. Radio" → ["Tiberius", "Mr. Radio"]).
+    Declaration is ROLE-only (Q2 ruling): it marks the personas as managers
+    for fleet-status rendering + escalation fanout; it does NOT reserve them
+    in the allocation pool.
+
+    Requires:
+        - project is a project-key string or None
+        - environ is a Mapping (os.environ when None) — injectable for tests
+
+    Ensures:
+        - Returns an ordered list of stripped non-empty persona names
+        - Duplicates (case-insensitive) dropped, first occurrence wins
+        - `*` elements are dropped (wildcard is chain syntax, meaningless in
+          a manager roster — tolerated so a copy-pasted chain can't poison it)
+        - Returns [] when project is None/empty/whitespace, the env var is
+          unset, or it parses to zero names
+        - Normalizes project name: strip + UPPER + hyphens→underscores
+        - Never raises
+
+    Examples:
+        COSA_VOICE_MANAGERS__LUPIN="Tiberius, Mr. Radio" + project="lupin"
+            → [ "Tiberius", "Mr. Radio" ]
+
+    See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
+    """
+    if environ is None:
+        environ = os.environ
+    if not project or not str( project ).strip():
+        return [ ]
+    normalized = str( project ).strip().upper().replace( "-", "_" )
+    value      = environ.get( f"COSA_VOICE_MANAGERS__{normalized}" )
+    if not value:
+        return [ ]
+    managers = [ ]
+    seen     = set()
+    for item in value.split( "," ):
+        stripped = item.strip()
+        if not stripped or stripped == "*":
+            continue
+        key = stripped.lower()
+        if key in seen:
+            continue
+        seen.add( key )
+        managers.append( stripped )
+    return managers
+
+
 def resolve_active_managers(
     who_rows,
     bridge_sessions,
     *,
-    list_managers : Optional[ Callable ] = None,
-    session_dir   : Path                 = SESSION_DIR,
+    list_managers     : Optional[ Callable ] = None,
+    session_dir       : Path                 = SESSION_DIR,
+    declared_managers : Optional[ list ]     = None,
 ):
     """
     Resolve the managers ON DUTY for the Part-6 fleet-crisis fanout (Rick + ALL
@@ -156,14 +211,17 @@ def resolve_active_managers(
 
     A persona is an ACTIVE MANAGER iff it satisfies BOTH:
       (1) MANAGER-ROLE — its session owns a spawn-lineage manifest (it spawned
-          ≥1 child; via `list_managers`).
+          ≥1 child; via `list_managers`) OR its persona is in the DECLARED
+          manager roster (`declared_managers`, from COSA_VOICE_MANAGERS__<PROJECT>
+          — a declared manager counts even before its first spawn; Rick 2026-06-11).
       (2) PROCESS-ALIVE — its session is present in `bridge_sessions` (the
           PID + mtime-filtered live-bridge discovery, `find_active_voice_persona_sessions`).
           This is the PHANTOM GUARD: a reaped manager whose commons `last_post_ts`
           LINGERS in `who_rows` is EXCLUDED, because its dead bridge is absent from
           bridge_sessions. (Raw commons_who is the phantom-prone signal — bridge
           presence is the authoritative process-liveness axis, per the Round-1
-          union doctrine.)
+          union doctrine.) The guard applies to DECLARED managers identically —
+          declaration grants role, never liveness.
 
     `who_rows` (commons_who) SEEDS the candidate set (a manager visible on commons
     OR discovered via its bridge); the bridge-presence check then GUARDS it. The
@@ -174,22 +232,27 @@ def resolve_active_managers(
         - who_rows is a list of commons_who rows (dicts) or None
         - bridge_sessions is { session_id: persona_name|None } (the arbiter's
           bridge discovery) or None
+        - declared_managers is a list of persona names or None
 
     Ensures:
         - returns a SORTED list of DISTINCT active-manager personas
-        - excludes non-managers (no manifest) AND phantoms (commons-recent but no
-          live bridge) AND managers with no DM-able persona
+        - includes a declared persona iff a LIVE bridge carries it
+          (case-insensitive match; the bridge's casing is emitted — the bridge
+          is the authoritative name surface)
+        - excludes non-managers (no manifest AND not declared) AND phantoms
+          (commons-recent but no live bridge) AND managers with no DM-able persona
         - never raises
     """
     list_managers   = list_managers   if list_managers   is not None else list_manager_session_ids
     who_rows        = who_rows        or [ ]
     bridge_sessions = bridge_sessions or { }
+    declared_lower  = { str( name ).strip().lower() for name in ( declared_managers or [ ] ) if str( name ).strip() }
 
     try:
         manager_ids = list_managers( session_dir )
     except Exception:
         manager_ids = set()
-    if not manager_ids:
+    if not manager_ids and not declared_lower:
         return [ ]
 
     def _is_manager( sid ):
@@ -202,7 +265,11 @@ def resolve_active_managers(
         if sid and _is_manager( sid ):
             candidates[ sid ] = row.get( "persona_name" )
     for sid, persona in bridge_sessions.items():
-        if sid and _is_manager( sid ):
+        if not sid:
+            continue
+        # DECLARED roster: a live-bridge persona in the declared set is a
+        # manager regardless of manifest ownership (role-by-declaration).
+        if _is_manager( sid ) or ( persona and persona.strip().lower() in declared_lower ):
             candidates[ sid ] = persona or candidates.get( sid )
 
     # PHANTOM GUARD: keep only sessions with a LIVE bridge (PID-alive), with a persona

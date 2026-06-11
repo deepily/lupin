@@ -93,15 +93,17 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     exit 0
 fi
 
-# Per-project preferred personas. Forwarded into the tmux session via -e so the
+# Per-project persona CHAINS. Forwarded into the tmux session via -e so the
 # SessionStart hook (register_session.py) sees them regardless of the tmux
 # server's frozen env or whether ~/.bashrc was sourced. The hook reads only the
 # key matching detect_project(), so unused keys are inert.
+# Chain syntax (2026-06-11, Rick): ordered comma-separated names; `*` means
+# "then take anything free"; no `*` = strict, loud fail on exhaustion.
 PERSONA_ENV_FLAGS=(
-    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Tiberius"
+    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Mr. Radio,Tiberius,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN_MOBILE=Tiffany"
-    -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María"
-    -e "COSA_VOICE_PREFERRED_PERSONA__LOOKML=Sam"
+    -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María,*"
+    -e "COSA_VOICE_PREFERRED_PERSONA__LOOKML=Sam,*"
 )
 
 # Forward manager-spawn lineage env (set by session_spawner on the spawning
@@ -109,7 +111,10 @@ PERSONA_ENV_FLAGS=(
 # env for a new session, so without this the child's SessionStart hook never
 # sees COSA_VOICE_SPAWNED_BY/HEADLESS/ROLE and can't self-tag / start
 # speakerphone-off. (Caught by the live spawn E2E 2026-05-28.)
-for _v in COSA_VOICE_SPAWNED_BY COSA_VOICE_HEADLESS COSA_VOICE_ROLE; do
+# COSA_VOICE_PERSONA_CHAIN carries a manager's spawn persona_preference;
+# it must cross the tmux boundary here or the spawner's injection is lost
+# (the original transport bug, one layer down — 2026-06-11).
+for _v in COSA_VOICE_SPAWNED_BY COSA_VOICE_HEADLESS COSA_VOICE_ROLE COSA_VOICE_PERSONA_CHAIN; do
     if [[ -n "${!_v:-}" ]]; then
         PERSONA_ENV_FLAGS+=( -e "$_v=${!_v}" )
     fi

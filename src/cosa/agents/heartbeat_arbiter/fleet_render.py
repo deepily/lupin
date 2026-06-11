@@ -199,7 +199,8 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     resolve_manager_fn = None,
                     list_managers_fn   = None,
                     process_dead       = None,
-                    include_offline    = False ):
+                    include_offline    = False,
+                    declared_managers  = None ):
     """
     Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
     with per-session hierarchy (Fleet-Status P1, design §4) and live-only-by-default
@@ -233,7 +234,10 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
           { session_id, persona, state, holding_on, stuck, liveness{...},
             role, manager }
         - role = "manager" if the session-id (prefix-tolerantly) belongs to the
-          injected manager set (list_managers_fn), else "worker"
+          injected manager set (list_managers_fn) OR its persona is in the
+          DECLARED roster (`declared_managers`, case-insensitive — from
+          COSA_VOICE_MANAGERS__<PROJECT>; a declared manager badges as manager
+          even before its first spawn, Rick 2026-06-11), else "worker"
         - manager = resolve_manager_fn(sid).manager_persona ONLY when its source
           is "lineage"; for declared/unresolved/error → None (degrade-safe: we
           NEVER show a guessed manager — None lands the row in the "Unmanaged"
@@ -253,6 +257,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             manager_ids = list_managers_fn() or set()
         except Exception:
             manager_ids = set()
+    declared_lower = { str( name ).strip().lower() for name in ( declared_managers or [ ] ) if str( name ).strip() }
 
     rows = [ ]
     for sid in sorted( ( fleet_view or { } ).keys() ):
@@ -274,8 +279,10 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         # D6 / §5.2: omit offline sessions from the PUBLISHED snapshot by default.
         if not include_offline and liveness.get( "verdict" ) == "offline":
             continue
-        role    = "manager" if any( _sid_matches( sid, mid ) for mid in manager_ids ) else "worker"
-        manager = None
+        persona_value = view.get( "persona" )
+        is_declared   = bool( persona_value ) and str( persona_value ).strip().lower() in declared_lower
+        role          = "manager" if ( is_declared or any( _sid_matches( sid, mid ) for mid in manager_ids ) ) else "worker"
+        manager       = None
         if resolve_manager_fn is not None:
             try:
                 res = resolve_manager_fn( sid )
