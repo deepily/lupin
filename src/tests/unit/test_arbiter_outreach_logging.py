@@ -74,10 +74,10 @@ def _job( gw=None, log=None, notify=None, **overrides ):
 # ── module helpers: default log fn + EDT/minutes formatters ──────────────────
 
 def test_default_log_fn_emits_one_json_line( capsys ):
-    _default_log_fn( "arbiter_outreach", kind="poke", recipients=[ "P" ] )
+    _default_log_fn( "arbiter_outreach", kind="stuck_poke", recipients=[ "P" ] )
     line = json.loads( capsys.readouterr().out.strip() )
     assert line[ "service" ] == "heartbeat-arbiter" and line[ "event" ] == "arbiter_outreach"
-    assert line[ "kind" ] == "poke" and line[ "recipients" ] == [ "P" ] and "ts" in line
+    assert line[ "kind" ] == "stuck_poke" and line[ "recipients" ] == [ "P" ] and "ts" in line
 
 
 def test_fmt_eastern_labels_zone_and_degrades():
@@ -95,7 +95,7 @@ def test_fmt_minutes():
 def test_log_seam_swallows_log_fn_blowup():
     def _boom( event, **fields ): raise RuntimeError( "log sink down" )
     job = _job( log=_boom )
-    job._log( "arbiter_outreach", kind="poke" )                      # must not raise
+    job._log( "arbiter_outreach", kind="stuck_poke" )                      # must not raise
 
 
 # ── arbiter_outreach: every emission path is journaled ───────────────────────
@@ -127,7 +127,7 @@ def test_stuck_poke_logs_outreach_with_session_fields():
     fleet = { "s1": { "session_id": "s1", "persona": "Stuckie", "state": "stuck",
                       "stuck": True, "holding_on": "none", "alive": True } }
     job._auto_poke( fleet, NOW, [ ] )
-    pokes = [ f for f in log.of( "arbiter_outreach" ) if f[ "kind" ] == "poke" ]
+    pokes = [ f for f in log.of( "arbiter_outreach" ) if f[ "kind" ] == "stuck_poke" ]
     assert len( pokes ) == 1
     assert pokes[ 0 ][ "recipients" ] == [ "Stuckie" ] and pokes[ 0 ][ "session_id" ] == "s1"
     assert pokes[ 0 ][ "via" ] == "send_to" and "STUCK" in pokes[ 0 ][ "summary" ]
@@ -250,10 +250,15 @@ def test_gate_disabled_and_tier_disabled_and_mgr_capped_and_not_stale():
     job2._check_manager_staleness( snap_stale, NOW, [ ] )            # poke 1 → capped
     job2._emit_poke_gates( _view( "m1" ), snap_stale, NOW )
     assert log2.of( "arbiter_poke_gate" )[ -1 ][ "stale_why_not" ] == [ "mgr_capped" ]
-    # liveness-malformed manager row: age None → eligible (no why_not)
+    # liveness-malformed manager row: age None → eligible (no why_not). The same
+    # emission also EVICTS m1 (it left the fleet view), so select m2's gate event.
     snap_bad = _snap_rows( { "session_id": "m2", "role": "manager", "liveness": "bad" } )
     job2._emit_poke_gates( _view( "m2" ), snap_bad, NOW )
-    assert log2.of( "arbiter_poke_gate" )[ -1 ][ "stale_why_not" ] == [ ]
+    m2_gates = [ g for g in log2.of( "arbiter_poke_gate" )
+                 if g.get( "session_id" ) == "m2" and not g.get( "evicted" ) ]
+    assert m2_gates[ -1 ][ "stale_why_not" ] == [ ]
+    evictions = [ g for g in log2.of( "arbiter_poke_gate" ) if g.get( "evicted" ) ]
+    assert evictions == [ { "session_id": "m1", "evicted": True } ]
 
 
 def test_gate_skips_non_dict_views():

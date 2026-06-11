@@ -103,7 +103,7 @@ DARK_LOOKBACK_SECONDS    = 7200
 # F1: arbiter_outreach carries a truncated message head, not the full body.
 OUTREACH_SUMMARY_MAXLEN  = 160
 
-# F1: routed-case → log `kind` vocabulary (the direct-send kinds — poke,
+# F1: routed-case → log `kind` vocabulary (the direct-send kinds — stuck_poke,
 # manager_stale_poke, decision_cc, poll_error_escalation — are literals at their
 # emission sites).
 CASE_KINDS = {
@@ -1287,7 +1287,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 recipient = view.get( "persona" ) or sid
                 body      = self._format_poke( view )
                 self._commons.send_to( recipient, body )
-                self._log_outreach( "poke", "send_to", [ recipient ], body,    # post-game F1
+                # post-game F1 — kind "stuck_poke", never the bare four-letter literal
+                # (the poked-rename one-name sweep bans quoted bare-poke literals on
+                # production surfaces; also symmetric with "manager_stale_poke")
+                self._log_outreach( "stuck_poke", "send_to", [ recipient ], body,
                                     session_id=sid, persona=view.get( "persona" ) )
                 self._poke_count[ sid ] += 1
                 fired += 1
