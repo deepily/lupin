@@ -113,6 +113,40 @@ def render_task_prompt(
     return rendered
 
 
+# ── Persona-chain transport ───────────────────────────────────────────────────
+
+def persona_chain_csv( persona_preference ) -> Optional[ str ]:
+    """
+    Normalize a spawn persona_preference (str | list | None) into the CSV
+    form carried by the COSA_VOICE_PERSONA_CHAIN child env var.
+
+    Requires:
+        - persona_preference is a str, a list, or None
+
+    Ensures:
+        - Returns the stripped string when persona_preference is a non-empty
+          string (already CSV or a single name — passed through verbatim)
+        - Returns a comma-joined string of stripped non-empty string items
+          when persona_preference is a list (non-string items skipped)
+        - Returns None for None, empty/whitespace input, an empty list, or
+          any other type — callers omit the env var entirely in that case
+        - Never raises
+
+    Examples:
+        "Rio"                      → "Rio"
+        "Rio, Krishna ,*"          → "Rio, Krishna ,*"   (server-side parser strips)
+        [ "Rio", "Krishna", "*" ]  → "Rio,Krishna,*"
+        [] / None / "   " / 42     → None
+    """
+    if isinstance( persona_preference, str ):
+        stripped = persona_preference.strip()
+        return stripped if stripped else None
+    if isinstance( persona_preference, list ):
+        items = [ item.strip() for item in persona_preference if isinstance( item, str ) and item.strip() ]
+        return ",".join( items ) if items else None
+    return None
+
+
 # ── Spawn invocation construction ─────────────────────────────────────────────
 
 def build_spawn_argv(
@@ -237,6 +271,13 @@ def spawn_sessions(
           runner returns non-zero is recorded with status "failed" (others still
           proceed — partial success is reported, not raised)
         - On a NON-dry-run, appends successful spawns to the manager's manifest
+        - When persona_preference is non-empty, injects it into EVERY child's
+          environment as COSA_VOICE_PERSONA_CHAIN (CSV) — the child's
+          SessionStart walks the chain strictly (first FREE element wins,
+          `*` = "then take anything free", exhaustion without `*` = loud
+          fail, never a silent random re-allocation). Each child walks the
+          SAME chain and takes the first unclaimed element; sibling boots
+          serialize via the server's atomic allocate-or-409.
         - Returns { spawned: [ {session_name, requested_role, status, ...} ],
                     manager_session_id, collection_topic, dry_run, requested,
                     persona_preference }
@@ -249,8 +290,9 @@ def spawn_sessions(
         script_path: spawn script path
         role: requested role label (templated into the prompt)
         project: project for the child (sets cwd / CLAUDE.md)
-        persona_preference: echoed into the result (allocation honored host-side
-            by the child's SessionStart; predictable-fail is enforced there)
+        persona_preference: str | list — ordered persona chain transported to
+            the children via COSA_VOICE_PERSONA_CHAIN (see
+            src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md)
         seed_memento: optional prior-context blob for author continuity
         tokens: extra template tokens
         spawn_cap: max children
@@ -300,6 +342,14 @@ def spawn_sessions(
             "COSA_VOICE_HEADLESS"   : "1",
             "COSA_VOICE_ROLE"       : role
         }
+        # Transport the persona chain to the child — THE missing link that
+        # made spawn_sessions(persona_preference=...) a silent no-op for a
+        # month (Rio→Krishna repros, root-caused 2026-06-11). The child's
+        # SessionStart reads COSA_VOICE_PERSONA_CHAIN ahead of the per-repo
+        # COSA_VOICE_PREFERRED_PERSONA__<PROJECT> default.
+        chain_csv = persona_chain_csv( persona_preference )
+        if chain_csv:
+            env[ "COSA_VOICE_PERSONA_CHAIN" ] = chain_csv
         result = runner( argv, env=env )
         ok     = getattr( result, "returncode", 1 ) == 0
 

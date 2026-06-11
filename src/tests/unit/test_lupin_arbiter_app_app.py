@@ -250,3 +250,39 @@ def test_state_partial_one_section_awaiting():
         assert body[ "health_watcher" ]   == { "containers": { } }
         assert body[ "fleet_arbiter" ]    == { "status": "awaiting", "session_count": 0, "sessions": [ ] }
         assert body[ "context_pressure" ] == { "status": "awaiting", "personas": { } }
+
+
+def test_assemble_app_resolves_declared_managers_into_arbiter( monkeypatch ):
+    """COSA_VOICE_MANAGERS__<PROJECT> (Rick 2026-06-11) reaches the fleet-arbiter
+    job: assemble_app resolves the project, reads the roster, logs it, and the
+    factory-built job carries it."""
+    import lupin_arbiter_app.app as app_module
+    monkeypatch.setattr( "cosa.agents.utils.sender_id.detect_project", lambda: "lupin" )
+    monkeypatch.setenv( "COSA_VOICE_MANAGERS__LUPIN", "Mr. Radio, Tiberius" )
+    logs = [ ]
+    app  = app_module.assemble_app( _FakeCfg( enabled=False ), _FakeGateway(),
+                                    log_fn=lambda event, **fields: logs.append( ( event, fields ) ) )
+    job  = app.state.fleet_arbiter_loop._job_factory()
+    assert job.declared_managers == [ "Mr. Radio", "Tiberius" ]
+    resolved = [ f for e, f in logs if e == "declared_managers_resolved" ]
+    assert resolved and resolved[ 0 ][ "managers" ] == [ "Mr. Radio", "Tiberius" ]
+
+
+def test_assemble_app_detect_project_failure_degrades_to_lupin( monkeypatch ):
+    """A detect_project() blow-up degrades to project='lupin' — the arbiter app
+    IS the lupin fleet's arbiter; declared roster still resolves."""
+    def _boom():
+        raise RuntimeError( "no git" )
+    monkeypatch.setattr( "cosa.agents.utils.sender_id.detect_project", _boom )
+    monkeypatch.setenv( "COSA_VOICE_MANAGERS__LUPIN", "Tiffany" )
+    app = assemble_app( _FakeCfg( enabled=False ), _FakeGateway(), log_fn=lambda *a, **k: None )
+    job = app.state.fleet_arbiter_loop._job_factory()
+    assert job.declared_managers == [ "Tiffany" ]
+
+
+def test_assemble_app_no_roster_env_yields_empty_declared( monkeypatch ):
+    monkeypatch.setattr( "cosa.agents.utils.sender_id.detect_project", lambda: "lupin" )
+    monkeypatch.delenv( "COSA_VOICE_MANAGERS__LUPIN", raising=False )
+    app = assemble_app( _FakeCfg( enabled=False ), _FakeGateway(), log_fn=lambda *a, **k: None )
+    job = app.state.fleet_arbiter_loop._job_factory()
+    assert job.declared_managers == [ ]

@@ -2255,8 +2255,13 @@ def spawn_sessions(
             are auto-substituted, plus any you reference and supply downstream
         role: reviewer | author | observer | manager (templated into the brief)
         project: child project (sets cwd / CLAUDE.md)
-        persona_preference: str | list — request specific personas (predictable-
-            fail honored by the child's SessionStart, not silently re-allocated)
+        persona_preference: str | list — ordered persona CHAIN ("Rio,Krishna,*"
+            or ["Rio","Krishna","*"]): transported to each child via the
+            COSA_VOICE_PERSONA_CHAIN env var; the child's SessionStart walks
+            it strictly — first FREE element wins, `*` means "then take
+            anything free", exhaustion without `*` is a LOUD fail (child
+            stays persona-less; never silently re-allocated). Sibling spawns
+            walk the same chain and take successive unclaimed elements.
         seed_memento: path/ref to a prior memento; restores author continuity
         dry_run: build + print the spawn commands without launching
 

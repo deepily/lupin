@@ -434,3 +434,61 @@ def test_poll_once_composes_all_v2_2_detectors( tmp_path ):
     assert summary[ "stalled" ] == 0                    # first poll = progress baseline
     assert summary[ "managers_down" ] == 0             # MgrX just tapped, ack window open
     assert "do not assign" in gw.sent[ -1 ][ 1 ].lower()   # advisory framing carried through
+
+
+# ── declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, Rick 2026-06-11) ──
+
+class TestDeclaredManagers:
+    """declared_managers wiring: fallback head, list copy, default-resolver fold,
+    snapshot pass-through. Role-only — allocation is untouched."""
+
+    def test_default_empty_roster_falls_back_to_manager_recipient( self, tmp_path ):
+        job = _make_job( tmp_path )
+        assert job.declared_managers == [ ]
+        assert job.declared_fallback_manager == "Tiberius"      # = manager_recipient
+
+    def test_roster_head_outranks_manager_recipient( self, tmp_path ):
+        job = _make_job( tmp_path, declared_managers=[ "Mr. Radio", "Tiberius" ] )
+        assert job.declared_managers == [ "Mr. Radio", "Tiberius" ]
+        assert job.declared_fallback_manager == "Mr. Radio"
+
+    def test_roster_is_copied_not_aliased( self, tmp_path ):
+        roster = [ "Mr. Radio" ]
+        job    = _make_job( tmp_path, declared_managers=roster )
+        roster.append( "Imposter" )
+        assert job.declared_managers == [ "Mr. Radio" ]
+
+    def test_default_active_resolver_folds_declared_roster( self, tmp_path, monkeypatch ):
+        # The production default seam must thread declared_managers through to
+        # manager_resolver.resolve_active_managers (the Part-6 fanout source).
+        import cosa.agents.heartbeat_arbiter.arbiter_job as aj
+        calls = [ ]
+        def fake_resolver( who_rows, bridge_sessions, declared_managers=None ):
+            calls.append( ( who_rows, bridge_sessions, declared_managers ) )
+            return [ "Mr. Radio" ]
+        monkeypatch.setattr( aj, "_default_resolve_active_managers", fake_resolver )
+        job = _make_job( tmp_path, declared_managers=[ "Mr. Radio" ],
+                         resolve_active_managers_fn=None )      # force the production default
+        assert job._active_managers( [ ], { "s": "Mr. Radio" } ) == [ "Mr. Radio" ]
+        assert calls == [ ( [ ], { "s": "Mr. Radio" }, [ "Mr. Radio" ] ) ]
+
+    def test_injected_active_resolver_seam_signature_unchanged( self, tmp_path ):
+        # Existing fakes keep their two-arg signature — the fold lives ONLY in
+        # the production default.
+        job = _make_job( tmp_path, declared_managers=[ "Mr. Radio" ],
+                         resolve_active_managers_fn=lambda w, b: [ "Custom" ] )
+        assert job._active_managers( [ ], { } ) == [ "Custom" ]
+
+    def test_publish_snapshot_passes_declared_to_build_snapshot( self, tmp_path, monkeypatch ):
+        import datetime as _dt
+        import cosa.agents.heartbeat_arbiter.arbiter_job as aj
+        seen = { }
+        def fake_build_snapshot( fleet_view, bridge_mtimes, now, **kwargs ):
+            seen.update( kwargs )
+            return { "generated_at": now.isoformat(), "session_count": 0, "sessions": [ ] }
+        monkeypatch.setattr( aj, "build_snapshot", fake_build_snapshot )
+        job = _make_job( tmp_path, declared_managers=[ "Mr. Radio", "Tiberius" ],
+                         snapshot_sink=lambda snap: None, render_sink=lambda line: None,
+                         bridge_mtime_fn=lambda sid: None )
+        job._publish_fleet_snapshot( { }, _dt.datetime( 2026, 6, 11, tzinfo=_dt.timezone.utc ) )
+        assert seen[ "declared_managers" ] == [ "Mr. Radio", "Tiberius" ]

@@ -47,7 +47,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_c
 from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids, listener_spawn_lock
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
-from cosa.rest.voice_persona_helpers import pick_preferred_persona_from_env
+from cosa.rest.voice_persona_helpers import resolve_session_start_persona_chain
 
 
 def _find_tmux_session( cc_pid ):
@@ -577,8 +577,8 @@ def _check_cosa_voice_status():
 
 def _allocate_voice_persona_via_http(
     server_url, project, stable_session_id,
-    previous_persona_name  = None,
-    preferred_persona_name = None
+    previous_persona_name = None,
+    persona_chain         = None
 ):
     """
     Allocate a voice persona for the given session by calling the cosa-voice
@@ -606,12 +606,13 @@ def _allocate_voice_persona_via_http(
         - When previous_persona_name is non-empty, threads it as a
           query-string param so the server pushes a "Voice re-assigned"
           announcement after the assigned broadcast
-        - When preferred_persona_name is non-empty, threads it as a
-          query-string param so the server uses soft-preference semantics
-          (try preferred, fall back to random on miss, push a
-          voice_persona_conflict notification). Used by the env-var
-          default-persona path; mutually exclusive with the strict
-          requested_persona_name swap endpoint.
+        - When persona_chain is non-empty, threads it as a query-string
+          param so the server walks the chain strictly (first FREE element
+          wins, `*` = "then take anything free", exhaustion without `*` =
+          409 + conflict notify — the fail-soft except path below turns
+          that 409 into a None return, leaving the session persona-less).
+          Mutually exclusive with the strict requested_persona_name swap
+          endpoint.
 
     Args:
         server_url: Lupin server URL
@@ -620,9 +621,9 @@ def _allocate_voice_persona_via_http(
         previous_persona_name: Optional display_name of the outgoing persona
             (when /clear preservation failed); causes the server to push a
             "Voice re-assigned: X → Y" notification on successful allocation
-        preferred_persona_name: Optional persona name from the user's shell
-            env var (`COSA_VOICE_PREFERRED_PERSONA__<PROJECT>`) — soft
-            preference with graceful fallback + conflict notify on miss
+        persona_chain: Optional ordered persona-chain expression — from the
+            spawn-injected `COSA_VOICE_PERSONA_CHAIN` env var or the user's
+            per-repo `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` shell default
 
     Returns:
         dict or None: The persona dict, or None on failure
@@ -648,13 +649,13 @@ def _allocate_voice_persona_via_http(
             return None
 
         # Step 2: POST /allocate (optionally with previous_persona_name +
-        # preferred_persona_name as query params)
+        # persona_chain as query params)
         alloc_url    = f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate"
         query_params = []
         if previous_persona_name:
             query_params.append( f"previous_persona_name={urllib.parse.quote( previous_persona_name )}" )
-        if preferred_persona_name:
-            query_params.append( f"preferred_persona_name={urllib.parse.quote( preferred_persona_name )}" )
+        if persona_chain:
+            query_params.append( f"persona_chain={urllib.parse.quote( persona_chain )}" )
         if query_params:
             alloc_url = f"{alloc_url}?{'&'.join( query_params )}"
 
@@ -1044,29 +1045,28 @@ def main():
             project = detect_project()
         except Exception:
             project = "lupin"
-        # Per-repo default persona from user's shell env var
-        # `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` — when set, the server
-        # uses soft-preference semantics (try named persona, fall back to
-        # random + conflict notify on miss). When unset, the server falls
-        # back to its existing random-allocation behavior.
-        # See: planning-is-prompting/src/rnd/2026.05.19-cosa-voice-preferred-persona-env-var.md
-        preferred = pick_preferred_persona_from_env( project )
+        # Persona-chain precedence (strict ordered-fallback, Rick 2026-06-11):
+        # spawn-injected COSA_VOICE_PERSONA_CHAIN > headless-no-default >
+        # per-repo COSA_VOICE_PREFERRED_PERSONA__<PROJECT> > None (random).
+        # Full precedence contract lives in the pure helper.
+        # See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
+        chain = resolve_session_start_persona_chain( project, os.environ )
         # ── TEMPORARY DEBUG (2026-05-19, Tiberius session 4e724860) ─────────
         # Investigating why LookML hook never successfully allocates a persona
         # despite the backend chain working when called manually via curl.
         # Remove once root cause identified.
         _env_key   = f"COSA_VOICE_PREFERRED_PERSONA__{project.upper().replace( '-', '_' )}"
         _env_raw   = os.environ.get( _env_key, "<UNSET>" )
-        print( f"[LOOKML-DEBUG] phase4.5 entry — project={project!r} env_key={_env_key!r} env_raw={_env_raw!r} preferred={preferred!r}",
+        print( f"[LOOKML-DEBUG] phase4.5 entry — project={project!r} env_key={_env_key!r} env_raw={_env_raw!r} spawned_chain_env={os.environ.get( 'COSA_VOICE_PERSONA_CHAIN', '<UNSET>' )!r} chain={chain!r}",
                file=sys.stderr )
         try:
             voice_persona_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
-            print( f"[LOOKML-DEBUG] calling _allocate_voice_persona_via_http — server={voice_persona_server_url!r} sid={stable_session_id!r} preferred={preferred!r}",
+            print( f"[LOOKML-DEBUG] calling _allocate_voice_persona_via_http — server={voice_persona_server_url!r} sid={stable_session_id!r} chain={chain!r}",
                    file=sys.stderr )
             allocated = _allocate_voice_persona_via_http(
                 voice_persona_server_url, project, stable_session_id,
-                previous_persona_name  = previous_persona_name,
-                preferred_persona_name = preferred
+                previous_persona_name = previous_persona_name,
+                persona_chain         = chain
             )
             print( f"[LOOKML-DEBUG] _allocate_voice_persona_via_http returned — allocated={allocated!r}",
                    file=sys.stderr )

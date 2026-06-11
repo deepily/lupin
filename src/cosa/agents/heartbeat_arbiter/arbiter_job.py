@@ -255,6 +255,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         commons                  : ArbiterGateway,
         poll_seconds             : int,
         manager_recipient        : str,
+        declared_managers        : Optional[ list ] = None,
         alive_threshold_seconds  : int                  = 600,
         quiet_threshold_seconds  : int                  = 300,
         ping_global_cap          : int                  = 10,
@@ -362,6 +363,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # --- config ---
         self.poll_seconds            = poll_seconds
         self.manager_recipient       = manager_recipient
+        # Declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, Rick
+        # 2026-06-11): feeds (a) the Part-6 active-managers fanout via the
+        # default resolver, (b) build_snapshot role badging, (c) the
+        # per-worker declared fallback below. Role-only — never reserves
+        # personas.
+        self.declared_managers       = list( declared_managers ) if declared_managers else [ ]
+        # The per-worker declared fallback stays a SINGLE recipient
+        # (resolve_manager's contract): the roster head outranks the INI
+        # manager-on-duty placeholder when a roster is declared.
+        self.declared_fallback_manager = self.declared_managers[ 0 ] if self.declared_managers else manager_recipient
         self.alive_threshold_seconds = alive_threshold_seconds
         self.quiet_threshold_seconds = quiet_threshold_seconds
         self.ping_global_cap         = ping_global_cap
@@ -386,9 +397,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._resolve_manager_fn = resolve_manager_fn if resolve_manager_fn is not None else _default_resolve_manager
         # 2b-2 Part-6 fanout: the active-managers-on-duty resolver seam (commons
         # candidate ∩ live-bridge PID guard — phantom-safe). Injectable for tests.
+        # The production default folds the declared roster in here, keeping the
+        # seam's (who_rows, bridge_sessions) signature stable for injected fakes.
         self._resolve_active_managers_fn = ( resolve_active_managers_fn
                                              if resolve_active_managers_fn is not None
-                                             else _default_resolve_active_managers )
+                                             else lambda who_rows, bridge_sessions:
+                                                 _default_resolve_active_managers(
+                                                     who_rows, bridge_sessions,
+                                                     declared_managers=self.declared_managers ) )
         self.tap_min_interval_seconds      = tap_min_interval_seconds
         self.manager_ack_window_seconds    = manager_ack_window_seconds
         self.fleet_stall_window_seconds    = fleet_stall_window_seconds
@@ -599,6 +615,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             resolve_manager_fn = self._resolve_manager_fn,
             list_managers_fn   = self._list_managers_fn,
             process_dead       = process_dead,
+            declared_managers  = self.declared_managers,
             include_offline    = True,        # FULL view for the post-game F2/F3 detectors
         )
         # Fleet-Status offline-lineage carry (2026-06-10): a reaped worker loses both
@@ -813,7 +830,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if not sid:
             return None, None
         try:
-            res     = self._resolve_manager_fn( sid, declared_manager=self.manager_recipient )
+            res     = self._resolve_manager_fn( sid, declared_manager=self.declared_fallback_manager )
             manager = res.get( "manager_persona" ) if isinstance( res, dict ) else None
         except Exception:
             manager = None
@@ -951,7 +968,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         groups = { }                                 # manager_persona -> [view, ...]
         for view in attention:
             res     = self._resolve_manager_fn( view.get( "session_id" ),
-                                                declared_manager=self.manager_recipient )
+                                                declared_manager=self.declared_fallback_manager )
             persona = res.get( "manager_persona" ) if isinstance( res, dict ) else None
             if not persona:
                 self._route(                                   # Part-6 #8 orphan worker

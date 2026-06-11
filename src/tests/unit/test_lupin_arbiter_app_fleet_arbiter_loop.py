@@ -189,3 +189,22 @@ def test_default_log_fn_fleet_arbiter_emits_json( capsys ):
     _default_log_fn( "fleet_arbiter_job_start", cycle=1 )
     p = json.loads( capsys.readouterr().out.strip() )
     assert p[ "loop" ] == "fleet_arbiter" and p[ "event" ] == "fleet_arbiter_job_start" and p[ "cycle" ] == 1
+
+
+def test_build_factory_passes_declared_managers_to_job():
+    """COSA_VOICE_MANAGERS roster rides the factory into every recycled job."""
+    gw, store = FakeGateway(), LocalSnapshotStore()
+    factory = build_fleet_arbiter_job_factory(
+        gw, store, log_fn=lambda *a, **k: None,
+        manager_on_duty="dut", declared_managers=[ "Mr. Radio", "Tiberius" ] )
+    job = factory()
+    assert job.declared_managers == [ "Mr. Radio", "Tiberius" ]
+    assert job.declared_fallback_manager == "Mr. Radio"          # roster head outranks INI dut
+
+
+def test_build_factory_default_no_declared_managers():
+    gw, store = FakeGateway(), LocalSnapshotStore()
+    job = build_fleet_arbiter_job_factory( gw, store, log_fn=lambda *a, **k: None,
+                                           manager_on_duty="dut" )()
+    assert job.declared_managers == [ ]
+    assert job.declared_fallback_manager == "dut"                # INI fallback unchanged
