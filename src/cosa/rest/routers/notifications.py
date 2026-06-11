@@ -878,6 +878,19 @@ async def notify_user(
                            f"conf={prediction_result.confidence:.3f}, hint={'yes' if prediction_hint else 'no'}" )
             except Exception as pred_error:
                 print( f"[PREDICTION] ⚠️ Prediction hook error (non-fatal): {pred_error}" )
+
+        # Stage 3 (Krishna's drift-fix): the client gates its 👍🏼/👎🏼 vote controls on the
+        # INI vote gate — carry it IN the hint payload so notifications.js cannot drift
+        # from the server config. Voting disabled → gate not stamped → no controls offered.
+        # An override hint may pre-set the key (to e2e-test both sides of the gate).
+        if prediction_hint is not None and "vote_min_confidence_threshold" not in prediction_hint:
+            try:
+                from cosa.agents.prediction_engine import get_prediction_engine
+                vote_engine = get_prediction_engine()
+                if vote_engine.hint_voting_enabled:
+                    prediction_hint[ "vote_min_confidence_threshold" ] = vote_engine.hint_vote_min_confidence_threshold
+            except Exception as gate_error:
+                print( f"[PREDICTION] ⚠️ Vote-gate stamp error (non-fatal): {gate_error}" )
         # ---- End Prediction Engine Hook ----
 
         # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields)

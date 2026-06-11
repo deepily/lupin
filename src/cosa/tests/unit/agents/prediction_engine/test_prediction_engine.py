@@ -162,6 +162,8 @@ def test_init_with_config_mgr_reads_keys():
                 "prediction engine open ended prompt template"    : "/src/conf/p.txt",
                 "prediction hint vote approved weight"            : 2.0,
                 "prediction hint vote rejected weight"            : 2.0,
+                "prediction hint voting enabled"                  : True,
+                "prediction hint vote min confidence threshold"   : 0.5,
             }
             return table[ key ]
 
@@ -176,6 +178,8 @@ def test_init_with_config_mgr_reads_keys():
     assert eng._llm_spec_key == "spec/x"
     assert eng.hint_vote_approved_weight == 2.0
     assert eng.hint_vote_rejected_weight == 2.0
+    assert eng.hint_voting_enabled is True
+    assert eng.hint_vote_min_confidence_threshold == 0.5
     # debug = config(False) OR debug(True) = True
     assert eng.debug is True
     PredictionEngine.reset()
@@ -536,17 +540,17 @@ def test_mc_skips_unparseable_case_then_uses_valid( engine, monkeypatch ):
 # ---------------------------------------------------------------------------
 
 def test_tally_multi_select_threshold_and_fallback( engine ):
-    # valid_cases=4 → threshold 2.0. "A"(3) >= thr selected; "B"(1) < thr excluded.
-    counts = { "H1": { "A": 3, "B": 1 } }
-    answers, avg = engine._tally_multi_select_votes( counts, valid_cases=4 )
+    # positive_case_mass=4 → threshold 2.0. "A"(3) >= thr selected; "B"(1) < thr excluded.
+    votes = { "H1": { "A": 3, "B": 1 } }
+    answers, avg = engine._tally_multi_select_votes( votes, positive_case_mass=4 )
     assert answers[ "H1" ] == [ "A" ]
     assert avg == pytest.approx( 0.75 )                 # A inclusion 3/4
 
 
 def test_tally_multi_select_no_option_meets_threshold_fallback( engine ):
-    # valid_cases=4 → threshold 2.0. Both below → fallback to highest-count option.
-    counts = { "H1": { "A": 1, "B": 1 } }
-    answers, avg = engine._tally_multi_select_votes( counts, valid_cases=4 )
+    # positive_case_mass=4 → threshold 2.0. Both below → fallback to highest-weighted option.
+    votes = { "H1": { "A": 1, "B": 1 } }
+    answers, avg = engine._tally_multi_select_votes( votes, positive_case_mass=4 )
     assert len( answers[ "H1" ] ) == 1                  # single fallback option
     assert avg == pytest.approx( 0.25 )                 # 1/4
 

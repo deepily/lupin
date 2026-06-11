@@ -33,7 +33,8 @@ _RENDER_HINT_JS = """( args ) => {
         message         : args.message,
         response_type   : 'yes_no',
         prediction_hint : { predicted_value: 'yes', confidence: 0.9,
-                            strategy: 'cbr_majority_vote', category: 'deploy' },
+                            strategy: 'cbr_majority_vote', category: 'deploy',
+                            vote_min_confidence_threshold: 0.5 },
     };
     const html = ui.buildPredictionHintSection( notif );
     const host = document.createElement( 'div' );
