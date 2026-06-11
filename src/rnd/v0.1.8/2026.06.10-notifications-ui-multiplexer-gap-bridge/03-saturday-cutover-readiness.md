@@ -75,6 +75,10 @@ those are now built, tested to the 100% gate, and held **inactive** behind an IN
   (both servers read the same file), which is the gated action itself. Mitigation: the
   HTTP-layer unit test exercises the real router + 302 + Location through TestClient; flip-day
   verification is a 30-second probe (`/app/notifications` → 302; `?classic=1` → 200).
-- **`:8000` receipts pending** — `ts-5e0f61c0` / `ts-5a32ef03` queued behind a ~6-job batch;
-  results to be triaged when they land (failure would be test-side, not product — server path
-  is proven inert).
+- ~~**`:8000` receipts pending**~~ **RESOLVED 2026-06-11 PM:** `ts-5e0f61c0` (10:38 EDT) and
+  `ts-5a32ef03` (10:41 EDT) both **ALL PASSED — 11/11, 0 failed/errors/skipped** (reports:
+  `test-suite/2026.06.11-at-10:38-EDT-e2e-results.md`, `…10:41…`). The runs collected the
+  patched working-tree test files, so the `?classic=1` navigation patch is E2E-proven inert.
+- **WP12 color parity confirmed** (Tiberius relay 06-11): the multiplexer fleet panel already
+  mirrors the final legacy color scheme (Lane E follow-on `8e9488a9` — exact palette + classes
+  in `fleet-status.css`). Not a gap.
