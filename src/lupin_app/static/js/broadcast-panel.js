@@ -299,9 +299,21 @@
         updatePreview();
         updateSendButton();
 
+        // F3 fanout receipts — surface filtered-out sessions so a silent
+        // broadcast miss (stale bridge, owner mismatch) is visible to the sender.
+        let filteredNote = "";
+        if ( Array.isArray( data.filtered_out ) && data.filtered_out.length > 0 ) {
+            const reasons = data.filtered_out
+                .map( f => f.reason + ": " + String( f.session_id || "" ).slice( 0, 8 ) )
+                .join( ", " );
+            filteredNote = " — " + data.filtered_out.length + " filtered out (" + reasons + ")";
+            console.debug( "[broadcast-panel] filtered_out receipts:", data.filtered_out );
+        }
+
         setStatus( "sent to " + data.recipients + " session" +
             ( data.recipients === 1 ? "" : "s" ) +
-            " (broadcast_id " + data.broadcast_id.slice( 0, 8 ) + "…)" );
+            " (broadcast_id " + data.broadcast_id.slice( 0, 8 ) + "…)" +
+            filteredNote );
     }
 
     async function safeJsonDetail( res ) {

@@ -44,6 +44,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids, listener_spawn_lock
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
 from cosa.rest.voice_persona_helpers import pick_preferred_persona_from_env
@@ -148,6 +149,32 @@ def _resolve_cc_pid( hook_ppid ):
         return hook_ppid
 
 
+def _record_listener_pid( session_data, session_file, listener_pid ):
+    """
+    Record the listener PID in the session bridge file for SessionEnd cleanup.
+
+    Requires:
+        - listener_pid is a positive int
+
+    Ensures:
+        - Writes listener_pid into session_data and persists to session_file
+        - No-op when session_data is None or session_file is falsy
+        - Never raises exceptions (best-effort)
+
+    Args:
+        session_data: Session bridge data dict (updated in-place), or None
+        session_file: Path to session bridge JSON file, or None
+        listener_pid: PID to record
+    """
+    if session_data is not None and session_file:
+        session_data[ "listener_pid" ] = listener_pid
+        try:
+            with open( session_file, "w" ) as f:
+                json.dump( session_data, f, indent=2 )
+        except OSError:
+            pass  # Best-effort
+
+
 def _spawn_listener( session_id, session_data, session_file, accepted_ids=None ):
     """
     Spawn the CC Notification Listener as a background subprocess.
@@ -155,11 +182,22 @@ def _spawn_listener( session_id, session_data, session_file, accepted_ids=None )
     The listener connects via WebSocket and buffers user_initiated_message
     notifications targeted at this CC session.
 
+    Singleton guard (F1, 2026-06-11): the documented `--continue` double-fire
+    runs two concurrent SessionStart hooks; without a guard BOTH spawned a
+    listener, the bridge remembered only the last PID, and the orphaned
+    duplicate raced tmux injections — the broadcast-miss root cause. The
+    check-then-spawn section is serialized under a per-session-hash flock so
+    the second hook sees the first hook's live listener and reuses it.
+    See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §4
+
     Requires:
         - session_id is a non-empty string
         - LUPIN_ROOT environment variable is set (for PYTHONPATH)
 
     Ensures:
+        - At most ONE live listener exists per session hash (flock-serialized
+          pgrep guard; an existing live listener is recorded + returned
+          instead of spawning a duplicate)
         - Spawns listener subprocess in background (detached from hook lifecycle)
         - Records listener PID in session bridge file for SessionEnd cleanup
         - Always writes log file to ~/.claude/sessions/cc-listener-{hash}.log
@@ -183,6 +221,43 @@ def _spawn_listener( session_id, session_data, session_file, accepted_ids=None )
     if os.environ.get( "LUPIN_CC_HOOK_LISTENER_ENABLED", "true" ).strip().lower() == "false":
         return None
 
+    short_id = session_id[:8]
+
+    with listener_spawn_lock( short_id ):
+        existing = find_live_listener_pids( short_id )
+        if existing:
+            # A live listener already serves this session hash (the other
+            # double-fire hook won the race, or a resume found the prior
+            # listener still running). Record it so SessionEnd can reap it.
+            _record_listener_pid( session_data, session_file, existing[ 0 ] )
+            return existing[ 0 ]
+
+        return _spawn_listener_locked( session_id, session_data, session_file, accepted_ids )
+
+
+def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids ):
+    """
+    Spawn the listener subprocess — F1 critical section, caller holds the
+    per-session-hash spawn lock.
+
+    Requires:
+        - session_id is a non-empty string
+        - caller holds listener_spawn_lock( session_id[:8] )
+
+    Ensures:
+        - Same spawn/record/liveness contract as _spawn_listener
+        - Returns listener PID on success, None on failure
+        - Never raises exceptions
+
+    Args:
+        session_id: Full CC session ID (stable_session_id after Phase 2)
+        session_data: Session bridge data dict (updated in-place with listener_pid)
+        session_file: Path to session bridge JSON file
+        accepted_ids: Comma-separated 8-char hashes for listener filtering
+
+    Returns:
+        int or None: Listener subprocess PID, or None on failure
+    """
     short_id = session_id[:8]
 
     cmd = [
@@ -260,13 +335,7 @@ def _spawn_listener( session_id, session_data, session_file, accepted_ids=None )
             return None
 
         # Record listener PID in session bridge file for SessionEnd cleanup
-        if session_data is not None and session_file:
-            session_data[ "listener_pid" ] = listener_pid
-            try:
-                with open( session_file, "w" ) as f:
-                    json.dump( session_data, f, indent=2 )
-            except OSError:
-                pass  # Best-effort
+        _record_listener_pid( session_data, session_file, listener_pid )
 
         return listener_pid
 

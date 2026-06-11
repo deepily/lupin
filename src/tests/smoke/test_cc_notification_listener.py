@@ -814,11 +814,18 @@ class TestStampUserIdOnBridge:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestSessionEndHook:
-    """Test SessionEnd hook helper functions."""
+    """Test SessionEnd hook helper functions (F2 reap-all contract, 2026-06-11)."""
 
-    def test_find_listener_pid_from_bridge( self, tmp_path ):
-        """Finds listener PID from session bridge file."""
-        from lupin_cli.claude_code.hooks.session_end import _find_listener_pid
+    @staticmethod
+    def _no_cmdline_matches( monkeypatch ):
+        """Silence the pgrep sweep so only bridge-derived PIDs are observed."""
+        import lupin_cli.claude_code.hooks.lib.listener_processes as listener_processes
+        monkeypatch.setattr( listener_processes, "find_live_listener_pids", lambda h: [ ] )
+
+    def test_find_listener_pids_from_bridge( self, tmp_path, monkeypatch ):
+        """Finds the bridge-recorded listener PID."""
+        from lupin_cli.claude_code.hooks.session_end import _find_all_listener_pids
+        self._no_cmdline_matches( monkeypatch )
 
         bridge_file = tmp_path / "cc-12345.json"
         bridge_data = {
@@ -827,15 +834,16 @@ class TestSessionEndHook:
         }
         bridge_file.write_text( json.dumps( bridge_data ) )
 
-        pid = _find_listener_pid(
+        pids = _find_all_listener_pids(
             "bbd0e94b-cdf0-4766-a16d-16fe116125ef",
             session_dir=str( tmp_path )
         )
-        assert pid == 99999
+        assert pids == [ 99999 ]
 
-    def test_no_matching_session( self, tmp_path ):
-        """Returns None when no bridge file matches session_id."""
-        from lupin_cli.claude_code.hooks.session_end import _find_listener_pid
+    def test_no_matching_session( self, tmp_path, monkeypatch ):
+        """Returns [] when no bridge file matches session_id."""
+        from lupin_cli.claude_code.hooks.session_end import _find_all_listener_pids
+        self._no_cmdline_matches( monkeypatch )
 
         bridge_file = tmp_path / "cc-12345.json"
         bridge_file.write_text( json.dumps( {
@@ -843,30 +851,32 @@ class TestSessionEndHook:
             "listener_pid" : 11111,
         } ) )
 
-        pid = _find_listener_pid( "nonexistent-session", session_dir=str( tmp_path ) )
-        assert pid is None
+        pids = _find_all_listener_pids( "nonexistent-session", session_dir=str( tmp_path ) )
+        assert pids == [ ]
 
-    def test_empty_session_dir( self, tmp_path ):
-        """Returns None when session dir is empty."""
-        from lupin_cli.claude_code.hooks.session_end import _find_listener_pid
+    def test_empty_session_dir( self, tmp_path, monkeypatch ):
+        """Returns [] when session dir is empty."""
+        from lupin_cli.claude_code.hooks.session_end import _find_all_listener_pids
+        self._no_cmdline_matches( monkeypatch )
 
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
 
-        pid = _find_listener_pid( "any-session", session_dir=str( empty_dir ) )
-        assert pid is None
+        pids = _find_all_listener_pids( "any-session", session_dir=str( empty_dir ) )
+        assert pids == [ ]
 
-    def test_no_listener_pid_key( self, tmp_path ):
-        """Returns None when bridge file has no listener_pid."""
-        from lupin_cli.claude_code.hooks.session_end import _find_listener_pid
+    def test_no_listener_pid_key( self, tmp_path, monkeypatch ):
+        """Returns [] when bridge file has no listener_pid."""
+        from lupin_cli.claude_code.hooks.session_end import _find_all_listener_pids
+        self._no_cmdline_matches( monkeypatch )
 
         bridge_file = tmp_path / "cc-99999.json"
         bridge_file.write_text( json.dumps( {
             "session_id" : "test-session",
         } ) )
 
-        pid = _find_listener_pid( "test-session", session_dir=str( tmp_path ) )
-        assert pid is None
+        pids = _find_all_listener_pids( "test-session", session_dir=str( tmp_path ) )
+        assert pids == [ ]
 
 
 # ══════════════════════════════════════════════════════════════════════════════

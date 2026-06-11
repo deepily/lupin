@@ -322,7 +322,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
 
     def test_bridge_none_skipped( self ):
         raw = [ ( "pathA", "sidA", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: None,
         )
@@ -330,7 +330,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
 
     def test_owner_mismatch_skipped( self ):
         raw = [ ( "p", "s", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { "owner_user_id": "OTHER" },
         )
@@ -338,7 +338,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
 
     def test_owner_none_passes_graceful( self ):
         raw = [ ( "p", "s", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { "owner_user_id": None },
             mtime_fn=lambda p: 1000.0,   # fresh bridge mtime → alive
@@ -347,7 +347,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
 
     def test_owner_match_passes( self ):
         raw = [ ( "p", "s", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { "owner_user_id": "u" },
             mtime_fn=lambda p: 1000.0,   # fresh bridge mtime → alive
@@ -357,7 +357,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
     def test_stale_mtime_skipped( self ):
         # Dead session: bridge mtime frozen past the liveness threshold.
         raw = [ ( "p", "s", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=10,
             now_epoch=1000.0, bridge_loader=lambda p: { },
             mtime_fn=lambda p: 500.0,   # 500s old > 10s threshold = dead
@@ -366,7 +366,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
 
     def test_fresh_mtime_passes( self ):
         raw = [ ( "p", "s", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=10000,
             now_epoch=1000.0, bridge_loader=lambda p: { },
             mtime_fn=lambda p: 999.0,   # 1s old < threshold = alive
@@ -380,7 +380,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
         stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=9 ) ).isoformat()
         now_epoch = datetime.now( timezone.utc ).timestamp()
         raw = [ ( "p", "s", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=7200,
             now_epoch=now_epoch,
             bridge_loader=lambda p: { "idle_detection": { "last_interaction_at": stale_iso } },
@@ -393,7 +393,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
         def boom( p ):
             raise OSError( "gone" )
         raw = [ ( "p", "s", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { }, mtime_fn=boom,
         )
@@ -409,13 +409,13 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
             now_epoch = _time.time()
             raw = [ ( bridge_path, "s", self._persona() ) ]
             loader = lambda p: { }
-            out = filter_and_project_sessions(
+            out, _filtered = filter_and_project_sessions(
                 raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
                 now_epoch=now_epoch, bridge_loader=loader,
             )
             self.assertEqual( len( out ), 1 )
             os.utime( bridge_path, ( now_epoch - 3600, now_epoch - 3600 ) )
-            out = filter_and_project_sessions(
+            out, _filtered = filter_and_project_sessions(
                 raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
                 now_epoch=now_epoch, bridge_loader=loader,
             )
@@ -423,7 +423,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
 
     def test_originator_excluded_when_flag_false( self ):
         raw = [ ( "p", "ME", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { }, originator_session_id="ME",
             include_originator=False, mtime_fn=lambda p: 1000.0,
@@ -432,7 +432,7 @@ class TestFilterAndProjectSessions( unittest.TestCase ):
 
     def test_originator_none_not_excluded( self ):
         raw = [ ( "p", "s", self._persona() ) ]
-        out = filter_and_project_sessions(
+        out, _filtered = filter_and_project_sessions(
             raw_sessions=raw, authenticated_user_id="u", active_session_threshold_seconds=600,
             now_epoch=1000.0, bridge_loader=lambda p: { }, originator_session_id=None,
             include_originator=False, mtime_fn=lambda p: 1000.0,

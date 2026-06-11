@@ -404,7 +404,7 @@ def test_filter_includes_same_user():
         _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria", "icon": "🌸", "color": "#A040A0" } ),
     ]
     loader = lambda p: { "owner_user_id": "alice", "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -421,7 +421,7 @@ def test_filter_excludes_other_user():
         _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ),
     ]
     loader = lambda p: { "owner_user_id": "bob", "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -442,7 +442,7 @@ def test_filter_graceful_includes_bridge_without_owner_user_id():
     raw = [ _make_session_tuple( "/bridge/legacy", "sid-legacy", { "name": "Maria" } ) ]
     # Bridge has NO owner_user_id key
     loader = lambda p: { "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -461,7 +461,7 @@ def test_filter_graceful_includes_bridge_with_null_owner_user_id():
     """
     raw = [ _make_session_tuple( "/bridge/null", "sid-null", { "name": "Maria" } ) ]
     loader = lambda p: { "owner_user_id": None, "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -495,7 +495,7 @@ def test_filter_uses_owner_user_id_not_legacy_user_id():
         "owner_user_id"       : "alice",           # human owner — the one that matters
         "last_activity_epoch" : 1000.0,
     }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -521,7 +521,7 @@ def test_filter_includes_dormant_worker_stale_interaction_fresh_mtime():
     stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=9, minutes=30 ) ).isoformat()
     now_epoch = datetime.now( timezone.utc ).timestamp()
     loader = lambda p: { "idle_detection": { "last_interaction_at": stale_iso } }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "anyone",
         active_session_threshold_seconds = 7200,
@@ -545,7 +545,7 @@ def test_filter_includes_session_recently_interactive_via_idle_detection_iso():
     recent_iso = ( datetime.now( timezone.utc ) - timedelta( seconds=60 ) ).isoformat()
     now_epoch  = datetime.now( timezone.utc ).timestamp()
     loader = lambda p: { "idle_detection": { "last_interaction_at": recent_iso } }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "anyone",
         active_session_threshold_seconds = 600,
@@ -572,7 +572,7 @@ def test_filter_strict_when_bridge_has_owner_user_id():
         if str( p ) == "/bridge/A": return { "owner_user_id": "alice", "last_activity_epoch": 1000.0 }
         if str( p ) == "/bridge/B": return { "owner_user_id": "bob",   "last_activity_epoch": 1000.0 }
         return None
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -588,7 +588,7 @@ def test_filter_strict_when_bridge_has_owner_user_id():
 def test_filter_skips_unloadable_bridge():
     """Bridge loader returns None → session skipped."""
     raw = [ _make_session_tuple( "/bridge/A", "sid-A", { } ) ]
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -602,7 +602,7 @@ def test_filter_excludes_dead_session_stale_mtime():
     """A DEAD session — bridge mtime frozen past the liveness threshold — is excluded."""
     raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
     loader = lambda p: { "owner_user_id": "alice" }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -620,7 +620,7 @@ def test_filter_includes_session_regardless_of_interaction_fields():
     """
     raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
     loader = lambda p: { "user_id": "alice" }   # no interaction/activity fields at all
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -636,7 +636,7 @@ def test_filter_mtime_fn_oserror_skips_session():
     raw = [ _make_session_tuple( "/bridge/gone", "sid-gone", { "name": "Maria" } ) ]
     def boom( p ):
         raise OSError( "bridge vanished" )
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -659,7 +659,7 @@ def test_filter_default_mtime_fn_uses_real_file_stat( tmp_path ):
     raw    = [ _make_session_tuple( bridge_path, "sid-real", { "name": "Maria" } ) ]
     loader = lambda p: { "owner_user_id": "alice" }
     # Fresh file (just written) → included via the DEFAULT mtime_fn (no injection).
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -669,7 +669,7 @@ def test_filter_default_mtime_fn_uses_real_file_stat( tmp_path ):
     assert len( out ) == 1
     # Age the file 1 hour into the past → excluded by the same default mtime_fn.
     os.utime( bridge_path, ( now_epoch - 3600, now_epoch - 3600 ) )
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -685,7 +685,7 @@ def test_filter_excludes_originator_when_requested():
         _make_session_tuple( "/bridge/B", "sid-B", { "name": "Tiberius" } ),
     ]
     loader = lambda p: { "user_id": "alice", "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -705,7 +705,7 @@ def test_filter_includes_originator_by_default():
         _make_session_tuple( "/bridge/B", "sid-B", { "name": "Tiberius" } ),
     ]
     loader = lambda p: { "user_id": "alice", "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -1986,3 +1986,162 @@ def test_execute_broadcast_history_dedupes_broadcast_fanout_end_to_end():
     assert result[ "entries" ][ 0 ][ "metadata" ][ "broadcast_id" ] == bid
     assert "target_session_id" not in result[ "entries" ][ 0 ][ "metadata" ]
 
+
+
+# ─── F3 fanout receipts (2026-06-11) ─────────────────────────────────────────
+# Every formerly-silent recipient-filter gate now emits a filtered_out entry,
+# and execute_broadcast carries filtered_out in BOTH 200 shapes — so a silent
+# broadcast miss (the 2026-06-06 class) is visible to the sender.
+# Per src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §3.
+
+
+def test_receipts_bridge_unreadable():
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: None,
+        mtime_fn                         = lambda p: 1000.0,
+    )
+    assert out == [ ]
+    assert filtered == [ { "session_id": "sid-A", "reason": "bridge_unreadable" } ]
+
+
+def test_receipts_owner_mismatch():
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "bob" },
+        mtime_fn                         = lambda p: 1000.0,
+    )
+    assert out == [ ]
+    assert filtered == [ { "session_id": "sid-A", "reason": "owner_mismatch" } ]
+
+
+def test_receipts_stale_bridge_mtime_includes_age_and_threshold():
+    """Gate 3 — THE silent-loss gate from the 06-06 miss. Age must be reported."""
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 2000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        mtime_fn                         = lambda p: 1000.0,   # 1000s old > 600s threshold
+    )
+    assert out == [ ]
+    assert filtered == [ {
+        "session_id"        : "sid-A",
+        "reason"            : "stale_bridge_mtime",
+        "age_seconds"       : 1000.0,
+        "threshold_seconds" : 600,
+    } ]
+
+
+def test_receipts_bridge_vanished_on_stat_failure():
+    def _raising_mtime( p ):
+        raise OSError( "stat: vanished" )
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        mtime_fn                         = _raising_mtime,
+    )
+    assert out == [ ]
+    assert filtered == [ { "session_id": "sid-A", "reason": "bridge_vanished" } ]
+
+
+def test_receipts_originator_excluded():
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        originator_session_id            = "sid-A",
+        include_originator               = False,
+        mtime_fn                         = lambda p: 1000.0,
+    )
+    assert out == [ ]
+    assert filtered == [ { "session_id": "sid-A", "reason": "originator_excluded" } ]
+
+
+def test_receipts_empty_when_all_pass():
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        mtime_fn                         = lambda p: 1000.0,
+    )
+    assert len( out ) == 1
+    assert filtered == [ ]
+
+
+def test_execute_broadcast_zero_recipient_response_carries_filtered_out( store, rate_limiter, ack_watcher, push_fn ):
+    """The silent-miss shape: every session filtered out → receipts explain WHY."""
+    raw  = [ ( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    body = BroadcastRequestBody( message="anyone there?" )
+    result = execute_broadcast(
+        authenticated_user_id            = "alice",
+        body                             = body,
+        store                            = store,
+        rate_limiter                     = rate_limiter,
+        ack_watcher                      = ack_watcher,
+        notification_queue               = push_fn,
+        active_session_threshold_seconds = 600,
+        raw_sessions_fn                  = _make_raw_sessions_fn( raw ),
+        bridge_loader                    = _bridge_loader_fixed(),
+        build_sender_id                  = lambda sid: sid,
+        now_epoch_fn                     = lambda: 99999.0,
+        mtime_fn                         = lambda p: 1000.0,   # ancient bridge → mtime gate drops it
+    )
+    assert result[ "http_status" ] == 200
+    assert result[ "recipients" ] == 0
+    assert result[ "status" ] == "no-active-sessions"
+    assert result[ "filtered_out" ] == [ {
+        "session_id"        : "sid-A",
+        "reason"            : "stale_bridge_mtime",
+        "age_seconds"       : 98999.0,
+        "threshold_seconds" : 600,
+    } ]
+
+
+def test_execute_broadcast_queued_response_carries_filtered_out( store, rate_limiter, ack_watcher, push_fn, captured_pushes ):
+    """Mixed fanout: one delivered, one mtime-filtered — both visible in the response."""
+    raw = [
+        ( "/bridge/fresh", "sid-fresh", { "name": "Maria" } ),
+        ( "/bridge/stale", "sid-stale", { "name": "Rachel" } ),
+    ]
+    body = BroadcastRequestBody( message="hello all" )
+    result = execute_broadcast(
+        authenticated_user_id            = "alice",
+        body                             = body,
+        store                            = store,
+        rate_limiter                     = rate_limiter,
+        ack_watcher                      = ack_watcher,
+        notification_queue               = push_fn,
+        active_session_threshold_seconds = 600,
+        raw_sessions_fn                  = _make_raw_sessions_fn( raw ),
+        bridge_loader                    = _bridge_loader_fixed(),
+        build_sender_id                  = lambda sid: f"sender-{sid}",
+        now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0 if "fresh" in str( p ) else 1.0,
+    )
+    assert result[ "http_status" ] == 200
+    assert result[ "recipients" ] == 1
+    assert result[ "status" ] == "queued"
+    assert len( result[ "filtered_out" ] ) == 1
+    assert result[ "filtered_out" ][ 0 ][ "session_id" ] == "sid-stale"
+    assert result[ "filtered_out" ][ 0 ][ "reason" ] == "stale_bridge_mtime"
