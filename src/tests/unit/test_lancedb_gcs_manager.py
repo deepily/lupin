@@ -26,6 +26,7 @@ src_path = os_sys.path.join( lupin_root, 'src' )
 if src_path not in sys.path:
     sys.path.insert( 0, src_path )
 
+from cosa.config.configuration_manager import ConfigurationManager
 from cosa.memory.lancedb_solution_manager import LanceDBSolutionManager
 
 
@@ -41,6 +42,13 @@ class TestLanceDBManagerPathResolution:
             "db_path": "/src/conf/long-term-memory/test.lancedb",
             "table_name": "test_table"
         }
+
+        # Seed the ConfigurationManager singleton from the canonical env BEFORE
+        # faking get_project_root — at a virgin (hermetic) module boundary the
+        # manager's CM instantiation would otherwise resolve its INI path
+        # against the fake root and fail the file sanity check. The fake root
+        # then scopes to the db_path resolution under test.
+        ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
         with patch( 'cosa.memory.lancedb_solution_manager.du.get_project_root', return_value='/project/root' ):
             with patch( 'os.path.exists', return_value=True ):

@@ -27,6 +27,67 @@ if src_path not in sys.path:
 # Now cosa is importable - other test files can just: import cosa.utils.util as du
 
 
+# ── FM-21: hermetic-config module boundary ────────────────────────────────────
+#
+# Design + nod trail: src/rnd/v0.1.8/2026.06.11-fm21-test-isolation-hermetic-config-fixture.md
+# Verify pair: src/tests/unit/test_hermetic_config_fixture_{a,b}.py — the _b
+# module fails RED if this fixture is removed.
+
+# LUPIN_TEST_HERMETIC_SENTINEL is never set in real runs — it exists as the
+# verify pair's leak channel AND keeps the delete-on-restore arm exercised on
+# every module teardown.
+_HERMETIC_TRACKED_ENV_VARS = (
+    "LUPIN_CONFIG_MGR_CLI_ARGS",
+    "LUPIN_ROOT",
+    "LUPIN_TEST_HERMETIC_SENTINEL",
+)
+
+
+@pytest.fixture( scope="module", autouse=True )
+def hermetic_config_module_boundary():
+    """
+    Guarantee a virgin ConfigurationManager world at every test-module boundary.
+
+    Module-scoped (not function-scoped) on purpose: the stated contract is
+    "config state cannot leak between test MODULES"; intra-module setup
+    patterns that share a CM instance across tests stay valid, and the
+    singleton is not churned per-test.
+
+    Requires:
+        - cosa.config.configuration_manager importable (path bootstrap above)
+        - LUPIN_CONFIG_MGR_CLI_ARGS / LUPIN_ROOT hold canonical values when
+          a module starts (suite invariant)
+
+    Ensures:
+        - The CM singleton registry entry is dropped before AND after each
+          module — first CM use per module re-derives from the canonical env;
+          existing in-module references stay valid (reset drops the registry
+          entry, not the object)
+        - set_config() mutations, _reset_singleton recreations with custom
+          INIs, and bare os.environ writes to the tracked vars cannot cross
+          a module boundary
+        - Tracked env vars absent at module start are absent again at module
+          end (delete arm); present ones are restored to their snapshot value
+          (restore arm)
+
+    Raises:
+        - None
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+
+    ConfigurationManager.reset_for_testing()
+    env_snapshot = { var : os.environ.get( var ) for var in _HERMETIC_TRACKED_ENV_VARS }
+
+    yield
+
+    ConfigurationManager.reset_for_testing()
+    for var, saved_value in env_snapshot.items():
+        if saved_value is None:
+            os.environ.pop( var, None )
+        else:
+            os.environ[ var ] = saved_value
+
+
 # ── Phase 5 fixtures: model-server carveout testing ──────────────────────────
 #
 # These fixtures support unit tests for the 2026-05-16 model-server carve-out

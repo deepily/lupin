@@ -53,6 +53,13 @@ def _run_hook_main( payload, tmp_dir, session_id="abc12345-fake-uuid" ):
     """
     import io
     from lupin_cli.claude_code.hooks import user_prompt_submit
+    from cosa.config.configuration_manager import ConfigurationManager
+
+    # Seed the ConfigurationManager singleton BEFORE capturing stdout — at a
+    # virgin (hermetic) module boundary the hook's CM instantiation would
+    # otherwise print its init banner into the captured stream and corrupt
+    # the JSON parse below.
+    ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
     captured = io.StringIO()
 
