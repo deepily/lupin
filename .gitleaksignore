@@ -13,3 +13,11 @@
 # not suppressing a live one (every real-secret rule stays enforced via .gitleaks.toml).
 e4ee364fcadaaa4bf0adab5f8b889539da58325f:src/ephemera/notebooks/utterance-embeddings.ipynb:openai-api-key:20
 e4ee364fcadaaa4bf0adab5f8b889539da58325f:src/ephemera/notebooks/utterance-embeddings.ipynb:openai-api-key:56
+#
+# The SCRUB PLACEHOLDER itself (`sk-ROTATED-2026-06-10-PLACEHOLDER`, committed in
+# the M2 batch 64e10375) matched the generic-api-key rule via its `sk-` prefix —
+# a remediation artifact, not a secret (the literal ends in -PLACEHOLDER). The
+# working-tree copy was renamed to drop the `sk-` prefix (2026-06-11) so no future
+# commit re-flags; these two fingerprints cover the immutable historical occurrence.
+64e10375a2ff73bcc88103934302c14b6ec29eba:src/ephemera/notebooks/utterance-embeddings.ipynb:generic-api-key:20
+64e10375a2ff73bcc88103934302c14b6ec29eba:src/ephemera/notebooks/utterance-embeddings.ipynb:generic-api-key:56
