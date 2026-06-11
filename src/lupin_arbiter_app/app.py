@@ -237,9 +237,23 @@ def assemble_app(
     from lupin_arbiter_app.health_watcher import HealthWatcherLoop, docker_inspect_health
     from lupin_arbiter_app.health_watcher import _default_log_fn as _log_default
     from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop, build_fleet_arbiter_job_factory
+    from cosa.agents.heartbeat_arbiter.manager_resolver import pick_declared_managers_from_env
 
     store  = store  if store  is not None else LocalSnapshotStore()
     log_fn = log_fn if log_fn is not None else _log_default
+
+    # ── declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, Rick 2026-06-11):
+    # multi-manager-per-repo support. Role-only — feeds fanout, badging, and the
+    # per-worker declared fallback; never reserves personas. Project resolved the
+    # same way every other arbiter surface does (detect_project from cwd/git),
+    # degrade-safe to "lupin" (this app IS the lupin fleet's arbiter).
+    try:
+        from cosa.agents.utils.sender_id import detect_project
+        _arbiter_project = detect_project()
+    except Exception:
+        _arbiter_project = "lupin"
+    declared_managers = pick_declared_managers_from_env( _arbiter_project )
+    log_fn( "declared_managers_resolved", project=_arbiter_project, managers=declared_managers )
 
     # ── fleet arbiter (L3): the standing v2.2 arbiter on the recycle supervisor ──
     fleet_arbiter_factory = build_fleet_arbiter_job_factory(
@@ -249,6 +263,7 @@ def assemble_app(
         live_notify_fn       = live_notify_fn,
         poll_seconds         = int( cfg.get( "arbiter poll seconds", default=60, return_type="int" ) ),
         manager_on_duty      = cfg.get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty",
+        declared_managers    = declared_managers,
         alive_threshold      = int( cfg.get( "arbiter alive threshold seconds", default=600, return_type="int" ) ),
         quiet_threshold      = int( cfg.get( "arbiter quiet threshold seconds", default=300, return_type="int" ) ),
         tap_min_interval     = int( cfg.get( "arbiter tap min interval seconds", default=300, return_type="int" ) ),

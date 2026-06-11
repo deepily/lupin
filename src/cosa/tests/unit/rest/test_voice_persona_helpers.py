@@ -5,15 +5,16 @@ Covers display_name_for, load_persona_pool_from_config, load_overflow_persona_fr
 _lowest_free_extra_n, _make_extra_persona, borrowed_persona_for_sid,
 pick_unallocated_persona (free / Arnold-overflow / Extra-N / legacy-borrow / empty),
 allocate_persona_for_session, _find_persona_in_pool, pick_requested_persona,
-allocate_requested_persona_for_session, and pick_preferred_persona_from_env — to
-genuine 100% line + branch + function.
+allocate_requested_persona_for_session, pick_persona_chain_from_env,
+parse_persona_chain, resolve_session_start_persona_chain, and
+allocate_persona_chain_for_session — to genuine 100% line + branch + function.
 
 config_mgr is a dict-backed stand-in; session_bridge.find_active_voice_persona_sessions
 and random.choice are patched. ZERO config-file / bridge-file / env mutation leaks.
 """
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, ANY
 
 from cosa.rest import voice_persona_helpers as vph
 from cosa.rest.voice_persona_helpers import (
@@ -28,7 +29,11 @@ from cosa.rest.voice_persona_helpers import (
     _find_persona_in_pool,
     pick_requested_persona,
     allocate_requested_persona_for_session,
-    pick_preferred_persona_from_env,
+    pick_persona_chain_from_env,
+    parse_persona_chain,
+    resolve_session_start_persona_chain,
+    allocate_persona_chain_for_session,
+    PERSONA_CHAIN_WILDCARD,
 )
 
 
@@ -347,26 +352,230 @@ class TestAllocateRequestedPersonaForSession( unittest.TestCase ):
         self.assertIsNone( res[ "persona" ] )
 
 
-class TestPickPreferredPersonaFromEnv( unittest.TestCase ):
+class TestPickPersonaChainFromEnv( unittest.TestCase ):
     def test_none_project_returns_none( self ):
-        self.assertIsNone( pick_preferred_persona_from_env( None ) )
-        self.assertIsNone( pick_preferred_persona_from_env( "" ) )
+        self.assertIsNone( pick_persona_chain_from_env( None ) )
+        self.assertIsNone( pick_persona_chain_from_env( "" ) )
 
     def test_whitespace_project_returns_none( self ):
         # non-empty whitespace passes the first guard but normalizes to ""
-        self.assertIsNone( pick_preferred_persona_from_env( "   " ) )
+        self.assertIsNone( pick_persona_chain_from_env( "   " ) )
 
     def test_env_unset_returns_none( self ):
         with patch.dict( "os.environ", {}, clear=True ):
-            self.assertIsNone( pick_preferred_persona_from_env( "lupin" ) )
+            self.assertIsNone( pick_persona_chain_from_env( "lupin" ) )
 
     def test_env_empty_returns_none( self ):
         with patch.dict( "os.environ", { "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "   " }, clear=True ):
-            self.assertIsNone( pick_preferred_persona_from_env( "lupin" ) )
+            self.assertIsNone( pick_persona_chain_from_env( "lupin" ) )
 
     def test_env_set_returns_value_normalizing_project( self ):
         with patch.dict( "os.environ", { "COSA_VOICE_PREFERRED_PERSONA__COSA_VOICE": "Tiberius" }, clear=True ):
-            self.assertEqual( pick_preferred_persona_from_env( "cosa-voice" ), "Tiberius" )
+            self.assertEqual( pick_persona_chain_from_env( "cosa-voice" ), "Tiberius" )
+
+    def test_explicit_environ_dict_returns_chain_verbatim( self ):
+        # environ= param bypasses os.environ entirely (testability seam)
+        environ = { "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "Mr. Radio,Tiberius,*" }
+        self.assertEqual( pick_persona_chain_from_env( "lupin", environ=environ ), "Mr. Radio,Tiberius,*" )
+
+    def test_explicit_environ_dict_unset_returns_none( self ):
+        self.assertIsNone( pick_persona_chain_from_env( "lupin", environ={} ) )
+
+    def test_explicit_environ_dict_whitespace_value_returns_none( self ):
+        environ = { "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "   " }
+        self.assertIsNone( pick_persona_chain_from_env( "lupin", environ=environ ) )
+
+
+class TestParsePersonaChain( unittest.TestCase ):
+    def test_csv_string( self ):
+        self.assertEqual( parse_persona_chain( "Rio,Krishna,*" ), [ "Rio", "Krishna", "*" ] )
+
+    def test_csv_strips_whitespace_around_elements( self ):
+        self.assertEqual( parse_persona_chain( " Rio , Krishna , * " ), [ "Rio", "Krishna", "*" ] )
+
+    def test_list_input( self ):
+        self.assertEqual( parse_persona_chain( [ "Rio", "Krishna" ] ), [ "Rio", "Krishna" ] )
+
+    def test_multi_word_name_passes_verbatim( self ):
+        # Commas are the ONLY delimiter — "Mr. Radio" stays one element
+        self.assertEqual( parse_persona_chain( "Mr. Radio, Tiberius , *" ), [ "Mr. Radio", "Tiberius", "*" ] )
+
+    def test_wildcard_is_an_ordinary_element( self ):
+        self.assertEqual( parse_persona_chain( "*" ), [ PERSONA_CHAIN_WILDCARD ] )
+
+    def test_case_insensitive_dedupe_first_wins( self ):
+        self.assertEqual( parse_persona_chain( "rio,Rio,*" ),       [ "rio", "*" ] )
+        self.assertEqual( parse_persona_chain( "Rio,RIO,rio,Rio" ), [ "Rio" ] )
+
+    def test_non_string_items_in_list_skipped( self ):
+        self.assertEqual( parse_persona_chain( [ "Rio", 42, None, "*" ] ), [ "Rio", "*" ] )
+
+    def test_none_returns_empty( self ):
+        self.assertEqual( parse_persona_chain( None ), [] )
+
+    def test_empty_string_returns_empty( self ):
+        self.assertEqual( parse_persona_chain( "" ), [] )
+
+    def test_commas_only_returns_empty( self ):
+        self.assertEqual( parse_persona_chain( ",,," ), [] )
+
+    def test_int_returns_empty( self ):
+        self.assertEqual( parse_persona_chain( 42 ), [] )
+
+
+class TestResolveSessionStartPersonaChain( unittest.TestCase ):
+    def test_spawn_chain_wins_over_everything( self ):
+        environ = {
+            "COSA_VOICE_PERSONA_CHAIN"            : "Rio,Krishna,*",
+            "COSA_VOICE_HEADLESS"                 : "1",
+            "COSA_VOICE_PREFERRED_PERSONA__LUPIN" : "Tiberius",
+        }
+        self.assertEqual( resolve_session_start_persona_chain( "lupin", environ ), "Rio,Krishna,*" )
+
+    def test_headless_without_chain_returns_none_even_with_repo_var( self ):
+        # A preference-less worker must NOT inherit the user's manager chain
+        environ = {
+            "COSA_VOICE_HEADLESS"                 : "1",
+            "COSA_VOICE_PREFERRED_PERSONA__LUPIN" : "Mr. Radio,Tiberius,*",
+        }
+        self.assertIsNone( resolve_session_start_persona_chain( "lupin", environ ) )
+
+    def test_non_headless_falls_to_per_repo_var( self ):
+        environ = { "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "Mr. Radio,Tiberius,*" }
+        self.assertEqual( resolve_session_start_persona_chain( "lupin", environ ), "Mr. Radio,Tiberius,*" )
+
+    def test_nothing_set_returns_none( self ):
+        self.assertIsNone( resolve_session_start_persona_chain( "lupin", {} ) )
+
+    def test_project_none_returns_none( self ):
+        self.assertIsNone( resolve_session_start_persona_chain( None, {} ) )
+
+    def test_whitespace_spawn_chain_falls_through( self ):
+        environ = {
+            "COSA_VOICE_PERSONA_CHAIN"            : "   ",
+            "COSA_VOICE_PREFERRED_PERSONA__LUPIN" : "Tiberius",
+        }
+        self.assertEqual( resolve_session_start_persona_chain( "lupin", environ ), "Tiberius" )
+
+
+class TestAllocatePersonaChainForSession( unittest.TestCase ):
+    """
+    Chain-walk tests with the two underlying allocators boundary-mocked —
+    allocate_requested_persona_for_session (named elements) and
+    allocate_persona_for_session (wildcard) — so each branch of the walk is
+    driven deterministically with zero bridge/config I/O.
+    """
+
+    _OCCUPIED_RIO = {
+        "status"               : "occupied",
+        "persona"              : None,
+        "holding_session_id"   : "sid-holder",
+        "holding_persona_name" : "rio",
+        "available"            : [ "krishna", "nora" ]
+    }
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_first_element_ok( self, mock_named, mock_wild ):
+        mock_named.return_value = { "status": "ok", "persona": { "name": "rio", "assigned_at": "t" }, "available": [] }
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "Rio,Krishna,*" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], "Rio" )
+        self.assertFalse( res[ "wildcard_used" ] )
+        self.assertEqual( res[ "outcomes" ], [] )
+        self.assertEqual( res[ "persona" ][ "name" ], "rio" )
+        mock_named.assert_called_once_with( ANY, "sid", "Rio" )
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_occupied_then_ok_records_outcome( self, mock_named, mock_wild ):
+        mock_named.side_effect = [
+            dict( self._OCCUPIED_RIO ),
+            { "status": "ok", "persona": { "name": "krishna", "assigned_at": "t" }, "available": [] },
+        ]
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "Rio,Krishna" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], "Krishna" )
+        self.assertFalse( res[ "wildcard_used" ] )
+        self.assertEqual( res[ "outcomes" ], [ {
+            "name"                 : "Rio",
+            "status"               : "occupied",
+            "holding_session_id"   : "sid-holder",
+            "holding_persona_name" : "rio"
+        } ] )
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_not_in_pool_skipped( self, mock_named, mock_wild ):
+        mock_named.side_effect = [
+            { "status": "not_in_pool", "persona": None, "available": [ "nora" ] },
+            { "status": "ok", "persona": { "name": "nora", "assigned_at": "t" }, "available": [] },
+        ]
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "Ghost,Nora" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], "Nora" )
+        # not_in_pool outcome carries NO holding info
+        self.assertEqual( res[ "outcomes" ], [ { "name": "Ghost", "status": "not_in_pool" } ] )
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_wildcard_fires_with_outcomes_carried( self, mock_named, mock_wild ):
+        mock_named.return_value = dict( self._OCCUPIED_RIO )
+        mock_wild.return_value  = { "name": "nora", "assigned_at": "t" }
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "Rio,*" )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], PERSONA_CHAIN_WILDCARD )
+        self.assertTrue( res[ "wildcard_used" ] )
+        self.assertEqual( len( res[ "outcomes" ] ), 1 )
+        self.assertEqual( res[ "outcomes" ][ 0 ][ "name" ], "Rio" )
+        self.assertEqual( res[ "persona" ][ "name" ], "nora" )
+        mock_wild.assert_called_once_with( ANY, "sid" )
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_wildcard_pool_none_returns_pool_error( self, mock_named, mock_wild ):
+        mock_wild.return_value = None
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "*" )
+        self.assertEqual( res[ "status" ], "pool_error" )
+        self.assertIsNone( res[ "persona" ] )
+        self.assertEqual( res[ "outcomes" ], [] )
+        self.assertEqual( res[ "available" ], [] )
+        mock_named.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_named_pool_none_returns_pool_error( self, mock_named, mock_wild ):
+        mock_named.return_value = None
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "Rio,*" )
+        self.assertEqual( res[ "status" ], "pool_error" )
+        self.assertIsNone( res[ "persona" ] )
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_exhausted_records_outcomes_and_available( self, mock_named, mock_wild ):
+        mock_named.side_effect = [
+            dict( self._OCCUPIED_RIO ),
+            { "status": "not_in_pool", "persona": None, "available": [ "krishna" ] },
+        ]
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", "Rio,Ghost" )
+        self.assertEqual( res[ "status" ], "exhausted" )
+        self.assertIsNone( res[ "persona" ] )
+        self.assertEqual( [ o[ "name" ] for o in res[ "outcomes" ] ], [ "Rio", "Ghost" ] )
+        self.assertEqual( [ o[ "status" ] for o in res[ "outcomes" ] ], [ "occupied", "not_in_pool" ] )
+        self.assertEqual( res[ "available" ], [ "krishna" ] )   # from the LAST walk result
+        mock_wild.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_empty_chain_short_circuits( self, mock_named, mock_wild ):
+        res = allocate_persona_chain_for_session( _MockConfig(), "sid", ",,," )
+        self.assertEqual( res, { "status": "empty_chain", "persona": None, "outcomes": [], "available": [] } )
+        mock_named.assert_not_called()
+        mock_wild.assert_not_called()
 
 
 def isolated_unit_test():

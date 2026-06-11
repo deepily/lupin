@@ -18,8 +18,10 @@ _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
+import cosa.agents.heartbeat_arbiter.manager_resolver as MR
 from cosa.agents.heartbeat_arbiter.manager_resolver import (
     find_manager_session_id, resolve_manager, quick_smoke_test,
+    pick_declared_managers_from_env,
     SOURCE_LINEAGE, SOURCE_DECLARED, SOURCE_UNRESOLVED,
 )
 from lupin_mcp.session_spawner import _manifest_path
@@ -184,5 +186,115 @@ def test_quick_smoke_test():
     assert quick_smoke_test() is True
 
 
+# ── pick_declared_managers_from_env (COSA_VOICE_MANAGERS__<PROJECT>) ───────────
+
+class TestPickDeclaredManagersFromEnv:
+    """Declared-manager roster parsing — multi-manager-per-repo (Rick 2026-06-11)."""
+
+    def test_csv_with_multiword_names( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Tiberius, Mr. Radio" }
+        assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Tiberius", "Mr. Radio" ]
+
+    def test_project_normalization_hyphen_and_case( self ):
+        env = { "COSA_VOICE_MANAGERS__COSA_VOICE": "Rio" }
+        assert pick_declared_managers_from_env( "cosa-voice", environ=env ) == [ "Rio" ]
+        assert pick_declared_managers_from_env( "  Cosa-Voice  ", environ=env ) == [ "Rio" ]
+
+    def test_case_insensitive_dedupe_first_wins( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio, rio, RIO, Krishna" }
+        assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Rio", "Krishna" ]
+
+    def test_wildcard_elements_dropped( self ):
+        # A copy-pasted chain expression must not poison the roster.
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio,Tiberius,*" }
+        assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Mr. Radio", "Tiberius" ]
+
+    def test_unset_empty_whitespace_value( self ):
+        assert pick_declared_managers_from_env( "lupin", environ={ } ) == [ ]
+        assert pick_declared_managers_from_env( "lupin", environ={ "COSA_VOICE_MANAGERS__LUPIN": "" } ) == [ ]
+        assert pick_declared_managers_from_env( "lupin", environ={ "COSA_VOICE_MANAGERS__LUPIN": " , ,*" } ) == [ ]
+
+    def test_project_none_empty_whitespace( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio" }
+        assert pick_declared_managers_from_env( None, environ=env )  == [ ]
+        assert pick_declared_managers_from_env( "", environ=env )    == [ ]
+        assert pick_declared_managers_from_env( "   ", environ=env ) == [ ]
+
+    def test_default_environ_is_os_environ( self, monkeypatch ):
+        monkeypatch.setenv( "COSA_VOICE_MANAGERS__LUPIN", "Tiffany" )
+        assert pick_declared_managers_from_env( "lupin" ) == [ "Tiffany" ]
+
+
+# ── resolve_active_managers — declared-roster union ────────────────────────────
+
+class TestResolveActiveManagersDeclared:
+    """Declared ∪ lineage union; phantom guard applies to declared identically."""
+
+    def test_declared_live_bridge_no_manifest_included( self ):
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "mgr-new": "Mr. Radio" },
+            list_managers=lambda sd: set(),                       # owns NO manifest yet
+            declared_managers=[ "Mr. Radio" ] )
+        assert managers == [ "Mr. Radio" ]
+
+    def test_declared_match_is_case_insensitive_bridge_casing_wins( self ):
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "mgr-new": "mr. radio" },
+            list_managers=lambda sd: set(),
+            declared_managers=[ "MR. RADIO" ] )
+        assert managers == [ "mr. radio" ]                        # bridge is the name authority
+
+    def test_declared_union_with_lineage_manager( self ):
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "mgr-a": "Tiberius", "mgr-b": "Mr. Radio" },
+            list_managers=lambda sd: { "mgr-a" },                 # only Tiberius owns a manifest
+            declared_managers=[ "Mr. Radio" ] )
+        assert managers == [ "Mr. Radio", "Tiberius" ]            # sorted distinct union
+
+    def test_declared_without_live_bridge_excluded_phantom_guard( self ):
+        managers = MR.resolve_active_managers(
+            who_rows=[ { "session_id": "mgr-x", "persona_name": "Mr. Radio" } ],
+            bridge_sessions={ },                                  # declared but PID-dead
+            list_managers=lambda sd: set(),
+            declared_managers=[ "Mr. Radio" ] )
+        assert managers == [ ]
+
+    def test_declared_does_not_promote_other_personas( self ):
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "wkr-1": "Rio" },
+            list_managers=lambda sd: set(),
+            declared_managers=[ "Mr. Radio" ] )
+        assert managers == [ ]                                    # Rio is not declared, not lineage
+
+    def test_no_manifests_no_declared_short_circuits( self ):
+        assert MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "s": "P" },
+            list_managers=lambda sd: set(), declared_managers=None ) == [ ]
+
+    def test_declared_blank_names_ignored( self ):
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "mgr-new": "Ann" },
+            list_managers=lambda sd: set(),
+            declared_managers=[ "  ", "Ann" ] )
+        assert managers == [ "Ann" ]
+
+    def test_declared_with_none_persona_bridge_excluded( self ):
+        # A live bridge with no persona can never match a declared name.
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "mgr-new": None },
+            list_managers=lambda sd: set(),
+            declared_managers=[ "Mr. Radio" ] )
+        assert managers == [ ]
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
+
+
+def test_resolve_active_managers_falsy_bridge_sid_skipped():
+    """An empty-string bridge key (corrupt discovery row) is skipped, never a candidate."""
+    managers = MR.resolve_active_managers(
+        who_rows=[ ], bridge_sessions={ "": "Ann", "mgr-a": "Ann" },
+        list_managers=lambda sd: set(),
+        declared_managers=[ "Ann" ] )
+    assert managers == [ "Ann" ]

@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from unittest.mock import MagicMock, patch
 
 # Bootstrap
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
@@ -22,6 +23,7 @@ if _src_path not in sys.path:
 
 from lupin_mcp.session_spawner import (
     render_task_prompt,
+    persona_chain_csv,
     build_spawn_argv,
     spawn_sessions,
     dismiss_sessions,
@@ -34,6 +36,7 @@ from lupin_mcp.session_spawner import (
     _manifest_path,
     _read_manifest,
     _write_manifest,
+    _capture_reap_identity,
     _slug,
     DEFAULT_SPAWN_CAP,
 )
@@ -93,6 +96,35 @@ class TestRenderTaskPrompt:
     def test_blank_memento_ignored( self ):
         assert render_task_prompt( "task", {}, seed_memento="   " ) == "task"
         assert render_task_prompt( "task", {}, seed_memento=None ) == "task"
+
+
+# ── persona_chain_csv ─────────────────────────────────────────────────────────
+
+class TestPersonaChainCsv:
+    """Normalization of spawn persona_preference → COSA_VOICE_PERSONA_CHAIN CSV."""
+
+    def test_str_passed_through_stripped( self ):
+        assert persona_chain_csv( "Rio" )      == "Rio"
+        assert persona_chain_csv( "  Rio  " )  == "Rio"
+
+    def test_str_inner_csv_verbatim( self ):
+        # Inner whitespace is the server-side parser's job — outer strip only
+        assert persona_chain_csv( "Rio, Krishna ,*" ) == "Rio, Krishna ,*"
+
+    def test_list_joined_with_commas( self ):
+        assert persona_chain_csv( [ "Rio", "Krishna", "*" ] ) == "Rio,Krishna,*"
+
+    def test_list_items_stripped_non_str_and_empty_skipped( self ):
+        assert persona_chain_csv( [ " Rio ", 42, "", "   ", None, "*" ] ) == "Rio,*"
+
+    def test_empty_or_invalid_inputs_return_none( self ):
+        assert persona_chain_csv( None )    is None
+        assert persona_chain_csv( "" )      is None
+        assert persona_chain_csv( "   " )   is None
+        assert persona_chain_csv( [] )      is None
+        assert persona_chain_csv( [ 42 ] )  is None
+        assert persona_chain_csv( 42 )      is None
+        assert persona_chain_csv( { "x": 1 } ) is None
 
 
 # ── build_spawn_argv ──────────────────────────────────────────────────────────
@@ -269,6 +301,46 @@ class TestSpawnSessions:
         batch2 = spawn_sessions( 2, "t", "sid-b", script_path="x", manager_persona="Rio", runner=runner, session_dir=tmp_path )
         assert [ s[ "session_name" ] for s in batch2[ "spawned" ] ] == [ "cc-reviewer-rio-4", "cc-reviewer-rio-5" ]
 
+    def test_persona_chain_env_injected_for_str_preference( self, tmp_path ):
+        # The transport fix (2026-06-11): persona_preference must reach EVERY
+        # child's env as COSA_VOICE_PERSONA_CHAIN — previously a silent no-op.
+        runner = FakeRunner( returncode=0 )
+        spawn_sessions( 2, "t", "sid-chain-s", script_path="x",
+                        persona_preference="Rio,Krishna,*",
+                        runner=runner, session_dir=tmp_path )
+        assert len( runner.calls ) == 2
+        for _argv, env in runner.calls:
+            assert env[ "COSA_VOICE_PERSONA_CHAIN" ] == "Rio,Krishna,*"
+            # chain rides ALONGSIDE the standard lineage markers
+            assert env[ "COSA_VOICE_SPAWNED_BY" ] == "sid-chain-s"
+            assert env[ "COSA_VOICE_HEADLESS" ]   == "1"
+            assert env[ "COSA_VOICE_ROLE" ]       == "reviewer"
+
+    def test_persona_chain_env_injected_for_list_preference( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 1, "t", "sid-chain-l", script_path="x",
+                              persona_preference=[ "Rio", "Krishna" ],
+                              runner=runner, session_dir=tmp_path )
+        _argv, env = runner.calls[ 0 ]
+        assert env[ "COSA_VOICE_PERSONA_CHAIN" ] == "Rio,Krishna"
+        # the raw preference is echoed in the result roster
+        assert res[ "persona_preference" ] == [ "Rio", "Krishna" ]
+
+    def test_persona_chain_env_absent_for_none_preference( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        spawn_sessions( 1, "t", "sid-chain-n", script_path="x",
+                        runner=runner, session_dir=tmp_path )
+        _argv, env = runner.calls[ 0 ]
+        assert "COSA_VOICE_PERSONA_CHAIN" not in env
+
+    def test_persona_chain_env_absent_for_empty_preference( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        spawn_sessions( 1, "t", "sid-chain-e", script_path="x",
+                        persona_preference="   ",
+                        runner=runner, session_dir=tmp_path )
+        _argv, env = runner.calls[ 0 ]
+        assert "COSA_VOICE_PERSONA_CHAIN" not in env
+
     def test_index_token_reflects_assigned_number( self, tmp_path ):
         # After a batch of 3, the next batch's {index} token = 4, not 1
         runner = FakeRunner()
@@ -319,6 +391,79 @@ class TestDismissSessions:
         res = dismiss_sessions( "mgr", reason="cascade complete", write_memento=False,
                                 runner=FakeRunner(), session_dir=tmp_path )
         assert res[ "reason" ] == "cascade complete" and res[ "write_memento" ] is False
+
+
+# ── _capture_reap_identity + dismiss bridge-unlink edge arcs ──────────────────
+
+class TestCaptureReapIdentityEdges:
+    """Defensive arcs of the pre-kill bridge-identity capture (never raises)."""
+
+    def test_glob_oserror_returns_none( self ):
+        bad_dir = MagicMock()
+        bad_dir.glob.side_effect = OSError( "boom" )
+        assert _capture_reap_identity( bad_dir, "sess-x" ) is None
+
+    def test_buffer_and_listener_bridges_skipped( self, tmp_path ):
+        ( tmp_path / "cc-buffer-1.json"   ).write_text( json.dumps( { "tmux_session": "sess-x" } ) )
+        ( tmp_path / "cc-listener-1.json" ).write_text( json.dumps( { "tmux_session": "sess-x" } ) )
+        assert _capture_reap_identity( tmp_path, "sess-x" ) is None
+
+    def test_tmux_session_mismatch_skipped( self, tmp_path ):
+        ( tmp_path / "cc-1.json" ).write_text( json.dumps( { "tmux_session": "other" } ) )
+        assert _capture_reap_identity( tmp_path, "sess-x" ) is None
+
+    def test_sender_id_build_failure_tolerated( self, tmp_path ):
+        # build_sender_id_for_cc blowing up must not break the capture
+        ( tmp_path / "cc-1.json" ).write_text( json.dumps(
+            { "tmux_session": "sess-x", "stable_session_id": "sid-1",
+              "voice_persona": { "name": "Rio" } } ) )
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.build_sender_id_for_cc",
+                    side_effect=RuntimeError( "bridge lib broken" ) ):
+            ident = _capture_reap_identity( tmp_path, "sess-x" )
+        assert ident[ "session_id" ]        == "sid-1"
+        assert ident[ "sender_id" ]         is None
+        assert ident[ "persona" ][ "name" ] == "Rio"
+
+
+class TestDismissBridgeUnlinkEdges:
+    """Defensive arcs of the post-kill bridge unlink (producer never breaks the reap)."""
+
+    def _seed( self, tmp_path, names ):
+        """
+        Write a one-manager manifest containing `names`.
+
+        Requires:
+            - tmp_path is a writable Path (pytest fixture)
+            - names is a list of tmux session-name strings
+
+        Ensures:
+            - the manifest for manager "mgr" exists in tmp_path with one
+              reviewer record per name
+        """
+        _write_manifest( _manifest_path( "mgr", tmp_path ),
+                         [ { "session_name": n, "requested_role": "reviewer" } for n in names ] )
+
+    def test_identity_with_none_bridge_path_skips_unlink_still_emits( self, tmp_path ):
+        self._seed( tmp_path, [ "a" ] )
+        emitted = []
+        with patch( "lupin_mcp.session_spawner._capture_reap_identity",
+                    return_value={ "bridge_path": None, "persona": None,
+                                   "sender_id": None, "session_id": None } ):
+            res = dismiss_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path,
+                                    emit_reap_fn=lambda ident, reason: emitted.append( ident ) )
+        assert res[ "bridges_deleted" ] == 0
+        assert len( emitted ) == 1
+
+    def test_unlink_failure_tolerated( self, tmp_path ):
+        self._seed( tmp_path, [ "a" ] )
+        ghost = tmp_path / "ghost-bridge.json"   # never created → unlink raises FileNotFoundError
+        with patch( "lupin_mcp.session_spawner._capture_reap_identity",
+                    return_value={ "bridge_path": ghost, "persona": None,
+                                   "sender_id": None, "session_id": "s" } ):
+            res = dismiss_sessions( "mgr", runner=FakeRunner( returncode=0 ), session_dir=tmp_path,
+                                    emit_reap_fn=lambda ident, reason: None )
+        assert res[ "bridges_deleted" ] == 0
+        assert res[ "dismissed" ][ 0 ][ "status" ] == "killed"
 
 
 # ── list_spawned_sessions ─────────────────────────────────────────────────────

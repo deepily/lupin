@@ -143,6 +143,50 @@ class TestBuildSnapshot:
         row = fr.build_snapshot( view, { }, NOW )[ "sessions" ][ 0 ]
         assert row[ "role" ] == "worker" and row[ "manager" ] is None
 
+    def _live_row( self, sid, persona ):
+        """One LIVE fleet-view row (survives the offline prune)."""
+        return { "session_id": sid, "persona": persona, "state": "working",
+                 "holding_on": "none", "stuck": False, "last_event_ts": NOW }
+
+    def test_declared_persona_badges_as_manager_without_manifest( self ):
+        # COSA_VOICE_MANAGERS__<PROJECT> roster (Rick 2026-06-11): a declared
+        # persona is role="manager" even before its first spawn (no manifest).
+        view = { "s1": self._live_row( "s1", "Mr. Radio" ) }
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "manager"
+
+    def test_declared_match_is_case_insensitive( self ):
+        view = { "s1": self._live_row( "s1", "mr. radio" ) }
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "MR. RADIO" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "manager"
+
+    def test_undeclared_persona_stays_worker( self ):
+        view = { "s1": self._live_row( "s1", "Rio" ) }
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "worker"
+
+    def test_declared_none_persona_row_stays_worker( self ):
+        # A row with persona=None can never match the declared roster.
+        view = { "s1": self._live_row( "s1", None ) }
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "worker"
+
+    def test_declared_blank_entries_ignored( self ):
+        view = { "s1": self._live_row( "s1", "Ann" ) }
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "  ", "" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "worker"
+
+    def test_declared_unions_with_manifest_managers( self ):
+        # One manager by manifest (list_managers_fn), another by declaration —
+        # both badge as manager in the same snapshot.
+        view = { "mgr-a": self._live_row( "mgr-a", "Tiberius" ),
+                 "mgr-b": self._live_row( "mgr-b", "Mr. Radio" ) }
+        snap  = fr.build_snapshot( view, { }, NOW,
+                                   list_managers_fn  = lambda: { "mgr-a" },
+                                   declared_managers = [ "Mr. Radio" ] )
+        roles = { r[ "session_id" ]: r[ "role" ] for r in snap[ "sessions" ] }
+        assert roles == { "mgr-a": "manager", "mgr-b": "manager" }
+
 
 # ── _sid_matches (prefix-tolerant) ─────────────────────────────────────────────
 

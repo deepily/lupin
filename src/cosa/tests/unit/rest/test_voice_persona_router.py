@@ -7,12 +7,14 @@ Covers:
   non-dict / nameless persona filtering).
 - get_voice_persona_endpoint — 404 + read.
 - allocate_voice_persona_endpoint — every mode: 404, mutual-exclusive 422,
-  outer idempotency, requested same-name idempotency, requested
-  none/not_in_pool/occupied/success/write-fail, no-request raced idempotency,
-  no-request random success/empty-pool, preferred ok/none/occupied-fallback/
-  not_in_pool-fallback (avail + empty), preferred fallback empty-pool, broadcast
-  failure, conflict-notify failure, re-assign announce (via previous + via swap)
-  and its push failure.
+  outer idempotency (incl. chain short-circuit), requested same-name idempotency,
+  requested none/not_in_pool/occupied/success/write-fail, no-request raced
+  idempotency, no-request random success/empty-pool, chain pool_error 500 /
+  empty_chain 422 / exhausted 409 (+ conflict notify, incl. notify failure) /
+  wildcard-fallback conflict notify (occupied + not_in_pool message arms, incl.
+  notify failure) / wildcard-no-outcomes silent / second-name-success silent /
+  write-fail 500, broadcast failure, re-assign announce (via previous + via
+  swap) and its push failure.
 - release_voice_persona_endpoint — 404, already-empty, write-fail, success, broadcast fail.
 - voice_persona_sample — missing fields 400, not-in-pool 400 (+ overflow accept),
   missing api key 503, httpx error 503, upstream non-200 503, success.
@@ -133,7 +135,7 @@ class TestAllocate( unittest.IsolatedAsyncioTestCase ):
     async def _alloc( self, **kw ):
         defaults = dict(
             session_id="s1", authenticated_user_id="u",
-            previous_persona_name=None, requested_persona_name=None, preferred_persona_name=None,
+            previous_persona_name=None, requested_persona_name=None, persona_chain=None,
             notification_queue=kw.pop( "queue", _queue() ), config_mgr=self.cfg,
         )
         defaults.update( kw )
@@ -147,9 +149,9 @@ class TestAllocate( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( ctx.exception.status_code, 404 )
 
     async def test_mutually_exclusive_422( self ):
-        """Ensures: supplying both requested + preferred → 422."""
+        """Ensures: supplying both requested + persona_chain → 422."""
         with self.assertRaises( HTTPException ) as ctx:
-            await self._alloc( requested_persona_name="A", preferred_persona_name="B" )
+            await self._alloc( requested_persona_name="A", persona_chain="B,*" )
         self.assertEqual( ctx.exception.status_code, 422 )
 
     async def test_outer_idempotent_return( self ):
@@ -250,66 +252,165 @@ class TestAllocate( unittest.IsolatedAsyncioTestCase ):
                 await self._alloc()
         self.assertEqual( ctx.exception.status_code, 500 )
 
-    async def test_preferred_ok( self ):
-        """Ensures: preferred persona available → allocated, no conflict."""
-        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
-             patch( f"{VP}.allocate_requested_persona_for_session",
-                    return_value={ "status": "ok", "persona": _persona() } ), \
-             patch( f"{VP}.set_voice_persona", return_value=True ):
-            resp = await self._alloc( preferred_persona_name="María" )
-        self.assertIsNone( _json( resp )[ "preference_conflict" ] )
+    # ── Chain branch (STRICT ordered fallback — replaced the soft-preference
+    #    path 2026-06-11; the old "María with soft fallback" is now "María,*") ──
 
-    async def test_preferred_result_none_500( self ):
-        """Ensures: preferred allocate returning None → 500."""
+    def _chain_ok( self, persona=None, satisfied_by="María", wildcard_used=False, outcomes=None ):
+        """
+        Build an "ok" allocate_persona_chain_for_session result dict.
+
+        Requires:
+            - persona is a persona dict or None (None → default _persona())
+
+        Ensures:
+            - returns the exact result shape the router's chain branch consumes
+              (status/persona/satisfied_by/wildcard_used/outcomes)
+        """
+        return {
+            "status"        : "ok",
+            "persona"       : persona or _persona(),
+            "satisfied_by"  : satisfied_by,
+            "wildcard_used" : wildcard_used,
+            "outcomes"      : outcomes or []
+        }
+
+    _OUTCOMES_MIXED = [
+        { "name": "María", "status": "occupied", "holding_session_id": "sid-other-12345678",
+          "holding_persona_name": "María" },
+        { "name": "Ghost", "status": "not_in_pool" },
+    ]
+
+    async def test_chain_existing_allocation_short_circuits( self ):
+        """Ensures: a chain does NOT override an existing allocation (outer fast-path)."""
+        with patch( f"{VP}.get_voice_persona", return_value=_persona( "Held" ) ), \
+             patch( f"{VP}.allocate_persona_chain_for_session" ) as mock_chain:
+            resp = await self._alloc( persona_chain="María,*" )
+        body = _json( resp )
+        self.assertFalse( body[ "newly_allocated" ] )
+        self.assertEqual( body[ "voice_persona" ][ "name" ], "Held" )
+        mock_chain.assert_not_called()
+
+    async def test_chain_pool_error_500( self ):
+        """Ensures: chain walk reporting pool_error → 500."""
         with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
-             patch( f"{VP}.allocate_requested_persona_for_session", return_value=None ):
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value={ "status": "pool_error", "persona": None, "outcomes": [], "available": [] } ):
             with self.assertRaises( HTTPException ) as ctx:
-                await self._alloc( preferred_persona_name="María" )
+                await self._alloc( persona_chain="María,*" )
         self.assertEqual( ctx.exception.status_code, 500 )
 
-    async def test_preferred_occupied_fallback_to_random( self ):
-        """Ensures: preferred held elsewhere → random fallback + occupied conflict notify."""
+    async def test_chain_empty_chain_422( self ):
+        """Ensures: a chain parsing to zero elements → 422 with message + chain echo."""
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value={ "status": "empty_chain", "persona": None, "outcomes": [], "available": [] } ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await self._alloc( persona_chain=",,," )
+        self.assertEqual( ctx.exception.status_code, 422 )
+        self.assertIn( "message", ctx.exception.detail )
+        self.assertEqual( ctx.exception.detail[ "chain" ], ",,," )
+
+    async def test_chain_exhausted_409_pushes_conflict_notification( self ):
+        """Ensures: exhausted chain → conflict notify (kind=chain_exhausted, voice_persona=None) THEN 409."""
         q = _queue()
         with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
-             patch( f"{VP}.allocate_requested_persona_for_session",
-                    return_value={ "status": "occupied", "holding_session_id": "sother123",
-                                   "holding_persona_name": "María", "available": [ "A" ] } ), \
-             patch( f"{VP}.allocate_persona_for_session", return_value=_persona( "Edmund" ) ), \
-             patch( f"{VP}.set_voice_persona", return_value=True ):
-            resp = await self._alloc( preferred_persona_name="María", queue=q )
-        body = _json( resp )
-        self.assertEqual( body[ "preference_conflict" ][ "kind" ], "occupied" )
-        types = [ c.kwargs.get( "type" ) for c in q.push_notification.call_args_list ]
-        self.assertIn( "voice_persona_conflict", types )
-
-    async def test_preferred_not_in_pool_fallback_with_available( self ):
-        """Ensures: preferred not in pool (avail names) → fallback + not_in_pool conflict."""
-        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
-             patch( f"{VP}.allocate_requested_persona_for_session",
-                    return_value={ "status": "not_in_pool", "available": [ "A", "B" ] } ), \
-             patch( f"{VP}.allocate_persona_for_session", return_value=_persona( "Edmund" ) ), \
-             patch( f"{VP}.set_voice_persona", return_value=True ):
-            resp = await self._alloc( preferred_persona_name="Ghost" )
-        self.assertEqual( _json( resp )[ "preference_conflict" ][ "kind" ], "not_in_pool" )
-
-    async def test_preferred_not_in_pool_fallback_empty_available( self ):
-        """Ensures: not_in_pool with no free names → conflict notify uses '(none free)'."""
-        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
-             patch( f"{VP}.allocate_requested_persona_for_session",
-                    return_value={ "status": "not_in_pool", "available": [] } ), \
-             patch( f"{VP}.allocate_persona_for_session", return_value=_persona( "Edmund" ) ), \
-             patch( f"{VP}.set_voice_persona", return_value=True ):
-            resp = await self._alloc( preferred_persona_name="Ghost" )
-        self.assertEqual( _json( resp )[ "preference_conflict" ][ "available" ], [] )
-
-    async def test_preferred_fallback_empty_pool_500( self ):
-        """Ensures: preferred conflict then empty random pool → 500."""
-        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
-             patch( f"{VP}.allocate_requested_persona_for_session",
-                    return_value={ "status": "not_in_pool", "available": [] } ), \
-             patch( f"{VP}.allocate_persona_for_session", return_value=None ):
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value={ "status": "exhausted", "persona": None,
+                                   "outcomes": self._OUTCOMES_MIXED, "available": [ "Edmund" ] } ):
             with self.assertRaises( HTTPException ) as ctx:
-                await self._alloc( preferred_persona_name="Ghost" )
+                await self._alloc( persona_chain="María,Ghost", queue=q )
+        self.assertEqual( ctx.exception.status_code, 409 )
+        detail = ctx.exception.detail
+        self.assertIn( "message", detail )
+        self.assertEqual( detail[ "chain" ], "María,Ghost" )
+        self.assertEqual( detail[ "outcomes" ], self._OUTCOMES_MIXED )
+        self.assertEqual( detail[ "available" ], [ "Edmund" ] )
+        # exactly one push: the conflict notification (assigned-broadcast never reached)
+        conflict_calls = [ c for c in q.push_notification.call_args_list
+                           if c.kwargs.get( "type" ) == "voice_persona_conflict" ]
+        self.assertEqual( len( conflict_calls ), 1 )
+        kw = conflict_calls[ 0 ].kwargs
+        self.assertEqual( kw[ "payload" ][ "kind" ], "chain_exhausted" )
+        self.assertEqual( kw[ "payload" ][ "chain" ], "María,Ghost" )
+        self.assertEqual( kw[ "payload" ][ "outcomes" ], self._OUTCOMES_MIXED )
+        self.assertEqual( kw[ "payload" ][ "available" ], [ "Edmund" ] )
+        self.assertIsNone( kw[ "voice_persona" ] )
+        # message names both miss kinds: holder short-id + not-in-pool
+        self.assertIn( "sid-othe", kw[ "message" ] )         # [:8] of holding_session_id
+        self.assertIn( "Ghost not in pool", kw[ "message" ] )
+
+    async def test_chain_exhausted_notify_failure_still_409( self ):
+        """Ensures: a failed chain-exhausted notify is swallowed; the 409 still raises."""
+        q = _queue( raise_on_type="voice_persona_conflict" )
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value={ "status": "exhausted", "persona": None,
+                                   "outcomes": self._OUTCOMES_MIXED, "available": [] } ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await self._alloc( persona_chain="María,Ghost", queue=q )
+        self.assertEqual( ctx.exception.status_code, 409 )
+
+    async def test_chain_wildcard_fallback_notifies_with_holder_short_id( self ):
+        """Ensures: wildcard fired after named misses → chain_conflict in response + conflict notify."""
+        q = _queue()
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value=self._chain_ok( persona=_persona( "Edmund" ), satisfied_by="*",
+                                                 wildcard_used=True, outcomes=self._OUTCOMES_MIXED ) ), \
+             patch( f"{VP}.set_voice_persona", return_value=True ):
+            resp = await self._alloc( persona_chain="María,Ghost,*", queue=q )
+        body = _json( resp )
+        self.assertTrue( body[ "newly_allocated" ] )
+        self.assertEqual( body[ "chain_conflict" ][ "kind" ], "wildcard_fallback" )
+        self.assertEqual( body[ "chain_conflict" ][ "chain" ], "María,Ghost,*" )
+        self.assertEqual( body[ "chain_conflict" ][ "outcomes" ], self._OUTCOMES_MIXED )
+        conflict_calls = [ c for c in q.push_notification.call_args_list
+                           if c.kwargs.get( "type" ) == "voice_persona_conflict" ]
+        self.assertEqual( len( conflict_calls ), 1 )
+        kw = conflict_calls[ 0 ].kwargs
+        # message covers BOTH miss arms: occupied (holder short-id) + not_in_pool
+        self.assertIn( "sid-othe", kw[ "message" ] )
+        self.assertIn( "Ghost is not in the configured pool", kw[ "message" ] )
+        self.assertIn( "Allocated Edmund via the wildcard", kw[ "message" ] )
+        self.assertEqual( kw[ "payload" ][ "kind" ], "wildcard_fallback" )
+
+    async def test_chain_wildcard_without_outcomes_is_silent( self ):
+        """Ensures: wildcard satisfied with NO named misses → no conflict notify, chain_conflict None."""
+        q = _queue()
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value=self._chain_ok( satisfied_by="*", wildcard_used=True, outcomes=[] ) ), \
+             patch( f"{VP}.set_voice_persona", return_value=True ):
+            resp = await self._alloc( persona_chain="*", queue=q )
+        body = _json( resp )
+        self.assertIsNone( body[ "chain_conflict" ] )
+        types = [ c.kwargs.get( "type" ) for c in q.push_notification.call_args_list ]
+        self.assertNotIn( "voice_persona_conflict", types )
+
+    async def test_chain_second_name_success_is_silent( self ):
+        """Ensures: landing on a later NAMED element (expressed intent) stays silent."""
+        q = _queue()
+        outcomes = [ { "name": "María", "status": "occupied",
+                       "holding_session_id": "sid-other-12345678", "holding_persona_name": "María" } ]
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value=self._chain_ok( persona=_persona( "Edmund" ), satisfied_by="Edmund",
+                                                 wildcard_used=False, outcomes=outcomes ) ), \
+             patch( f"{VP}.set_voice_persona", return_value=True ):
+            resp = await self._alloc( persona_chain="María,Edmund", queue=q )
+        body = _json( resp )
+        self.assertIsNone( body[ "chain_conflict" ] )
+        self.assertEqual( body[ "voice_persona" ][ "name" ], "Edmund" )
+        types = [ c.kwargs.get( "type" ) for c in q.push_notification.call_args_list ]
+        self.assertNotIn( "voice_persona_conflict", types )
+
+    async def test_chain_success_write_fail_500( self ):
+        """Ensures: bridge write failure after a chain success → 500."""
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_chain_for_session", return_value=self._chain_ok() ), \
+             patch( f"{VP}.set_voice_persona", return_value=False ):
+            with self.assertRaises( HTTPException ) as ctx:
+                await self._alloc( persona_chain="María,*" )
         self.assertEqual( ctx.exception.status_code, 500 )
 
     async def test_broadcast_failure_sets_delivered_false( self ):
@@ -321,16 +422,18 @@ class TestAllocate( unittest.IsolatedAsyncioTestCase ):
             resp = await self._alloc( queue=q )
         self.assertFalse( _json( resp )[ "broadcast_delivered" ] )
 
-    async def test_conflict_notify_failure_swallowed( self ):
-        """Ensures: a failed conflict notify does not fail the request."""
+    async def test_chain_conflict_notify_failure_swallowed( self ):
+        """Ensures: a failed wildcard-fallback conflict notify does not fail the request."""
         q = _queue( raise_on_type="voice_persona_conflict" )
         with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
-             patch( f"{VP}.allocate_requested_persona_for_session",
-                    return_value={ "status": "not_in_pool", "available": [ "A" ] } ), \
-             patch( f"{VP}.allocate_persona_for_session", return_value=_persona( "Edmund" ) ), \
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value=self._chain_ok( persona=_persona( "Edmund" ), satisfied_by="*",
+                                                 wildcard_used=True, outcomes=self._OUTCOMES_MIXED ) ), \
              patch( f"{VP}.set_voice_persona", return_value=True ):
-            resp = await self._alloc( preferred_persona_name="Ghost", queue=q )
-        self.assertTrue( _json( resp )[ "newly_allocated" ] )
+            resp = await self._alloc( persona_chain="María,Ghost,*", queue=q )
+        body = _json( resp )
+        self.assertTrue( body[ "newly_allocated" ] )
+        self.assertEqual( body[ "chain_conflict" ][ "kind" ], "wildcard_fallback" )
 
     async def test_reassign_via_previous_persona_name( self ):
         """Ensures: previous_persona_name drives the re-assign announcement."""
