@@ -130,7 +130,11 @@ class WebSocketManager:
             - Records connection timestamp
             - Validates subscribed events against available_events
             - Records the session's client type in session_client_types — "mobile"
-              iff client_type == "mobile", else "web" (absent ⇒ web, F-S6-1)
+              iff client_type == "mobile", any other EXPLICIT value ⇒ "web"; an
+              ABSENT client_type writes "web" only for an unmapped session_id and
+              never downgrades an established "mobile" entry (the audio-WS
+              connect reuses the queue-WS session id without a marker — F-S6-1,
+              Rachel R1)
 
         Raises:
             - Exception if closing old WebSocket connections fails (handled gracefully)
@@ -179,9 +183,15 @@ class WebSocketManager:
         self.session_is_admin[ session_id ] = bool( roles and "admin" in roles )
 
         # F-S6-1: pin the platform marker — exactly "mobile" marks a mobile
-        # session; anything else (including absent) is web, so a desktop browser
-        # can never suppress the phone's FCM wake.
-        self.session_client_types[ session_id ] = "mobile" if client_type == "mobile" else "web"
+        # session; any other EXPLICIT value is web, so a desktop browser can
+        # never suppress the phone's FCM wake. An ABSENT client_type must never
+        # DOWNGRADE an established "mobile" entry (Rachel R1): the mobile app's
+        # audio-WS connect reuses the queue-WS session id and passes no
+        # client_type — overwriting here would silently kill wake suppression.
+        if client_type is not None:
+            self.session_client_types[ session_id ] = "mobile" if client_type == "mobile" else "web"
+        elif session_id not in self.session_client_types:
+            self.session_client_types[ session_id ] = "web"
 
         # Store event subscriptions
         session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"

@@ -82,6 +82,35 @@ class TestClientTypeRecording:
         assert mgr.session_client_types[ "sess-audio" ] == "web"
 
 
+class TestSameSessionIdDualSocket:
+    """
+    Rachel R1 regression: the mobile app's audio-WS connect reuses the queue-WS
+    session id and passes NO client_type — that must never downgrade the
+    established "mobile" marker (it would silently kill wake suppression).
+    """
+
+    def test_audio_reconnect_without_marker_does_not_downgrade_mobile( self ):
+        mgr = _manager()
+        mgr.connect( MagicMock(), "sess-1", "user-1", client_type="mobile" )   # queue WS
+        mgr.connect( MagicMock(), "sess-1", "user-1" )                         # audio WS, same sid, no marker
+        assert mgr.session_client_types[ "sess-1" ] == "mobile"
+        assert mgr.has_live_mobile_session( "user-1" ) is True
+
+    def test_explicit_non_mobile_value_does_downgrade( self ):
+        # An EXPLICIT declaration wins — only the absent case preserves
+        mgr = _manager()
+        mgr.connect( MagicMock(), "sess-1", "user-1", client_type="mobile" )
+        mgr.connect( MagicMock(), "sess-1", "user-1", client_type="web" )
+        assert mgr.session_client_types[ "sess-1" ] == "web"
+
+    def test_marker_arriving_after_unmarked_connect_upgrades( self ):
+        # Audio WS first (web), queue WS with the marker second → mobile
+        mgr = _manager()
+        mgr.connect( MagicMock(), "sess-1", "user-1" )
+        mgr.connect( MagicMock(), "sess-1", "user-1", client_type="mobile" )
+        assert mgr.session_client_types[ "sess-1" ] == "mobile"
+
+
 class TestHasLiveMobileSession:
 
     def test_true_for_live_mobile_session( self ):

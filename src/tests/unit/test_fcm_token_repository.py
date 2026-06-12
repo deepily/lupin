@@ -22,7 +22,6 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest.db.repositories.fcm_token_repository import FcmTokenRepository
-from cosa.rest.postgres_models import FcmToken
 
 
 @pytest.fixture
@@ -36,37 +35,47 @@ def repo( mock_session ):
 
 
 class TestUpsertToken:
+    """
+    Rachel R3: the upsert is a single atomic PostgreSQL
+    `INSERT .. ON CONFLICT (token) DO UPDATE` — a read-then-insert sequence
+    races under concurrent same-token registration (login + WS-reconnect belt).
+    These tests pin the STATEMENT shape; durability runs at the integration tier.
+    """
 
-    def test_new_token_adds_row( self, repo, mock_session ):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
+    def _executed_sql( self, mock_session ):
+        from sqlalchemy.dialects import postgresql
+        statement = mock_session.execute.call_args.args[ 0 ]
+        return str( statement.compile( dialect=postgresql.dialect() ) )
 
+    def test_upsert_is_a_single_atomic_on_conflict_statement( self, repo, mock_session ):
+        repo.upsert_token( token="tok-1", user_id="u-1", user_email="rick@example.com" )
+
+        mock_session.execute.assert_called_once()
+        sql = self._executed_sql( mock_session )
+        assert "INSERT INTO fcm_tokens" in sql
+        assert "ON CONFLICT (token) DO UPDATE" in sql
+        mock_session.flush.assert_called_once()
+        mock_session.add.assert_not_called()   # never the racy read-then-add path
+
+    def test_conflict_update_refreshes_binding_and_timestamp( self, repo, mock_session ):
+        repo.upsert_token( token="tok-1", user_id="u-1", user_email="rick@example.com" )
+
+        sql        = self._executed_sql( mock_session )
+        update_set = sql.split( "DO UPDATE SET" )[ 1 ]
+        for column in ( "user_id", "user_email", "platform", "last_registered_at" ):
+            assert column in update_set
+
+    def test_returns_persisted_row( self, repo, mock_session ):
+        persisted = MagicMock()
+        mock_session.query.return_value.filter.return_value.first.return_value = persisted
         row = repo.upsert_token( token="tok-1", user_id="u-1", user_email="rick@example.com" )
+        assert row is persisted
 
-        mock_session.add.assert_called_once()
-        mock_session.flush.assert_called_once()
-        assert isinstance( row, FcmToken )
-        assert row.token      == "tok-1"
-        assert row.user_id    == "u-1"
-        assert row.user_email == "rick@example.com"
-        assert row.platform   == "android"
-
-    def test_known_token_updates_in_place( self, repo, mock_session ):
-        existing = FcmToken( token="tok-1", user_id="old-user", user_email="old@example.com", platform="android" )
-        mock_session.query.return_value.filter.return_value.first.return_value = existing
-
-        row = repo.upsert_token( token="tok-1", user_id="new-user", user_email="new@example.com", platform="android" )
-
-        assert row is existing
-        assert row.user_id            == "new-user"
-        assert row.user_email         == "new@example.com"
-        assert row.last_registered_at is not None
-        mock_session.add.assert_not_called()    # upsert, never a duplicate row
-        mock_session.flush.assert_called_once()
-
-    def test_explicit_platform_respected( self, repo, mock_session ):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-        row = repo.upsert_token( token="tok-1", user_id="u-1", user_email="r@e.com", platform="android-tv" )
-        assert row.platform == "android-tv"
+    def test_explicit_platform_flows_into_statement( self, repo, mock_session ):
+        repo.upsert_token( token="tok-1", user_id="u-1", user_email="r@e.com", platform="android" )
+        statement = mock_session.execute.call_args.args[ 0 ]
+        compiled  = statement.compile()
+        assert compiled.params[ "platform" ] == "android"
 
 
 class TestDeleteToken:

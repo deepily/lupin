@@ -89,6 +89,17 @@ class TestRegisterToken:
         assert response.status_code == 200
         assert mock_repo.upsert_token.call_args.kwargs[ "platform" ] == "android"
 
+    def test_non_android_platform_is_422( self, client, mock_repo ):
+        # R5: platform is the spec-pinned enum {"android"} — iOS/APNs is out of
+        # milestone scope by design, so anything else is a contract violation.
+        response = client.post( "/api/fcm/register-token", json={
+            "token"      : "fcm-tok-123",
+            "platform"   : "ios",
+            "user_email" : "rick@example.com"
+        } )
+        assert response.status_code == 422
+        mock_repo.upsert_token.assert_not_called()
+
     def test_missing_token_is_422( self, client, mock_repo ):
         response = client.post( "/api/fcm/register-token", json={ "user_email": "rick@example.com" } )
         assert response.status_code == 422

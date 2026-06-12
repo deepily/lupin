@@ -12,10 +12,14 @@ Endpoints (cascade-ratified contract, amended 2026-06-12 under OSQ-6):
         (was DELETE /api/fcm/register-token with JSON body — switched because
         DELETE-with-body is dropped by some proxies/LBs on the GCP cutover path)
 
+Handlers are SYNC `def` by design (Rachel R2): they hold sync DB sessions, and
+FastAPI runs sync handlers on the threadpool — `async def` with sync `get_db()`
+inside would block the event loop (the :7999 starvation pattern Lane 1 fixed).
+
 See: src/lupin-mobile/src/rnd/2026.06.11-focus-mode-voice-chat/15-section-s6-fcm-backend-interface.md
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -31,7 +35,7 @@ router = APIRouter( prefix="/api/fcm", tags=[ "fcm" ] )
 
 class RegisterTokenRequest( BaseModel ):
     token      : str = Field( min_length=1, max_length=512 )
-    platform   : str = Field( default="android", max_length=32 )
+    platform   : Literal[ "android" ] = "android"   # spec-pinned enum (S6 §3.1; iOS/APNs out of milestone scope)
     user_email : str = Field( min_length=3, max_length=255 )
 
 
@@ -44,7 +48,7 @@ class UnregisterTokenRequest( BaseModel ):
     summary     = "Register a mobile device's FCM token for the silent-relay wake channel",
     description = "Upsert keyed on token (S6 §3.1): re-registering a known token refreshes its user binding instead of duplicating it. Multiple devices per user allowed. The mobile app calls this on login, onTokenRefresh, and every WS reconnect (idempotent belt for parent-restart registry loss)."
 )
-async def register_fcm_token(
+def register_fcm_token(
     body                 : RegisterTokenRequest,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ) -> JSONResponse:
@@ -85,7 +89,7 @@ async def register_fcm_token(
     summary     = "Unregister a mobile device's FCM token (best-effort logout path)",
     description = "Idempotent: unregistering an unknown token still returns 200 (S6 §3.1 amended 2026-06-12 — POST replaces the proxy-fragile DELETE-with-JSON-body shape)."
 )
-async def unregister_fcm_token(
+def unregister_fcm_token(
     body                 : UnregisterTokenRequest,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
 ) -> JSONResponse:

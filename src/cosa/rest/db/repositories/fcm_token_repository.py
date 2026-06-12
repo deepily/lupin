@@ -11,6 +11,7 @@ AC-S6.1 re-instantiate-from-store proof).
 from datetime import datetime, timezone
 from typing import List, Optional
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from cosa.rest.postgres_models import FcmToken
@@ -48,39 +49,43 @@ class FcmTokenRepository( BaseRepository[FcmToken] ):
         and last_registered_at instead of duplicating the row. Multiple devices
         per user are allowed — each device has its own token, hence its own row.
 
+        ATOMIC by construction (Rachel R3): a single PostgreSQL
+        `INSERT .. ON CONFLICT (token) DO UPDATE` — a read-then-insert sequence
+        would race when the same token registers concurrently (login +
+        WS-reconnect belt firing together) and 500 on the unique constraint.
+
         Requires:
             - token is a non-empty FCM registration token string
             - user_id is the authenticated user's uid
             - user_email is the registering user's email (contract field, S6 §3.1)
 
         Ensures:
-            - exactly one row exists for the token afterwards
+            - exactly one row exists for the token afterwards — even under
+              concurrent same-token registration
             - the row's user_id/user_email/platform reflect THIS registration
             - last_registered_at is refreshed to now (UTC)
-            - the row is flushed so callers see generated defaults
+            - the statement is flushed; returns the persisted row
 
         Returns:
             The persisted FcmToken instance
         """
-        existing = self.session.query( FcmToken ).filter( FcmToken.token == token ).first()
-
-        if existing is not None:
-            existing.user_id            = user_id
-            existing.user_email         = user_email
-            existing.platform           = platform
-            existing.last_registered_at = datetime.now( timezone.utc )
-            self.session.flush()
-            return existing
-
-        row = FcmToken(
+        statement = pg_insert( FcmToken ).values(
             token      = token,
             user_id    = user_id,
             user_email = user_email,
             platform   = platform
+        ).on_conflict_do_update(
+            index_elements = [ "token" ],
+            set_           = {
+                "user_id"            : user_id,
+                "user_email"         : user_email,
+                "platform"           : platform,
+                "last_registered_at" : datetime.now( timezone.utc )
+            }
         )
-        self.session.add( row )
+        self.session.execute( statement )
         self.session.flush()
-        return row
+        return self.session.query( FcmToken ).filter( FcmToken.token == token ).first()
 
     def delete_token( self, token: str ) -> bool:
         """
