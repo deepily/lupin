@@ -103,3 +103,15 @@ def test_model_server_pinned_to_gpu0( services ):
     assert str( env.get( "CUDA_VISIBLE_DEVICES" ) ) == "0", \
         "Lupin models must always pin to GPU 0 (hard rule)"
     assert env.get( "LUPIN_MODEL_SERVER_DEVICE" ) == "cuda:0"
+
+
+def test_socket_init_chowns_volume_before_proxy( services ):
+    # The proxy runs as nonroot uid 65532 and crash-loops on a fresh root-owned
+    # volume (hit live 2026-06-11); the init one-shot must own the volume first.
+    init = services[ "cloudsql-socket-init" ]
+    assert "65532:65532" in " ".join( init[ "command" ] ), \
+        "init must chown the socket volume to the proxy's nonroot uid"
+    assert any( v.startswith( "cloudsql-socket:" ) for v in init[ "volumes" ] )
+    dep = services[ "cloud-sql-proxy" ][ "depends_on" ][ "cloudsql-socket-init" ]
+    assert dep[ "condition" ] == "service_completed_successfully", \
+        "proxy must wait for the socket-volume init to complete"
