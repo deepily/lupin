@@ -18,8 +18,11 @@ it must FAIL in `test_cold_load_paints_external_sender_card_with_no_live_events`
 (0 sender cards — the RC repro); against the post-fix bundle it must PASS.
 
 A FRESH external-sender row is persisted per run (the 2026-06-11
-`[E2E-CARDGAP]` fixture row ages out of the today-anchored window), exercising
-the exact one-shot-advisory shape: POST /api/notify with the page CLOSED.
+`[E2E-CARDGAP]` fixture row ages out of the 48h rolling window — classic's
+virgin default, ruling amended post-review — by Saturday), exercising the
+exact one-shot-advisory shape: POST /api/notify with the page CLOSED. The 48h
+window also moots the midnight-straddle flake Rio flagged for a today-anchored
+window: a row persisted seconds before load is always in-window.
 
 Venue: :8000 (monopolize, scheduled via /api/test-suite/submit) —
 `test_multiplexer_*` E2E batch. Per CLAUDE.local.md "USER IS NEVER A TESTER":
@@ -145,7 +148,7 @@ def test_cold_load_paints_external_sender_card_with_no_live_events( page ):
     access, refresh, email = _login_tokens()
 
     # Persist the advisory with the page CLOSED — the exact arbiter-stall
-    # shape: fire-and-forget POST, fresh row each run so the today-anchored
+    # shape: fire-and-forget POST, fresh row each run so the 48h rolling
     # window always contains it. Accept queued OR user_not_available (another
     # open tab elsewhere changes connectivity, not persistence — persist is
     # unconditional, RC leg 1).

@@ -29,7 +29,7 @@ import { createAuthManager } from "./auth/AuthManager";
 import { redirectToLoginIfUnauthenticated } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
-import { createStores, computeTodayAnchoredEffectiveHours } from "./stores";
+import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
 import type { ServerSenderHydrationRecord } from "./stores";
 import {
   createNotificationsListRenderer,
@@ -403,8 +403,9 @@ function bootMultiplexer(): void {
   // sender records (persona/unread/activity), and the notification history
   // (the card-gap fix: cold load previously rendered ZERO sender cards because
   // nothing ever fetched history). One fetch; per-sender conversation-by-date
-  // calls ride inside hydrateHistory. Window = classic's today-anchored
-  // default, silently (2026-06-11 design ruling — no selector).
+  // calls ride inside hydrateHistory. Window = classic's virgin 48h rolling
+  // default, silently (2026-06-11 design ruling, amended post-review — no
+  // selector; see DEFAULT_HISTORY_WINDOW_HOURS).
   // Design: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md
   const hydrationEmail = authManager.getCurrentUserEmail();
   if (hydrationEmail !== null && hydrationEmail !== "") {
@@ -415,7 +416,7 @@ function bootMultiplexer(): void {
         stores.senders.hydrate(records);
         return stores.notifications.hydrateHistory(apiClient, {
           userEmail      : hydrationEmail,
-          effectiveHours : computeTodayAnchoredEffectiveHours(Date.now()),
+          effectiveHours : DEFAULT_HISTORY_WINDOW_HOURS,
           senders        : records,
         });
       })

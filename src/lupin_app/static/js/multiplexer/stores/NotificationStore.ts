@@ -69,7 +69,8 @@ export interface NotificationHistoryApiClient {
 
 export interface HydrateHistoryOptions {
   userEmail      : string;
-  // Today-anchored window in hours (see computeTodayAnchoredEffectiveHours).
+  // Rolling window in hours (DEFAULT_HISTORY_WINDOW_HOURS for the silent
+  // classic-parity default).
   effectiveHours : number;
   // The boot-time senders-visible snapshot — the SAME records the strip and
   // SenderStore hydrate from (single fetch, three consumers).
@@ -92,23 +93,15 @@ interface ServerHistoryRow {
   [k: string]       : unknown;
 }
 
-/**
- * Classic-verbatim port of notifications.js `getEffectiveHoursForQuery()`'s
- * `'today'` branch — the silently-adopted default window per the 2026-06-11
- * design ruling (no selector): hours since LOCAL midnight, ceil'd, floored
- * at 1.
- *
- * Requires:
- *   - nowMs is a ms-epoch timestamp
- *
- * Ensures:
- *   - returns an integer >= 1
- */
-export function computeTodayAnchoredEffectiveHours(nowMs: number): number {
-  const now      = new Date(nowMs);
-  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.max(1, Math.ceil((nowMs - midnight.getTime()) / 3_600_000));
-}
+// Classic-verbatim VIRGIN default for the history window — notifications.js:360
+// (`parseInt( storedWindow ) || 48`). Ruling amended 2026-06-11 post-review
+// (Tiberius, reviewer Rio): classic's virgin default is a 48h ROLLING window;
+// 'today' is only a stored-sentinel option a user can pick later. 48h also
+// covers the originally-reported case — a pre-midnight external advisory must
+// still card the next morning — and moots the e2e midnight-straddle flake a
+// today-anchored window would have had. Silent default per ruling (a): no
+// selector, no localStorage key.
+export const DEFAULT_HISTORY_WINDOW_HOURS = 48;
 
 // ---------------------------------------------------------------------------
 // Public interface

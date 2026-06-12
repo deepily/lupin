@@ -12,7 +12,7 @@ import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplex
 import { createStorageServiceForTesting, InMemoryStorage } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import {
   createNotificationStore,
-  computeTodayAnchoredEffectiveHours,
+  DEFAULT_HISTORY_WINDOW_HOURS,
 } from "../../../lupin_app/static/js/multiplexer/stores/NotificationStore";
 import type { NotificationHistoryApiClient } from "../../../lupin_app/static/js/multiplexer/stores/NotificationStore";
 import type { ServerSenderHydrationRecord } from "../../../lupin_app/static/js/multiplexer/stores/SessionStripStore";
@@ -309,16 +309,9 @@ test("isHistoryHydrated is false before the first hydrateHistory", () => {
 });
 
 // ===========================================================================
-// computeTodayAnchoredEffectiveHours — classic-verbatim 'today' branch
+// DEFAULT_HISTORY_WINDOW_HOURS — classic-verbatim virgin default
 // ===========================================================================
 
-test("computeTodayAnchoredEffectiveHours: floors at 1 at/just-after local midnight, ceils mid-day", () => {
-  const atMidnight = new Date(2026, 5, 11, 0, 0, 0).getTime();
-  assert.equal(computeTodayAnchoredEffectiveHours(atMidnight), 1);
-  const halfPast = new Date(2026, 5, 11, 0, 30, 0).getTime();
-  assert.equal(computeTodayAnchoredEffectiveHours(halfPast), 1);
-  const midDay = new Date(2026, 5, 11, 13, 30, 0).getTime();
-  assert.equal(computeTodayAnchoredEffectiveHours(midDay), 14);
-  const exactHour = new Date(2026, 5, 11, 9, 0, 0).getTime();
-  assert.equal(computeTodayAnchoredEffectiveHours(exactHour), 9);
+test("DEFAULT_HISTORY_WINDOW_HOURS is classic's virgin 48h rolling default (notifications.js:360, ruling amended post-review)", () => {
+  assert.equal(DEFAULT_HISTORY_WINDOW_HOURS, 48);
 });

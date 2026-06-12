@@ -144,7 +144,7 @@ export type {
   NotificationHistoryApiClient,
   HydrateHistoryOptions,
 } from "./NotificationStore";
-export { createNotificationStore, computeTodayAnchoredEffectiveHours } from "./NotificationStore";
+export { createNotificationStore, DEFAULT_HISTORY_WINDOW_HOURS } from "./NotificationStore";
 export type { JobStore, JobStoreOptions, JobHistoryApiClient } from "./JobStore";
 export { createJobStore } from "./JobStore";
 export type { SenderStore, SenderStoreOptions } from "./SenderStore";
