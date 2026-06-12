@@ -138,8 +138,13 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
 }
 
 // Re-exports so consumers can import everything from the barrel.
-export type { NotificationStore, NotificationStoreOptions } from "./NotificationStore";
-export { createNotificationStore } from "./NotificationStore";
+export type {
+  NotificationStore,
+  NotificationStoreOptions,
+  NotificationHistoryApiClient,
+  HydrateHistoryOptions,
+} from "./NotificationStore";
+export { createNotificationStore, DEFAULT_HISTORY_WINDOW_HOURS } from "./NotificationStore";
 export type { JobStore, JobStoreOptions, JobHistoryApiClient } from "./JobStore";
 export { createJobStore } from "./JobStore";
 export type { SenderStore, SenderStoreOptions } from "./SenderStore";

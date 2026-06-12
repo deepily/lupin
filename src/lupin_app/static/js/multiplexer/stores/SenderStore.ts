@@ -44,6 +44,11 @@ import type {
   StoreSendersChangedPayload,
   VoicePersona,
 } from "../shared/types";
+// Cold-load hydration (2026-06-11): type-only import of the ONE canonical
+// senders-visible row shape — SessionStripStore owns the definition because
+// WP9 introduced it; both stores consume the SAME records from the single
+// boot fetch. No runtime coupling.
+import type { ServerSenderHydrationRecord } from "./SessionStripStore";
 
 // State-update notification types — see notifications.py:359 valid_types
 // and the 2026-04-29 cleanup design doc. Server-canonical type names
@@ -111,6 +116,17 @@ interface ServerVoicePersona {
 export interface SenderStore {
   get(senderId: string): SenderRecord | undefined;
   list(): ReadonlyArray<SenderRecord>;
+  /**
+   * Cold-load hydration (2026-06-11) — bulk-seed sender records from the
+   * boot-time senders-visible snapshot (same records the strip hydrates from).
+   * Merge is NEVER-REGRESS: a live event may have arrived before the snapshot
+   * resolved, so hydration only fills forward — `last_active_ts` and
+   * `unread_count` take max(existing, snapshot), `voice_persona` is set only
+   * when absent, `conversation_mode_active` and `display_name` are untouched.
+   * Records without a sender_id are skipped. Emits a single
+   * `store_senders_changed { changeKind: "hydrated" }` for the whole snapshot.
+   */
+  hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void;
   /** Test/cleanup helper: detach EventBus listeners. */
   disposeForTesting(): void;
 }
@@ -145,6 +161,40 @@ class SenderStoreImpl implements SenderStore {
 
   list(): ReadonlyArray<SenderRecord> {
     return Array.from(this.senders.values());
+  }
+
+  hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void {
+    for (const rec of records) {
+      const senderId = rec.sender_id;
+      if (!senderId) continue;
+
+      const parsedActivity = rec.last_activity !== undefined ? Date.parse(rec.last_activity) : Number.NaN;
+      const activityTs     = Number.isNaN(parsedActivity) ? 0 : parsedActivity;
+      const newCount       = typeof rec.new_count === "number" && rec.new_count > 0 ? rec.new_count : 0;
+
+      let record = this.senders.get(senderId);
+      if (!record) {
+        record = {
+          sender_id                : senderId,
+          display_name             : senderId,
+          last_active_ts           : activityTs,
+          unread_count             : newCount,
+          conversation_mode_active : false,
+        };
+        this.senders.set(senderId, record);
+      } else {
+        // Never-regress merge — see interface docstring.
+        record.last_active_ts = Math.max(record.last_active_ts, activityTs);
+        record.unread_count   = Math.max(record.unread_count, newCount);
+      }
+
+      const persona = rec.voice_persona;
+      if (record.voice_persona === undefined && persona && persona.released !== true) {
+        record.voice_persona = this.normalizeVoicePersona(persona);
+      }
+    }
+    // Single emission for the whole snapshot — consumers reconcile from list().
+    this.emit("hydrated");
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
@@ -242,15 +292,21 @@ class SenderStoreImpl implements SenderStore {
     // voice_persona_assigned — persona must be present + non-released.
     if (!persona || persona.released === true) return;
 
-    const vp: VoicePersona = {
+    record.voice_persona = this.normalizeVoicePersona(persona);
+    this.emit("updated", senderId);
+  }
+
+  // Server persona → client VoicePersona (5 canonical fields per D-E
+  // ratification). Shared by the live voice_persona_assigned path and
+  // cold-load hydrate().
+  private normalizeVoicePersona(persona: ServerVoicePersona): VoicePersona {
+    return {
       name     : (persona.name ?? persona.display_name ?? "") + "",
       voice_id : persona.voice_id ?? "",
       icon     : persona.icon ?? "",
       color    : persona.color ?? "",
       borrowed : persona.borrowed === true,
     };
-    record.voice_persona = vp;
-    this.emit("updated", senderId);
   }
 
   private handleConversationModeUpdate(
@@ -321,10 +377,13 @@ class SenderStoreImpl implements SenderStore {
   // Helpers
   // -------------------------------------------------------------------------
 
-  private emit(changeKind: SenderChangeKind, senderId: string): void {
+  private emit(changeKind: SenderChangeKind, senderId?: string): void {
+    const payload: StoreSendersChangedPayload = { changeKind };
+    // "hydrated" carries no single id; added/updated/removed always do.
+    if (senderId !== undefined) payload.sender_id = senderId;
     this.bus.emit<StoreSendersChangedPayload>({
       type    : "store_senders_changed",
-      payload : { changeKind, sender_id: senderId },
+      payload,
       source  : "SenderStore",
       ts      : this.nowFn(),
     });
