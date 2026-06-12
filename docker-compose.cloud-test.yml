@@ -50,15 +50,19 @@ services:
     command:
       - "--unix-socket=/cloudsql"
       - "--private-ip"
+      - "--health-check"                    # serves /startup,/readiness,/liveness on localhost:9090
       - "${CLOUD_SQL_CONNECTION_NAME:?set CLOUD_SQL_CONNECTION_NAME}"
     volumes:
       - cloudsql-socket:/cloudsql
     healthcheck:
-      # The proxy serves a /readiness probe on :9090 when --health-check is set;
-      # here we simply assert the instance socket dir was created.
-      test: ["CMD-SHELL", "test -d /cloudsql/${CLOUD_SQL_CONNECTION_NAME} || exit 1"]
+      # The image is DISTROLESS — no /bin/sh, so any CMD-SHELL test fails with
+      # "exec: /bin/sh: no such file or directory" and lupin-rest's
+      # service_healthy gate deadlocks (hit live 2026-06-12). Probe via the
+      # proxy binary's own `wait` subcommand, which polls the --health-check
+      # /startup endpoint on localhost:9090.
+      test: ["CMD", "/cloud-sql-proxy", "wait", "--max=5s"]
       interval: 15s
-      timeout: 5s
+      timeout: 10s
       retries: 5
       start_period: 20s
     networks:
