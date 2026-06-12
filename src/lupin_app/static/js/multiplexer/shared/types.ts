@@ -381,11 +381,15 @@ export interface SenderRecord {
   voice_persona?           : VoicePersona;
 }
 
-export type SenderChangeKind = "added" | "updated" | "removed";
+export type SenderChangeKind = "added" | "updated" | "removed" | "hydrated";
 
 export interface StoreSendersChangedPayload {
   changeKind : SenderChangeKind;
-  sender_id  : string;
+  // Present for added/updated/removed; OMITTED for "hydrated" (cold-load bulk
+  // seed emits a single change for the whole snapshot — consumers reconcile
+  // from store.list() rather than a single id). Mirrors
+  // StoreSessionStripChangedPayload's contract below.
+  sender_id? : string;
 }
 
 // ---------------------------------------------------------------------------

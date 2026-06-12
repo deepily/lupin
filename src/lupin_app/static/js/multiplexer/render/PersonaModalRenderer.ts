@@ -106,6 +106,14 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
   }
 
   forceRenderForTesting(): void {
+    this.reconcileAll();
+  }
+
+  // -------------------------------------------------------------------------
+  // Reducer
+  // -------------------------------------------------------------------------
+
+  private reconcileAll(): void {
     // Full reconcile: re-create or update every popover based on current store.
     if (this.portal === null) return;
     const seenIds = new Set<string>();
@@ -121,14 +129,16 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Reducer
-  // -------------------------------------------------------------------------
-
   private onStoreChange(e: LupinEvent<StoreSendersChangedPayload>): void {
     /* c8 ignore next */ // defensive: subscription is detached in unmount() BEFORE portal is nulled.
     if (this.portal === null) return;
     const { changeKind, sender_id: senderId } = e.payload;
+    // Cold-load hydration (2026-06-11): "hydrated" is a whole-snapshot change
+    // with NO single sender_id — reconcile every popover from store.list().
+    if (changeKind === "hydrated" || senderId === undefined) {
+      this.reconcileAll();
+      return;
+    }
     if (changeKind === "removed") {
       this.removePopover(senderId);
       return;

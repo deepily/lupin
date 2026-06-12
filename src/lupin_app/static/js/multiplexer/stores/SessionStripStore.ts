@@ -96,8 +96,17 @@ interface ServerManagerPersona {
 // (notifications.py get_visible_senders → _voice_persona_for_sender_id +
 // _manager_persona_for_sender_id). `voice_persona` carries `assigned_at`.
 // A null voice_persona means no persona assigned → no strip icon (skipped).
+//
+// Cold-load notification hydration (2026-06-11): this interface is the ONE
+// typed shape for a senders-visible row — SenderStore.hydrate and
+// NotificationStore.hydrateHistory consume the SAME records from the single
+// boot fetch (see boot.ts), so the activity/count fields are typed here
+// rather than reached through the index signature.
 export interface ServerSenderHydrationRecord {
   sender_id       ?: string;
+  last_activity   ?: string;    // ISO timestamp of the sender's newest visible notification
+  count           ?: number;    // total visible notifications for this sender
+  new_count       ?: number;    // server-side unread count (notification badge seed)
   voice_persona   ?: ServerVoicePersona | null;
   manager_persona ?: ServerManagerPersona | null;
   [k: string]     : unknown;

@@ -730,6 +730,15 @@ async def notify_user(
                 priority                = priority,
                 source                  = "claude_code",
                 user_id                 = target_system_id,
+                # Use database ID for consistency (mirrors the response-required
+                # path below + the offline cc-listener frame above): the live
+                # WS frame's id/id_hash must equal the persisted row's UUID so
+                # the multiplexer's cold-load hydration can dedupe live
+                # re-arrivals against hydrated history by id. None (persist
+                # failed — non-fatal by design) falls back to a generated uuid4
+                # inside NotificationItem, preserving prior behavior.
+                # See: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md §4
+                id                      = db_notification_id,
                 title                   = title,
                 sender_id               = resolved_sender_id,
                 abstract                = abstract,

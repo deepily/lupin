@@ -38,6 +38,11 @@ import type {
   StoreNotificationsChangedPayload,
   VoicePersona,
 } from "../shared/types";
+// Cold-load hydration (2026-06-11): type-only import of the ONE canonical
+// senders-visible row shape (SessionStripStore owns the definition — WP9
+// introduced it; SenderStore + this store consume the SAME records from the
+// single boot fetch). No runtime coupling.
+import type { ServerSenderHydrationRecord } from "./SessionStripStore";
 
 // Persisted envelope shape (StorageService prepends `lupin:` prefix; key is
 // `notifications:unread-count`).
@@ -49,6 +54,61 @@ interface UnreadCountEnvelope {
 const STORAGE_KEY            = "notifications:unread-count";
 const STORAGE_SCHEMA_VERSION = 1;
 const PERSIST_DEBOUNCE_MS    = 250;
+
+// ---------------------------------------------------------------------------
+// Cold-load history hydration (2026-06-11) — supporting types + window helper.
+// Design: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md
+// ---------------------------------------------------------------------------
+
+// Loose ApiClient surface for hydrateHistory — this store only needs `get<T>`
+// (mirrors JobStore's JobHistoryApiClient). Production passes the canonical
+// ApiClient; tests pass a stub.
+export interface NotificationHistoryApiClient {
+  get<T>(path: string): Promise<T>;
+}
+
+export interface HydrateHistoryOptions {
+  userEmail      : string;
+  // Today-anchored window in hours (see computeTodayAnchoredEffectiveHours).
+  effectiveHours : number;
+  // The boot-time senders-visible snapshot — the SAME records the strip and
+  // SenderStore hydrate from (single fetch, three consumers).
+  senders        : ReadonlyArray<ServerSenderHydrationRecord>;
+}
+
+// One row from GET /api/notifications/conversation-by-date/{sender}/{email}
+// (notifications.py get_sender_conversation_by_date serialization). DB-null
+// optionals arrive as null, not undefined — the normalizer copies only
+// string values through.
+interface ServerHistoryRow {
+  id                ?: string;          // DB row UUID — the cross-surface identity key
+  sender_id         ?: string;
+  message           ?: string;
+  title             ?: string | null;
+  abstract          ?: string | null;
+  timestamp         ?: string;          // ISO, app-timezone
+  time_display      ?: string | null;
+  progress_group_id ?: string | null;
+  [k: string]       : unknown;
+}
+
+/**
+ * Classic-verbatim port of notifications.js `getEffectiveHoursForQuery()`'s
+ * `'today'` branch — the silently-adopted default window per the 2026-06-11
+ * design ruling (no selector): hours since LOCAL midnight, ceil'd, floored
+ * at 1.
+ *
+ * Requires:
+ *   - nowMs is a ms-epoch timestamp
+ *
+ * Ensures:
+ *   - returns an integer >= 1
+ */
+export function computeTodayAnchoredEffectiveHours(nowMs: number): number {
+  const now      = new Date(nowMs);
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(1, Math.ceil((nowMs - midnight.getTime()) / 3_600_000));
+}
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -65,6 +125,25 @@ export interface NotificationStore {
   markRead(idHash: string): void;
   /** Mark every active notification as read in one shot (e.g. inbox open). */
   markAllRead(): void;
+  /**
+   * Cold-load history hydration (2026-06-11) — fetch each in-window sender's
+   * conversation-by-date history and bulk-seed the active list, then emit a
+   * single `store_notifications_changed { changeKind: "hydrated" }`.
+   *
+   * Contract (per the design note §2/§4):
+   *   - senders outside the window (last_activity older than effectiveHours,
+   *     or missing/unparseable) are skipped
+   *   - per-sender fetch failures are skipped (best-effort; never rejects)
+   *   - rows whose id already exists in the store are skipped (live-first
+   *     wins; the reverse order — hydrate-first, live re-arrival — is handled
+   *     by onQueueUpdate's existing idempotent-re-arrival branch)
+   *   - seeded rows NEVER bump unread, NEVER set expires_at, and force
+   *     action_required=false (historical rows are conversation history,
+   *     never live prompts)
+   *   - idempotent: a second call is a no-op (isHistoryHydrated guard)
+   */
+  hydrateHistory(api: NotificationHistoryApiClient, opts: HydrateHistoryOptions): Promise<void>;
+  isHistoryHydrated(): boolean;
   /** Test/cleanup helper: flush any pending persistence write immediately. */
   flushPersistenceForTesting(): void;
   /** Test/cleanup helper: cancel any pending persistence timer. */
@@ -144,6 +223,9 @@ class NotificationStoreImpl implements NotificationStore {
   // Debounced persistence state.
   private persistTimer : unknown = null;
 
+  // Cold-load history hydration guard (JobStore.historyHydrated precedent).
+  private historyHydrated = false;
+
   // Subscriptions (kept so dispose can unwire if ever needed; primarily used
   // by the lifetime-of-store assumption).
   private readonly unsubscribers : Array<() => void> = [];
@@ -197,6 +279,70 @@ class NotificationStoreImpl implements NotificationStore {
       source  : "NotificationStore",
       ts      : this.nowFn(),
     });
+  }
+
+  async hydrateHistory(api: NotificationHistoryApiClient, opts: HydrateHistoryOptions): Promise<void> {
+    if (this.historyHydrated) return;
+
+    // Window filter — client-side equivalent of classic's server-side `hours`
+    // on senders-visible (the param only drops senders by last_activity
+    // cutoff; counts are unaffected — design note §1 window-equivalence).
+    const cutoffMs = this.nowFn() - opts.effectiveHours * 3_600_000;
+    const inWindow = opts.senders.filter(rec => {
+      if (!rec.sender_id) return false;
+      const ts = rec.last_activity !== undefined ? Date.parse(rec.last_activity) : Number.NaN;
+      return !Number.isNaN(ts) && ts >= cutoffMs;
+    });
+
+    // Per-sender conversation fetch, classic-mirroring params: `hours` =
+    // effective window, `anchor` = the sender's last_activity (classic's
+    // activity-anchored window loading).
+    const fetches = inWindow.map(rec => {
+      const base   = `/api/notifications/conversation-by-date/${encodeURIComponent(rec.sender_id as string)}/${encodeURIComponent(opts.userEmail)}`;
+      const params = new URLSearchParams();
+      params.append("hours", String(opts.effectiveHours));
+      params.append("anchor", rec.last_activity as string);
+      return api.get<Record<string, ReadonlyArray<ServerHistoryRow>>>(`${base}?${params.toString()}`);
+    });
+
+    // Best-effort batch: a rejected sender fetch is skipped, the rest seed.
+    const settled = await Promise.allSettled(fetches);
+    const rows: Notification[] = [];
+    for (const result of settled) {
+      if (result.status !== "fulfilled") continue;
+      for (const dateRows of Object.values(result.value)) {
+        for (const raw of dateRows) {
+          const norm = this.normalizeHistoryRow(raw);
+          if (!norm) continue;
+          if (this.byId.has(norm.id_hash)) continue;   // live-first wins
+          rows.push(norm);
+        }
+      }
+    }
+
+    // Seed ascending by ts (cosmetic — the card template re-sorts per date
+    // bucket internally; this just keeps active[] roughly chronological).
+    rows.sort((a, b) => a.ts - b.ts);
+    for (const n of rows) {
+      this.active.push(n);
+      this.byId.set(n.id_hash, n);
+    }
+
+    // NO unread mutation, NO persistence — the localStorage envelope and the
+    // per-sender new_count (SenderStore.hydrate) own unread accounting.
+
+    this.historyHydrated = true;
+    // Single emission for the whole snapshot — renderer reconciles once.
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "hydrated" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  isHistoryHydrated(): boolean {
+    return this.historyHydrated;
   }
 
   flushPersistenceForTesting(): void {
@@ -353,6 +499,37 @@ class NotificationStoreImpl implements NotificationStore {
   // -------------------------------------------------------------------------
   // Field normalization (server contract → client interface)
   // -------------------------------------------------------------------------
+
+  // Hydration variant of normalize() for conversation-by-date rows. Differs
+  // deliberately from the live normalizer (design note §2):
+  //   - identity comes from the DB row `id` (the cross-surface dedupe key)
+  //   - action_required is FORCED false — historical action-required rows
+  //     (state responded/expired) paint as plain conversation messages and
+  //     never resurrect in the live AR pane
+  //   - expires_at is NEVER set — historical rows must not feed the
+  //     sys_time_update local sweep
+  //   - DB-null optionals (title/abstract/progress_group_id/time_display
+  //     arrive as null) are copied only when they are strings
+  private normalizeHistoryRow(raw: ServerHistoryRow): Notification | null {
+    if (!raw.id || typeof raw.id !== "string") return null;
+    if (!raw.message || typeof raw.message !== "string") return null;
+
+    const ts = raw.timestamp ? Date.parse(raw.timestamp) : Number.NaN;
+    if (Number.isNaN(ts)) return null;
+
+    const norm: Notification = {
+      id_hash         : raw.id,
+      ts,
+      sender_id       : typeof raw.sender_id === "string" ? raw.sender_id : "",
+      message         : raw.message,
+      action_required : false,
+    };
+    if (typeof raw.title === "string")             norm.title             = raw.title;
+    if (typeof raw.abstract === "string")          norm.abstract          = raw.abstract;
+    if (typeof raw.progress_group_id === "string") norm.progress_group_id = raw.progress_group_id;
+    if (typeof raw.time_display === "string")      norm.time_display      = raw.time_display;
+    return norm;
+  }
 
   private normalize(raw: ServerNotificationFields): Notification | null {
     const id_hash = raw.id_hash ?? raw.id;

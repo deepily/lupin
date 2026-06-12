@@ -29,7 +29,7 @@ import { createAuthManager } from "./auth/AuthManager";
 import { redirectToLoginIfUnauthenticated } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
-import { createStores } from "./stores";
+import { createStores, computeTodayAnchoredEffectiveHours } from "./stores";
 import type { ServerSenderHydrationRecord } from "./stores";
 import {
   createNotificationsListRenderer,
@@ -398,11 +398,27 @@ function bootMultiplexer(): void {
   // voice_persona_assigned. Floated non-blocking (mirrors the config fetch);
   // boundary .catch avoids an unhandled rejection — hydration is best-effort,
   // live events still populate the strip. Skipped when no email resolves yet.
+  // Cold-load notification hydration (2026-06-11) — the SAME senders-visible
+  // snapshot now fans out to THREE consumers: the strip (WP9, unchanged), the
+  // sender records (persona/unread/activity), and the notification history
+  // (the card-gap fix: cold load previously rendered ZERO sender cards because
+  // nothing ever fetched history). One fetch; per-sender conversation-by-date
+  // calls ride inside hydrateHistory. Window = classic's today-anchored
+  // default, silently (2026-06-11 design ruling — no selector).
+  // Design: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md
   const hydrationEmail = authManager.getCurrentUserEmail();
   if (hydrationEmail !== null && hydrationEmail !== "") {
     apiClient
       .get<ServerSenderHydrationRecord[]>(`/api/notifications/senders-visible/${encodeURIComponent(hydrationEmail)}`)
-      .then(records => stores.sessionStrip.hydrate(records))
+      .then(records => {
+        stores.sessionStrip.hydrate(records);
+        stores.senders.hydrate(records);
+        return stores.notifications.hydrateHistory(apiClient, {
+          userEmail      : hydrationEmail,
+          effectiveHours : computeTodayAnchoredEffectiveHours(Date.now()),
+          senders        : records,
+        });
+      })
       .catch(() => { /* best-effort cold-reload hydration; live events still populate */ });
   }
   // Lane C WP4+WP5 — master-detail Reading Pane renderer. Mounts on the
