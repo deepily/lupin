@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.11 - Session f557aab9 NIGHT (Tiberius 👑) | Double-wedge recovery + card-gap RC→hydration fix shipped + GCP VM up + quota incident
+
+**Accomplishments**:
+- **Boot sweep found 100% of the fleet wedged**: both workers frozen 2.5h/3.5h inside dead in-process MCP/HTTP calls (Enter-immune — NEW mechanism, distinct from FM-18 injection race); recovered via Escape interrupt + re-brief, evidence filed durably in bug-fix-queue.md (recommends staffing the :7999 async-handlers debt, now also María's task-store F2 entry gate)
+- **Card-gap lane closed end-to-end in one night**: Clayton's RC (mux has NO notifications-pane history hydration; 5-leg innocence proof) → Rachel built the fix (incl. the `:727` id-threading server one-liner Rio's review verified surgical) → Rio fresh-critical APPROVE **with a finding that corrected the manager's own ruling** ('today'→48h classic-parity window) → merged `47aa72f3` with live adversarial receipts (FAIL `ts-82ae2446` pre-fix 2-failed → PASS `ts-69419933` post-fix 2-passed) — **Saturday cutover's offline-history asterisk CLEARED**
+- **GCP M2 night (Krishna)**: L4 stockout research (zonal squeeze; retry-overnight evidence-backed) → VM-RUNNING on retry #5 (~4h10m stockout) → data disk formatted/mounted, repo over as ratified git bundle, **Cloud-SQL proxy chain PROVEN**, both images staged (model-server built on-VM), durable compose socket-init fix — only Rick's morning SCP + OAuth remain
+- **Fleet-wide Max-plan session-limit freeze** (22:08, first ever — dual-manager ~10-session evening inside peak hours): all frozen sessions recovered no-spend; arbiter's WHOLE-FLEET-STALL alarms 2-for-2 genuine catches tonight; third María-detect/Tiberius-fire poke resolved Mr Radio's cascade as 3 distinct mechanisms (injection race / quota / context exhaustion)
+- WP6 served-bundle e2e receipt confirmed (full batch `ts-e949714d` 588/0 green); Rick's task-store F1–F4 rulings recorded (cold v0.3 review queued off-peak; Phase-1 post-cutover gated on async-debt staffing)
+- Fleet ops: Clayton + Krishna + Rachel + Rio all reaped with closeout/rotation mementos; worktrees pruned to single clean tree
+
+**Files**: 8 new held commits tonight on `wip-v0.1.8` (docs `13e92f86`, spec merge `7f3ec290`, fix merge `47aa72f3`, + Krishna's 4, + Clayton's 2)
+
+---
+
 ### 2026.06.10 - Session 4f7a7ab8 PM (Tiberius 👑) | Merge-train r2 + local 1.1.0 cutover + oracle acked-ledger + e2e near-sweep
 
 **Accomplishments**:
