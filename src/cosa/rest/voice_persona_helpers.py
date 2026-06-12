@@ -29,6 +29,13 @@ import random
 from datetime  import datetime, timezone
 from typing    import List, Optional, Set, Dict, Any
 
+# Shared persona-name normalizer ("Mr. Radio"/"mr radio"/"MR.RADIO" → "mrradio").
+# Travelled here WITH pick_declared_managers_from_env (relocated from
+# manager_resolver 2026-06-11); import-time-safe — commons_persona_matcher
+# pulls only re+typing, and cosa→lupin_mcp imports are precedented
+# (e.g. cosa/rest/routers/commons.py).
+from lupin_mcp.commons_persona_matcher import _normalize_for_match
+
 
 PoolPersona = Dict[ str, Any ]
 
@@ -372,15 +379,25 @@ def borrowed_persona_for_sid(
 
 
 def pick_unallocated_persona(
-    pool             : List[ PoolPersona ],
-    occupied_names   : Set[ str ],
-    stable_session_id: str,
-    overflow_persona : Optional[ PoolPersona ] = None,
-    extra_colors     : Optional[ List[ str ] ] = None
+    pool                   : List[ PoolPersona ],
+    occupied_names         : Set[ str ],
+    stable_session_id      : str,
+    overflow_persona       : Optional[ PoolPersona ]  = None,
+    extra_colors           : Optional[ List[ str ] ]  = None,
+    declared_manager_names : Optional[ Set[ str ] ]   = None
 ) -> Optional[ PoolPersona ]:
     """
-    Uniform random draw from (pool − occupied), falling back to Arnold-first→
-    Extra-N overflow (preferred) or hash-borrow (legacy) on exhaustion.
+    Uniform random draw from (pool − occupied − declared managers), falling
+    back to Arnold-first→Extra-N overflow (preferred) or hash-borrow (legacy)
+    on exhaustion.
+
+    Reserve-from-random (Rick, 2026-06-11): names in `declared_manager_names`
+    (the COSA_VOICE_MANAGERS__<PROJECT> roster, already resolved to POOL-KEY
+    form) are excluded from the random draw — a random allocation must never
+    squat a declared manager's identity. They remain claimable through the
+    strict requested-persona path, which never calls this function. A free
+    set emptied BY this exclusion lands in the existing exhaustion branch
+    (overflow → Extra-N → legacy borrow) byte-unchanged.
 
     Overflow identity model (Option A, 2026-05-28): when the named pool is
     exhausted, the FIRST overflow session gets the configured overflow persona
@@ -396,10 +413,16 @@ def pick_unallocated_persona(
         - stable_session_id is a non-empty string
         - overflow_persona is a persona dict (with overflow=True) or None
         - extra_colors is a list of CSS hex strings or None/empty
+        - declared_manager_names is a set of POOL-KEY name strings or None
+          (caller resolves user-typed roster forms via _find_persona_in_pool)
 
     Ensures:
-        - Returns a fresh dict with borrowed=False when (pool − occupied) is non-empty,
-          chosen uniformly at random
+        - Returns a fresh dict with borrowed=False when
+          (pool − occupied − declared_manager_names) is non-empty, chosen
+          uniformly at random
+        - declared_manager_names constrains ONLY the random draw — the
+          exhaustion fallbacks (overflow/Extra-N/borrow) evaluate against
+          occupied_names exactly as before
         - When the pool is fully occupied AND overflow_persona is non-None:
           * if overflow_persona's name is NOT occupied → returns a copy of
             overflow_persona with borrowed=False (preserving overflow=True) — the
@@ -422,6 +445,8 @@ def pick_unallocated_persona(
             the main pool is exhausted; None falls through to the legacy borrow path
         extra_colors: Green-rule-compliant palette for Extra-N personas, cycled by
             (n-1) % len; None/empty → Extras inherit the overflow persona's color
+        declared_manager_names: Pool-key names reserved out of the random draw
+            (declared-manager roster); None/empty → no reservation
 
     Returns:
         dict or None: Allocated persona, or None if pool is empty
@@ -429,7 +454,8 @@ def pick_unallocated_persona(
     if not pool:
         return None
 
-    free = [ p for p in pool if p[ "name" ] not in occupied_names ]
+    reserved = declared_manager_names or set()
+    free     = [ p for p in pool if p[ "name" ] not in occupied_names and p[ "name" ] not in reserved ]
 
     if not free:
         if overflow_persona is not None:
@@ -460,10 +486,12 @@ def pick_unallocated_persona(
 
 def allocate_persona_for_session(
     config_mgr,
-    stable_session_id: str
+    stable_session_id: str,
+    declared_managers: Optional[ List[ str ] ] = None
 ) -> Optional[ PoolPersona ]:
     """
-    End-to-end allocation: read pool, scan occupied, pick free (or borrow).
+    End-to-end allocation: read pool, scan occupied, pick free (or borrow),
+    reserving declared-manager names out of the random draw.
 
     This is the function the voice_persona router endpoint calls inside its
     asyncio.Lock critical section. It composes load_persona_pool_from_config
@@ -471,19 +499,34 @@ def allocate_persona_for_session(
 
     The returned persona has an `assigned_at` ISO-8601 UTC timestamp added.
 
+    Reserve-from-random (Rick, 2026-06-11): `declared_managers` is the
+    COSA_VOICE_MANAGERS__<PROJECT> roster as user-typed names (e.g.
+    "Mr. Radio"); each is resolved to its pool entry via the same
+    case-insensitive key-form/display-form matching every requested-persona
+    lookup uses (_find_persona_in_pool), and the resolved pool-key names are
+    excluded from the random draw. Roster names that resolve to no pool
+    entry constrain nothing — a typo or renamed pool must not brick
+    allocation.
+
     Requires:
         - config_mgr is an initialized ConfigurationManager
         - stable_session_id is a non-empty string
+        - declared_managers is a list of persona-name strings or None
 
     Ensures:
         - Returns a complete persona dict ready for bridge write, or None if
           the pool is empty (misconfiguration)
+        - Never randomly returns a pool persona whose entry matches a
+          declared_managers name; exclusion-emptied pools take the existing
+          overflow/Extra-N/borrow exhaustion path unchanged
         - Adds an `assigned_at` field with current UTC ISO-8601 timestamp
         - Never raises on bridge-scan failures (the bridge module catches them)
 
     Args:
         config_mgr: ConfigurationManager
         stable_session_id: Session being allocated
+        declared_managers: Declared-manager roster names to reserve out of
+            the random draw (user-typed forms accepted)
 
     Returns:
         dict or None: persona with all 7 fields, or None if pool is empty
@@ -518,8 +561,18 @@ def allocate_persona_for_session(
         if c.strip()
     ]
 
+    # Resolve roster names → pool-key names with the SAME matcher the strict
+    # requested path uses ("Mr. Radio" / "mr radio" / "MR. RADIO" all land on
+    # pool entry "mr radio"). Unresolvable names drop out silently.
+    declared_manager_names = {
+        match[ "name" ]
+        for name in ( declared_managers or [ ] )
+        if ( match := _find_persona_in_pool( pool, name ) ) is not None
+    }
+
     persona = pick_unallocated_persona(
-        pool, occupied, stable_session_id, overflow_persona=overflow, extra_colors=extra_colors
+        pool, occupied, stable_session_id, overflow_persona=overflow, extra_colors=extra_colors,
+        declared_manager_names=declared_manager_names
     )
     if persona is None:  # pragma: no cover  # defensive — pick only returns None for an empty pool, already guarded above
         return None
@@ -715,6 +768,115 @@ def allocate_requested_persona_for_session(
     return result
 
 
+# ── Declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>) ─────────────────
+
+def parse_declared_managers( raw ) -> List[ str ]:
+    """
+    Normalize a declared-manager roster expression into an ordered name list.
+
+    The ONE parser for the roster wherever it travels — the env reader
+    (pick_declared_managers_from_env) and the allocate endpoint's
+    `declared_managers` query param both call this, so the two carriers can
+    never drift. Extracted 2026-06-11 when the roster gained its second
+    carrier (hook→server transport for reserve-from-random).
+
+    Requires:
+        - raw is a str (comma-separated), a list of strings, or None
+
+    Ensures:
+        - Returns an ordered list of stripped, non-empty persona names
+          (multi-word names pass through verbatim — commas are the only
+          delimiter)
+        - `*` elements are dropped (wildcard is chain syntax, meaningless in
+          a manager roster — tolerated so a copy-pasted chain can't poison it)
+        - Duplicates dropped with a normalize-keyed comparison (F-B:
+          "Mr. Radio, mr radio, MR.RADIO" declares ONE manager); the first
+          (verbatim) spelling is emitted, ORDER preserved — roster head =
+          declared fallback manager
+        - Non-string items inside a list input are skipped
+        - Returns [] for None, empty/whitespace input, or any other type
+        - Never raises
+
+    Examples:
+        "Mr. Radio, Tiberius"            → [ "Mr. Radio", "Tiberius" ]
+        "Mr. Radio, mr radio, Tiberius"  → [ "Mr. Radio", "Tiberius" ]
+        "Mr. Radio,Tiberius,*"           → [ "Mr. Radio", "Tiberius" ]
+        None / "" / " , ,*"              → []
+    """
+    if isinstance( raw, str ):
+        items = raw.split( "," )
+    elif isinstance( raw, list ):
+        items = [ item for item in raw if isinstance( item, str ) ]
+    else:
+        return [ ]
+
+    managers = [ ]
+    seen     = set()
+    for item in items:
+        stripped = item.strip()
+        if not stripped or stripped == "*":
+            continue
+        # F-B: dedup key is normalize-keyed ("Tiberius, Mr. Radio, mr radio"
+        # declares TWO managers, not three); the emitted name stays verbatim.
+        key = _normalize_for_match( stripped )
+        if key in seen:
+            continue
+        seen.add( key )
+        managers.append( stripped )
+    return managers
+
+
+def pick_declared_managers_from_env( project, environ=None ):
+    """
+    Read COSA_VOICE_MANAGERS__<PROJECT> — the user's declared-manager roster
+    for a repo (Rick, 2026-06-11: multi-manager-per-repo support).
+
+    The value is a comma-separated list of persona names; multi-word names
+    pass through verbatim ("Tiberius, Mr. Radio" → ["Tiberius", "Mr. Radio"]).
+    Declaration is role + reserve-from-random (Rick's D3 ruling, 2026-06-11,
+    superseding the role-only Q2 scope): it marks the personas as managers
+    for fleet-status rendering + escalation fanout, AND reserves their names
+    OUT of random/chain-`*` allocation (see allocate_persona_for_session).
+    It never OCCUPIES a persona — an explicit strict request or named chain
+    element still claims a declared name; that is how managers get theirs.
+
+    (Relocated from heartbeat_arbiter/manager_resolver.py 2026-06-11 when the
+    allocation corridor became its second consumer — sibling of
+    pick_persona_chain_from_env, same `__<PROJECT>` lookup pattern; the LIVE
+    SessionStart hook imports THIS module and must not drag
+    manager_resolver's lupin_mcp.session_spawner import into its chain.
+    Single definition, no re-export shim — one-name rule.)
+
+    Requires:
+        - project is a project-key string or None
+        - environ is a Mapping (os.environ when None) — injectable for tests
+
+    Ensures:
+        - Returns an ordered list of stripped non-empty persona names
+          (parse semantics: see parse_declared_managers)
+        - Returns [] when project is None/empty/whitespace, the env var is
+          unset, or it parses to zero names
+        - Normalizes project name: strip + UPPER + hyphens→underscores
+        - Never raises
+
+    Examples:
+        COSA_VOICE_MANAGERS__LUPIN="Tiberius, Mr. Radio" + project="lupin"
+            → [ "Tiberius", "Mr. Radio" ]
+
+    See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
+         src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
+    """
+    if environ is None:
+        environ = os.environ
+    if not project or not str( project ).strip():
+        return [ ]
+    normalized = str( project ).strip().upper().replace( "-", "_" )
+    value      = environ.get( f"COSA_VOICE_MANAGERS__{normalized}" )
+    if not value:
+        return [ ]
+    return parse_declared_managers( value )
+
+
 # ── Persona-chain resolution + allocation ────────────────────────────────────
 
 PERSONA_CHAIN_WILDCARD = "*"
@@ -865,7 +1027,8 @@ def parse_persona_chain( raw ) -> List[ str ]:
 def allocate_persona_chain_for_session(
     config_mgr,
     stable_session_id : str,
-    chain_raw
+    chain_raw,
+    declared_managers : Optional[ List[ str ] ] = None
 ) -> Dict[ str, Any ]:
     """
     Walk an ordered persona chain, allocating the first FREE element.
@@ -876,6 +1039,12 @@ def allocate_persona_chain_for_session(
     A `*` element allocates randomly from the free pool ("then take
     anything"). A chain exhausted without `*` is a LOUD predictable fail —
     no silent random fallback.
+
+    Reserve-from-random (Rick, 2026-06-11): `declared_managers` reaches ONLY
+    the `*` wildcard's random draw — a NAMED chain element claims a declared
+    name through the strict path exactly like an explicit request (that is
+    how managers get their names); the wildcard, like plain random
+    allocation, must never squat one.
 
     The caller (router) holds the allocation lock; this function performs
     the whole walk inside one critical section so sibling sessions racing
@@ -908,6 +1077,8 @@ def allocate_persona_chain_for_session(
         config_mgr: ConfigurationManager
         stable_session_id: Session being allocated
         chain_raw: Chain expression (see parse_persona_chain)
+        declared_managers: Declared-manager roster names reserved out of the
+            `*` wildcard's random draw (named elements unaffected)
 
     Returns:
         Result dict (see Ensures)
@@ -921,7 +1092,7 @@ def allocate_persona_chain_for_session(
 
     for element in chain:
         if element == PERSONA_CHAIN_WILDCARD:
-            persona = allocate_persona_for_session( config_mgr, stable_session_id )
+            persona = allocate_persona_for_session( config_mgr, stable_session_id, declared_managers=declared_managers )
             if persona is None:
                 return { "status": "pool_error", "persona": None, "outcomes": outcomes, "available": available }
             return {
@@ -1055,6 +1226,18 @@ def quick_smoke_test():
     assert _lowest_free_extra_n( { "extra 2" } )                == 1
     assert _lowest_free_extra_n( { "extra 1", "extra 2" } )     == 3
     print( "  ✓ _lowest_free_extra_n picks lowest unused index" )
+
+    # Test 9: reserve-from-random — declared-manager names never come out of
+    # the random draw; exclusion-emptied pool takes the overflow path.
+    for _ in range( 10 ):
+        reserved_pick = pick_unallocated_persona( pool, set(), "sid-r", declared_manager_names={ "Nora", "Quentin" } )
+        assert reserved_pick[ "name" ] == "Rachel", reserved_pick
+    all_reserved = pick_unallocated_persona(
+        pool, set(), "sid-r2", overflow_persona=arnold, extra_colors=extra_colors,
+        declared_manager_names={ "Nora", "Quentin", "Rachel" }
+    )
+    assert all_reserved[ "name" ] == "arnold" and all_reserved[ "overflow" ] is True
+    print( "  ✓ Reserve-from-random: declared managers skipped; emptied pool → overflow" )
 
     print( "\nAll voice persona helpers smoke tests: ✓ passed" )
 

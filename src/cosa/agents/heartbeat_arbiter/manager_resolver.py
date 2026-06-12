@@ -150,61 +150,6 @@ def list_manager_session_ids( session_dir: Path = SESSION_DIR ):
     return ids
 
 
-def pick_declared_managers_from_env( project, environ=None ):
-    """
-    Read COSA_VOICE_MANAGERS__<PROJECT> — the user's declared-manager roster
-    for a repo (Rick, 2026-06-11: multi-manager-per-repo support).
-
-    The value is a comma-separated list of persona names; multi-word names
-    pass through verbatim ("Tiberius, Mr. Radio" → ["Tiberius", "Mr. Radio"]).
-    Declaration is ROLE-only (Q2 ruling): it marks the personas as managers
-    for fleet-status rendering + escalation fanout; it does NOT reserve them
-    in the allocation pool.
-
-    Requires:
-        - project is a project-key string or None
-        - environ is a Mapping (os.environ when None) — injectable for tests
-
-    Ensures:
-        - Returns an ordered list of stripped non-empty persona names
-        - Duplicates (case-insensitive) dropped, first occurrence wins
-        - `*` elements are dropped (wildcard is chain syntax, meaningless in
-          a manager roster — tolerated so a copy-pasted chain can't poison it)
-        - Returns [] when project is None/empty/whitespace, the env var is
-          unset, or it parses to zero names
-        - Normalizes project name: strip + UPPER + hyphens→underscores
-        - Never raises
-
-    Examples:
-        COSA_VOICE_MANAGERS__LUPIN="Tiberius, Mr. Radio" + project="lupin"
-            → [ "Tiberius", "Mr. Radio" ]
-
-    See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
-    """
-    if environ is None:
-        environ = os.environ
-    if not project or not str( project ).strip():
-        return [ ]
-    normalized = str( project ).strip().upper().replace( "-", "_" )
-    value      = environ.get( f"COSA_VOICE_MANAGERS__{normalized}" )
-    if not value:
-        return [ ]
-    managers = [ ]
-    seen     = set()
-    for item in value.split( "," ):
-        stripped = item.strip()
-        if not stripped or stripped == "*":
-            continue
-        # F-B: dedup key is normalize-keyed ("Tiberius, Mr. Radio, mr radio"
-        # declares TWO managers, not three); the emitted name stays verbatim.
-        key = _normalize_for_match( stripped )
-        if key in seen:
-            continue
-        seen.add( key )
-        managers.append( stripped )
-    return managers
-
-
 def resolve_active_managers(
     who_rows,
     bridge_sessions,

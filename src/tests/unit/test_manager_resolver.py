@@ -21,7 +21,6 @@ if _src_path not in sys.path:
 import cosa.agents.heartbeat_arbiter.manager_resolver as MR
 from cosa.agents.heartbeat_arbiter.manager_resolver import (
     find_manager_session_id, resolve_manager, quick_smoke_test,
-    pick_declared_managers_from_env,
     SOURCE_LINEAGE, SOURCE_DECLARED, SOURCE_UNRESOLVED,
 )
 from lupin_mcp.session_spawner import _manifest_path
@@ -186,49 +185,9 @@ def test_quick_smoke_test():
     assert quick_smoke_test() is True
 
 
-# ── pick_declared_managers_from_env (COSA_VOICE_MANAGERS__<PROJECT>) ───────────
-
-class TestPickDeclaredManagersFromEnv:
-    """Declared-manager roster parsing — multi-manager-per-repo (Rick 2026-06-11)."""
-
-    def test_csv_with_multiword_names( self ):
-        env = { "COSA_VOICE_MANAGERS__LUPIN": "Tiberius, Mr. Radio" }
-        assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Tiberius", "Mr. Radio" ]
-
-    def test_project_normalization_hyphen_and_case( self ):
-        env = { "COSA_VOICE_MANAGERS__COSA_VOICE": "Rio" }
-        assert pick_declared_managers_from_env( "cosa-voice", environ=env ) == [ "Rio" ]
-        assert pick_declared_managers_from_env( "  Cosa-Voice  ", environ=env ) == [ "Rio" ]
-
-    def test_case_insensitive_dedupe_first_wins( self ):
-        env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio, rio, RIO, Krishna" }
-        assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Rio", "Krishna" ]
-
-    def test_punct_tolerant_dedupe_first_wins( self ):
-        """F-B: the dedup key is normalize-keyed — "Mr. Radio" and "mr radio"
-        declare ONE manager; the first (verbatim) spelling is emitted."""
-        env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio, mr radio, MR.RADIO, Tiberius" }
-        assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Mr. Radio", "Tiberius" ]
-
-    def test_wildcard_elements_dropped( self ):
-        # A copy-pasted chain expression must not poison the roster.
-        env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio,Tiberius,*" }
-        assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Mr. Radio", "Tiberius" ]
-
-    def test_unset_empty_whitespace_value( self ):
-        assert pick_declared_managers_from_env( "lupin", environ={ } ) == [ ]
-        assert pick_declared_managers_from_env( "lupin", environ={ "COSA_VOICE_MANAGERS__LUPIN": "" } ) == [ ]
-        assert pick_declared_managers_from_env( "lupin", environ={ "COSA_VOICE_MANAGERS__LUPIN": " , ,*" } ) == [ ]
-
-    def test_project_none_empty_whitespace( self ):
-        env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio" }
-        assert pick_declared_managers_from_env( None, environ=env )  == [ ]
-        assert pick_declared_managers_from_env( "", environ=env )    == [ ]
-        assert pick_declared_managers_from_env( "   ", environ=env ) == [ ]
-
-    def test_default_environ_is_os_environ( self, monkeypatch ):
-        monkeypatch.setenv( "COSA_VOICE_MANAGERS__LUPIN", "Tiffany" )
-        assert pick_declared_managers_from_env( "lupin" ) == [ "Tiffany" ]
+# (TestPickDeclaredManagersFromEnv moved to src/cosa/tests/unit/rest/
+#  test_voice_persona_helpers.py with the 2026-06-11 relocation of
+#  pick_declared_managers_from_env into cosa.rest.voice_persona_helpers.)
 
 
 # ── resolve_active_managers — declared-roster union ────────────────────────────

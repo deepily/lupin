@@ -33,6 +33,8 @@ from cosa.rest.voice_persona_helpers import (
     parse_persona_chain,
     resolve_session_start_persona_chain,
     allocate_persona_chain_for_session,
+    parse_declared_managers,
+    pick_declared_managers_from_env,
     PERSONA_CHAIN_WILDCARD,
 )
 
@@ -236,6 +238,44 @@ class TestPickUnallocatedPersona( unittest.TestCase ):
             p = pick_unallocated_persona( pool, set(), "sid" )
         self.assertEqual( p[ "display_name" ], "NORA-CUSTOM" )
 
+    def test_declared_managers_excluded_from_random_draw( self ):
+        # Reserve-from-random: nothing occupied, but nora + quentin are
+        # declared managers → the only random candidate is rachel.
+        for _ in range( 10 ):
+            p = pick_unallocated_persona(
+                self._POOL, set(), "sid", declared_manager_names={ "nora", "quentin" }
+            )
+            self.assertEqual( p[ "name" ], "rachel" )
+            self.assertFalse( p[ "borrowed" ] )
+
+    def test_exclusion_emptied_pool_takes_overflow_path( self ):
+        # Nothing occupied, ALL pool names declared → free set empties via the
+        # reservation alone → existing overflow semantics fire unchanged.
+        p = pick_unallocated_persona(
+            self._POOL, set(), "sid",
+            overflow_persona=self._ARNOLD, extra_colors=[ "#111" ],
+            declared_manager_names={ "nora", "quentin", "rachel" }
+        )
+        self.assertEqual( p[ "name" ], "arnold" )
+        self.assertTrue( p[ "overflow" ] )
+
+    def test_exclusion_emptied_pool_no_overflow_borrows( self ):
+        p = pick_unallocated_persona(
+            self._POOL, set(), "sid-z", declared_manager_names={ "nora", "quentin", "rachel" }
+        )
+        self.assertTrue( p[ "borrowed" ] )
+
+    def test_exclusion_does_not_shadow_occupied_in_overflow_check( self ):
+        # Declared names are NOT added to occupied: with the pool emptied by
+        # reservation and arnold genuinely occupied, Extra-N fires (proving
+        # the overflow check still reads occupied_names, not the reservation).
+        p = pick_unallocated_persona(
+            self._POOL, { "arnold" }, "sid",
+            overflow_persona=self._ARNOLD, extra_colors=[ "#111" ],
+            declared_manager_names={ "nora", "quentin", "rachel" }
+        )
+        self.assertEqual( p[ "name" ], "extra 1" )
+
 
 class TestAllocatePersonaForSession( unittest.TestCase ):
     def _cfg( self ):
@@ -264,6 +304,36 @@ class TestAllocatePersonaForSession( unittest.TestCase ):
             p = allocate_persona_for_session( self._cfg(), "sid" )
         self.assertTrue( p[ "borrowed" ] )
         self.assertIn( "assigned_at", p )
+
+    def _roster_cfg( self ):
+        return _MockConfig( {
+            "cc session voice persona pool"               : "mr radio, tiberius, nora",
+            "cc session voice persona mr radio voice id"  : "v-radio",
+            "cc session voice persona tiberius voice id"  : "v-tib",
+            "cc session voice persona nora voice id"      : "v-nora",
+            "cc session voice persona overflow name"      : "   ",
+            "cc session voice persona extra colors"       : "",
+            "cc session voice persona stale threshold seconds": 43200,
+        } )
+
+    def test_declared_managers_resolved_punct_tolerant_and_excluded( self ):
+        # Roster forms "Mr. Radio" (display) / "TIBERIUS" (case) both resolve
+        # via _find_persona_in_pool; "Ghost" resolves to nothing and
+        # constrains nothing → the random draw can only yield nora.
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions", return_value=[] ):
+            for _ in range( 10 ):
+                p = allocate_persona_for_session(
+                    self._roster_cfg(), "sid",
+                    declared_managers=[ "Mr. Radio", "TIBERIUS", "Ghost" ]
+                )
+                self.assertEqual( p[ "name" ], "nora" )
+                self.assertFalse( p[ "borrowed" ] )
+
+    def test_declared_managers_none_leaves_full_pool( self ):
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions", return_value=[] ), \
+             patch( "cosa.rest.voice_persona_helpers.random.choice", side_effect=lambda seq: seq[ 0 ] ):
+            p = allocate_persona_for_session( self._roster_cfg(), "sid", declared_managers=None )
+        self.assertEqual( p[ "name" ], "mr radio" )   # head of the UNRESERVED pool
 
 
 class TestFindPersonaInPool( unittest.TestCase ):
@@ -458,6 +528,80 @@ class TestResolveSessionStartPersonaChain( unittest.TestCase ):
         self.assertEqual( resolve_session_start_persona_chain( "lupin", environ ), "Tiberius" )
 
 
+class TestParseDeclaredManagers( unittest.TestCase ):
+    """The ONE roster parser — shared by the env reader + the router param."""
+
+    def test_csv_with_multiword_names( self ):
+        self.assertEqual( parse_declared_managers( "Tiberius, Mr. Radio" ), [ "Tiberius", "Mr. Radio" ] )
+
+    def test_list_input( self ):
+        self.assertEqual( parse_declared_managers( [ "Mr. Radio", "Tiberius" ] ), [ "Mr. Radio", "Tiberius" ] )
+
+    def test_non_string_items_in_list_skipped( self ):
+        self.assertEqual( parse_declared_managers( [ "Rio", 42, None ] ), [ "Rio" ] )
+
+    def test_normalize_keyed_dedupe_first_verbatim_wins( self ):
+        # F-B: "Mr. Radio" / "mr radio" / "MR.RADIO" declare ONE manager.
+        self.assertEqual(
+            parse_declared_managers( "Mr. Radio, mr radio, MR.RADIO, Tiberius" ),
+            [ "Mr. Radio", "Tiberius" ]
+        )
+
+    def test_wildcard_elements_dropped( self ):
+        self.assertEqual( parse_declared_managers( "Mr. Radio,Tiberius,*" ), [ "Mr. Radio", "Tiberius" ] )
+
+    def test_none_empty_whitespace_and_other_types( self ):
+        self.assertEqual( parse_declared_managers( None ),     [ ] )
+        self.assertEqual( parse_declared_managers( "" ),       [ ] )
+        self.assertEqual( parse_declared_managers( " , ,*" ),  [ ] )
+        self.assertEqual( parse_declared_managers( 42 ),       [ ] )
+
+
+class TestPickDeclaredManagersFromEnv( unittest.TestCase ):
+    """Declared-manager roster env reader — multi-manager-per-repo (Rick 2026-06-11).
+    (Moved from test_manager_resolver.py with the 2026-06-11 relocation into
+    cosa.rest.voice_persona_helpers.)"""
+
+    def test_csv_with_multiword_names( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Tiberius, Mr. Radio" }
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ=env ), [ "Tiberius", "Mr. Radio" ] )
+
+    def test_project_normalization_hyphen_and_case( self ):
+        env = { "COSA_VOICE_MANAGERS__COSA_VOICE": "Rio" }
+        self.assertEqual( pick_declared_managers_from_env( "cosa-voice", environ=env ), [ "Rio" ] )
+        self.assertEqual( pick_declared_managers_from_env( "  Cosa-Voice  ", environ=env ), [ "Rio" ] )
+
+    def test_case_insensitive_dedupe_first_wins( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio, rio, RIO, Krishna" }
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ=env ), [ "Rio", "Krishna" ] )
+
+    def test_punct_tolerant_dedupe_first_wins( self ):
+        """F-B: the dedup key is normalize-keyed — "Mr. Radio" and "mr radio"
+        declare ONE manager; the first (verbatim) spelling is emitted."""
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio, mr radio, MR.RADIO, Tiberius" }
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ=env ), [ "Mr. Radio", "Tiberius" ] )
+
+    def test_wildcard_elements_dropped( self ):
+        # A copy-pasted chain expression must not poison the roster.
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio,Tiberius,*" }
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ=env ), [ "Mr. Radio", "Tiberius" ] )
+
+    def test_unset_empty_whitespace_value( self ):
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ={ } ), [ ] )
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ={ "COSA_VOICE_MANAGERS__LUPIN": "" } ), [ ] )
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ={ "COSA_VOICE_MANAGERS__LUPIN": " , ,*" } ), [ ] )
+
+    def test_project_none_empty_whitespace( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio" }
+        self.assertEqual( pick_declared_managers_from_env( None, environ=env ),  [ ] )
+        self.assertEqual( pick_declared_managers_from_env( "", environ=env ),    [ ] )
+        self.assertEqual( pick_declared_managers_from_env( "   ", environ=env ), [ ] )
+
+    def test_default_environ_is_os_environ( self ):
+        with patch.dict( "os.environ", { "COSA_VOICE_MANAGERS__LUPIN": "Tiffany" } ):
+            self.assertEqual( pick_declared_managers_from_env( "lupin" ), [ "Tiffany" ] )
+
+
 class TestAllocatePersonaChainForSession( unittest.TestCase ):
     """
     Chain-walk tests with the two underlying allocators boundary-mocked —
@@ -532,7 +676,33 @@ class TestAllocatePersonaChainForSession( unittest.TestCase ):
         self.assertEqual( len( res[ "outcomes" ] ), 1 )
         self.assertEqual( res[ "outcomes" ][ 0 ][ "name" ], "Rio" )
         self.assertEqual( res[ "persona" ][ "name" ], "nora" )
-        mock_wild.assert_called_once_with( ANY, "sid" )
+        mock_wild.assert_called_once_with( ANY, "sid", declared_managers=None )
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_wildcard_threads_declared_managers( self, mock_named, mock_wild ):
+        # Reserve-from-random: the roster reaches the `*` random draw...
+        mock_wild.return_value = { "name": "nora", "assigned_at": "t" }
+        res = allocate_persona_chain_for_session(
+            _MockConfig(), "sid", "*", declared_managers=[ "Mr. Radio", "Tiberius" ]
+        )
+        self.assertEqual( res[ "status" ], "ok" )
+        mock_wild.assert_called_once_with( ANY, "sid", declared_managers=[ "Mr. Radio", "Tiberius" ] )
+        mock_named.assert_not_called()
+
+    @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
+    @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
+    def test_named_element_ignores_declared_managers( self, mock_named, mock_wild ):
+        # ...but a NAMED element claims through the strict path untouched —
+        # that is how a manager gets its name.
+        mock_named.return_value = { "status": "ok", "persona": { "name": "mr radio", "assigned_at": "t" }, "available": [] }
+        res = allocate_persona_chain_for_session(
+            _MockConfig(), "sid", "Mr. Radio,*", declared_managers=[ "Mr. Radio" ]
+        )
+        self.assertEqual( res[ "status" ], "ok" )
+        self.assertEqual( res[ "satisfied_by" ], "Mr. Radio" )
+        mock_named.assert_called_once_with( ANY, "sid", "Mr. Radio" )
+        mock_wild.assert_not_called()
 
     @patch( "cosa.rest.voice_persona_helpers.allocate_persona_for_session" )
     @patch( "cosa.rest.voice_persona_helpers.allocate_requested_persona_for_session" )
