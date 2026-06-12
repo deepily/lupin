@@ -74,8 +74,8 @@ class TaskTransitionIn( BaseModel ):
     Transition body for POST /api/tasks/{id}/transition.
 
     Structural rules (terminal states, receipts on ->done, next_chase_ts +
-    typed blocked_by on ->blocked) are validated by
-    task_store_rules.validate_transition in the handler.
+    typed blocked_by on ->blocked, non-blank reason on ->dropped) are
+    validated by task_store_rules.validate_transition in the handler.
     """
     to_status     : str                 = Field( ..., min_length=1 )
     actor         : str                 = Field( ..., min_length=1, max_length=255, description="persona + session id performing the transition" )
@@ -83,6 +83,21 @@ class TaskTransitionIn( BaseModel ):
     receipt_refs  : Optional[dict]      = None
     next_chase_ts : Optional[datetime]  = None
     blocked_by    : Optional[list]      = None
+    reason        : Optional[str]       = Field( default=None, max_length=4000, description="free-text justification; REQUIRED non-blank for ->dropped (C12)" )
+
+
+class TaskCorrelateIn( BaseModel ):
+    """
+    Body for POST /api/tasks/{id}/correlate (Phase 2 — cross-session respawn
+    adoption: re-stamp an item's correlation_key onto a successor session's
+    harness task id instead of forking a duplicate item).
+
+    Terminal items are rejected in the handler (no re-keying closed history);
+    authority enum membership is validated there too (one rules home).
+    """
+    correlation_key : str = Field( ..., min_length=1, max_length=255 )
+    actor           : str = Field( ..., min_length=1, max_length=255, description="persona + session id performing the re-correlation" )
+    authority       : str = Field( default="standing" )
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +154,7 @@ def _serialize_event( event ) -> dict:
         "transition"   : event.transition,
         "receipt_refs" : event.receipt_refs,
         "authority"    : event.authority,
+        "reason"       : event.reason,
     }
 
 
@@ -253,6 +269,7 @@ def transition_task(
             receipt_refs  = payload.receipt_refs,
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = payload.blocked_by,
+            reason        = payload.reason,
         ) )
 
         event = repo.apply_transition(
@@ -263,6 +280,61 @@ def transition_task(
             receipt_refs  = payload.receipt_refs,
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = payload.blocked_by,
+            reason        = payload.reason,
+        )
+        return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
+
+
+@router.post(
+    "/tasks/{task_id}/correlate",
+    summary     = "Re-stamp a task-store item's correlation key",
+    description = "Phase-2 cross-session respawn adoption: a successor session "
+                  "re-registers its harness task id onto an inherited item "
+                  "instead of forking a duplicate. Appends an audited "
+                  "'re-correlated' event (R3). Terminal items are rejected. "
+                  "Auth: X-API-Key or Bearer JWT."
+)
+def correlate_task(
+    task_id: uuid.UUID,
+    payload: TaskCorrelateIn,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Re-stamp an item's correlation_key (audited).
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+        - task_id is a valid UUID (FastAPI 422s malformed ids)
+        - payload validates against TaskCorrelateIn
+
+    Ensures:
+        - 404 when the item does not exist
+        - 422 when the item is terminal (no re-keying closed history) or
+          authority is not a valid enum member
+        - row-locked read (N3 parity) so the terminal check cannot be raced
+          by a concurrent ->done/->dropped transition
+        - correlation_key update + 're-correlated' event append are atomic
+          (one get_db() transaction)
+        - returns { item, event } serialized
+    """
+    with get_db() as session:
+        repo = TaskRepository( session )
+        item = repo.get_by_id_for_update( task_id )
+        if item is None:
+            raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
+
+        errors = [ ]
+        if payload.authority not in rules.VALID_AUTHORITIES:
+            errors.append( f"authority '{payload.authority}' must be one of {rules.VALID_AUTHORITIES}" )
+        if item.status in rules.TERMINAL_STATUSES:
+            errors.append( f"item is terminal ('{item.status}') — correlation keys of closed history are immutable" )
+        _reject_if_errors( errors )
+
+        event = repo.apply_correlation(
+            item            = item,
+            correlation_key = payload.correlation_key,
+            actor           = payload.actor,
+            authority       = payload.authority,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
 
@@ -282,6 +354,7 @@ def query_tasks(
     accountable_manager : Optional[str] = None,
     project             : Optional[str] = None,
     item_class          : Optional[str] = None,
+    correlation_key     : Optional[str] = None,
     limit               : int = Query( default=100, ge=0, le=500 ),
     offset              : int = Query( default=0, ge=0 ),
 ):
@@ -319,6 +392,7 @@ def query_tasks(
             accountable_manager = accountable_manager,
             project             = project,
             item_class          = item_class,
+            correlation_key     = correlation_key,
             limit               = limit,
             offset              = offset,
         )

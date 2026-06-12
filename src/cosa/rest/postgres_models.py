@@ -1434,6 +1434,12 @@ class TaskEvent( Base ):
         default="standing",
         server_default="standing"
     )
+    reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )  # REQUIRED non-empty for ->dropped at the API layer (C12 pulled forward,
+       # Phase 2 — the T3 escape hatch carries its justification); optional on
+       # every other transition. Nullable by schema: D1 convergence unaffected.
 
     # Relationship to TaskItem
     item: Mapped["TaskItem"] = relationship(

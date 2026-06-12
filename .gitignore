@@ -138,4 +138,9 @@ coverage/
 # See src/rnd/v0.1.8/2026.06.04-heartbeat-hook/ + PIP design §0 decision #7
 .heartbeat-hold-*.json
 .heartbeat-acked-*.json
+
+# Task-store mirror — per-session correlation map + C8 failure spool (runtime
+# state; same family). See src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/
+.task-store-map-*.json
+.task-store-spool-*.jsonl
 .claude-session.md

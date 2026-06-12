@@ -242,20 +242,21 @@ def validate_transition(
     receipt_refs  = None,
     next_chase_ts = None,
     blocked_by    = None,
+    reason        = None,
     scope_roots   : Optional[dict] = None,
 ) -> list:
     """
-    Validate one state transition against the Phase-1 structural rules.
+    Validate one state transition against the Phase-1/2 structural rules.
 
     The full legal-transition graph is Phase-2+ backlog (design §4.1 C-items);
-    Phase 1 enforces enum validity + the ratified structural rules only.
+    enforced here are enum validity + the ratified structural rules only.
 
     Requires:
         - from_status is the item's CURRENT status (read inside the same DB
           session that will apply the transition)
         - to_status / authority are the candidate values
-        - receipt_refs / next_chase_ts / blocked_by are the candidate payload
-          fields (each may be None)
+        - receipt_refs / next_chase_ts / blocked_by / reason are the candidate
+          payload fields (each may be None)
         - scope_roots: optional override for receipt path checks (tests)
 
     Ensures:
@@ -271,10 +272,15 @@ def validate_transition(
             lands in the audit trail)
             to_status == blocked => next_chase_ts present (I3) AND blocked_by
             passes validate_blocked_by_refs (gate ruling #5)
+            to_status == dropped => reason is a non-blank string (C12 pulled
+            forward into Phase 2, Tiberius ruling qid b312b0f1 — the T3
+            escape hatch must carry its justification)
+        - reason is OPTIONAL on every other transition (free text, no shape
+          rule — length is capped at the wire by the router's Pydantic model)
         - returns the full list of violations otherwise — every problem at
           once, with ONE exception: an invalid to_status short-circuits
-          (the dependent receipt/blocked rules are meaningless without a
-          valid target state)
+          (the dependent receipt/blocked/reason rules are meaningless without
+          a valid target state)
     """
     if to_status not in VALID_STATUSES:
         return [ f"to_status '{to_status}' must be one of {VALID_STATUSES}" ]
@@ -293,6 +299,8 @@ def validate_transition(
         if next_chase_ts is None:
             errors.append( "next_chase_ts is REQUIRED when transitioning to 'blocked' (I3 — no 'pending X' graves)" )
         errors.extend( validate_blocked_by_refs( blocked_by ) )
+    if to_status == "dropped" and ( not isinstance( reason, str ) or not reason.strip() ):
+        errors.append( "reason is REQUIRED (non-blank) when transitioning to 'dropped' (C12 — the escape hatch carries its justification)" )
 
     return errors
 
@@ -332,7 +340,9 @@ def quick_smoke_test():
             assert validate_transition( "done", "queued", "standing" ) != [ ]
             assert validate_transition( "review", "done", "standing", receipt_refs={ "commit": "6be15f46" } ) == [ ]
             assert validate_transition( "in_progress", "blocked", "standing" ) != [ ]
-            print( "✓ terminal / receipts-on-done / blocked rules enforced" )
+            assert validate_transition( "queued", "dropped", "standing" ) != [ ]
+            assert validate_transition( "queued", "dropped", "standing", reason="superseded-by-rewrite" ) == [ ]
+            print( "✓ terminal / receipts-on-done / blocked / dropped-reason rules enforced" )
 
         print( "\n✓ Smoke test completed successfully" )
 
