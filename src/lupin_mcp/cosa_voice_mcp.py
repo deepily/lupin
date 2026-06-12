@@ -3125,6 +3125,7 @@ def task_transition(
     receipt_refs  : Optional[ dict ] = None,
     next_chase_ts : Optional[ str ]  = None,
     blocked_by    : Optional[ list ] = None,
+    reason        : Optional[ str ]  = None,
     authority     : str              = "standing",
 ) -> dict:
     """
@@ -3153,6 +3154,9 @@ def task_transition(
         receipt_refs: Receipt dict — REQUIRED server-side for ->done
         next_chase_ts: ISO-8601 chase time — REQUIRED server-side for ->blocked
         blocked_by: Typed refs [{kind, id}] — REQUIRED server-side for ->blocked
+        reason: Free-text rationale (<=4000) — REQUIRED server-side (non-empty)
+            for ->dropped once the Phase-2 write-path lands (C12 pull-forward);
+            give one on every ->dropped regardless (task-store-discipline.md §4)
         authority: standing | user_direct | manager_relay (default "standing")
 
     Returns:
@@ -3171,6 +3175,7 @@ def task_transition(
         receipt_refs  = receipt_refs,
         next_chase_ts = next_chase_ts,
         blocked_by    = blocked_by,
+        reason        = reason,
         authority     = authority,
     )
 
@@ -3183,6 +3188,7 @@ def task_query(
     accountable_manager : Optional[ str ] = None,
     project             : Optional[ str ] = None,
     item_class          : Optional[ str ] = None,
+    correlation_key     : Optional[ str ] = None,
     limit               : Optional[ int ] = None,
     offset              : Optional[ int ] = None,
 ) -> dict:
@@ -3210,6 +3216,8 @@ def task_query(
         accountable_manager: Filter by chasing manager
         project: Filter by owning project
         item_class: Filter by class (task | decision | review_request | bug | gate)
+        correlation_key: Exact-match filter on the hook-upsert correlation key
+            (Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
         limit: Max rows (server default 100, cap 500)
         offset: Pagination offset
 
@@ -3225,6 +3233,7 @@ def task_query(
         accountable_manager = accountable_manager,
         project             = project,
         item_class          = item_class,
+        correlation_key     = correlation_key,
         limit               = limit,
         offset              = offset,
     )

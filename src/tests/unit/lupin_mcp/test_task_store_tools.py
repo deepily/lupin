@@ -194,6 +194,7 @@ class TestTaskTransitionImpl:
             "receipt_refs"  : None,
             "next_chase_ts" : None,
             "blocked_by"    : None,
+            "reason"        : None,
         }
 
     def test_blocked_fields_pass_through( self, capture_request ):
@@ -213,6 +214,19 @@ class TestTaskTransitionImpl:
         assert sent[ "next_chase_ts" ] == "2026-06-13T09:00:00-04:00"
         assert sent[ "blocked_by" ]    == [ { "kind": "persona", "id": "tiffany" } ]
         assert sent[ "authority" ]     == "user_direct"
+
+    def test_reason_passes_through( self, capture_request ):
+        # Amendment 2026-06-12 (Phase-2 §1.11(B)): server-REQUIRED non-empty
+        # for ->dropped once C12 lands; transport just carries it verbatim.
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_transition_impl(
+            BASE_URL, API_KEY,
+            actor     = "sam 01b3bf59",
+            task_id   = "abc",
+            to_status = "dropped",
+            reason    = "superseded-by-rewrite",
+        )
+        assert calls[ "json" ][ "reason" ] == "superseded-by-rewrite"
 
 
 class TestTaskQueryImpl:
@@ -248,6 +262,7 @@ class TestTaskQueryImpl:
             accountable_manager = "tiberius",
             project             = "lupin",
             item_class          = "decision",
+            correlation_key     = "todo:abc123",
             limit               = 5,
             offset              = 20,
         )
@@ -258,6 +273,7 @@ class TestTaskQueryImpl:
             "accountable_manager" : "tiberius",
             "project"             : "lupin",
             "item_class"          : "decision",
+            "correlation_key"     : "todo:abc123",
             "limit"               : 5,
             "offset"              : 20,
         }

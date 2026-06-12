@@ -106,6 +106,7 @@ class TestTaskTransitionWrapper:
             receipt_refs  = { "commit": "f4e0370" },
             next_chase_ts = "2026-06-13T09:00:00-04:00",
             blocked_by    = [ { "kind": "user", "id": "rick" } ],
+            reason        = "waiting on Rick's gate",
             authority     = "user_direct",
         )
 
@@ -119,6 +120,7 @@ class TestTaskTransitionWrapper:
             "receipt_refs"  : { "commit": "f4e0370" },
             "next_chase_ts" : "2026-06-13T09:00:00-04:00",
             "blocked_by"    : [ { "kind": "user", "id": "rick" } ],
+            "reason"        : "waiting on Rick's gate",
             "authority"     : "user_direct",
         }
 
@@ -129,6 +131,7 @@ class TestTaskTransitionWrapper:
         assert captured[ "receipt_refs" ]  is None
         assert captured[ "next_chase_ts" ] is None
         assert captured[ "blocked_by" ]    is None
+        assert captured[ "reason" ]        is None
         assert captured[ "authority" ]     == "standing"
 
 
@@ -150,6 +153,7 @@ class TestTaskQueryWrapper:
             "accountable_manager" : None,
             "project"             : None,
             "item_class"          : None,
+            "correlation_key"     : None,
             "limit"               : None,
             "offset"              : None,
         }
@@ -159,12 +163,13 @@ class TestTaskQueryWrapper:
         monkeypatch.setattr( cv, "task_query_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
         cv.task_query.fn( owner_persona="sam", status="queued", gate_class="ricks_court",
                           accountable_manager="tiberius", project="lupin", item_class="gate",
-                          limit=7, offset=14 )
+                          correlation_key="todo:abc123", limit=7, offset=14 )
         assert captured[ "owner_persona" ]       == "sam"
         assert captured[ "status" ]              == "queued"
         assert captured[ "gate_class" ]          == "ricks_court"
         assert captured[ "accountable_manager" ] == "tiberius"
         assert captured[ "project" ]             == "lupin"
         assert captured[ "item_class" ]          == "gate"
+        assert captured[ "correlation_key" ]     == "todo:abc123"
         assert captured[ "limit" ]               == 7
         assert captured[ "offset" ]              == 14

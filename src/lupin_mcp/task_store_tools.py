@@ -137,6 +137,7 @@ def task_transition_impl(
     receipt_refs  = None,
     next_chase_ts = None,
     blocked_by    = None,
+    reason        = None,
     authority     = "standing",
 ):
     """
@@ -151,6 +152,9 @@ def task_transition_impl(
         - returns { item, event } (200 body) verbatim on success
         - 422 surfaces the server's detail.errors VERBATIM (spec §2.2)
         - 404 surfaces "task {id} not found" verbatim
+        - `reason` passes through verbatim (spec amendment 2026-06-12 / Phase-2
+          contract §1.11(B): server-REQUIRED non-empty for ->dropped once the
+          C12 pull-forward lands; the pre-Phase-2 server ignores the field)
     """
     payload = {
         "to_status"     : to_status,
@@ -159,6 +163,7 @@ def task_transition_impl(
         "receipt_refs"  : receipt_refs,
         "next_chase_ts" : next_chase_ts,
         "blocked_by"    : blocked_by,
+        "reason"        : reason,
     }
     return task_store_request( "POST", f"/api/tasks/{task_id}/transition", api_base_url, api_key, json_body=payload )
 
@@ -172,6 +177,7 @@ def task_query_impl(
     accountable_manager = None,
     project             = None,
     item_class          = None,
+    correlation_key     = None,
     limit               = None,
     offset              = None,
 ):
@@ -182,6 +188,8 @@ def task_query_impl(
         - returns { tasks, count } verbatim on success
         - omits unset filters entirely (server defaults apply), so a no-arg
           call is "everything, newest first" — the manager board glance
+        - `correlation_key` exact-match filter passes through (spec amendment
+          2026-06-12 / Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
     """
     filters = {
         "owner_persona"       : owner_persona,
@@ -190,6 +198,7 @@ def task_query_impl(
         "accountable_manager" : accountable_manager,
         "project"             : project,
         "item_class"          : item_class,
+        "correlation_key"     : correlation_key,
         "limit"               : limit,
         "offset"              : offset,
     }
