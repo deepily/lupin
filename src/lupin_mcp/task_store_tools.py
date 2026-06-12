@@ -72,8 +72,11 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
         return resp.json()
 
     # Non-2xx: surface the server's words verbatim, never paraphrased.
+    # A valid-JSON body is not necessarily a dict (an LB/proxy error shape can
+    # be a bare list/str/int) — never call .get on it (F1, review of 1ed3c0dc).
     try:
-        detail = resp.json().get( "detail" )
+        body   = resp.json()
+        detail = body.get( "detail" ) if isinstance( body, dict ) else body
     except ValueError:
         detail = resp.text
 

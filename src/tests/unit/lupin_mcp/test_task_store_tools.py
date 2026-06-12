@@ -115,6 +115,19 @@ class TestTaskStoreRequest:
         result = task_store_request( "GET", "/api/tasks", BASE_URL, API_KEY )
         assert result == { "status": "error", "http_status": 500, "detail": "Internal Server Error" }
 
+    @pytest.mark.parametrize( "non_dict_body", [
+        [ "upstream connect error" ],   # bare list — LB/proxy error shape
+        "Bad Gateway",                  # bare str
+        503,                            # bare int
+    ] )
+    def test_valid_json_non_dict_error_body_never_raises( self, capture_request, non_dict_body ):
+        # F1 (review of 1ed3c0dc): json() succeeding with a NON-dict body used
+        # to escape the ValueError handler and raise AttributeError on .get —
+        # violating the never-raises contract. Pin all three body classes.
+        capture_request( FakeResponse( 502, json_body=non_dict_body ) )
+        result = task_store_request( "GET", "/api/tasks", BASE_URL, API_KEY )
+        assert result == { "status": "error", "http_status": 502, "detail": non_dict_body }
+
 
 class TestTaskCreateImpl:
 

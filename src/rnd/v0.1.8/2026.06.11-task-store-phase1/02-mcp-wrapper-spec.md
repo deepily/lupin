@@ -57,6 +57,7 @@ Returns: the serialized item dict (201 body) verbatim.
 | `receipt_refs` | dict | no (REQUIRED server-side for `done`) | `receipt_refs` |
 | `next_chase_ts` | str ISO-8601 | no (REQUIRED server-side for `blocked`) | `next_chase_ts` |
 | `blocked_by` | list of `{kind, id}` | no (REQUIRED server-side for `blocked`) | `blocked_by` |
+| `reason` | str ≤4000 | no (REQUIRED server-side for `dropped` once Phase-2 C12 lands — §6 B) | `reason` |
 | `authority` | str, default `"standing"` | no | `authority` |
 
 `actor` stamped from the session bridge, same as `created_by` above.
@@ -75,6 +76,7 @@ rejection text reaches the model unedited.
 | `accountable_manager` | str | no | query param |
 | `project` | str | no | query param |
 | `item_class` | str | no | query param |
+| `correlation_key` | str | no | query param (exact match — §6 C) |
 | `limit` / `offset` | int | no | query params |
 
 Returns: `{ tasks, count }` verbatim. Convenience: `task_query()` with no
