@@ -153,7 +153,7 @@ async def get_voice_persona_pool(
         "occupied_names" : occupied_names,
         "free_names"     : free_names,
         "active_sessions": [
-            { "session_id": sid, "persona_name": p.get( "name" ), "borrowed": p.get( "borrowed", False ) }
+            { "session_id": sid, "persona_name": p.get( "name" ), "borrowed": p.get( "borrowed", False ), "assigned_at": p.get( "assigned_at" ) }
             for _path, sid, p in active
             if isinstance( p, dict )
         ]
