@@ -1,6 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Dict, Optional
+import asyncio
 import os
 from jwt.exceptions import ExpiredSignatureError
 from .user_id_generator import get_user_info, email_to_system_id
@@ -173,8 +174,11 @@ async def verify_jwt_token(token: str) -> Dict:
                 detail="Invalid token: missing user ID"
             )
 
-        # Get user from database
-        user_data = get_user_by_id( user_id )
+        # Get user from database. Lever B (messaging plane, surgical pass 2):
+        # get_user_by_id is a blocking SQLAlchemy lookup and this dependency runs
+        # on EVERY JWT-authenticated request — run it OFF the event loop so a slow
+        # DB under fleet load can't starve the shared :7999 loop (FM-7).
+        user_data = await asyncio.to_thread( get_user_by_id, user_id )
         if not user_data:
             print( f"[AUTH-DEBUG] Token validation failed: User {user_id} not found in database" )
             raise HTTPException(
