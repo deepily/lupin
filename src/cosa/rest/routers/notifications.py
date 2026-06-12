@@ -1716,8 +1716,10 @@ async def mark_notification_played(
         # async_embedding=False — TWO synchronous embedding generations plus a
         # LanceDB write into a fragmenting table, formerly ALL on the event loop
         # (stalls grew with daily fragmentation: the 10:48 → 20:23 worsening).
-        # mark_played is already thread-safe (COSA queues call it from worker
-        # threads; its WS emit schedules via run_coroutine_threadsafe).
+        # mark_played is safe to run on a worker thread: its WS emit goes
+        # through the manager's _sync wrappers, which schedule onto the main
+        # loop via asyncio.run_coroutine_threadsafe by design, and the queue's
+        # shared structures are guarded by the base FifoQueue RLock.
         success = await asyncio.to_thread( notification_queue.mark_played, notification_id )
 
         if success:

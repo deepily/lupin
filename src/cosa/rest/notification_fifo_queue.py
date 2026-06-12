@@ -254,10 +254,14 @@ class NotificationFifoQueue( FifoQueue ):
         Raises:
             - None
         """
-        # Add to queue data structures
-        self.queue_list.append( notification )
-        self.queue_dict[ notification.id_hash ] = notification
-        self.push_counter += 1
+        # Add to queue data structures under the base FifoQueue lock — this
+        # override bypasses the parent's locked push(), and callers reach it
+        # from worker threads (e.g. the notify route's asyncio.to_thread work),
+        # so unlocked mutation would race the consumer thread.
+        with self._lock:
+            self.queue_list.append( notification )
+            self.queue_dict[ notification.id_hash ] = notification
+            self.push_counter += 1
 
         self._emit_notification_added( notification )
 
@@ -327,17 +331,22 @@ class NotificationFifoQueue( FifoQueue ):
         
         # Priority handling - urgent/high go to front, but after other urgent/high
         if priority in [ "urgent", "high" ]:
-            # Find insertion point after other urgent/high messages
-            insert_idx = 0
-            for idx, item in enumerate( self.queue_list ):
-                if hasattr( item, 'priority' ) and item.priority not in [ "urgent", "high" ]:
-                    break
-                insert_idx = idx + 1
-            
-            # Manual insertion for priority placement
-            self.queue_list.insert( insert_idx, notification )
-            self.queue_dict[ notification.id_hash ] = notification
-            self.push_counter += 1
+            # Scan + insert under the base FifoQueue lock: the insert_idx scan
+            # and the insertion must be one atomic unit, and this path mutates
+            # queue_list/queue_dict directly (it does not go through the
+            # parent's locked push()).
+            with self._lock:
+                # Find insertion point after other urgent/high messages
+                insert_idx = 0
+                for idx, item in enumerate( self.queue_list ):
+                    if hasattr( item, 'priority' ) and item.priority not in [ "urgent", "high" ]:
+                        break
+                    insert_idx = idx + 1
+
+                # Manual insertion for priority placement
+                self.queue_list.insert( insert_idx, notification )
+                self.queue_dict[ notification.id_hash ] = notification
+                self.push_counter += 1
 
             self._emit_notification_added( notification )
         else:
