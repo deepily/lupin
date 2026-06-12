@@ -490,9 +490,15 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             subscribed_events = auth_message.get("subscribed_events", ["*"])
             print(f"[WS-QUEUE-AUTH] Subscribed events for session [{session_id}]: {subscribed_events}")
 
+            # F-S6-1: extract the client-type marker from auth_request. The mobile
+            # app sends "mobile"; web clients send nothing (absent ⇒ web). ONLY the
+            # queue WS records this — the FCM wake trigger keys on queue-WS liveness.
+            client_type = auth_message.get( "client_type" )
+            if client_type: print( f"[WS-QUEUE-AUTH] Client type for session [{session_id}]: {client_type}" )
+
             # Connect with user association and subscriptions
             print(f"[WS-QUEUE-AUTH] Connecting session [{session_id}] to user [{user_id}] in WebSocket manager...")
-            websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ) )
+            websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type )
             session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
             print( f"[WS-QUEUE] Authenticated {session_type} session [{session_id}] for user [{user_id}] ({user_info.get( 'email', '?' )})" )
 

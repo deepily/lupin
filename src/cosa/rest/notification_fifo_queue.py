@@ -208,20 +208,23 @@ class NotificationFifoQueue( FifoQueue ):
     Logs all notifications to InputAndOutputTable for persistence and analytics.
     """
     
-    def __init__( self, websocket_mgr: Optional[Any] = None, emit_enabled: bool = True, 
-                 debug: bool = False, verbose: bool = False ) -> None:
+    def __init__( self, websocket_mgr: Optional[Any] = None, emit_enabled: bool = True,
+                 debug: bool = False, verbose: bool = False,
+                 fcm_wake_service: Optional[Any] = None ) -> None:
         """
         Initialize notification queue with io_tbl logging.
-        
+
         Requires:
             - websocket_mgr is a valid WebSocketManager instance or None
             - emit_enabled is boolean to control auto-emission
-            
+            - fcm_wake_service is an FcmWakeService instance or None (S6 silent
+              relay — None disables the wake trigger entirely)
+
         Ensures:
             - Inherits FifoQueue with 'notification' queue name
             - Initializes InputAndOutputTable for logging
             - Sets debug and verbose flags
-            
+
         Raises:
             - Database connection errors propagated from InputAndOutputTable
         """
@@ -230,11 +233,12 @@ class NotificationFifoQueue( FifoQueue ):
             queue_name="notification",  # Will emit 'notification_queue_update' events
             emit_enabled=emit_enabled
         )
-        
-        self.debug           = debug
-        self.verbose         = verbose
-        self._io_tbl         = InputAndOutputTable( debug=debug, verbose=verbose )
-        
+
+        self.debug            = debug
+        self.verbose          = verbose
+        self._io_tbl          = InputAndOutputTable( debug=debug, verbose=verbose )
+        self.fcm_wake_service = fcm_wake_service
+
         if self.debug:
             print( f"NotificationFifoQueue initialized with io_tbl logging" )
     
@@ -418,6 +422,13 @@ class NotificationFifoQueue( FifoQueue ):
         Raises:
             - None
         """
+        # S6 silent relay: the FCM wake trigger fires on ENQUEUE (this is the
+        # single chokepoint both the normal-priority push() and the urgent/high
+        # push_notification() paths route through), independent of whether the
+        # WS emit below is enabled — the wake exists precisely for the user
+        # whose WebSocket isn't there.
+        self._maybe_send_fcm_wake( notification )
+
         if not ( self.websocket_mgr and self.emit_enabled ):
             return
 
@@ -459,6 +470,34 @@ class NotificationFifoQueue( FifoQueue ):
                     event   = "notification_queue_update",
                     data    = event_data,
                 )
+
+    def _maybe_send_fcm_wake( self, notification: NotificationItem ) -> None:
+        """
+        Run the S6 §3.3 wake trigger for a newly-enqueued user-targeted notification.
+
+        The full policy (enabled → no-live-mobile-WS → debounce → ≥1 token →
+        off-thread send) lives in FcmWakeService.maybe_send_wake; this hook only
+        gates on having a service and a target user, so the queue stays decoupled
+        from FCM concerns.
+
+        Requires:
+            - notification is a fully-populated NotificationItem
+
+        Ensures:
+            - Silent no-op when fcm_wake_service is None or user_id is unset
+              (broadcast notifications never wake devices)
+            - NEVER raises — the notification path must survive any wake failure
+
+        Raises:
+            - None
+        """
+        if self.fcm_wake_service is None or not notification.user_id:
+            return
+        try:
+            status = self.fcm_wake_service.maybe_send_wake( notification.user_id )
+            if self.debug and self.verbose: print( f"[NOTIFY-QUEUE] FCM wake trigger for user {notification.user_id}: {status}" )
+        except Exception as e:
+            print( f"[NOTIFY-QUEUE] ⚠️ FCM wake trigger failed for user {notification.user_id}: {type( e ).__name__}: {e}" )
 
     def _emit_queue_update( self ) -> None:
         """

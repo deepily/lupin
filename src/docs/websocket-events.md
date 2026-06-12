@@ -341,12 +341,14 @@ First message a client must send after connecting to `/ws/queue/{session_id}`.
 {
   "type": "auth_request",
   "token": "Bearer <jwt_token>",
-  "subscribed_events": ["job_state_transition", "notification_queue_update"]
+  "subscribed_events": ["job_state_transition", "notification_queue_update"],
+  "client_type": "mobile"
 }
 ```
 
 - `subscribed_events` is optional; defaults to `["*"]` (all events)
 - `token` can include or omit the `Bearer ` prefix (stripped server-side)
+- `client_type` is optional (F-S6-1, queue WS only): the mobile app sends `"mobile"`; anything else — including absent (existing web clients send nothing) — is recorded as `"web"`. Drives the FCM `ws_wake` trigger: a wake push fires only when the user has NO live session marked `"mobile"`, so a desktop browser never suppresses the phone's wake. The audio WS never records this marker.
 
 ### `auth_success` (Server → Client)
 

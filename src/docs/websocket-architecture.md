@@ -73,6 +73,7 @@ The `WebSocketManager` bridges COSA's synchronous queue system with FastAPI's as
 | `user_to_email` | `Dict[str, str]` | Debug cache: `user_id` → email |
 | `session_subscriptions` | `Dict[str, List[str]]` | Maps `session_id` → subscribed event names (or `["*"]` for all) |
 | `session_timestamps` | `Dict[str, datetime]` | Connection time per session; used by stale-session cleanup |
+| `session_client_types` | `Dict[str, str]` | F-S6-1 side map: `session_id` → `"mobile"` \| `"web"`. Recorded from the queue-WS `auth_request` `client_type` field (exactly `"mobile"` marks mobile; absent/anything else ⇒ `"web"`). Read by `has_live_mobile_session(user_id)` — the FCM `ws_wake` trigger input (a wake fires only when the user has no live mobile queue-WS; web sessions never suppress it) |
 | `available_events` | `set` | Valid event names loaded from `lupin-app.ini` |
 | `main_loop` | `Optional[asyncio.AbstractEventLoop]` | Main event loop reference for thread-safe emission |
 | `single_session_per_user` | `bool` | Policy flag; when `True`, new connections close prior sessions for same user |

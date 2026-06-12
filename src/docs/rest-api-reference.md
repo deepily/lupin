@@ -1,6 +1,6 @@
 # Lupin REST API Quick Reference
 
-> **Last Updated**: 2026.03.20
+> **Last Updated**: 2026.06.12
 >
 > For detailed request/response schemas, see the interactive API docs at `/docs` (Swagger UI) or `/redoc` (ReDoc).
 
@@ -352,6 +352,17 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
 | GET | `/api/multiplexer/config` | None | Multiplexer client-config (boot-time tuning values) |
+
+---
+
+## 25. FCM Wake Push (`/api/fcm/*`)
+
+> Mobile silent-relay wake channel (S6). The mobile app registers its FCM device token; the parent fires a content-free, data-only `ws_wake` push when a notification is enqueued for a user with no live WebSocket session marked `client_type: "mobile"` (web sessions never suppress the wake). Tokens persist in the `fcm_tokens` table. Spec: `src/lupin-mobile/src/rnd/2026.06.11-focus-mode-voice-chat/15-section-s6-fcm-backend-interface.md`.
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| POST | `/api/fcm/register-token` | JWT | Register device token. Body `{ token, platform, user_email }` → `{ "status": "ok" }`. Upsert keyed on token; multiple devices per user. |
+| POST | `/api/fcm/unregister-token` | JWT | Unregister device token (best-effort logout). Body `{ token }` → `{ "status": "ok" }`, idempotent. |
 
 ---
 

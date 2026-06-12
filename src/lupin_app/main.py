@@ -69,7 +69,7 @@ from cosa.rest.websocket_manager import WebSocketManager
 from cosa.rest.notification_fifo_queue import NotificationFifoQueue
 
 # Import routers
-from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks
+from cosa.rest.routers import system, notifications, speech, queues, jobs, websocket, websocket_admin, auth, admin, claude_code_queue, embeddings, mode, stats, deep_research, mock_job, io_files, docs_files, podcast_generator, presentation_generator, deep_research_to_podcast, deep_research_to_presentation, swe_team, bug_fix_expediter, decision_proxy, test_suite, pages, peer, speakerphone, voice_persona, multiplexer_config, commons, arbiter, tasks, fcm
 from cosa.rest.queue_consumer import start_todo_producer_run_consumer_thread
 from cosa.rest.job_persistence import mark_interrupted_jobs, record_server_available
 
@@ -99,6 +99,7 @@ jobs_notification_queue = None
 snapshot_mgr = None
 io_tbl = None
 id_generator = None
+fcm_wake_service = None  # S6 silent-relay wake sender (disabled until Firebase credentials exist)
 
 # Inter-Session Commons (Phase 2 — user-broadcast surface; Phase 3 — push-mode + LLM)
 commons_store            = None
@@ -426,7 +427,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
     
     config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
@@ -517,8 +518,28 @@ async def lifespan( app: FastAPI ):
     jobs_dead_queue = FifoQueue( websocket_mgr=websocket_manager, queue_name="dead", emit_enabled=True )
     jobs_run_queue = RunningFifoQueue( app, websocket_manager, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, config_mgr=config_mgr, emit_speech_callback=None )
     
+    # Initialize the FCM silent-relay wake sender (S6). Boots DISABLED with one
+    # clear log line until Firebase credentials are provisioned (OSQ-7) — never
+    # blocks startup. Token lookup opens a short-lived session per wake attempt
+    # (debounce caps this at ≤1 per user per window).
+    from cosa.rest.fcm_wake_service import FcmWakeService
+
+    def _fcm_tokens_for_user( user_id ):
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.fcm_token_repository import FcmTokenRepository
+        with get_db() as session:
+            return FcmTokenRepository( session ).get_tokens_for_user( user_id )
+
+    fcm_wake_service = FcmWakeService(
+        config_mgr,
+        token_lookup    = _fcm_tokens_for_user,
+        mobile_liveness = websocket_manager.has_live_mobile_session,
+        debug           = app_debug,
+        verbose         = app_verbose
+    )
+
     # Initialize notification queue with io_tbl logging
-    jobs_notification_queue = NotificationFifoQueue( websocket_mgr=websocket_manager, emit_enabled=True, debug=app_debug, verbose=app_verbose )
+    jobs_notification_queue = NotificationFifoQueue( websocket_mgr=websocket_manager, emit_enabled=True, debug=app_debug, verbose=app_verbose, fcm_wake_service=fcm_wake_service )
     
     # Initialize input/output table
     io_tbl = InputAndOutputTable( debug=app_debug, verbose=app_verbose )
@@ -1048,6 +1069,7 @@ app.include_router(multiplexer_config.router)
 app.include_router(commons.router)
 app.include_router(arbiter.router)
 app.include_router(tasks.router)
+app.include_router(fcm.router)
 
 # Mount static files
 static_dir = os.path.join(os.path.dirname(__file__), "static")

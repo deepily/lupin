@@ -92,6 +92,24 @@ of three things happens:
 
 **Source**: Router endpoint `POST /api/notify` with `response_requested=true`
 
+#### Side Channel: FCM Wake Push ( mobile silent relay, S6 )
+
+When a user-targeted notification is enqueued at Layer 1 and the user has NO live
+WebSocket session marked `client_type: "mobile"` ( a live web/desktop session does
+NOT suppress this ), the queue's enqueue chokepoint asks `FcmWakeService` to send a
+content-free, data-only, high-priority FCM push
+`{ "type": "ws_wake", "reason": "undelivered" | "reconnect-hint", "ts": <iso8601> }`
+to the user's registered devices ( `POST /api/fcm/register-token` ). The push carries
+NO message content — the woken mobile handler fetches the notification over the
+authenticated API. Debounced to at most one wake per user per
+`fcm wake debounce seconds` ( default 60 ). Boots DISABLED with a clear log line
+until Firebase credentials are provisioned — never blocks the notification path.
+
+**Source**: `src/cosa/rest/fcm_wake_service.py` ( policy + sender ),
+`src/cosa/rest/notification_fifo_queue.py` ( `_maybe_send_fcm_wake` hook ),
+`src/cosa/rest/routers/fcm.py` ( token registration ),
+spec `src/lupin-mobile/src/rnd/2026.06.11-focus-mode-voice-chat/15-section-s6-fcm-backend-interface.md`
+
 ---
 
 ### Key Concepts
