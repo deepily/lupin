@@ -1,0 +1,397 @@
+#!/usr/bin/env python3
+"""
+Unit tests for the task-store router — /api/tasks/* (cosa.rest.routers.tasks).
+
+Minimal FastAPI app mounting ONLY the tasks router, with require_api_key_or_jwt
+overridden and the get_db/TaskRepository seams monkeypatched — exercises HTTP
+routing, structural-rule enforcement at the wire (422 with EVERY violation),
+404s, and serialization without auth DB or Postgres (:7999-eligible).
+
+100% lines/branches/functions of routers/tasks.py. All handlers are sync `def`
+(C4 debt-clean) — TestClient drives them through the threadpool exactly as
+production does.
+"""
+import os
+import sys
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+# Bootstrap
+_src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
+if _src_path not in sys.path:
+    sys.path.insert( 0, _src_path )
+
+from cosa.rest.postgres_models import TaskItem, TaskEvent
+from cosa.rest.routers import tasks
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+
+NOW = datetime( 2026, 6, 12, 0, 0, tzinfo=timezone.utc )
+
+
+def make_item( **overrides ):
+    fields = dict(
+        id                  = uuid.uuid4(),
+        item_class          = "task",
+        title               = "build the store",
+        body                = None,
+        project             = "lupin",
+        owner_persona       = "krishna",
+        accountable_manager = "tiberius",
+        created_by          = "krishna 38d15e3b",
+        status              = "queued",
+        blocked_by          = [ ],
+        next_chase_ts       = None,
+        gate_class          = "none",
+        priority            = "P2",
+        source_qid          = None,
+        correlation_key     = None,
+        created_ts          = NOW,
+        updated_ts          = NOW,
+    )
+    fields.update( overrides )
+    return TaskItem( **fields )
+
+
+def make_event( item_id, **overrides ):
+    fields = dict(
+        id           = 1,
+        item_id      = item_id,
+        ts           = NOW,
+        actor        = "krishna 38d15e3b",
+        transition   = "->queued",
+        receipt_refs = None,
+        authority    = "standing",
+    )
+    fields.update( overrides )
+    return TaskEvent( **fields )
+
+
+@pytest.fixture
+def repo( monkeypatch ):
+    """Patch the router's get_db + TaskRepository seams; return the fake repo."""
+    fake = MagicMock()
+
+    @contextmanager
+    def _fake_get_db():
+        yield MagicMock()
+
+    monkeypatch.setattr( tasks, "get_db", _fake_get_db )
+    monkeypatch.setattr( tasks, "TaskRepository", lambda session: fake )
+    return fake
+
+
+@pytest.fixture
+def client( repo ):
+    app = FastAPI()
+    app.include_router( tasks.router )
+    # Override the credential (X-API-Key / JWT) so we test routing, not auth-DB.
+    app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+    return TestClient( app )
+
+
+_CREATE_BODY = {
+    "item_class" : "task",
+    "title"      : "build the store",
+    "project"    : "lupin",
+    "created_by" : "krishna 38d15e3b",
+}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tasks
+# ---------------------------------------------------------------------------
+
+def test_create_returns_201_with_serialized_item( client, repo ):
+    item = make_item()
+    repo.create_item.return_value = item
+
+    r = client.post( "/api/tasks", json=_CREATE_BODY )
+
+    assert r.status_code == 201
+    body = r.json()
+    assert body[ "id" ] == str( item.id )
+    assert body[ "status" ] == "queued" and body[ "item_class" ] == "task"
+    assert body[ "created_ts" ] == NOW.isoformat() and body[ "next_chase_ts" ] is None
+    repo.create_item.assert_called_once()
+
+
+def test_create_defaults_flow_to_repository( client, repo ):
+    repo.create_item.return_value = make_item()
+    client.post( "/api/tasks", json=_CREATE_BODY )
+    kwargs = repo.create_item.call_args.kwargs
+    assert kwargs[ "authority" ] == "standing" and kwargs[ "gate_class" ] == "none"
+    assert kwargs[ "priority" ] == "P2" and kwargs[ "owner_persona" ] is None
+
+
+def test_create_rejects_bad_enums_with_all_violations( client, repo ):
+    bad = dict( _CREATE_BODY, item_class="chore", gate_class="side-gate", priority="P9", authority="by-fiat" )
+    r = client.post( "/api/tasks", json=bad )
+    assert r.status_code == 422
+    assert len( r.json()[ "detail" ][ "errors" ] ) == 4
+    repo.create_item.assert_not_called()                       # rejected BEFORE any write
+
+
+def test_create_rejects_empty_required_fields( client, repo ):
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="" ) )
+    assert r.status_code == 422                                 # Pydantic min_length
+    repo.create_item.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/tasks/{id}/transition
+# ---------------------------------------------------------------------------
+
+def _transition_body( **overrides ):
+    body = { "to_status": "claimed", "actor": "krishna 38d15e3b" }
+    body.update( overrides )
+    return body
+
+
+def test_transition_404_when_item_missing( client, repo ):
+    repo.get_by_id_for_update.return_value = None
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body() )
+    assert r.status_code == 404 and "not found" in r.json()[ "detail" ]
+    repo.apply_transition.assert_not_called()
+
+
+def test_transition_422_on_malformed_uuid( client, repo ):
+    r = client.post( "/api/tasks/not-a-uuid/transition", json=_transition_body() )
+    assert r.status_code == 422
+    repo.get_by_id_for_update.assert_not_called()
+
+
+def test_transition_rejects_done_without_receipts( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item( status="review" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body( to_status="done" ) )
+    assert r.status_code == 422
+    assert any( "receipt_refs" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_transition.assert_not_called()
+
+
+def test_transition_rejects_leaving_terminal_state( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item( status="done" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body() )
+    assert r.status_code == 422
+    assert any( "append-only" in e for e in r.json()[ "detail" ][ "errors" ] )
+
+
+def test_transition_happy_path_returns_item_and_event( client, repo ):
+    item  = make_item( status="queued", updated_ts=NOW )       # current status — body moves it to claimed
+    event = make_event( item.id, transition="queued->claimed" )
+    repo.get_by_id_for_update.return_value         = item
+    repo.apply_transition.return_value  = event
+
+    r = client.post( f"/api/tasks/{item.id}/transition", json=_transition_body() )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "item" ][ "id" ] == str( item.id )
+    assert body[ "event" ][ "transition" ] == "queued->claimed"
+    assert body[ "event" ][ "ts" ] == NOW.isoformat() and body[ "event" ][ "authority" ] == "standing"
+    kwargs = repo.apply_transition.call_args.kwargs
+    assert kwargs[ "to_status" ] == "claimed" and kwargs[ "actor" ] == "krishna 38d15e3b"
+
+
+def test_transition_to_done_with_valid_receipts_passes_them_through( client, repo ):
+    receipts = { "commit": "6be15f46" }
+    item     = make_item( status="done" )
+    repo.get_by_id_for_update.return_value        = make_item( status="review" )
+    repo.apply_transition.return_value = make_event( item.id, transition="review->done", receipt_refs=receipts )
+
+    r = client.post( f"/api/tasks/{item.id}/transition",
+                     json=_transition_body( to_status="done", receipt_refs=receipts ) )
+
+    assert r.status_code == 200
+    assert r.json()[ "event" ][ "receipt_refs" ] == receipts
+    assert repo.apply_transition.call_args.kwargs[ "receipt_refs" ] == receipts
+
+
+def test_transition_to_blocked_serializes_chase_ts( client, repo ):
+    chase = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc )
+    refs  = [ { "kind": "user", "id": "rick" } ]
+    item  = make_item( status="blocked", next_chase_ts=chase, blocked_by=refs )
+    repo.get_by_id_for_update.return_value        = make_item( status="in_progress" )
+    repo.apply_transition.return_value = make_event( item.id, transition="in_progress->blocked" )
+    repo.get_by_id_for_update.return_value.next_chase_ts = None
+
+    def _apply( **kwargs ):
+        loaded               = repo.get_by_id_for_update.return_value
+        loaded.status        = "blocked"
+        loaded.next_chase_ts = kwargs[ "next_chase_ts" ]
+        loaded.blocked_by    = kwargs[ "blocked_by" ]
+        return make_event( loaded.id, transition="in_progress->blocked" )
+    repo.apply_transition.side_effect = _apply
+
+    r = client.post( f"/api/tasks/{item.id}/transition",
+                     json=_transition_body( to_status="blocked",
+                                            next_chase_ts=chase.isoformat(),
+                                            blocked_by=refs ) )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "item" ][ "status" ] == "blocked"
+    assert body[ "item" ][ "next_chase_ts" ] == chase.isoformat()   # the non-None serialize branch
+    assert body[ "item" ][ "blocked_by" ] == refs
+
+
+def test_transition_rejects_blocked_without_chase_or_refs( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item( status="in_progress" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body( to_status="blocked" ) )
+    assert r.status_code == 422
+    assert len( r.json()[ "detail" ][ "errors" ] ) == 2             # chase_ts + blocked_by, all at once
+
+
+def test_transition_rejects_junk_receipts_on_non_done( client, repo ):
+    """N2 at the wire: junk receipts on ->review never reach the audit trail."""
+    repo.get_by_id_for_update.return_value = make_item( status="in_progress" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition",
+                     json=_transition_body( to_status="review", receipt_refs={ "vibes": "good" } ) )
+    assert r.status_code == 422
+    assert any( "unknown receipt key 'vibes'" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_transition.assert_not_called()
+
+
+def test_transition_reads_through_row_lock_seam( client, repo ):
+    """N3 code-path: the transition load uses get_by_id_for_update, never the
+    plain unlocked get_by_id."""
+    repo.get_by_id_for_update.return_value = make_item( status="queued" )
+    repo.apply_transition.return_value     = make_event( uuid.uuid4(), transition="queued->claimed" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body() )
+    assert r.status_code == 200
+    repo.get_by_id_for_update.assert_called_once()
+    repo.get_by_id.assert_not_called()
+
+
+def test_transition_rejects_overlong_actor( client, repo ):
+    """N5: actor backs VARCHAR(255) on the event — overlong is a 422, not a DB 500."""
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition",
+                     json=_transition_body( actor="k" * 256 ) )
+    assert r.status_code == 422
+    repo.get_by_id_for_update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tasks
+# ---------------------------------------------------------------------------
+
+def test_query_returns_tasks_and_count( client, repo ):
+    repo.query_tasks.return_value = [ make_item(), make_item( status="claimed" ) ]
+    r = client.get( "/api/tasks" )
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "count" ] == 2 and len( body[ "tasks" ] ) == 2
+
+
+def test_query_passes_all_filters_through( client, repo ):
+    repo.query_tasks.return_value = [ ]
+    r = client.get( "/api/tasks", params={
+        "owner_persona"       : "krishna",
+        "status"              : "in_progress",
+        "gate_class"          : "ricks_court",
+        "accountable_manager" : "tiberius",
+        "project"             : "lupin",
+        "item_class"          : "task",
+        "limit"               : 7,
+        "offset"              : 3,
+    } )
+    assert r.status_code == 200 and r.json() == { "tasks": [ ], "count": 0 }
+    kwargs = repo.query_tasks.call_args.kwargs
+    assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "gate_class" ] == "ricks_court"
+    assert kwargs[ "limit" ] == 7 and kwargs[ "offset" ] == 3
+
+
+@pytest.mark.parametrize( "params, fragment", [
+    ( { "status": "finished" }, "status filter" ),
+    ( { "gate_class": "side-gate" }, "gate_class filter" ),
+    ( { "item_class": "chore" }, "item_class filter" ),
+] )
+def test_query_rejects_junk_enum_filters( client, repo, params, fragment ):
+    """A typo'd filter is a caller bug surfaced as 422 — never an honest-looking empty result."""
+    r = client.get( "/api/tasks", params=params )
+    assert r.status_code == 422
+    assert any( fragment in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.query_tasks.assert_not_called()
+
+
+def test_query_reports_multiple_junk_filters_at_once( client, repo ):
+    r = client.get( "/api/tasks", params={ "status": "finished", "gate_class": "side-gate", "item_class": "chore" } )
+    assert r.status_code == 422 and len( r.json()[ "detail" ][ "errors" ] ) == 3
+
+
+@pytest.mark.parametrize( "params", [
+    { "limit": -1 },          # Postgres InvalidRowCountInLimitClause — was an authenticated 500
+    { "limit": 501 },         # above the wire cap
+    { "offset": -1 },
+] )
+def test_query_rejects_out_of_bounds_pagination( client, repo, params ):
+    """N4: limit/offset bounds enforced at the wire (Query ge/le), never a DB 500."""
+    r = client.get( "/api/tasks", params=params )
+    assert r.status_code == 422
+    repo.query_tasks.assert_not_called()
+
+
+@pytest.mark.parametrize( "field, limit", [
+    ( "project", 255 ),
+    ( "created_by", 255 ),
+    ( "owner_persona", 255 ),
+    ( "accountable_manager", 255 ),
+    ( "source_qid", 64 ),
+    ( "correlation_key", 255 ),
+] )
+def test_create_rejects_overlong_varchar_backed_fields( client, repo, field, limit ):
+    """N5: max_length mirrors the VARCHAR widths — overlong is a 422, not a DataError 500."""
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, **{ field: "x" * ( limit + 1 ) } ) )
+    assert r.status_code == 422
+    repo.create_item.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tasks/{id} + /events
+# ---------------------------------------------------------------------------
+
+def test_get_task_404_when_missing( client, repo ):
+    repo.get_by_id.return_value = None
+    r = client.get( f"/api/tasks/{uuid.uuid4()}" )
+    assert r.status_code == 404
+
+
+def test_get_task_returns_serialized_item( client, repo ):
+    item = make_item( body="framing payload", source_qid="c8c73fde-6ce4-4e8d-83d7-c55b5cce65a3" )
+    repo.get_by_id.return_value = item
+    r = client.get( f"/api/tasks/{item.id}" )
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "body" ] == "framing payload" and body[ "source_qid" ].startswith( "c8c73fde" )
+
+
+def test_get_events_404_when_item_missing( client, repo ):
+    repo.get_by_id.return_value = None
+    r = client.get( f"/api/tasks/{uuid.uuid4()}/events" )
+    assert r.status_code == 404
+    repo.get_events.assert_not_called()
+
+
+def test_get_events_returns_trail_in_order( client, repo ):
+    item = make_item()
+    repo.get_by_id.return_value = item
+    repo.get_events.return_value = [
+        make_event( item.id, id=1, transition="->queued" ),
+        make_event( item.id, id=2, transition="queued->claimed",
+                    receipt_refs=None, authority="manager_relay" ),
+    ]
+    r = client.get( f"/api/tasks/{item.id}/events" )
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "count" ] == 2
+    assert [ e[ "transition" ] for e in body[ "events" ] ] == [ "->queued", "queued->claimed" ]
+    assert body[ "events" ][ 1 ][ "authority" ] == "manager_relay"
+
+
+if __name__ == "__main__":
+    sys.exit( pytest.main( [ __file__, "-v" ] ) )
