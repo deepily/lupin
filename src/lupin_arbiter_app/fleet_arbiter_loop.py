@@ -166,6 +166,8 @@ def build_fleet_arbiter_job_factory(
     reannounce_interval  : int                  = 300,
     reannounce_ttl       : int                  = 86400,
     pending_ledger_path  : Optional[ str ]      = None,
+    # F-A (2026.06.11 lineage-persistence design): the restart-surviving carry file.
+    lineage_carry_path   : Optional[ str ]      = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -203,6 +205,7 @@ def build_fleet_arbiter_job_factory(
             manager_stale_poke_threshold_seconds = manager_stale_poke_threshold,   # post-game F2
             manager_stale_poke_max_age_seconds   = manager_stale_poke_max_age,     # corpse ceiling
             dm_push_fn                  = dm_push_fn,                              # Item B §3.3
+            lineage_carry_path          = lineage_carry_path,                      # F-A lineage carry
             live_retry_fn               = live_retry_fn,                           # Item B §3.5
             outreach_ack_window_seconds = outreach_ack_window,
             reannounce_interval_seconds = reannounce_interval,

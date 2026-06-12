@@ -160,6 +160,20 @@ class TestBuildSnapshot:
         row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "MR. RADIO" ] )[ "sessions" ][ 0 ]
         assert row[ "role" ] == "manager"
 
+    def test_declared_match_is_punct_tolerant_JOURNAL_REGRESSION( self ):
+        """F-B regression pin (2026-06-11 journal, 23:53:30Z): persona "mr radio"
+        — the EVENT-sourced lowercase punct-stripped form a bridge-less session
+        surfaces — read role=worker against declared "Mr. Radio", which ALSO
+        config-deaded the F2 manager-staleness tier for him (stale_why_not:
+        [not_manager]). Equivalence now rides the ONE shared normalizer."""
+        view = { "s1": self._live_row( "s1", "mr radio" ) }              # no period — the journal shape
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "manager"
+        # and the squashed variant too — display casing untouched either way
+        view = { "s1": self._live_row( "s1", "MR.RADIO" ) }
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "manager" and row[ "persona" ] == "MR.RADIO"
+
     def test_undeclared_persona_stays_worker( self ):
         view = { "s1": self._live_row( "s1", "Rio" ) }
         row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]

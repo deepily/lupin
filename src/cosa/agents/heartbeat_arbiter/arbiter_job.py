@@ -61,6 +61,8 @@ from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
 from cosa.agents.heartbeat_arbiter.outreach_ledger import (
     add_pending, read_pending, record_attempt, remove_pending,
 )
+# F-A (2026.06.11 lineage-persistence design): the restart-surviving carry file.
+from cosa.agents.heartbeat_arbiter.lineage_carry import read_carry, write_carry
 from cosa.rest.arbiter_snapshot_store import set_snapshot as _default_snapshot_sink
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_bridge_mtime as _default_bridge_mtime_fn,
@@ -275,6 +277,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         reannounce_interval_seconds : int               = 300,    # §3.5 Rick re-announce cadence
         reannounce_ttl_seconds   : int                  = 86400,  # §3.5 re-announce give-up horizon
         pending_ledger_path      : Optional[ str ]      = None,   # §3.5 file-backed ledger (None → re-announce inert)
+        lineage_carry_path       : Optional[ str ]      = None,   # F-A lineage-carry file (None → volatile, pre-fix behavior)
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
@@ -513,7 +516,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # sources at once (bridge unlink + manifest drop), so without this its
         # still-decaying row would wrongly drop to "Unmanaged". Threaded through
         # carry_forward_lineage each poll; pruned to the published sids (eviction).
-        self._manager_lineage  = { }                               # sid -> manager_persona (last-known)
+        # F-A (2026.06.11 lineage-persistence design): SEEDED from the carry file
+        # when a path is wired, so the mapping survives restarts — the 4× :8001
+        # bounces of 2026-06-11 each wiped the in-memory map and orphaned reaped
+        # rows to "(Unmanaged)". None keeps the volatile pre-fix behavior
+        # (in-pool / unit-fake construction).
+        self._lineage_carry_path = lineage_carry_path
+        self._manager_lineage    = read_carry( lineage_carry_path ) if lineage_carry_path else { }
         # post-game F2: manager-staleness EPISODE state (mirrors the stuck-tier
         # _poke_* trio): keyed by session_id; cleared when the manager freshens
         # below the threshold (or leaves the roster) → the cap + advisory re-arm.
@@ -685,7 +694,17 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # (Post-game note: the carry now runs on the FULL snapshot, so lineage is
         # retained until FULL-snapshot eviction — published rows are a subset and
         # receive identical fills, so the published view is unchanged.)
+        prior_lineage = self._manager_lineage
         snapshot, self._manager_lineage = carry_forward_lineage( snapshot, self._manager_lineage )
+        # F-A: persist the POST-prune mapping write-on-change — bounded by
+        # construction (carry_forward_lineage prunes to the snapshot sids, so the
+        # file tracks exactly the decay-window population). A write failure is
+        # journaled, never raised (worst case = pre-fix volatility, not a dead poll).
+        if self._lineage_carry_path and self._manager_lineage != prior_lineage:
+            try:
+                write_carry( self._lineage_carry_path, self._manager_lineage )
+            except OSError as e:
+                self._log( "lineage_carry_error", error=str( e ) )
         self._last_full_snapshot = snapshot
         published                = prune_offline_rows( snapshot )   # the D6/§5.2 published contract
         self._last_published_n   = published[ "session_count" ]
@@ -1005,6 +1024,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         acked = 0
         for outreach_id, state in list( self._awaiting_ack.items() ):
             topic = LupinArbiterGateway.dm_topic_for( state[ "persona" ] )
+            # Timing note (Tiberius review nit, 2026-06-11): a resend resets
+            # sent_at to NOW, so an ack posted in the instant between the
+            # window-expiry evaluation and that reset falls before this `since`
+            # and is missed for ONE cycle — it is still caught on the next poll
+            # because the prefix match below accepts the ORIGINAL outreach_id
+            # against any of its question_id derivatives. Correct, just non-obvious.
             since = ( state[ "sent_at" ] - datetime.timedelta( seconds=1 ) ).isoformat()
             try:
                 entries = self._commons.read( topic, since=since ) or [ ]
