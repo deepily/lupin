@@ -47,7 +47,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_c
 from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids, listener_spawn_lock
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
-from cosa.rest.voice_persona_helpers import resolve_session_start_persona_chain
+from cosa.rest.voice_persona_helpers import resolve_session_start_persona_chain, pick_declared_managers_from_env
 
 
 def _find_tmux_session( cc_pid ):
@@ -578,7 +578,8 @@ def _check_cosa_voice_status():
 def _allocate_voice_persona_via_http(
     server_url, project, stable_session_id,
     previous_persona_name = None,
-    persona_chain         = None
+    persona_chain         = None,
+    declared_managers     = None
 ):
     """
     Allocate a voice persona for the given session by calling the cosa-voice
@@ -613,6 +614,12 @@ def _allocate_voice_persona_via_http(
           that 409 into a None return, leaving the session persona-less).
           Mutually exclusive with the strict requested_persona_name swap
           endpoint.
+        - When declared_managers is a non-empty list, threads it as a CSV
+          `declared_managers` query-string param on EVERY allocate call —
+          with AND without a chain — so the server reserves those names out
+          of the random and chain-`*` draws (reserve-from-random, Rick
+          2026-06-11). Named chain elements and strict requests still claim
+          them.
 
     Args:
         server_url: Lupin server URL
@@ -624,6 +631,9 @@ def _allocate_voice_persona_via_http(
         persona_chain: Optional ordered persona-chain expression — from the
             spawn-injected `COSA_VOICE_PERSONA_CHAIN` env var or the user's
             per-repo `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` shell default
+        declared_managers: Optional list of declared-manager persona names
+            (the `COSA_VOICE_MANAGERS__<PROJECT>` roster) reserved out of
+            the server's random + chain-`*` draws
 
     Returns:
         dict or None: The persona dict, or None on failure
@@ -656,6 +666,8 @@ def _allocate_voice_persona_via_http(
             query_params.append( f"previous_persona_name={urllib.parse.quote( previous_persona_name )}" )
         if persona_chain:
             query_params.append( f"persona_chain={urllib.parse.quote( persona_chain )}" )
+        if declared_managers:
+            query_params.append( f"declared_managers={urllib.parse.quote( ','.join( declared_managers ) )}" )
         if query_params:
             alloc_url = f"{alloc_url}?{'&'.join( query_params )}"
 
@@ -1051,6 +1063,13 @@ def main():
         # Full precedence contract lives in the pure helper.
         # See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
         chain = resolve_session_start_persona_chain( project, os.environ )
+        # Reserve-from-random (Rick, 2026-06-11): thread the project's
+        # declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, sourced
+        # from fleet-roster.env and tmux-forwarded by start-cc-with-tmux.sh)
+        # to the allocate endpoint on EVERY call — chain or plain random —
+        # so neither draw can squat a declared manager's name.
+        # See: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
+        declared_managers = pick_declared_managers_from_env( project, os.environ )
         # ── TEMPORARY DEBUG (2026-05-19, Tiberius session 4e724860) ─────────
         # Investigating why LookML hook never successfully allocates a persona
         # despite the backend chain working when called manually via curl.
@@ -1066,7 +1085,8 @@ def main():
             allocated = _allocate_voice_persona_via_http(
                 voice_persona_server_url, project, stable_session_id,
                 previous_persona_name = previous_persona_name,
-                persona_chain         = chain
+                persona_chain         = chain,
+                declared_managers     = declared_managers
             )
             print( f"[LOOKML-DEBUG] _allocate_voice_persona_via_http returned — allocated={allocated!r}",
                    file=sys.stderr )

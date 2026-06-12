@@ -48,7 +48,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 from ..voice_persona_helpers import (
     load_persona_pool_from_config, allocate_persona_for_session,
     load_overflow_persona_from_config, allocate_requested_persona_for_session,
-    allocate_persona_chain_for_session
+    allocate_persona_chain_for_session, parse_declared_managers
 )
 
 
@@ -182,7 +182,7 @@ async def get_voice_persona_endpoint(
 @router.post(
     "/voice-persona/{session_id}/allocate",
     summary     = "Allocate a voice persona for a session",
-    description = "Idempotent: if a persona is already set on the bridge and no `requested_persona_name`/`persona_chain` query param is supplied, returns it without re-allocating. When `requested_persona_name` is supplied: atomically allocates the named persona with strict 422/409 errors on miss. When `persona_chain` is supplied: STRICT ordered-fallback walk — comma-separated names tried in order, first FREE one allocated; a `*` element means 'then take anything free'; a chain exhausted without `*` is a LOUD fail (409 + `voice_persona_conflict` notification, NO silent random fallback). Used by the SessionStart hook for both spawn-injected and per-repo env-var chains. Mutually exclusive with `requested_persona_name`."
+    description = "Idempotent: if a persona is already set on the bridge and no `requested_persona_name`/`persona_chain` query param is supplied, returns it without re-allocating. When `requested_persona_name` is supplied: atomically allocates the named persona with strict 422/409 errors on miss. When `persona_chain` is supplied: STRICT ordered-fallback walk — comma-separated names tried in order, first FREE one allocated; a `*` element means 'then take anything free'; a chain exhausted without `*` is a LOUD fail (409 + `voice_persona_conflict` notification, NO silent random fallback). Used by the SessionStart hook for both spawn-injected and per-repo env-var chains. Mutually exclusive with `requested_persona_name`. `declared_managers` (CSV, optional — the hook threads its project's COSA_VOICE_MANAGERS__<PROJECT> roster) reserves those names OUT of the random and chain-`*` draws; explicit `requested_persona_name` and NAMED chain elements can still claim them."
 )
 async def allocate_voice_persona_endpoint(
     session_id            : str,
@@ -190,6 +190,7 @@ async def allocate_voice_persona_endpoint(
     previous_persona_name : Optional[ str ] = None,
     requested_persona_name: Annotated[ Optional[ str ], Query( min_length=1, max_length=64 ) ] = None,
     persona_chain         : Annotated[ Optional[ str ], Query( min_length=1, max_length=256 ) ] = None,
+    declared_managers     : Annotated[ Optional[ str ], Query( min_length=1, max_length=256 ) ] = None,
     notification_queue    : NotificationFifoQueue = Depends( get_notification_queue ),
     config_mgr            = Depends( get_config_manager )
 ) -> JSONResponse:
@@ -349,9 +350,18 @@ async def allocate_voice_persona_endpoint(
             # wins; `*` = "then take anything free"; exhaustion without `*` is
             # a LOUD predictable fail (409 + conflict notify, NO silent random).
             # See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
+            # Reserve-from-random (Rick, 2026-06-11): the SessionStart hook
+            # threads its project's COSA_VOICE_MANAGERS__<PROJECT> roster as
+            # a CSV `declared_managers` query param on BOTH the chain and the
+            # plain-random calls; the same parser as the env reader keeps the
+            # two carriers from drifting. Declared names are excluded from
+            # random + `*` draws only — the strict path above stays
+            # reservation-blind (that is how managers claim their names).
+            declared = parse_declared_managers( declared_managers ) or None
+
             if persona_chain is not None:
                 chain_result = allocate_persona_chain_for_session(
-                    config_mgr, session_id, persona_chain
+                    config_mgr, session_id, persona_chain, declared_managers=declared
                 )
                 if chain_result[ "status" ] == "pool_error":
                     raise HTTPException(
@@ -420,7 +430,7 @@ async def allocate_voice_persona_endpoint(
                         "outcomes" : chain_result[ "outcomes" ]
                     }
             else:
-                persona = allocate_persona_for_session( config_mgr, session_id )
+                persona = allocate_persona_for_session( config_mgr, session_id, declared_managers=declared )
                 if persona is None:
                     raise HTTPException(
                         status_code=500,

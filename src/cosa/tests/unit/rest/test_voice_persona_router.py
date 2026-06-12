@@ -235,6 +235,25 @@ class TestAllocate( unittest.IsolatedAsyncioTestCase ):
         self.assertTrue( body[ "newly_allocated" ] )
         self.assertFalse( body[ "swapped" ] )
 
+    async def test_no_request_threads_declared_managers( self ):
+        """Ensures: the CSV `declared_managers` param is parsed (REAL
+        parse_declared_managers — normalize-keyed dedup) and threaded into the
+        plain-random allocation (reserve-from-random, Rick 2026-06-11)."""
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_for_session", return_value=_persona() ) as mock_alloc, \
+             patch( f"{VP}.set_voice_persona", return_value=True ):
+            resp = await self._alloc( declared_managers="Mr. Radio, mr radio, Tiberius" )
+        self.assertTrue( _json( resp )[ "newly_allocated" ] )
+        mock_alloc.assert_called_once_with( self.cfg, "s1", declared_managers=[ "Mr. Radio", "Tiberius" ] )
+
+    async def test_no_request_without_declared_managers_passes_none( self ):
+        """Ensures: absent/empty roster param reaches the allocator as None."""
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_for_session", return_value=_persona() ) as mock_alloc, \
+             patch( f"{VP}.set_voice_persona", return_value=True ):
+            await self._alloc()
+        mock_alloc.assert_called_once_with( self.cfg, "s1", declared_managers=None )
+
     async def test_no_request_empty_pool_500( self ):
         """Ensures: random allocation returning None → 500."""
         with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
@@ -289,6 +308,17 @@ class TestAllocate( unittest.IsolatedAsyncioTestCase ):
         self.assertFalse( body[ "newly_allocated" ] )
         self.assertEqual( body[ "voice_persona" ][ "name" ], "Held" )
         mock_chain.assert_not_called()
+
+    async def test_chain_threads_declared_managers( self ):
+        """Ensures: the roster param rides the chain call too — the `*`
+        wildcard's random draw must honor reserve-from-random."""
+        with patch( f"{VP}.get_voice_persona", side_effect=[ None, None ] ), \
+             patch( f"{VP}.allocate_persona_chain_for_session",
+                    return_value=self._chain_ok() ) as mock_chain, \
+             patch( f"{VP}.set_voice_persona", return_value=True ):
+            resp = await self._alloc( persona_chain="María,*", declared_managers="Mr. Radio" )
+        self.assertTrue( _json( resp )[ "newly_allocated" ] )
+        mock_chain.assert_called_once_with( self.cfg, "s1", "María,*", declared_managers=[ "Mr. Radio" ] )
 
     async def test_chain_pool_error_500( self ):
         """Ensures: chain walk reporting pool_error → 500."""

@@ -246,6 +246,109 @@ class TestReleaseAndReAssignWiring:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# TestDeclaredManagersTransport — reserve-from-random (Rick 2026-06-11)
+# ═════════════════════════════════════════════════════════════════════════════
+# The COSA_VOICE_MANAGERS__<PROJECT> roster must reach the allocate endpoint on
+# EVERY Phase 4.5 call — chain or plain random — or the reserve only protects
+# chained boots (Tiberius's build-time check).
+# Design: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
+
+class TestDeclaredManagersTransport:
+    """Call-site threading of declared_managers into _allocate_voice_persona_via_http."""
+
+    def _clear_chain_env( self, monkeypatch ):
+        for var in ( "COSA_VOICE_PERSONA_CHAIN", "COSA_VOICE_PREFERRED_PERSONA__LUPIN",
+                     "COSA_VOICE_HEADLESS" ):
+            monkeypatch.delenv( var, raising=False )
+
+    def test_roster_threads_on_plain_random_call( self, isolated_session_dir, patched_main, monkeypatch ):
+        """THE no-chain receipt: with NO chain resolvable, the roster still
+        rides the allocate call — plain-random boots are protected too."""
+        self._clear_chain_env( monkeypatch )
+        monkeypatch.setenv( "COSA_VOICE_MANAGERS__LUPIN", "Mr. Radio, Tiberius" )
+        register_session.main()
+        kwargs = patched_main[ "_allocate_voice_persona_via_http" ].call_args.kwargs
+        assert kwargs.get( "persona_chain" ) is None
+        assert kwargs.get( "declared_managers" ) == [ "Mr. Radio", "Tiberius" ]
+
+    def test_roster_threads_alongside_chain( self, isolated_session_dir, patched_main, monkeypatch ):
+        self._clear_chain_env( monkeypatch )
+        monkeypatch.setenv( "COSA_VOICE_PERSONA_CHAIN", "Rio,*" )
+        monkeypatch.setenv( "COSA_VOICE_MANAGERS__LUPIN", "Mr. Radio, Tiberius" )
+        register_session.main()
+        kwargs = patched_main[ "_allocate_voice_persona_via_http" ].call_args.kwargs
+        assert kwargs.get( "persona_chain" ) == "Rio,*"
+        assert kwargs.get( "declared_managers" ) == [ "Mr. Radio", "Tiberius" ]
+
+    def test_no_roster_env_threads_empty_list( self, isolated_session_dir, patched_main, monkeypatch ):
+        self._clear_chain_env( monkeypatch )
+        monkeypatch.delenv( "COSA_VOICE_MANAGERS__LUPIN", raising=False )
+        register_session.main()
+        kwargs = patched_main[ "_allocate_voice_persona_via_http" ].call_args.kwargs
+        assert kwargs.get( "declared_managers" ) == [ ]
+
+
+class TestAllocateHttpDeclaredManagersParam:
+    """Query-param emission inside _allocate_voice_persona_via_http itself."""
+
+    _LOGIN_BODY = { "tokens": { "access_token": "tok" } }
+    _ALLOC_BODY = { "voice_persona": { "name": "nora" } }
+
+    def _patch_transport( self, monkeypatch, captured_urls ):
+        import urllib.request
+
+        def fake_urlopen( req, timeout=None ):
+            captured_urls.append( req.full_url )
+            body = self._LOGIN_BODY if "/auth/login" in req.full_url else self._ALLOC_BODY
+            cm = MagicMock()
+            cm.__enter__.return_value.read.return_value = json.dumps( body ).encode()
+            cm.__exit__.return_value = False
+            return cm
+
+        monkeypatch.setattr( urllib.request, "urlopen", fake_urlopen )
+        monkeypatch.setattr(
+            "lupin_cli.claude_code.hooks.lib.hook_credentials.get_hook_credentials",
+            lambda project: ( "e@x.com", "pw" )
+        )
+
+    def _alloc_url( self, captured_urls ):
+        urls = [ u for u in captured_urls if "/allocate" in u ]
+        assert len( urls ) == 1, captured_urls
+        return urls[ 0 ]
+
+    def test_declared_managers_emitted_as_csv_param( self, monkeypatch ):
+        import urllib.parse
+        captured = [ ]
+        self._patch_transport( monkeypatch, captured )
+        persona = register_session._allocate_voice_persona_via_http(
+            "http://srv", "lupin", "sid-1",
+            declared_managers=[ "Mr. Radio", "Tiberius" ]
+        )
+        assert persona == { "name": "nora" }
+        query = urllib.parse.parse_qs( urllib.parse.urlsplit( self._alloc_url( captured ) ).query )
+        assert query[ "declared_managers" ] == [ "Mr. Radio,Tiberius" ]
+        assert "persona_chain" not in query
+
+    def test_declared_managers_alongside_chain_param( self, monkeypatch ):
+        import urllib.parse
+        captured = [ ]
+        self._patch_transport( monkeypatch, captured )
+        register_session._allocate_voice_persona_via_http(
+            "http://srv", "lupin", "sid-1",
+            persona_chain="Rio,*", declared_managers=[ "Mr. Radio" ]
+        )
+        query = urllib.parse.parse_qs( urllib.parse.urlsplit( self._alloc_url( captured ) ).query )
+        assert query[ "persona_chain" ]     == [ "Rio,*" ]
+        assert query[ "declared_managers" ] == [ "Mr. Radio" ]
+
+    def test_no_declared_managers_omits_param( self, monkeypatch ):
+        captured = [ ]
+        self._patch_transport( monkeypatch, captured )
+        register_session._allocate_voice_persona_via_http( "http://srv", "lupin", "sid-1" )
+        assert "declared_managers" not in self._alloc_url( captured )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # TestCarryForwardReadModifyWrite — Fix B for the 2026-05-17 §6 mystery
 # ═════════════════════════════════════════════════════════════════════════════
 # Per src/rnd/v0.1.7/2026.05.17-owner-user-id-stamper-writer-side/01-design.md

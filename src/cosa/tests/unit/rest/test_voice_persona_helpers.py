@@ -33,6 +33,8 @@ from cosa.rest.voice_persona_helpers import (
     parse_persona_chain,
     resolve_session_start_persona_chain,
     allocate_persona_chain_for_session,
+    parse_declared_managers,
+    pick_declared_managers_from_env,
     PERSONA_CHAIN_WILDCARD,
 )
 
@@ -524,6 +526,80 @@ class TestResolveSessionStartPersonaChain( unittest.TestCase ):
             "COSA_VOICE_PREFERRED_PERSONA__LUPIN" : "Tiberius",
         }
         self.assertEqual( resolve_session_start_persona_chain( "lupin", environ ), "Tiberius" )
+
+
+class TestParseDeclaredManagers( unittest.TestCase ):
+    """The ONE roster parser — shared by the env reader + the router param."""
+
+    def test_csv_with_multiword_names( self ):
+        self.assertEqual( parse_declared_managers( "Tiberius, Mr. Radio" ), [ "Tiberius", "Mr. Radio" ] )
+
+    def test_list_input( self ):
+        self.assertEqual( parse_declared_managers( [ "Mr. Radio", "Tiberius" ] ), [ "Mr. Radio", "Tiberius" ] )
+
+    def test_non_string_items_in_list_skipped( self ):
+        self.assertEqual( parse_declared_managers( [ "Rio", 42, None ] ), [ "Rio" ] )
+
+    def test_normalize_keyed_dedupe_first_verbatim_wins( self ):
+        # F-B: "Mr. Radio" / "mr radio" / "MR.RADIO" declare ONE manager.
+        self.assertEqual(
+            parse_declared_managers( "Mr. Radio, mr radio, MR.RADIO, Tiberius" ),
+            [ "Mr. Radio", "Tiberius" ]
+        )
+
+    def test_wildcard_elements_dropped( self ):
+        self.assertEqual( parse_declared_managers( "Mr. Radio,Tiberius,*" ), [ "Mr. Radio", "Tiberius" ] )
+
+    def test_none_empty_whitespace_and_other_types( self ):
+        self.assertEqual( parse_declared_managers( None ),     [ ] )
+        self.assertEqual( parse_declared_managers( "" ),       [ ] )
+        self.assertEqual( parse_declared_managers( " , ,*" ),  [ ] )
+        self.assertEqual( parse_declared_managers( 42 ),       [ ] )
+
+
+class TestPickDeclaredManagersFromEnv( unittest.TestCase ):
+    """Declared-manager roster env reader — multi-manager-per-repo (Rick 2026-06-11).
+    (Moved from test_manager_resolver.py with the 2026-06-11 relocation into
+    cosa.rest.voice_persona_helpers.)"""
+
+    def test_csv_with_multiword_names( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Tiberius, Mr. Radio" }
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ=env ), [ "Tiberius", "Mr. Radio" ] )
+
+    def test_project_normalization_hyphen_and_case( self ):
+        env = { "COSA_VOICE_MANAGERS__COSA_VOICE": "Rio" }
+        self.assertEqual( pick_declared_managers_from_env( "cosa-voice", environ=env ), [ "Rio" ] )
+        self.assertEqual( pick_declared_managers_from_env( "  Cosa-Voice  ", environ=env ), [ "Rio" ] )
+
+    def test_case_insensitive_dedupe_first_wins( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio, rio, RIO, Krishna" }
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ=env ), [ "Rio", "Krishna" ] )
+
+    def test_punct_tolerant_dedupe_first_wins( self ):
+        """F-B: the dedup key is normalize-keyed — "Mr. Radio" and "mr radio"
+        declare ONE manager; the first (verbatim) spelling is emitted."""
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio, mr radio, MR.RADIO, Tiberius" }
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ=env ), [ "Mr. Radio", "Tiberius" ] )
+
+    def test_wildcard_elements_dropped( self ):
+        # A copy-pasted chain expression must not poison the roster.
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio,Tiberius,*" }
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ=env ), [ "Mr. Radio", "Tiberius" ] )
+
+    def test_unset_empty_whitespace_value( self ):
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ={ } ), [ ] )
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ={ "COSA_VOICE_MANAGERS__LUPIN": "" } ), [ ] )
+        self.assertEqual( pick_declared_managers_from_env( "lupin", environ={ "COSA_VOICE_MANAGERS__LUPIN": " , ,*" } ), [ ] )
+
+    def test_project_none_empty_whitespace( self ):
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio" }
+        self.assertEqual( pick_declared_managers_from_env( None, environ=env ),  [ ] )
+        self.assertEqual( pick_declared_managers_from_env( "", environ=env ),    [ ] )
+        self.assertEqual( pick_declared_managers_from_env( "   ", environ=env ), [ ] )
+
+    def test_default_environ_is_os_environ( self ):
+        with patch.dict( "os.environ", { "COSA_VOICE_MANAGERS__LUPIN": "Tiffany" } ):
+            self.assertEqual( pick_declared_managers_from_env( "lupin" ), [ "Tiffany" ] )
 
 
 class TestAllocatePersonaChainForSession( unittest.TestCase ):

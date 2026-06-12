@@ -239,7 +239,10 @@ def assemble_app(
     from lupin_arbiter_app.health_watcher import HealthWatcherLoop, docker_inspect_health
     from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop, build_fleet_arbiter_job_factory
     from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
-    from cosa.agents.heartbeat_arbiter.manager_resolver import pick_declared_managers_from_env
+    # Relocated 2026-06-11 (fleet-roster reserve-from-random): the roster
+    # reader lives with its env-var siblings in voice_persona_helpers now
+    # that the allocation corridor is its second consumer.
+    from cosa.rest.voice_persona_helpers import pick_declared_managers_from_env
 
     store = store if store is not None else LocalSnapshotStore()
 
@@ -259,8 +262,9 @@ def assemble_app(
     log_fn = wiring_log_fn
 
     # ── declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, Rick 2026-06-11):
-    # multi-manager-per-repo support. Role-only — feeds fanout, badging, and the
-    # per-worker declared fallback; never reserves personas. Project resolved the
+    # multi-manager-per-repo support. Feeds fanout, badging, and the per-worker
+    # declared fallback; never OCCUPIES a persona (allocation-side reserve-from-
+    # random lives in voice_persona_helpers, not here). Project resolved the
     # same way every other arbiter surface does (detect_project from cwd/git),
     # degrade-safe to "lupin" (this app IS the lupin fleet's arbiter).
     try:

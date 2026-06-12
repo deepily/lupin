@@ -29,6 +29,13 @@ import random
 from datetime  import datetime, timezone
 from typing    import List, Optional, Set, Dict, Any
 
+# Shared persona-name normalizer ("Mr. Radio"/"mr radio"/"MR.RADIO" → "mrradio").
+# Travelled here WITH pick_declared_managers_from_env (relocated from
+# manager_resolver 2026-06-11); import-time-safe — commons_persona_matcher
+# pulls only re+typing, and cosa→lupin_mcp imports are precedented
+# (e.g. cosa/rest/routers/commons.py).
+from lupin_mcp.commons_persona_matcher import _normalize_for_match
+
 
 PoolPersona = Dict[ str, Any ]
 
@@ -759,6 +766,115 @@ def allocate_requested_persona_for_session(
         result[ "persona" ][ "assigned_at" ] = datetime.now( timezone.utc ).isoformat( timespec="seconds" )
 
     return result
+
+
+# ── Declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>) ─────────────────
+
+def parse_declared_managers( raw ) -> List[ str ]:
+    """
+    Normalize a declared-manager roster expression into an ordered name list.
+
+    The ONE parser for the roster wherever it travels — the env reader
+    (pick_declared_managers_from_env) and the allocate endpoint's
+    `declared_managers` query param both call this, so the two carriers can
+    never drift. Extracted 2026-06-11 when the roster gained its second
+    carrier (hook→server transport for reserve-from-random).
+
+    Requires:
+        - raw is a str (comma-separated), a list of strings, or None
+
+    Ensures:
+        - Returns an ordered list of stripped, non-empty persona names
+          (multi-word names pass through verbatim — commas are the only
+          delimiter)
+        - `*` elements are dropped (wildcard is chain syntax, meaningless in
+          a manager roster — tolerated so a copy-pasted chain can't poison it)
+        - Duplicates dropped with a normalize-keyed comparison (F-B:
+          "Mr. Radio, mr radio, MR.RADIO" declares ONE manager); the first
+          (verbatim) spelling is emitted, ORDER preserved — roster head =
+          declared fallback manager
+        - Non-string items inside a list input are skipped
+        - Returns [] for None, empty/whitespace input, or any other type
+        - Never raises
+
+    Examples:
+        "Mr. Radio, Tiberius"            → [ "Mr. Radio", "Tiberius" ]
+        "Mr. Radio, mr radio, Tiberius"  → [ "Mr. Radio", "Tiberius" ]
+        "Mr. Radio,Tiberius,*"           → [ "Mr. Radio", "Tiberius" ]
+        None / "" / " , ,*"              → []
+    """
+    if isinstance( raw, str ):
+        items = raw.split( "," )
+    elif isinstance( raw, list ):
+        items = [ item for item in raw if isinstance( item, str ) ]
+    else:
+        return [ ]
+
+    managers = [ ]
+    seen     = set()
+    for item in items:
+        stripped = item.strip()
+        if not stripped or stripped == "*":
+            continue
+        # F-B: dedup key is normalize-keyed ("Tiberius, Mr. Radio, mr radio"
+        # declares TWO managers, not three); the emitted name stays verbatim.
+        key = _normalize_for_match( stripped )
+        if key in seen:
+            continue
+        seen.add( key )
+        managers.append( stripped )
+    return managers
+
+
+def pick_declared_managers_from_env( project, environ=None ):
+    """
+    Read COSA_VOICE_MANAGERS__<PROJECT> — the user's declared-manager roster
+    for a repo (Rick, 2026-06-11: multi-manager-per-repo support).
+
+    The value is a comma-separated list of persona names; multi-word names
+    pass through verbatim ("Tiberius, Mr. Radio" → ["Tiberius", "Mr. Radio"]).
+    Declaration is role + reserve-from-random (Rick's D3 ruling, 2026-06-11,
+    superseding the role-only Q2 scope): it marks the personas as managers
+    for fleet-status rendering + escalation fanout, AND reserves their names
+    OUT of random/chain-`*` allocation (see allocate_persona_for_session).
+    It never OCCUPIES a persona — an explicit strict request or named chain
+    element still claims a declared name; that is how managers get theirs.
+
+    (Relocated from heartbeat_arbiter/manager_resolver.py 2026-06-11 when the
+    allocation corridor became its second consumer — sibling of
+    pick_persona_chain_from_env, same `__<PROJECT>` lookup pattern; the LIVE
+    SessionStart hook imports THIS module and must not drag
+    manager_resolver's lupin_mcp.session_spawner import into its chain.
+    Single definition, no re-export shim — one-name rule.)
+
+    Requires:
+        - project is a project-key string or None
+        - environ is a Mapping (os.environ when None) — injectable for tests
+
+    Ensures:
+        - Returns an ordered list of stripped non-empty persona names
+          (parse semantics: see parse_declared_managers)
+        - Returns [] when project is None/empty/whitespace, the env var is
+          unset, or it parses to zero names
+        - Normalizes project name: strip + UPPER + hyphens→underscores
+        - Never raises
+
+    Examples:
+        COSA_VOICE_MANAGERS__LUPIN="Tiberius, Mr. Radio" + project="lupin"
+            → [ "Tiberius", "Mr. Radio" ]
+
+    See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
+         src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
+    """
+    if environ is None:
+        environ = os.environ
+    if not project or not str( project ).strip():
+        return [ ]
+    normalized = str( project ).strip().upper().replace( "-", "_" )
+    value      = environ.get( f"COSA_VOICE_MANAGERS__{normalized}" )
+    if not value:
+        return [ ]
+    return parse_declared_managers( value )
 
 
 # ── Persona-chain resolution + allocation ────────────────────────────────────
