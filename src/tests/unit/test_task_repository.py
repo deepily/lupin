@@ -32,10 +32,11 @@ def session():
     """A MagicMock session whose query() chain returns itself (any chain order)."""
     mock = MagicMock()
     query = mock.query.return_value
-    query.filter.return_value   = query
-    query.order_by.return_value = query
-    query.limit.return_value    = query
-    query.offset.return_value   = query
+    query.filter.return_value          = query
+    query.order_by.return_value        = query
+    query.limit.return_value           = query
+    query.offset.return_value          = query
+    query.with_for_update.return_value = query
     return mock
 
 
@@ -233,6 +234,31 @@ def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filter
     query.all.return_value = [ ]
     repo.query_tasks( **kwargs )
     assert query.filter.call_count == expected_filters
+
+
+# ---------------------------------------------------------------------------
+# get_by_id_for_update (cold-review N3 — the transition row lock)
+# ---------------------------------------------------------------------------
+
+def test_get_by_id_for_update_takes_row_lock( repo, session ):
+    """The transition read MUST go through with_for_update — terminal lockout
+    is raceable without it (cold-review N3)."""
+    sentinel = _item()
+    query    = session.query.return_value
+    query.first.return_value = sentinel
+
+    result = repo.get_by_id_for_update( sentinel.id )
+
+    assert result is sentinel
+    query.with_for_update.assert_called_once_with()
+    query.filter.assert_called_once()
+
+
+def test_get_by_id_for_update_returns_none_when_missing( repo, session ):
+    query = session.query.return_value
+    query.first.return_value = None
+    assert repo.get_by_id_for_update( uuid.uuid4() ) is None
+    query.with_for_update.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

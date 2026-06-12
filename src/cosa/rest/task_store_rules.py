@@ -42,10 +42,13 @@ VALID_BLOCKED_BY_KINDS = ( "item", "persona", "user" )
 # Receipt key whitelist + shape rules (design §4.1 AC1)
 RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line" )
 
-COMMIT_PATTERN   = re.compile( r"^[0-9a-f]{7,40}$" )
-TEST_RUN_PATTERN = re.compile( r"^ts-[0-9a-f]{8}$" )
-QID_PATTERN      = re.compile( r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" )
-LOG_LINE_PATTERN = re.compile( r"^(.+):(\d+)$" )
+# Shape patterns are applied via re.fullmatch ONLY — never re.match + `$`,
+# because Python's `$` matches before a trailing newline, letting
+# "abcdef1\n" smuggle through the AC1 gate (cold-review N1, live-proven).
+COMMIT_PATTERN   = re.compile( r"[0-9a-f]{7,40}" )
+TEST_RUN_PATTERN = re.compile( r"ts-[0-9a-f]{8}" )
+QID_PATTERN      = re.compile( r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" )
+LOG_LINE_PATTERN = re.compile( r"(.+):(\d+)" )
 
 
 # ---------------------------------------------------------------------------
@@ -150,16 +153,16 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None ) ->
             errors.append( f"receipt '{key}' must be a non-empty string" )
             continue
 
-        if key == "commit" and not COMMIT_PATTERN.match( value ):
+        if key == "commit" and not COMMIT_PATTERN.fullmatch( value ):
             errors.append( f"receipt commit '{value}' must be 7-40 lowercase hex chars" )
-        elif key == "test_run" and not TEST_RUN_PATTERN.match( value ):
+        elif key == "test_run" and not TEST_RUN_PATTERN.fullmatch( value ):
             errors.append( f"receipt test_run '{value}' must match 'ts-<8 hex chars>'" )
-        elif key == "qid" and not QID_PATTERN.match( value ):
+        elif key == "qid" and not QID_PATTERN.fullmatch( value ):
             errors.append( f"receipt qid '{value}' must be a canonical lowercase UUID" )
         elif key == "doc_path":
             errors.extend( _validate_scoped_path( value, scope_roots ) )
         elif key == "log_line":
-            match = LOG_LINE_PATTERN.match( value )
+            match = LOG_LINE_PATTERN.fullmatch( value )
             if not match:
                 errors.append( f"receipt log_line '{value}' must be '<scope>/<rel-path>:<lineno>'" )
             else:
@@ -262,10 +265,16 @@ def validate_transition(
             from_status is not terminal (done/dropped are append-only — gate
             ruling #4: the audit invariant made mechanical)
             to_status == done  => receipt_refs passes validate_receipt_refs
+            receipt_refs present on ANY transition => it passes
+            validate_receipt_refs (cold-review N2 — the §5 receipt-theater
+            guard outranks the design letter's done-only wording: junk never
+            lands in the audit trail)
             to_status == blocked => next_chase_ts present (I3) AND blocked_by
             passes validate_blocked_by_refs (gate ruling #5)
-        - returns the full list of violations otherwise (never fail-fast on
-          the first — the caller sees every problem at once)
+        - returns the full list of violations otherwise — every problem at
+          once, with ONE exception: an invalid to_status short-circuits
+          (the dependent receipt/blocked rules are meaningless without a
+          valid target state)
     """
     if to_status not in VALID_STATUSES:
         return [ f"to_status '{to_status}' must be one of {VALID_STATUSES}" ]
@@ -278,7 +287,7 @@ def validate_transition(
     elif to_status == from_status:
         errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected" )
 
-    if to_status == "done":
+    if to_status == "done" or receipt_refs is not None:
         errors.extend( validate_receipt_refs( receipt_refs, scope_roots ) )
     if to_status == "blocked":
         if next_chase_ts is None:

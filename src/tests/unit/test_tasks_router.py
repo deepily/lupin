@@ -154,7 +154,7 @@ def _transition_body( **overrides ):
 
 
 def test_transition_404_when_item_missing( client, repo ):
-    repo.get_by_id.return_value = None
+    repo.get_by_id_for_update.return_value = None
     r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body() )
     assert r.status_code == 404 and "not found" in r.json()[ "detail" ]
     repo.apply_transition.assert_not_called()
@@ -163,11 +163,11 @@ def test_transition_404_when_item_missing( client, repo ):
 def test_transition_422_on_malformed_uuid( client, repo ):
     r = client.post( "/api/tasks/not-a-uuid/transition", json=_transition_body() )
     assert r.status_code == 422
-    repo.get_by_id.assert_not_called()
+    repo.get_by_id_for_update.assert_not_called()
 
 
 def test_transition_rejects_done_without_receipts( client, repo ):
-    repo.get_by_id.return_value = make_item( status="review" )
+    repo.get_by_id_for_update.return_value = make_item( status="review" )
     r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body( to_status="done" ) )
     assert r.status_code == 422
     assert any( "receipt_refs" in e for e in r.json()[ "detail" ][ "errors" ] )
@@ -175,7 +175,7 @@ def test_transition_rejects_done_without_receipts( client, repo ):
 
 
 def test_transition_rejects_leaving_terminal_state( client, repo ):
-    repo.get_by_id.return_value = make_item( status="done" )
+    repo.get_by_id_for_update.return_value = make_item( status="done" )
     r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body() )
     assert r.status_code == 422
     assert any( "append-only" in e for e in r.json()[ "detail" ][ "errors" ] )
@@ -184,7 +184,7 @@ def test_transition_rejects_leaving_terminal_state( client, repo ):
 def test_transition_happy_path_returns_item_and_event( client, repo ):
     item  = make_item( status="queued", updated_ts=NOW )       # current status — body moves it to claimed
     event = make_event( item.id, transition="queued->claimed" )
-    repo.get_by_id.return_value         = item
+    repo.get_by_id_for_update.return_value         = item
     repo.apply_transition.return_value  = event
 
     r = client.post( f"/api/tasks/{item.id}/transition", json=_transition_body() )
@@ -201,7 +201,7 @@ def test_transition_happy_path_returns_item_and_event( client, repo ):
 def test_transition_to_done_with_valid_receipts_passes_them_through( client, repo ):
     receipts = { "commit": "6be15f46" }
     item     = make_item( status="done" )
-    repo.get_by_id.return_value        = make_item( status="review" )
+    repo.get_by_id_for_update.return_value        = make_item( status="review" )
     repo.apply_transition.return_value = make_event( item.id, transition="review->done", receipt_refs=receipts )
 
     r = client.post( f"/api/tasks/{item.id}/transition",
@@ -216,12 +216,12 @@ def test_transition_to_blocked_serializes_chase_ts( client, repo ):
     chase = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc )
     refs  = [ { "kind": "user", "id": "rick" } ]
     item  = make_item( status="blocked", next_chase_ts=chase, blocked_by=refs )
-    repo.get_by_id.return_value        = make_item( status="in_progress" )
+    repo.get_by_id_for_update.return_value        = make_item( status="in_progress" )
     repo.apply_transition.return_value = make_event( item.id, transition="in_progress->blocked" )
-    repo.get_by_id.return_value.next_chase_ts = None
+    repo.get_by_id_for_update.return_value.next_chase_ts = None
 
     def _apply( **kwargs ):
-        loaded               = repo.get_by_id.return_value
+        loaded               = repo.get_by_id_for_update.return_value
         loaded.status        = "blocked"
         loaded.next_chase_ts = kwargs[ "next_chase_ts" ]
         loaded.blocked_by    = kwargs[ "blocked_by" ]
@@ -241,10 +241,39 @@ def test_transition_to_blocked_serializes_chase_ts( client, repo ):
 
 
 def test_transition_rejects_blocked_without_chase_or_refs( client, repo ):
-    repo.get_by_id.return_value = make_item( status="in_progress" )
+    repo.get_by_id_for_update.return_value = make_item( status="in_progress" )
     r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body( to_status="blocked" ) )
     assert r.status_code == 422
     assert len( r.json()[ "detail" ][ "errors" ] ) == 2             # chase_ts + blocked_by, all at once
+
+
+def test_transition_rejects_junk_receipts_on_non_done( client, repo ):
+    """N2 at the wire: junk receipts on ->review never reach the audit trail."""
+    repo.get_by_id_for_update.return_value = make_item( status="in_progress" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition",
+                     json=_transition_body( to_status="review", receipt_refs={ "vibes": "good" } ) )
+    assert r.status_code == 422
+    assert any( "unknown receipt key 'vibes'" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_transition.assert_not_called()
+
+
+def test_transition_reads_through_row_lock_seam( client, repo ):
+    """N3 code-path: the transition load uses get_by_id_for_update, never the
+    plain unlocked get_by_id."""
+    repo.get_by_id_for_update.return_value = make_item( status="queued" )
+    repo.apply_transition.return_value     = make_event( uuid.uuid4(), transition="queued->claimed" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition", json=_transition_body() )
+    assert r.status_code == 200
+    repo.get_by_id_for_update.assert_called_once()
+    repo.get_by_id.assert_not_called()
+
+
+def test_transition_rejects_overlong_actor( client, repo ):
+    """N5: actor backs VARCHAR(255) on the event — overlong is a 422, not a DB 500."""
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition",
+                     json=_transition_body( actor="k" * 256 ) )
+    assert r.status_code == 422
+    repo.get_by_id_for_update.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +322,33 @@ def test_query_rejects_junk_enum_filters( client, repo, params, fragment ):
 def test_query_reports_multiple_junk_filters_at_once( client, repo ):
     r = client.get( "/api/tasks", params={ "status": "finished", "gate_class": "side-gate", "item_class": "chore" } )
     assert r.status_code == 422 and len( r.json()[ "detail" ][ "errors" ] ) == 3
+
+
+@pytest.mark.parametrize( "params", [
+    { "limit": -1 },          # Postgres InvalidRowCountInLimitClause — was an authenticated 500
+    { "limit": 501 },         # above the wire cap
+    { "offset": -1 },
+] )
+def test_query_rejects_out_of_bounds_pagination( client, repo, params ):
+    """N4: limit/offset bounds enforced at the wire (Query ge/le), never a DB 500."""
+    r = client.get( "/api/tasks", params=params )
+    assert r.status_code == 422
+    repo.query_tasks.assert_not_called()
+
+
+@pytest.mark.parametrize( "field, limit", [
+    ( "project", 255 ),
+    ( "created_by", 255 ),
+    ( "owner_persona", 255 ),
+    ( "accountable_manager", 255 ),
+    ( "source_qid", 64 ),
+    ( "correlation_key", 255 ),
+] )
+def test_create_rejects_overlong_varchar_backed_fields( client, repo, field, limit ):
+    """N5: max_length mirrors the VARCHAR widths — overlong is a 422, not a DataError 500."""
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, **{ field: "x" * ( limit + 1 ) } ) )
+    assert r.status_code == 422
+    repo.create_item.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

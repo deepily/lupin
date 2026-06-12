@@ -138,6 +138,20 @@ def test_multiple_violations_all_reported( scope_roots ):
     assert len( errors ) == 3
 
 
+# ── N1 regression: trailing-newline smuggle (cold review, live-proven) ──────
+# re.match + `$` matches before a final \n; the shape gate must use fullmatch.
+
+@pytest.mark.parametrize( "key, smuggled", [
+    ( "commit",   "abcdef1\n" ),
+    ( "test_run", "ts-82ae2446\n" ),
+    ( "qid",      "c8c73fde-6ce4-4e8d-83d7-c55b5cce65a3\n" ),
+    ( "log_line", "lupin/src/receipt.md:1\n" ),
+] )
+def test_trailing_newline_smuggle_rejected( key, smuggled, scope_roots ):
+    errors = rules.validate_receipt_refs( { key: smuggled }, scope_roots=scope_roots )
+    assert len( errors ) == 1, f"'{key}' with trailing newline must be rejected"
+
+
 def test_full_valid_receipt_set( scope_roots ):
     receipts = {
         "commit"   : "6be15f46",
@@ -296,6 +310,25 @@ def test_transition_to_blocked_accepts_chase_ts_plus_typed_refs():
 
 def test_transition_happy_path_plain_move():
     assert rules.validate_transition( "queued", "claimed", "manager_relay" ) == [ ]
+
+
+# ── N2 regression: receipts validated WHENEVER present, not just ->done ─────
+# (§5 receipt-theater guard: junk never lands in the audit trail)
+
+def test_transition_non_done_with_junk_receipts_rejected( scope_roots ):
+    errors = rules.validate_transition( "in_progress", "review", "standing",
+                                        receipt_refs={ "vibes": "good" }, scope_roots=scope_roots )
+    assert len( errors ) == 1 and "unknown receipt key 'vibes'" in errors[ 0 ]
+
+
+def test_transition_non_done_with_valid_receipts_accepted( scope_roots ):
+    errors = rules.validate_transition( "in_progress", "review", "standing",
+                                        receipt_refs={ "commit": "6be15f46" }, scope_roots=scope_roots )
+    assert errors == [ ]
+
+
+def test_transition_non_done_without_receipts_needs_none():
+    assert rules.validate_transition( "queued", "claimed", "standing", receipt_refs=None ) == [ ]
 
 
 def test_transition_terminal_violation_suppresses_no_op_check():

@@ -46,6 +46,36 @@ class TaskRepository( BaseRepository[TaskItem] ):
         """
         super().__init__( TaskItem, session )
 
+    def get_by_id_for_update( self, id: uuid.UUID ) -> Optional[TaskItem]:
+        """
+        Load one item under a row lock (SELECT ... FOR UPDATE) for a
+        read-validate-write transition.
+
+        Cold-review N3: without the lock, two concurrent transitions both
+        validate against the same stale from_status and the terminal lockout
+        is bypassable under race — and concurrent multi-session writes are
+        this store's reason to exist. The lock serializes transitions per
+        item: the second transaction blocks until the first commits, then
+        reads the COMMITTED status, so validation always sees fresh state.
+
+        Requires:
+            - id: TaskItem UUID
+            - called inside the SAME get_db() transaction that will apply
+              the transition (the lock lives and dies with that transaction)
+
+        Ensures:
+            - returns the row-locked entity, or None if not found
+
+        Returns:
+            TaskItem instance or None
+        """
+        return (
+            self.session.query( TaskItem )
+            .filter( TaskItem.id == id )
+            .with_for_update()
+            .first()
+        )
+
     def create_item(
         self,
         item_class          : str,

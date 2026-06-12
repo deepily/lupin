@@ -176,3 +176,25 @@ is not zero-bootstrappable. Filed upward to Tiberius.
 Note: one micro-deviation from §1 — receipt validation lives in
 `task_store_rules.py` (widened from the planned `task_receipts.py`) because the
 transition/create/blocked_by rules belong in the SAME one-rules-home module.
+
+## 10. Review Round 1 — Rachel 🕊️ fresh-critical (2026-06-12 04:51Z) → fix commit
+
+Verdict on `8ffa7670`: **APPROVE-WITH-FINDINGS** — every builder claim reproduced
+exactly (zero discrepancies). Tiberius gate ruling: N1–N5 ALL pre-merge; N6
+documented constraint; N7/N9 backlog; N8 if-trivial. All landed in the stacked
+fix commit (no schema change — migration `f0a1b2c3d4e5` stable for Clayton):
+
+| Finding | Fix |
+|---|---|
+| **N1 MED** trailing-`\n` receipt smuggle (`re.match`+`$`) | ALL shape checks → `re.fullmatch` (anchors dropped from patterns); 4 smuggle regression tests (commit/test_run/qid/log_line) |
+| **N2 MED** junk receipts persisted on non-done transitions | `validate_transition` now validates `receipt_refs` WHENEVER present (§5 receipt-theater guard outranks the done-only design letter); rules + router + integration tests |
+| **N3 MED** transition read-validate-write race (no row lock) | `TaskRepository.get_by_id_for_update()` (`SELECT ... FOR UPDATE`); transition handler reads through it; code-path tests both layers (lock called, plain `get_by_id` NOT called) |
+| **N4 LOW** `limit=-1` → authenticated 500 | `Query( ge=0, le=500 )` / `offset Query( ge=0 )`; 3 bounds tests + integration wire-assert |
+| **N5 LOW** no `max_length` on VARCHAR-backed Pydantic fields | `max_length` mirroring column widths on project/created_by/owner_persona/accountable_manager (255), source_qid (64), correlation_key (255) + `actor` (255); 7 tests |
+| **N6 LOW** `updated_ts` freshness is ORM-only | model comment documenting the constraint (non-ORM writers must bump explicitly; Phase-2 backlog) |
+| **N8 INFO** docstring vs early-return | `validate_transition` docstring now names the one short-circuit exception |
+
+Post-fix verification: 151 task-store unit tests (was 130), 100% L/B held on
+rules (103/62), repository (40/2), router (86/14); changed-surface 100% on
+postgres_models (same 13 pre-existing repr misses); full unit regression re-run
+(see fix-commit message for count).

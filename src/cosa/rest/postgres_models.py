@@ -1346,7 +1346,10 @@ class TaskItem( Base ):
         default=func.now(),
         server_default=func.now(),
         onupdate=func.now()
-    )
+    )  # onupdate is ORM-CLIENT-SIDE only — no DB trigger; a raw-SQL UPDATE
+       # will NOT bump this (cold-review N6). Freshness holds only while every
+       # writer rides TaskRepository; a future non-ORM writer must bump it
+       # explicitly (Phase-2 backlog carries this constraint).
 
     # Relationships
     events: Mapped[List["TaskEvent"]] = relationship(

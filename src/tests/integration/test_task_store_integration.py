@@ -254,3 +254,20 @@ class TestTaskStoreLifecycle:
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         r = requests.get( ENDPOINT, headers=headers, timeout=10, params={ "status": "finished" } )
         assert r.status_code == 422
+
+    def test_query_rejects_negative_limit( self, test_api_key ):
+        """N4 live: limit=-1 is a 422 at the wire — never a Postgres 500."""
+        headers = { "X-API-Key": test_api_key[ "api_key" ] }
+        r = requests.get( ENDPOINT, headers=headers, timeout=10, params={ "limit": -1 } )
+        assert r.status_code == 422
+
+    def test_transition_rejects_junk_receipts_on_non_done( self, test_api_key ):
+        """N2 live: junk receipts on ->claimed never land in the audit trail."""
+        headers = { "X-API-Key": test_api_key[ "api_key" ] }
+        created = requests.post( ENDPOINT, json=_create_body(), headers=headers, timeout=10 )
+        task_id = created.json()[ "id" ]
+        r = _transition( headers, task_id, to_status="claimed", actor="krishna 38d15e3b",
+                         receipt_refs={ "vibes": "good" } )
+        assert r.status_code == 422
+        trail = requests.get( f"{ENDPOINT}/{task_id}/events", headers=headers, timeout=10 )
+        assert [ e[ "transition" ] for e in trail.json()[ "events" ] ] == [ "->queued" ]

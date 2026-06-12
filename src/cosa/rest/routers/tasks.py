@@ -28,7 +28,7 @@ from datetime import datetime
 from typing import Annotated, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
@@ -54,16 +54,19 @@ class TaskCreateIn( BaseModel ):
     """
     item_class          : str            = Field( ..., min_length=1 )
     title               : str            = Field( ..., min_length=1 )
-    project             : str            = Field( ..., min_length=1 )
-    created_by          : str            = Field( ..., min_length=1, description="persona + session id of the creator" )
+    project             : str            = Field( ..., min_length=1, max_length=255 )
+    created_by          : str            = Field( ..., min_length=1, max_length=255, description="persona + session id of the creator" )
     authority           : str            = Field( default="standing" )
     body                : Optional[str]  = None
-    owner_persona       : Optional[str]  = None
-    accountable_manager : Optional[str]  = None
+    owner_persona       : Optional[str]  = Field( default=None, max_length=255 )
+    accountable_manager : Optional[str]  = Field( default=None, max_length=255 )
     gate_class          : str            = Field( default="none" )
     priority            : str            = Field( default="P2" )
-    source_qid          : Optional[str]  = None
-    correlation_key     : Optional[str]  = None
+    source_qid          : Optional[str]  = Field( default=None, max_length=64 )
+    correlation_key     : Optional[str]  = Field( default=None, max_length=255 )
+    # max_length values mirror the VARCHAR widths in postgres_models.TaskItem
+    # (cold-review N5): overlong input is a 422 at the wire, never a DB
+    # DataError surfacing as an authenticated 500.
 
 
 class TaskTransitionIn( BaseModel ):
@@ -75,7 +78,7 @@ class TaskTransitionIn( BaseModel ):
     task_store_rules.validate_transition in the handler.
     """
     to_status     : str                 = Field( ..., min_length=1 )
-    actor         : str                 = Field( ..., min_length=1, description="persona + session id performing the transition" )
+    actor         : str                 = Field( ..., min_length=1, max_length=255, description="persona + session id performing the transition" )
     authority     : str                 = Field( default="standing" )
     receipt_refs  : Optional[dict]      = None
     next_chase_ts : Optional[datetime]  = None
@@ -236,7 +239,10 @@ def transition_task(
     """
     with get_db() as session:
         repo = TaskRepository( session )
-        item = repo.get_by_id( task_id )
+        # Row-locked read (cold-review N3): serializes concurrent transitions
+        # per item so validation always sees the COMMITTED from_status —
+        # the terminal lockout cannot be raced.
+        item = repo.get_by_id_for_update( task_id )
         if item is None:
             raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
 
@@ -276,9 +282,12 @@ def query_tasks(
     accountable_manager : Optional[str] = None,
     project             : Optional[str] = None,
     item_class          : Optional[str] = None,
-    limit               : int = 100,
-    offset              : int = 0,
+    limit               : int = Query( default=100, ge=0, le=500 ),
+    offset              : int = Query( default=0, ge=0 ),
 ):
+    # limit/offset bounds (cold-review N4): Postgres rejects a negative LIMIT
+    # with InvalidRowCountInLimitClause — unbounded params turned that into an
+    # authenticated 500; le=500 also caps result-set size at the wire.
     """
     Query items with exact-match filters.
 
