@@ -2,6 +2,21 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.12 - Session f557aab9 LATE NIGHT (Tiberius 👑, post-/clear successor) | Task-store BUILT+LANDED end-to-end + starvation fix LIVE + S6 FCM landed + 2.5h quota freeze recovered
+
+**Accomplishments**:
+- **Rick's task-store directive executed review→land in one night** (his voice orders 23:30–23:46): cold 3-pass review (Clayton 😎 fresh, APPROVE-W-FINDINGS C1-C15, María 🌸 observer) → v0.4/v0.4.1 fold + FOLD-VERIFIED delta → **Phase-1 BUILT** (Krishna 🦚: TaskItem/TaskEvent + correlation_key, alembic `f0a1b2c3d4e5`, debt-clean `/api/tasks/*`, receipt key-whitelist) → Rachel 🕊️ fresh-critical ×2 rounds zero-discrepancy (her N1 trailing-newline receipt smuggle + N3 row-lock race caught pre-merge) → merged `3be8008e` → both DBs migrated → **integration 11/11 GREEN on :8000 (`ts-e232f0d4`)** + live :7999 probe 200
+- **:7999 async-handlers/HTTP-starvation fix LANDED** (the F2 gate, Rio ⚡): T1-T5 hot handlers off-loop incl. the mark_played smoking gun (2 sync embeddings on-loop per TTS playback — explains the worsening wedge curve); both-directions starvation regression test (pre-fix FAILS 0.79s lag / post-fix 3ms); Arnold 🪨 reviewed; merged `5e5c2b67` + lock follow-up `f99a4af5`, live on :7999
+- **S6 FCM backend landed** (Mr. Radio 🦉 work-order, Clayton 😎): task-zero pool assigned_at fix in 4 min → AC-S6.5 6/6 → build (durable fcm_tokens, mobile WS marker, FcmWakeService w/ OSQ-7 tolerance, amended POST unregister contract via OSQ-6 + Mr. Radio concurrence) → Rachel's R1 HIGH catch (audio-WS shared-sid clobbered the mobile marker = suppression dead in real topology) fixed pre-merge w/ R2 (starvation pattern regrown day-one) + R3 (upsert race) → merged `83990552`, AC-S6.1 integration 6/6 green
+- **2nd fleet-wide Max-plan quota freeze** (01:10–03:45, all 7 sessions): arbiter caught it (manager-stale ×3 + fleet-stall escalation = TRUE positive; later 04:25 alarm = false positive blind to manager shell work — tuning telemetry filed); recovery = rate-limit dialogs cleared no-spend + swallowed DMs re-delivered; **non-launderable-auth doctrine held under live fire** (Krishna's harness refused the shared-DB migration; manager ran it in-band)
+- **Alembic zero-bootstrap gap proven + recipe** (Krishna escalation): empty/unstamped DBs can't `upgrade head` (schema.sql out-of-band origin); test DB recovered via stamp-then-upgrade — routed to the GCP successor (fresh Cloud-SQL hits this)
+- **Tripwire lane closed with receipts, zero unnecessary code** (Krishna-2): T1 403-queues = STALE-MOCKS (intentional RBAC since 2025-10, already test-repaired 06-01) · T2 prediction_engine = already fixed `d722396a`, re-verified 100% · T3 side-find mux-config mock refresh merged `4ff0346f` → `cosa/tests/unit/rest/` 2437/0
+- Fleet ops: 11 workers spawned/reaped with mementos across 7 lanes (incl. the morning GCP successor, dismissed at ritual — blocked on Rick's expired gcloud login, seed memento durable); **all-suite baseline `ts-b51e63c9` collected 06:40: 959 pass / 1 visual-class fail / 2 runner-budget artifacts — NO regressions from the night's merges**
+
+**Files**: 5 held merges on `wip-v0.1.8` (`5e5c2b67` → `3be8008e` → `f99a4af5` → `83990552` → `4ff0346f`), never pushed (Rick's gate); TODO.md entries ticked w/ receipts; dev+test DBs at `a1b2c3d4e5f6`
+
+---
+
 ### 2026.06.11 - Session f557aab9 NIGHT (Tiberius 👑) | Double-wedge recovery + card-gap RC→hydration fix shipped + GCP VM up + quota incident
 
 **Accomplishments**:
