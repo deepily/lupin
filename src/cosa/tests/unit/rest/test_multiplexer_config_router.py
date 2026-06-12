@@ -3,8 +3,10 @@ Unit tests for the multiplexer client-config router (`cosa.rest.routers.multiple
 
 Covers:
 - `get_multiplexer_config` endpoint — sources `multiplexer max meta display bytes`
-  from the injected ConfigurationManager and returns a MultiplexerConfigResponse.
+  AND `tts preview fraction` (Lane E WP13/F6) from the injected ConfigurationManager
+  and returns a MultiplexerConfigResponse.
 - The default-value wiring (the endpoint passes `default=256000, return_type="int"`
+  for the byte cap and `default=0.25, return_type="float"` for the preview fraction
   to `config_mgr.get`).
 - `MultiplexerConfigResponse` model shape + router registration metadata.
 
@@ -34,58 +36,78 @@ class TestMultiplexerConfigRouter( unittest.TestCase ):
         - A boundary-mock ConfigurationManager honoring .get(key, default, return_type)
 
     Ensures:
-        - The endpoint returns the configured byte cap
-        - The default + return_type kwargs are threaded to config_mgr.get
+        - The endpoint returns the configured byte cap + TTS preview fraction
+        - The default + return_type kwargs are threaded to config_mgr.get per key
         - The response model + router metadata match the contract
     """
 
     def setUp( self ):
         """
         Ensures:
-            - A fresh MagicMock config manager is available per test
+            - A fresh MagicMock config manager is available per test, keyed to
+              return per-INI-key values matching the live two-key contract
         """
-        self.config_mgr = MagicMock()
+        self.config_values = {
+            "multiplexer max meta display bytes" : 512000,
+            "tts preview fraction"               : 0.5
+        }
+        self.config_mgr     = MagicMock()
+        self.config_mgr.get.side_effect = lambda key, default=None, return_type=None: self.config_values[ key ]
 
     # ---- endpoint behavior --------------------------------------------------
 
-    def test_returns_configured_byte_cap( self ):
+    def test_returns_configured_values( self ):
         """
         Ensures:
-            - The value returned by config_mgr.get is surfaced on the response
-              model's `multiplexer_max_meta_display_bytes` field
+            - The per-key values returned by config_mgr.get are surfaced on the
+              response model's `multiplexer_max_meta_display_bytes` and
+              `tts_preview_fraction` fields
         """
-        self.config_mgr.get.return_value = 512000
-
         resp = asyncio.run( get_multiplexer_config( config_mgr=self.config_mgr ) )
 
         self.assertIsInstance( resp, MultiplexerConfigResponse )
         self.assertEqual( resp.multiplexer_max_meta_display_bytes, 512000 )
+        self.assertEqual( resp.tts_preview_fraction, 0.5 )
 
     def test_threads_default_and_return_type_to_config_get( self ):
         """
         Ensures:
-            - The endpoint queries the exact INI key with default=256000,
-              return_type="int" (the documented fallback wiring)
+            - The endpoint queries BOTH INI keys with their documented fallback
+              wiring: byte cap (default=256000, return_type="int") and preview
+              fraction (default=0.25, return_type="float"), exactly one call each
         """
-        self.config_mgr.get.return_value = 256000
+        from unittest.mock import call
 
         asyncio.run( get_multiplexer_config( config_mgr=self.config_mgr ) )
 
-        self.config_mgr.get.assert_called_once_with(
-            "multiplexer max meta display bytes",
-            default     = 256000,
-            return_type = "int"
-        )
+        self.config_mgr.get.assert_has_calls( [
+            call(
+                "multiplexer max meta display bytes",
+                default     = 256000,
+                return_type = "int"
+            ),
+            call(
+                "tts preview fraction",
+                default     = 0.25,
+                return_type = "float"
+            )
+        ] )
+        self.assertEqual( self.config_mgr.get.call_count, 2 )
 
     # ---- response model -----------------------------------------------------
 
-    def test_response_model_accepts_int_field( self ):
+    def test_response_model_stores_fields_verbatim( self ):
         """
         Ensures:
-            - MultiplexerConfigResponse stores the int byte-cap field verbatim
+            - MultiplexerConfigResponse stores the int byte-cap and float
+              preview-fraction fields verbatim (both required — no defaults)
         """
-        model = MultiplexerConfigResponse( multiplexer_max_meta_display_bytes=256000 )
+        model = MultiplexerConfigResponse(
+            multiplexer_max_meta_display_bytes = 256000,
+            tts_preview_fraction               = 0.25
+        )
         self.assertEqual( model.multiplexer_max_meta_display_bytes, 256000 )
+        self.assertEqual( model.tts_preview_fraction, 0.25 )
 
     # ---- router registration ------------------------------------------------
 
