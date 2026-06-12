@@ -18,6 +18,7 @@ from sqlalchemy import (
     BigInteger,
     Text,
     Index,
+    CheckConstraint,
     func
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
@@ -1212,6 +1213,240 @@ class ServerLifecycle( Base ):
         return f"<ServerLifecycle(key='{self.key}', last_available_at='{self.last_available_at}')>"
 
 
+# ============================================================================
+# Unified Task Store Models (Phase 1)
+# ============================================================================
+
+class TaskItem( Base ):
+    """
+    Task-store item — one row per obligation (unified task store, Phase 1).
+
+    The single source of truth for fleet owed-work state: arbiter, managers,
+    workers, and Rick all read the same rows (design R1/R4). Structural rules
+    (receipts on done, chase-ts on blocked) are enforced by task_store_rules
+    at the API layer; this model carries the belt-and-suspenders CHECK.
+
+    Canonical design: planning-is-prompting ->
+    src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1.
+
+    Requires:
+        - item_class: one of task|decision|review_request|bug|gate
+          (named item_class at EVERY layer — `class` is a Python reserved
+          word; one-name rule, gate-ruled by Tiberius qid c8c73fde)
+        - title: non-empty item title
+        - project: repo scope (lupin, planning-is-prompting, ...)
+        - created_by: persona + session id of the creator
+
+    Ensures:
+        - id is automatically generated UUID
+        - status defaults to 'queued' (creation event stamps "->queued")
+        - blocked_by is a JSONB list of TYPED refs [{kind: item|persona|user, id}]
+        - next_chase_ts is non-null whenever status='blocked' (I3, CHECK-enforced)
+        - correlation_key is indexed (C1 — poured Phase 1, writer arrives Phase 2)
+        - events cascade-delete with the item
+    """
+    __tablename__ = "task_items"
+
+    # Primary Key
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=func.gen_random_uuid()
+    )
+
+    # Classification
+    item_class: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False,
+        index=True
+    )
+    title: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
+    body: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )  # decision items carry the framing payload (options, pros/cons, recommendation) here
+    project: Mapped[str] = mapped_column(
+        String( 255 ),
+        nullable=False,
+        index=True
+    )
+
+    # Ownership (design T1 — real fields, not prose-and-emoji)
+    owner_persona: Mapped[Optional[str]] = mapped_column(
+        String( 255 ),
+        nullable=True,
+        index=True
+    )
+    accountable_manager: Mapped[Optional[str]] = mapped_column(
+        String( 255 ),
+        nullable=True,
+        index=True
+    )
+    created_by: Mapped[str] = mapped_column(
+        String( 255 ),
+        nullable=False
+    )
+
+    # State
+    status: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False,
+        default="queued",
+        server_default="queued",
+        index=True
+    )
+    blocked_by: Mapped[list] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default="[]"
+    )  # typed refs [{kind: item|persona|user, id}] — {kind:user} => oracle treats as NOT-owed
+    next_chase_ts: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
+    gate_class: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False,
+        default="none",
+        server_default="none",
+        index=True
+    )  # Rick's court becomes SELECT ... WHERE gate_class='ricks_court'
+    priority: Mapped[str] = mapped_column(
+        String( 2 ),
+        nullable=False,
+        default="P2",
+        server_default="P2"
+    )
+
+    # Provenance + correlation
+    source_qid: Mapped[Optional[str]] = mapped_column(
+        String( 64 ),
+        nullable=True
+    )  # DM question id that spawned the item, if any (T4)
+    correlation_key: Mapped[Optional[str]] = mapped_column(
+        String( 255 ),
+        nullable=True
+    )  # harness TodoWrite/TaskList <-> store uuid correlation (C1 upsert key); indexed via __table_args__
+
+    # Timestamps (design names: _ts, not _at)
+    created_ts: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=False,
+        default=func.now(),
+        server_default=func.now()
+    )
+    updated_ts: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=False,
+        default=func.now(),
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    # Relationships
+    events: Mapped[List["TaskEvent"]] = relationship(
+        "TaskEvent",
+        back_populates="item",
+        cascade="all, delete-orphan",
+        order_by="TaskEvent.id"
+    )
+
+    # Indexes + structural CHECK
+    __table_args__ = (
+        Index( 'idx_task_items_owner_status', 'owner_persona', 'status' ),  # the oracle query shape
+        Index( 'idx_task_items_correlation_key', 'correlation_key' ),
+        CheckConstraint(
+            "status != 'blocked' OR next_chase_ts IS NOT NULL",
+            name="ck_task_items_blocked_requires_chase_ts"
+        ),
+    )
+
+    def __repr__( self ) -> str:
+        return f"<TaskItem(id={self.id}, item_class='{self.item_class}', status='{self.status}', owner='{self.owner_persona}')>"
+
+
+class TaskEvent( Base ):
+    """
+    Task-store event — append-only per-item audit trail (design R3/T2).
+
+    Every state change writes exactly one event row in the same transaction
+    that updates the item. Receipts are first-class: a ->done transition's
+    receipt_refs must pass task_store_rules.validate_receipt_refs (T3 — the
+    mechanical no-confabulation enforcement).
+
+    Requires:
+        - item_id: valid task_items UUID
+        - actor: persona + session id performing the transition
+        - transition: "from->to" string (creation stamps "->queued")
+        - authority: standing|user_direct|manager_relay (blast-radius model)
+
+    Ensures:
+        - id is an append-only BIGSERIAL (insertion order == audit order)
+        - ts defaults to current timestamp
+        - cascades delete when the item is deleted
+    """
+    __tablename__ = "task_events"
+
+    # Primary Key (append-only BIGSERIAL)
+    id: Mapped[int] = mapped_column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True
+    )
+
+    # Foreign Key to TaskItem
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ),
+        ForeignKey( "task_items.id", ondelete="CASCADE" ),
+        nullable=False
+    )  # indexed via __table_args__ (idx_task_events_item_id)
+
+    # Event Data
+    ts: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=False,
+        default=func.now(),
+        server_default=func.now()
+    )
+    actor: Mapped[str] = mapped_column(
+        String( 255 ),
+        nullable=False
+    )
+    transition: Mapped[str] = mapped_column(
+        String( 64 ),
+        nullable=False
+    )
+    receipt_refs: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )  # {commit, test_run, qid, doc_path, log_line} — non-empty REQUIRED for ->done (T3)
+    authority: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False,
+        default="standing",
+        server_default="standing"
+    )
+
+    # Relationship to TaskItem
+    item: Mapped["TaskItem"] = relationship(
+        "TaskItem",
+        back_populates="events"
+    )
+
+    # Indexes
+    __table_args__ = (
+        Index( 'idx_task_events_item_id', 'item_id' ),
+    )
+
+    def __repr__( self ) -> str:
+        return f"<TaskEvent(id={self.id}, item_id={self.item_id}, transition='{self.transition}', actor='{self.actor}')>"
+
+
 def quick_smoke_test():
     """
     Quick smoke test for postgres_models module - validates PostgreSQL ORM model definitions.
@@ -1231,7 +1466,8 @@ def quick_smoke_test():
         print( "Testing model class definitions..." )
         models = [User, RefreshToken, ApiKey, EmailVerificationToken,
                   PasswordResetToken, FailedLoginAttempt, Notification, AuthAuditLog,
-                  ProxyDecision, TrustState, PredictionLog, JobHistory, ServerLifecycle]
+                  ProxyDecision, TrustState, PredictionLog, JobHistory, ServerLifecycle,
+                  TaskItem, TaskEvent]
         for model in models:
             assert hasattr( model, '__tablename__' ), f"{model.__name__} missing __tablename__"
         print( f"✓ All {len( models )} models defined: {', '.join( [m.__name__ for m in models] )}" )
@@ -1242,7 +1478,8 @@ def quick_smoke_test():
         table_names = list( Base.metadata.tables.keys() )
         expected_tables = ['users', 'refresh_tokens', 'api_keys', 'email_verification_tokens',
                           'password_reset_tokens', 'failed_login_attempts', 'notifications', 'auth_audit_log',
-                          'proxy_decisions', 'trust_states', 'prediction_log', 'job_history']
+                          'proxy_decisions', 'trust_states', 'prediction_log', 'job_history',
+                          'server_lifecycle', 'task_items', 'task_events']
         assert set( table_names ) == set( expected_tables ), f"Table mismatch: {table_names}"
         print( f"✓ Base metadata contains {len( table_names )} tables" )
 

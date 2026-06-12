@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""
+Unit tests for TaskRepository (cosa.rest.db.repositories.task_repository).
+
+MagicMock-session tests (house norm for repositories — no live Postgres,
+:7999-eligible): create_item's item+creation-event unit, apply_transition's
+blocked/unblocked field handling + event labeling, query_tasks' filter
+composition, and get_events' ordering chain.
+
+100% lines/branches/functions of task_repository.py. Real id population +
+constraint behavior is the integration suite's job (held behind Lane 1).
+"""
+import os
+import sys
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
+
+import pytest
+
+# Bootstrap
+_src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
+if _src_path not in sys.path:
+    sys.path.insert( 0, _src_path )
+
+from cosa.rest.postgres_models import TaskItem, TaskEvent
+from cosa.rest.db.repositories.task_repository import TaskRepository
+
+
+@pytest.fixture
+def session():
+    """A MagicMock session whose query() chain returns itself (any chain order)."""
+    mock = MagicMock()
+    query = mock.query.return_value
+    query.filter.return_value   = query
+    query.order_by.return_value = query
+    query.limit.return_value    = query
+    query.offset.return_value   = query
+    return mock
+
+
+@pytest.fixture
+def repo( session ):
+    return TaskRepository( session )
+
+
+def _added_instances( session, model ):
+    return [ call.args[ 0 ] for call in session.add.call_args_list
+             if isinstance( call.args[ 0 ], model ) ]
+
+
+# ---------------------------------------------------------------------------
+# create_item
+# ---------------------------------------------------------------------------
+
+def test_create_item_writes_item_plus_creation_event( repo, session ):
+    item = repo.create_item(
+        item_class = "task",
+        title      = "build the store",
+        project    = "lupin",
+        created_by = "krishna 38d15e3b",
+        authority  = "standing",
+    )
+
+    items  = _added_instances( session, TaskItem )
+    events = _added_instances( session, TaskEvent )
+    assert len( items ) == 1 and items[ 0 ] is item
+    assert len( events ) == 1
+
+    event = events[ 0 ]
+    assert event.transition   == "->queued"
+    assert event.actor        == "krishna 38d15e3b"            # creator IS the creation actor
+    assert event.authority    == "standing"
+    assert event.receipt_refs is None
+    assert session.flush.call_count == 2                       # item flush + event flush
+
+
+def test_create_item_is_always_queued_with_empty_blocked_by( repo ):
+    item = repo.create_item(
+        item_class = "decision",
+        title      = "pick a substrate",
+        project    = "lupin",
+        created_by = "maria dbe21f66",
+        authority  = "user_direct",
+    )
+    assert item.status == "queued" and item.blocked_by == [ ]
+
+
+def test_create_item_passes_optional_fields_through( repo ):
+    item = repo.create_item(
+        item_class          = "review_request",
+        title               = "cold review",
+        project             = "planning-is-prompting",
+        created_by          = "tiberius f557aab9",
+        authority           = "manager_relay",
+        body                = "details",
+        owner_persona       = "clayton",
+        accountable_manager = "tiberius",
+        gate_class          = "manager",
+        priority            = "P1",
+        source_qid          = "fef1f7fa-0000-0000-0000-000000000000",
+        correlation_key     = "harness-7",
+    )
+    assert item.owner_persona == "clayton" and item.accountable_manager == "tiberius"
+    assert item.gate_class == "manager" and item.priority == "P1"
+    assert item.source_qid.startswith( "fef1f7fa" ) and item.correlation_key == "harness-7"
+    assert item.body == "details"
+
+
+# ---------------------------------------------------------------------------
+# apply_transition
+# ---------------------------------------------------------------------------
+
+def _item( **overrides ):
+    fields = dict(
+        id            = uuid.uuid4(),
+        item_class    = "task",
+        title         = "t",
+        project       = "lupin",
+        created_by    = "krishna 38d15e3b",
+        status        = "in_progress",
+        blocked_by    = [ ],
+        next_chase_ts = None,
+    )
+    fields.update( overrides )
+    return TaskItem( **fields )
+
+
+def test_transition_to_blocked_sets_chase_ts_and_refs( repo, session ):
+    chase = datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc )
+    refs  = [ { "kind": "user", "id": "rick" } ]
+    item  = _item()
+
+    event = repo.apply_transition(
+        item          = item,
+        to_status     = "blocked",
+        actor         = "krishna 38d15e3b",
+        authority     = "standing",
+        next_chase_ts = chase,
+        blocked_by    = refs,
+    )
+
+    assert item.status == "blocked"
+    assert item.next_chase_ts == chase and item.blocked_by == refs
+    assert event.transition == "in_progress->blocked"
+    assert event.item_id == item.id and event.receipt_refs is None
+
+
+def test_transition_away_from_blocked_clears_block_state( repo ):
+    item = _item( status="blocked",
+                  next_chase_ts=datetime( 2026, 6, 12, 9, 0, tzinfo=timezone.utc ),
+                  blocked_by=[ { "kind": "user", "id": "rick" } ] )
+
+    event = repo.apply_transition(
+        item      = item,
+        to_status = "in_progress",
+        actor     = "krishna 38d15e3b",
+        authority = "standing",
+    )
+
+    assert item.status == "in_progress"
+    assert item.next_chase_ts is None and item.blocked_by == [ ]   # unblocked = blocked on nothing
+    assert event.transition == "blocked->in_progress"
+
+
+def test_transition_to_done_carries_receipts_onto_event( repo, session ):
+    receipts = { "commit": "6be15f46", "test_run": "ts-82ae2446" }
+    item     = _item( status="review" )
+
+    event = repo.apply_transition(
+        item         = item,
+        to_status    = "done",
+        actor        = "krishna 38d15e3b",
+        authority    = "standing",
+        receipt_refs = receipts,
+    )
+
+    assert item.status == "done"
+    assert event.transition == "review->done" and event.receipt_refs == receipts
+    added_events = _added_instances( session, TaskEvent )
+    assert len( added_events ) == 1 and added_events[ 0 ] is event
+
+
+# ---------------------------------------------------------------------------
+# query_tasks
+# ---------------------------------------------------------------------------
+
+def test_query_tasks_no_filters_skips_filter_calls( repo, session ):
+    sentinel = [ _item() ]
+    query    = session.query.return_value
+    query.all.return_value = sentinel
+
+    result = repo.query_tasks()
+
+    assert result is sentinel
+    query.filter.assert_not_called()
+    query.limit.assert_called_once_with( 100 )
+    query.offset.assert_called_once_with( 0 )
+    query.order_by.assert_called_once()
+
+
+def test_query_tasks_applies_every_provided_filter( repo, session ):
+    query = session.query.return_value
+    query.all.return_value = [ ]
+
+    repo.query_tasks(
+        owner_persona       = "krishna",
+        status              = "in_progress",
+        gate_class          = "ricks_court",
+        accountable_manager = "tiberius",
+        project             = "lupin",
+        item_class          = "task",
+        limit               = 7,
+        offset              = 3,
+    )
+
+    assert query.filter.call_count == 6                       # one per provided filter, AND semantics
+    query.limit.assert_called_once_with( 7 )
+    query.offset.assert_called_once_with( 3 )
+
+
+@pytest.mark.parametrize( "kwargs, expected_filters", [
+    ( { "owner_persona": "krishna" }, 1 ),
+    ( { "status": "queued" }, 1 ),
+    ( { "gate_class": "manager" }, 1 ),
+    ( { "accountable_manager": "tiberius" }, 1 ),
+    ( { "project": "lupin" }, 1 ),
+    ( { "item_class": "bug" }, 1 ),
+    ( { "owner_persona": "krishna", "status": "queued" }, 2 ),
+] )
+def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filters ):
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_tasks( **kwargs )
+    assert query.filter.call_count == expected_filters
+
+
+# ---------------------------------------------------------------------------
+# get_events
+# ---------------------------------------------------------------------------
+
+def test_get_events_filters_by_item_and_orders_ascending( repo, session ):
+    sentinel = [ TaskEvent( item_id=uuid.uuid4(), actor="a", transition="->queued" ) ]
+    query    = session.query.return_value
+    query.all.return_value = sentinel
+
+    result = repo.get_events( uuid.uuid4() )
+
+    assert result is sentinel
+    session.query.assert_called_once_with( TaskEvent )
+    query.filter.assert_called_once()
+    query.order_by.assert_called_once()
+
+
+if __name__ == "__main__":
+    sys.exit( pytest.main( [ __file__, "-v" ] ) )
