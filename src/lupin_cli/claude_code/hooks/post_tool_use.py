@@ -83,6 +83,16 @@ def main():
             last_interaction_at = _dt.datetime.now().astimezone().isoformat( timespec="seconds" ),
         )
 
+    # Task-store mirror (Phase 2 write path): harness Task* events flow into
+    # the unified task store. Gated INSIDE the mirror on settings.json
+    # ["task_store"]["enabled"] (default OFF) + the F4 manager-figure
+    # predicate; never-raises by contract, bounded by its client timeout.
+    # Lazy import keeps the every-tool-call hot path untouched for the ~all
+    # tool events that are not Task*.
+    if tool_name in ( "TaskCreate", "TaskUpdate" ):
+        from lupin_cli.claude_code.hooks.lib.task_store_mirror import mirror_task_tool_event
+        mirror_task_tool_event( payload, session_id )
+
     # Smart TTS filtering (respects HOOK_TTS_ENABLED)
     if tool_name in TOOLS_SILENT:
         pass  # No TTS for high-frequency read-only tools

@@ -339,5 +339,35 @@ def test_transition_terminal_violation_suppresses_no_op_check():
     assert len( errors ) == 1 and "append-only" in errors[ 0 ]
 
 
+# ── Phase 2: ->dropped requires a non-blank reason (C12 pulled forward) ─────
+
+def test_transition_to_dropped_requires_reason():
+    errors = rules.validate_transition( "queued", "dropped", "standing" )
+    assert len( errors ) == 1 and "reason is REQUIRED" in errors[ 0 ]
+
+
+@pytest.mark.parametrize( "bad_reason", [ None, "", "   ", 7, [ "r" ], True ] )
+def test_transition_to_dropped_rejects_blank_or_non_string_reason( bad_reason ):
+    errors = rules.validate_transition( "queued", "dropped", "standing", reason=bad_reason )
+    assert any( "reason is REQUIRED" in e for e in errors )
+
+
+def test_transition_to_dropped_accepts_non_blank_reason():
+    assert rules.validate_transition( "queued", "dropped", "standing", reason="superseded-by-rewrite" ) == [ ]
+
+
+def test_transition_reason_optional_on_non_dropped_moves():
+    assert rules.validate_transition( "queued", "claimed", "standing", reason=None ) == [ ]
+    assert rules.validate_transition( "queued", "claimed", "standing", reason="early claim note" ) == [ ]
+
+
+def test_transition_dropped_reason_error_stacks_with_others():
+    # Terminal violation + missing reason both reported (every problem at once).
+    errors = rules.validate_transition( "done", "dropped", "standing" )
+    assert any( "append-only" in e for e in errors )
+    assert any( "reason is REQUIRED" in e for e in errors )
+    assert len( errors ) == 2
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

@@ -271,3 +271,65 @@ class TestTaskStoreLifecycle:
         assert r.status_code == 422
         trail = requests.get( f"{ENDPOINT}/{task_id}/events", headers=headers, timeout=10 )
         assert [ e[ "transition" ] for e in trail.json()[ "events" ] ] == [ "->queued" ]
+
+
+class TestTaskStorePhase2WritePaths:
+    """Phase 2 live wire: reason on ->dropped, correlation_key filter, /correlate."""
+
+    def test_dropped_requires_reason_and_persists_it( self, test_api_key ):
+        """C12 live: ->dropped without reason 422s; with reason it lands on the event row."""
+        headers = { "X-API-Key": test_api_key[ "api_key" ] }
+        created = requests.post( ENDPOINT, json=_create_body(), headers=headers, timeout=10 )
+        task_id = created.json()[ "id" ]
+
+        bare = _transition( headers, task_id, to_status="dropped", actor="tiffany d03e6219" )
+        assert bare.status_code == 422
+        assert any( "reason is REQUIRED" in e for e in bare.json()[ "detail" ][ "errors" ] )
+
+        reasoned = _transition( headers, task_id, to_status="dropped", actor="tiffany d03e6219",
+                                reason="superseded-by-rewrite" )
+        assert reasoned.status_code == 200
+        assert reasoned.json()[ "event" ][ "reason" ] == "superseded-by-rewrite"
+
+        trail = requests.get( f"{ENDPOINT}/{task_id}/events", headers=headers, timeout=10 )
+        assert trail.json()[ "events" ][ -1 ][ "reason" ] == "superseded-by-rewrite"
+
+    def test_query_filters_by_correlation_key( self, test_api_key ):
+        """The C1 key is REST-queryable (spool-replay idempotency probe shape)."""
+        headers = { "X-API-Key": test_api_key[ "api_key" ] }
+        ck      = f"cc-task:{uuid.uuid4()}:5"
+        requests.post( ENDPOINT, json=_create_body( correlation_key=ck ), headers=headers, timeout=10 )
+        requests.post( ENDPOINT, json=_create_body(), headers=headers, timeout=10 )
+
+        r = requests.get( ENDPOINT, headers=headers, timeout=10, params={ "correlation_key": ck } )
+        assert r.status_code == 200
+        body = r.json()
+        assert body[ "count" ] == 1 and body[ "tasks" ][ 0 ][ "correlation_key" ] == ck
+
+    def test_correlate_restamps_key_with_audit_event( self, test_api_key ):
+        """Respawn adoption live: re-stamp + 're-correlated' event; terminal items refuse."""
+        headers = { "X-API-Key": test_api_key[ "api_key" ] }
+        old_ck  = f"cc-task:{uuid.uuid4()}:3"
+        new_ck  = f"cc-task:{uuid.uuid4()}:8"
+        created = requests.post( ENDPOINT, json=_create_body( correlation_key=old_ck ), headers=headers, timeout=10 )
+        task_id = created.json()[ "id" ]
+
+        r = requests.post( f"{ENDPOINT}/{task_id}/correlate", headers=headers, timeout=10,
+                           json={ "correlation_key": new_ck, "actor": "tiffany d03e6219" } )
+        assert r.status_code == 200
+        body = r.json()
+        assert body[ "item" ][ "correlation_key" ] == new_ck
+        assert body[ "item" ][ "status" ] == "queued"                     # status untouched
+        assert body[ "event" ][ "transition" ] == "re-correlated"
+        assert body[ "event" ][ "reason" ] == f"correlation_key: {old_ck} -> {new_ck}"
+
+        # Old key no longer findable; new key is.
+        hits = requests.get( ENDPOINT, headers=headers, timeout=10, params={ "correlation_key": old_ck } )
+        assert hits.json()[ "count" ] == 0
+
+        # Terminal lockout: drop it, then correlate must 422.
+        _transition( headers, task_id, to_status="dropped", actor="tiffany d03e6219", reason="probe cleanup" )
+        locked = requests.post( f"{ENDPOINT}/{task_id}/correlate", headers=headers, timeout=10,
+                                json={ "correlation_key": old_ck, "actor": "tiffany d03e6219" } )
+        assert locked.status_code == 422
+        assert any( "immutable" in e for e in locked.json()[ "detail" ][ "errors" ] )

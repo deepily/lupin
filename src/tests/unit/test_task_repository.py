@@ -211,11 +211,12 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
         accountable_manager = "tiberius",
         project             = "lupin",
         item_class          = "task",
+        correlation_key     = "cc-task:sid:5",
         limit               = 7,
         offset              = 3,
     )
 
-    assert query.filter.call_count == 6                       # one per provided filter, AND semantics
+    assert query.filter.call_count == 7                       # one per provided filter, AND semantics
     query.limit.assert_called_once_with( 7 )
     query.offset.assert_called_once_with( 3 )
 
@@ -227,6 +228,7 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
     ( { "accountable_manager": "tiberius" }, 1 ),
     ( { "project": "lupin" }, 1 ),
     ( { "item_class": "bug" }, 1 ),
+    ( { "correlation_key": "cc-task:sid:5" }, 1 ),
     ( { "owner_persona": "krishna", "status": "queued" }, 2 ),
 ] )
 def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filters ):
@@ -259,6 +261,69 @@ def test_get_by_id_for_update_returns_none_when_missing( repo, session ):
     query.first.return_value = None
     assert repo.get_by_id_for_update( uuid.uuid4() ) is None
     query.with_for_update.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — reason threading (C12 pulled forward)
+# ---------------------------------------------------------------------------
+
+def test_transition_to_dropped_carries_reason_onto_event( repo, session ):
+    item  = _item( status="queued" )
+    event = repo.apply_transition(
+        item      = item,
+        to_status = "dropped",
+        actor     = "tiffany d03e6219",
+        authority = "standing",
+        reason    = "harness-deleted (TaskUpdate)",
+    )
+    assert item.status == "dropped"
+    assert event.transition == "queued->dropped"
+    assert event.reason == "harness-deleted (TaskUpdate)"
+
+
+def test_transition_reason_defaults_to_none( repo, session ):
+    event = repo.apply_transition(
+        item      = _item(),
+        to_status = "review",
+        actor     = "tiffany d03e6219",
+        authority = "standing",
+    )
+    assert event.reason is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — apply_correlation (respawn adoption seam)
+# ---------------------------------------------------------------------------
+
+def test_apply_correlation_restamps_key_and_audits( repo, session ):
+    item  = _item( correlation_key="cc-task:old-sid:3" )
+    event = repo.apply_correlation(
+        item            = item,
+        correlation_key = "cc-task:new-sid:8",
+        actor           = "tiffany d03e6219",
+        authority       = "standing",
+    )
+
+    assert item.correlation_key == "cc-task:new-sid:8"
+    assert item.status == "in_progress"                       # status untouched
+    assert event.transition   == "re-correlated"
+    assert event.receipt_refs is None
+    assert event.reason       == "correlation_key: cc-task:old-sid:3 -> cc-task:new-sid:8"
+    assert event.actor        == "tiffany d03e6219"
+    added_events = _added_instances( session, TaskEvent )
+    assert len( added_events ) == 1 and added_events[ 0 ] is event
+
+
+def test_apply_correlation_from_null_key_names_none_in_audit( repo, session ):
+    item  = _item( correlation_key=None )
+    event = repo.apply_correlation(
+        item            = item,
+        correlation_key = "cc-task:sid:1",
+        actor           = "a b",
+        authority       = "manager_relay",
+    )
+    assert event.reason == "correlation_key: None -> cc-task:sid:1"
+    assert event.authority == "manager_relay"
 
 
 # ---------------------------------------------------------------------------

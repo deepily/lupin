@@ -98,6 +98,16 @@ def test_event_columns( events_table ):
     assert events_table.c.authority.server_default.arg == "standing"
 
 
+def test_event_reason_column_nullable_text( events_table ):
+    # Phase 2 (C12 pulled forward): nullable by schema — requiredness for
+    # ->dropped is the rules layer's job, additive for D1 convergence.
+    from sqlalchemy import Text
+    column = events_table.c.reason
+    assert column.nullable is True
+    assert isinstance( column.type, Text )
+    assert column.server_default is None
+
+
 def test_event_fk_cascades_on_delete( events_table ):
     fk = next( iter( events_table.c.item_id.foreign_keys ) )
     assert fk.column.table.name == "task_items"

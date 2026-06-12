@@ -137,6 +137,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         receipt_refs  : Optional[dict] = None,
         next_chase_ts : Optional[datetime] = None,
         blocked_by    : Optional[list] = None,
+        reason        : Optional[str] = None,
     ) -> TaskEvent:
         """
         Apply an ALREADY-VALIDATED transition: update the item + append the event.
@@ -152,7 +153,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - to_status != 'blocked': item.next_chase_ts cleared and
               item.blocked_by emptied (an unblocked item is blocked on nothing)
             - exactly one TaskEvent ("from->to") appended with receipt_refs
-              + authority
+              + authority + reason (reason non-None for ->dropped by rule)
             - flush() called; commit NOT called (caller's get_db() commits)
 
         Returns:
@@ -168,7 +169,42 @@ class TaskRepository( BaseRepository[TaskItem] ):
             item.next_chase_ts = None
             item.blocked_by    = [ ]
 
-        return self._append_event( item.id, actor, transition_label, authority, receipt_refs )
+        return self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
+
+    def apply_correlation(
+        self,
+        item            : TaskItem,
+        correlation_key : str,
+        actor           : str,
+        authority       : str,
+    ) -> TaskEvent:
+        """
+        Re-stamp an item's correlation_key + append the audit event (Phase 2 —
+        the cross-session respawn adoption seam: a successor session
+        re-registers its harness task id onto the inherited item instead of
+        forking a duplicate).
+
+        Requires:
+            - item is a TaskItem loaded in THIS session (row-locked by the
+              router, N3 parity) and NOT terminal (router-validated)
+            - correlation_key / actor / authority already validated (router)
+
+        Ensures:
+            - item.correlation_key set to correlation_key (status untouched)
+            - exactly one TaskEvent appended: transition='re-correlated',
+              receipt_refs=None, reason='correlation_key: <old> -> <new>'
+              (R3 — the adoption is auditable)
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        old_key              = item.correlation_key
+        item.correlation_key = correlation_key
+        return self._append_event(
+            item.id, actor, "re-correlated", authority, receipt_refs=None,
+            reason = f"correlation_key: {old_key} -> {correlation_key}",
+        )
 
     def query_tasks(
         self,
@@ -178,6 +214,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         accountable_manager : Optional[str] = None,
         project             : Optional[str] = None,
         item_class          : Optional[str] = None,
+        correlation_key     : Optional[str] = None,
         limit               : int = 100,
         offset              : int = 0,
     ) -> List[TaskItem]:
@@ -205,6 +242,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if accountable_manager is not None: query = query.filter( TaskItem.accountable_manager == accountable_manager )
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
+        if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
 
         return query.order_by( TaskItem.created_ts.desc(), TaskItem.id ).limit( limit ).offset( offset ).all()
 
@@ -236,6 +274,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         transition   : str,
         authority    : str,
         receipt_refs : Optional[dict],
+        reason       : Optional[str] = None,
     ) -> TaskEvent:
         """
         Append one audit-trail event row (internal helper).
@@ -256,6 +295,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             transition   = transition,
             receipt_refs = receipt_refs,
             authority    = authority,
+            reason       = reason,
         )
         self.session.add( event )
         self.session.flush()

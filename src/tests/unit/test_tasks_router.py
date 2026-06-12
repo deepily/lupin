@@ -297,12 +297,14 @@ def test_query_passes_all_filters_through( client, repo ):
         "accountable_manager" : "tiberius",
         "project"             : "lupin",
         "item_class"          : "task",
+        "correlation_key"     : "cc-task:sid:5",
         "limit"               : 7,
         "offset"              : 3,
     } )
     assert r.status_code == 200 and r.json() == { "tasks": [ ], "count": 0 }
     kwargs = repo.query_tasks.call_args.kwargs
     assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "gate_class" ] == "ricks_court"
+    assert kwargs[ "correlation_key" ] == "cc-task:sid:5"
     assert kwargs[ "limit" ] == 7 and kwargs[ "offset" ] == 3
 
 
@@ -391,6 +393,119 @@ def test_get_events_returns_trail_in_order( client, repo ):
     assert body[ "count" ] == 2
     assert [ e[ "transition" ] for e in body[ "events" ] ] == [ "->queued", "queued->claimed" ]
     assert body[ "events" ][ 1 ][ "authority" ] == "manager_relay"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — reason on transitions (C12 pulled forward)
+# ---------------------------------------------------------------------------
+
+def test_transition_rejects_dropped_without_reason( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item( status="queued" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition",
+                     json={ "to_status": "dropped", "actor": "tiffany d03e6219" } )
+    assert r.status_code == 422
+    assert any( "reason is REQUIRED" in e for e in r.json()[ "detail" ][ "errors" ] )
+
+
+def test_transition_to_dropped_with_reason_serializes_it( client, repo ):
+    item = make_item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value = make_event(
+        item.id, transition="queued->dropped", reason="superseded-by-rewrite" )
+
+    r = client.post( f"/api/tasks/{item.id}/transition",
+                     json={ "to_status": "dropped", "actor": "tiffany d03e6219",
+                            "reason": "superseded-by-rewrite" } )
+
+    assert r.status_code == 200
+    assert r.json()[ "event" ][ "reason" ] == "superseded-by-rewrite"
+    assert repo.apply_transition.call_args.kwargs[ "reason" ] == "superseded-by-rewrite"
+
+
+def test_transition_reason_defaults_to_none_in_serialization( client, repo ):
+    item = make_item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value = make_event( item.id, transition="queued->claimed" )
+    r = client.post( f"/api/tasks/{item.id}/transition",
+                     json={ "to_status": "claimed", "actor": "a b" } )
+    assert r.status_code == 200 and r.json()[ "event" ][ "reason" ] is None
+
+
+def test_transition_rejects_overlong_reason( client, repo ):
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/transition",
+                     json={ "to_status": "dropped", "actor": "a b", "reason": "x" * 4001 } )
+    assert r.status_code == 422   # Pydantic max_length — never a DB error
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — POST /api/tasks/{id}/correlate (respawn adoption)
+# ---------------------------------------------------------------------------
+
+_CORRELATE_BODY = { "correlation_key": "cc-task:new-sid:8", "actor": "tiffany d03e6219" }
+
+
+def test_correlate_404_when_missing( client, repo ):
+    repo.get_by_id_for_update.return_value = None
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/correlate", json=_CORRELATE_BODY )
+    assert r.status_code == 404
+
+
+def test_correlate_422_on_malformed_uuid( client, repo ):
+    r = client.post( "/api/tasks/not-a-uuid/correlate", json=_CORRELATE_BODY )
+    assert r.status_code == 422
+    repo.get_by_id_for_update.assert_not_called()
+
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_correlate_rejects_terminal_items( client, repo, terminal ):
+    repo.get_by_id_for_update.return_value = make_item( status=terminal )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/correlate", json=_CORRELATE_BODY )
+    assert r.status_code == 422
+    assert any( "immutable" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_correlation.assert_not_called()
+
+
+def test_correlate_rejects_bad_authority( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item()
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/correlate",
+                     json={ **_CORRELATE_BODY, "authority": "divine_right" } )
+    assert r.status_code == 422
+    assert any( "authority" in e for e in r.json()[ "detail" ][ "errors" ] )
+
+
+def test_correlate_reports_terminal_and_authority_together( client, repo ):
+    repo.get_by_id_for_update.return_value = make_item( status="done" )
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/correlate",
+                     json={ **_CORRELATE_BODY, "authority": "divine_right" } )
+    assert r.status_code == 422 and len( r.json()[ "detail" ][ "errors" ] ) == 2
+
+
+def test_correlate_happy_path_returns_item_and_event( client, repo ):
+    item = make_item( correlation_key="cc-task:old-sid:3" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_correlation.return_value = make_event(
+        item.id, transition="re-correlated",
+        reason="correlation_key: cc-task:old-sid:3 -> cc-task:new-sid:8" )
+
+    r = client.post( f"/api/tasks/{item.id}/correlate", json=_CORRELATE_BODY )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "event" ][ "transition" ] == "re-correlated"
+    assert body[ "event" ][ "reason" ].endswith( "-> cc-task:new-sid:8" )
+    kwargs = repo.apply_correlation.call_args.kwargs
+    assert kwargs[ "correlation_key" ] == "cc-task:new-sid:8"
+    assert kwargs[ "actor" ] == "tiffany d03e6219" and kwargs[ "authority" ] == "standing"
+    # Row-locked read (N3 parity): the terminal check must not be raceable.
+    repo.get_by_id_for_update.assert_called_once()
+    repo.get_by_id.assert_not_called()
+
+
+@pytest.mark.parametrize( "field,limit", [ ( "correlation_key", 255 ), ( "actor", 255 ) ] )
+def test_correlate_rejects_overlong_fields( client, repo, field, limit ):
+    r = client.post( f"/api/tasks/{uuid.uuid4()}/correlate",
+                     json={ **_CORRELATE_BODY, field: "x" * ( limit + 1 ) } )
+    assert r.status_code == 422
 
 
 if __name__ == "__main__":

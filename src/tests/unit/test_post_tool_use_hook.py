@@ -362,3 +362,38 @@ class TestCosaVoiceIdleReset:
         # session_id positional + a last_interaction_at ISO string keyword
         assert mock_set_field.call_args[ 0 ][ 0 ] == "abc12345"
         assert "last_interaction_at" in mock_set_field.call_args[ 1 ]
+
+
+class TestTaskStoreMirrorSeam:
+    """Phase-2 write path: Task* events route to the task-store mirror."""
+
+    @staticmethod
+    def _run( tool_name, mirror_mock ):
+        payload = {
+            "tool_name"     : tool_name,
+            "tool_input"    : { "subject": "s" },
+            "tool_response" : { "task": { "id": "1" } },
+            "session_id"    : "abc12345",
+        }
+        with patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input", return_value=payload ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.get_claude_session_id", return_value="abc12345" ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" ), \
+             patch( "lupin_cli.claude_code.hooks.lib.task_store_mirror.mirror_task_tool_event", mirror_mock ):
+            main()
+        return payload
+
+    @pytest.mark.parametrize( "tool_name", [ "TaskCreate", "TaskUpdate" ] )
+    def test_task_tools_route_to_mirror( self, tool_name ):
+        mirror = MagicMock( return_value={ "action": "disabled" } )
+        payload = self._run( tool_name, mirror )
+        mirror.assert_called_once_with( payload, "abc12345" )
+
+    @pytest.mark.parametrize( "tool_name", [ "TaskGet", "TaskList", "Read", "Bash" ] )
+    def test_non_task_write_tools_do_not_touch_the_mirror( self, tool_name ):
+        mirror = MagicMock()
+        self._run( tool_name, mirror )
+        mirror.assert_not_called()
