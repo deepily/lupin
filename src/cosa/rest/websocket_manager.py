@@ -60,6 +60,12 @@ class WebSocketManager:
         self.user_to_email: Dict[str, str] = {}
         # Track which sessions belong to admin users (for targeted admin broadcasts)
         self.session_is_admin: Dict[str, bool] = {}
+        # Side map session_id → client type ("mobile" | "web") for the FCM wake
+        # trigger (F-S6-1). user_sessions stores bare session-id strings, so the
+        # platform marker lives here. Populated ONLY by the queue-WS auth path
+        # (`client_type` in auth_request); absent marker ⇒ "web" — existing web
+        # clients and the audio WS never send it, so they can never suppress a wake.
+        self.session_client_types: Dict[str, str] = {}
         # Store reference to main event loop for thread-safe operations
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         # Session management configuration
@@ -102,18 +108,20 @@ class WebSocketManager:
         self.main_loop = loop
         print( "[WS] Event loop reference stored for thread-safe operations" )
     
-    def connect( self, websocket: WebSocket, session_id: str, user_id: str = None, subscribed_events: List[str] = None, email: str = None, roles: list = None ):
+    def connect( self, websocket: WebSocket, session_id: str, user_id: str = None, subscribed_events: List[str] = None, email: str = None, roles: list = None, client_type: str = None ):
         """
         Add a new WebSocket connection with optional user association.
-        
+
         Implements optional single-session policy: if enabled, closes old sessions
         when a user connects with a new session.
-        
+
         Requires:
             - websocket is a valid FastAPI WebSocket instance
             - session_id is a unique string identifier
             - subscribed_events (if provided) contains valid event names or "*"
-            
+            - client_type (if provided) is the `client_type` value from the queue-WS
+              auth_request (the mobile app sends "mobile"; web clients send nothing)
+
         Ensures:
             - Adds connection to active_connections dictionary
             - Associates session with user if user_id provided
@@ -121,7 +129,13 @@ class WebSocketManager:
             - Sets up event subscriptions (defaults to "*" for all events)
             - Records connection timestamp
             - Validates subscribed events against available_events
-            
+            - Records the session's client type in session_client_types — "mobile"
+              iff client_type == "mobile", any other EXPLICIT value ⇒ "web"; an
+              ABSENT client_type writes "web" only for an unmapped session_id and
+              never downgrades an established "mobile" entry (the audio-WS
+              connect reuses the queue-WS session id without a marker — F-S6-1,
+              Rachel R1)
+
         Raises:
             - Exception if closing old WebSocket connections fails (handled gracefully)
         """
@@ -167,6 +181,17 @@ class WebSocketManager:
 
         # Track admin status for targeted admin broadcasts
         self.session_is_admin[ session_id ] = bool( roles and "admin" in roles )
+
+        # F-S6-1: pin the platform marker — exactly "mobile" marks a mobile
+        # session; any other EXPLICIT value is web, so a desktop browser can
+        # never suppress the phone's FCM wake. An ABSENT client_type must never
+        # DOWNGRADE an established "mobile" entry (Rachel R1): the mobile app's
+        # audio-WS connect reuses the queue-WS session id and passes no
+        # client_type — overwriting here would silently kill wake suppression.
+        if client_type is not None:
+            self.session_client_types[ session_id ] = "mobile" if client_type == "mobile" else "web"
+        elif session_id not in self.session_client_types:
+            self.session_client_types[ session_id ] = "web"
 
         # Store event subscriptions
         session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
@@ -231,6 +256,9 @@ class WebSocketManager:
         # Clean up admin tracking
         self.session_is_admin.pop( session_id, None )
 
+        # Clean up client-type marker (F-S6-1)
+        self.session_client_types.pop( session_id, None )
+
         # Clean up user association
         if session_id in self.session_to_user:
             user_id = self.session_to_user[session_id]
@@ -275,7 +303,35 @@ class WebSocketManager:
             self.user_sessions[user_id].append( session_id )
         
         print( f"[WS] Registered session {session_id} for user {user_id} (pre-WebSocket)" )
-    
+
+    def has_live_mobile_session( self, user_id: str ) -> bool:
+        """
+        Report whether the user has a LIVE WebSocket session marked `client_type: "mobile"`.
+
+        This is the FCM wake-trigger input (S6 §3.3): the wake push fires only when
+        the user has NO live mobile session — a live web/desktop session must NOT
+        suppress the phone's wake (the "one listening channel" goal, F-S6-1).
+        Liveness keys on the QUEUE WS: only the queue-WS auth path records "mobile"
+        in session_client_types, and a session must hold an active connection —
+        `register_session_user` pre-registrations without a socket don't count.
+
+        Requires:
+            - user_id is a string (may have no sessions)
+
+        Ensures:
+            - Returns True iff at least one of the user's sessions is BOTH present
+              in active_connections AND marked "mobile" in session_client_types
+            - Returns False for unknown users, connectionless pre-registrations,
+              and users whose only live sessions are web/audio/listener
+
+        Raises:
+            - None
+        """
+        for session_id in self.user_sessions.get( user_id, [] ):
+            if session_id in self.active_connections and self.session_client_types.get( session_id ) == "mobile":
+                return True
+        return False
+
     async def async_emit( self, event: str, data: dict ):
         """
         Emit an event to all connected WebSocket clients asynchronously.
@@ -900,6 +956,7 @@ class WebSocketManager:
             "session_id": session_id,
             "connected": True,
             "user_id": self.session_to_user.get( session_id ),
+            "client_type": self.session_client_types.get( session_id, "web" ),
             "connected_at": self.session_timestamps.get( session_id ).isoformat() if session_id in self.session_timestamps else None
         }
         

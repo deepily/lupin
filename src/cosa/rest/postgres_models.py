@@ -1450,6 +1450,70 @@ class TaskEvent( Base ):
         return f"<TaskEvent(id={self.id}, item_id={self.item_id}, transition='{self.transition}', actor='{self.actor}')>"
 
 
+class FcmToken( Base ):
+    """
+    Registered FCM device token for the mobile silent-relay wake channel (S6).
+
+    One row per device token. The token string is the upsert key (S6 §3.1):
+    re-registering an existing token refreshes its user binding and
+    last_registered_at instead of duplicating it. Multiple devices per user
+    are allowed (multiple rows sharing user_id).
+
+    Durability requirement (F-S6-S2-1a): this table IS the wake channel's
+    survival across parent restarts — the registry must rehydrate from here
+    with zero in-memory carryover (AC-S6.1).
+
+    Requires:
+        - token is the unique FCM registration token string from the device
+        - user_id is the authenticated user's uid (JWT) at registration time
+
+    Ensures:
+        - token is unique (upsert key)
+        - user_id is indexed (the wake trigger resolves tokens by user)
+        - timestamps are timezone-aware UTC
+    """
+    __tablename__ = "fcm_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ),
+        primary_key=True,
+        default=uuid.uuid4
+    )
+    token: Mapped[str] = mapped_column(
+        String( 512 ),
+        unique=True,
+        nullable=False,
+        index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String( 64 ),
+        nullable=False,
+        index=True
+    )
+    user_email: Mapped[str] = mapped_column(
+        String( 255 ),
+        nullable=False
+    )
+    platform: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False,
+        default="android"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        default=func.now(),
+        server_default=func.now()
+    )
+    last_registered_at: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        default=func.now(),
+        server_default=func.now()
+    )
+
+    def __repr__( self ) -> str:
+        return f"<FcmToken(user_id='{self.user_id}', platform='{self.platform}', token='…{self.token[ -8: ]}')>"
+
+
 def quick_smoke_test():
     """
     Quick smoke test for postgres_models module - validates PostgreSQL ORM model definitions.
@@ -1470,7 +1534,7 @@ def quick_smoke_test():
         models = [User, RefreshToken, ApiKey, EmailVerificationToken,
                   PasswordResetToken, FailedLoginAttempt, Notification, AuthAuditLog,
                   ProxyDecision, TrustState, PredictionLog, JobHistory, ServerLifecycle,
-                  TaskItem, TaskEvent]
+                  TaskItem, TaskEvent, FcmToken]
         for model in models:
             assert hasattr( model, '__tablename__' ), f"{model.__name__} missing __tablename__"
         print( f"✓ All {len( models )} models defined: {', '.join( [m.__name__ for m in models] )}" )
@@ -1482,7 +1546,7 @@ def quick_smoke_test():
         expected_tables = ['users', 'refresh_tokens', 'api_keys', 'email_verification_tokens',
                           'password_reset_tokens', 'failed_login_attempts', 'notifications', 'auth_audit_log',
                           'proxy_decisions', 'trust_states', 'prediction_log', 'job_history',
-                          'server_lifecycle', 'task_items', 'task_events']
+                          'server_lifecycle', 'task_items', 'task_events', 'fcm_tokens']
         assert set( table_names ) == set( expected_tables ), f"Table mismatch: {table_names}"
         print( f"✓ Base metadata contains {len( table_names )} tables" )
 

@@ -63,6 +63,11 @@ dependencies = [
   "psycopg2-binary==2.9.11",
   "alembic==1.18.1",
 
+  # --- Push (S6 FCM silent-relay wake channel) ---
+  "firebase-admin>=6.5,<7",               # REAL FCM admin SDK (named app "lupin-fcm-wake");
+                                          # import stays lazy/optional — FcmWakeService degrades
+                                          # to DISABLED when module or credentials are absent (OSQ-7)
+
   # --- Auth (some pins are pre-3.13-wheel-era; bump if uv lock fails) ---
   "PyJWT==2.10.1",
   "passlib==1.7.4",
