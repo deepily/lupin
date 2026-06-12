@@ -28,6 +28,8 @@ Pure + never-raises. Design authority: lupin
 import datetime
 
 from cosa.agents.heartbeat_arbiter.manager_resolver import SOURCE_LINEAGE
+# F-B: THE one persona-equivalence normalizer (allocation/DM path's own).
+from lupin_mcp.commons_persona_matcher import _normalize_for_match
 
 
 # Liveness verdict thresholds (seconds). Defaults are render-layer constants
@@ -257,7 +259,16 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             manager_ids = list_managers_fn() or set()
         except Exception:
             manager_ids = set()
-    declared_lower = { str( name ).strip().lower() for name in ( declared_managers or [ ] ) if str( name ).strip() }
+    # F-B (2026.06.11 lineage-persistence design): persona equivalence uses THE
+    # one shared normalizer (commons_persona_matcher._normalize_for_match —
+    # "Mr. Radio"/"mr radio"/"MR.RADIO" → "mrradio"). Persona strings drift
+    # structurally across signal sources (bridge keeps display casing; the
+    # event-sourced fallback is lowercase punct-stripped), so the journal-
+    # confirmed miss — persona "mr radio" reading role=worker, with the F2
+    # manager-staleness tier config-dead for him — is inherent to any exact
+    # compare. Normalization is for COMPARISON only; display casing untouched.
+    declared_norm = { _normalize_for_match( str( name ) ) for name in ( declared_managers or [ ] )
+                      if _normalize_for_match( str( name ) ) }
 
     rows = [ ]
     for sid in sorted( ( fleet_view or { } ).keys() ):
@@ -280,7 +291,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         if not include_offline and liveness.get( "verdict" ) == "offline":
             continue
         persona_value = view.get( "persona" )
-        is_declared   = bool( persona_value ) and str( persona_value ).strip().lower() in declared_lower
+        is_declared   = bool( persona_value ) and _normalize_for_match( str( persona_value ) ) in declared_norm
         role          = "manager" if ( is_declared or any( _sid_matches( sid, mid ) for mid in manager_ids ) ) else "worker"
         manager       = None
         if resolve_manager_fn is not None:

@@ -204,6 +204,12 @@ class TestPickDeclaredManagersFromEnv:
         env = { "COSA_VOICE_MANAGERS__LUPIN": "Rio, rio, RIO, Krishna" }
         assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Rio", "Krishna" ]
 
+    def test_punct_tolerant_dedupe_first_wins( self ):
+        """F-B: the dedup key is normalize-keyed — "Mr. Radio" and "mr radio"
+        declare ONE manager; the first (verbatim) spelling is emitted."""
+        env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio, mr radio, MR.RADIO, Tiberius" }
+        assert pick_declared_managers_from_env( "lupin", environ=env ) == [ "Mr. Radio", "Tiberius" ]
+
     def test_wildcard_elements_dropped( self ):
         # A copy-pasted chain expression must not poison the roster.
         env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio,Tiberius,*" }
@@ -243,6 +249,16 @@ class TestResolveActiveManagersDeclared:
             list_managers=lambda sd: set(),
             declared_managers=[ "MR. RADIO" ] )
         assert managers == [ "mr. radio" ]                        # bridge is the name authority
+
+    def test_declared_match_is_punct_tolerant_JOURNAL_REGRESSION( self ):
+        """F-B regression pin (2026-06-11): the EVENT-shape persona "mr radio"
+        (no period) must satisfy declared "Mr. Radio" on the fanout site too —
+        pre-fix this site shared fleet_render's exact-compare miss."""
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "mgr-new": "mr radio" },
+            list_managers=lambda sd: set(),
+            declared_managers=[ "Mr. Radio" ] )
+        assert managers == [ "mr radio" ]                         # bridge casing emitted, role granted
 
     def test_declared_union_with_lineage_manager( self ):
         managers = MR.resolve_active_managers(

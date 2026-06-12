@@ -302,6 +302,7 @@ def assemble_app(
         reannounce_interval  = int( cfg.get( "arbiter outreach reannounce interval seconds", default=300, return_type="int" ) ),
         reannounce_ttl       = int( cfg.get( "arbiter outreach reannounce ttl seconds", default=86400, return_type="int" ) ),
         pending_ledger_path  = _pending_ledger_path( cfg ),
+        lineage_carry_path   = _lineage_carry_path( cfg ),
     )
     fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=arbiter_log_fn )
 
@@ -346,6 +347,21 @@ def _pending_ledger_path( cfg ):
     rel = ( cfg.get( "arbiter outreach pending ledger path",
                      default="/io/arbiter/outreach-pending.json" )
             or "/io/arbiter/outreach-pending.json" )
+    return cu.get_project_root() + rel
+
+
+def _lineage_carry_path( cfg ):
+    """
+    Resolve the F-A lineage-carry file path (2026.06.11 lineage-persistence
+    design): relative INI value + the canonical project root (PATH MANAGEMENT).
+
+    Ensures:
+        - returns <project_root> + <`arbiter lineage carry path`>
+    """
+    import cosa.utils.util as cu
+    rel = ( cfg.get( "arbiter lineage carry path",
+                     default="/io/arbiter/lineage-carry.json" )
+            or "/io/arbiter/lineage-carry.json" )
     return cu.get_project_root() + rel
 
 

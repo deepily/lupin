@@ -391,5 +391,82 @@ def test_s7_undelivered_advisory_survives_recycle_and_reannounces( tmp_path ):
     assert read_pending( ledger ) == { }                              # obligation discharged
 
 
+# ── S8: reaped worker keeps its manager ACROSS a restart (lineage carry) ──────
+
+def test_s8_reaped_worker_keeps_manager_across_restart( tmp_path ):
+    """THE LINEAGE-PERSISTENCE REQUIREMENT (2026.06.11 design F-A; Rick's
+    "(Unmanaged)" Cheech/old-Rio bug): at reap, dismiss_sessions destroys BOTH
+    lineage sources (manifest record + bridge), so the decaying row's manager
+    survives ONLY via the carry — and the carry was in-memory, wiped by each of
+    tonight's 4× :8001 restarts. Driven through the composed `_poll_once` with
+    the REAL dismiss aftermath simulated (bridge gone + resolver unresolved):
+    job A observes the lineage and persists it; job A is DISCARDED; a FRESH
+    job B — same carry FILE, empty memory — still renders the row under
+    Tiberius. Pre-fix, job B rendered "(Unmanaged)"."""
+    import json as _json
+    from cosa.agents.heartbeat_arbiter.lineage_carry import read_carry
+
+    carry = tmp_path / "io" / "lineage-carry.json"
+    clock = _FakeClock( T0 )
+    fleet = Fleet( clock )
+    fleet.add( "wkr-cheech-uuid", "Cheech" )
+    # the worker has an events trace, so its row PERSISTS in the fleet view
+    # after the bridge vanishes (the realistic decay shape).
+    ( tmp_path / "wkr-cheech-uuid.jsonl" ).write_text( _json.dumps( {
+        "schema_version": 1, "session_id": "wkr-cheech-uuid",
+        "persona": "Cheech", "outcome": "idle", "ts": T0.isoformat(),
+    } ) + "\n" )
+
+    snapshots = [ ]
+    def _job_with():
+        return ArbiterConsumerJob(
+            commons                    = _GW(),
+            poll_seconds               = 60,
+            manager_recipient          = "manager-on-duty",
+            events_dir                 = str( tmp_path ),
+            clock                      = clock,
+            notify_fn                  = lambda m: [ { "channel": "live", "outcome": "queued" } ],
+            lineage_carry_path         = str( carry ),
+            log_fn                     = _Log(),
+            bridge_discovery_fn        = lambda: dict( fleet.bridges ),
+            bridge_mtime_fn            = lambda sid: fleet.mtimes.get( sid ),
+            list_managers_fn           = lambda: set( fleet.managers ),
+            # lineage resolves ONLY while the worker's bridge exists — after the
+            # reap (bridge unlinked + manifest record dropped) the resolver is
+            # structurally unresolved, exactly like production.
+            resolve_manager_fn         = lambda sid, declared_manager=None: (
+                { "manager_persona": "Tiberius", "source": "lineage" }
+                if sid in fleet.bridges else
+                { "manager_persona": None, "source": "unresolved" } ),
+            resolve_active_managers_fn = lambda who, bridges: [ ],
+            render_sink                = lambda s: None,
+            snapshot_sink              = snapshots.append,
+        )
+
+    def _row( snap, sid ):
+        return next( r for r in snap[ "sessions" ] if r[ "session_id" ] == sid )
+
+    # ── job A: observes the live worker under Tiberius; carry hits the FILE ──
+    job_a = _job_with()
+    job_a._poll_once()
+    assert _row( snapshots[ -1 ], "wkr-cheech-uuid" )[ "manager" ] == "Tiberius"
+    assert read_carry( carry ) == { "wkr-cheech-uuid": "Tiberius" }   # persisted
+
+    # ── the REAP: bridge gone, resolver unresolved; row decays but stays parented ──
+    fleet.remove( "wkr-cheech-uuid" )
+    clock.t = clock.t + datetime.timedelta( minutes=10 )
+    job_a._poll_once()
+    assert _row( snapshots[ -1 ], "wkr-cheech-uuid" )[ "manager" ] == "Tiberius"   # in-memory carry (2026-06-10 fix)
+
+    # ── THE RESTART BOUNDARY: job A discarded; job B = fresh memory, same FILE ──
+    del job_a
+    job_b = _job_with()
+    clock.t = clock.t + datetime.timedelta( minutes=5 )
+    job_b._poll_once()
+    row = _row( snapshots[ -1 ], "wkr-cheech-uuid" )
+    assert row[ "manager" ] == "Tiberius", \
+        f"pre-fix failure shape: restart orphaned the row to Unmanaged (got {row[ 'manager' ]!r})"
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

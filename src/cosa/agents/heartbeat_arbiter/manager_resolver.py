@@ -53,6 +53,12 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from lupin_mcp.session_spawner import SESSION_DIR, _read_manifest, _manifest_path
+# F-B (2026.06.11 lineage-persistence design): THE one persona-equivalence
+# normalizer — the allocation/DM path's own ("Mr. Radio"/"mr radio" → "mrradio").
+# Persona strings drift structurally across signal sources (bridge = display
+# casing; event-sourced fallback = lowercase punct-stripped), so every declared-
+# roster compare in this module is normalize-keyed; display casing untouched.
+from lupin_mcp.commons_persona_matcher import _normalize_for_match
 
 
 SOURCE_LINEAGE    = "lineage"
@@ -189,7 +195,9 @@ def pick_declared_managers_from_env( project, environ=None ):
         stripped = item.strip()
         if not stripped or stripped == "*":
             continue
-        key = stripped.lower()
+        # F-B: dedup key is normalize-keyed ("Tiberius, Mr. Radio, mr radio"
+        # declares TWO managers, not three); the emitted name stays verbatim.
+        key = _normalize_for_match( stripped )
         if key in seen:
             continue
         seen.add( key )
@@ -237,8 +245,9 @@ def resolve_active_managers(
     Ensures:
         - returns a SORTED list of DISTINCT active-manager personas
         - includes a declared persona iff a LIVE bridge carries it
-          (case-insensitive match; the bridge's casing is emitted — the bridge
-          is the authoritative name surface)
+          (punct/case-tolerant match via the shared persona normalizer — F-B;
+          the bridge's casing is emitted — the bridge is the authoritative
+          name surface)
         - excludes non-managers (no manifest AND not declared) AND phantoms
           (commons-recent but no live bridge) AND managers with no DM-able persona
         - never raises
@@ -246,13 +255,16 @@ def resolve_active_managers(
     list_managers   = list_managers   if list_managers   is not None else list_manager_session_ids
     who_rows        = who_rows        or [ ]
     bridge_sessions = bridge_sessions or { }
-    declared_lower  = { str( name ).strip().lower() for name in ( declared_managers or [ ] ) if str( name ).strip() }
+    # F-B: normalize-keyed declared set (the journal-confirmed "mr radio" vs
+    # "Mr. Radio" miss also broke this fanout site).
+    declared_norm   = { _normalize_for_match( str( name ) ) for name in ( declared_managers or [ ] )
+                        if _normalize_for_match( str( name ) ) }
 
     try:
         manager_ids = list_managers( session_dir )
     except Exception:
         manager_ids = set()
-    if not manager_ids and not declared_lower:
+    if not manager_ids and not declared_norm:
         return [ ]
 
     def _is_manager( sid ):
@@ -269,7 +281,7 @@ def resolve_active_managers(
             continue
         # DECLARED roster: a live-bridge persona in the declared set is a
         # manager regardless of manifest ownership (role-by-declaration).
-        if _is_manager( sid ) or ( persona and persona.strip().lower() in declared_lower ):
+        if _is_manager( sid ) or ( persona and _normalize_for_match( persona ) in declared_norm ):
             candidates[ sid ] = persona or candidates.get( sid )
 
     # PHANTOM GUARD: keep only sessions with a LIVE bridge (PID-alive), with a persona
