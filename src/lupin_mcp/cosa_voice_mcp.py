@@ -3016,6 +3016,220 @@ def commons_send_to(
     return result
 
 
+# ============================================================================
+# Task-Store Tools (Phase 1 — unified work-queue wrappers)
+# ============================================================================
+#
+# Per Lupin src/rnd/v0.1.8/2026.06.11-task-store-phase1/02-mcp-wrapper-spec.md:
+# three thin TRANSPORT-only shims over :7999 /api/tasks/* — every structural
+# rule (receipts on ->done, typed blocked_by + next_chase_ts on ->blocked,
+# terminal lockout, enum membership) lives server-side in
+# cosa.rest.task_store_rules; these tools never pre-validate. Identity
+# (`created_by`/`actor`) is bridge-stamped, same stamping lane as commons_post
+# — a session cannot impersonate. Day-to-day practice: planning-is-prompting
+# workflow/task-store-discipline.md.
+
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_query_impl
+
+
+def _task_store_identity() -> str:
+    """
+    Build the bridge-stamped identity for task-store writes.
+
+    Ensures:
+        - returns "<persona_name> <8-hex session id>" (e.g. "krishna 38d15e3b")
+        - persona resolves via the same `_commons_persona_fields()` bridge
+          lookup commons_post uses (falls back to the AC3 default on bridge
+          failure — never raises)
+    """
+    return f"{_commons_persona_fields()[ 'persona_name' ]} {SESSION_ID}"
+
+
+@mcp.tool
+def task_create(
+    item_class          : str,
+    title               : str,
+    project             : str,
+    body                : Optional[ str ] = None,
+    owner_persona       : Optional[ str ] = None,
+    accountable_manager : Optional[ str ] = None,
+    gate_class          : str             = "none",
+    priority            : str             = "P2",
+    source_qid          : Optional[ str ] = None,
+    correlation_key     : Optional[ str ] = None,
+    authority           : str             = "standing",
+) -> dict:
+    """
+    **[SELF-DISCLOSURE]** Create an item in the unified task store.
+
+    Managers-first write practice (design F4) is enforced socially + by the
+    audit trail, not by tool gating. Create EXPLICITLY when the obligation is
+    cross-session or durable beyond your own TodoWrite list (the
+    PostToolUse(TodoWrite) hook mirrors that list for you — see
+    planning-is-prompting workflow/task-store-discipline.md §3).
+
+    Examples:
+        # Assign work to another persona:
+        task_create(item_class="task", title="Review the wrapper build",
+                    project="lupin", owner_persona="tiffany",
+                    accountable_manager="tiberius")
+
+        # A decision for Rick's court (framing payload in body):
+        task_create(item_class="decision", title="Deploy window for MCP restart",
+                    project="lupin", body="Options: ... Recommendation: ...",
+                    gate_class="ricks_court")
+
+    Args:
+        item_class: task | decision | review_request | bug | gate
+        title: One-line obligation statement
+        project: Owning project (e.g. "lupin")
+        body: Optional long-form payload (decision framing lives here)
+        owner_persona: Who owes the work
+        accountable_manager: Who chases it
+        gate_class: none | ricks_court (default "none")
+        priority: P0..P3 (default "P2")
+        source_qid: Originating commons question_id, when DM-born
+        correlation_key: Upsert key for hook-mirrored items
+        authority: standing | user_direct | manager_relay (default "standing")
+
+    Returns:
+        The serialized item dict (server 201 body) verbatim, or an error dict:
+        {"status": "error", "reason": "server_unreachable"|"missing_auth_header", ...}
+        or {"status": "error", "http_status": 422, "errors": [...server's words...]}.
+
+    `created_by` is NOT a parameter — it is stamped from the session bridge
+    ("<persona> <session id>"), the same identity lane as commons_post.
+    """
+    return task_create_impl(
+        api_base_url        = _get_server_url(),
+        api_key             = _mcp_outbound_api_key(),
+        created_by          = _task_store_identity(),
+        item_class          = item_class,
+        title               = title,
+        project             = project,
+        body                = body,
+        owner_persona       = owner_persona,
+        accountable_manager = accountable_manager,
+        gate_class          = gate_class,
+        priority            = priority,
+        source_qid          = source_qid,
+        correlation_key     = correlation_key,
+        authority           = authority,
+    )
+
+
+@mcp.tool
+def task_transition(
+    task_id       : str,
+    to_status     : str,
+    receipt_refs  : Optional[ dict ] = None,
+    next_chase_ts : Optional[ str ]  = None,
+    blocked_by    : Optional[ list ] = None,
+    authority     : str              = "standing",
+) -> dict:
+    """
+    **[SELF-DISCLOSURE]** Apply one state change to a task-store item.
+
+    The receipts discipline is enforced SERVER-side and surfaces verbatim:
+    `->done` REQUIRES receipt_refs (key-whitelisted: commit/qid/test_run/
+    doc_path/log_line — if you can't cite a receipt, the work isn't done);
+    `->blocked` REQUIRES BOTH >=1 typed blocked_by ref ({kind: item|persona|user,
+    id}) AND next_chase_ts; done/dropped are terminal. This tool does NOT
+    pre-check any of that — a 422 carries the server's errors unedited.
+
+    Examples:
+        # Close with receipts:
+        task_transition(task_id="<uuid>", to_status="done",
+                        receipt_refs={"commit": "f4e0370", "test_run": "ts-b51e63c9"})
+
+        # Block with a typed wait + chase time:
+        task_transition(task_id="<uuid>", to_status="blocked",
+                        blocked_by=[{"kind": "persona", "id": "tiffany"}],
+                        next_chase_ts="2026-06-13T09:00:00-04:00")
+
+    Args:
+        task_id: The item's UUID
+        to_status: Target status (e.g. in_progress | blocked | done | dropped)
+        receipt_refs: Receipt dict — REQUIRED server-side for ->done
+        next_chase_ts: ISO-8601 chase time — REQUIRED server-side for ->blocked
+        blocked_by: Typed refs [{kind, id}] — REQUIRED server-side for ->blocked
+        authority: standing | user_direct | manager_relay (default "standing")
+
+    Returns:
+        { item, event } (server 200 body) verbatim, or an error dict — a 422
+        carries the server's detail.errors list VERBATIM under "errors"; a 404
+        carries "task {id} not found" verbatim under "detail".
+
+    `actor` is NOT a parameter — bridge-stamped like task_create's created_by.
+    """
+    return task_transition_impl(
+        api_base_url  = _get_server_url(),
+        api_key       = _mcp_outbound_api_key(),
+        actor         = _task_store_identity(),
+        task_id       = task_id,
+        to_status     = to_status,
+        receipt_refs  = receipt_refs,
+        next_chase_ts = next_chase_ts,
+        blocked_by    = blocked_by,
+        authority     = authority,
+    )
+
+
+@mcp.tool
+def task_query(
+    owner_persona       : Optional[ str ] = None,
+    status              : Optional[ str ] = None,
+    gate_class          : Optional[ str ] = None,
+    accountable_manager : Optional[ str ] = None,
+    project             : Optional[ str ] = None,
+    item_class          : Optional[ str ] = None,
+    limit               : Optional[ int ] = None,
+    offset              : Optional[ int ] = None,
+) -> dict:
+    """
+    **[READ — always allowed, no user permission needed]** Query the task store.
+
+    The deterministic owed-work query (design R4): exact-match filters, AND
+    semantics, newest first. Junk enum filter values are rejected by the
+    server (422), never silently empty.
+
+    Examples:
+        # Manager board glance — everything, newest first:
+        task_query()
+
+        # My owed work:
+        task_query(owner_persona="sam", status="in_progress")
+
+        # Rick's court:
+        task_query(gate_class="ricks_court")
+
+    Args:
+        owner_persona: Filter by who owes the work
+        status: Filter by status (queued | in_progress | blocked | done | dropped)
+        gate_class: Filter by gate (none | ricks_court)
+        accountable_manager: Filter by chasing manager
+        project: Filter by owning project
+        item_class: Filter by class (task | decision | review_request | bug | gate)
+        limit: Max rows (server default 100, cap 500)
+        offset: Pagination offset
+
+    Returns:
+        { tasks: [...], count } verbatim, or an error dict (see task_create).
+    """
+    return task_query_impl(
+        api_base_url        = _get_server_url(),
+        api_key             = _mcp_outbound_api_key(),
+        owner_persona       = owner_persona,
+        status              = status,
+        gate_class          = gate_class,
+        accountable_manager = accountable_manager,
+        project             = project,
+        item_class          = item_class,
+        limit               = limit,
+        offset              = offset,
+    )
+
+
 if __name__ == "__main__":
     _maybe_start_commons_archival_daemon()
     mcp.run()
