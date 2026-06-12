@@ -2,9 +2,12 @@
 
 **Date**: 2026.06.11 (EDT)
 **Author**: Krishna 🦚 (Lane 2, task-store crew) — named MCP-wrapper owner (design C5)
-**Status**: SPEC ONLY — the implementation lands in the **cosa-voice repo**
-(`/var/external-projects/cosa-voice`), a SEPARATE repo whose touch is flagged to Rick.
-**NO cosa-voice edits until Tiberius relays Rick's explicit GO.**
+**Status**: IMPLEMENTED 2026-06-12 (Sam 🎙️, held commits on `wt-sam-taskstore-mcp-2026.06.12`)
+— **location correction**: there is NO standalone cosa-voice repo on the host (the
+doc-viewer registry path `/var/external-projects/cosa-voice` is stale); the cosa-voice
+MCP server lives IN-TREE at Lupin `src/lupin_mcp/`, and the implementation landed there
+(`task_store_tools.py` transport + tool shims in `cosa_voice_mcp.py`) per Tiberius's
+revised directive under Rick's D4 authorization. See §6 Amendments.
 **Canonical design**: planning-is-prompting → `src/rnd/2026.06.11-unified-task-store-design.md` (v0.4) §2.2.
 
 ---
@@ -54,6 +57,7 @@ Returns: the serialized item dict (201 body) verbatim.
 | `receipt_refs` | dict | no (REQUIRED server-side for `done`) | `receipt_refs` |
 | `next_chase_ts` | str ISO-8601 | no (REQUIRED server-side for `blocked`) | `next_chase_ts` |
 | `blocked_by` | list of `{kind, id}` | no (REQUIRED server-side for `blocked`) | `blocked_by` |
+| `reason` | str ≤4000 | no (REQUIRED server-side for `dropped` once Phase-2 C12 lands — §6 B) | `reason` |
 | `authority` | str, default `"standing"` | no | `authority` |
 
 `actor` stamped from the session bridge, same as `created_by` above.
@@ -72,6 +76,7 @@ rejection text reaches the model unedited.
 | `accountable_manager` | str | no | query param |
 | `project` | str | no | query param |
 | `item_class` | str | no | query param |
+| `correlation_key` | str | no | query param (exact match — §6 C) |
 | `limit` / `offset` | int | no | query params |
 
 Returns: `{ tasks, count }` verbatim. Convenience: `task_query()` with no
@@ -98,3 +103,19 @@ review (harness has native TaskCreate/TaskList). The MCP tool names here are
 snake_case (`task_create`) vs harness PascalCase (`TaskCreate`) — distinct
 strings, but the collision review may still rename; this spec follows
 whatever that review rules.
+
+## 6. Amendments (2026-06-12, Tiberius-ruled GO, per Phase-2 contract §1.11)
+
+The Phase-2 write-path build (`src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md`)
+extends the REST surface this spec wraps. Ruled wrapper impact:
+
+- **(B) `task_transition` gains optional `reason` (str, ≤4000)** — passes
+  through verbatim. Server-REQUIRED non-empty for `→dropped` once the C12
+  pull-forward lands; the pre-Phase-2 server ignores the field (backward-safe).
+  Practice rule (task-store-discipline.md §4): give one on every `→dropped`
+  regardless.
+- **(C) `task_query` gains optional `correlation_key`** — exact-match filter,
+  mirrors the REST addition; pre-Phase-2 server ignores it.
+- **(A) `POST /api/tasks/{id}/correlate` wrapper exposure: DEFERRED to
+  Phase-2.1** — no session-facing consumer named; the hook lane consumes it
+  via REST directly. Recorded here so the gap is a decision, not a discovery.
