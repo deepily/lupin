@@ -331,6 +331,181 @@ def _persist_notification_sync(
         return nid
 
 
+def _update_notification_state_sync( notification_id, state ):
+    """
+    Synchronous notification state update — run OFF the event loop via
+    asyncio.to_thread (lever B, surgical pass 2).
+
+    Requires:
+        - notification_id is a UUID string
+        - state is a valid notification state (e.g. 'delivered')
+
+    Ensures:
+        - updates the Notification row's state
+
+    Raises:
+        - propagates DB errors to the caller (handled there as non-fatal)
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        repo.update_state( uuid.UUID( notification_id ), state )
+
+
+def _persist_response_required_sync(
+    resolved_sender_id, target_system_id, message, type, priority, title,
+    abstract, response_type, response_default, parsed_response_options,
+    timeout_seconds, job_id, progress_group_id, state
+):
+    """
+    Synchronous DB persist for a response-required notification — run OFF the
+    event loop via asyncio.to_thread (lever B, surgical pass 2).
+
+    This is the blocking-ask hot path: every ask_yes_no / ask_multiple_choice /
+    converse from every fleet session lands here. The inline `with get_db()`
+    version blocked the shared :7999 event loop on session checkout + two
+    round-trips per ask (the FM-7 black-hole).
+
+    Requires:
+        - target_system_id is a UUID string
+        - timeout_seconds is a positive int
+        - state is 'delivered' (user online) or 'expired' (offline default)
+
+    Ensures:
+        - creates the response-required Notification row with expiration
+        - sets the row state to `state`
+        - returns the new notification id (str)
+
+    Raises:
+        - propagates DB errors to the caller
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        # Calculate expiration time
+        expires_at = datetime.utcnow() + timedelta( seconds=timeout_seconds )
+        db_notification = repo.create_notification(
+            sender_id          = resolved_sender_id,
+            recipient_id       = uuid.UUID( target_system_id ),
+            title              = title or message.strip()[:50],
+            message            = message.strip(),
+            type               = type,
+            priority           = priority,
+            abstract           = abstract,
+            response_requested = True,
+            response_type      = response_type,
+            response_default   = response_default,
+            response_options   = parsed_response_options,
+            timeout_seconds    = timeout_seconds,
+            expires_at         = expires_at,
+            job_id             = job_id,
+            progress_group_id  = progress_group_id
+        )
+        repo.update_state( db_notification.id, state )
+        return str( db_notification.id )
+
+
+def _mark_notification_expired_sync( notification_id ):
+    """
+    Synchronous expiry mark for a timed-out response-required notification —
+    run OFF the event loop via asyncio.to_thread (lever B, surgical pass 2).
+
+    Fires inside the SSE event_generator on ask timeout; the inline version
+    blocked the event loop for a DB write at exactly the moment a fleet of
+    asks expires together.
+
+    Requires:
+        - notification_id is a UUID string
+
+    Ensures:
+        - marks the Notification row expired
+
+    Raises:
+        - propagates DB errors to the caller
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        repo.mark_expired( uuid.UUID( notification_id ) )
+
+
+def _submit_response_sync( notification_id, response_value ):
+    """
+    Synchronous DB read/validate/update for a notification response — run OFF
+    the event loop via asyncio.to_thread (lever B, surgical pass 2). Fires per
+    ask answer.
+
+    Requires:
+        - notification_id is a UUID string
+        - response_value is a non-empty str or dict
+
+    Ensures:
+        - validates notification exists, is unanswered, and is within the grace
+          period when expired
+        - persists the response (wrapping plain strings as {value, source})
+        - returns ( recipient_id, job_id ) for the WebSocket broadcast
+
+    Raises:
+        - HTTPException 404 if the notification does not exist
+        - HTTPException 400 if already responded / grace period exceeded
+        - HTTPException 500 if the response update fails
+    """
+    with get_db() as session:
+        repo = NotificationRepository( session )
+        notification = repo.get_by_id( uuid.UUID( notification_id ) )
+
+        if not notification:
+            raise HTTPException(
+                status_code = 404,
+                detail      = f"Notification {notification_id} not found"
+            )
+
+        # Check state - must be 'delivered' or within grace period
+        if notification.state == "responded":
+            raise HTTPException(
+                status_code = 400,
+                detail      = "Notification already responded to"
+            )
+
+        # Grace period check - read from config (supports pause button feature)
+        import lupin_app.main as main_module
+        config_mgr = main_module.config_mgr
+        grace_period_seconds = config_mgr.get( "notification grace period seconds", default=300, return_type="int" )
+
+        if notification.state == "expired":
+            # Check if within grace period
+            expires_at = notification.expires_at
+            now        = datetime.now( timezone.utc )
+
+            if expires_at and (now - expires_at).total_seconds() > grace_period_seconds:
+                raise HTTPException(
+                    status_code = 400,
+                    detail      = f"Notification expired more than {grace_period_seconds}s ago (grace period exceeded)"
+                )
+
+            print(f"[NOTIFY] Accepting late response within grace period ({grace_period_seconds}s)")
+
+        # Capture recipient_id and job_id before session closes (for WebSocket broadcast).
+        # job_id is needed for the cross-user CC-listener fallback in the
+        # notification_responded broadcast below (Phase C migration 2026-04-27).
+        recipient_id        = str( notification.recipient_id )
+        notification_job_id = notification.job_id
+
+        # Update database with response (pass dict, not JSON string)
+        # Wrap in dict if response_value is a simple string like "yes" or "no"
+        if isinstance( response_value, str ):
+            response_dict = { "value": response_value, "source": "ui" }
+        else:
+            response_dict = response_value
+
+        updated = repo.update_response( uuid.UUID( notification_id ), response_dict )
+
+        if not updated:
+            raise HTTPException(
+                status_code = 500,
+                detail      = "Failed to update notification response in database"
+            )
+
+        return ( recipient_id, notification_job_id )
+
+
 @router.post(
     "/notify",
     summary     = "Send notification",
@@ -526,10 +701,13 @@ async def notify_user(
     print(f"[NOTIFY] Sender ID resolved: {resolved_sender_id}")
 
     try:
-        # Look up user in JWT auth database to get their UUID user_id
+        # Look up user in JWT auth database to get their UUID user_id.
+        # Lever B (surgical pass 2): get_user_by_email is a blocking SQLAlchemy
+        # lookup that ran on EVERY notify — run it OFF the event loop so a slow
+        # DB under fleet load can't starve the shared :7999 loop (FM-7).
         from cosa.rest.user_service import get_user_by_email
 
-        user_data = get_user_by_email(target_user)
+        user_data = await asyncio.to_thread( get_user_by_email, target_user )
         if not user_data:
             print(f"[NOTIFY] ❌ User not found in auth database: {target_user}")
             raise HTTPException(
@@ -649,6 +827,11 @@ async def notify_user(
             #    inside the helper is redundant. The helper just tries the
             #    listener path.
             if not is_connected and job_id:
+                # Lever B (surgical pass 2): the persona lookup reads bridge files
+                # (directory scan + JSON load) — blocking file I/O off the loop.
+                listener_voice_persona = await asyncio.to_thread(
+                    _voice_persona_for_sender_id, resolved_sender_id
+                )
                 dispatch_result = ws_manager.emit_to_user_or_listener_sync(
                     user_id = None,
                     job_id  = job_id,
@@ -666,17 +849,18 @@ async def notify_user(
                             "title"             : title,
                             "abstract"          : abstract,
                             "timestamp"         : datetime.utcnow().isoformat(),
-                            "voice_persona"     : _voice_persona_for_sender_id( resolved_sender_id ),
+                            "voice_persona"     : listener_voice_persona,
                         },
                     },
                 )
                 if dispatch_result[ "listener_delivered" ]:
-                    # Best-effort state update — non-fatal if it fails
+                    # Best-effort state update — non-fatal if it fails. Lever B
+                    # (surgical pass 2): blocking DB write off the event loop.
                     if db_notification_id:
                         try:
-                            with get_db() as session:
-                                repo = NotificationRepository( session )
-                                repo.update_state( uuid.UUID( db_notification_id ), "delivered" )
+                            await asyncio.to_thread(
+                                _update_notification_state_sync, db_notification_id, "delivered"
+                            )
                         except Exception as state_err:
                             print( f"[NOTIFY] ⚠️ State update to 'delivered' failed (non-fatal): {state_err}" )
 
@@ -722,8 +906,10 @@ async def notify_user(
                             _idempotency_cache.popitem( last=False )
                 return response_dict
 
-            # 3. User is connected — push to FIFO queue for live WebSocket delivery
-            voice_persona_payload = _voice_persona_for_sender_id( resolved_sender_id )
+            # 3. User is connected — push to FIFO queue for live WebSocket delivery.
+            #    Lever B (surgical pass 2): persona lookup reads bridge files
+            #    (blocking file I/O) — off the event loop.
+            voice_persona_payload = await asyncio.to_thread( _voice_persona_for_sender_id, resolved_sender_id )
             notification_item = notification_queue.push_notification(
                 message                 = message.strip(),
                 type                    = type,
@@ -777,30 +963,15 @@ async def notify_user(
             if response_default:
                 print(f"[NOTIFY] User offline - returning default immediately: {response_default}")
 
-                # Create notification in PostgreSQL with state='expired'
-                with get_db() as session:
-                    repo = NotificationRepository( session )
-                    # Calculate expiration time
-                    expires_at = datetime.utcnow() + timedelta( seconds=timeout_seconds )
-                    db_notification = repo.create_notification(
-                        sender_id          = resolved_sender_id,
-                        recipient_id       = uuid.UUID( target_system_id ),
-                        title              = title or message.strip()[:50],
-                        message            = message.strip(),
-                        type               = type,
-                        priority           = priority,
-                        abstract           = abstract,
-                        response_requested = True,
-                        response_type      = response_type,
-                        response_default   = response_default,
-                        response_options   = parsed_response_options,
-                        timeout_seconds    = timeout_seconds,
-                        expires_at         = expires_at,
-                        job_id             = job_id,
-                        progress_group_id  = progress_group_id
-                    )
-                    repo.update_state( db_notification.id, "expired" )
-                    notification_id = str( db_notification.id )
+                # Create notification in PostgreSQL with state='expired'.
+                # Lever B (surgical pass 2): blocking DB persist off the event loop.
+                notification_id = await asyncio.to_thread(
+                    _persist_response_required_sync,
+                    resolved_sender_id, target_system_id, message, type, priority,
+                    title, abstract, response_type, response_default,
+                    parsed_response_options, timeout_seconds, job_id,
+                    progress_group_id, "expired"
+                )
 
                 return JSONResponse({
                     "status"             : "offline",
@@ -814,31 +985,16 @@ async def notify_user(
                     detail      = "User is offline and no default response provided"
                 )
 
-        # User is online - create notification in PostgreSQL
-        with get_db() as session:
-            repo = NotificationRepository( session )
-            # Calculate expiration time
-            expires_at = datetime.utcnow() + timedelta( seconds=timeout_seconds )
-            db_notification = repo.create_notification(
-                sender_id          = resolved_sender_id,
-                recipient_id       = uuid.UUID( target_system_id ),
-                title              = title or message.strip()[:50],
-                message            = message.strip(),
-                type               = type,
-                priority           = priority,
-                abstract           = abstract,
-                response_requested = True,
-                response_type      = response_type,
-                response_default   = response_default,
-                response_options   = parsed_response_options,
-                timeout_seconds    = timeout_seconds,
-                expires_at         = expires_at,
-                job_id             = job_id,
-                progress_group_id  = progress_group_id
-            )
-            # Mark as delivered since user is connected
-            repo.update_state( db_notification.id, "delivered" )
-            notification_id = str( db_notification.id )
+        # User is online - create notification in PostgreSQL (marked delivered).
+        # Lever B (surgical pass 2): this is the blocking-ask hot path — every
+        # fleet ask_* lands here; blocking DB persist off the event loop.
+        notification_id = await asyncio.to_thread(
+            _persist_response_required_sync,
+            resolved_sender_id, target_system_id, message, type, priority,
+            title, abstract, response_type, response_default,
+            parsed_response_options, timeout_seconds, job_id,
+            progress_group_id, "delivered"
+        )
 
         print(f"[NOTIFY] Created response-required notification: {notification_id}")
 
@@ -902,8 +1058,9 @@ async def notify_user(
                 print( f"[PREDICTION] ⚠️ Vote-gate stamp error (non-fatal): {gate_error}" )
         # ---- End Prediction Engine Hook ----
 
-        # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields)
-        voice_persona_payload = _voice_persona_for_sender_id( resolved_sender_id )
+        # Push notification to WebSocket for UI rendering (Phase 2.2 with full fields).
+        # Lever B (surgical pass 2): persona lookup reads bridge files — off the loop.
+        voice_persona_payload = await asyncio.to_thread( _voice_persona_for_sender_id, resolved_sender_id )
         notification_item = notification_queue.push_notification(
             message                  = message.strip(),
             type                     = type,
@@ -954,10 +1111,10 @@ async def notify_user(
                 # Task 4: Timeout - use default value
                 print(f"[NOTIFY] ⏱️ Timeout for notification {notification_id}, using default: {response_default}")
 
-                # Mark as expired in PostgreSQL
-                with get_db() as session:
-                    repo = NotificationRepository( session )
-                    repo.mark_expired( uuid.UUID( notification_id ) )
+                # Mark as expired in PostgreSQL. Lever B (surgical pass 2):
+                # blocking DB write off the event loop — a fleet of asks expiring
+                # together used to serialize the loop on these writes.
+                await asyncio.to_thread( _mark_notification_expired_sync, notification_id )
 
                 # Task 7: Broadcast notification_expired WebSocket event.
                 # Phase C migration (2026-04-27): use the canonical dispatch
@@ -1093,62 +1250,11 @@ async def submit_notification_response(
 
         print(f"[NOTIFY] Response submission for {notification_id}: {response_value}")
 
-        # Get notification from PostgreSQL
-        with get_db() as session:
-            repo = NotificationRepository( session )
-            notification = repo.get_by_id( uuid.UUID( notification_id ) )
-
-            if not notification:
-                raise HTTPException(
-                    status_code = 404,
-                    detail      = f"Notification {notification_id} not found"
-                )
-
-            # Check state - must be 'delivered' or within grace period
-            if notification.state == "responded":
-                raise HTTPException(
-                    status_code = 400,
-                    detail      = "Notification already responded to"
-                )
-
-            # Grace period check - read from config (supports pause button feature)
-            import lupin_app.main as main_module
-            config_mgr = main_module.config_mgr
-            grace_period_seconds = config_mgr.get( "notification grace period seconds", default=300, return_type="int" )
-
-            if notification.state == "expired":
-                # Check if within grace period
-                expires_at = notification.expires_at
-                now        = datetime.now( timezone.utc )
-
-                if expires_at and (now - expires_at).total_seconds() > grace_period_seconds:
-                    raise HTTPException(
-                        status_code = 400,
-                        detail      = f"Notification expired more than {grace_period_seconds}s ago (grace period exceeded)"
-                    )
-
-                print(f"[NOTIFY] Accepting late response within grace period ({grace_period_seconds}s)")
-
-            # Capture recipient_id and job_id before session closes (for WebSocket broadcast).
-            # job_id is needed for the cross-user CC-listener fallback in the
-            # notification_responded broadcast below (Phase C migration 2026-04-27).
-            recipient_id    = str( notification.recipient_id )
-            notification_job_id = notification.job_id
-
-            # Update database with response (pass dict, not JSON string)
-            # Wrap in dict if response_value is a simple string like "yes" or "no"
-            if isinstance( response_value, str ):
-                response_dict = { "value": response_value, "source": "ui" }
-            else:
-                response_dict = response_value
-
-            updated = repo.update_response( uuid.UUID( notification_id ), response_dict )
-
-            if not updated:
-                raise HTTPException(
-                    status_code = 500,
-                    detail      = "Failed to update notification response in database"
-                )
+        # Get notification from PostgreSQL + persist the response. Lever B
+        # (surgical pass 2): blocking DB read/validate/update off the event loop.
+        recipient_id, notification_job_id = await asyncio.to_thread(
+            _submit_response_sync, notification_id, response_value
+        )
 
         print(f"[NOTIFY] ✓ Updated database with response for {notification_id}")
 
@@ -1286,10 +1392,16 @@ async def get_undelivered_notifications(
 
     try:
         max_age_hours = _undelivered_max_age_hours()
-        with get_db() as session:
-            repo          = NotificationRepository( session )
-            items         = repo.get_undelivered_for_recipient( recipient_uuid, limit=limit, max_age_hours=max_age_hours )
-            notifications = [ _project_undelivered_notification( n ) for n in items ]
+
+        def _fetch_undelivered_sync():
+            # Lever B (surgical pass 2): blocking DB read off the event loop —
+            # this pull-inbox fires per session-return across the whole fleet.
+            with get_db() as session:
+                repo  = NotificationRepository( session )
+                items = repo.get_undelivered_for_recipient( recipient_uuid, limit=limit, max_age_hours=max_age_hours )
+                return [ _project_undelivered_notification( n ) for n in items ]
+
+        notifications = await asyncio.to_thread( _fetch_undelivered_sync )
         return {
             "status"            : "success",
             "undelivered_count" : len( notifications ),
@@ -1338,10 +1450,16 @@ async def dismiss_undelivered_notifications(
 
     try:
         max_age_hours = _undelivered_max_age_hours()
-        with get_db() as session:
-            repo            = NotificationRepository( session )
-            dismissed_count = repo.dismiss_undelivered_for_recipient( recipient_uuid, max_age_hours=max_age_hours )
-            remaining       = repo.count_undelivered_for_recipient( recipient_uuid, max_age_hours=max_age_hours )
+
+        def _dismiss_undelivered_sync():
+            # Lever B (surgical pass 2): blocking DB update off the event loop.
+            with get_db() as session:
+                repo            = NotificationRepository( session )
+                dismissed_count = repo.dismiss_undelivered_for_recipient( recipient_uuid, max_age_hours=max_age_hours )
+                remaining       = repo.count_undelivered_for_recipient( recipient_uuid, max_age_hours=max_age_hours )
+                return ( dismissed_count, remaining )
+
+        dismissed_count, remaining = await asyncio.to_thread( _dismiss_undelivered_sync )
         print( f"[NOTIFY] Dismissed {dismissed_count} undelivered notification(s) for {authenticated_user_id}" )
         return {
             "status"            : "success",
@@ -1593,8 +1711,15 @@ async def mark_notification_played(
         dict: Success status and updated notification info
     """
     try:
-        success = notification_queue.mark_played(notification_id)
-        
+        # Lever B (surgical pass 2) — the 2026-06-11 wedge smoking gun: the browser
+        # fires this endpoint per TTS playback, and mark_played logs to io_tbl with
+        # async_embedding=False — TWO synchronous embedding generations plus a
+        # LanceDB write into a fragmenting table, formerly ALL on the event loop
+        # (stalls grew with daily fragmentation: the 10:48 → 20:23 worsening).
+        # mark_played is already thread-safe (COSA queues call it from worker
+        # threads; its WS emit schedules via run_coroutine_threadsafe).
+        success = await asyncio.to_thread( notification_queue.mark_played, notification_id )
+
         if success:
             return {
                 "status": "success",

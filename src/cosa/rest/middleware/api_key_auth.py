@@ -22,6 +22,7 @@ Usage:
 """
 
 import re
+import asyncio
 import bcrypt
 from typing import Optional, Annotated
 from datetime import datetime, timezone
@@ -31,9 +32,14 @@ from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import ApiKeyRepository
 
 
-async def validate_api_key( api_key: str ) -> Optional[str]:
+def _validate_api_key_sync( api_key: str ) -> Optional[str]:
     """
-    Validate API key and return user_id if valid.
+    Synchronous API-key validation — run OFF the event loop via asyncio.to_thread.
+
+    Each call does a blocking SQLAlchemy session checkout PLUS one bcrypt.checkpw
+    (~hundreds of ms of CPU) per active key. Every X-API-Key request — i.e. every
+    fleet notify/ask — used to pay that ON the shared :7999 event loop, serializing
+    the whole server behind bcrypt (the FM-7/HTTP-starvation hot path).
 
     Requires:
         - api_key is string from X-API-Key header
@@ -45,13 +51,6 @@ async def validate_api_key( api_key: str ) -> Optional[str]:
         - returns None if key invalid or inactive
         - updates last_used_at timestamp on success
         - timing-safe comparison (bcrypt)
-
-    Args:
-        api_key: API key from request header
-
-    Returns:
-        str: user_id (UUID) if valid
-        None: if invalid or inactive
 
     Raises:
         - None (returns None on error)
@@ -80,6 +79,37 @@ async def validate_api_key( api_key: str ) -> Optional[str]:
         # Log error but don't expose details to client
         print( f"[API_KEY_AUTH] Validation error: {e}" )
         return None
+
+
+async def validate_api_key( api_key: str ) -> Optional[str]:
+    """
+    Validate API key and return user_id if valid.
+
+    Lever B (messaging plane, surgical pass 2): the DB checkout + per-key bcrypt
+    work runs in a worker thread so it can no longer starve the event loop.
+
+    Requires:
+        - api_key is string from X-API-Key header
+        - Database is initialized
+        - api_keys table exists
+
+    Ensures:
+        - returns user_id (str) if key valid and active
+        - returns None if key invalid or inactive
+        - updates last_used_at timestamp on success
+        - timing-safe comparison (bcrypt)
+
+    Args:
+        api_key: API key from request header
+
+    Returns:
+        str: user_id (UUID) if valid
+        None: if invalid or inactive
+
+    Raises:
+        - None (returns None on error)
+    """
+    return await asyncio.to_thread( _validate_api_key_sync, api_key )
 
 
 async def require_api_key(
