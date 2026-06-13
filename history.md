@@ -2,6 +2,19 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.12 - Session f557aab9 DAY/PM (Tiberius 👑) | Post-game agenda ruled (8 decisions) + runner-nits & task-store Phase-2/MCP-wrapper LANDED + 3rd freeze (weekly cap) + end-of-session reprioritization
+
+**Accomplishments**:
+- **Post-game agenda walkthrough — 8 decisions ruled** (via /plan-decide, recorded in TODO Decisions Log): D1 quota → **fleet-wide cap of 8 ALL-sessions + stagger** (María = cross-repo coordination point; events+reconciliation `fleet-allocation` topic, store-migratable) · D2 → ratify arbiter suppression whitelist (work-order) · D3 → task-store Phase-2 tonight · D4 → cosa-voice MCP-wrapper authorized · D5 → C2 LANDED-pin · D6 → fleet-panel eyeball-then-rebaseline · D7 → alembic hybrid (recipe now + baseline-migration filed) · D8 → **4 process wins ratified into doctrine** (investigate-first tripwires · fresh-critical-review-always · non-launderable auth · harness-gotchas worker-brief block) → María drafted manager-autonomy v1.1 (§7+§8, PIP `a37d4b0`→`d4818ff`)
+- **Runner-nits lane LANDED** (merge `926c6925`): Clayton 😎 built (unit/e2e timeout budgets + parametrized 1.4x headroom guard, smoke leg excludes destructive proxy test, clean_test_db TRUNCATE += task_items/task_events/fcm_tokens, scheduling-guide re-sync); Tiffany 💍 fresh-critical APPROVE-W-FINDINGS + delta-verify on the fcm_tokens fold
+- **Task-store Phase-2 + MCP wrapper LANDED** (merges `a20aa5b5` + `8f4a36f2`, merge-together window): Phase-2 write-path hooks (Tiffany 💍 — harness Task*→store mirror, completed→review, dropped-requires-reason, **blocked_by {kind:user} oracle invariant structurally pinned**, C12 reason migration `b2c3d4e5f6a7`, correlation_key filter, /correlate adoption, C8 spool, F4 fail-closed gate) + MCP wrapper (Sam 🎙️ — task_create/transition/query in src/lupin_mcp); Clayton 😎 double fresh-critical caught **2 structurally-invisible defects** (wrapper non-dict-JSON fail-open on the GCP branch + Phase-2 claimed-pin hole), both fixed pre-merge; **388/388 post-merge, both dev DBs → `b2c3d4e5f6a7`**; feature flag `task_store.enabled` DEFAULT OFF (merge is a no-op until flipped) — **the shared CC task list is now live-but-dark**
+- **3rd fleet freeze — the WEEKLY Max-plan cap** (resets Jun 15 11am EDT, not a rolling window): both whittle-workers (arbiter-tuning + FM-21) froze at boot; arbiter fired WHOLE-FLEET-STALL → **2nd TRUE positive of the day** (honestly logged, not a false positive); manager also dark ~2h on the Opus model-tier outage. Rick added $250 credits, switched manager to Opus+credits, declined backlog-credit-spend
+- **Rick's end-of-session directive** (broadcast `59f2d129`, reached me only via board-pull — listener-layer miss again): GCP migration **back-burnered until further notice**; delegation offline until reset; next = cleared sessions to tackle the **two priorities — (a) the task list, (b) cosa-voice MCP token efficiency (~75% of inference budget)**
+
+**Files**: 3 held merges on `wip-v0.1.8` (`926c6925` runner-nits, `a20aa5b5` task-store Phase-2, `8f4a36f2` MCP wrapper), never pushed (Rick's gate); both dev DBs migrated `a1b2c3d4e5f6` → `b2c3d4e5f6a7`; TODO Decisions Log + Filed Work Items updated
+
+---
+
 ### 2026.06.12 - Session f557aab9 LATE NIGHT (Tiberius 👑, post-/clear successor) | Task-store BUILT+LANDED end-to-end + starvation fix LIVE + S6 FCM landed + 2.5h quota freeze recovered
 
 **Accomplishments**:

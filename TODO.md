@@ -1,5 +1,13 @@
 # TODO
 
+## ▶ NEXT SESSION (cleared restart — Rick's end-of-session directive, broadcast 59f2d129, 2026-06-12 18:00 EDT)
+
+**Seed memento**: `io/mementos/tiberius-session-resume-2026.06.12-endofsession.md` (read END TO END on boot).
+**Two priorities Rick named**: (1) **the task list** — task-store Phase-1+2+wrapper ALL LANDED today (held, flag `task_store.enabled` DEFAULT OFF); discuss enablement/UX. (2) **cosa-voice MCP token efficiency** — burning ~75% of inference budget; bring reduction ideas (the prior session's own notify/abstract/per-DM-ack pattern is a big contributor).
+**Hard constraint**: Max-plan WEEKLY cap hit → delegation OFFLINE until ~Sun Jun 15 11am EDT; only credit-funded sessions work. **GCP back-burnered.** Rick's open gates: flag-flip + watched run · push held chain · fleet-panel rebaseline · Sat cutover (06-14, feasible under cap).
+
+---
+
 ## 🎙️ POST-GAME AGENDA (Rick-requested at 2026-06-12 morning ritual — items to go over across all sessions)
 
 1. **Quota policy ruling needed**: TWO fleet-wide Max-plan freezes in 12h (22:08 peak-hours ×10 sessions; 01:10–03:45 post-midnight ×7 sessions, 2.5h). Off-peak no longer guarantees headroom — fleet-size × window budget needs an explicit policy (cap concurrent sessions? stagger heavy lanes?).
@@ -9,6 +17,14 @@
 5. **Task-store Phase 2+ kickoff timing**: Phase-1 live on dev; backlog anchored in PIP TODO.md (Clayton's C-numbering of record); widen-to-all-sessions rider (F4) double-anchored — when do write-path hooks (Phase 2) start?
 6. **Alembic zero-bootstrap durable fix**: stamp-then-upgrade recipe proven but is a workaround — baseline migration vs documented bootstrap procedure decision.
 7. **Process wins worth ratifying**: investigate-first tripwire doctrine paid twice (T1/T2 both ghosts) · non-launderable-auth held under live fire (Krishna refused, manager in-band) · fresh-critical reviews caught 2 HIGH defects builders' 100%-coverage suites couldn't see (newline smuggle, shared-sid clobber) · worktree-conftest path-poisoning + pytest-cov double-registration + pytest INTERNALERROR-on-control = 3 harness gotchas for the fleet playbook.
+
+## 📌 FILED WORK ITEMS (from post-game rulings 2026-06-12)
+- [ ] **[LUPIN] Alembic TRUE baseline migration** (D7 hybrid ruling, post-cutover slot): make `upgrade head` work from an empty DB — encode schema.sql's origin as migration zero; until then stamp-then-upgrade recipe (schema.sql if empty → `alembic stamp e9f0a1b2c3d4` → `upgrade head`) is the OFFICIAL documented bootstrap (3 clean runs incl. fresh Cloud-SQL 06-12).
+- [ ] **[LUPIN] Arbiter whitelist tuning work-order** (D2 ratified, staff on next freed slot): suppression classes (a) human_gated marker w/ TTL (b) post-ritual standby (c) zero-workers+:8000-run (d) acking-manager; + Mr Radio addendum #14 (quota-freeze correlation, covers-metadata retry bug); + root-cause what "last signal" actually measures. Evidence file: memento §4 (1 TP vs 15 FP).
+- [ ] **[LUPIN] E2E smoke-budget proof point** (Tiffany F3): next scheduled smoke run confirms the proxy-test exclusion brings the leg under its 3600s budget — read the breakdown, not just completion.
+- [ ] **[LUPIN] T4: DM-review-request auto-create in commons.py** (server-side task_create on review-request DMs; C10 scope call) — explicitly OUT of the Phase-2 hook lane per 2026-06-12 ruling (Tiffany call 5); assign separately after the Task*-hook lane lands.
+- [ ] **[LUPIN] Task-store WATCH-2** (Clayton reviewer memento): live :8000 integration leg (3 wire tests in test_task_store_integration.py) rides the next deploy sequence — new endpoints not on deployed servers until bounce.
+- [ ] **[LUPIN] Task-store WATCH-3**: `task_store.enabled` is DEFAULT OFF (merge was a no-op); first enablement = Rick's flip + a WATCHED run (mirror writes live for the first time). Sequencing note: pre-flip MCP subprocesses lack the amended wrapper until respawn (→dropped 422s, self-healing).
 
 ## 🔄 2026-06-12 LIVE BOARD (Tiberius 👑, session f557aab9 post-/clear) — updated 06:05 EDT (late-night shift close)
 
@@ -63,6 +79,15 @@
 **🆕 NEW PROJECT (Rick, D2 ruling):** [LUPIN] **JS-vs-TS client code-quality comparison study** — preserve the JS notifications client + its ENTIRE test suite long-term as a research corpus. Compare client 1 (JS, organic "hot collection of changes" accretion) vs client 2 (TS, serialized review → cascade review midway). Methodology TBD; planned: submit both implementations to Claude + GPT-5 for qualitative code analysis. Implication: cutover ≠ deletion; `?classic=1` + JS suites retained indefinitely (Clayton updating the readiness-report deprecation language).
 
 ## Decisions Log
+- 2026-06-12 (post-game D1) — Quota policy after 2 fleet-wide freezes in 12h → **CAP fleet-wide at 8 concurrent sessions + stagger heavy lanes** (Rick raised the recommended 6 → 8). Riders: cross-repo manager coordination on worker allocation (María = coordination point, DM sent e7fc1d22); all managers vigilant about reaping unused workers promptly. Why: both freezes had 7-10 sessions burning the same rolling window.
+- 2026-06-12 (post-game D2) — Arbiter FP tuning (1 TP vs 15 FP overnight) → **RATIFY suppression whitelist now as a tuning work-order**: classes (a) human_gated marker (b) post-ritual standby (c) zero-workers+:8000-run (d) acking-manager; + Mr Radio addendum #14 carve-outs (quota-freeze correlation, covers-metadata retry bug) + root-cause the "last signal" channel; markers get TTLs. Phase-3 store-oracle follows when task-store Phase 2 lands. Staffing rides the next freed slot under the cap-of-8. Why: freeze/human-gated classes aren't store-visible, so the whitelist is needed regardless; 15:1 noise erodes the arbiter's proven value.
+- 2026-06-12 (post-game D3) — Task-store Phase-2 write-path hooks → **KICK OFF TONIGHT, off-peak** (builder staffed from freed slots post review-merge; 1 builder + 1 reviewer sequenced under the cap-of-8). Why: Phase-1 context hot; unblocks the D2-ratified arbiter Phase-3 oracle; cutover prep already GO-READY.
+- 2026-06-12 (post-game D4) — cosa-voice MCP-wrapper repo touch (parked since 06-11) → **AUTHORIZED, rides tonight's Phase-2 lane** (spec frozen at 02-mcp-wrapper-spec.md; cross-repo review + MCP restart to land). Why: Phase-2 write semantics + session-side tools are one contract; HTTP-only writes leave the arbiter-oracle data thin.
+- 2026-06-12 (post-game D5) — C2 (task-store review C-ledger) → **PIN LANDED** (exercised by ts-e232f0d4, unvetoed; relayed to María for the PIP TODO.md ledger edit). Why: ledger matches shipped reality; reversible one-liner.
+- 2026-06-12 (post-game D6) — test_fleet_status_panel visual (sole baseline red) → **EYEBALL THEN REBASELINE**: Rick inspects the live panel, then Tiberius submits the :8000 rebaseline (--update-snapshots -k fleet_status_panel + flagless verify). Why: panel changed legitimately twice this week; human sign-off before new truth is baked.
+- 2026-06-12 (post-game D7) — Alembic zero-bootstrap → **HYBRID**: stamp-then-upgrade recipe = documented official bootstrap for now (3 clean runs incl. Krishna's Cloud-SQL today); TRUE baseline migration filed as post-cutover work item. Why: zero risk to in-flight GCP lane; chain surgery 2 days pre-cutover is worst timing.
+- 2026-06-12 (post-game D8) — Process wins → **ALL FOUR RATIFIED into standing doctrine**: investigate-first tripwires · fresh-critical review before every merge · non-launderable auth · harness gotchas → fleet playbook + worker-brief template. Lands in PIP workflow/manager-autonomy.md (María drafts w/ allocation convention, Tiberius reviews, Mr Radio acks).
+- 2026-06-12 (post-game D1 rider) — Cap scope → **ALL sessions count inside the 8** (managers/stewards + workers; ~5 worker slots with 3 standing seats). Rick's emphasis: the tight budget is the POINT — it forces cross-repo manager collaboration and vigilant spin-down of unused/unoccupied workers. Why: the freezes hit total rolling-window burn, so the cap must bound the real cause.
 - 2026-06-11 — Saturday cutover → **GO as planned (Sat 06-14 AM: INI flip + :8000 bounce)**. Why: gate green, redirect reviewed, 153 sites pre-patched, receipts 11/11 ×2.
 - 2026-06-11 — `?classic=1` hatch + JS client retention → **KEEP LONG-TERM as research corpus** (beyond soak; see new project above). Why: planned JS-vs-TS quality study needs both implementations + suites intact.
 - 2026-06-11 — 7 `test_multiplexer_*` e2e counterparts → **BUILD PRE-SATURDAY, starting tonight** (Rick override of fast-follow rec: "plenty of bandwidth"). Clayton re-activated, 3 batches.
