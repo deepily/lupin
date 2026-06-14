@@ -2,6 +2,20 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.13 - Session ccbb1cca (Mr. Radio 🦉) | cosa-voice DM token-bloat — Phase 1 design serialized (body-in-push, ~18× cut) + crash recovery
+
+**Accomplishments**:
+- **Recovered from a mid-answer session crash** with zero context-burn: reconstructed the last exchange from the on-disk transcript (`9351f3c7.jsonl`) + today's resume memento (`mr-radio-dm-token-efficiency-resume-2026.06.13.md`) rather than re-reading code — exactly the token-frugal recovery Rick proposed (paste/transcript beats re-establish).
+- **Root-caused the DM token bloat** (Rick measured cosa-voice DM traffic at ~75% of inference budget; server OFF since 06-12): the peer-DM push ships an **empty body + claim-check** (`commons.py:1034` `message=""`), and doctrine's "ALWAYS re-fetch via `commons_read`" turns retrieving ONE ~181-token message into **~3,712 tokens**.
+- **Designed the Phase-1 fix — DM body-in-push**: carry the full DM body inside the push system-reminder so the recipient processes it directly (~204 tokens, zero `commons_read`) → **~18× reduction, ~175k tokens saved at 50 DMs/heavy session**. Three precise edits (push payload, buffer pass-through, formatter branch) on infrastructure that already exists.
+- **Locked the provenance discriminator** `kind = { "human_to_ai" | "ai_to_ai" }` (`human_to_ai` default → voice path untouched): dropped the redundant `peer_llm_to_llm`, chose symmetric/non-redundant provenance naming, one-name-everywhere per Rick's contract rule. Formatter branches to `[Voice from Rick]` vs `[DM from <persona>]` + reply affordance.
+- **Offline-recipient DB-inbox replay explicitly deferred to Phase 2 (Monday)** — Phase 1 is the temporary stop-the-bleed fix; implementation begins Monday once Rick is off per-token billing.
+- **Session housekeeping**: pruned the `.claude-session.md` manifest (179 stale "active" sections, newest activity Jun 10 — all past the 24h threshold) back to a clean slate.
+
+**Files**: new design doc `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/01-dm-body-in-push-phase1-design.md` (6 ACs, before/after Mermaid, 5-item edit list) + `src/rnd/README.md` link. Design-only — no code touched; committed + pushed on `wip-v0.1.8` at Rick's explicit go.
+
+---
+
 ### 2026.06.12 - Session f557aab9 DAY/PM (Tiberius 👑) | Post-game agenda ruled (8 decisions) + runner-nits & task-store Phase-2/MCP-wrapper LANDED + 3rd freeze (weekly cap) + end-of-session reprioritization
 
 **Accomplishments**:
