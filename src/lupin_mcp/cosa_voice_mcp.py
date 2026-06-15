@@ -3186,7 +3186,7 @@ def dm_send(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_query_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl
 
 
 def _task_store_identity() -> str:
@@ -3393,6 +3393,49 @@ def task_query(
         correlation_key     = correlation_key,
         limit               = limit,
         offset              = offset,
+    )
+
+
+@mcp.tool
+def task_correlate(
+    task_id         : str,
+    correlation_key : str,
+    authority       : str = "standing",
+) -> dict:
+    """
+    **[SELF-DISCLOSURE]** Re-stamp a task-store item's correlation_key.
+
+    Cross-session respawn adoption (Phase-2 design C5/ruling #4): when a
+    successor session inherits an item, ADOPT it by re-keying it onto your own
+    harness id instead of forking a duplicate. The server appends an audited
+    `re-correlated` event (R3) and REJECTS terminal items (no re-keying closed
+    history) — this tool does NOT pre-check that; a 422 carries the server's
+    words verbatim.
+
+    Example:
+        # Adopt the inherited item onto this session's harness id:
+        task_correlate(task_id="<uuid>",
+                       correlation_key="cc-task:<my-stable-sid>:<harness-id>")
+
+    Args:
+        task_id: The item's UUID
+        correlation_key: The new key to stamp (server validates 1..255 chars)
+        authority: standing | user_direct | manager_relay (default "standing")
+
+    Returns:
+        { item, event } (server 200 body) verbatim, or an error dict — a 404
+        carries "task {id} not found" verbatim under "detail"; a 422 (terminal
+        item / bad authority) carries the server's detail verbatim.
+
+    `actor` is NOT a parameter — bridge-stamped like task_transition's actor.
+    """
+    return task_correlate_impl(
+        api_base_url    = _get_server_url(),
+        api_key         = _mcp_outbound_api_key(),
+        actor           = _task_store_identity(),
+        task_id         = task_id,
+        correlation_key = correlation_key,
+        authority       = authority,
     )
 
 

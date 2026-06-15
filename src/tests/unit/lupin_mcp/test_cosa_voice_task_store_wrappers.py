@@ -135,6 +135,35 @@ class TestTaskTransitionWrapper:
         assert captured[ "authority" ]     == "standing"
 
 
+class TestTaskCorrelateWrapper:
+
+    def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
+        captured = { }
+        monkeypatch.setattr( cv, "task_correlate_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_correlate.fn(
+            task_id         = "abc-uuid",
+            correlation_key = "cc-task:newsid:harness-7",
+            authority       = "manager_relay",
+        )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url"    : "http://stub:7999",
+            "api_key"         : "ck_live_stub",
+            "actor"           : "krishna 38d15e3b",
+            "task_id"         : "abc-uuid",
+            "correlation_key" : "cc-task:newsid:harness-7",
+            "authority"       : "manager_relay",
+        }
+
+    def test_default_authority_is_standing( self, stamped_identity, monkeypatch ):
+        captured = { }
+        monkeypatch.setattr( cv, "task_correlate_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+        cv.task_correlate.fn( task_id="abc", correlation_key="corr-1" )
+        assert captured[ "authority" ] == "standing"
+
+
 class TestTaskQueryWrapper:
 
     def test_no_args_board_glance( self, stamped_identity, monkeypatch ):
