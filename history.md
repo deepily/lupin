@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.15 - Session 3ab96a04 (Tiberius 👑) | GCP-M2 GPU-stockout schedule fix + managed task-store 2.1 & TTS-rider landings
+
+**Accomplishments**:
+- **GCP-M2 GPU-stockout root-caused + fixed (gcloud, applied live):** the nightly "pause" was a GCE instance-schedule STOP, not a suspend (schedules can only start/stop; GPU VMs can't be suspended; a STOP releases the L4 → morning `ZONE_RESOURCE_POOL_EXHAUSTED`). Detached the overnight schedule, attached a Friday-23:00-EDT stop → VM **24/7 through the push, off weekends**. VM verified stable 9h+; stack healthy (rest/proxy green, DB 13 tables, L4 models loaded); model-server 503 only on the pending keys SCP. New memory `reference_gcp_vm_stockout_stop_not_suspend`.
+- **Managed task-store Phase-2.1 A–E to completion** (builder Krishna 🦚 + fresh-critical reviewers): all 5 items reviewer-APPROVED, integration `ts-bc232e9f` **323/0/0 green**; held `0ca22758`→`ba215439`→`67401eb9`. F deferred to 2.2.
+- **Delegated the TTS-rider brevity fix** (Rick task; María 🌸 consult): retired word-counts for the ratified **SENTENCE-based** standard (PIP S110), cap single-sourced via `cu.get_spoken_char_cap()` (=500), stale `750` reconciled; **LIVE** + reviewer-APPROVE, committed in `ba0ce800`. Memory `feedback_notify_spoken_under_450_chars` updated to sentence-based.
+- **Committed the GCP `/login` enabler `b524c15d`** (claude-creds volume → persistent `claude /login`, auto-refresh) — reviewer-APPROVE; operational delta: env-var `CLAUDE_CODE_OAUTH_TOKEN` PRECEDES stored creds → keep `cloud-test.env` token empty under /login.
+
+**Held stack (unpushed):** `0ca22758`→`ba215439`→`ba0ce800`→`67401eb9`→`b524c15d`. **Rick's gates:** provider-keys SCP · `claude /login` · D1 env check · push. **Resume:** `io/mementos/tiberius-resume-2026.06.15.md`. New process memory: `feedback_reviewers_read_only_no_destructive_git_shared_tree`.
+
 ### 2026.06.15 - Session a38ee857 (Krishna 🦚) | Task-store Phase 2.1 — backlog A–E complete (held), integration-verified
 
 **Accomplishments**:
