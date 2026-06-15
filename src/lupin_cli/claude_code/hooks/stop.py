@@ -30,7 +30,7 @@ if _src_path not in sys.path:   # pragma: no cover - bootstrap import-guard; src
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, log_to_stream, emit_json, send_tts,
     drain_and_acknowledge, format_voice_context, build_stop_block,
-    inject_qualifier_via_tmux, get_buffer_path,
+    inject_qualifier_via_tmux, get_buffer_path, deliver_pending_peer_dms,
     enrich_voice_context, get_stop_block_count, increment_stop_block_count,
     reset_stop_block_count, get_turn_elapsed_seconds, MAX_STOP_BLOCKS
 )
@@ -1451,6 +1451,21 @@ def main():
                 } )
                 emit_json( heartbeat_output )
                 return
+        else:
+            # Pending buffered peer DM(s), §6a. The speakerphone branch returns
+            # below BEFORE the main format_voice_context drain (~line 1480), so
+            # without this a peer DM to a manager (every manager runs speakerphone)
+            # would sit unseen until idle_prompt. Drain + tmux-deliver each DM with
+            # NO voice rider, then allow the stop. (The buffer holds only DMs — the
+            # voice path injects directly without buffering — so any returned voice
+            # list is empty in practice.)
+            deliver_pending_peer_dms( session_id )
+            log_to_stream( "stop", {}, extra={
+                "phase"      : "speakerphone_peer_dm_deliver",
+                "session_id" : session_id,
+            } )
+            emit_json( {} )
+            return
 
         # Silent idle-announce (Rick, 2026-06-08 — unchanged by the §3 split).
         # _announce_idle posts at LOW priority, which the client renders to the
@@ -1490,7 +1505,7 @@ def main():
         else:
             increment_stop_block_count( session_id )
             send_tts( "Stop — blocking with voice input" )
-            emit_json( build_stop_block( enrich_voice_context( voice_ctx ) ) )
+            emit_json( build_stop_block( enrich_voice_context( voice_ctx, messages ) ) )
     else:
         # No voice input → ask user "Anything else?" via notification.
         # Two paths gated by ~/.claude/settings.json idle_detection.enabled:

@@ -706,6 +706,7 @@ class TestMainSpeakerphonePokeMatrix:
             "announce_idle" : p( "_announce_idle" ),
             "emit"          : p( "emit_json" ),
             "drain"         : p( "drain_and_acknowledge" ),
+            "deliver_dms"   : p( "deliver_pending_peer_dms", return_value=[] ),
             "ask"           : p( "_ask_anything_else" ),
             "arm_waiter"    : p( "_arm_idle_waiter" ),
             "notify_sync"   : p( "notify_user_sync" ),
@@ -779,18 +780,21 @@ class TestMainSpeakerphonePokeMatrix:
             m[ "emit" ].assert_called_once_with( {} )
 
     def test_speakerphone_pending_voice_suppresses_poke( self ):
-        """Branch-C invariant (voice always wins): pending buffered voice →
-        NO poke; the buffer is NOT drained (peek only); falls through to the
-        idle announce + allow-stop."""
+        """§6a: a pending buffered peer DM → NO poke; the DM is DELIVERED via
+        deliver_pending_peer_dms (drain + tmux-wake, no voice rider), then the
+        stop is allowed. (Pre-§6a the speakerphone branch peeked-and-left,
+        losing the DM until idle_prompt — every manager runs speakerphone.)"""
         payload  = { "stop_hook_active": False, "session_id": "abc12345" }
         stack, m = self._patches( payload=payload, pending_voice=True,
                                   heartbeat_output=dict( self._POKE ) )
         with stack:
-            with pytest.raises( SystemExit ):
-                main()
-            m[ "heartbeat" ].assert_not_called()
-            m[ "drain" ].assert_not_called()           # peek, never consume
+            main()   # returns (no sys.exit) — mirrors the poke early-exit
+            m[ "heartbeat" ].assert_not_called()                       # pending ⇒ poke suppressed
+            m[ "deliver_dms" ].assert_called_once_with( "abc12345" )   # the DM is delivered
+            m[ "announce_idle" ].assert_not_called()                   # delivery path, not idle path
             m[ "emit" ].assert_called_once_with( {} )
+            phases = [ c.kwargs[ "extra" ][ "phase" ] for c in m[ "log_stream" ].call_args_list ]
+            assert "speakerphone_peer_dm_deliver" in phases
 
     def test_speakerphone_auto_narrate_error_never_blocks_poke( self ):
         """A raising auto-narrate is swallowed (logged) and the poke still

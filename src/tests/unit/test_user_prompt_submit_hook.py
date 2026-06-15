@@ -205,6 +205,23 @@ class TestUserPromptSubmitHook:
             assert "IMPORTANT:" in ctx
             assert "mcp__cosa-voice__notify()" in ctx
 
+    def test_voice_only_no_reminder_branch( self ):
+        """elif voice_ctx (voice present, reminder EMPTY) → enriched voice ctx alone.
+        The structural §6a decision still attaches the human-voice rider because the
+        drained message is human_to_ai (F2 fix passes `messages` to enrich_voice_context)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            entries = [ _make_buffer_entry( "do the thing" ) ]
+            _write_buffer( tmp_dir, "abc12345", entries )
+
+            payload = { "session_id": "abc12345-fake-uuid" }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block",
+                        return_value="" ):
+                result = _run_hook_main( payload, tmp_dir )
+
+            ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
+            assert "[Voice]: do the thing" in ctx
+            assert "IMPORTANT:" in ctx          # human-voice rider attached structurally
+
 
 class TestHeartbeatPokeReset:
     """Genuine user re-engagement reopens the heartbeat self-poke budget."""

@@ -25,7 +25,12 @@ class NotificationItem:
                  display_qualifier_widget: bool = False,
                  session_name: Optional[str] = None,
                  voice_persona: Optional[dict] = None,
-                 payload: Optional[dict] = None ) -> None:
+                 payload: Optional[dict] = None,
+                 direction: str = "ai_to_human",
+                 sender_persona: Optional[str] = None,
+                 sender_icon: Optional[str] = None,
+                 reply_to: Optional[str] = None,
+                 thread_id: Optional[str] = None ) -> None:
         """
         Initialize a notification item.
 
@@ -106,6 +111,19 @@ class NotificationItem:
         # schema with one-off fields. None on standard notifications (skipped in to_dict).
         # See: src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md §6.1
         self.payload = payload
+
+        # Communication-direction axis (provenance, orthogonal to `type`). First-class
+        # column on the notifications table; wire JSON keys map 1:1 to columns.
+        #   - "ai_to_human"  → AI speaking to the user (the bulk: TTS/cards). Default.
+        #   - "human_to_ai"  → the user's voice arriving into an AI session.
+        #   - "ai_to_ai"     → a directed peer DM between AI persona sessions.
+        # The sender_* fields + reply_to/thread_id carry DM provenance + threading.
+        # See: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
+        self.direction      = direction
+        self.sender_persona = sender_persona
+        self.sender_icon    = sender_icon
+        self.reply_to       = reply_to
+        self.thread_id      = thread_id
 
     def _get_local_timestamp( self ) -> str:
         """Get timezone-aware timestamp using configured timezone from ConfigurationManager"""
@@ -196,7 +214,14 @@ class NotificationItem:
             # Per-session voice persona (None when no persona allocated → server uses Sam default)
             "voice_persona"              : self.voice_persona,
             # Generic structured payload for custom-typed notifications (None on standard types)
-            "payload"                    : self.payload
+            "payload"                    : self.payload,
+            # Communication-direction axis + DM provenance/threading (first-class columns).
+            # Wire keys == column names (1:1; external repr == internal repr).
+            "direction"                  : self.direction,
+            "sender_persona"             : self.sender_persona,
+            "sender_icon"                : self.sender_icon,
+            "reply_to"                   : self.reply_to,
+            "thread_id"                  : self.thread_id
         }
 
 
@@ -285,7 +310,12 @@ class NotificationFifoQueue( FifoQueue ):
                  display_qualifier_widget: bool = False,
                          session_name: Optional[str] = None,
                          voice_persona: Optional[dict] = None,
-                         payload: Optional[dict] = None ) -> NotificationItem:
+                         payload: Optional[dict] = None,
+                         direction: str = "ai_to_human",
+                         sender_persona: Optional[str] = None,
+                         sender_icon: Optional[str] = None,
+                         reply_to: Optional[str] = None,
+                         thread_id: Optional[str] = None ) -> NotificationItem:
         """
         Push a notification with priority handling and io_tbl logging.
 
@@ -330,7 +360,12 @@ class NotificationFifoQueue( FifoQueue ):
             display_qualifier_widget = display_qualifier_widget,
             session_name             = session_name,
             voice_persona            = voice_persona,
-            payload                  = payload
+            payload                  = payload,
+            direction                = direction,
+            sender_persona           = sender_persona,
+            sender_icon              = sender_icon,
+            reply_to                 = reply_to,
+            thread_id                = thread_id
         )
         
         # Priority handling - urgent/high go to front, but after other urgent/high

@@ -26,7 +26,8 @@ if _src_path not in sys.path:   # pragma: no cover - bootstrap import-guard; src
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
-    read_hook_input, log_payload, emit_json, send_tts, drain_and_acknowledge
+    read_hook_input, log_payload, emit_json, send_tts, drain_and_acknowledge,
+    deliver_pending_peer_dms
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, resolve_stable_session_id, get_voice_persona
@@ -51,8 +52,16 @@ def main():
     # Resolve session_id: payload first, then session bridge fallback
     session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
-    # Drain voice buffer and acknowledge buffered messages
-    drain_and_acknowledge( session_id )
+    # Drain voice buffer. At idle_prompt the pane is sitting at a prompt, so any
+    # pending peer DM (direction=ai_to_ai) must be tmux-DELIVERED, not discarded —
+    # the Notification hook's emit_json is ignored by CC, so tmux-wake is the only
+    # path to an idle pane (§6 of the notification-native AI↔AI design). Other
+    # notification types keep the legacy drain-and-acknowledge (voice ack is a
+    # no-op now; this just clears any stale buffer).
+    if notification_type == "idle_prompt":
+        deliver_pending_peer_dms( session_id )
+    else:
+        drain_and_acknowledge( session_id )
 
     # Type-specific TTS content (respects HOOK_TTS_ENABLED)
     # Permission prompts use high priority so TTS speaks them aloud —

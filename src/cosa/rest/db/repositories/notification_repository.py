@@ -57,7 +57,12 @@ class NotificationRepository( BaseRepository[Notification] ):
         timeout_seconds: Optional[int] = None,
         expires_at: Optional[datetime] = None,
         job_id: Optional[str] = None,
-        progress_group_id: Optional[str] = None
+        progress_group_id: Optional[str] = None,
+        direction: str = "ai_to_human",
+        sender_persona: Optional[str] = None,
+        sender_icon: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        thread_id: Optional[str] = None
     ) -> Notification:
         """
         Create new notification.
@@ -105,6 +110,11 @@ class NotificationRepository( BaseRepository[Notification] ):
             expires_at         = expires_at,
             job_id             = job_id,
             progress_group_id  = progress_group_id,
+            direction          = direction,
+            sender_persona     = sender_persona,
+            sender_icon        = sender_icon,
+            reply_to           = reply_to,
+            thread_id          = thread_id,
             state              = "created"
         )
 

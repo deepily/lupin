@@ -810,14 +810,20 @@ mcp.add_middleware( BridgeLivenessMiddleware() )
 # ONLY — the notifications REST API stays unrestricted so agentic jobs / system
 # events can still send longer payloads when they genuinely need to.
 #
-# The cap VALUE lives in lupin-app.ini (`cosa voice spoken char cap`, default 500
-# ≈ 80 words) and is read via ConfigurationManager so it is TUNABLE AT RUNTIME:
-# re-read mtime-gated (so the hot path stays cheap) on the next call after the INI
-# changes — no MCP restart required. A spoken field over the cap is REJECTED unless
-# the caller sets override_size_limitation=True (long is opt-in-and-intentional).
-SPOKEN_CHAR_CAP_DEFAULT = 500
+# The cap VALUE lives in lupin-app.ini (`cosa voice spoken char cap`, default 500)
+# and is read via ConfigurationManager so it is TUNABLE AT RUNTIME: re-read
+# mtime-gated (so the hot path stays cheap) on the next call after the INI changes
+# — no MCP restart required. A spoken field over the cap is REJECTED unless the
+# caller sets override_size_limitation=True (long is opt-in-and-intentional).
+#
+# SINGLE SOURCE OF TRUTH: the INI key + default are owned by cosa.utils.util so the
+# per-turn TTS brevity rider (hook_common._brevity_rules, which names this number to
+# the model) and this caller-side enforcement guard can NEVER drift. Do not inline a
+# literal here — reference cu.
+import cosa.utils.util as _cu_capsrc
+SPOKEN_CHAR_CAP_DEFAULT = _cu_capsrc.SPOKEN_CHAR_CAP_DEFAULT
 SPOKEN_ENFORCE_DEFAULT  = True   # default: guard ON. INI may flip it OFF for ALL callers.
-_SPOKEN_CAP_INI_KEY     = "cosa voice spoken char cap"
+_SPOKEN_CAP_INI_KEY     = _cu_capsrc.SPOKEN_CHAR_CAP_INI_KEY
 _SPOKEN_ENFORCE_INI_KEY = "cosa voice enforce spoken char cap"
 _spoken_cap_cache       = { "value": SPOKEN_CHAR_CAP_DEFAULT, "enforce": SPOKEN_ENFORCE_DEFAULT, "ini_mtime": None }
 
@@ -1048,7 +1054,7 @@ def converse(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
             and send a long spoken `message` KNOWINGLY. Default False — detail belongs
             in `abstract` (not length-limited), not the spoken/TTS channel.
 
@@ -1299,7 +1305,7 @@ def notify(
             Notifications sharing this ID update a single element instead of appending new ones.
         session_name: Optional human-readable session name for UI header display.
             When set, updates the sender-session-name span in notification history card.
-        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
             and send a long spoken `message` KNOWINGLY. Default False — detail belongs
             in `abstract` (not length-limited), not the spoken/TTS channel.
 
@@ -1365,7 +1371,7 @@ def ask_yes_no(
         priority: "low", "medium", "high", or "urgent"
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
             and send a long spoken `question` KNOWINGLY. Default False — detail belongs
             in `abstract` (not length-limited), not the spoken/TTS channel.
 
@@ -1460,7 +1466,7 @@ def ask_multiple_choice(
             return an error dict before the notification fires.
             Backward-compat: ``default=None`` preserves the legacy timeout
             return ``{"error": "timeout - no response received", "timeout": True}``.
-        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
             and send long spoken `question` text KNOWINGLY. Default False — detail
             belongs in `abstract` (not length-limited), not the spoken/TTS channel.
 
@@ -1681,7 +1687,7 @@ def ask_open_ended_batch(
         title: Optional short title for the notification
         abstract: Optional supplementary context (plan details, URLs, markdown)
         job_id: Optional agentic job ID for routing to job cards (e.g., "dr-a1b2c3d4")
-        override_size_limitation: If True, bypass the spoken-length cap (~750 chars)
+        override_size_limitation: If True, bypass the spoken-length cap (configured cap, default 500)
             and send long spoken `question` text KNOWINGLY. Default False — detail
             belongs in `abstract` (not length-limited), not the spoken/TTS channel.
 
@@ -2750,6 +2756,13 @@ def commons_ask_async(
     expect_reply         : bool            = True,
 ) -> dict:
     """
+    **⚠️ DM-mode DEPRECATED — use `dm_send` instead.** When `recipient_persona`
+    or `recipient_session_id` is supplied, this routes through the commons
+    claim-check path (forced `commons_read` re-fetch, ~3,700 tokens/received DM).
+    For directed peer DMs use `dm_send` (body inline, ~204 tokens). The
+    polling-mode use below (no recipient — post a question to a topic at large)
+    is NOT deprecated.
+
     **[ATTENTION-DEMANDING — requires user trigger or clear coordination need]**
     Post a question to commons and return immediately (fire-and-forget).
 
@@ -2921,6 +2934,12 @@ def commons_send_to(
     question_id  : Optional[ str ] = None,
 ) -> dict:
     """
+    **⚠️ DEPRECATED — use `dm_send` instead.** This routes through the commons
+    claim-check path (empty-body push → forced `commons_read` re-fetch,
+    ~3,700 tokens/received DM). `dm_send` carries the body inline (~204 tokens,
+    ~18× cheaper) and is the supported peer-DM tool. Kept temporarily for
+    backward compatibility; will be removed.
+
     **[DM — directed attention-demanding]** Thin persona-routed wrapper over `commons_ask_async`.
     Send a directed inter-session DM to another CC session.
 
@@ -3014,6 +3033,144 @@ def commons_send_to(
         # Surface the in_reply_to on the result so callers can see the threading.
         result[ "in_reply_to" ] = in_reply_to
     return result
+
+
+# ============================================================================
+# Notification-native AI↔AI direct messaging (cosa-voice token reduction)
+#
+# `dm_send` is the PREFERRED peer-DM tool — it carries the body INLINE via a
+# direction='ai_to_ai' notification (POST /api/notify-peer), so the recipient
+# processes it directly (~204 tokens) with zero `commons_read` re-fetch, vs the
+# commons claim-check path's ~3,700 tokens/received DM. `commons_send_to` /
+# `commons_ask_async` are deprecated in favor of this.
+# Design: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
+# ============================================================================
+
+def _dm_send_impl(
+    *,
+    recipient,
+    body,
+    reply_to,
+    thread_id,
+    recipient_session_id,
+    session_id,
+    sender_persona,
+    sender_icon,
+    api_base_url,
+    api_key,
+    post_fn,
+):
+    """
+    Testable core for `dm_send` — HTTP is injected via `post_fn` so unit tests
+    need no live server.
+
+    Requires:
+        - recipient (persona) OR recipient_session_id identifies the target
+        - post_fn(url, json=, headers=, timeout=) -> response with .status_code,
+          .json(), .text (the requests.post contract)
+
+    Ensures:
+        - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
+        - 201 → {"status":"sent", **body_json}
+        - 422 → {"status":"error","reason":"recipient_unresolved","detail":...}
+        - other status → {"status":"error","reason":"http_<code>","detail":...}
+        - transport exception → {"status":"error","reason":"request_failed","detail":str(e)}
+    """
+    if not api_key:
+        return { "status": "error", "reason": "missing_auth_header",
+                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/notify-peer" }
+
+    payload = {
+        "asker_session_id" : session_id,
+        "body"             : body,
+        "sender_persona"   : sender_persona,
+        "sender_icon"      : sender_icon,
+        "reply_to"         : reply_to,
+        "thread_id"        : thread_id,
+    }
+    if recipient_session_id:
+        payload[ "recipient_session_id" ] = recipient_session_id
+    else:
+        payload[ "recipient_persona" ] = recipient
+
+    url = f"{api_base_url}/api/notify-peer"
+    try:
+        resp = post_fn( url, json=payload, headers={ "X-API-Key": api_key }, timeout=10 )
+    except Exception as e:
+        return { "status": "error", "reason": "request_failed", "detail": str( e ) }
+
+    if resp.status_code == 201:
+        return { "status": "sent", **resp.json() }
+    if resp.status_code == 422:
+        try:
+            detail = resp.json().get( "detail" )
+        except Exception:
+            detail = resp.text[ :200 ]
+        return { "status": "error", "reason": "recipient_unresolved", "detail": detail }
+    return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
+
+
+@mcp.tool
+def dm_send(
+    recipient            : str,
+    body                 : str,
+    reply_to             : Optional[ str ] = None,
+    thread_id            : Optional[ str ] = None,
+    recipient_session_id : Optional[ str ] = None,
+) -> dict:
+    """
+    **[DM — directed attention-demanding]** Send a notification-native direct
+    message to another CC persona session. **PREFERRED** over `commons_send_to`
+    / `commons_ask_async`, which are deprecated.
+
+    Unlike the commons DM path (empty-body claim-check → forced `commons_read`
+    re-fetch, ~3,700 tokens per received DM), dm_send carries the body INLINE in
+    the recipient's push (direction='ai_to_ai'), so the recipient processes it
+    directly (~204 tokens — ~18× cheaper) with zero re-fetch.
+
+    Replies are symmetric: to answer a DM you received, call dm_send back to the
+    sender with `reply_to` = the message_id from their system-reminder and
+    `thread_id` = the conversation's thread_id (both surfaced in the inbound DM
+    framing). There is no separate watcher/expect_reply — a reply is just a DM.
+
+    Examples:
+        # Basic DM by persona name:
+        dm_send(recipient="tiberius", body="have you touched src/auth.py today?")
+
+        # Threaded reply to a DM you received:
+        dm_send(recipient="tiberius", body="yes — commit f4e0370",
+                reply_to="<message_id>", thread_id="<thread_id>")
+
+    Args:
+        recipient: Recipient persona name (case/punctuation-tolerant resolution).
+        body: Message body (delivered inline — no re-fetch).
+        reply_to: message_id of the DM this answers (threading). Omit for a new DM.
+        thread_id: conversation id (threading). Omit to start a fresh thread (the
+                   server seeds one from the new message_id).
+        recipient_session_id: precise session addressing; takes precedence over
+                   `recipient` when supplied.
+
+    Returns:
+        Success: {"status":"sent","message_id","thread_id","recipient_session",
+                  "recipient_persona","dispatched":True}.
+        Recipient-resolution failure: {"status":"error",
+                  "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
+        Transport/auth failure: {"status":"error","reason":...,"detail":...}.
+    """
+    persona = _commons_persona_fields()
+    return _dm_send_impl(
+        recipient            = recipient,
+        body                 = body,
+        reply_to             = reply_to,
+        thread_id            = thread_id,
+        recipient_session_id = recipient_session_id,
+        session_id           = SESSION_ID,
+        sender_persona       = persona[ "persona_name" ],
+        sender_icon          = persona[ "persona_icon" ],
+        api_base_url         = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ),
+        api_key              = _mcp_outbound_api_key(),
+        post_fn              = requests.post,
+    )
 
 
 # ============================================================================

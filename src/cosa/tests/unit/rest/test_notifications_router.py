@@ -186,6 +186,7 @@ class TestNotificationsRouter( unittest.TestCase ):
             authenticated_user_id    = "svc-account",
             message                  = self.test_message,
             type                     = self.test_type,
+            direction                = "ai_to_human",
             priority                 = self.test_priority,
             target_user              = self.test_user_email,
             response_requested       = False,
@@ -432,6 +433,51 @@ class TestNotificationsRouter( unittest.TestCase ):
         
         asyncio.run( run_test() )
     
+    def test_notify_user_invalid_direction( self ):
+        """
+        Test notification sending with an invalid direction value.
+
+        Ensures:
+            - Raises HTTPException with 400 status
+            - Includes the valid directions in the error message
+        """
+        async def run_test():
+            from fastapi import HTTPException
+
+            mock_notification_queue = self._create_mock_notification_queue()
+            mock_ws_manager = self._create_mock_websocket_manager()
+
+            with self.assertRaises( HTTPException ) as context:
+                await self._call_notify_user(
+                    mock_notification_queue, mock_ws_manager, direction="sideways"
+                )
+
+            self.assertEqual( context.exception.status_code, 400 )
+            self.assertIn( "Invalid direction", str( context.exception.detail ) )
+            self.assertIn( "human_to_ai, ai_to_ai, ai_to_human", str( context.exception.detail ) )
+
+        asyncio.run( run_test() )
+
+    def test_notify_user_ai_to_ai_direction_forwarded_to_queue( self ):
+        """
+        A non-default direction (ai_to_ai) reaches push_notification on the
+        connected-user delivery path — proving the endpoint threads it through.
+        """
+        async def run_test():
+            mock_notification_queue = self._create_mock_notification_queue()
+            mock_ws_manager = self._create_mock_websocket_manager()
+
+            await self._call_notify_user(
+                mock_notification_queue, mock_ws_manager, direction="ai_to_ai"
+            )
+
+            # push_notification called with direction='ai_to_ai'
+            self.assertTrue( mock_notification_queue.push_notification.called )
+            kwargs = mock_notification_queue.push_notification.call_args.kwargs
+            self.assertEqual( kwargs.get( "direction" ), "ai_to_ai" )
+
+        asyncio.run( run_test() )
+
     def test_notify_user_empty_message( self ):
         """
         Test notification sending with empty message.

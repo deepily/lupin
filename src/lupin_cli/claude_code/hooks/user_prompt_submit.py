@@ -92,10 +92,10 @@ def main():
     reminder = speakerphone_reminder_block( "terminal-typed", session_id )
 
     if voice_ctx and reminder:
-        enriched = enrich_voice_context( voice_ctx )
+        enriched = enrich_voice_context( voice_ctx, messages )
         emit_json( build_additional_context( enriched + "\n\n" + reminder, "UserPromptSubmit" ) )
     elif voice_ctx:
-        enriched = enrich_voice_context( voice_ctx )
+        enriched = enrich_voice_context( voice_ctx, messages )
         emit_json( build_additional_context( enriched, "UserPromptSubmit" ) )
     elif reminder:
         emit_json( build_additional_context( reminder, "UserPromptSubmit" ) )

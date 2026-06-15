@@ -686,6 +686,324 @@ class TestEventHandling:
             reminder = args[ 0 ]
             assert "unknown" in reminder
 
+    @pytest.mark.asyncio
+    async def test_voice_empty_message_skips_inject_still_gists( self, listener ):
+        """
+        A matching voice notification with an empty/whitespace body skips the
+        tmux injection but still fires the gist auto-response (covers the
+        message_text-falsy branch of the voice path).
+        """
+        with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+             patch.object( listener, '_send_gist_response' ) as mock_gist:
+            await listener._handle_event( "notification_queue_update", {
+                "notification": {
+                    "type"    : "user_initiated_message",
+                    "job_id"  : "sess1234",
+                    "message" : "   ",
+                }
+            } )
+            mock_inject.assert_not_called()
+            mock_gist.assert_called_once()
+
+    # ── Phase 3 §6a — direction-aware peer-DM framing ──────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_ai_to_ai_routes_to_deliver_peer_dm( self, listener ):
+        """
+        A user_initiated_message carrying direction=ai_to_ai routes to the
+        idle-aware _deliver_peer_dm — NOT the human-voice path (_inject_via_tmux
+        raw + _send_gist_response). Per §6 of
+        src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md.
+        """
+        with patch.object( listener, '_deliver_peer_dm' ) as mock_deliver, \
+             patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+             patch.object( listener, '_send_gist_response' ) as mock_gist:
+            await listener._handle_event( "notification_queue_update", {
+                "notification": {
+                    "type"      : "user_initiated_message",
+                    "job_id"    : "sess1234",
+                    "message"   : "peer body",
+                    "direction" : "ai_to_ai",
+                }
+            } )
+            mock_deliver.assert_called_once()
+            # Voice path is bypassed entirely for a peer DM.
+            mock_inject.assert_not_called()
+            mock_gist.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_human_to_ai_uses_voice_path( self, listener ):
+        """direction=human_to_ai keeps the existing voice path (raw inject + gist)."""
+        with patch.object( listener, '_deliver_peer_dm' ) as mock_deliver, \
+             patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+             patch.object( listener, '_send_gist_response' ):
+            await listener._handle_event( "notification_queue_update", {
+                "notification": {
+                    "type"      : "user_initiated_message",
+                    "job_id"    : "sess1234",
+                    "message"   : "Hello from voice",
+                    "direction" : "human_to_ai",
+                }
+            } )
+            mock_deliver.assert_not_called()
+            mock_inject.assert_called_once_with( "Hello from voice" )
+
+    @pytest.mark.asyncio
+    async def test_missing_direction_uses_voice_path( self, listener ):
+        """
+        A legacy notification with no direction key keeps the voice path —
+        only an explicit direction=ai_to_ai diverts to the peer handler.
+        """
+        with patch.object( listener, '_deliver_peer_dm' ) as mock_deliver, \
+             patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+             patch.object( listener, '_send_gist_response' ):
+            await listener._handle_event( "notification_queue_update", {
+                "notification": {
+                    "type"    : "user_initiated_message",
+                    "job_id"  : "sess1234",
+                    "message" : "Legacy voice",
+                }
+            } )
+            mock_deliver.assert_not_called()
+            mock_inject.assert_called_once_with( "Legacy voice" )
+
+    # ── §6 idle-aware delivery split: _deliver_peer_dm + _recipient_is_idle ─────
+
+    def test_deliver_peer_dm_active_buffers( self, listener ):
+        """An ACTIVE recipient (not idle) → _buffer_message (clean, non-invasive),
+        NOT a mid-turn tmux injection."""
+        notif = { "direction": "ai_to_ai", "message": "hi", "job_id": "sess1234" }
+        with patch.object( listener, '_recipient_is_idle', return_value=False ), \
+             patch.object( listener, '_buffer_message' ) as mock_buf, \
+             patch.object( listener, '_handle_peer_dm' ) as mock_tmux:
+            listener._deliver_peer_dm( notif )
+            mock_buf.assert_called_once_with( notif )
+            mock_tmux.assert_not_called()
+
+    def test_deliver_peer_dm_idle_tmux_wakes( self, listener ):
+        """An IDLE recipient → _handle_peer_dm (tmux-wake), NOT the buffer (nothing
+        would drain a buffer at an idle pane)."""
+        notif = { "direction": "ai_to_ai", "message": "hi", "job_id": "sess1234" }
+        with patch.object( listener, '_recipient_is_idle', return_value=True ), \
+             patch.object( listener, '_buffer_message' ) as mock_buf, \
+             patch.object( listener, '_handle_peer_dm' ) as mock_tmux:
+            listener._deliver_peer_dm( notif )
+            mock_tmux.assert_called_once_with( notif )
+            mock_buf.assert_not_called()
+
+    # F1 (Cheech 2026-06-15): the 8-char hash MUST be resolved to the full stable
+    # UUID via the bridge before the heartbeat read (events keyed by full UUID,
+    # exact-match). FULL_ID's 8-char prefix == the listener fixture's "sess1234".
+    _FULL_ID = "sess1234-aaaa-bbbb-cccc-dddddddddddd"
+
+    def test_recipient_is_idle_resolves_full_uuid_before_read( self, listener ):
+        """F1: idle outcome under the FULL uuid → idle; last_emitted_outcome is
+        called with the resolved full id, NOT the 8-char hash."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                    return_value={ "stable_session_id": self._FULL_ID } ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
+                    return_value="idle" ) as mock_last:
+            assert listener._recipient_is_idle() is True
+            mock_last.assert_called_once_with( self._FULL_ID )   # full id, not "sess1234"
+
+    def test_recipient_is_idle_false_when_active_outcome( self, listener ):
+        """A non-idle last outcome (poked) under the resolved full id → active."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                    return_value={ "stable_session_id": self._FULL_ID } ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
+                    return_value="poked" ):
+            assert listener._recipient_is_idle() is False
+
+    def test_recipient_is_idle_false_when_no_history( self, listener ):
+        """No heartbeat history (None) under the resolved full id → ACTIVE (buffer)."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                    return_value={ "stable_session_id": self._FULL_ID } ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
+                    return_value=None ):
+            assert listener._recipient_is_idle() is False
+
+    def test_recipient_is_idle_falls_back_to_session_id_field( self, listener ):
+        """When the bridge lacks stable_session_id, fall back to the session_id field."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                    return_value={ "session_id": self._FULL_ID } ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
+                    return_value="idle" ) as mock_last:
+            assert listener._recipient_is_idle() is True
+            mock_last.assert_called_once_with( self._FULL_ID )
+
+    def test_recipient_is_idle_true_when_bridge_unresolvable( self, listener ):
+        """No live bridge (find_session_by_id → None) → can't resolve full id →
+        fail toward tmux-wake (True) so a DM is never lost to an undrained buffer."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                    return_value=None ):
+            assert listener._recipient_is_idle() is True
+
+    def test_recipient_is_idle_true_on_read_error( self, listener ):
+        """A read/import error fails toward tmux-wake (return True) so a DM is
+        never silently lost to a buffer nothing drains."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                    return_value={ "stable_session_id": self._FULL_ID } ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
+                    side_effect=RuntimeError( "store unreadable" ) ), \
+             patch.object( listener, '_log' ):
+            assert listener._recipient_is_idle() is True
+
+    def test_recipient_is_idle_nonmocking_real_files( self, tmp_path, monkeypatch ):
+        """
+        F1 NON-MOCKING regression (Cheech 2026-06-15): construct the listener with
+        the 8-CHAR hash, write a REAL bridge file (8char→full uuid) + a REAL
+        heartbeat events file keyed by the FULL uuid with an idle outcome, and
+        assert _recipient_is_idle() resolves end-to-end to True. The pre-fix code
+        passed the 8-char hash to the full-uuid-keyed store → always None → False
+        (the idle→tmux-wake branch was dead). Only directory constants are
+        redirected to tmp — last_emitted_outcome + find_session_by_id run for real.
+        """
+        from lupin_cli.claude_code.hooks.lib import session_bridge, heartbeat_events
+
+        full_id  = "abcd1234-1111-2222-3333-444455556666"
+        short_id = full_id[ :8 ]   # "abcd1234"
+
+        sessions_dir = tmp_path / "sessions"
+        events_dir   = tmp_path / "heartbeat-events"
+        sessions_dir.mkdir(); events_dir.mkdir()
+        monkeypatch.setattr( session_bridge, "SESSION_DIR", sessions_dir )
+        monkeypatch.setattr( heartbeat_events, "FLEET_EVENTS_DIR", events_dir )
+
+        # Real bridge file: cc-<hex>.json is non-numeric → NOT PID-skipped.
+        ( sessions_dir / f"cc-{short_id}.json" ).write_text( json.dumps( {
+            "session_id"        : short_id,
+            "stable_session_id" : full_id,
+            "tmux_session"      : "lupin",
+        } ) )
+        # Real heartbeat events file keyed by the FULL uuid, last outcome = idle.
+        heartbeat_events.emit_outcome(
+            full_id, persona="maría", outcome=heartbeat_events.EVENT_IDLE,
+            poke_count=0, cap=1, base_dir=str( events_dir )
+        )
+
+        probe = CCNotificationListener(
+            email           = "test@test.ai",
+            password        = "pass",
+            session_id_hash = short_id,
+            buffer_path     = str( tmp_path / "buf.jsonl" ),
+        )
+        assert probe._recipient_is_idle() is True
+
+    def test_peer_dm_builds_envelope_with_reply_affordance( self, listener ):
+        """
+        _handle_peer_dm injects a PEER DM envelope — sender persona + icon +
+        message_id + thread_id + a dm_send reply affordance — with the body
+        INLINE, wrap=False, and NONE of the human-voice rider language.
+        """
+        with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
+            listener._handle_peer_dm( {
+                "message"        : "Build is green, ready for review.",
+                "sender_persona" : "maria",
+                "sender_icon"    : "🌸",
+                "id"             : "msg-abc-123",
+                "thread_id"      : "thr-xyz-789",
+            } )
+            assert mock_inject.call_count == 1
+            args, kwargs = mock_inject.call_args
+            reminder = args[ 0 ] if args else kwargs.get( "message_text" )
+            # Complete system-reminder block, injected verbatim (no voice wrap).
+            assert reminder.startswith( "<system-reminder>" )
+            assert reminder.endswith( "</system-reminder>" )
+            assert kwargs.get( "wrap" ) is False
+            # Peer envelope: framing + persona + icon + ids + inline body.
+            assert "PEER DM from"                   in reminder
+            assert "maria"                          in reminder
+            assert "🌸"                              in reminder
+            assert "msg-abc-123"                    in reminder
+            assert "thr-xyz-789"                    in reminder
+            assert "Build is green, ready for review." in reminder
+            # Reply affordance points at dm_send with threading params.
+            assert "dm_send("    in reminder
+            assert "reply_to="   in reminder
+            assert "thread_id="  in reminder
+            # NO human-voice rider language — this is a peer, not Rick speaking.
+            lowered = reminder.lower()
+            assert "user spoke"   not in lowered
+            assert "speakerphone" not in lowered
+            assert "notify("      not in reminder
+            assert "tts"          not in lowered
+
+    def test_peer_dm_missing_body_skips( self, listener ):
+        """Empty inline body → log + return; no injection."""
+        with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+             patch.object( listener, '_log' ) as mock_log:
+            listener._handle_peer_dm( {
+                "message"        : "   ",
+                "sender_persona" : "maria",
+            } )
+            mock_inject.assert_not_called()
+            assert any( "peer DM missing body" in str( c ) for c in mock_log.call_args_list )
+
+    def test_peer_dm_defaults_when_provenance_missing( self, listener ):
+        """Missing persona/icon/ids → graceful defaults; still injects an envelope."""
+        with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
+            listener._handle_peer_dm( { "message": "no provenance here" } )
+            args, kwargs = mock_inject.call_args
+            reminder = args[ 0 ]
+            assert "a peer session"      in reminder   # persona fallback
+            assert "no provenance here"  in reminder
+            assert kwargs.get( "wrap" ) is False
+
+    def test_peer_dm_inject_failure_isolated( self, listener ):
+        """Tmux injection failure is caught (T7 isolation) — log + don't crash."""
+        with patch.object( listener, '_inject_via_tmux', side_effect=RuntimeError( "tmux down" ) ) as mock_inject, \
+             patch.object( listener, '_log' ) as mock_log:
+            listener._handle_peer_dm( {
+                "message"        : "body",
+                "sender_persona" : "maria",
+            } )
+            mock_inject.assert_called_once()
+            assert any( "peer DM inject failed" in str( c ) for c in mock_log.call_args_list )
+
+    # ── §6a — _buffer_message persists direction + DM provenance/threading ──────
+
+    def test_buffer_message_persists_direction_and_provenance( self, listener ):
+        """An ai_to_ai buffered entry carries direction + persona/icon/reply_to/thread_id."""
+        listener._buffer_message( {
+            "message"        : "green build",
+            "job_id"         : "sess1234",
+            "id"             : "m1",
+            "direction"      : "ai_to_ai",
+            "sender_persona" : "maria",
+            "sender_icon"    : "🌸",
+            "reply_to"       : "r0",
+            "thread_id"      : "t1",
+        } )
+        lines = listener.buffer_path.read_text().strip().splitlines()
+        assert len( lines ) == 1
+        entry = json.loads( lines[ 0 ] )
+        assert entry[ "direction" ]       == "ai_to_ai"
+        assert entry[ "sender_persona" ]  == "maria"
+        assert entry[ "sender_icon" ]     == "🌸"
+        assert entry[ "reply_to" ]        == "r0"
+        assert entry[ "thread_id" ]       == "t1"
+        assert entry[ "message" ]         == "green build"
+        assert entry[ "notification_id" ] == "m1"
+        assert listener._message_count == 1
+
+    def test_buffer_message_direction_defaults_human_to_ai( self, listener ):
+        """A notification with no direction defaults to human_to_ai; DM fields default to None."""
+        listener._buffer_message( { "message": "hi", "job_id": "s" } )
+        entry = json.loads( listener.buffer_path.read_text().strip() )
+        assert entry[ "direction" ]      == "human_to_ai"
+        assert entry[ "sender_persona" ] is None
+        assert entry[ "sender_icon" ]    is None
+        assert entry[ "reply_to" ]       is None
+        assert entry[ "thread_id" ]      is None
+
+    def test_buffer_message_error_isolated( self, listener ):
+        """A write/serialize failure is caught and logged — never crashes the listener."""
+        with patch( "lupin_cli.claude_code.hooks.lib.cc_notification_listener.json.dumps",
+                    side_effect=RuntimeError( "serialize boom" ) ), \
+             patch.object( listener, '_log' ) as mock_log:
+            listener._buffer_message( { "message": "hi", "job_id": "s" } )   # must not raise
+            assert any( "ERROR buffering message" in str( c ) for c in mock_log.call_args_list )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Test: _stamp_user_id_on_bridge (Phase 3 Option 2 fix)

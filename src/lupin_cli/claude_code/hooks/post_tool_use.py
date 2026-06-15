@@ -104,7 +104,7 @@ def main():
     # Drain voice buffer, acknowledge, and inject as additionalContext
     messages  = drain_and_acknowledge( session_id )
     voice_ctx = format_voice_context( messages )
-    emit_json( build_additional_context( enrich_voice_context( voice_ctx ), "PostToolUse" ) )
+    emit_json( build_additional_context( enrich_voice_context( voice_ctx, messages ), "PostToolUse" ) )
     # enrich returns "" when empty → build_additional_context returns {} → passthrough
 
 

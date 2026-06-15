@@ -558,6 +558,37 @@ class Notification( Base ):
         nullable=False
     )
 
+    # Communication direction + DM provenance/threading (first-class columns).
+    # `direction` is orthogonal to `type` (event-category): it names who sent the
+    # message to whom. Wire JSON keys map 1:1 to these column names (external
+    # representation IS the internal representation — no payload blob, no overload).
+    # Populated for DMs/voice; `direction` defaults to the dominant AI→user case.
+    # See: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md
+    direction: Mapped[str] = mapped_column(
+        String( 20 ),
+        nullable=False,
+        default="ai_to_human",
+        server_default="ai_to_human",
+        index=True
+    )
+    sender_persona: Mapped[Optional[str]] = mapped_column(
+        String( 64 ),
+        nullable=True
+    )
+    sender_icon: Mapped[Optional[str]] = mapped_column(
+        String( 16 ),
+        nullable=True
+    )
+    reply_to: Mapped[Optional[str]] = mapped_column(
+        String( 64 ),
+        nullable=True
+    )
+    thread_id: Mapped[Optional[str]] = mapped_column(
+        String( 64 ),
+        nullable=True,
+        index=True
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime( timezone=True ),

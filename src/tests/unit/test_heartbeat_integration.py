@@ -684,7 +684,7 @@ def _drive_main( roots, monkeypatch, *, payload, speakerphone=False, voice_ctx="
     monkeypatch.setattr( stop, "get_stop_block_count", lambda _sid: 0 )
     monkeypatch.setattr( stop, "increment_stop_block_count", lambda _sid: None )
     monkeypatch.setattr( stop, "reset_stop_block_count", lambda _sid: None )
-    monkeypatch.setattr( stop, "enrich_voice_context", lambda c: c )
+    monkeypatch.setattr( stop, "enrich_voice_context", lambda c, *a, **k: c )
     monkeypatch.setattr( stop, "build_stop_block",
                          lambda r: captured.__setitem__( "voice_block", True ) or { "decision": "block", "reason": r } )
     monkeypatch.setattr( stop, "send_tts", lambda *a, **k: None )

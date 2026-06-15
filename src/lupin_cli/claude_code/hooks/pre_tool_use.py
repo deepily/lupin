@@ -50,7 +50,7 @@ def main():
     voice_ctx = format_voice_context( messages )
 
     if voice_ctx:
-        emit_json( build_voice_deny_response( voice_ctx ) )
+        emit_json( build_voice_deny_response( voice_ctx, messages ) )
     else:
         emit_json( {} )
 

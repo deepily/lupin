@@ -87,6 +87,7 @@ def _run_notify( ws_manager, notification_queue, *, persist_raises: bool ):
         "authenticated_user_id"   : "auth-user-id",
         "message"                 : "[E2E-CARDGAP] simulated arbiter stall warning",
         "type"                    : "alert",
+        "direction"               : "ai_to_human",
         "priority"                : "medium",
         "target_user"             : "interactive.job.tester@example.com",
         "response_requested"      : False,

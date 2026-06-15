@@ -273,11 +273,138 @@ class CCNotificationListener( BaseWebSocketListener ):
                 self._log( f"{self.LOG_PREFIX} Skipping: job_id={job_id} not in {self.accepted_ids}" )
             return
 
+        # Direction-aware routing (notification-native AI↔AI messaging, Phase 3 §6a of
+        # src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md).
+        # A peer DM (direction=ai_to_ai) must NOT receive the human-voice envelope or the
+        # speakerphone rider — it routes to _handle_peer_dm, which injects a peer-DM envelope
+        # plus a dm_send reply affordance verbatim (wrap=False). Everything else — human voice
+        # (human_to_ai) or a legacy notification with no direction — keeps the existing path.
+        if notification.get( "direction" ) == "ai_to_ai":
+            self._deliver_peer_dm( notification )
+            return
+
         # Match — inject directly into tmux prompt (skip buffer for idle injection)
         message_text = notification.get( "message", "" ).strip()
         if message_text:
             self._inject_via_tmux( message_text )
         self._send_gist_response( notification )
+
+    def _deliver_peer_dm( self, notification ):
+        """
+        Idle-aware delivery for an inbound notification-native AI↔AI DM
+        (direction=ai_to_ai), per §6 of
+        src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md.
+
+        Routes by the recipient session's liveness:
+        - ACTIVE → _buffer_message: write to the voice buffer, drained by the
+          next injecting hook (PreToolUse/PostToolUse/Stop) at a clean tool
+          boundary and framed by format_voice_context's ai_to_ai branch. Clean,
+          non-invasive — does NOT type into a live prompt mid-turn.
+        - IDLE → _handle_peer_dm: inject via tmux to WAKE the idle pane (the only
+          path that reaches a pane sitting at an idle prompt).
+
+        Liveness is read from the existing heartbeat_events outcome store; on any
+        read error we fall back to the tmux-wake path (degrades to the always-
+        deliver behavior rather than risk a buffered DM sitting unseen).
+
+        Ensures:
+            - Active recipient → buffered; idle (or unknown-state) recipient → tmux
+            - Never raises (both downstream paths are self-isolating)
+        """
+        if self._recipient_is_idle():
+            self._handle_peer_dm( notification )
+        else:
+            self._buffer_message( notification )
+
+    def _recipient_is_idle( self ):
+        """
+        Is this CC session sitting at an idle prompt right now?
+
+        Reads the most recent heartbeat outcome for this session: a last outcome
+        of EVENT_IDLE ("idle") means the session went idle and is waiting at a
+        prompt. Any other outcome (poked/honored/cap_reached/…) or None (no
+        heartbeat history yet — e.g. a freshly-started session) is treated as
+        ACTIVE, so a peer DM buffers cleanly rather than interrupting.
+
+        Ensures:
+            - Returns True iff last_emitted_outcome(<full stable uuid>) == EVENT_IDLE
+            - Returns True when the full id can't be resolved, or on any
+              read/import error (fail toward tmux-wake so a DM is never silently
+              lost to a buffer that nothing drains)
+        """
+        try:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
+            from lupin_cli.claude_code.hooks.lib.heartbeat_events import (
+                last_emitted_outcome, EVENT_IDLE
+            )
+            # heartbeat events are keyed by the FULL stable UUID — the file is
+            # <full_uuid>.jsonl, read by EXACT match (no prefix glob), and stop.py
+            # writes via resolve_stable_session_id (full UUID). self.session_id_hash
+            # is the 8-char form, so we MUST resolve the full id via the bridge
+            # first; passing the 8-char hash straight through always misses the
+            # file → None → "active" → the idle→tmux-wake branch was DEAD in prod
+            # (F1, Cheech 2026-06-15). Fix at the source (the listener holds the
+            # wrong-form id), not by loosening the store's exact-match contract.
+            data    = find_session_by_id( self.session_id_hash )
+            full_id = ( data.get( "stable_session_id" ) or data.get( "session_id" ) ) if data else None
+            if not full_id:
+                # No live bridge → can't resolve the full id → fail toward tmux-wake.
+                return True
+            return last_emitted_outcome( full_id ) == EVENT_IDLE
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} idle-state read failed (assuming idle/tmux-wake): {e}" )
+            return True
+
+    def _handle_peer_dm( self, notification ):
+        """
+        Inject a peer-DM envelope into an IDLE pane via tmux to wake it (the idle
+        branch of _deliver_peer_dm).
+
+        Per §6a of
+        src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md:
+        - A peer DM is NOT human voice. It must NOT receive the speakerphone_wrap
+          voice rider ("the user spoke… call notify() to speak your reply aloud…
+          TTS brevity… chorus") — that would hand an AI peer the human-voice
+          contract, framed as if Rick spoke. Peers reply via dm_send, never TTS.
+        - The body rides the push INLINE (notification["message"]) — no
+          commons_read round-trip (the ~18x token win over the retired commons
+          claim-check DM path).
+        - The envelope (sender persona + icon + message_id + thread_id + dm_send
+          reply affordance) is built by the SHARED build_peer_dm_reminder helper,
+          so the idle (tmux) and active (buffer-drain) paths frame identically.
+        - Injects via _inject_via_tmux( text, wrap=False ): the block is complete
+          and must reach the model verbatim, with NO voice wrapping.
+
+        Requires:
+            - notification is a dict carrying at least "message"; sender_persona,
+              sender_icon, id, and thread_id ride the WS dict via
+              NotificationItem.to_dict().
+
+        Ensures:
+            - Injects a peer-framed <system-reminder> into the tmux pane
+            - NEVER applies the speakerphone voice rider (wrap=False)
+            - Skips (logs) when the inline body is empty
+            - Never raises (T7 listener-injection isolation — failure logs + skips)
+        """
+        from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
+
+        body = ( notification.get( "message" ) or "" ).strip()
+        if not body:
+            self._log( f"{self.LOG_PREFIX} peer DM missing body; skipping" )
+            return
+
+        wrapped = build_peer_dm_reminder(
+            body,
+            persona   = notification.get( "sender_persona" ),
+            icon      = notification.get( "sender_icon" ),
+            msg_id    = notification.get( "id" ),
+            thread_id = notification.get( "thread_id" ),
+        )
+        try:
+            self._inject_via_tmux( wrapped, wrap=False )
+        except Exception as e:
+            # T7 listener-injection isolation: failure logs + skips, doesn't crash listener
+            self._log( f"{self.LOG_PREFIX} peer DM inject failed: {e}" )
 
     def _handle_action( self, action, notification ):
         """
@@ -721,6 +848,15 @@ class CCNotificationListener( BaseWebSocketListener ):
                 "notification_id" : notification.get( "id", "" ),
                 "timestamp"     : notification.get( "timestamp", datetime.now( timezone.utc ).isoformat() ),
                 "buffered_at"   : datetime.now( timezone.utc ).isoformat(),
+                # Direction + DM provenance/threading (notification-native AI↔AI, §6a).
+                # format_voice_context branches on `direction`: an ai_to_ai entry is
+                # drained into a peer-DM envelope (persona/icon/ids) instead of a
+                # "[Voice]:" line. Defaults keep voice entries shaped as before.
+                "direction"      : notification.get( "direction", "human_to_ai" ),
+                "sender_persona" : notification.get( "sender_persona" ),
+                "sender_icon"    : notification.get( "sender_icon" ),
+                "reply_to"       : notification.get( "reply_to" ),
+                "thread_id"      : notification.get( "thread_id" ),
             }
 
             with open( self.buffer_path, "a" ) as f:

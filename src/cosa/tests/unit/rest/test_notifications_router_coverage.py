@@ -205,6 +205,7 @@ class TestNotifyUser( unittest.IsolatedAsyncioTestCase ):
             authenticated_user_id    = "svc",
             message                  = "Hello world",
             type                     = "progress",
+            direction                = "ai_to_human",
             priority                 = "medium",
             target_user              = self.EMAIL,
             response_requested       = False,

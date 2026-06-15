@@ -27,8 +27,13 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     get_stop_block_count,
     increment_stop_block_count,
     reset_stop_block_count,
+    build_peer_dm_reminder,
+    enrich_voice_context,
+    deliver_pending_peer_dms,
+    inject_qualifier_via_tmux,
     MAX_STOP_BLOCKS,
     MCP_VOICE_PREFIX,
+    VOICE_LINE_PREFIX,
     TOOLS_SILENT,
     TOOLS_ANNOUNCE
 )
@@ -365,3 +370,293 @@ class TestStopBlockCounter:
     def test_max_stop_blocks_constant( self ):
         """MAX_STOP_BLOCKS is 3."""
         assert MAX_STOP_BLOCKS == 3
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestBuildPeerDmReminder — §6a peer-DM framing (notification-native AI↔AI)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestBuildPeerDmReminder:
+    """Tests for build_peer_dm_reminder() — the SINGLE source of peer-DM framing."""
+
+    def test_full_envelope( self ):
+        """Full envelope: system-reminder wrapper, persona+icon label, ids, body, reply affordance."""
+        r = build_peer_dm_reminder(
+            "Build is green, ready for review.",
+            persona="maría", icon="🌸", msg_id="m-1", thread_id="t-1"
+        )
+        assert r.startswith( "<system-reminder>" )
+        assert r.endswith( "</system-reminder>" )
+        assert "PEER DM from maría 🌸" in r
+        assert "message_id m-1" in r
+        assert "thread t-1" in r
+        assert "Build is green, ready for review." in r
+        # dm_send reply affordance threads via reply_to + thread_id
+        assert 'dm_send( recipient="maría"' in r
+        assert 'reply_to="m-1"' in r
+        assert 'thread_id="t-1"' in r
+
+    def test_persona_fallback( self ):
+        """Missing persona falls back to 'a peer session' — in label AND reply affordance."""
+        r = build_peer_dm_reminder( "body", persona=None )
+        assert "PEER DM from a peer session" in r
+        assert 'recipient="a peer session"' in r
+
+    def test_icon_id_thread_fallbacks_to_empty( self ):
+        """Missing icon/msg_id/thread_id degrade to empty strings (no 'None' leakage)."""
+        r = build_peer_dm_reminder( "body", persona="maría", icon=None, msg_id=None, thread_id=None )
+        # icon empty → label is just the persona (no trailing space)
+        assert "PEER DM from maría (message_id , thread ):" in r
+        assert "None" not in r
+
+    def test_no_voice_rider_strings( self ):
+        """A peer DM is NOT human voice — none of the speakerphone/TTS rider language."""
+        r       = build_peer_dm_reminder( "body", persona="maría", icon="🌸", msg_id="m1", thread_id="t1" )
+        lowered = r.lower()
+        assert "user spoke"   not in lowered
+        assert "speakerphone" not in lowered
+        assert "notify("      not in r
+        assert "tts"          not in lowered
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestFormatVoiceContextPeerDm — §6a ai_to_ai branch of format_voice_context
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestFormatVoiceContextPeerDm:
+    """Tests for the direction=='ai_to_ai' branch of format_voice_context()."""
+
+    def test_ai_to_ai_becomes_peer_block_not_voice_line( self ):
+        """An ai_to_ai entry renders as a peer-DM block — NOT a '[Voice]:' line."""
+        msgs = [ {
+            "message"        : "peer hello",
+            "direction"      : "ai_to_ai",
+            "sender_persona" : "maría",
+            "sender_icon"    : "🌸",
+            "notification_id": "m1",
+            "thread_id"      : "t1",
+        } ]
+        result = format_voice_context( msgs )
+        assert result.startswith( "<system-reminder>" )
+        assert VOICE_LINE_PREFIX not in result
+        assert "PEER DM from maría 🌸" in result
+        assert "peer hello" in result
+
+    def test_mixed_voice_and_dm( self ):
+        """A mixed buffer yields a [Voice]: line AND a peer-DM block, newline-joined."""
+        msgs = [
+            { "message": "spoke this", "direction": "human_to_ai" },
+            { "message": "dm body", "direction": "ai_to_ai", "sender_persona": "maría" },
+        ]
+        result = format_voice_context( msgs )
+        assert f"{VOICE_LINE_PREFIX}spoke this" in result
+        assert "PEER DM from maría" in result
+
+    def test_blank_ai_to_ai_skipped( self ):
+        """A whitespace-only ai_to_ai body is skipped (no empty peer block)."""
+        msgs = [ { "message": "   ", "direction": "ai_to_ai", "sender_persona": "maría" } ]
+        assert format_voice_context( msgs ) == ""
+
+    def test_notification_id_preferred_over_id( self ):
+        """notification_id wins when both present (the buffer's canonical id key)."""
+        msgs = [ {
+            "message"        : "body",
+            "direction"      : "ai_to_ai",
+            "sender_persona" : "maría",
+            "notification_id": "nid",
+            "id"             : "other",
+        } ]
+        result = format_voice_context( msgs )
+        assert "message_id nid" in result
+        assert "other" not in result
+
+    def test_id_fallback_when_no_notification_id( self ):
+        """Falls back to the 'id' key when notification_id is absent."""
+        msgs = [ {
+            "message"        : "body",
+            "direction"      : "ai_to_ai",
+            "sender_persona" : "maría",
+            "id"             : "fallback-id",
+        } ]
+        result = format_voice_context( msgs )
+        assert "fallback-id" in result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestEnrichVoiceContext — §6a pure-DM skip of the voice-acknowledge rider
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestEnrichVoiceContext:
+    """Tests for enrich_voice_context() — rider decided STRUCTURALLY from message direction (§6a, F2)."""
+
+    def test_empty_passthrough( self ):
+        """Empty input returns empty (passthrough)."""
+        assert enrich_voice_context( "", [] ) == ""
+
+    def test_pure_peer_dm_unchanged_no_rider( self ):
+        """A pure peer-DM context (all ai_to_ai messages) is returned UNCHANGED — no TTS rider."""
+        msgs     = [ { "message": "body", "direction": "ai_to_ai", "sender_persona": "maría" } ]
+        dm_block = format_voice_context( msgs )
+        result   = enrich_voice_context( dm_block, msgs )
+        assert result == dm_block
+        assert "MUST acknowledge" not in result
+
+    def test_voice_only_keeps_rider( self ):
+        """A voice-only context (a human_to_ai message) keeps the notify()-acknowledge rider."""
+        msgs   = [ { "message": "hello", "direction": "human_to_ai" } ]
+        ctx    = format_voice_context( msgs )
+        result = enrich_voice_context( ctx, msgs )
+        assert result.startswith( f"{VOICE_LINE_PREFIX}hello" )
+        assert "MUST acknowledge" in result
+
+    def test_mixed_voice_and_dm_keeps_rider( self ):
+        """A mixed context (voice + DM) keeps the rider — the voice line still needs it."""
+        msgs = [
+            { "message": "spoke this", "direction": "human_to_ai" },
+            { "message": "dm body", "direction": "ai_to_ai", "sender_persona": "maría" },
+        ]
+        result = enrich_voice_context( format_voice_context( msgs ), msgs )
+        assert "MUST acknowledge" in result
+
+    def test_messages_none_defaults_to_no_rider( self ):
+        """messages=None is the §6a-safe default — never attach the human rider blindly."""
+        result = enrich_voice_context( f"{VOICE_LINE_PREFIX}hello" )
+        assert result == f"{VOICE_LINE_PREFIX}hello"
+        assert "MUST acknowledge" not in result
+
+    def test_blank_human_voice_does_not_count_as_voice( self ):
+        """A BLANK human_to_ai message contributes no [Voice]: line → structurally
+        not voice → a context that renders only a peer DM gets NO rider."""
+        msgs = [
+            { "message": "   ", "direction": "human_to_ai" },          # blank → skipped
+            { "message": "dm body", "direction": "ai_to_ai", "sender_persona": "maría" },
+        ]
+        ctx    = format_voice_context( msgs )   # only the DM block renders
+        result = enrich_voice_context( ctx, msgs )
+        assert "MUST acknowledge" not in result
+
+    def test_f2_voice_marker_inside_dm_body_no_rider( self ):
+        """
+        F2 REGRESSION (Cheech 2026-06-15): a peer DM whose BODY literally contains
+        "[Voice]: " must NOT trigger the human-voice rider. The old substring sniff
+        leaked the rider here; the structural direction check does not.
+        """
+        msgs   = [ {
+            "message"        : "the reviewer wrote [Voice]: do X — please action",
+            "direction"      : "ai_to_ai",
+            "sender_persona" : "maría",
+        } ]
+        ctx    = format_voice_context( msgs )
+        assert VOICE_LINE_PREFIX in ctx          # the substring IS present in the body…
+        result = enrich_voice_context( ctx, msgs )
+        assert "MUST acknowledge" not in result  # …but structurally it's a pure peer DM → NO rider
+        assert result == ctx
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestDeliverPendingPeerDms — §6 buffer-drain + tmux delivery of peer DMs
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestDeliverPendingPeerDms:
+    """Tests for deliver_pending_peer_dms() — drain buffer, tmux-deliver DMs, return voice."""
+
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.inject_qualifier_via_tmux" )
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.drain_voice_buffer" )
+    def test_injects_each_ai_to_ai_wrap_false( self, mock_drain, mock_inject ):
+        """Each ai_to_ai entry is tmux-injected verbatim (wrap=False), framed as a peer DM."""
+        mock_drain.return_value = [
+            { "message": "dm one", "direction": "ai_to_ai", "sender_persona": "maría",
+              "sender_icon": "🌸", "notification_id": "m1", "thread_id": "t1" },
+            { "message": "dm two", "direction": "ai_to_ai", "sender_persona": "john", "id": "m2" },
+        ]
+        result = deliver_pending_peer_dms( "abc12345" )
+
+        assert result == []                       # no voice messages
+        assert mock_inject.call_count == 2
+        for call in mock_inject.call_args_list:
+            assert call.kwargs.get( "wrap" ) is False
+            assert call.args[ 0 ] == "abc12345"   # session_id threaded through
+        # First injected block carries the framed body + persona
+        first_text = mock_inject.call_args_list[ 0 ].args[ 1 ]
+        assert "dm one" in first_text and "maría" in first_text
+        # Second uses the id fallback (no notification_id)
+        second_text = mock_inject.call_args_list[ 1 ].args[ 1 ]
+        assert "message_id m2" in second_text
+
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.inject_qualifier_via_tmux" )
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.drain_voice_buffer" )
+    def test_returns_voice_messages_not_injected( self, mock_drain, mock_inject ):
+        """Non-DM (voice) entries are returned for the caller, NOT tmux-delivered here."""
+        voice = { "message": "spoke this", "direction": "human_to_ai" }
+        mock_drain.return_value = [
+            voice,
+            { "message": "dm body", "direction": "ai_to_ai", "sender_persona": "maría" },
+        ]
+        result = deliver_pending_peer_dms( "abc12345" )
+        assert result == [ voice ]
+        assert mock_inject.call_count == 1
+
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.inject_qualifier_via_tmux" )
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.drain_voice_buffer" )
+    def test_blank_body_ai_to_ai_skipped( self, mock_drain, mock_inject ):
+        """A whitespace-only ai_to_ai body is skipped — no injection, not returned."""
+        mock_drain.return_value = [ { "message": "   ", "direction": "ai_to_ai", "sender_persona": "maría" } ]
+        result = deliver_pending_peer_dms( "abc12345" )
+        assert result == []
+        mock_inject.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.inject_qualifier_via_tmux" )
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.drain_voice_buffer",
+            side_effect=Exception( "drain boom" ) )
+    def test_drain_exception_returns_empty( self, mock_drain, mock_inject ):
+        """A drain failure returns [] and never injects (self-isolating)."""
+        result = deliver_pending_peer_dms( "abc12345" )
+        assert result == []
+        mock_inject.assert_not_called()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestInjectQualifierWrapParam — §6a wrap=False verbatim path + isolation
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestInjectQualifierWrapParam:
+    """Tests for the wrap param + defensive branches of inject_qualifier_via_tmux()."""
+
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap" )
+    @patch( "subprocess.Popen" )
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
+    def test_wrap_false_skips_speakerphone_wrap( self, mock_find, mock_popen, mock_wrap ):
+        """wrap=False injects the text VERBATIM — speakerphone_wrap is never called (§6a peer DM)."""
+        mock_find.return_value = { "tmux_session": "lupin" }
+        block = "<system-reminder>\nPEER DM from maría\n</system-reminder>"
+
+        inject_qualifier_via_tmux( "abc12345", block, wrap=False )
+
+        mock_wrap.assert_not_called()
+        mock_popen.assert_called_once()
+        assert mock_popen.call_args[ 0 ][ 0 ][ 6 ] == block   # $3 = verbatim text
+
+    @patch( "subprocess.Popen" )
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
+    def test_no_tmux_session_in_bridge_skips( self, mock_find, mock_popen ):
+        """Bridge data without a tmux_session key → skip (no Popen), no exception."""
+        mock_find.return_value = { "session_id": "abc12345" }   # no tmux_session
+        inject_qualifier_via_tmux( "abc12345", "text" )
+        mock_popen.assert_not_called()
+
+    @patch( "subprocess.Popen" )
+    @patch( "lupin_cli.claude_code.hooks.lib.hook_common.speakerphone_wrap",
+            side_effect=RuntimeError( "wrap boom" ) )
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id" )
+    def test_wrap_exception_falls_through_with_raw_text( self, mock_find, mock_wrap, mock_popen ):
+        """A speakerphone_wrap failure is non-fatal — falls through with the raw text."""
+        mock_find.return_value = { "tmux_session": "lupin" }
+        inject_qualifier_via_tmux( "abc12345", "raw text", wrap=True )
+        mock_popen.assert_called_once()
+        assert mock_popen.call_args[ 0 ][ 0 ][ 6 ] == "raw text"
+
+    @patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+            side_effect=RuntimeError( "bridge boom" ) )
+    def test_outer_exception_swallowed( self, mock_find ):
+        """An error resolving the session is swallowed (hook must never crash CC)."""
+        inject_qualifier_via_tmux( "abc12345", "text" )   # must not raise

@@ -94,6 +94,7 @@ def _run_notify( ws_manager, notification_queue, job_id, **overrides ):
         "authenticated_user_id" : "auth-user-id",
         "message"               : "Hello, anybody home?",
         "type"                  : "user_initiated_message",
+        "direction"             : "ai_to_human",
         "priority"              : "medium",
         "target_user"           : "claude.code@lookml.deepily.ai",
         "response_requested"    : False,

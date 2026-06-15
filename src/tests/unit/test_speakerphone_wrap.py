@@ -26,6 +26,7 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     speakerphone_wrap,
     speakerphone_reminder_block,
     speakerphone_exit_reminder,
+    _brevity_rules,
     _SPEAKERPHONE_WRAP_SENTINEL,
 )
 
@@ -465,3 +466,66 @@ class TestSpeakerphoneExitReminder:
         unknown = speakerphone_exit_reminder( "unknown-mode" )
         chorus  = speakerphone_exit_reminder( "chorus" )
         assert unknown == chorus
+
+
+# ── _brevity_rules: ratified SENTENCE-based standard (PIP S110, 2026-06-15) ────
+
+class TestBrevityRulesSentenceBased:
+    """
+    The TTS brevity rider now states a SENTENCE-based target (max 3 sentences),
+    NOT word/char counting — LLMs count sentences reliably but not words. The
+    named char cap is the server REJECT BOUNDARY, single-sourced from
+    cu.get_spoken_char_cap() (the SAME source the enforcement guard reads) so the
+    rider's number and the enforcement check can never drift.
+    """
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_states_max_three_sentences( self, mock_cap ):
+        assert "Max 3 sentences" in _brevity_rules()
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_keeps_brevity_for_tts_anchor( self, mock_cap ):
+        # The matrix tests + downstream tooling key off this exact anchor phrase.
+        assert "Brevity for TTS" in _brevity_rules()
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_keeps_verdict_not_inventory( self, mock_cap ):
+        assert "Speak the verdict, not the inventory" in _brevity_rules()
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_ask_question_is_one_short_line( self, mock_cap ):
+        body = _brevity_rules()
+        assert "ONE short line" in body
+        # pros/cons + recommendation routed OUT of the spoken question
+        assert "option descriptions" in body
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_abandons_word_and_char_counting( self, mock_cap ):
+        # The retired counting language must be gone — sentences, not words.
+        body = _brevity_rules()
+        assert "80-120 words" not in body
+        assert "60 words" not in body
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_names_reject_boundary_as_hard_limit( self, mock_cap ):
+        body = _brevity_rules()
+        assert "HARD LIMIT" in body
+        assert "REJECTS" in body
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=777 )
+    def test_interpolates_cap_from_single_source( self, mock_cap ):
+        # The named number tracks cu.get_spoken_char_cap() — no hardcoded literal.
+        assert "~777 chars" in _brevity_rules()
+        mock_cap.assert_called_once()
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_no_terminal_hostile_markdown_named_as_keep( self, mock_cap ):
+        # The rider instructs STRIPPING these — they should be named as hostile.
+        body = _brevity_rules()
+        for token in ( "headings", "bullets", "code", "backticks", "JSON", "URLs" ):
+            assert token in body
+
+    @patch( "cosa.utils.util.get_spoken_char_cap", return_value=500 )
+    def test_returns_nonempty_string( self, mock_cap ):
+        body = _brevity_rules()
+        assert isinstance( body, str ) and len( body ) > 0

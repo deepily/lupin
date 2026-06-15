@@ -2,11 +2,35 @@
 
 **Date**: 2026.06.13
 **Author**: Mr. Radio 🦉 (with Rick, architect)
-**Status**: DESIGN — approved to serialize; implementation pending
+**Status**: ⚠️ **PARTIALLY SUPERSEDED 2026-06-15** by `02-notification-native-aixai-design.md` (approved). See banner.
 **Engagement**: cosa-voice MCP token reduction (Rick measured DM traffic at ~75% of his inference budget; cosa-voice turned OFF 2026-06-12 over the cost)
 **Scope**: TEMPORARY high-leverage fix to stop the bleeding. Offline-recipient replay is explicitly **Phase 2 (Monday)** — see §8.
 
 ---
+
+> ## ⚠️ Correction banner (2026-06-15) — read before implementing
+>
+> Exploration during plan approval found this doc's **Layer 2 / Layer 3 edit list is
+> mis-aimed**, and the persistence model is wrong. The approved design is
+> **`02-notification-native-aixai-design.md`**. Corrections:
+>
+> 1. **Layers 2 & 3 target a path DMs don't traverse.** The doc edits `_buffer_message`
+>    + `format_voice_context` as if DMs flow through the voice-buffer pipeline. They do
+>    not today — a DM rides the **commons action path** (`action:commons_question_received`
+>    → `_handle_commons_question_received` → tmux). The buffer *writer* `_buffer_message`
+>    is dead (no caller). The corrected design *does* use the buffer pipeline, but only
+>    after **wiring the writer** and making delivery **idle-aware** (active → buffer,
+>    idle → tmux), because the idle Notification hook (`notification.py:55`) drains-and-
+>    **discards** and would otherwise eat a buffered DM.
+> 2. **`kind` → `direction`.** The discriminator is a first-class **`direction`** column
+>    with three values `human_to_ai` | `ai_to_ai` | `ai_to_human`, set cross-cutting at
+>    every notification call site — not a `kind` field (synonym-collides with `type`) and
+>    not payload-only.
+> 3. **Persistence is DB columns, not payload, not a commons board.** The free-form
+>    `payload` dict is NOT persisted; durable content (body in `message`, plus the new
+>    first-class columns) lives in real Postgres columns. No board mirror.
+>
+> §1 (problem) and the §2 token baseline remain valid. The rest is superseded by `02`.
 
 ## 1. Problem
 

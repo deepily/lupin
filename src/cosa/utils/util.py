@@ -684,6 +684,42 @@ def get_tts_interaction_mode() -> str:
     return mode
 
 
+# ── cosa-voice spoken-char cap — SINGLE SOURCE OF TRUTH ───────────────────────
+# The reject-boundary for TTS spoken text (Rick 2026-06-02). Both the per-turn
+# TTS brevity rider (lupin_cli ... hook_common._brevity_rules) and the
+# caller-side enforcement guard (lupin_mcp.cosa_voice_mcp._enforce_spoken_brevity)
+# resolve the cap from THIS one key + default, so the rider's named number and
+# the enforcement check can NEVER drift. Per ratified PIP S110 (2026-06-15) the
+# cap is a REJECT BOUNDARY, not a target — the spoken target is sentence-based.
+SPOKEN_CHAR_CAP_INI_KEY = "cosa voice spoken char cap"
+SPOKEN_CHAR_CAP_DEFAULT = 500
+
+
+def get_spoken_char_cap() -> int:
+    """
+    Resolve the cosa-voice spoken-char cap (the server reject boundary) from
+    lupin-app.ini at call time, so it is runtime-tunable.
+
+    Requires:
+        - ConfigurationManager is importable
+        - LUPIN_CONFIG_MGR_CLI_ARGS env var is set on first singleton init
+
+    Ensures:
+        - returns an int cap (the value of SPOKEN_CHAR_CAP_INI_KEY)
+        - returns SPOKEN_CHAR_CAP_DEFAULT if the key is absent
+        - returns SPOKEN_CHAR_CAP_DEFAULT on any config-read error (never raises)
+
+    Raises:
+        - never
+    """
+    from cosa.config.configuration_manager import ConfigurationManager
+    try:
+        config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        return config_mgr.get( SPOKEN_CHAR_CAP_INI_KEY, default=SPOKEN_CHAR_CAP_DEFAULT, return_type="int" )
+    except Exception:
+        return SPOKEN_CHAR_CAP_DEFAULT
+
+
 def get_api_key(key_name: str, project_root: str = None) -> Optional[str]:
     """
     Get an API key from the configuration directory.
