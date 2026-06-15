@@ -86,6 +86,7 @@ services:
       - ./io:/var/lupin/io
       - ./src/conf/keys:/var/lupin/src/conf/keys:ro   # provider keys, out-of-band (Decision 3b)
       - cloudsql-socket:/cloudsql           # shared Auth-Proxy socket → matches database.py host=/cloudsql/<CONN>
+      - claude-creds:/home/rruiz/.claude    # persistent CC OAuth login (manual `claude /login`); survives container recreate + auto-refreshes the token (M2 Phase F — avoids the static setup-token expiry race)
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: testing
@@ -167,6 +168,7 @@ services:
 
 volumes:
   cloudsql-socket:                          # shared Auth-Proxy ↔ app unix-socket dir
+  claude-creds:                             # CC OAuth login store for lupin-rest (/home/rruiz/.claude) — manual `claude /login`, persistent + auto-refresh
 
 networks:
   lupin-cloud-network:
