@@ -39,6 +39,17 @@ VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3" )
 VALID_AUTHORITIES      = ( "standing", "user_direct", "manager_relay" )
 VALID_BLOCKED_BY_KINDS = ( "item", "persona", "user" )
 
+# Legal-transition graph (Phase 2.1, ratified 2026-06-15). The RATIFIED graph:
+# every NON-terminal status may move to every OTHER status; terminal statuses
+# (done/dropped) have NO out-edges (append-only finality); same->same is a no-op.
+# This is BEHAVIOR-PRESERVING — it makes the Phase-1 implicit graph EXPLICIT so a
+# future tightening has one home (and the mirror-edge regression can prove the
+# live hook's edges stay legal). Derived from the enums, never hand-listed.
+LEGAL_TRANSITIONS = {
+    src: tuple( dst for dst in VALID_STATUSES if dst != src )
+    for src in VALID_STATUSES if src not in TERMINAL_STATUSES
+}
+
 # Receipt key whitelist + shape rules (design §4.1 AC1)
 RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line" )
 
@@ -284,14 +295,26 @@ def validate_transition(
     """
     if to_status not in VALID_STATUSES:
         return [ f"to_status '{to_status}' must be one of {VALID_STATUSES}" ]
+    # from_status comes from a free VARCHAR column (no enum CHECK) on a now-LIVE
+    # write path — short-circuit an unknown source as a DATA error (symmetry with
+    # to_status above), so the LEGAL_TRANSITIONS[from_status] lookup below can
+    # never KeyError. Errors are data, not exceptions (D-DELTA, 2026-06-15).
+    if from_status not in VALID_STATUSES:
+        return [ f"from_status '{from_status}' must be one of {VALID_STATUSES}" ]
 
     errors = [ ]
     if authority not in VALID_AUTHORITIES:
         errors.append( f"authority '{authority}' must be one of {VALID_AUTHORITIES}" )
+    # Legal-graph adjacency (Phase 2.1 D-DELTA-1): consult the EXPLICIT
+    # LEGAL_TRANSITIONS graph. Terminal sources have no out-edges; for a
+    # non-terminal source the only target not in "every other status" is
+    # from_status itself (to_status is already a valid enum here), so this
+    # rejects the no-op — behavior-preserving. The receipt / blocked / dropped
+    # payload rules below are PREPENDED-to, never replaced.
     if from_status in TERMINAL_STATUSES:
         errors.append( f"item is terminal ('{from_status}') — done/dropped are append-only, no transitions out" )
-    elif to_status == from_status:
-        errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected" )
+    elif to_status not in LEGAL_TRANSITIONS[ from_status ]:
+        errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
 
     if to_status == "done" or receipt_refs is not None:
         errors.extend( validate_receipt_refs( receipt_refs, scope_roots ) )

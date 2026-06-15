@@ -249,6 +249,61 @@ class TaskRepository( BaseRepository[TaskItem] ):
         reason = "; ".join( changes ) if changes else "no-op patch (no field changed)"
         return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=reason )
 
+    def query_chase_due( self, now: datetime, limit: int = 100 ) -> List[TaskItem]:
+        """
+        Return blocked items whose next_chase_ts is at/before `now` (design I3 —
+        the chase consumer's due-list; "no 'pending X' graves" made operational).
+
+        Requires:
+            - now is a timezone-aware datetime (the chase cutoff)
+            - limit is a non-negative int
+
+        Ensures:
+            - returns items with status='blocked' AND next_chase_ts IS NOT NULL
+              AND next_chase_ts <= now
+            - ordered by next_chase_ts ascending (longest-overdue first)
+            - read-only — NEVER mutates (the consumer re-arms via apply_chase)
+
+        Returns:
+            List of TaskItem instances (may be empty)
+        """
+        return (
+            self.session.query( TaskItem )
+            .filter(
+                TaskItem.status == "blocked",
+                TaskItem.next_chase_ts.isnot( None ),
+                TaskItem.next_chase_ts <= now,
+            )
+            .order_by( TaskItem.next_chase_ts )
+            .limit( limit )
+            .all()
+        )
+
+    def apply_chase( self, item: TaskItem, actor: str, authority: str, next_chase_ts: datetime ) -> TaskEvent:
+        """
+        Record a chase on a blocked item: re-arm next_chase_ts (backoff) + append
+        a 'chased' audit event. NEVER changes status (the consumer chases, it
+        does not auto-transition — design: chasing is a nudge, not a decision).
+
+        Requires:
+            - item is a blocked TaskItem loaded in THIS session
+            - next_chase_ts is the re-armed (future) chase time
+
+        Ensures:
+            - item.next_chase_ts set to next_chase_ts; item.status UNTOUCHED
+            - exactly one TaskEvent appended: transition='chased',
+              receipt_refs=None, reason names the re-armed time (R3 — auditable)
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        item.next_chase_ts = next_chase_ts
+        return self._append_event(
+            item.id, actor, "chased", authority, receipt_refs=None,
+            reason = f"chase re-armed -> {next_chase_ts.isoformat()}",
+        )
+
     def query_tasks(
         self,
         owner_persona       : Optional[str] = None,

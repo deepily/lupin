@@ -375,6 +375,40 @@ def test_apply_patch_no_change_records_noop_marker( repo ):
 
 
 # ---------------------------------------------------------------------------
+# Phase 2.1 — query_chase_due + apply_chase (chase consumer support)
+# ---------------------------------------------------------------------------
+
+def test_query_chase_due_filters_blocked_and_overdue( repo, session ):
+    now      = datetime( 2026, 6, 15, 12, 0, tzinfo=timezone.utc )
+    sentinel = [ _item( status="blocked" ) ]
+    query    = session.query.return_value
+    query.all.return_value = sentinel
+
+    result = repo.query_chase_due( now )
+
+    assert result is sentinel
+    session.query.assert_called_once_with( TaskItem )
+    query.filter.assert_called_once()                         # status + not-null + <= now in ONE filter
+    query.order_by.assert_called_once()
+    query.limit.assert_called_once_with( 100 )
+
+
+def test_apply_chase_rearms_next_chase_and_audits( repo, session ):
+    item   = _item( status="blocked", next_chase_ts=datetime( 2026, 6, 15, 9, 0, tzinfo=timezone.utc ) )
+    re_arm = datetime( 2026, 6, 15, 12, 30, tzinfo=timezone.utc )
+
+    event = repo.apply_chase( item, actor="task-chase-consumer", authority="standing", next_chase_ts=re_arm )
+
+    assert item.next_chase_ts == re_arm
+    assert item.status == "blocked"                           # status NEVER touched by a chase
+    assert event.transition   == "chased"
+    assert event.receipt_refs is None
+    assert event.reason == f"chase re-armed -> {re_arm.isoformat()}"
+    added = _added_instances( session, TaskEvent )
+    assert len( added ) == 1 and added[ 0 ] is event
+
+
+# ---------------------------------------------------------------------------
 # get_events
 # ---------------------------------------------------------------------------
 

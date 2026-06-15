@@ -407,5 +407,66 @@ def test_patch_all_editable_fields_valid():
     } ) == [ ]
 
 
+# ---------------------------------------------------------------------------
+# Legal-transition graph (Phase 2.1 — Item D, ratified 2026-06-15)
+# ---------------------------------------------------------------------------
+
+def test_legal_transitions_graph_shape():
+    # Ratified: every NON-terminal status -> every OTHER status; terminals have
+    # NO out-edges. Derived from the enums, so this pins the derivation.
+    for status in rules.VALID_STATUSES:
+        if status in rules.TERMINAL_STATUSES:
+            assert status not in rules.LEGAL_TRANSITIONS            # no out-edges from terminal
+        else:
+            assert set( rules.LEGAL_TRANSITIONS[ status ] ) == set( rules.VALID_STATUSES ) - { status }
+
+
+@pytest.mark.parametrize( "src", [ s for s in rules.VALID_STATUSES if s not in rules.TERMINAL_STATUSES ] )
+def test_every_non_terminal_source_reaches_every_other_status( src ):
+    # Each non-terminal source -> every OTHER status is a LEGAL edge (graph layer;
+    # payload rules like receipts/reason are validated separately).
+    for dst in rules.VALID_STATUSES:
+        if dst != src:
+            assert dst in rules.LEGAL_TRANSITIONS[ src ]
+        else:
+            assert dst not in rules.LEGAL_TRANSITIONS[ src ]       # no-op is not a legal edge
+
+
+def test_transition_rejects_invalid_from_status():
+    # D-DELTA: an unknown from_status (free VARCHAR, no enum CHECK) short-circuits
+    # to a DATA error — never a KeyError on the LEGAL_TRANSITIONS lookup.
+    errors = rules.validate_transition( "bogus", "queued", "standing" )
+    assert len( errors ) == 1 and "from_status" in errors[ 0 ] and "must be one of" in errors[ 0 ]
+
+
+def test_no_op_rejected_via_graph():
+    errors = rules.validate_transition( "in_progress", "in_progress", "standing" )
+    assert len( errors ) == 1 and "no-op transition" in errors[ 0 ] and "not a legal edge" in errors[ 0 ]
+
+
+def test_legal_graph_covers_every_live_mirror_edge():
+    # D-DELTA-2: derive the store edges the LIVE hook mirror can emit straight
+    # from its STATUS_TRANSITIONS map (NO hand-copied list — it rots), plus the
+    # queued create-seed and the backward re-queue edges, and assert EVERY one is
+    # a legal edge. Guards a future graph tightening from silently breaking the
+    # now-LIVE mirror (which would start 422-ing real Task* events).
+    from lupin_cli.claude_code.hooks.lib.task_store_mirror import STATUS_TRANSITIONS
+
+    mirror_targets = set( STATUS_TRANSITIONS.values() )            # {queued, in_progress, review, dropped}
+    # statuses the mirror SETS and can then transition FROM (dropped is terminal —
+    # the mirror never moves out of it); plus the 'queued' create-seed source.
+    mirror_sources = { "queued" } | ( mirror_targets - set( rules.TERMINAL_STATUSES ) )
+    edges  = { ( src, dst ) for src in mirror_sources for dst in mirror_targets if src != dst }
+    edges |= { ( "in_progress", "queued" ), ( "review", "queued" ) }   # explicit backward re-queue
+
+    for src, dst in sorted( edges ):
+        assert dst in rules.LEGAL_TRANSITIONS[ src ], f"live mirror edge {src}->{dst} is not legal"
+
+    # terminal-source + no-op are still rejected by the full validator
+    assert rules.validate_transition( "done", "queued", "standing" )    != [ ]
+    assert rules.validate_transition( "dropped", "queued", "standing" ) != [ ]
+    assert rules.validate_transition( "review", "review", "standing" )  != [ ]
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
