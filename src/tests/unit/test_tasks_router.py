@@ -508,5 +508,153 @@ def test_correlate_rejects_overlong_fields( client, repo, field, limit ):
     assert r.status_code == 422
 
 
+# ---------------------------------------------------------------------------
+# Phase 2.1 — PATCH /api/tasks/{id} (item-field edit)
+# ---------------------------------------------------------------------------
+
+_PATCH_BODY = { "title": "edited title", "actor": "krishna a38ee857" }
+
+
+def test_patch_happy_path_returns_item_and_event( client, repo ):
+    item = make_item( title="old title" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event(
+        item.id, transition="patched", reason="title: 'old title' -> 'edited title'" )
+
+    r = client.patch( f"/api/tasks/{item.id}", json=_PATCH_BODY )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "event" ][ "transition" ] == "patched"
+    args, kwargs = repo.apply_patch.call_args.args, repo.apply_patch.call_args.kwargs
+    assert args[ 1 ] == { "title": "edited title" }              # fields passed positionally; actor/authority excluded from it
+    assert kwargs[ "actor" ] == "krishna a38ee857" and kwargs[ "authority" ] == "standing"
+    repo.get_by_id_for_update.assert_called_once()               # N3 row-lock parity
+    repo.get_by_id.assert_not_called()
+
+
+def test_patch_empty_editable_set_rejected( client, repo ):
+    # Only actor, no editable field → 422 before any DB touch.
+    r = client.patch( f"/api/tasks/{uuid.uuid4()}", json={ "actor": "a b" } )
+    assert r.status_code == 422
+    assert any( "at least one editable field" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.get_by_id_for_update.assert_not_called()
+    repo.apply_patch.assert_not_called()
+
+
+@pytest.mark.parametrize( "forbidden", [
+    { "status": "done" },
+    { "correlation_key": "cc-task:x:1" },
+    { "blocked_by": [ ] },
+    { "next_chase_ts": "2026-06-15T00:00:00+00:00" },
+    { "receipt_refs": { "commit": "abc1234" } },
+] )
+def test_patch_forbids_oracle_fields_at_the_wire( client, repo, forbidden ):
+    # extra='forbid' — naming a transition-oracle field is a 422, never a silent
+    # drop. The hard no-bypass invariant (reviewer ruling 2026-06-15).
+    r = client.patch( f"/api/tasks/{uuid.uuid4()}", json={ **forbidden, "actor": "a b" } )
+    assert r.status_code == 422
+    repo.apply_patch.assert_not_called()
+
+
+def test_patch_rejects_junk_enum_fields( client, repo ):
+    r = client.patch( f"/api/tasks/{uuid.uuid4()}",
+                      json={ "priority": "P9", "gate_class": "side-gate", "actor": "a b" } )
+    assert r.status_code == 422
+    errors = r.json()[ "detail" ][ "errors" ]
+    assert any( "priority" in e for e in errors ) and any( "gate_class" in e for e in errors )
+    repo.get_by_id_for_update.assert_not_called()
+
+
+def test_patch_rejects_bad_authority( client, repo ):
+    r = client.patch( f"/api/tasks/{uuid.uuid4()}",
+                      json={ **_PATCH_BODY, "authority": "divine_right" } )
+    assert r.status_code == 422
+    assert any( "authority" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.get_by_id_for_update.assert_not_called()
+
+
+def test_patch_404_when_missing( client, repo ):
+    repo.get_by_id_for_update.return_value = None
+    r = client.patch( f"/api/tasks/{uuid.uuid4()}", json=_PATCH_BODY )
+    assert r.status_code == 404
+    repo.apply_patch.assert_not_called()
+
+
+@pytest.mark.parametrize( "terminal", [ "done", "dropped" ] )
+def test_patch_rejects_terminal_items( client, repo, terminal ):
+    repo.get_by_id_for_update.return_value = make_item( status=terminal )
+    r = client.patch( f"/api/tasks/{uuid.uuid4()}", json=_PATCH_BODY )
+    assert r.status_code == 422
+    assert any( "terminal" in e for e in r.json()[ "detail" ][ "errors" ] )
+    repo.apply_patch.assert_not_called()
+
+
+def test_patch_422_on_malformed_uuid( client, repo ):
+    r = client.patch( "/api/tasks/not-a-uuid", json=_PATCH_BODY )
+    assert r.status_code == 422
+    repo.get_by_id_for_update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# GET /api/tasks/events (cross-item stream)
+# ---------------------------------------------------------------------------
+
+def test_event_stream_returns_events_and_count( client, repo ):
+    item_id = uuid.uuid4()
+    repo.query_events.return_value = [
+        make_event( item_id, id=2, transition="queued->in_progress" ),
+        make_event( item_id, id=1, transition="->queued" ),
+    ]
+    r = client.get( "/api/tasks/events" )
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "count" ] == 2 and len( body[ "events" ] ) == 2
+    assert body[ "events" ][ 0 ][ "transition" ] == "queued->in_progress"
+
+
+def test_event_stream_static_path_wins_over_uuid_route( client, repo ):
+    # /tasks/events must resolve to the stream handler, NOT /tasks/{task_id}
+    # (which would 422 parsing "events" as a UUID). Declaration order is the
+    # guarantee — pin it so a future reorder can't silently regress it.
+    repo.query_events.return_value = [ ]
+    r = client.get( "/api/tasks/events" )
+    assert r.status_code == 200
+    repo.query_events.assert_called_once()
+    repo.get_by_id.assert_not_called()                       # the per-item route is never touched
+
+
+def test_event_stream_passes_all_filters_through( client, repo ):
+    repo.query_events.return_value = [ ]
+    r = client.get( "/api/tasks/events", params={
+        "actor"      : "krishna a38ee857",
+        "transition" : "queued->done",
+        "project"    : "lupin",
+        "since"      : "2026-06-01T00:00:00+00:00",
+        "until"      : "2026-06-30T00:00:00+00:00",
+        "limit"      : 12,
+        "offset"     : 6,
+    } )
+    assert r.status_code == 200 and r.json() == { "events": [ ], "count": 0 }
+    kwargs = repo.query_events.call_args.kwargs
+    assert kwargs[ "actor" ]      == "krishna a38ee857"
+    assert kwargs[ "transition" ] == "queued->done"
+    assert kwargs[ "project" ]    == "lupin"
+    assert kwargs[ "since" ].isoformat() == "2026-06-01T00:00:00+00:00"
+    assert kwargs[ "until" ].isoformat() == "2026-06-30T00:00:00+00:00"
+    assert kwargs[ "limit" ] == 12 and kwargs[ "offset" ] == 6
+
+
+@pytest.mark.parametrize( "params", [
+    { "limit": -1 },
+    { "offset": -1 },
+    { "limit": 501 },
+] )
+def test_event_stream_rejects_out_of_bounds_pagination( client, repo, params ):
+    r = client.get( "/api/tasks/events", params=params )
+    assert r.status_code == 422
+    repo.query_events.assert_not_called()
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

@@ -369,5 +369,43 @@ def test_transition_dropped_reason_error_stacks_with_others():
     assert len( errors ) == 2
 
 
+# ---------------------------------------------------------------------------
+# validate_patch (Phase 2.1 — item-field edit)
+# ---------------------------------------------------------------------------
+
+def test_patch_empty_is_rejected():
+    errors = rules.validate_patch( { } )
+    assert len( errors ) == 1 and "at least one editable field" in errors[ 0 ]
+
+
+def test_patch_single_nullable_field_ok():
+    assert rules.validate_patch( { "body": "new body" } ) == [ ]
+    assert rules.validate_patch( { "owner_persona": None } ) == [ ]   # clearing a nullable field is fine
+
+
+@pytest.mark.parametrize( "bad_title", [ None, "", "   " ] )
+def test_patch_title_must_be_non_empty( bad_title ):
+    errors = rules.validate_patch( { "title": bad_title } )
+    assert any( "title must be a non-empty string" in e for e in errors )
+
+
+def test_patch_rejects_junk_priority_and_gate_class():
+    errors = rules.validate_patch( { "priority": "P9", "gate_class": "side-gate" } )
+    assert any( "priority" in e for e in errors )
+    assert any( "gate_class" in e for e in errors )
+    assert len( errors ) == 2
+
+
+def test_patch_all_editable_fields_valid():
+    assert rules.validate_patch( {
+        "title"               : "fresh title",
+        "body"                : "details",
+        "priority"            : "P1",
+        "owner_persona"       : "tiffany",
+        "accountable_manager" : "tiberius",
+        "gate_class"          : "ricks_court",
+    } ) == [ ]
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

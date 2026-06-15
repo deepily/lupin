@@ -29,7 +29,7 @@ from typing import Annotated, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.db.database import get_db
@@ -98,6 +98,30 @@ class TaskCorrelateIn( BaseModel ):
     correlation_key : str = Field( ..., min_length=1, max_length=255 )
     actor           : str = Field( ..., min_length=1, max_length=255, description="persona + session id performing the re-correlation" )
     authority       : str = Field( default="standing" )
+
+
+class TaskPatchIn( BaseModel ):
+    """
+    Body for PATCH /api/tasks/{id} (Phase 2.1 — item-field edit).
+
+    Edits the mutable presentation/ownership fields of a NON-terminal item.
+    `status` / `blocked_by` / `next_chase_ts` / `receipt_refs` /
+    `correlation_key` are DELIBERATELY ABSENT — they ride the transition oracle
+    (validate_transition) and the /correlate seam, NEVER an item-PATCH.
+    `extra='forbid'` makes that a HARD wire-level invariant: naming any of them
+    is a 422, not a silent drop (reviewer ruling 2026-06-15 — PATCH can never
+    bypass the oracle). `actor`/`authority` stamp the audit event, not the item.
+    """
+    model_config = ConfigDict( extra="forbid" )
+
+    title               : Optional[str] = Field( default=None, min_length=1 )
+    body                : Optional[str] = Field( default=None )
+    priority            : Optional[str] = Field( default=None )
+    owner_persona       : Optional[str] = Field( default=None, max_length=255 )
+    accountable_manager : Optional[str] = Field( default=None, max_length=255 )
+    gate_class          : Optional[str] = Field( default=None )
+    actor               : str           = Field( ..., min_length=1, max_length=255, description="persona + session id performing the edit" )
+    authority           : str           = Field( default="standing" )
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +363,59 @@ def correlate_task(
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
 
 
+@router.patch(
+    "/tasks/{task_id}",
+    summary     = "Edit a task-store item's mutable fields",
+    description = "Phase-2.1 item edit: PATCH whitelisted fields (title/body/"
+                  "priority/owner_persona/accountable_manager/gate_class) on a "
+                  "NON-terminal item; appends a 'patched' audit event with the "
+                  "field delta. status/blocked_by/next_chase_ts/receipt_refs/"
+                  "correlation_key can NEVER be PATCHed (they ride the transition "
+                  "oracle — naming one is a 422). Auth: X-API-Key or Bearer JWT."
+)
+def patch_task(
+    task_id: uuid.UUID,
+    payload: TaskPatchIn,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+):
+    """
+    Edit an item's mutable fields (audited).
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+        - task_id is a valid UUID (FastAPI 422s malformed ids)
+        - payload validates against TaskPatchIn (extra='forbid' rejects any
+          non-editable field at the wire — the hard no-oracle-bypass invariant)
+
+    Ensures:
+        - 422 when no editable field is set, an enum field is invalid, or
+          authority is not a valid enum member (every violation at once)
+        - 404 when the item does not exist
+        - 422 when the item is terminal (no edits to closed history)
+        - row-locked read (N3 parity) so the terminal check cannot be raced
+          by a concurrent ->done/->dropped transition
+        - field update + 'patched' event append are atomic (one transaction)
+        - returns { item, event } serialized
+    """
+    fields = payload.model_dump( exclude_unset=True, exclude={ "actor", "authority" } )
+
+    errors = list( rules.validate_patch( fields ) )
+    if payload.authority not in rules.VALID_AUTHORITIES:
+        errors.append( f"authority '{payload.authority}' must be one of {rules.VALID_AUTHORITIES}" )
+    _reject_if_errors( errors )
+
+    with get_db() as session:
+        repo = TaskRepository( session )
+        item = repo.get_by_id_for_update( task_id )
+        if item is None:
+            raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
+        if item.status in rules.TERMINAL_STATUSES:
+            _reject_if_errors( [ f"item is terminal ('{item.status}') — no edits to closed history" ] )
+
+        event = repo.apply_patch( item, fields, actor=payload.actor, authority=payload.authority )
+        return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
+
+
 @router.get(
     "/tasks",
     summary     = "Query task-store items",
@@ -398,6 +475,55 @@ def query_tasks(
         )
         tasks = [ _serialize_item( item ) for item in items ]
         return { "tasks": tasks, "count": len( tasks ) }
+
+
+@router.get(
+    "/tasks/events",
+    summary     = "Query the cross-item event stream",
+    description = "Fleet-wide audit (design backlog): the append-only event "
+                  "trail across ALL items, filtered by actor / transition / "
+                  "project / time range (since/until on event ts), newest "
+                  "first. Distinct from /tasks/{id}/events (one item). Declared "
+                  "BEFORE /tasks/{task_id} so the static path wins over the "
+                  "UUID path converter. Auth: X-API-Key or Bearer JWT."
+)
+def query_event_stream(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    actor      : Optional[str]      = None,
+    transition : Optional[str]      = None,
+    project    : Optional[str]      = None,
+    since      : Optional[datetime] = None,
+    until      : Optional[datetime] = None,
+    limit      : int = Query( default=100, ge=0, le=500 ),
+    offset     : int = Query( default=0, ge=0 ),
+):
+    # limit/offset bounds (cold-review N4 parity): an unbounded negative LIMIT
+    # is an authenticated 500 on Postgres — bound at the wire, cap result size.
+    """
+    Query the cross-item audit trail with exact-match + time-range filters.
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+        - since/until are ISO-8601 datetimes (FastAPI parses them; a malformed
+          value is a 422 request-validation error, surfaced by the framework)
+
+    Ensures:
+        - returns { events: [...], count } matching ALL provided filters
+        - ordered ts descending, stable tiebreak on id descending (newest first)
+    """
+    with get_db() as session:
+        repo   = TaskRepository( session )
+        events = repo.query_events(
+            actor      = actor,
+            transition = transition,
+            project    = project,
+            since      = since,
+            until      = until,
+            limit      = limit,
+            offset     = offset,
+        )
+        rows = [ _serialize_event( event ) for event in events ]
+        return { "events": rows, "count": len( rows ) }
 
 
 @router.get(

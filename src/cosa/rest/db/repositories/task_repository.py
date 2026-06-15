@@ -206,6 +206,49 @@ class TaskRepository( BaseRepository[TaskItem] ):
             reason = f"correlation_key: {old_key} -> {correlation_key}",
         )
 
+    def apply_patch(
+        self,
+        item      : TaskItem,
+        fields    : dict,
+        actor     : str,
+        authority : str,
+    ) -> TaskEvent:
+        """
+        Apply an ALREADY-VALIDATED item-field edit + append a 'patched' event.
+
+        Touches ONLY the editable presentation/ownership fields the caller set;
+        status / blocked_by / next_chase_ts / receipt_refs / correlation_key are
+        NEVER written here — they ride apply_transition / apply_correlation, so
+        the transition oracle is never bypassed (reviewer ruling 2026-06-15).
+
+        Requires:
+            - item is a TaskItem loaded in THIS session (row-locked by the
+              router, N3 parity) and NOT terminal (router-validated)
+            - fields keys are whitelist-validated editable field names
+              (router validated via task_store_rules.validate_patch); values
+              already wire-checked by the TaskPatchIn Pydantic model
+
+        Ensures:
+            - each provided field whose value differs is written onto the item
+            - exactly one TaskEvent appended: transition='patched',
+              receipt_refs=None, reason = the field delta ("k: old -> new; ...")
+              or a no-op marker when nothing actually changed (R3 — the edit is
+              auditable either way)
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        changes = [ ]
+        for key, new_value in fields.items():
+            old_value = getattr( item, key )                 # key is whitelist-validated, never arbitrary — fails loud if absent
+            if old_value != new_value:
+                setattr( item, key, new_value )
+                changes.append( f"{key}: {old_value!r} -> {new_value!r}" )
+
+        reason = "; ".join( changes ) if changes else "no-op patch (no field changed)"
+        return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=reason )
+
     def query_tasks(
         self,
         owner_persona       : Optional[str] = None,
@@ -266,6 +309,48 @@ class TaskRepository( BaseRepository[TaskItem] ):
             .order_by( TaskEvent.id )
             .all()
         )
+
+    def query_events(
+        self,
+        actor      : Optional[str] = None,
+        transition : Optional[str] = None,
+        project    : Optional[str] = None,
+        since      : Optional[datetime] = None,
+        until      : Optional[datetime] = None,
+        limit      : int = 100,
+        offset     : int = 0,
+    ) -> List[TaskEvent]:
+        """
+        The cross-item event stream (design backlog — Rick's fleet-wide audit):
+        the append-only trail across ALL items, filtered + newest-first.
+        Distinct from get_events, which is one item's trail.
+
+        Requires:
+            - each filter is None (no constraint) or an exact-match value;
+              since/until bound TaskEvent.ts inclusively
+            - limit/offset are non-negative ints
+
+        Ensures:
+            - returns events matching ALL provided filters (AND semantics)
+            - project filters via a join to the owning TaskItem — events carry
+              no project column of their own (one name, no denormalized copy)
+            - ordered by ts descending then id descending (newest first, stable
+              total order)
+            - paginated via limit/offset
+
+        Returns:
+            List of TaskEvent instances (may be empty)
+        """
+        query = self.session.query( TaskEvent )
+
+        if project is not None:
+            query = query.join( TaskItem, TaskEvent.item_id == TaskItem.id ).filter( TaskItem.project == project )
+        if actor is not None:      query = query.filter( TaskEvent.actor == actor )
+        if transition is not None: query = query.filter( TaskEvent.transition == transition )
+        if since is not None:      query = query.filter( TaskEvent.ts >= since )
+        if until is not None:      query = query.filter( TaskEvent.ts <= until )
+
+        return query.order_by( TaskEvent.ts.desc(), TaskEvent.id.desc() ).limit( limit ).offset( offset ).all()
 
     def _append_event(
         self,

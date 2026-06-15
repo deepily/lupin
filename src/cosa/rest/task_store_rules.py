@@ -305,6 +305,52 @@ def validate_transition(
     return errors
 
 
+# ---------------------------------------------------------------------------
+# Item-field edit rules (Phase 2.1 — PATCH /api/tasks/{id})
+# ---------------------------------------------------------------------------
+
+PATCH_EDITABLE_FIELDS = ( "title", "body", "priority", "owner_persona", "accountable_manager", "gate_class" )
+
+
+def validate_patch( fields: dict ) -> list:
+    """
+    Validate an item-field PATCH (Phase 2.1). `fields` is the dict of EDITABLE
+    fields the caller actually set (the router passes
+    model_dump(exclude_unset=True) minus actor/authority).
+
+    The forbidden fields — status / blocked_by / next_chase_ts / receipt_refs /
+    correlation_key — are excluded STRUCTURALLY by the TaskPatchIn model
+    (extra='forbid' → 422 at the wire) and never reach here: an item-PATCH can
+    NEVER bypass the transition oracle (reviewer ruling 2026-06-15).
+
+    Requires:
+        - fields is a dict of provided editable fields (may be empty)
+
+    Ensures:
+        - returns [] iff at least one editable field is set AND every provided
+          constrained field is valid:
+            title      - non-empty string (the column is NOT NULL)
+            priority   - member of VALID_PRIORITIES
+            gate_class - member of VALID_GATE_CLASSES
+          (body / owner_persona / accountable_manager are nullable free text —
+          a provided null clears them; no shape rule beyond the wire max_length)
+        - an empty patch (no editable field set) is rejected — a PATCH must
+          change something
+        - one error string per offending field; never raises
+    """
+    if not fields:
+        return [ f"patch must set at least one editable field {PATCH_EDITABLE_FIELDS}" ]
+
+    errors = [ ]
+    if "title" in fields and ( not isinstance( fields[ "title" ], str ) or not fields[ "title" ].strip() ):
+        errors.append( "title must be a non-empty string" )
+    if "priority" in fields and fields[ "priority" ] not in VALID_PRIORITIES:
+        errors.append( f"priority '{fields[ 'priority' ]}' must be one of {VALID_PRIORITIES}" )
+    if "gate_class" in fields and fields[ "gate_class" ] not in VALID_GATE_CLASSES:
+        errors.append( f"gate_class '{fields[ 'gate_class' ]}' must be one of {VALID_GATE_CLASSES}" )
+    return errors
+
+
 def quick_smoke_test():
     """
     Quick smoke test for task_store_rules — exercises every validator at the

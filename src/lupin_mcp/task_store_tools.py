@@ -171,6 +171,43 @@ def task_transition_impl(
     return task_store_request( "POST", f"/api/tasks/{task_id}/transition", api_base_url, api_key, json_body=payload )
 
 
+def task_correlate_impl(
+    api_base_url,
+    api_key,
+    actor,
+    task_id,
+    correlation_key,
+    authority = "standing",
+):
+    """
+    POST /api/tasks/{task_id}/correlate — re-stamp an item's correlation_key
+    (cross-session respawn adoption: a successor session ADOPTS an inherited
+    item by re-keying it onto its own harness id instead of forking a
+    duplicate). The server appends an audited 're-correlated' event (R3).
+
+    Requires:
+        - actor is the bridge-stamped identity ("<persona> <8-hex sid>"); the
+          CALLER (cosa_voice_mcp) stamps it — never a tool param, so a session
+          cannot impersonate (spec §2.1, same lane as task_transition's actor)
+        - task_id is the item's UUID string (a malformed id is the server's
+          reject to report, not ours — transport only)
+        - correlation_key is the new key to stamp (server validates 1..255)
+
+    Ensures:
+        - returns { item, event } (200 body) verbatim on success
+        - 404 surfaces "task {id} not found" verbatim
+        - 422 surfaces the server's detail VERBATIM (spec §2.2) — terminal
+          items (no re-keying closed history) and bad authority are the
+          server's reject, never pre-checked here
+    """
+    payload = {
+        "correlation_key" : correlation_key,
+        "actor"           : actor,
+        "authority"       : authority,
+    }
+    return task_store_request( "POST", f"/api/tasks/{task_id}/correlate", api_base_url, api_key, json_body=payload )
+
+
 def task_query_impl(
     api_base_url,
     api_key,

@@ -33,6 +33,7 @@ def session():
     mock = MagicMock()
     query = mock.query.return_value
     query.filter.return_value          = query
+    query.join.return_value            = query
     query.order_by.return_value        = query
     query.limit.return_value           = query
     query.offset.return_value          = query
@@ -327,6 +328,53 @@ def test_apply_correlation_from_null_key_names_none_in_audit( repo, session ):
 
 
 # ---------------------------------------------------------------------------
+# Phase 2.1 — apply_patch (item-field edit; never touches the oracle fields)
+# ---------------------------------------------------------------------------
+
+def test_apply_patch_writes_changed_fields_and_audits_delta( repo, session ):
+    item  = _item( title="old title", priority="P2" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "title": "new title", "priority": "P0" },
+        actor     = "krishna a38ee857",
+        authority = "standing",
+    )
+    assert item.title    == "new title"
+    assert item.priority == "P0"
+    assert item.status   == "in_progress"                     # status NEVER touched by a patch
+    assert event.transition   == "patched"
+    assert event.receipt_refs is None
+    assert "title: 'old title' -> 'new title'" in event.reason
+    assert "priority: 'P2' -> 'P0'" in event.reason
+    added = _added_instances( session, TaskEvent )
+    assert len( added ) == 1 and added[ 0 ] is event
+
+
+def test_apply_patch_skips_unchanged_fields_in_delta( repo ):
+    item  = _item( title="same", body="b0" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "title": "same", "body": "b1" },         # title unchanged, body changed
+        actor     = "a b",
+        authority = "standing",
+    )
+    assert "title:" not in event.reason                       # unchanged field omitted from the delta
+    assert "body: 'b0' -> 'b1'" in event.reason
+
+
+def test_apply_patch_no_change_records_noop_marker( repo ):
+    item  = _item( title="same" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "title": "same" },
+        actor     = "a b",
+        authority = "standing",
+    )
+    assert event.reason     == "no-op patch (no field changed)"
+    assert event.transition == "patched"
+
+
+# ---------------------------------------------------------------------------
 # get_events
 # ---------------------------------------------------------------------------
 
@@ -341,6 +389,68 @@ def test_get_events_filters_by_item_and_orders_ascending( repo, session ):
     session.query.assert_called_once_with( TaskEvent )
     query.filter.assert_called_once()
     query.order_by.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# query_events (cross-item stream)
+# ---------------------------------------------------------------------------
+
+def test_query_events_no_filters_skips_filter_and_join( repo, session ):
+    sentinel = [ TaskEvent( item_id=uuid.uuid4(), actor="a", transition="->queued" ) ]
+    query    = session.query.return_value
+    query.all.return_value = sentinel
+
+    result = repo.query_events()
+
+    assert result is sentinel
+    session.query.assert_called_once_with( TaskEvent )
+    query.filter.assert_not_called()
+    query.join.assert_not_called()
+    query.limit.assert_called_once_with( 100 )
+    query.offset.assert_called_once_with( 0 )
+    query.order_by.assert_called_once()
+
+
+def test_query_events_project_filter_joins_task_item( repo, session ):
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_events( project="lupin" )
+    query.join.assert_called_once()                          # project rides a join to TaskItem
+    assert query.filter.call_count == 1                      # the joined project == filter
+
+
+def test_query_events_applies_every_provided_filter( repo, session ):
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_events(
+        actor      = "krishna a38ee857",
+        transition = "queued->in_progress",
+        project    = "lupin",
+        since      = datetime( 2026, 6, 1, tzinfo=timezone.utc ),
+        until      = datetime( 2026, 6, 30, tzinfo=timezone.utc ),
+        limit      = 9,
+        offset     = 4,
+    )
+    query.join.assert_called_once()
+    assert query.filter.call_count == 5                      # project + actor + transition + since + until
+    query.limit.assert_called_once_with( 9 )
+    query.offset.assert_called_once_with( 4 )
+
+
+@pytest.mark.parametrize( "kwargs, expected_filters, expect_join", [
+    ( { "actor": "krishna a38ee857" }, 1, False ),
+    ( { "transition": "queued->done" }, 1, False ),
+    ( { "since": datetime( 2026, 6, 1, tzinfo=timezone.utc ) }, 1, False ),
+    ( { "until": datetime( 2026, 6, 30, tzinfo=timezone.utc ) }, 1, False ),
+    ( { "project": "lupin" }, 1, True ),
+    ( { "actor": "a", "transition": "queued->done" }, 2, False ),
+] )
+def test_query_events_filter_combinations( repo, session, kwargs, expected_filters, expect_join ):
+    query = session.query.return_value
+    query.all.return_value = [ ]
+    repo.query_events( **kwargs )
+    assert query.filter.call_count == expected_filters
+    assert query.join.called is expect_join
 
 
 if __name__ == "__main__":

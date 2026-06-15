@@ -18,6 +18,7 @@ from lupin_mcp.task_store_tools import (
     task_store_request,
     task_create_impl,
     task_transition_impl,
+    task_correlate_impl,
     task_query_impl,
 )
 
@@ -240,6 +241,51 @@ class TestTaskTransitionImpl:
             reason    = "superseded-by-rewrite",
         )
         assert calls[ "json" ][ "reason" ] == "superseded-by-rewrite"
+
+
+class TestTaskCorrelateImpl:
+
+    def test_payload_and_route( self, capture_request ):
+        body  = { "item": { "id": "abc" }, "event": { "transition": "re-correlated" } }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_correlate_impl(
+            BASE_URL, API_KEY,
+            actor           = "krishna a38ee857",
+            task_id         = "abc-def",
+            correlation_key = "cc-task:newsid:harness-7",
+        )
+        assert result == body
+        assert calls[ "method" ] == "POST"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def/correlate"
+        assert calls[ "json" ]   == {
+            "correlation_key" : "cc-task:newsid:harness-7",
+            "actor"           : "krishna a38ee857",
+            "authority"       : "standing",
+        }
+
+    def test_authority_passes_through( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_correlate_impl(
+            BASE_URL, API_KEY,
+            actor           = "krishna a38ee857",
+            task_id         = "abc",
+            correlation_key = "corr-9",
+            authority       = "manager_relay",
+        )
+        assert calls[ "json" ][ "authority" ] == "manager_relay"
+
+    def test_422_terminal_item_surfaces_detail_verbatim( self, capture_request ):
+        # No re-keying closed history: the terminal-item reject is the SERVER's
+        # 422 (one rules home) — transport carries its words unedited.
+        detail = "cannot re-correlate a terminal item (status=done)"
+        capture_request( FakeResponse( 422, json_body={ "detail": detail } ) )
+        result = task_correlate_impl(
+            BASE_URL, API_KEY,
+            actor           = "krishna a38ee857",
+            task_id         = "abc",
+            correlation_key = "corr-9",
+        )
+        assert result == { "status": "error", "http_status": 422, "detail": detail }
 
 
 class TestTaskQueryImpl:
