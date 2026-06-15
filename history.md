@@ -2,6 +2,19 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.15 - Session a38ee857 (Krishna 🦚) | Task-store Phase 2.1 — backlog A–E complete (held), integration-verified
+
+**Accomplishments**:
+- **Flipped `task_store.enabled` on** (`~/.claude/settings.json`) — the harness Task*→store mirror is now LIVE on :7999 (a deliberate no-op since the Phase-2 merge until opted in).
+- **Built the full Phase 2.1 backlog A–E**, each reviewer-APPROVED at 100% lines+branches (fresh-critical reviews coordinated via Tiberius 👑): **A** `task_correlate` MCP tool (transport impl + `@mcp.tool` registration); **B** `PATCH /api/tasks/{id}` item-edit (`extra='forbid'` blocks status/blocked_by/next_chase_ts/receipt_refs/correlation_key at the wire — PATCH never bypasses the transition oracle); **C** `GET /api/tasks/events` cross-item event stream (static route declared before `/tasks/{id}`); **D** explicit legal-transition graph (behavior-preserving; `from_status` guard returns a data error, never a KeyError) + a programmatic mirror-edge regression off the live hook's `STATUS_TRANSITIONS`; **E** `next_chase_ts` chase consumer (`task_chase_consumer.py` — daemon, flag-OFF default, never auto-transitions) + read-only `stall_report` (store-derived I4).
+- **Scheduled + triaged the :8000 integration suite**: first run surfaced 17 failures — root-caused 100% to a missing `notifications.direction` column from a parallel session's (Mr. Radio 🦉) in-flight migration, NOT task-store (task-store integration was 14/14 green). Re-ran after Mr. Radio applied `c3d4e5f6a7b8` → **323 passed / 0 failed / 0 errors** GREEN.
+- **Reconciled the `cosa_voice_mcp.py` 3-way hotspot owner-by-owner** with Mr. Radio's `dm_send` stream: his package committed first (`ba0ce800`), my `task_correlate` registration stacked additively on top (zero `dm_send` leftovers in my delta).
+- **Deferred to Phase 2.2**: Item F (T4 DM auto-create — blocked on the unresolved acked-ledger-scope ruling) + the hook-marker I4 variant (server reading hook-lane flag-once files = fragile cross-lane coupling).
+
+**Files**: four held commits on `wip-v0.1.8` (NOT pushed — Rick's gate): `0ca22758` (A-transport + C + B), `ba215439` (D + E + D-delta guard), `67401eb9` (A registration + shared README row) — interleaved with Mr. Radio's `ba0ce800` (dm_send). New code: `src/cosa/rest/task_chase_consumer.py`; 3 chase INI keys in `lupin-app.ini` `[Lupin: Baseline]` + splainer. Doc of record: `src/rnd/v0.1.8/2026.06.15-task-store-phase2.1/01-build-plan.md`. Resume memento: `io/mementos/krishna-phase2.1-complete-resume-2026.06.15.md`.
+
+---
+
 ### 2026.06.13 - Session ccbb1cca (Mr. Radio 🦉) | cosa-voice DM token-bloat — Phase 1 design serialized (body-in-push, ~18× cut) + crash recovery
 
 **Accomplishments**:
