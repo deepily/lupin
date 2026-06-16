@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.16 - Session f33b0f62 (Mr. Radio 🦉) | cosa-voice notification-native CUTOVER + reap-tombstone roster-eviction fix + task-store operationalize
+
+**Accomplishments**:
+- **Drove the cosa-voice notification-native CUTOVER**: a fresh-critical reviewer returned GREEN on the Phase-4 legacy commons-DM comment-out (`5ce5dba5`) → courtesy queue-check (todo/run = 0) → bounced `:7999` + Rick restarted the MCP servers. Verified post-cutover route table: `/api/notify-peer` live, `/api/commons/register-question` gone, broadcasts + presence still live, `commons_send_to` deregistered from the tool surface. Fleet now on `dm_send` end-to-end.
+- **Managed the reap-tombstone roster-eviction fix** (Clayton 😎 root-cause + serialized plan → Tiffany 💍 build → Clayton fresh-critical reproduce-not-trust review): a reaped session lingered in the arbiter Fleet-Status roster as "stale 32m" instead of evicting (Rick-reported). Fix = authoritative `EVENT_KIND_REAPED` tombstone emitted by `dismiss_sessions` on the event rail the arbiter already polls + off-axis `reaped` bucket → `verdict=offline` → existing `prune_offline_rows` evicts in ~1 poll. Held `08ca99a4`, 4 additive edits, 100% L/B/F on all 4 changed modules, 504 tests / 0 regressions, reviewer GREEN. Distinguishes reaped-dead (evict now) from idle-alive (stale tag OK).
+- **Operationalized the task-store** (Krishna 🦚): live E2E-verified all 4 MCP task tools GREEN (probe `c5ba4603`); automated wrapper-layer suite `TestTaskStoreWrapperE2E` (`ab40b62b`, green on :8000 `ts-49c3cb37`) + adoption-gaps inventory (`5b5e5c08`) held; 30/30 edge matrix + 4 receipts handed to María for the conventions doc.
+- **Identified a cutover regression I own**: the Phase-4 comment-out broke **12 integration tests** (`commons_ask_async_push` ×7 + `dm_integration_live` ×5) — they exercise the intentionally-retired legacy commons-DM path. Deferred to next session per Rick's session-end broadcast; classification brief (retired-path skip/update vs real break) captured in Krishna's memento.
+
+**Held + PUSHED this session** (per Rick's session-end broadcast — push + backup authorized for Mr. Radio): `ab40b62b`, `08ca99a4`, `5b5e5c08` (+ Tiberius's held `69893db0`). README v0.1.8 rollup row left UNcommitted for María's global rollup. New memory: `feedback_arbiter_bounce_manager_authority` (bouncing :8001 after a green review is the manager's own authority). Crew (Clayton/Krishna/Tiffany) reaped with mementos. **Pending next session:** the 12 integration failures · `/api/notify-peer` → `dm_send`-aligned rename · commons polling-tool audit · full-removal of the commented legacy commons-DM path.
+
 ### 2026.06.15 - Session 895f0a7b (Tiberius 👑) | GCP-M2 cloud bring-up VALIDATED (keys→/login→Phase-G) + reproducible auto-migrate
 
 **Accomplishments**:

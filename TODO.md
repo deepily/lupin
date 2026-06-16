@@ -1,5 +1,18 @@
 # TODO
 
+## ▶ NEXT SESSION (Mr. Radio 🦉 session f33b0f62 end — 2026-06-16) — cosa-voice CUTOVER landed + reap-tombstone fix shipped
+
+**Pending (cosa-voice token-reduction engagement):**
+- [ ] **[LUPIN] 12 integration failures** from the Phase-4 commons-DM comment-out (`5ce5dba5`): `test_commons_ask_async_push_integration.py` ×7 + `test_dm_integration_live.py` ×5. Classify each: (i) retired-path assertion → skip/update citing 5ce5dba5, vs (ii) real break → fix. Selective-stage only those files. Brief in `io/mementos/krishna-task-store-operationalize-resume-2026.06.15.md`.
+- [ ] **[LUPIN] `/api/notify-peer` → `dm_send`-aligned rename** (one-name doctrine; e.g. `/api/dm-send`). Discuss + execute.
+- [ ] **[LUPIN] commons polling-tool audit**: now directed DMs use `dm_send`, are `commons_ask_async`/`ask_sync` polling-mode (+ `commons_read` token cost) still used? Retire if dead — further token win.
+- [ ] **[LUPIN] Full-removal pass** of the commented-out legacy commons-DM machinery (after cutover soak + zero-hit telemetry). Includes `heartbeat_poker`/`cascade_heartbeat_scheduler` still referencing the now-404 `register-question`.
+- [ ] **[LUPIN] Task-store adoption gaps** (Krishna `5b5e5c08` inventory): gap A discoverability (recommend close-now); gaps E chase-flag + F write-scope = Rick decisions.
+
+**Landed + pushed this session:** cosa-voice notification-native cutover (bounce :7999 + MCP reload), reap-tombstone roster-eviction `08ca99a4`, task-store wrapper suite `ab40b62b` + adoption-gaps `5b5e5c08`; branch `wip-v0.1.8` pushed + backed up; crew reaped with mementos.
+
+---
+
 ## ▶ NEXT SESSION (cleared restart — Rick's end-of-session directive, broadcast 59f2d129, 2026-06-12 18:00 EDT)
 
 **Seed memento**: `io/mementos/tiberius-session-resume-2026.06.12-endofsession.md` (read END TO END on boot).
@@ -338,11 +351,13 @@ Filed 2026-06-03 by Sam 🎙️ at Rick's session-end request.
 
 **Messaging plane — follow-on (deferred design decision):**
 - [ ] **[LUPIN] Lever B comprehensive sweep** — revisit moving ALL remaining sync DB/file I/O off the event loop (beyond the surgical hot-handler fix), after measuring whether colder paths still stall under load. Deferred per Rick 2026-06-02; surgical fix lands first.
+- [ ] **[LUPIN] Full-REMOVAL of the legacy commons-DM path (revisit-later)** — note-to-revisit per Rick's 2026-06-15 ruling (comment-out now, full-delete deferred). After the dm_send cutover has soaked and telemetry shows zero legacy-path hits, DELETE the commented-out machinery: `commons_send_to`, `ask_async`/`ask_sync` DM-mode, `register-question` + `CommonsQuestionWatcher` + main.py lifespan, the 2 legacy listener handlers. KEEP polling-mode + broadcasts + presence + `_handle_broadcast_received`. Prereq already handled at comment-out time: arbiter `make_dm_push_fn` migrated to `/api/notify-peer`. Design: `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md`.
 
 ## Decisions Log
 
 > ADR-lite: `YYYY-MM-DD — decision → ruling. Why: …`. Appended by `/plan-decide` and ad-hoc.
 
+- 2026-06-15 — `/plan-decide` walkthrough (4 rulings, Rick; cosa-voice notification-native engagement). Pre-walkthrough: commit-scope → **A (cosa-voice cluster, exclude task-store)**; landed held `ba0ce800` (32 files, 512 unit green), Krishna's `task_correlate` stacked `67401eb9` (held). Phase-4 reversed from full-delete to **comment-out + note-to-revisit** (Rick, direct voice). The 4: (1) **Phase-4 comment-out → EXECUTE NOW, keep Rachel** (overruled my defer rec). (2) **Bug #9 trailing-truncation → VALIDATE-FIRST** then apply the trailing-`\n` only if empirically proven (root cause is outside our repo; affects both paths). (3) **Cutover (retire legacy commons path, crew→dm_send) → THIS SESSION after comment-out lands** — Rick's word authorizes the gated :7999 bounce + MCP reload (overruled my off-peak-defer rec). (4) **Phase-3 Step-3 voice-in `direction=human_to_ai` tag → DO NOW** (finish the direction model). Push remains Rick's gate; nothing pushed.
 - 2026-06-10 — `/plan-decide` walkthrough (5 rulings, Rick): (1) GCP gated batch → **GO now** (ADC re-auth Rick's hands; Rio executes runbook §9). (2) Arbiter Option B host-systemd → **CONFIRMED** (veto window closed). (3) Arbiter live-push key → **MOOT** — already reads `~/.lupin/config` via config_loader (06-09 design); resolver verified True on this box; the `LUPIN_ARBITER_NOTIFY_API_KEY` env-var TODO entry was STALE. Rick caught it. (4) `systemctl --user restart lupin-arbiter-app` allow-rule → **YES**; Rick adding via /permissions (paste: `Bash(systemctl --user restart lupin-arbiter-app:*)`, project-local scope). (5) Manager-TODO oracle practice → **RATIFIED** (per-session artifact + María's PostToolUse(TodoWrite) hook mirror; blocked_on + next-chase; fail-open + flag-once).
 - 2026-06-10 — Multiplexer sprint integration rulings (Tiberius): transport flat-frame fix + auth_success frame-shape ownership → Lane A (Cheech); Lane E's websocket.py:509 mirror dropped. All new stores join createStores() at boot-wiring. FocusTrayRenderer → RETIRED (strip focus supersedes; clean removal diff). WP9 cold-reload hydration → Lane B follow-on post-A-merge. Lane D recipient-refresh ← subscribes `store_session_strip_changed` (no new event).
 - 2026-06-10 — GCP-M2 arbiter ride-along → Option B: host `systemd --user` on the VM (NOT a compose service). Why: lupin image ships no docker CLI (arbiter shells out to `docker inspect`), zero heavy deps in the import chain, truest out-of-band, mirrors local prod :8001. Ratified by Tiberius (manager-level, Rick veto window open); condition: host-side prereqs scripted, not tribal. Rio's plan doc: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.10-m2-arbiter-ride-along-and-vm-cutover.md`.
