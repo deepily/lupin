@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.15 - Session 895f0a7b (Tiberius 👑) | GCP-M2 cloud bring-up VALIDATED (keys→/login→Phase-G) + reproducible auto-migrate
+
+**Accomplishments**:
+- **GCP-M2 cloud-test stack VALIDATED end-to-end** (collaborative with Rick over IAP; agent ran all verification — user never tested): guided provider-keys SCP (hit + documented the **1001-owned-dest** gotcha → `/tmp` staging + `sudo cp`/`chown`), `docker restart` model-server → **healthy** (3 models on cuda:0, 0 errors), and proved the Claude **`/login` OAuth** (`claude -p` → `CLOUD OAUTH OK`). Phase G scorecard green: REST/health · model-server · GPU L4 · **Cloud-SQL round-trip (17 tables)**. D1 confirmed (`CLAUDE_CODE_OAUTH_TOKEN` empty in running container).
+- **Authored 2 deployment runbooks** in `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`: `2026.06.15-vm-connectivity-and-claude-login-runbook.md` + the comprehensive **`2026.06.15-new-deployer-runbook-gcp-cloud-test.md`** (6 live gotchas). Added the **IAP-tunnel browser access + −1000 port convention** (dev 7999 → cloud-test localhost 6999).
+- **Discovered + fixed a real model↔migration DRIFT bug**: `User.is_protected` (model) had no migration → user-seeding failed on any migration-bootstrapped DB. Wrote migration `d4e5f6a7b8c9`; a fleet crew then made it **idempotent (inspector-guarded)** after reproducing a boot-crash (dev DB has the column via `schema.sql` baseline but stamped one revision behind → blind `add_column` = `DuplicateColumn`).
+- **Spawned 3 visible fleet crews** (per Rick's preference): (1) test-debt fixes — `voice_injection_e2e ×3` + `io-models→io_models` rename (unblocks cosa-suite collection); (2) `dm_send`/`notify_peer` one-name rename **build plan** (`src/rnd/v0.1.8/2026.06.15-dm-send-rename/`); (3) **reproducible auto-migrate** — `env.py` resolves DB URL via the app's `database.py` (one source of truth), programmatic `alembic upgrade head` on startup (`src/cosa/rest/db/auto_migrate.py`, idempotent + fail-loud, no `alembic.ini`-in-container dep), + `src/scripts/check_schema_parity.py` drift checker. 43 tests, 100% cov on new code.
+
+**Held this session (my checkpoint — NOT pushed, NO backup per Rick's broadcast):** the 2 runbooks + `d4e5f6a7b8c9` migration + auto-migrate feature (`env.py`, `auto_migrate.py`, `main.py` lifespan, parity script + tests) + test-debt fixes + dm-send-rename docs. New memories: `feedback_reproducible_no_manual_patch_or_test`, `reference_test_ports_minus_1000`. **Rick gates remaining:** apply migrations on cloud via the new auto-migrate (reproducible, no hand-ALTER), full CJ-Flow bounded-CC job (follow-up), push.
+
 ### 2026.06.15 - Session 3ab96a04 (Tiberius 👑) | GCP-M2 GPU-stockout schedule fix + managed task-store 2.1 & TTS-rider landings
 
 **Accomplishments**:

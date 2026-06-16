@@ -436,6 +436,17 @@ async def lifespan( app: FastAPI ):
     app_verbose = config_mgr.get( "app verbose", default=False, return_type="boolean" )
     app_silent  = config_mgr.get( "app silent",  default=True,  return_type="boolean" )
 
+    # Auto-migrate the database to the latest Alembic head BEFORE anything
+    # touches it. Reproducible + hands-off: the human never runs SQL/ALTER by
+    # hand (Rick's rule). Idempotent (no-op at head) and FAIL-LOUD — a migration
+    # error MUST abort boot, never serve a half-migrated schema. Runs once per
+    # process start. URL is resolved by the migrations' env.py via the app's own
+    # get_database_url builder, so it connects exactly like the app in every env.
+    from cosa.rest.db.auto_migrate import run_migrations_to_head
+    print( "Running database auto-migration (alembic upgrade head)..." )
+    run_migrations_to_head( debug=app_debug )
+    print( "✓ Database schema is at migration head." )
+
     # Suppress LanceDB cosmetic warnings if configured
     # These warnings are non-functional - queries execute correctly regardless
     # Warnings occur when using .search() for metadata filtering (not vector similarity)
