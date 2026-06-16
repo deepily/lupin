@@ -161,6 +161,8 @@ def build_fleet_arbiter_job_factory(
     # Item B (2026.06.11 receipts design): the delivery-receipt seams + knobs,
     # threaded verbatim to the job. None seams keep their tier inert.
     dm_push_fn           : Optional[ Callable ] = None,
+    tmux_push_fn         : Optional[ Callable ] = None,   # Thread C+D host-side tmux wake hop
+    poke_wake_mechanism  : str                  = "tmux", # Thread C+D wake-surface selector (default tmux)
     live_retry_fn        : Optional[ Callable ] = None,
     outreach_ack_window  : int                  = 900,
     reannounce_interval  : int                  = 300,
@@ -205,6 +207,8 @@ def build_fleet_arbiter_job_factory(
             manager_stale_poke_threshold_seconds = manager_stale_poke_threshold,   # post-game F2
             manager_stale_poke_max_age_seconds   = manager_stale_poke_max_age,     # corpse ceiling
             dm_push_fn                  = dm_push_fn,                              # Item B §3.3
+            tmux_push_fn                = tmux_push_fn,                            # Thread C+D host-side tmux wake
+            poke_wake_mechanism         = poke_wake_mechanism,                     # Thread C+D wake selector
             lineage_carry_path          = lineage_carry_path,                      # F-A lineage carry
             live_retry_fn               = live_retry_fn,                           # Item B §3.5
             outreach_ack_window_seconds = outreach_ack_window,

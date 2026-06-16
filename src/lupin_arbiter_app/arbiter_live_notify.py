@@ -388,6 +388,90 @@ def make_dm_push_fn(
     return dm_push
 
 
+# ── the TMUX-push wake hop (Thread C+D — host-side direct injection) ──────────
+
+def _default_tmux_resolve( session_id ):   # pragma: no cover - host-side bridge IO boundary
+    """Real bridge probe: session_id → bridge dict (or None). No-cover; the seam is injected in tests."""
+    from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
+    return find_session_by_id( session_id )
+
+
+def _default_tmux_inject( session_id, text, wrap ):   # pragma: no cover - host-side tmux IO boundary
+    """Real wake injector: reuse the existing inject_qualifier_via_tmux primitive (send-keys + Enter)."""
+    from lupin_cli.claude_code.hooks.lib.hook_common import inject_qualifier_via_tmux
+    inject_qualifier_via_tmux( session_id, text, wrap=wrap )
+
+
+def _default_peer_dm_reminder( body, persona, icon, msg_id, thread_id ):   # pragma: no cover - host-side framing import
+    """Real envelope: reuse the SHARED build_peer_dm_reminder so the woken pane frames it identically to a peer DM."""
+    from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
+    return build_peer_dm_reminder( body, persona=persona, icon=icon, msg_id=msg_id, thread_id=thread_id )
+
+
+def make_tmux_push_fn(
+    *,
+    sender_persona : str                  = "heartbeat-arbiter",
+    sender_icon    : Optional[ str ]      = "🛰️",
+    resolve_fn     : Optional[ Callable ] = None,
+    inject_fn      : Optional[ Callable ] = None,
+    reminder_fn    : Optional[ Callable ] = None,
+    log_fn         : Optional[ Callable ] = None,
+) -> Callable[ [ str, str, str ], dict ]:
+    """
+    Build the host-side TMUX wake seam: tmux_push( session_id, thread_id, body )
+    -> dm_push-channel outcome dict.
+
+    The arbiter app is host-side (systemd --user, same uid as the CC tmux
+    server), so it can reach a dormant pane's tmux socket directly. This seam
+    WAKES that pane by reusing the existing inject_qualifier_via_tmux primitive
+    (resolve tmux from the bridge → send-keys -l … Enter, UNCONDITIONALLY — no
+    EVENT_IDLE gate). That is the whole point of Thread C+D: bypass the
+    listener's buffer-vs-inject gate that drops the arbiter poke for a
+    stale/owed or an idle-but-EVENT_IDLE-never-emitted manager.
+
+    Requires:
+        - resolve_fn (if given) is session_id -> bridge dict | None (test seam;
+          default the real find_session_by_id bridge probe)
+        - inject_fn (if given) is ( session_id, text, wrap ) -> None (test seam;
+          default the real inject_qualifier_via_tmux)
+        - reminder_fn (if given) is ( body, persona, icon, msg_id, thread_id ) ->
+          framed text (test seam; default the real build_peer_dm_reminder)
+
+    Ensures:
+        - a resolvable bridge WITH a tmux_session → frame body as a peer-DM
+          <system-reminder> (wrap=False, verbatim) + inject → outcome "dispatched"
+        - no bridge / no tmux_session → outcome "push_unavailable" (the
+          degrade-safe signal that lets _emit_dm fall back to dm_push_fn, rider a)
+        - ANY exception (bridge read, framing, inject) → outcome
+          "push_unavailable" with detail — NEVER raises
+        - logs `tmux_push_attempted` with the outcome on every call
+    """
+    log_fn   = log_fn   if log_fn   is not None else _default_log_fn
+    resolve  = resolve_fn  if resolve_fn  is not None else _default_tmux_resolve
+    inject   = inject_fn   if inject_fn   is not None else _default_tmux_inject
+    reminder = reminder_fn if reminder_fn is not None else _default_peer_dm_reminder
+
+    def tmux_push( session_id: str, thread_id: str, body: str ) -> dict:
+        try:
+            bridge       = resolve( session_id )
+            tmux_session = bridge.get( "tmux_session" ) if isinstance( bridge, dict ) else None
+            if not tmux_session:
+                outcome = { "channel": "dm_push", "outcome": "push_unavailable",
+                            "detail": "no tmux_session in bridge" }
+            else:
+                framed = reminder( body, sender_persona, sender_icon, thread_id, thread_id )
+                inject( session_id, framed, False )
+                outcome = { "channel": "dm_push", "outcome": "dispatched" }
+        except Exception as e:
+            outcome = { "channel": "dm_push", "outcome": "push_unavailable",
+                        "detail": str( e )[ :160 ] }
+        log_fn( "tmux_push_attempted", session_id=session_id,
+                thread_id=thread_id, outcome=outcome[ "outcome" ] )
+        return outcome
+
+    return tmux_push
+
+
 # ── the literal urllib IO boundaries ─────────────────────────────────────────
 
 def _http_post( url, headers, timeout_seconds=5 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)

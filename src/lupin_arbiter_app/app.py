@@ -212,6 +212,7 @@ def assemble_app(
     live_notify_fn : Optional[ Callable ]           = None,
     live_retry_fn  : Optional[ Callable ]           = None,
     dm_push_fn     : Optional[ Callable ]           = None,
+    tmux_push_fn   : Optional[ Callable ]           = None,   # Thread C+D host-side tmux wake hop
     log_fn         : Optional[ Callable ]           = None,
     clock          : Optional[ Any ]                = None,
 ) -> FastAPI:
@@ -301,6 +302,11 @@ def assemble_app(
         # runtime (PATH MANAGEMENT) — file-backed so re-announce survives both
         # the 12h recycle and a service restart.
         dm_push_fn           = dm_push_fn,
+        tmux_push_fn         = tmux_push_fn,
+        # Thread C+D: the wake-surface selector. Default "tmux" (host-side direct
+        # inject, wakes a dormant pane) — load-bearing now that the internal
+        # self-poke is confirmed broken; "dm" reverts to notify-peer-only.
+        poke_wake_mechanism  = cfg.get( "arbiter poke wake mechanism", default="tmux" ) or "tmux",
         live_retry_fn        = live_retry_fn,
         outreach_ack_window  = int( cfg.get( "arbiter outreach ack window seconds", default=900, return_type="int" ) ),
         reannounce_interval  = int( cfg.get( "arbiter outreach reannounce interval seconds", default=300, return_type="int" ) ),
@@ -371,8 +377,11 @@ def _lineage_carry_path( cfg ):
 
 def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal external IO boundary (config, env credential, urllib)
     """
-    Build the best-effort :7999 outreach hops (2026.06.11 receipts design):
-    ( live_notify_fn, live_retry_fn, dm_push_fn ) — each None when unavailable.
+    Build the best-effort outreach hops (2026.06.11 receipts design + Thread C+D):
+    ( live_notify_fn, live_retry_fn, dm_push_fn, tmux_push_fn ) — the first three
+    are the :7999 hops (each None when unavailable); tmux_push_fn is the host-side
+    wake hop, ALWAYS built (independent of the :7999 api_key) and returned in every
+    path.
 
     The IO boundary for the :7999 hops: reads the gating INI knobs + the
     X-API-Key from `~/.lupin/config` (canonical cosa.utils.config_loader) and
@@ -395,18 +404,25 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
     """
     from cosa.utils.config_loader import get_api_config, load_api_key
     from lupin_arbiter_app.arbiter_live_notify import (
-        make_notify_transport, make_live_notify_fn, make_dm_push_fn,
+        make_notify_transport, make_live_notify_fn, make_dm_push_fn, make_tmux_push_fn,
         resolve_arbiter_api_key, validate_live_notify_target, _default_log_fn,
     )
 
+    # Thread C+D: the host-side tmux wake hop is INDEPENDENT of the :7999 live-
+    # notify-to-Rick hop and its api_key — it reaches peer panes' tmux directly.
+    # Build it unconditionally (returned in EVERY path); the
+    # `arbiter poke wake mechanism` selector (read in assemble_app) decides
+    # whether _emit_dm actually uses it.
+    tmux_push_fn = make_tmux_push_fn()
+
     if not cfg.get( "arbiter live notify enabled", default=True, return_type="boolean" ):
         _default_log_fn( "live_notify_disabled", reason="arbiter live notify enabled = false" )
-        return None, None, None
+        return None, None, None, tmux_push_fn
 
     config_env = cfg.get( "arbiter live notify config env", default="development" ) or "development"
     api_key    = resolve_arbiter_api_key( get_api_config, load_api_key, env=config_env )
     if not api_key:
-        return None, None, None   # resolver already logged live_notify_disabled with the cause
+        return None, None, None, tmux_push_fn   # resolver already logged live_notify_disabled with the cause
 
     base_url     = cfg.get( "arbiter live notify url", default="http://127.0.0.1:7999" ) or "http://127.0.0.1:7999"
     target_user  = cfg.get( "arbiter live notify target user", default="" ) or ""
@@ -432,14 +448,14 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
                           f"ARBITER MISCONFIGURED — live push to Rick is DISABLED: {target_error}" )
         except Exception as e:
             _default_log_fn( "escalation_post_error", error=str( e ) )
-        return None, None, dm_push_fn
+        return None, None, dm_push_fn, tmux_push_fn
 
     transport = make_notify_transport(
         base_url=base_url, target_user=target_user, sender_id=sender_id,
         api_key=api_key, timeout_seconds=timeout,
     )
     return ( make_live_notify_fn( transport, dedup_window_seconds=dedup_window ),
-             transport, dm_push_fn )
+             transport, dm_push_fn, tmux_push_fn )
 
 
 def create_production_app() -> FastAPI:   # pragma: no cover - literal external construction (config, gateway)
@@ -454,9 +470,10 @@ def create_production_app() -> FastAPI:   # pragma: no cover - literal external 
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
     cfg     = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
     gateway = LupinArbiterGateway.from_environment( sender_session_id="lupin-arbiter-app-8001" )
-    live_notify_fn, live_retry_fn, dm_push_fn = _build_arbiter_outreach_hops( cfg, gateway )
+    live_notify_fn, live_retry_fn, dm_push_fn, tmux_push_fn = _build_arbiter_outreach_hops( cfg, gateway )
     return assemble_app( cfg, gateway, live_notify_fn=live_notify_fn,
-                         live_retry_fn=live_retry_fn, dm_push_fn=dm_push_fn )
+                         live_retry_fn=live_retry_fn, dm_push_fn=dm_push_fn,
+                         tmux_push_fn=tmux_push_fn )
 
 
 # Module-level loop-less ASGI entrypoint (safe to import; used by /health-only boots

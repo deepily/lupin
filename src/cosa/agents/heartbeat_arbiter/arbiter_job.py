@@ -272,6 +272,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # default None/inert so legacy in-pool construction is unchanged; the
         # :8001 factory wires the real hops.
         dm_push_fn               : Optional[ Callable ] = None,   # §3.3 manager wake hop (persona, thread_id, body) -> outcome
+        tmux_push_fn             : Optional[ Callable ] = None,   # Thread C+D wake hop: host-side tmux inject (session_id, thread_id, body) -> outcome
+        poke_wake_mechanism      : str                  = "tmux", # Thread C+D: "tmux" (direct host-side inject; wakes a dormant pane) | "dm" (notify-peer only; buffered for a non-idle pane)
         live_retry_fn            : Optional[ Callable ] = None,   # §3.5 dedup-BYPASSING live transport for re-announce
         outreach_ack_window_seconds : int               = 900,    # §3.4 manager threaded-ack window
         reannounce_interval_seconds : int               = 300,    # §3.5 Rick re-announce cadence
@@ -466,6 +468,24 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # an inert tier is VISIBLE per-outreach as outcome "disabled" (dm_push) or
         # by the absence of re-announce results (ledger path None).
         self._dm_push_fn                 = dm_push_fn
+        # Thread C+D wake hop: the host-side tmux-inject seam + its mechanism
+        # selector. "tmux" (default) wakes a dormant pane via the host-side
+        # inject_qualifier_via_tmux primitive, BYPASSING the listener's
+        # EVENT_IDLE buffer gate (the non-wake root cause — a stale/owed or an
+        # idle-but-EVENT_IDLE-never-emitted session is buffered, never drained).
+        # With the INTERNAL self-poke (stop.py decision:block) confirmed broken
+        # (pokes log but never effect a continuation turn — filed separately,
+        # P1), this EXTERNAL tmux-wake is the PRIMARY fleet liveness path, not a
+        # fallback. "dm" keeps the notify-peer-only path. A malformed value
+        # coerces to the default "tmux" with a LOUD log — a typo must not
+        # silently change wake behavior (mirrors arbiter_bootstrap's guard).
+        self._tmux_push_fn               = tmux_push_fn
+        _mechanism = str( poke_wake_mechanism ).strip().lower()
+        if _mechanism not in ( "tmux", "dm" ):
+            self._log_fn( "poke_wake_mechanism_coerced",
+                          requested=poke_wake_mechanism, coerced_to="tmux" )
+            _mechanism = "tmux"
+        self._poke_wake_mechanism        = _mechanism
         self._live_retry_fn              = live_retry_fn
         self.outreach_ack_window_seconds = outreach_ack_window_seconds
         self.reannounce_interval_seconds = reannounce_interval_seconds
@@ -882,18 +902,30 @@ class ArbiterConsumerJob( AgenticJobBase ):
                   session_id=None, expects_ack=False, attempt=1 ):
         """
         Emit one persona-bound DM: the durable dm-<persona> board write PLUS the
-        best-effort §3.3 push hop (register-question → commons_question_received →
-        listener tmux injection — the recipient WAKES; root-cause R6 was the
-        arbiter never invoking it). Journals one result per channel.
+        best-effort wake push hop. Journals one result per channel.
+
+        The wake push hop is mechanism-selected (Thread C+D, INI
+        `arbiter poke wake mechanism`, default "tmux" — load-bearing, not a
+        preference):
+        - "tmux" + a tmux_push_fn + a session_id → host-side tmux injection
+          (inject_qualifier_via_tmux) that WAKES a dormant pane, BYPASSING the
+          listener's EVENT_IDLE buffer gate. This is the PRIMARY fleet liveness
+          path now that the internal self-poke (stop.py decision:block) is
+          confirmed broken (filed separately, P1). On a tmux/bridge-unavailable
+          outcome it degrades to the dm_push_fn hop (rider a).
+        - "dm" (or tmux selected with no tmux seam / no session_id) → the
+          notify-peer dm_push_fn hop (register-question-era §3.3 path).
 
         Ensures:
             - the board write stamps outreach_id + question_id metadata (the
               threading key a replying recipient names in in_reply_to) +
               expects_ack; a resend (attempt > 1) derives a fresh question_id
               "<outreach_id>-r<attempt>" so the push registration never 409s
+            - the durable board write runs UNCONDITIONALLY, before the push-hop
+              selection, so the poke is never lost regardless of mechanism/outcome
             - dm channel outcome: posted | post_error; dm_push channel outcome:
-              the hop's own (dispatched / registered_no_push / push_unavailable)
-              or "disabled" when no hop is wired — every case journaled
+              the hop's own (dispatched / push_unavailable) or "disabled" when no
+              hop is wired — every case journaled
             - expects_ack=True (manager-bound, first attempt) registers the
               outreach in the awaiting-ack tracker for §3.4 receipt polling
             - never raises
@@ -908,14 +940,28 @@ class ArbiterConsumerJob( AgenticJobBase ):
         except Exception as e:
             dm_outcome = { "channel": "dm", "outcome": "post_error", "detail": str( e )[ :160 ] }
         self._log_outreach_result( outreach_id, kind, persona, dm_outcome, attempt=attempt )
-        if self._dm_push_fn is not None:
+        # Push hop — Thread C+D mechanism-selected, degrade-safe. The durable
+        # board write above already ran UNCONDITIONALLY, so the poke is never
+        # lost no matter which push channel is chosen or whether it lands.
+        def _call_push( fn, *push_args ):
             try:
-                push_outcome = self._dm_push_fn( persona, qid, body )
+                return fn( *push_args )
             except Exception as e:
-                push_outcome = { "channel": "dm_push", "outcome": "push_unavailable",
-                                 "detail": str( e )[ :160 ] }
-        else:
-            push_outcome = { "channel": "dm_push", "outcome": "disabled" }
+                return { "channel": "dm_push", "outcome": "push_unavailable",
+                         "detail": str( e )[ :160 ] }
+        push_outcome = None
+        if self._poke_wake_mechanism == "tmux" and self._tmux_push_fn is not None and session_id:
+            # PRIMARY wake path: host-side tmux inject (session_id, qid, body) —
+            # bypasses the listener's EVENT_IDLE buffer gate, waking a dormant pane.
+            push_outcome = _call_push( self._tmux_push_fn, session_id, qid, body )
+            # Rider (a): tmux/bridge unavailable → degrade to the DM push hop.
+            if push_outcome.get( "outcome" ) == "push_unavailable" and self._dm_push_fn is not None:
+                push_outcome = _call_push( self._dm_push_fn, persona, qid, body )
+        if push_outcome is None:
+            # mechanism == "dm", OR tmux selected with no tmux seam / no session_id.
+            push_outcome = ( _call_push( self._dm_push_fn, persona, qid, body )
+                             if self._dm_push_fn is not None
+                             else { "channel": "dm_push", "outcome": "disabled" } )
         self._log_outreach_result( outreach_id, kind, persona, push_outcome, attempt=attempt )
         if expects_ack:
             self._awaiting_ack[ outreach_id ] = {
