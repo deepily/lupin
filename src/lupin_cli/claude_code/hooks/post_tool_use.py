@@ -36,6 +36,18 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     kill_idle_waiter, set_idle_detection_field, touch_bridge_mtime,
 )
 
+# Fleet PROGRESS beacon trigger set (arbiter signs-of-life Fix 2, 2026-06-16): a
+# task-store WRITE in ANY of these forms is unambiguous coordination work-
+# advancement. BOTH creation doors count — the harness TaskCreate/TaskUpdate
+# (self-owned stubs, auto-mirrored) AND the MCP task_create/task_transition
+# (typed / cross-persona items, status moves). A write of any of these emits one
+# kind="task_transition" fleet event so the arbiter reads an actively-
+# coordinating session as PROGRESSING (see heartbeat_events.emit_task_transition).
+TASK_STORE_WRITE_TOOLS = (
+    "TaskCreate", "TaskUpdate",
+    "mcp__cosa-voice__task_create", "mcp__cosa-voice__task_transition",
+)
+
 
 def main():
 
@@ -92,6 +104,21 @@ def main():
     if tool_name in ( "TaskCreate", "TaskUpdate" ):
         from lupin_cli.claude_code.hooks.lib.task_store_mirror import mirror_task_tool_event
         mirror_task_tool_event( payload, session_id )
+
+    # Fleet PROGRESS beacon (arbiter signs-of-life Fix 2, 2026-06-16): emit one
+    # kind="task_transition" fleet event on every task-store WRITE — harness OR
+    # MCP (TASK_STORE_WRITE_TOOLS). The arbiter folds a per-session
+    # last_task_transition_ts into _fleet_progress_signature so a session
+    # actively creating/moving task items registers as PROGRESS, fixing the
+    # false whole-fleet-stall on an actively-coordinating fleet. A task write
+    # can never be idle chatter, so it is a SAFE progress source (does NOT
+    # re-open the chatty-but-stuck blind spot). Lazy import keeps the
+    # every-tool-call hot path untouched for the ~all non-task tool events.
+    # emit_task_transition is no-throw by contract, so no guard is added — a
+    # redundant try/except here would only be a dead, uncoverable branch.
+    if tool_name in TASK_STORE_WRITE_TOOLS:
+        from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_task_transition
+        emit_task_transition( session_id )
 
     # Smart TTS filtering (respects HOOK_TTS_ENABLED)
     if tool_name in TOOLS_SILENT:

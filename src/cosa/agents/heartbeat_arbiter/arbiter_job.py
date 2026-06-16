@@ -1545,12 +1545,28 @@ class ArbiterConsumerJob( AgenticJobBase ):
     def _fleet_progress_signature( fleet_view ):
         """
         A hashable signature over the fleet's SEMANTIC progress (per-session
-        state / stuck / holding) — NOT liveness ages. When ANY session's semantic
-        state advances, the signature changes ⇒ progress. Used by the stall
-        detector (state≠liveness: stall keys on progress, never on liveness).
+        state / stuck / holding PLUS the last task-store-transition ts) — NOT
+        liveness ages. When ANY session's semantic state advances OR a session
+        records a NEW task-store WRITE, the signature changes ⇒ progress. Used by
+        the stall detector (state≠liveness: stall keys on progress, never on
+        liveness).
+
+        TASK-TRANSITION PROGRESS (arbiter signs-of-life Fix 2, 2026-06-16): a
+        manager actively creating/moving task items previously registered ALIVE
+        but NOT progressing (commons chatter is liveness, never progress), tripping
+        a false WHOLE-FLEET-STALL. Folding last_task_transition_ts in fixes that:
+        a fresh task write advances the signature ⇒ progress ⇒ the stall timer
+        re-arms. This is SAFE — a task write is unambiguous coordination work, and
+        (unlike a DM) can never be idle "still blocked" chatter, so it does NOT
+        re-open the chatty-but-stuck blind spot the signature deliberately guards:
+        a LIVE-but-stuck fleet doing NO task writes still produces an UNCHANGED
+        signature and STILL stalls (task writes are the ONLY new progress source —
+        their ABSENCE is still "no progress"). The ts is stringified (isoformat)
+        so the signature stays a clean, hashable, value-comparable tuple.
         """
         return tuple( sorted(
-            ( v.get( "session_id" ), v.get( "state" ), bool( v.get( "stuck" ) ), v.get( "holding_on" ) )
+            ( v.get( "session_id" ), v.get( "state" ), bool( v.get( "stuck" ) ), v.get( "holding_on" ),
+              v[ "last_task_transition_ts" ].isoformat() if v.get( "last_task_transition_ts" ) else None )
             for v in fleet_view.values() if isinstance( v, dict )
         ) )
 

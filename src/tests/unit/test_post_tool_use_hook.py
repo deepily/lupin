@@ -397,3 +397,50 @@ class TestTaskStoreMirrorSeam:
         mirror = MagicMock()
         self._run( tool_name, mirror )
         mirror.assert_not_called()
+
+
+class TestTaskTransitionProgressBeacon:
+    """
+    Arbiter signs-of-life Fix 2: a task-store WRITE (harness OR MCP) emits ONE
+    kind="task_transition" fleet PROGRESS beacon; non-write tools emit nothing.
+    """
+
+    @staticmethod
+    def _run( tool_name, emit_mock ):
+        payload = {
+            "tool_name"     : tool_name,
+            "tool_input"    : { "subject": "s" },
+            "tool_response" : { "task": { "id": "1" } },
+            "session_id"    : "abc12345",
+        }
+        with patch( "lupin_cli.claude_code.hooks.post_tool_use.read_hook_input", return_value=payload ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.get_claude_session_id", return_value="abc12345" ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.resolve_stable_session_id", side_effect=lambda x: x ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.send_tts" ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.drain_and_acknowledge", return_value=[] ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.emit_json" ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.kill_idle_waiter" ), \
+             patch( "lupin_cli.claude_code.hooks.post_tool_use.set_idle_detection_field" ), \
+             patch( "lupin_cli.claude_code.hooks.lib.task_store_mirror.mirror_task_tool_event", MagicMock() ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.emit_task_transition", emit_mock ):
+            main()
+
+    @pytest.mark.parametrize( "tool_name", [
+        "TaskCreate", "TaskUpdate",
+        "mcp__cosa-voice__task_create", "mcp__cosa-voice__task_transition",
+    ] )
+    def test_task_store_writes_emit_progress_beacon( self, tool_name ):
+        """Every task-store WRITE — harness AND MCP — emits one beacon for the session."""
+        emit = MagicMock( return_value=True )
+        self._run( tool_name, emit )
+        emit.assert_called_once_with( "abc12345" )
+
+    @pytest.mark.parametrize( "tool_name", [
+        "TaskGet", "TaskList", "Read", "Bash", "mcp__cosa-voice__notify",
+    ] )
+    def test_non_write_tools_emit_no_progress_beacon( self, tool_name ):
+        """Reads, non-task tools, and other MCP verbs must NOT emit a progress beacon."""
+        emit = MagicMock()
+        self._run( tool_name, emit )
+        emit.assert_not_called()

@@ -92,6 +92,21 @@ EVENT_KIND_IDLE_PROMPT = "idle_prompt"
 # reap), so a force-offline can only follow a REAL reap — no false-death risk.
 EVENT_KIND_REAPED = "reaped"
 
+# Fleet PROGRESS discriminator (arbiter signs-of-life fix, 2026-06-16, Fix 2). A
+# task-store WRITE — harness TaskCreate/TaskUpdate OR MCP task_create/
+# task_transition — is unambiguous coordination work-advancement (a manager
+# moving/creating task items). The PostToolUse hook appends ONE
+# `kind="task_transition"` record per task-store write so the arbiter can fold a
+# per-session last_task_transition_ts into _fleet_progress_signature: a working
+# manager who creates/moves task items now registers as PROGRESS, fixing the
+# false WHOLE-FLEET-STALL on an actively-coordinating fleet. Unlike commons
+# chatter / idle DMs, a task write CANNOT be idle noise, so counting it as
+# progress does NOT re-open the chatty-but-stuck blind spot. Like idle_prompt /
+# reaped, the record carries NO `outcome` key (never maps through
+# _STATE_BY_OUTCOME) and build_fleet_view keeps it OFF the activity axis
+# (never `state` / never `last_event_ts`) — it feeds last_task_transition_ts ONLY.
+EVENT_KIND_TASK_TRANSITION = "task_transition"
+
 
 def _resolve_base_dir( base_dir ):
     """
@@ -251,6 +266,54 @@ def emit_reaped( session_id, persona=None, ts=None, base_dir=None ):
             "persona"        : persona,
             "ts"             : ts if ts is not None else _now_iso(),
             "kind"           : EVENT_KIND_REAPED,
+        }
+        path = events_path( session_id, base_dir=base_dir )
+        path.parent.mkdir( parents=True, exist_ok=True )
+        with open( path, "a" ) as f:
+            f.write( json.dumps( record ) + "\n" )
+        return True
+    except ( OSError, TypeError, ValueError ):
+        return False
+
+
+def emit_task_transition( session_id, persona=None, ts=None, base_dir=None ):
+    """
+    Append one kind-tagged `task_transition` PROGRESS event. NEVER raises.
+
+    Emitted from the PostToolUse hook on every task-store WRITE (harness
+    TaskCreate/TaskUpdate OR MCP task_create/task_transition) so the fleet
+    arbiter counts a session actively creating/moving task items as PROGRESSING
+    (arbiter signs-of-life fix, 2026-06-16, Fix 2). A task write is unambiguous
+    work-advancement and — unlike commons chatter or idle "still blocked" DMs —
+    can never be idle noise, so it is a SAFE progress source that does NOT
+    re-open the chatty-but-stuck blind spot the progress signature deliberately
+    guards.
+
+    The record carries `kind="task_transition"` and DELIBERATELY OMITS `outcome`:
+    consumers MUST filter on the `kind` discriminator so the record feeds
+    `last_task_transition_ts` ONLY and never corrupts the ACTIVITY axis (`state`)
+    or `stop_event_age_s`. Mirrors emit_idle_prompt / emit_reaped exactly.
+
+    Requires:
+        - session_id is a string
+        - persona is a string or None (the session's voice-persona name, when
+          cheaply resolvable; None is fine — the union backfills from bridges)
+
+    Ensures:
+        - Appends exactly one JSON line: schema_version · session_id · persona ·
+          ts (ISO-8601 UTC) · kind="task_transition"  (NO `outcome` key)
+        - Creates the fleet dir if missing (parents, idempotent)
+        - Returns True on a successful append; False on any write/serialization
+          failure — NEVER raises into the caller (fire-and-forget; the task tool
+          call is unaffected)
+    """
+    try:
+        record = {
+            "schema_version" : SCHEMA_VERSION,
+            "session_id"     : session_id,
+            "persona"        : persona,
+            "ts"             : ts if ts is not None else _now_iso(),
+            "kind"           : EVENT_KIND_TASK_TRANSITION,
         }
         path = events_path( session_id, base_dir=base_dir )
         path.parent.mkdir( parents=True, exist_ok=True )
