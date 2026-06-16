@@ -271,7 +271,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # Item B (2026.06.11 receipts design): the delivery-receipt seams. All
         # default None/inert so legacy in-pool construction is unchanged; the
         # :8001 factory wires the real hops.
-        dm_push_fn               : Optional[ Callable ] = None,   # §3.3 manager wake hop (persona, qid) -> outcome
+        dm_push_fn               : Optional[ Callable ] = None,   # §3.3 manager wake hop (persona, thread_id, body) -> outcome
         live_retry_fn            : Optional[ Callable ] = None,   # §3.5 dedup-BYPASSING live transport for re-announce
         outreach_ack_window_seconds : int               = 900,    # §3.4 manager threaded-ack window
         reannounce_interval_seconds : int               = 300,    # §3.5 Rick re-announce cadence
@@ -910,7 +910,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._log_outreach_result( outreach_id, kind, persona, dm_outcome, attempt=attempt )
         if self._dm_push_fn is not None:
             try:
-                push_outcome = self._dm_push_fn( persona, qid )
+                push_outcome = self._dm_push_fn( persona, qid, body )
             except Exception as e:
                 push_outcome = { "channel": "dm_push", "outcome": "push_unavailable",
                                  "detail": str( e )[ :160 ] }

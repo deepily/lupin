@@ -515,176 +515,185 @@ class TestEventHandling:
             # Logged something with "Unknown action"
             assert any( "Unknown action" in str( c ) for c in mock_log.call_args_list )
 
-    # ─── Phase 3 step 8: commons_answer_received listener branch ────────────
-
-    def test_action_commons_answer_received_builds_peer_reply_reminder( self, listener ):
-        """
-        action:commons_answer_received injects a COMMONS PEER REPLY system-reminder
-        body using the Q3 framing — persona attribution + question_id correlation.
-        """
-        with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
-            listener._handle_action(
-                "commons_answer_received",
-                {
-                    "payload": {
-                        "question_id"  : "qid-1234",
-                        "body"         : "the answer is 42",
-                        "persona_name" : "Tiberius",
-                        "persona_icon" : "🌑",
-                    },
-                },
-            )
-            assert mock_inject.call_count == 1
-            args, kwargs = mock_inject.call_args
-            reminder = args[ 0 ] if args else kwargs.get( "message_text" )
-            assert reminder.startswith( "<system-reminder>" )
-            assert reminder.endswith( "</system-reminder>" )
-            # Q3 framing: PEER REPLY + question_id + persona attribution + body
-            assert "COMMONS PEER REPLY"           in reminder
-            assert "qid-1234"                     in reminder
-            assert "@Tiberius"                    in reminder
-            assert "the answer is 42"             in reminder
-            # wrap=False — body is already a complete <system-reminder> block
-            assert kwargs.get( "wrap" ) is False
-
-    def test_action_commons_answer_received_missing_question_id_skips( self, listener ):
-        """
-        Missing question_id in payload → log + return; no inject_via_tmux call.
-        Guards against malformed notifications corrupting the asker's session.
-        """
-        with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
-             patch.object( listener, '_log' ) as mock_log:
-            listener._handle_action(
-                "commons_answer_received",
-                { "payload": { "body": "no qid here", "persona_name": "Maria" } },
-            )
-            mock_inject.assert_not_called()
-            assert any( "missing question_id" in str( c ) for c in mock_log.call_args_list )
-
-    def test_action_commons_answer_received_missing_persona_defaults_to_unknown( self, listener ):
-        """
-        Missing persona_name in stamped payload → @unknown in the reminder body.
-        Honors the F9-fit immutability principle — no live lookup fallback.
-        """
-        with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
-            listener._handle_action(
-                "commons_answer_received",
-                {
-                    "payload": {
-                        "question_id": "qid-5678",
-                        "body"       : "blank-persona-test",
-                    },
-                },
-            )
-            args, _ = mock_inject.call_args
-            reminder = args[ 0 ]
-            assert "@unknown" in reminder
-
-    def test_action_commons_answer_received_no_payload_skips( self, listener ):
-        """A notification with no payload dict at all → log + return."""
-        with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
-            listener._handle_action( "commons_answer_received", { } )
-            mock_inject.assert_not_called()
-
-    # ─── Inter-Session DM (2026-05-15): commons_question_received listener branch ───
-
-    def test_action_commons_question_received_builds_peer_message_reminder( self, listener ):
-        """
-        action:commons_question_received injects a COMMONS PEER MESSAGE
-        system-reminder body using the Phase 0 Q5-rev framing — question_id +
-        topic + asker session attribution + commons_read/commons_post guidance.
-
-        Per AC6 of
-        src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md.
-        """
-        with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
-            listener._handle_action(
-                "commons_question_received",
-                {
-                    "payload": {
-                        "question_id"       : "qid-dm-9",
-                        "topic"             : "dm-radio",
-                        "asker_session"     : "ab12cd34ef56",
-                        "recipient_persona" : "radio",
-                    },
-                },
-            )
-            assert mock_inject.call_count == 1
-            args, kwargs = mock_inject.call_args
-            reminder = args[ 0 ] if args else kwargs.get( "message_text" )
-            assert reminder.startswith( "<system-reminder>" )
-            assert reminder.endswith( "</system-reminder>" )
-            # Q5-rev framing: PEER MESSAGE + question_id + topic + asker_session_id prefix
-            assert "COMMONS PEER MESSAGE"   in reminder
-            assert "qid-dm-9"               in reminder
-            assert "dm-radio"               in reminder
-            assert "ab12cd34"               in reminder   # short-form asker session
-            # Body framing carries actionable instructions for the AI recipient
-            assert "commons_read"           in reminder
-            assert "commons_post"           in reminder
-            assert "in_reply_to"            in reminder
-            # wrap=False — body is already a complete <system-reminder> block
-            assert kwargs.get( "wrap" ) is False
-
-    def test_action_commons_question_received_missing_question_id_skips( self, listener ):
-        """Missing question_id in payload → log + return; no inject_via_tmux call."""
-        with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
-             patch.object( listener, '_log' ) as mock_log:
-            listener._handle_action(
-                "commons_question_received",
-                { "payload": { "topic": "dm-radio", "asker_session": "abc" } },
-            )
-            mock_inject.assert_not_called()
-            assert any( "missing question_id" in str( c ) for c in mock_log.call_args_list )
-
-    def test_action_commons_question_received_missing_topic_skips( self, listener ):
-        """Missing topic in payload → log + return; no inject_via_tmux call."""
-        with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
-             patch.object( listener, '_log' ) as mock_log:
-            listener._handle_action(
-                "commons_question_received",
-                { "payload": { "question_id": "qid-1", "asker_session": "abc" } },
-            )
-            mock_inject.assert_not_called()
-            assert any( "missing topic" in str( c ) for c in mock_log.call_args_list )
-
-    def test_action_commons_question_received_inject_failure_isolated( self, listener ):
-        """
-        Tmux injection failure must be caught (T7 isolation) — log + don't
-        crash the listener.
-        """
-        with patch.object( listener, '_inject_via_tmux', side_effect=RuntimeError( "tmux down" ) ) as mock_inject, \
-             patch.object( listener, '_log' ) as mock_log:
-            listener._handle_action(
-                "commons_question_received",
-                {
-                    "payload": {
-                        "question_id"   : "qid-7",
-                        "topic"         : "dm-radio",
-                        "asker_session" : "xyz",
-                    },
-                },
-            )
-            # _inject_via_tmux was attempted
-            mock_inject.assert_called_once()
-            # And the exception was caught + logged
-            assert any( "inject failed" in str( c ) for c in mock_log.call_args_list )
-
-    def test_action_commons_question_received_missing_asker_defaults_to_unknown( self, listener ):
-        """Missing asker_session in payload → defaults to "unknown" in framing."""
-        with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
-            listener._handle_action(
-                "commons_question_received",
-                {
-                    "payload": {
-                        "question_id" : "qid-8",
-                        "topic"       : "dm-radio",
-                    },
-                },
-            )
-            args, _ = mock_inject.call_args
-            reminder = args[ 0 ]
-            assert "unknown" in reminder
+    # ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
+    # The commons_answer_received / commons_question_received listener-handler tests
+    # below are RETIRED in the cosa-voice token-reduction Phase 4 (2026-06-15): the
+    # handlers + their action-dispatch branches were commented out in
+    # cc_notification_listener.py (inbound peer DMs now route to _handle_peer_dm via
+    # direction='ai_to_ai'). These tests are LEFT IN PLACE behind comments for a later
+    # full-removal pass; restore them with the handlers if the legacy path is re-enabled.
+    # Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
+    #
+    # # ─── Phase 3 step 8: commons_answer_received listener branch ────────────
+    #
+    # def test_action_commons_answer_received_builds_peer_reply_reminder( self, listener ):
+    #     """
+    #     action:commons_answer_received injects a COMMONS PEER REPLY system-reminder
+    #     body using the Q3 framing — persona attribution + question_id correlation.
+    #     """
+    #     with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
+    #         listener._handle_action(
+    #             "commons_answer_received",
+    #             {
+    #                 "payload": {
+    #                     "question_id"  : "qid-1234",
+    #                     "body"         : "the answer is 42",
+    #                     "persona_name" : "Tiberius",
+    #                     "persona_icon" : "🌑",
+    #                 },
+    #             },
+    #         )
+    #         assert mock_inject.call_count == 1
+    #         args, kwargs = mock_inject.call_args
+    #         reminder = args[ 0 ] if args else kwargs.get( "message_text" )
+    #         assert reminder.startswith( "<system-reminder>" )
+    #         assert reminder.endswith( "</system-reminder>" )
+    #         # Q3 framing: PEER REPLY + question_id + persona attribution + body
+    #         assert "COMMONS PEER REPLY"           in reminder
+    #         assert "qid-1234"                     in reminder
+    #         assert "@Tiberius"                    in reminder
+    #         assert "the answer is 42"             in reminder
+    #         # wrap=False — body is already a complete <system-reminder> block
+    #         assert kwargs.get( "wrap" ) is False
+    #
+    # def test_action_commons_answer_received_missing_question_id_skips( self, listener ):
+    #     """
+    #     Missing question_id in payload → log + return; no inject_via_tmux call.
+    #     Guards against malformed notifications corrupting the asker's session.
+    #     """
+    #     with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+    #          patch.object( listener, '_log' ) as mock_log:
+    #         listener._handle_action(
+    #             "commons_answer_received",
+    #             { "payload": { "body": "no qid here", "persona_name": "Maria" } },
+    #         )
+    #         mock_inject.assert_not_called()
+    #         assert any( "missing question_id" in str( c ) for c in mock_log.call_args_list )
+    #
+    # def test_action_commons_answer_received_missing_persona_defaults_to_unknown( self, listener ):
+    #     """
+    #     Missing persona_name in stamped payload → @unknown in the reminder body.
+    #     Honors the F9-fit immutability principle — no live lookup fallback.
+    #     """
+    #     with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
+    #         listener._handle_action(
+    #             "commons_answer_received",
+    #             {
+    #                 "payload": {
+    #                     "question_id": "qid-5678",
+    #                     "body"       : "blank-persona-test",
+    #                 },
+    #             },
+    #         )
+    #         args, _ = mock_inject.call_args
+    #         reminder = args[ 0 ]
+    #         assert "@unknown" in reminder
+    #
+    # def test_action_commons_answer_received_no_payload_skips( self, listener ):
+    #     """A notification with no payload dict at all → log + return."""
+    #     with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
+    #         listener._handle_action( "commons_answer_received", { } )
+    #         mock_inject.assert_not_called()
+    #
+    # # ─── Inter-Session DM (2026-05-15): commons_question_received listener branch ───
+    #
+    # def test_action_commons_question_received_builds_peer_message_reminder( self, listener ):
+    #     """
+    #     action:commons_question_received injects a COMMONS PEER MESSAGE
+    #     system-reminder body using the Phase 0 Q5-rev framing — question_id +
+    #     topic + asker session attribution + commons_read/commons_post guidance.
+    #
+    #     Per AC6 of
+    #     src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md.
+    #     """
+    #     with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
+    #         listener._handle_action(
+    #             "commons_question_received",
+    #             {
+    #                 "payload": {
+    #                     "question_id"       : "qid-dm-9",
+    #                     "topic"             : "dm-radio",
+    #                     "asker_session"     : "ab12cd34ef56",
+    #                     "recipient_persona" : "radio",
+    #                 },
+    #             },
+    #         )
+    #         assert mock_inject.call_count == 1
+    #         args, kwargs = mock_inject.call_args
+    #         reminder = args[ 0 ] if args else kwargs.get( "message_text" )
+    #         assert reminder.startswith( "<system-reminder>" )
+    #         assert reminder.endswith( "</system-reminder>" )
+    #         # Q5-rev framing: PEER MESSAGE + question_id + topic + asker_session_id prefix
+    #         assert "COMMONS PEER MESSAGE"   in reminder
+    #         assert "qid-dm-9"               in reminder
+    #         assert "dm-radio"               in reminder
+    #         assert "ab12cd34"               in reminder   # short-form asker session
+    #         # Body framing carries actionable instructions for the AI recipient
+    #         assert "commons_read"           in reminder
+    #         assert "commons_post"           in reminder
+    #         assert "in_reply_to"            in reminder
+    #         # wrap=False — body is already a complete <system-reminder> block
+    #         assert kwargs.get( "wrap" ) is False
+    #
+    # def test_action_commons_question_received_missing_question_id_skips( self, listener ):
+    #     """Missing question_id in payload → log + return; no inject_via_tmux call."""
+    #     with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+    #          patch.object( listener, '_log' ) as mock_log:
+    #         listener._handle_action(
+    #             "commons_question_received",
+    #             { "payload": { "topic": "dm-radio", "asker_session": "abc" } },
+    #         )
+    #         mock_inject.assert_not_called()
+    #         assert any( "missing question_id" in str( c ) for c in mock_log.call_args_list )
+    #
+    # def test_action_commons_question_received_missing_topic_skips( self, listener ):
+    #     """Missing topic in payload → log + return; no inject_via_tmux call."""
+    #     with patch.object( listener, '_inject_via_tmux' ) as mock_inject, \
+    #          patch.object( listener, '_log' ) as mock_log:
+    #         listener._handle_action(
+    #             "commons_question_received",
+    #             { "payload": { "question_id": "qid-1", "asker_session": "abc" } },
+    #         )
+    #         mock_inject.assert_not_called()
+    #         assert any( "missing topic" in str( c ) for c in mock_log.call_args_list )
+    #
+    # def test_action_commons_question_received_inject_failure_isolated( self, listener ):
+    #     """
+    #     Tmux injection failure must be caught (T7 isolation) — log + don't
+    #     crash the listener.
+    #     """
+    #     with patch.object( listener, '_inject_via_tmux', side_effect=RuntimeError( "tmux down" ) ) as mock_inject, \
+    #          patch.object( listener, '_log' ) as mock_log:
+    #         listener._handle_action(
+    #             "commons_question_received",
+    #             {
+    #                 "payload": {
+    #                     "question_id"   : "qid-7",
+    #                     "topic"         : "dm-radio",
+    #                     "asker_session" : "xyz",
+    #                 },
+    #             },
+    #         )
+    #         # _inject_via_tmux was attempted
+    #         mock_inject.assert_called_once()
+    #         # And the exception was caught + logged
+    #         assert any( "inject failed" in str( c ) for c in mock_log.call_args_list )
+    #
+    # def test_action_commons_question_received_missing_asker_defaults_to_unknown( self, listener ):
+    #     """Missing asker_session in payload → defaults to "unknown" in framing."""
+    #     with patch.object( listener, '_inject_via_tmux' ) as mock_inject:
+    #         listener._handle_action(
+    #             "commons_question_received",
+    #             {
+    #                 "payload": {
+    #                     "question_id" : "qid-8",
+    #                     "topic"       : "dm-radio",
+    #                 },
+    #             },
+    #         )
+    #         args, _ = mock_inject.call_args
+    #         reminder = args[ 0 ]
+    #         assert "unknown" in reminder
 
     @pytest.mark.asyncio
     async def test_voice_empty_message_skips_inject_still_gists( self, listener ):

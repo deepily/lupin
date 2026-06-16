@@ -21,10 +21,10 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_arbiter_app.arbiter_live_notify import (
-    build_notify_request, build_register_question_payload, make_dm_push_fn,
+    build_notify_request, build_notify_peer_payload, make_dm_push_fn,
     make_live_notify_fn, make_notify_transport, parse_notify_outcome,
     resolve_arbiter_api_key, validate_live_notify_target,
-    _default_log_fn, quick_smoke_test, NOTIFY_PATH, REGISTER_QUESTION_PATH,
+    _default_log_fn, quick_smoke_test, NOTIFY_PATH, NOTIFY_PEER_PATH,
 )
 from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn, ESCALATION_TOPIC
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
@@ -232,40 +232,37 @@ class TestValidateLiveNotifyTarget:
         assert "not an email" in validate_live_notify_target( "rick" )
 
 
-# ── make_dm_push_fn + payload — the §3.3 manager wake hop ──────────────────────
+# ── make_dm_push_fn + payload — the §3.3 manager wake hop (notify-peer) ────────
 
 class TestDmPush:
     _ARGS = dict( base_url="http://x:7999/", api_key="k",
-                  asker_session_id="lupin-arbiter-app-8001", ttl_seconds=900 )
+                  asker_session_id="lupin-arbiter-app-8001" )
 
-    def test_payload_shape_and_qid_threading( self ):
-        p = build_register_question_payload(
-            recipient_persona="Mr Radio", outreach_id="oid-1",
-            asker_session_id="lupin-arbiter-app-8001", ttl_seconds=900 )
-        assert p[ "topic" ] == "dm-mr_radio"                          # same board as the durable write
-        assert p[ "question_id" ] == "oid-1"                          # in_reply_to names the outreach
-        assert p[ "expect_reply" ] is False and p[ "ttl_seconds" ] == 900
+    def test_payload_carries_body_inline_and_threads_on_outreach_id( self ):
+        p = build_notify_peer_payload(
+            recipient_persona="Mr Radio", body="WHOLE-FLEET-STALL — please advise",
+            thread_id="oid-1", asker_session_id="lupin-arbiter-app-8001" )
+        assert p[ "recipient_persona" ] == "Mr Radio"
+        assert p[ "thread_id" ] == "oid-1"                            # threaded reply names the outreach
+        assert p[ "body" ] == "WHOLE-FLEET-STALL — please advise"     # body travels INLINE
+        assert p[ "asker_session_id" ] == "lupin-arbiter-app-8001"
 
-    def test_dispatched_201_with_push( self ):
+    def test_dispatched_201_posts_notify_peer_with_body( self ):
         seen = [ ]
         def post( url, headers, payload, timeout ):
             seen.append( ( url, headers, payload ) )
-            return 201, { "dm_dispatched": True }
+            return 201, { "dispatched": True, "message_id": "m1", "thread_id": "oid-1" }
         push = make_dm_push_fn( http_post_json_fn=post, log_fn=lambda e, **f: None, **self._ARGS )
-        assert push( "Tiberius", "oid-1" )[ "outcome" ] == "dispatched"
+        assert push( "Tiberius", "oid-1", "wake up — stall" )[ "outcome" ] == "dispatched"
         url, headers, payload = seen[ 0 ]
-        assert url == f"http://x:7999{REGISTER_QUESTION_PATH}"        # trailing slash normalised
+        assert url == f"http://x:7999{NOTIFY_PEER_PATH}"              # trailing slash normalised
         assert headers[ "X-API-Key" ] == "k" and payload[ "recipient_persona" ] == "Tiberius"
-
-    def test_registered_without_push_is_distinct_outcome( self ):
-        push = make_dm_push_fn( http_post_json_fn=lambda u, h, p, t: ( 201, { "dm_dispatched": False } ),
-                                log_fn=lambda e, **f: None, **self._ARGS )
-        assert push( "Tiberius", "oid-1" )[ "outcome" ] == "registered_no_push"
+        assert payload[ "body" ] == "wake up — stall"                # inline body
 
     def test_non_201_is_push_unavailable_with_status( self ):
         push = make_dm_push_fn( http_post_json_fn=lambda u, h, p, t: ( 422, { "detail": "recipient_not_found" } ),
                                 log_fn=lambda e, **f: None, **self._ARGS )
-        out = push( "Ghost", "oid-1" )
+        out = push( "Ghost", "oid-1", "wake up" )
         assert out[ "outcome" ] == "push_unavailable" and out[ "http_status" ] == 422
 
     def test_exception_with_code_attr_carried( self ):
@@ -273,19 +270,19 @@ class TestDmPush:
             code = 401
         def boom( u, h, p, t ): raise _Err( "auth" )
         push = make_dm_push_fn( http_post_json_fn=boom, log_fn=lambda e, **f: None, **self._ARGS )
-        out = push( "Tiberius", "oid-1" )
+        out = push( "Tiberius", "oid-1", "wake up" )
         assert out[ "outcome" ] == "push_unavailable" and out[ "http_status" ] == 401
 
     def test_plain_exception_without_code( self ):
         def boom( u, h, p, t ): raise TimeoutError( "timed out" )
         push = make_dm_push_fn( http_post_json_fn=boom, log_fn=lambda e, **f: None, **self._ARGS )
-        out = push( "Tiberius", "oid-1" )
+        out = push( "Tiberius", "oid-1", "wake up" )
         assert out[ "outcome" ] == "push_unavailable" and "http_status" not in out
 
     def test_default_log_fn_traces_attempt( self, capsys ):
-        push = make_dm_push_fn( http_post_json_fn=lambda u, h, p, t: ( 201, { "dm_dispatched": True } ),
+        push = make_dm_push_fn( http_post_json_fn=lambda u, h, p, t: ( 201, { "dispatched": True } ),
                                 **self._ARGS )                        # log_fn=None → module default
-        push( "Tiberius", "oid-1" )
+        push( "Tiberius", "oid-1", "wake up" )
         out = capsys.readouterr().out
         assert "dm_push_attempted" in out and "dispatched" in out
 

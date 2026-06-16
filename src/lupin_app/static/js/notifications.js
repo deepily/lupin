@@ -1905,6 +1905,10 @@ class NotificationsUI {
             const params = new URLSearchParams( {
                 message     : message,
                 type        : 'user_initiated_message',
+                // Phase 3 §4 — provenance/direction axis (orthogonal to `type`): a
+                // voice/text-in message from the human to a CC session is human_to_ai.
+                // Completes the direction model on the frontend send path.
+                direction   : 'human_to_ai',
                 priority    : 'medium',
                 target_user : listenerEmail,
                 sender_id   : this.currentUserEmail,

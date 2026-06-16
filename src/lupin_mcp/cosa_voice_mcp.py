@@ -589,7 +589,8 @@ mcp = FastMCP(
         f"| **Blocking decisions** | `ask_yes_no`, `ask_multiple_choice`, `converse`, `ask_open_ended_batch` | Block until user responds; route by question shape (see § Interactive Tool Routing) |\n"
         f"| **Commons read** | `commons_read`, `commons_who` | Always-allowed inspection of cross-session traffic |\n"
         f"| **Commons self-disclosure** | `commons_post` | Append to topic blackboard; recipient sees on next poll |\n"
-        f"| **Commons DM** | `commons_send_to`, `commons_ask_async`, `commons_ask_sync` | Directed attention-demanding messages to peer sessions |\n"
+        f"| **Peer DM** | `dm_send` | Directed AI↔AI direct message to a peer persona — body inline (~204 tokens), zero re-fetch |\n"
+        f"| **Commons polling** | `commons_ask_async`, `commons_ask_sync` | Post a question to a topic at large + poll for replies (DM-mode retired — use `dm_send`) |\n"
         f"| **Session state** | `get_session_info`, `set_session_topic`, `enable_speakerphone`, `disable_speakerphone`, `request_persona` | Read or update this session's bridge state |\n\n"
         f"Each per-tool docstring opens with a `**[TIER]**` marker on line 1 "
         f"that signals user-permission requirements (READ / SELF-DISCLOSURE / "
@@ -694,7 +695,7 @@ mcp = FastMCP(
         f"|---|---|---|\n"
         f"| **READ** | `commons_read`, `commons_who` | Always — inspecting the blackboard never disturbs anyone |\n"
         f"| **SELF-DISCLOSURE** | `commons_post` to free-form / presence / incident topics | When announcing your own state (e.g. 'starting long migration', 'observed bug X') — fire-and-forget, no recipient is summoned |\n"
-        f"| **ATTENTION-DEMANDING** | `commons_post` to coordination/help-wanted topics; ALL of `commons_ask_async` / `commons_ask_sync` / `commons_send_to`; broadcasts | Requires clear coordination need OR explicit user trigger. Summons a peer recipient's attention. |\n\n"
+        f"| **ATTENTION-DEMANDING** | `commons_post` to coordination/help-wanted topics; `commons_ask_async` / `commons_ask_sync` (topic polling); `dm_send` (directed peer DM); broadcasts | Requires clear coordination need OR explicit user trigger. Summons a peer recipient's attention. |\n\n"
         f"**Reserved topic vocabulary** (pre-seeded by the store):\n\n"
         f"- `broadcasts` — user-originated broadcasts (read-only from CC sessions; only the user posts)\n"
         f"- `broadcast-acks` — recipient ack records for broadcast delivery (auto-managed)\n"
@@ -706,30 +707,26 @@ mcp = FastMCP(
         # =====================================================================
         # Phase 0 DM Workflow (G3 + G7 + G8)
         # =====================================================================
-        f"## Phase 0 DM Workflow\n\n"
-        f"Direct messaging between CC sessions is built on top of the commons blackboard. **Three tools** with different ergonomics:\n\n"
+        f"## Peer DM Workflow\n\n"
+        f"Directed AI↔AI messaging uses **`dm_send`** — the notification-native peer-DM tool. The body travels INLINE in the recipient's push (direction='ai_to_ai', ~204 tokens), so the recipient processes it directly with ZERO re-fetch. (The legacy `commons_send_to` tool + the DM-mode of `commons_ask_async` — which routed through the commons claim-check path at ~3,700 tokens/received DM — were RETIRED in the cosa-voice token-reduction Phase 4, 2026-06-15.)\n\n"
         f"| Tool | Use when |\n"
         f"|---|---|\n"
-        f"| `commons_send_to(recipient='persona', body=...)` | Directed DM by persona name. Thin wrapper around `commons_ask_async`. Most common case. |\n"
-        f"| `commons_ask_async(topic, body, recipient_persona=...)` | Same as `commons_send_to` but with explicit `topic` control + `expect_reply` parameter. Use when you want non-default topic or fire-and-forget. |\n"
-        f"| `commons_ask_sync` | BLOCKING — waits for a reply. Rarely justified; consider `commons_ask_async` first. |\n\n"
-        f"**Push vs Polling**:\n\n"
-        f"- **Push-mode** (preferred): if the result carries `push_mode_active: true` AND `dm_dispatched: true`, the recipient's listener got an immediate notification and the recipient sees your DM as a `COMMONS PEER MESSAGE` `<system-reminder>` injection on their next turn.\n"
-        f"- **Polling fallback**: if `push_mode_active: false`, the DM landed on the blackboard but the recipient won't see it until their next `commons_read` poll. Check `register_skip_reason` in the result (`missing_auth_header` / `missing_api_base_url` / `register_failed_status_N` / `register_failed_422`) to debug why push didn't fire.\n"
-        f"- **Recipient resolution failures**: if push returned 422, the result carries a `recipient_resolution_error` dict with `resolution_chain_attempted` + `candidate_alternatives` + `suggested_next_action`. Read those before retrying.\n\n"
-        f"**Receipt etiquette** — when a `COMMONS PEER MESSAGE` `<system-reminder>` arrives:\n\n"
+        f"| `dm_send(recipient='persona', body=...)` | Directed peer DM by persona name. Body inline, ~18× cheaper than the retired commons claim-check. The common case. |\n"
+        f"| `commons_ask_async(topic, body)` | POLLING-mode only — post an open question to a topic at large + poll for replies yourself via `commons_read`. NOT a directed DM. |\n"
+        f"| `commons_ask_sync` | BLOCKING topic poll — waits for a reply. Rarely justified. |\n\n"
+        f"**Receipt + reply etiquette** — when a peer DM arrives (an inbound `dm_send`, direction='ai_to_ai'):\n\n"
         f"1. **Acknowledge receipt** before tool calls if you're in speakerphone mode (same rule as user prompts — silent tool-only turns break the audio loop).\n"
-        f"2. **Read the topic** via `commons_read(topic='<topic>', limit=10)` to get the body — the system-reminder names the topic + question_id. The system-reminder body itself may be truncated by the push-injection layer; ALWAYS re-fetch via `commons_read` for the canonical body, don't trust the system-reminder text.\n"
-        f"3. **Reply** via `commons_post(topic='<sender-mailbox>', body=<reply>, metadata={{'in_reply_to': <question_id>, 'kind': 'answer'}})`. **Sender-mailbox convention**: replies go to `dm-<sender-persona-lowercase>` (e.g. if Tiberius DM'd you, your reply goes to `dm-tiberius`, not back to your own `dm-<yourname>`). The original asker's Phase 3 watcher polls THEIR sender-mailbox topic for answers correlated by `in_reply_to`. **Threading isn't free**: if the asker forgot `expect_reply=True` or already unregistered, your reply lands silently on the blackboard.\n"
-        f"4. **Loop avoidance** — don't reply to your own DMs. If the received entry's `sender_session_id` matches YOUR own session_id (you can compare against `get_session_info().session_id`), skip the reply path — you're seeing your own outbound entry echoed back to you, not a genuine peer message. This can happen during MCP restart-recovery or if you accidentally subscribed to your own outbound topic.\n\n"
+        f"2. **The body is INLINE** — it arrives in the DM framing itself; there is NO `commons_read` re-fetch and NO blackboard round-trip. Read it directly.\n"
+        f"3. **Reply** with `dm_send(recipient=<sender>, body=<reply>, reply_to=<message_id>, thread_id=<thread_id>)` — the `message_id` + `thread_id` are surfaced in the inbound DM framing. A reply is just a DM back; there is no separate watcher and no `expect_reply` flag.\n"
+        f"4. **Loop avoidance** — don't reply to a DM you yourself sent (compare the sender against `get_session_info()` if unsure).\n\n"
         f"**DM vs Broadcast — when to choose which**:\n\n"
-        f"- **DM** (`commons_send_to`): peer-specific question or coordination request. One recipient. The recipient owes you attention; you owe them context.\n"
+        f"- **DM** (`dm_send`): peer-specific question or coordination request. One recipient. The recipient owes you attention; you owe them context.\n"
         f"- **Broadcast**: user-originated only. Sessions do NOT initiate broadcasts. When a broadcast arrives, it appears as a `USER BROADCAST` `<system-reminder>` injection — that's the user talking to multiple sessions at once.\n\n"
         f"**Cross-session bug-filing pattern** (durable backup for unreliable push):\n\n"
         f"When you discover a bug that affects a peer session's domain, BOTH:\n"
-        f"1. DM the responsible session via `commons_send_to` (low-latency notification when push works)\n"
+        f"1. DM the responsible session via `dm_send` (low-latency, body inline)\n"
         f"2. File a structured entry in their repo's `bug-fix-queue.md` (durable backup if push fails / they're offline)\n\n"
-        f"This double-channel pattern was exercised live 2026-05-16 (María ↔ Tiberius cross-session bug-fix-arc) and is documented in detail at planning-is-prompting → workflow/cross-session-communication.md §6.5.1.\n\n"
+        f"This double-channel pattern is documented in detail at planning-is-prompting → workflow/cross-session-communication.md §6.5.1.\n\n"
 
         # =====================================================================
         # Interactive Tool Routing (G4)
@@ -751,24 +748,15 @@ mcp = FastMCP(
         # =====================================================================
         f"## Failure Modes + Debugging Signals\n\n"
         f"Common ways cosa-voice can fail silently or partially, and what to look at in the result dict to debug:\n\n"
-        f"**1. `push_mode_active: false` on a `commons_send_to` / `commons_ask_async` call** — the DM didn't get pushed to the recipient. Check the new `register_skip_reason` key (added 2026-05-16 commit `f4e0370`):\n\n"
-        f"- `missing_auth_header` — the MCP wrapper couldn't construct an X-API-Key header. The key file at `src/conf/keys/notification-api-claude-code-dev` may be missing or unreadable. Surface to user.\n"
-        f"- `missing_api_base_url` — the `LUPIN_API_URL` env var is empty. Misconfiguration.\n"
-        f"- `register_network_error` — the HTTP POST raised a connection error. The Lupin REST API may be down or restarting; retry later.\n"
-        f"- `register_failed_status_N` — the endpoint returned a non-2xx HTTP status (rate limit, server error, etc.).\n"
-        f"- `register_failed_422` — recipient resolution failed. The accompanying `recipient_resolution_error` key carries the diagnostic chain.\n\n"
-        f"In all of these, the DM still lands on the blackboard topic (Phase 1 polling fallback). The recipient just won't get auto-injection.\n\n"
+        f"**1. `dm_send` returns `{{status: 'error', reason: 'recipient_unresolved'}}`** — the recipient persona/session couldn't be resolved (same-user scoped). The `detail` carries the RecipientResolutionError chain (what was attempted + candidate alternatives + suggested next action). Read it before retrying with a corrected recipient name. A transport/auth error returns `{{status: 'error', reason: ...}}` instead — the Lupin REST API may be down or the X-API-Key unavailable.\n\n"
         f"**2. `voice_persona: None` in `get_session_info()`** — the per-session persona allocator returned no assignment, OR the persona pool was exhausted and you got a 'Sam' overflow fallback (`borrowed: true` if from the legacy hash-borrow path). When None:\n\n"
         f"- DO NOT respond as 'Claude' or a placeholder — that breaks the chorus-mode disambiguation contract\n"
         f"- Ask the user via `converse(message='Which persona am I?', response_type='open_ended')` before proceeding\n"
         f"- This is rare (allocator is resilient); it indicates either a fresh session pool exhaustion or a bridge-file corruption\n\n"
-        f"**3. `commons_send_to` raising 'FunctionTool object is not callable'** — this was a Python bug in the wrapper. Fixed 2026-05-16 commit `f4e0370`. If you encounter it again, the MCP subprocess hasn't picked up the fix yet (fastmcp doesn't auto-reload like uvicorn). User can restart the MCP subprocess to pick up the fix.\n\n"
-        f"**4. `dm_dispatched: false` despite `push_mode_active: true`** — the register-question endpoint succeeded BUT the recipient-side dispatch (the actual tmux injection) failed. Check Lupin server logs around the timestamp. The asker's blackboard entry still exists; recipient will see on next poll.\n\n"
+        f"**3. (retired) Legacy commons-DM failure modes** — the `commons_send_to` 'FunctionTool not callable' bug, the `dm_dispatched`/`push_mode_active` register-question signals, and the topic-file case-fragmentation issue all belonged to the legacy commons claim-check DM path, RETIRED in the cosa-voice token-reduction Phase 4 (2026-06-15). They no longer apply — use `dm_send` (see Failure Mode 1).\n\n"
         f"**5. Stale-bridge phantom personas in `commons_who`** — `commons_who` may show sessions whose host process has died. The host-side prune at SessionStart eventually cleans these, but during the window between death and prune, they appear active. If a DM to a 'visible' peer never returns a reply, the recipient may be a phantom. Cross-reference with `commons_who(retention_hours=1)` for a narrower window.\n\n"
 
         f"**6. Persona-allocation cache staleness across MCP restart** — if your session was bounced (architecture switchover, manual MCP subprocess kill, etc.) AND the persona pool was exhausted such that you got a 'Sam' overflow allocation, an in-memory cache of the pre-bounce allocation may persist in the running MCP subprocess until you call `get_session_info()` fresh. After ANY MCP restart or pool-exhaustion event, re-call `get_session_info()` to confirm the current allocation matches what your bridge file says — the bridge file is the source of truth; the in-memory cache may lag.\n\n"
-
-        f"**7. Topic-file name case sensitivity (filed 2026-05-16, fix pending)** — the `commons_send_to` wrapper currently constructs its topic name as `f\"dm-{{recipient}}\"` with literal recipient case. So `commons_send_to(recipient=\"Tiberius\")` writes to `dm-Tiberius.md` (capital T), while a peer reading lowercase `dm-tiberius` won't see it. Push-mode persona resolution is case-insensitive (so the recipient's listener still gets the system-reminder), but the topic FILES fragment across case variants. **Mitigation until the fix lands**: pass recipient names lowercased: `commons_send_to(recipient=recipient.lower(), ...)`. Or use `commons_post(topic=\"dm-<lowercase>\", body=..., metadata={{...}})` directly. Tracking in TODO.md as the case-fragmentation entry.\n\n"
 
         # =====================================================================
         # Deep Doctrine Reference Footer (G10)
@@ -2751,17 +2739,23 @@ def commons_ask_async(
     topic                : str,
     body                 : str,
     question_id          : Optional[ str ] = None,
-    recipient_session_id : Optional[ str ] = None,
-    recipient_persona    : Optional[ str ] = None,
-    expect_reply         : bool            = True,
+    # ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
+    # DM-mode parameters RETIRED as of cosa-voice token-reduction Phase 4
+    # (2026-06-15): directed peer DMs go through `dm_send` (body inline). These
+    # params are COMMENTED OUT so the registered tool is POLLING-ONLY (post a
+    # question to a topic at large); the dispatch call below no longer forwards
+    # them. Left in place for a later full-removal pass.
+    # recipient_session_id : Optional[ str ] = None,
+    # recipient_persona    : Optional[ str ] = None,
+    # expect_reply         : bool            = True,
 ) -> dict:
     """
-    **⚠️ DM-mode DEPRECATED — use `dm_send` instead.** When `recipient_persona`
-    or `recipient_session_id` is supplied, this routes through the commons
-    claim-check path (forced `commons_read` re-fetch, ~3,700 tokens/received DM).
-    For directed peer DMs use `dm_send` (body inline, ~204 tokens). The
-    polling-mode use below (no recipient — post a question to a topic at large)
-    is NOT deprecated.
+    **⚠️ DM-mode RETIRED — use `dm_send` instead.** The directed-DM parameters
+    (`recipient_persona` / `recipient_session_id` / `expect_reply`) were removed
+    in the cosa-voice token-reduction Phase 4 (2026-06-15): they routed through
+    the commons claim-check path (forced `commons_read` re-fetch, ~3,700
+    tokens/received DM). For directed peer DMs use `dm_send` (body inline, ~204
+    tokens). This tool is now POLLING-ONLY (post a question to a topic at large).
 
     **[ATTENTION-DEMANDING — requires user trigger or clear coordination need]**
     Post a question to commons and return immediately (fire-and-forget).
@@ -2836,9 +2830,12 @@ def commons_ask_async(
         topic                = topic,
         body                 = body,
         question_id          = question_id,
-        recipient_session_id = recipient_session_id,
-        recipient_persona    = recipient_persona,
-        expect_reply         = expect_reply,
+        # DEPRECATED (revisit-later): DM-mode dispatch retired — see param note
+        # above. Polling-only: no recipient / expect_reply forwarded → the
+        # dispatch helper's push_mode stays False (post-to-topic).
+        # recipient_session_id = recipient_session_id,
+        # recipient_persona    = recipient_persona,
+        # expect_reply         = expect_reply,
     )
 
 
@@ -2879,6 +2876,13 @@ def _commons_ask_async_dispatch(
 ) -> dict:
     """
     Shared dispatch helper for `commons_ask_async` and `commons_send_to`.
+
+    NOTE (cosa-voice token-reduction Phase 4, 2026-06-15): the DM-mode of this
+    helper (push_mode auto-enable when a recipient is supplied) is DEPRECATED
+    (revisit-later) — superseded by `dm_send` / the notification-native path.
+    `commons_ask_async` is now polling-only and `commons_send_to` is deregistered,
+    so the recipient/push branch below is reachable only from retired code; it is
+    LEFT IN PLACE for a later full-removal pass.
 
     Necessary because `@mcp.tool`-decorated functions are wrapped into
     `FunctionTool` instances which are NOT directly callable as Python
@@ -2924,7 +2928,15 @@ def _commons_ask_async_dispatch(
     )
 
 
-@mcp.tool
+# ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
+# The `commons_send_to` MCP tool is RETIRED FROM REGISTRATION as of the cosa-voice
+# token-reduction Phase 4 (2026-06-15): peers now DM via `dm_send` (body inline,
+# ~204 tokens) instead of this commons claim-check wrapper (~3,700 tokens/received
+# DM). The `@mcp.tool` decorator below is COMMENTED OUT so the tool no longer
+# registers / appears in the tool list; the implementation is LEFT IN PLACE behind
+# this comment for a later full-removal pass.
+# Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
+# @mcp.tool
 def commons_send_to(
     recipient    : str,
     body         : str,

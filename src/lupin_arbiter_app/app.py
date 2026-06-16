@@ -421,7 +421,6 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
             base_url         = base_url,
             api_key          = api_key,
             asker_session_id = "lupin-arbiter-app-8001",
-            ttl_seconds      = int( cfg.get( "arbiter outreach ack window seconds", default=900, return_type="int" ) ),
             timeout_seconds  = timeout,
         )
 

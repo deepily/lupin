@@ -15,11 +15,15 @@ escalation-path ONLY (never per-poll; detection stays :7999-free, R4):
     failures become outcome values, journaled by the caller under the
     outreach_id (no hop may fail silently — §1.5).
 
-  • the DM PUSH hop (`make_dm_push_fn`) — POST /api/commons/register-question
-    with recipient_persona, the same machinery `commons_send_to` uses: the
-    recipient's listener gets `commons_question_received` → tmux injection →
-    the manager WAKES. Pre-design the arbiter's manager DMs were board-only
-    writes (root-cause R6 — Tiberius never got pushed).
+  • the DM PUSH hop (`make_dm_push_fn`) — POST /api/notify-peer with
+    recipient_persona + the outreach body INLINE (notification-native AI↔AI
+    DM, direction='ai_to_ai'): the recipient's listener delivers the body
+    directly via `_handle_peer_dm` → tmux injection → the manager WAKES.
+    Pre-design the arbiter's manager DMs were board-only writes (root-cause
+    R6 — Tiberius never got pushed). Migrated off the legacy
+    register-question / CommonsQuestionWatcher claim-check path 2026-06-15
+    (cosa-voice token-reduction Phase 4) — the durable dm-<persona> board
+    write in `_emit_dm` is unchanged (presence/receipt-polling substrate).
 
 Outcome contract (every hop returns one dict):
     { "channel": "live"|"dm_push", "outcome": <vocabulary>, ...detail fields }
@@ -41,9 +45,10 @@ from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn, DELIVERED
 
 
 # the :7999 notification ingress (POST /api/notify; X-API-Key or JWT auth)
-NOTIFY_PATH            = "/api/notify"
-# the :7999 DM-push ingress (POST /api/commons/register-question — §3.3)
-REGISTER_QUESTION_PATH = "/api/commons/register-question"
+NOTIFY_PATH      = "/api/notify"
+# the :7999 notification-native DM-push ingress (POST /api/notify-peer — §3.3,
+# migrated off /api/commons/register-question 2026-06-15: body rides INLINE)
+NOTIFY_PEER_PATH = "/api/notify-peer"
 
 
 # Item A (2026.06.11 receipts design §2.3): the line shape has ONE owner —
@@ -292,35 +297,37 @@ def resolve_arbiter_api_key( get_api_config_fn, load_api_key_fn, *, env, log_fn=
         return None
 
 
-# ── the DM-push hop (§3.3 — manager-bound register-question) ─────────────────
+# ── the DM-push hop (§3.3 — manager-bound notification-native peer DM) ────────
 
-def build_register_question_payload(
+def build_notify_peer_payload(
     *,
     recipient_persona : str,
-    outreach_id       : str,
+    body              : str,
+    thread_id         : str,
     asker_session_id  : str,
-    ttl_seconds       : int,
 ):
     """
-    Build the JSON payload for the register-question DM-push hop — PURE.
+    Build the JSON payload for the /api/notify-peer DM-push hop — PURE.
+
+    Migrated off register-question 2026-06-15: the body rides INLINE (no
+    commons board claim-check). notify-peer resolves the recipient persona →
+    active session (same-user scoped) and delivers `body` as a
+    direction='ai_to_ai' notification — the manager WAKES with the text in hand.
 
     Ensures:
-        - question_id == outreach_id (the dot-connect key: the manager's
-          threaded reply `in_reply_to` therefore names the outreach directly)
-        - topic mirrors the gateway's dm-topic slug for the persona (same
-          board the durable send_to wrote to)
-        - expect_reply=False — the push (commons_question_received → tmux
-          injection) is what we want; the arbiter has no tmux for an
-          asker-side answer push, receipts come from §3.4 board polling
+        - thread_id == the caller's outreach/question id (the dot-connect key:
+          the manager's threaded reply names the outreach via thread_id, and
+          §3.4 board-polling receipts still correlate on the same id)
+        - body travels inline (NotifyPeerRequest.body is required)
+        - no topic / question_id / ttl_seconds / expect_reply — notify-peer is
+          stateless (no tracker), the durable dm-<persona> board write in
+          `_emit_dm` remains the receipt-polling substrate
     """
-    from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
     return {
-        "topic"             : LupinArbiterGateway.dm_topic_for( recipient_persona ),
-        "question_id"       : outreach_id,
         "asker_session_id"  : asker_session_id,
-        "ttl_seconds"       : ttl_seconds,
         "recipient_persona" : recipient_persona,
-        "expect_reply"      : False,
+        "body"              : body,
+        "thread_id"         : thread_id,
     }
 
 
@@ -329,14 +336,13 @@ def make_dm_push_fn(
     base_url          : str,
     api_key           : str,
     asker_session_id  : str,
-    ttl_seconds       : int                  = 900,
     timeout_seconds   : int                  = 5,
     http_post_json_fn : Optional[ Callable ] = None,
     log_fn            : Optional[ Callable ] = None,
-) -> Callable[ [ str, str ], dict ]:
+) -> Callable[ [ str, str, str ], dict ]:
     """
-    Build the manager DM-push seam: dm_push( recipient_persona, outreach_id ) ->
-    dm_push-channel outcome dict.
+    Build the manager DM-push seam: dm_push( recipient_persona, thread_id, body )
+    -> dm_push-channel outcome dict.
 
     Requires:
         - http_post_json_fn (if given) is ( url, headers, payload_dict,
@@ -344,11 +350,10 @@ def make_dm_push_fn(
           default the urllib boundary
 
     Ensures:
-        - POSTs :7999/api/commons/register-question; a 201 with
-          dm_dispatched=true → outcome "dispatched" (the manager's listener got
-          commons_question_received → tmux injection — they WAKE); a 201
-          without dispatch → "registered_no_push" (tracker took it but no live
-          listener push — visible, distinct)
+        - POSTs :7999/api/notify-peer with the body INLINE; a 201
+          (notify-peer always dispatches an ai_to_ai push on resolve) → outcome
+          "dispatched" (the manager's listener delivers the body via
+          _handle_peer_dm → tmux injection — they WAKE with the text in hand)
         - ANY failure (422 recipient-resolution, timeout, refused, non-2xx) →
           outcome "push_unavailable" with detail — the caller degrades to the
           durable board write it already made, VISIBLY (never raises)
@@ -356,31 +361,28 @@ def make_dm_push_fn(
     """
     http_post_json_fn = http_post_json_fn if http_post_json_fn is not None else _http_post_json
     log_fn            = log_fn            if log_fn            is not None else _default_log_fn
-    url               = f"{base_url.rstrip( '/' )}{REGISTER_QUESTION_PATH}"
+    url               = f"{base_url.rstrip( '/' )}{NOTIFY_PEER_PATH}"
     headers           = { "X-API-Key": api_key, "Content-Type": "application/json" }
 
-    def dm_push( recipient_persona: str, outreach_id: str ) -> dict:
-        payload = build_register_question_payload(
-            recipient_persona=recipient_persona, outreach_id=outreach_id,
-            asker_session_id=asker_session_id, ttl_seconds=ttl_seconds,
+    def dm_push( recipient_persona: str, thread_id: str, body: str ) -> dict:
+        payload = build_notify_peer_payload(
+            recipient_persona=recipient_persona, body=body,
+            thread_id=thread_id, asker_session_id=asker_session_id,
         )
         try:
-            status, body = http_post_json_fn( url, headers, payload, timeout_seconds )
-            if status == 201 and isinstance( body, dict ) and body.get( "dm_dispatched" ):
+            status, resp = http_post_json_fn( url, headers, payload, timeout_seconds )
+            if status == 201:
                 outcome = { "channel": "dm_push", "outcome": "dispatched" }
-            elif status == 201:
-                outcome = { "channel": "dm_push", "outcome": "registered_no_push",
-                            "detail": str( body )[ :160 ] }
             else:
                 outcome = { "channel": "dm_push", "outcome": "push_unavailable",
-                            "http_status": status, "detail": str( body )[ :160 ] }
+                            "http_status": status, "detail": str( resp )[ :160 ] }
         except Exception as e:
             http_status = getattr( e, "code", None )
             outcome = { "channel": "dm_push", "outcome": "push_unavailable",
                         "detail": str( e )[ :160 ] }
             if http_status is not None: outcome[ "http_status" ] = http_status
         log_fn( "dm_push_attempted", recipient=recipient_persona,
-                outreach_id=outreach_id, outcome=outcome[ "outcome" ] )
+                thread_id=thread_id, outcome=outcome[ "outcome" ] )
         return outcome
 
     return dm_push
@@ -466,21 +468,21 @@ def quick_smoke_test():
     assert validate_live_notify_target( "" ) is not None
     assert validate_live_notify_target( "not-an-email" ) is not None
 
-    # dm_push outcome mapping
-    payload = build_register_question_payload(
-        recipient_persona="Mr Radio", outreach_id="o-1",
-        asker_session_id="lupin-arbiter-app-8001", ttl_seconds=900,
+    # dm_push outcome mapping — notification-native /api/notify-peer (body inline)
+    payload = build_notify_peer_payload(
+        recipient_persona="Mr Radio", body="WHOLE-FLEET-STALL — please advise",
+        thread_id="o-1", asker_session_id="lupin-arbiter-app-8001",
     )
-    assert payload[ "topic" ] == "dm-mr_radio" and payload[ "question_id" ] == "o-1"
-    assert payload[ "expect_reply" ] is False
+    assert payload[ "recipient_persona" ] == "Mr Radio" and payload[ "thread_id" ] == "o-1"
+    assert payload[ "body" ] == "WHOLE-FLEET-STALL — please advise"
     push = make_dm_push_fn( base_url="http://x", api_key="k", asker_session_id="s",
-                            http_post_json_fn=lambda u, h, p, t: ( 201, { "dm_dispatched": True } ),
+                            http_post_json_fn=lambda u, h, p, t: ( 201, { "dispatched": True } ),
                             log_fn=quiet )
-    assert push( "Tiberius", "o-2" )[ "outcome" ] == "dispatched"
+    assert push( "Tiberius", "o-2", "wake up" )[ "outcome" ] == "dispatched"
     push = make_dm_push_fn( base_url="http://x", api_key="k", asker_session_id="s",
                             http_post_json_fn=lambda u, h, p, t: ( 422, { "detail": "recipient_not_found" } ),
                             log_fn=quiet )
-    assert push( "Ghost", "o-3" )[ "outcome" ] == "push_unavailable"
+    assert push( "Ghost", "o-3", "wake up" )[ "outcome" ] == "push_unavailable"
     return True
 
 

@@ -81,7 +81,20 @@ MCP bounce) is the gated moment; coordinated by Mr. Radio, not flipped unilatera
 
 Each stage py_compile + tested; **nothing committed/pushed**; deploy/cutover gated to Rick + Mr. Radio.
 
-## 6. Bug #9 (trailing-`>` truncation) — finding
+## 6. Bug #9 (trailing-`>` truncation) — VALIDATED 2026-06-15: external artifact, NO code change
+
+**Validation (Rick's validate-first)**: a byte-capture probe injected `build_peer_dm_reminder` output
+through the EXACT listener sequence (`tmux send-keys -l <text>` → sleep → `send-keys Enter`) into a
+`cat` capture, in two variants: (A) reminder as-is (ends `</system-reminder>`) and (B) reminder + a
+trailing `\n`. **Both captures contain the FULL `</system-reminder>`** — case A ended
+`b'</system-reminder>\n'`, case B `b'</system-reminder>\n\n'`. The Enter keystroke already appends a
+`\n` AFTER the `>`, so the `>` is never the last byte on the wire — the trailing-`\n` defensive idea
+changes nothing. **Conclusion: the truncation is NOT in our injection code; it is an external
+Claude-Code-input / terminal-render artifact. The fix is NOT proven → our code is left UNTOUCHED.**
+(Probe: `/tmp/bug9_probe.py`.) Since it's downstream of our boundary, it would affect the `dm_send`
+path identically — not path-specific, not fixable from the repo.
+
+### (historical proposal — superseded by the validation above)
 
 Confirmed **NOT in our code**: `wrap=False` skips `speakerphone_wrap`/`sanitize_for_wrap` entirely; the
 build is a clean f-string; `tmux send-keys -l` is byte-perfect (capture proof); server push carries
@@ -107,3 +120,27 @@ clip is a terminal artifact it hits `dm_send` **equally** — retiring legacy wi
 1. Approve **(b) staged**, or prefer a harder **(a) full retire** now (accepting the live-comms disruption + watcher rebuild)?
 2. Bug #9: apply the trailing-`\n` defensive fix to `build_peer_dm_reminder` now (protects the new path), or validate-first?
 3. External doc repoints (`~/.claude/CLAUDE.md`, planning-is-prompting): want me to draft the diffs for you to apply, or just flag them?
+
+## 9. EXECUTION — **COMMENT-OUT (not delete), revisit-later** (Rick, 2026-06-15)
+
+**⚠️ Decision override.** Rick walked the decisions ~20:30 on 2026-06-15 and **reversed the §5 (a) FULL-DELETE call** to a **COMMENT-OUT + note-to-revisit** approach: the legacy commons-DM machinery is left in the tree behind `#` comments (+ a `# DEPRECATED (revisit-later): superseded by dm_send / notification-native path` banner at each site), NOT physically deleted. This is the reversible, low-ceremony cutover; a separate **full-removal pass** is owed later (TODO below). Built on the working tree, **held — nothing committed/pushed**; the deploy + crew cutover bounce is gated to Mr. Radio (Rick authorized the cutover bounce for this session, to run AFTER a fresh-critical reviewer).
+
+### What landed (builder: Rachel 🕊️, session `916f4c4b`; all green + held)
+
+| Stage | What was done (comment-out) | Files | Verification |
+|---|---|---|---|
+| **0 — arbiter migration** (prerequisite) | `make_dm_push_fn` now POSTs **`/api/notify-peer`** (body INLINE) instead of `register-question`; `build_register_question_payload`→`build_notify_peer_payload`; `dm_push(persona, thread_id, body)` 3-arg; call site `arbiter_job._emit_dm` passes `body`; `app.py` drops vestigial `ttl_seconds`. The durable dm-`<persona>` board write (`gateway.send_to`) is UNCHANGED (presence/receipt-polling substrate). | `arbiter_live_notify.py`, `arbiter_job.py`, `app.py`, `test_arbiter_live_notify.py`, `test_arbiter_outreach_receipts.py` | 70 tests pass; **100%** L/B on `arbiter_live_notify.py` |
+| **S1 — MCP send tools** | `commons_send_to` `@mcp.tool` decorator commented out (deregistered; body left in place). `commons_ask_async` DM-mode params commented out → **polling-only** (tool stays registered). `_commons_ask_async_dispatch` DM-branch left in place w/ DEPRECATED note. `commons_ask_sync` untouched (pure polling). | `cosa_voice_mcp.py` | 705 commons/MCP unit tests pass; subprocess `list_tools` confirms `commons_send_to` absent, `commons_ask_async` present |
+| **S2 — server routes + watcher daemon** | POST/DELETE `/api/commons/register-question` route decorators commented out (endpoints deregistered). `CommonsQuestionWatcher` daemon create/start/stop + import commented out in `main.py` lifespan; `init_commons_state(question_watcher=…)` arg dropped (defaults None). Pure-logic cores (`execute_register_question`/`execute_unregister_question`) + the watcher CLASS left in place (still unit-tested). | `commons.py`, `main.py`, `test_commons_ac14_registration.py` (route-registration asserts → **inverted to deregistration guards**), `test_ask_async_push_e2e.py` (module-`skip`) | 581 commons tests pass, 11 skipped; **100%** L/B on `commons.py` + `commons_question_watcher.py` |
+| **S3 — listener handlers** | `_handle_commons_answer_received` + `_handle_commons_question_received` + their `_handle_action` dispatch elifs commented out (inbound peer DMs route to `_handle_peer_dm` via `direction='ai_to_ai'`). `_handle_broadcast_received` KEPT. | `cc_notification_listener.py`, `test_cc_notification_listener.py` (handler tests commented out) | listener suites green (3 pre-existing `test_voice_injection_e2e` voice-wrap failures are UNRELATED to Phase 4) |
+| **S4 — instructions/docs** | MCP `instructions` payload toolkit table + autonomy tier + DM-workflow + receipt/reply etiquette + bug-filing + failure-modes repointed to **`dm_send`**; the bug-#10 `commons_read`/`commons_post` re-fetch framing dropped. | `cosa_voice_mcp.py` | 103 MCP doc tests pass; no test asserts payload content |
+| **S5 — bug #9** | ✅ VALIDATED no-code-change (§6) — external CC/terminal artifact, not ours. Untouched. | — | byte-capture probe (§6) |
+
+### TODO — full-removal pass (revisit-later)
+
+A later cleanup should physically delete (not just uncomment) the now-dead legacy surface, once the cutover is deployed and telemetry shows zero hits:
+- `commons_send_to` tool + body; `commons_ask_async` DM-mode remnants; `_commons_ask_async_dispatch` DM-branch (`cosa_voice_mcp.py`); `commons_ask.py` `_register_push_mode` + `ask_async` push-mode block.
+- `execute_register_question` / `execute_unregister_question` / `make_question_inject_fn` / `_dispatch_commons_question_received` + the commented routes (`commons.py`); `CommonsQuestionWatcher` (`commons_question_watcher.py`) + its tests; the `main.py` commented lifespan block.
+- The two commented listener handlers + their commented tests (`cc_notification_listener.py`, `test_cc_notification_listener.py`); the skipped `test_ask_async_push_e2e.py`.
+- **KEEP regardless** (shared/live): `_resolve_dm_recipient`, `_derive_dm_topic`, broadcasts (`_handle_broadcast_received`), presence/coordination, `commons_ask_async` polling-mode, `commons_ask_sync`, the durable arbiter board write.
+- External doc repoints (out-of-repo, flagged for Rick): `~/.claude/CLAUDE.md` § CROSS-SESSION COMMUNICATION, `planning-is-prompting/workflow/cross-session-communication.md`.

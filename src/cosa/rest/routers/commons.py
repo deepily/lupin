@@ -1341,54 +1341,67 @@ async def get_broadcast_history(   # pragma: no cover
     return JSONResponse( content=result )
 
 
-@router.post(
-    "/register-question",
-    summary     = "Register an outstanding `ask_async` question for push-mode answer dispatch",
-    description = "Phase 3 push-mode. The MCP-side `ask_async()` calls this endpoint to register a (topic, question_id, asker_session_id) tracker entry. The server-side CommonsQuestionWatcher then tails the topic and pushes a `commons_answer_received` notification when a matching `in_reply_to` answer appears. Returns 201 on success, 409 on collision, 429 on cap-hit. FastAPI auto-422s on Pydantic validation failure.",
-)
-async def post_register_question(   # pragma: no cover
-    body: RegisterQuestionRequest,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
-    notification_queue=Depends( get_notification_queue ),
-) -> JSONResponse:
-    _require_question_watcher()
-    # FM-7 mitigation: register-question resolves the recipient via bridge-dir
-    # enumeration + per-bridge reads (blocking I/O); run it OFF the event loop so the
-    # DM/ask push-registration flood can't stall the shared :7999 loop. Mirrors broadcast.
-    result = await asyncio.to_thread(
-        execute_register_question,
-        authenticated_user_id            = authenticated_user_id,
-        body                             = body,
-        question_watcher                 = _commons_question_watcher,
-        notification_queue               = notification_queue,
-        build_sender_id                  = build_sender_id_for_cc,
-        raw_sessions_fn                  = find_active_voice_persona_sessions,
-        bridge_loader                    = _load_bridge_fields,
-        active_session_threshold_seconds = _active_session_threshold_seconds,
-    )
-    http_status = result.pop( "http_status" )
-    if http_status >= 400:
-        raise HTTPException( status_code=http_status, detail=result[ "detail" ] )
-    return JSONResponse( status_code=http_status, content=result )
-
-
-@router.delete(
-    "/register-question/{question_id}",
-    summary     = "Unregister an outstanding question (asker-side cleanup or cancellation)",
-    description = "T5 uniform 404 for both unknown question_ids AND known-but-not-owned. Returns 204 on success.",
-)
-async def delete_register_question(   # pragma: no cover
-    authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
-    question_id           : str = Path( ..., min_length=_QID_TOPIC_MIN, max_length=_QID_TOPIC_MAX, pattern=_TOPIC_OR_QID_PATTERN ),
-) -> JSONResponse:
-    _require_question_watcher()
-    result = execute_unregister_question(
-        authenticated_user_id = authenticated_user_id,
-        question_id           = question_id,
-        question_watcher      = _commons_question_watcher,
-    )
-    http_status = result.pop( "http_status" )
-    if http_status == 404:
-        raise HTTPException( status_code=404, detail=result[ "detail" ] )
-    # 204 No Content
-    return JSONResponse( status_code=204, content=None )
+# ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
+# The POST/DELETE /api/commons/register-question HTTP routes are RETIRED FROM
+# REGISTRATION as of the cosa-voice token-reduction Phase 4 (2026-06-15): the
+# legacy DM claim-check path (register-question → CommonsQuestionWatcher push →
+# commons_answer_received) is replaced by the notification-native path
+# (`dm_send` → POST /api/notify-peer, body inline). The route decorators below
+# are COMMENTED OUT so the endpoints no longer register; the pure-logic cores
+# (`execute_register_question` / `execute_unregister_question`) and the
+# `CommonsQuestionWatcher` are LEFT IN PLACE (still unit-tested) for a later
+# full-removal pass. The CommonsQuestionWatcher DAEMON is no longer started
+# (lupin_app/main.py lifespan wiring is likewise commented out).
+# Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
+#
+# @router.post(
+#     "/register-question",
+#     summary     = "Register an outstanding `ask_async` question for push-mode answer dispatch",
+#     description = "Phase 3 push-mode. The MCP-side `ask_async()` calls this endpoint to register a (topic, question_id, asker_session_id) tracker entry. The server-side CommonsQuestionWatcher then tails the topic and pushes a `commons_answer_received` notification when a matching `in_reply_to` answer appears. Returns 201 on success, 409 on collision, 429 on cap-hit. FastAPI auto-422s on Pydantic validation failure.",
+# )
+# async def post_register_question(   # pragma: no cover
+#     body: RegisterQuestionRequest,
+#     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+#     notification_queue=Depends( get_notification_queue ),
+# ) -> JSONResponse:
+#     _require_question_watcher()
+#     # FM-7 mitigation: register-question resolves the recipient via bridge-dir
+#     # enumeration + per-bridge reads (blocking I/O); run it OFF the event loop so the
+#     # DM/ask push-registration flood can't stall the shared :7999 loop. Mirrors broadcast.
+#     result = await asyncio.to_thread(
+#         execute_register_question,
+#         authenticated_user_id            = authenticated_user_id,
+#         body                             = body,
+#         question_watcher                 = _commons_question_watcher,
+#         notification_queue               = notification_queue,
+#         build_sender_id                  = build_sender_id_for_cc,
+#         raw_sessions_fn                  = find_active_voice_persona_sessions,
+#         bridge_loader                    = _load_bridge_fields,
+#         active_session_threshold_seconds = _active_session_threshold_seconds,
+#     )
+#     http_status = result.pop( "http_status" )
+#     if http_status >= 400:
+#         raise HTTPException( status_code=http_status, detail=result[ "detail" ] )
+#     return JSONResponse( status_code=http_status, content=result )
+#
+#
+# @router.delete(
+#     "/register-question/{question_id}",
+#     summary     = "Unregister an outstanding question (asker-side cleanup or cancellation)",
+#     description = "T5 uniform 404 for both unknown question_ids AND known-but-not-owned. Returns 204 on success.",
+# )
+# async def delete_register_question(   # pragma: no cover
+#     authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
+#     question_id           : str = Path( ..., min_length=_QID_TOPIC_MIN, max_length=_QID_TOPIC_MAX, pattern=_TOPIC_OR_QID_PATTERN ),
+# ) -> JSONResponse:
+#     _require_question_watcher()
+#     result = execute_unregister_question(
+#         authenticated_user_id = authenticated_user_id,
+#         question_id           = question_id,
+#         question_watcher      = _commons_question_watcher,
+#     )
+#     http_status = result.pop( "http_status" )
+#     if http_status == 404:
+#         raise HTTPException( status_code=404, detail=result[ "detail" ] )
+#     # 204 No Content
+#     return JSONResponse( status_code=204, content=None )

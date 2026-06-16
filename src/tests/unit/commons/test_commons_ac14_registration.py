@@ -54,34 +54,25 @@ def test_ac14_router_prefix_and_tag():
     assert "commons" in commons_router.tags
 
 
-# ─── AC14 (Phase 3 step 6 extension) — register-question endpoints ──────────
+# ─── register-question endpoints — RETIRED (cosa-voice token-reduction Phase 4) ─
+# DEPRECATED (revisit-later): the POST/DELETE /api/commons/register-question routes
+# were COMMENTED OUT in commons.py (2026-06-15) — the legacy DM claim-check path is
+# superseded by the notification-native dm_send / POST /api/notify-peer path. The
+# four former route-REGISTRATION assertions are inverted to actively guard the
+# DEREGISTRATION (the cutover regression guard); the pure-logic cores
+# (execute_register_question / execute_unregister_question) remain unit-tested in
+# test_commons_router.py. Restore these to the positive form if the routes are
+# ever re-enabled.
+# Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
 
 
-def test_ac14_register_question_post_route_registered():
-    """POST /api/commons/register-question appears in the router's routes."""
+def test_register_question_post_route_deregistered():
+    """POST /api/commons/register-question is NO LONGER registered (Phase 4 cutover)."""
     paths = { r.path for r in commons_router.routes }
-    assert "/api/commons/register-question" in paths, f"missing route; got {paths}"
+    assert "/api/commons/register-question" not in paths, f"route should be retired; got {paths}"
 
 
-def test_ac14_register_question_delete_route_registered():
-    """DELETE /api/commons/register-question/{question_id} appears in the router's routes."""
+def test_register_question_delete_route_deregistered():
+    """DELETE /api/commons/register-question/{question_id} is NO LONGER registered (Phase 4 cutover)."""
     paths = { r.path for r in commons_router.routes }
-    assert "/api/commons/register-question/{question_id}" in paths, f"missing route; got {paths}"
-
-
-def test_ac14_register_question_is_post():
-    """The /register-question (no path param) endpoint is registered as POST."""
-    for r in commons_router.routes:
-        if r.path == "/api/commons/register-question":
-            assert "POST" in r.methods, f"expected POST in {r.methods}"
-            return
-    pytest.fail( "route /api/commons/register-question not found" )
-
-
-def test_ac14_register_question_delete_is_delete():
-    """The /register-question/{question_id} endpoint is registered as DELETE."""
-    for r in commons_router.routes:
-        if r.path == "/api/commons/register-question/{question_id}":
-            assert "DELETE" in r.methods, f"expected DELETE in {r.methods}"
-            return
-    pytest.fail( "route /api/commons/register-question/{question_id} not found" )
+    assert "/api/commons/register-question/{question_id}" not in paths, f"route should be retired; got {paths}"

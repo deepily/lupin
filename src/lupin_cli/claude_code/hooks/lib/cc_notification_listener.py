@@ -426,10 +426,19 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._inject_exit_conversation_reminder()
         elif action == "broadcast_received":
             self._handle_broadcast_received( notification )
-        elif action == "commons_answer_received":
-            self._handle_commons_answer_received( notification )
-        elif action == "commons_question_received":
-            self._handle_commons_question_received( notification )
+        # DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
+        # The commons_answer_received / commons_question_received action dispatch is
+        # RETIRED in the cosa-voice token-reduction Phase 4 (2026-06-15): inbound peer
+        # DMs now arrive as direction='ai_to_ai' notifications routed to _handle_peer_dm
+        # (see _handle_event), and the legacy register-question/CommonsQuestionWatcher
+        # push path is commented out server-side. These two dispatch branches + their
+        # handler methods (_handle_commons_answer_received / _handle_commons_question_received,
+        # below) are LEFT IN PLACE behind comments for a later full-removal pass.
+        # Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
+        # elif action == "commons_answer_received":
+        #     self._handle_commons_answer_received( notification )
+        # elif action == "commons_question_received":
+        #     self._handle_commons_question_received( notification )
         else:
             self._log( f"{self.LOG_PREFIX} Unknown action: {action}" )
 
@@ -499,93 +508,104 @@ class CCNotificationListener( BaseWebSocketListener ):
             persona_roster    = persona_roster or None,
         )
 
-    def _handle_commons_answer_received( self, notification ):
-        """
-        Handle an `action:commons_answer_received` notification from the
-        server-side `CommonsQuestionWatcher` (Phase 3 step 8).
-
-        Per AC4 + Q3 of
-        src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md:
-        - Reads `persona_name` from the STAMPED notification payload (F9-fit
-          immutability — never a live lookup; the answerer's persona at
-          answer-write time is the authoritative attribution).
-        - Builds the `<system-reminder>` body using the Q3 framing:
-              "COMMONS PEER REPLY (question_id X, from @PersonaName):
-                  [body]"
-          PEER ≠ USER (intra-AI principle), REPLY ≠ BROADCAST.
-        - Injects via `_inject_via_tmux(text, wrap=False)` — the body
-          is already a complete <system-reminder> block.
-        """
-        payload      = notification.get( "payload" ) or { }
-        question_id  = payload.get( "question_id" )
-        body         = payload.get( "body", "" )
-        persona_name = payload.get( "persona_name" ) or "unknown"
-
-        if not question_id:
-            self._log( f"{self.LOG_PREFIX} commons_answer_received missing question_id; skipping" )
-            return
-
-        # Q3 framing — persona attribution preserves provenance; question_id
-        # lets the LLM correlate to the original ask_async call.
-        reminder_body = (
-            f"COMMONS PEER REPLY (question_id {question_id}, from @{persona_name}):\n\n"
-            f"{body}"
-        )
-        wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
-        self._inject_via_tmux( wrapped, wrap=False )
-
-    def _handle_commons_question_received( self, notification ):
-        """
-        Handle an `action:commons_question_received` notification — an inter-
-        session directed DM addressed to this CC session.
-
-        Per AC6 + Phase 0 Q5-rev framing of
-        src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md:
-        - Reads payload fields stamped at register-question dispatch time by
-          the endpoint's `_dispatch_commons_question_received` helper (the
-          sender's persona is NOT stamped here today — the listener can read
-          it from the topic entry if needed). For v1, the sender is identified
-          via the asker_session_id field; future enhancement adds the sender's
-          persona to the dispatch payload.
-        - Builds the `<system-reminder>` body using the Q5-rev framing
-          (parallel to Phase 3's COMMONS PEER REPLY):
-              "COMMONS PEER MESSAGE (question_id X, topic Y, from session Z):
-                  <body to be read from the commons topic>"
-          For v1, the body is not in the dispatch payload (the entry sits in
-          the commons topic) — the listener injects the framing with a
-          pointer to the topic + question_id so the recipient AI can call
-          commons_read() to retrieve the actual body and any subsequent
-          context. v1.1 enhancement: include body in dispatch payload to
-          avoid the read round-trip.
-        - Injects via `_inject_via_tmux(text, wrap=False)` — body is a
-          complete <system-reminder> block.
-        """
-        payload          = notification.get( "payload" ) or { }
-        question_id      = payload.get( "question_id" )
-        topic            = payload.get( "topic" )
-        asker_session    = payload.get( "asker_session" ) or "unknown"
-
-        if not question_id:
-            self._log( f"{self.LOG_PREFIX} commons_question_received missing question_id; skipping" )
-            return
-        if not topic:
-            self._log( f"{self.LOG_PREFIX} commons_question_received missing topic; skipping" )
-            return
-
-        reminder_body = (
-            f"COMMONS PEER MESSAGE (question_id {question_id}, topic {topic}, from session {asker_session[:8]}):\n\n"
-            f"A peer CC session has addressed a directed DM to you on topic '{topic}' with question_id '{question_id}'.\n"
-            f"Read the message body via commons_read(topic='{topic}', limit=10) and look for the entry whose "
-            f"metadata.question_id == '{question_id}'. To reply, call commons_post(topic='{topic}', body='<your reply>', "
-            f"metadata={{'in_reply_to': '{question_id}'}}) — the original asker's watcher will push your reply back "
-            f"to their tmux session via Phase 3 commons_answer_received."
-        )
-        wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
-        try:
-            self._inject_via_tmux( wrapped, wrap=False )
-        except Exception as e:
-            # T7 listener-injection isolation: failure logs + skips, doesn't crash listener
-            self._log( f"{self.LOG_PREFIX} commons_question_received inject failed: {e}" )
+    # ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
+    # The two legacy listener handlers below — `_handle_commons_answer_received` and
+    # `_handle_commons_question_received` — are RETIRED in the cosa-voice token-reduction
+    # Phase 4 (2026-06-15). Inbound peer DMs now arrive as direction='ai_to_ai'
+    # notifications routed to `_handle_peer_dm` (body inline). `_handle_commons_question_received`
+    # in particular emitted the bug-#10 framing that told the recipient to `commons_read`
+    # the body + reply via `commons_post` — the exact verbose claim-check the new path
+    # eliminates. Their action-dispatch elif branches (in `_handle_action`, above) are
+    # likewise commented out. LEFT IN PLACE behind comments for a later full-removal pass.
+    # Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
+    #
+    # def _handle_commons_answer_received( self, notification ):
+    #     """
+    #     Handle an `action:commons_answer_received` notification from the
+    #     server-side `CommonsQuestionWatcher` (Phase 3 step 8).
+    #
+    #     Per AC4 + Q3 of
+    #     src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md:
+    #     - Reads `persona_name` from the STAMPED notification payload (F9-fit
+    #       immutability — never a live lookup; the answerer's persona at
+    #       answer-write time is the authoritative attribution).
+    #     - Builds the `<system-reminder>` body using the Q3 framing:
+    #           "COMMONS PEER REPLY (question_id X, from @PersonaName):
+    #               [body]"
+    #       PEER ≠ USER (intra-AI principle), REPLY ≠ BROADCAST.
+    #     - Injects via `_inject_via_tmux(text, wrap=False)` — the body
+    #       is already a complete <system-reminder> block.
+    #     """
+    #     payload      = notification.get( "payload" ) or { }
+    #     question_id  = payload.get( "question_id" )
+    #     body         = payload.get( "body", "" )
+    #     persona_name = payload.get( "persona_name" ) or "unknown"
+    #
+    #     if not question_id:
+    #         self._log( f"{self.LOG_PREFIX} commons_answer_received missing question_id; skipping" )
+    #         return
+    #
+    #     # Q3 framing — persona attribution preserves provenance; question_id
+    #     # lets the LLM correlate to the original ask_async call.
+    #     reminder_body = (
+    #         f"COMMONS PEER REPLY (question_id {question_id}, from @{persona_name}):\n\n"
+    #         f"{body}"
+    #     )
+    #     wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+    #     self._inject_via_tmux( wrapped, wrap=False )
+    #
+    # def _handle_commons_question_received( self, notification ):
+    #     """
+    #     Handle an `action:commons_question_received` notification — an inter-
+    #     session directed DM addressed to this CC session.
+    #
+    #     Per AC6 + Phase 0 Q5-rev framing of
+    #     src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md:
+    #     - Reads payload fields stamped at register-question dispatch time by
+    #       the endpoint's `_dispatch_commons_question_received` helper (the
+    #       sender's persona is NOT stamped here today — the listener can read
+    #       it from the topic entry if needed). For v1, the sender is identified
+    #       via the asker_session_id field; future enhancement adds the sender's
+    #       persona to the dispatch payload.
+    #     - Builds the `<system-reminder>` body using the Q5-rev framing
+    #       (parallel to Phase 3's COMMONS PEER REPLY):
+    #           "COMMONS PEER MESSAGE (question_id X, topic Y, from session Z):
+    #               <body to be read from the commons topic>"
+    #       For v1, the body is not in the dispatch payload (the entry sits in
+    #       the commons topic) — the listener injects the framing with a
+    #       pointer to the topic + question_id so the recipient AI can call
+    #       commons_read() to retrieve the actual body and any subsequent
+    #       context. v1.1 enhancement: include body in dispatch payload to
+    #       avoid the read round-trip.
+    #     - Injects via `_inject_via_tmux(text, wrap=False)` — body is a
+    #       complete <system-reminder> block.
+    #     """
+    #     payload          = notification.get( "payload" ) or { }
+    #     question_id      = payload.get( "question_id" )
+    #     topic            = payload.get( "topic" )
+    #     asker_session    = payload.get( "asker_session" ) or "unknown"
+    #
+    #     if not question_id:
+    #         self._log( f"{self.LOG_PREFIX} commons_question_received missing question_id; skipping" )
+    #         return
+    #     if not topic:
+    #         self._log( f"{self.LOG_PREFIX} commons_question_received missing topic; skipping" )
+    #         return
+    #
+    #     reminder_body = (
+    #         f"COMMONS PEER MESSAGE (question_id {question_id}, topic {topic}, from session {asker_session[:8]}):\n\n"
+    #         f"A peer CC session has addressed a directed DM to you on topic '{topic}' with question_id '{question_id}'.\n"
+    #         f"Read the message body via commons_read(topic='{topic}', limit=10) and look for the entry whose "
+    #         f"metadata.question_id == '{question_id}'. To reply, call commons_post(topic='{topic}', body='<your reply>', "
+    #         f"metadata={{'in_reply_to': '{question_id}'}}) — the original asker's watcher will push your reply back "
+    #         f"to their tmux session via Phase 3 commons_answer_received."
+    #     )
+    #     wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+    #     try:
+    #         self._inject_via_tmux( wrapped, wrap=False )
+    #     except Exception as e:
+    #         # T7 listener-injection isolation: failure logs + skips, doesn't crash listener
+    #         self._log( f"{self.LOG_PREFIX} commons_question_received inject failed: {e}" )
 
     def _inject_exit_conversation_reminder( self ):
         """

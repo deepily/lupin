@@ -268,13 +268,13 @@ def test_emit_dm_send_failure_is_post_error_outcome():
 def test_emit_dm_push_hop_outcome_journaled_and_resend_derives_qid():
     gw, log = _GW(), _Log()
     pushes = [ ]
-    def dm_push( persona, qid ):
-        pushes.append( ( persona, qid ) )
+    def dm_push( persona, thread_id, body ):
+        pushes.append( ( persona, thread_id, body ) )
         return { "channel": "dm_push", "outcome": "dispatched" }
     job = _job( gw, log=log, dm_push_fn=dm_push )
     job._emit_dm( "oid1", "stall", "Tiberius", "body", attempt=1 )
     job._emit_dm( "oid1", "stall", "Tiberius", "body", attempt=2 )      # resend
-    assert pushes == [ ( "Tiberius", "oid1" ), ( "Tiberius", "oid1-r2" ) ]   # no 409 collision
+    assert pushes == [ ( "Tiberius", "oid1", "body" ), ( "Tiberius", "oid1-r2", "body" ) ]  # body inline; no 409 collision
     assert gw.sent[ 1 ][ 2 ][ "question_id" ] == "oid1-r2"              # board metadata matches
     push_results = [ f for f in log.of( "arbiter_outreach_result" ) if f[ "channel" ] == "dm_push" ]
     assert [ f[ "attempt" ] for f in push_results ] == [ 1, 2 ]
@@ -282,11 +282,11 @@ def test_emit_dm_push_hop_outcome_journaled_and_resend_derives_qid():
 
 def test_emit_dm_push_hop_blowup_degrades_to_push_unavailable():
     gw, log = _GW(), _Log()
-    def boom( persona, qid ): raise RuntimeError( "register-question down" )
+    def boom( persona, thread_id, body ): raise RuntimeError( "notify-peer down" )
     job = _job( gw, log=log, dm_push_fn=boom )
     job._emit_dm( "oid1", "stall", "Tiberius", "body" )
     push = [ f for f in log.of( "arbiter_outreach_result" ) if f[ "channel" ] == "dm_push" ][ 0 ]
-    assert push[ "outcome" ] == "push_unavailable" and "register-question" in push[ "detail" ]
+    assert push[ "outcome" ] == "push_unavailable" and "notify-peer" in push[ "detail" ]
 
 
 # ── _check_outreach_receipts: ack → resend-once → terminal unacked ───────────
