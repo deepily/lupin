@@ -30,6 +30,10 @@ def _idle_rec( ts, persona="Dot", sid="ip" ):
     return { "session_id": sid, "persona": persona, "kind": "idle_prompt", "ts": ts }
 
 
+def _reaped_rec( ts, persona="Hal", sid="rp" ):
+    return { "session_id": sid, "persona": persona, "kind": "reaped", "ts": ts }
+
+
 # ── _parse_iso ────────────────────────────────────────────────────────────────
 
 def test_parse_iso_none_and_non_str():
@@ -278,6 +282,46 @@ def test_build_view_who_row_without_session_id_ignored():
     who = [ { "persona_name": "x" }, { "session_id": "", "last_post_ts": _iso( 5 ) } ]
     # neither contributes a member; with no other source the roster is empty
     assert m.build_fleet_view( { }, who, NOW, 3600 ) == { }
+
+
+# ── reap tombstone (kind=reaped) — membership + off-axis + flag ───────────────
+
+def test_build_view_reaped_only_member_off_axis_with_flag():
+    """A kind=reaped tombstone makes the session a member, sets reaped=True, and
+    stays OFF the activity axis (never state / never feeds last_event_ts)."""
+    events = { "rp": [ _reaped_rec( _iso( 20 ), persona="Hal" ) ] }
+    v = m.build_fleet_view( events, None, NOW, 3600 )[ "rp" ]
+    assert v[ "reaped" ] is True
+    assert v[ "state" ] == "unknown" and v[ "last_outcome" ] is None
+    assert v[ "last_event_ts" ] is None and v[ "idle_prompt_ts" ] is None
+    assert v[ "persona" ] == "Hal"                      # persona fallback to the tombstone
+
+
+def test_build_view_reaped_flag_false_on_ordinary_session():
+    """Additive flag defaults False for any non-reaped row."""
+    v = m.build_fleet_view( { "s": [ _ev( "poked", _iso( 5 ) ) ] }, None, NOW, 3600 )[ "s" ]
+    assert v[ "reaped" ] is False
+
+
+def test_build_view_reaped_does_not_corrupt_activity_axis():
+    """An activity record + a reaped tombstone: state comes from the activity
+    record, reaped flag still set, tombstone never becomes state."""
+    events = { "s": [ _ev( "poked", _iso( 40 ), persona="Act" ), _reaped_rec( _iso( 5 ), sid="s" ) ] }
+    v = m.build_fleet_view( events, None, NOW, 3600 )[ "s" ]
+    assert v[ "reaped" ] is True
+    assert v[ "state" ] == "working" and v[ "last_outcome" ] == "poked"
+    assert v[ "persona" ] == "Act"                      # activity persona preferred over tombstone
+
+
+def test_build_view_reaped_persona_fallback_after_idle_prompt():
+    """Persona precedence: bridge → activity → idle_prompt → reaped (last resort)."""
+    events = { "s": [ _idle_rec( _iso( 8 ), persona="Idle", sid="s" ),
+                      _reaped_rec( _iso( 4 ), persona="Reap", sid="s" ) ] }
+    v = m.build_fleet_view( events, None, NOW, 3600 )[ "s" ]
+    assert v[ "persona" ] == "Idle"                     # idle_prompt wins over the tombstone
+    # reaped-only (no idle_prompt) → tombstone persona is used
+    only = { "s": [ _reaped_rec( _iso( 4 ), persona="Reap", sid="s" ) ] }
+    assert m.build_fleet_view( only, None, NOW, 3600 )[ "s" ][ "persona" ] == "Reap"
 
 
 def test_quick_smoke_test_passes():

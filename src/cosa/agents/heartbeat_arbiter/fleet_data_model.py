@@ -37,7 +37,7 @@ import datetime
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_CAP_REACHED,
 )
-from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENT_IDLE
+from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENT_IDLE, EVENT_KIND_REAPED
 
 
 # last-outcome → coarse session state (doc 03 §4)
@@ -213,7 +213,11 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
           commons_ts(datetime|None; None when bridge-absent, see guard) ·
           idle_prompt_ts(datetime|None) ·
           last_activity_ts(datetime|None; max of the three) · alive(bool) ·
-          state · holding_on · stuck · poke_count · cap
+          state · holding_on · stuck · poke_count · cap · reaped(bool)
+        - reaped is True iff a kind="reaped" tombstone is present (the host-side
+          reaper appended it); kept OFF the activity axis (never `state` / never
+          feeds last_event_ts), it makes the session a member so its row can be
+          force-offlined + pruned (fleet_render.build_snapshot)
         - the three distinct ts fields stay SEPARATE so the verdict seam
           (fleet_render.compute_liveness) can derive four distinct ages
         - persona prefers the bridge-discovered name, then the last activity
@@ -249,11 +253,16 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
             if isinstance( recs, list ):
                 records.extend( r for r in recs if isinstance( r, dict ) )
 
-        activity_recs   = [ r for r in records if r.get( "kind" ) != KIND_IDLE_PROMPT ]
+        # The activity axis excludes BOTH off-axis kinds (idle_prompt recency AND
+        # the reaped tombstone): neither may become `state` or feed the stop-event
+        # age. The reaped tombstone is a membership + verdict signal ONLY.
+        activity_recs   = [ r for r in records if r.get( "kind" ) not in ( KIND_IDLE_PROMPT, EVENT_KIND_REAPED ) ]
         idleprompt_recs = [ r for r in records if r.get( "kind" ) == KIND_IDLE_PROMPT ]
+        reaped_recs     = [ r for r in records if r.get( "kind" ) == EVENT_KIND_REAPED ]
 
         last_activity = activity_recs[ -1 ]   if activity_recs   else None
         last_idle     = idleprompt_recs[ -1 ] if idleprompt_recs else None
+        last_reaped   = reaped_recs[ -1 ]     if reaped_recs     else None
 
         commons_ts = _commons_ts_for_session( who_rows, cid )
 
@@ -270,7 +279,7 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
         # event list with no commons/idle/bridge signal is NOT trackable.
         # Judged on the RAW commons signal (pre-guard) so a phantom stays an
         # auditable roster row instead of vanishing without trace.
-        has_signal = bool( activity_recs ) or bool( idleprompt_recs ) \
+        has_signal = bool( activity_recs ) or bool( idleprompt_recs ) or bool( reaped_recs ) \
                      or commons_ts is not None or bridge_present
         if not has_signal:
             continue
@@ -301,6 +310,8 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
             persona = last_activity.get( "persona" )
         if persona is None and last_idle is not None:
             persona = last_idle.get( "persona" )
+        if persona is None and last_reaped is not None:
+            persona = last_reaped.get( "persona" )
 
         view[ cid ] = {
             "session_id"       : cid,
@@ -316,6 +327,7 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
             "stuck"            : _count_stuck_episodes( activity_recs ) >= STUCK_REPEAT_THRESHOLD,
             "poke_count"       : last_activity.get( "poke_count" ) if last_activity else None,
             "cap"              : last_activity.get( "cap" ) if last_activity else None,
+            "reaped"           : bool( reaped_recs ),
         }
     return view
 
@@ -344,6 +356,10 @@ def quick_smoke_test():
         # idle_prompt-ONLY session: kind-tagged, NO outcome → enters the roster
         # via the idle_prompt signal but stays OFF the activity axis (N2)
         "ip": [ { "session_id": "ip", "persona": "Dot", "kind": "idle_prompt", "ts": recent } ],
+        # reaped-ONLY session: a kind=reaped tombstone (NO outcome) → enters the
+        # roster as a member but stays OFF the activity axis; reaped flag set so
+        # the verdict seam force-offlines it.
+        "rp": [ { "session_id": "rp", "persona": "Hal", "kind": "reaped", "ts": recent } ],
         # canonicalization (N3): a SHORT event id that prefixes the full bridge uuid
         "abcd1234": [ ev( OUTCOME_POKE, recent, persona="Eve", poke_count=2 ) ],
     }
@@ -365,7 +381,7 @@ def quick_smoke_test():
     # UNION membership: stop-event (s1/s2/s3) ∪ idle_prompt (ip) ∪ canonical
     # bridge⊕event (full_uuid) ∪ bridge-only (bridgeonly) ∪ commons phantom (ph)
     # — s4 (no signal) skipped
-    assert set( view ) == { "s1", "s2", "s3", "ip", full_uuid, "bridgeonly-no-events", "ph" }, set( view )
+    assert set( view ) == { "s1", "s2", "s3", "ip", "rp", full_uuid, "bridgeonly-no-events", "ph" }, set( view )
     assert view[ "s1" ][ "state" ] == "working" and view[ "s1" ][ "holding_on" ] == "peer:Bob"
     assert view[ "s2" ][ "stuck" ] is True and view[ "s2" ][ "state" ] == "stuck"
     # s3: old event ts but recent commons ts + LIVE bridge ⇒ commons counts ⇒ alive
@@ -384,6 +400,15 @@ def quick_smoke_test():
     assert ipv[ "state" ] == "unknown" and ipv[ "last_outcome" ] is None
     assert ipv[ "last_event_ts" ] is None and ipv[ "idle_prompt_ts" ] is not None
     assert ipv[ "persona" ] == "Dot"
+
+    # reaped-only: kind=reaped tombstone keeps it OFF the activity axis, sets the
+    # reaped flag (verdict seam force-offlines it), still a member with persona.
+    rpv = view[ "rp" ]
+    assert rpv[ "reaped" ] is True and rpv[ "state" ] == "unknown"
+    assert rpv[ "last_outcome" ] is None and rpv[ "last_event_ts" ] is None
+    assert rpv[ "idle_prompt_ts" ] is None and rpv[ "persona" ] == "Hal"
+    # every non-reaped row carries reaped=False (additive flag, default off)
+    assert view[ "s1" ][ "reaped" ] is False and view[ "ip" ][ "reaped" ] is False
 
     # canonicalization: short "abcd1234" event ⊕ full-uuid bridge ⇒ ONE view under the full uuid
     assert "abcd1234" not in view

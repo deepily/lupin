@@ -276,6 +276,41 @@ class TestBuildSnapshotProcessDead:
         assert snap[ "sessions" ][ 0 ][ "liveness" ][ "verdict" ] == "offline"
 
 
+# ── build_snapshot REAP TOMBSTONE override (reaped) ─────────────────────────────
+
+class TestBuildSnapshotReaped:
+    def _live_reaped_view( self ):
+        # Fresh commons → would be LIVE absent the reaped tombstone override.
+        return { "s1": { "session_id": "s1", "persona": "Ann", "state": "unknown",
+                         "holding_on": "none", "stuck": False, "reaped": True,
+                         "last_event_ts": None, "commons_ts": NOW } }
+
+    def test_reaped_forces_offline_despite_fresh_signal( self ):
+        # s1 is LIVE by commons, but reaped tombstone present → forced offline + pruned.
+        snap = fr.build_snapshot( self._live_reaped_view(), { }, NOW )
+        assert snap[ "session_count" ] == 0   # offline → pruned from published snapshot
+
+    def test_reaped_row_carries_offline_verdict_and_flag_when_retained( self ):
+        snap = fr.build_snapshot( self._live_reaped_view(), { }, NOW, include_offline = True )
+        row = snap[ "sessions" ][ 0 ]
+        assert row[ "liveness" ][ "verdict" ] == "offline"
+        assert row[ "liveness" ][ "reaped" ] is True
+
+    def test_non_reaped_session_keeps_age_verdict( self ):
+        view = { "s1": { "session_id": "s1", "persona": "Ann", "state": "working",
+                         "holding_on": "none", "stuck": False, "last_event_ts": NOW } }
+        row = fr.build_snapshot( view, { "s1": NOW.timestamp() }, NOW )[ "sessions" ][ 0 ]
+        assert row[ "liveness" ][ "verdict" ] == "LIVE"
+        assert "reaped" not in row[ "liveness" ]
+
+    def test_reaped_absent_key_is_noop( self ):
+        # view without the reaped key → no override (back-compat with pre-fix views).
+        view = { "s1": { "session_id": "s1", "persona": "Ann", "state": "working",
+                         "holding_on": "none", "stuck": False, "last_event_ts": NOW } }
+        row = fr.build_snapshot( view, { "s1": NOW.timestamp() }, NOW )[ "sessions" ][ 0 ]
+        assert row[ "liveness" ][ "verdict" ] == "LIVE" and "reaped" not in row[ "liveness" ]
+
+
 # ── build_snapshot hierarchy enrichment (Fleet-Status P1 §4) ────────────────────
 
 class TestBuildSnapshotEnrichment:

@@ -461,6 +461,31 @@ def _default_emit_reap( identity: Dict[ str, Any ], reason: str = "" ) -> None:
         pass  # producer must NEVER break the reap
 
 
+def _default_emit_reaped_tombstone( identity: Dict[ str, Any ] ) -> None:
+    """
+    Default reap-TOMBSTONE emitter (reap-tombstone roster-eviction fix,
+    2026-06-15): append ONE authoritative `kind="reaped"` record onto the fleet
+    heartbeat-event rail the arbiter polls, so the reaped session's roster row is
+    force-offlined in ~1 poll instead of lingering "stale" for ~60 min. The reap
+    deletes the bridge FIRST (destroying the PID the fast kill-0 death path
+    needs), so this marker is the only fast death signal a reaped session can
+    carry. Reads the `session_id` captured pre-unlink by `_capture_reap_identity`
+    and passes the worker's persona NAME for nicer audit lines. Best-effort: a
+    missing session_id, a bad write, or any error NEVER breaks the reap. Override
+    via `dismiss_sessions(emit_reaped_fn=...)` — tests inject a capture instead.
+    """
+    session_id = identity.get( "session_id" )
+    if not session_id:
+        return                              # no id → fall back to the ~60-min age-out
+    persona = identity.get( "persona" )
+    name    = persona.get( "name" ) if isinstance( persona, dict ) else persona
+    try:
+        from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_reaped
+        emit_reaped( session_id, persona=name )
+    except Exception:
+        pass  # producer must NEVER break the reap
+
+
 def dismiss_sessions(
     manager_session_id : str,
     *,
@@ -469,7 +494,8 @@ def dismiss_sessions(
     write_memento      : bool = True,
     runner             : Callable = default_runner,
     session_dir        : Path = SESSION_DIR,
-    emit_reap_fn       : Optional[ Callable ] = None
+    emit_reap_fn       : Optional[ Callable ] = None,
+    emit_reaped_fn     : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -540,7 +566,8 @@ def dismiss_sessions(
     # (broadcast send-to list + focus bar), then emit the `session_reaped` event.
     # Ordering: kill + manifest-rewrite (above) → unlink bridge → emit. Producer is
     # fail-safe — a bad unlink/emit NEVER breaks the reap.
-    emit             = emit_reap_fn if emit_reap_fn is not None else _default_emit_reap
+    emit             = emit_reap_fn    if emit_reap_fn    is not None else _default_emit_reap
+    emit_tombstone   = emit_reaped_fn  if emit_reaped_fn  is not None else _default_emit_reaped_tombstone
     bridges_deleted  = 0
     for name in reaped_names:
         ident = identities.get( name )
@@ -555,6 +582,13 @@ def dismiss_sessions(
                 pass
         try:
             emit( ident, reason )
+        except Exception:
+            pass  # producer must NEVER break the reap
+        # Reap tombstone on the heartbeat-event rail (reap-tombstone fix): lets
+        # the arbiter evict the roster row in ~1 poll. Fail-safe — a raising
+        # emitter NEVER breaks the reap (same posture as the bridge unlink).
+        try:
+            emit_tombstone( ident )
         except Exception:
             pass  # producer must NEVER break the reap
 

@@ -150,5 +150,19 @@ def test_build_view_non_dict_records_filtered():
     assert f.build_fleet_view( { "s2": [ "all", "non-dict" ] }, [ ], NOW, 3600 ) == { }
 
 
+def test_build_view_reaped_tombstone_member_off_axis_with_flag():
+    """A kind=reaped tombstone (NO outcome) → member with reaped=True, kept OFF
+    the activity axis; a non-reaped row carries reaped=False."""
+    events = {
+        "rp": [ { "session_id": "rp", "persona": "Hal", "kind": "reaped", "ts": _ts( 20 ) } ],
+        "s1": [ { "persona": "Ann", "ts": _ts( 30 ), "outcome": "poked", "poke_count": 1, "cap": 3 } ],
+    }
+    v = f.build_fleet_view( events, [ ], NOW, 3600 )
+    assert v[ "rp" ][ "reaped" ] is True
+    assert v[ "rp" ][ "state" ] == "unknown" and v[ "rp" ][ "last_event_ts" ] is None
+    assert v[ "rp" ][ "persona" ] == "Hal"
+    assert v[ "s1" ][ "reaped" ] is False
+
+
 def test_quick_smoke_test():
     assert f.quick_smoke_test() is True

@@ -54,6 +54,7 @@ def test_reap_deletes_bridge_and_emits():
         res = ss.dismiss_sessions(
             mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
             emit_reap_fn=lambda ident, reason="": emitted.append( ident ),
+            emit_reaped_fn=lambda ident: None,   # no-op tombstone seam (don't touch real fleet dir)
         )
         assert res[ "bridges_deleted" ] == 1
         assert bridge.exists() is False                      # bridge unlinked
@@ -72,7 +73,7 @@ def test_reap_captures_persona_before_unlink():
             # by emit-time the bridge is already gone, but the identity survives
             assert not Path( ident[ "bridge_path" ] ).exists()
         ss.dismiss_sessions( mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER,
-                             session_dir=sd, emit_reap_fn=emit )
+                             session_dir=sd, emit_reap_fn=emit, emit_reaped_fn=lambda ident: None )
         assert captured[ "persona" ][ "name" ] == "Tiffany"
         assert captured[ "sender_id" ] is not None
 
@@ -96,7 +97,7 @@ def test_reap_emit_failure_never_breaks_reap():
         def boom( ident, reason="" ):
             raise RuntimeError( "server down" )
         res = ss.dismiss_sessions( mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER,
-                                   session_dir=sd, emit_reap_fn=boom )
+                                   session_dir=sd, emit_reap_fn=boom, emit_reaped_fn=lambda ident: None )
         assert res[ "bridges_deleted" ] == 1     # bridge still deleted despite emit blowup
         assert bridge.exists() is False
         assert res[ "dismissed" ][ 0 ][ "status" ] == "killed"
@@ -109,7 +110,8 @@ def test_reap_already_gone_session_still_cleans_up():
         dead_runner = lambda argv, env=None: SimpleNamespace( returncode=1 )
         emitted = []
         res = ss.dismiss_sessions( mgr, session_names=[ "cc-author-x-1" ], runner=dead_runner,
-                                   session_dir=sd, emit_reap_fn=lambda i, reason="": emitted.append( i ) )
+                                   session_dir=sd, emit_reap_fn=lambda i, reason="": emitted.append( i ),
+                                   emit_reaped_fn=lambda ident: None )
         assert res[ "dismissed" ][ 0 ][ "status" ] == "already_gone"
         assert res[ "bridges_deleted" ] == 1
         assert len( emitted ) == 1
@@ -202,3 +204,105 @@ def test_default_emit_reap_swallows_post_failure( monkeypatch ):
                                                 load_api_key=lambda f: "k" ) )
     # must NOT raise
     ss._default_emit_reap( { "sender_id": "claude.code@lupin.deepily.ai#abcd1234", "persona": { "name": "X" } } )
+
+
+# ── reap TOMBSTONE seam (reap-tombstone roster-eviction fix, 2026-06-15) ───────
+# dismiss_sessions also appends a kind="reaped" heartbeat tombstone per reaped
+# session so the arbiter force-offlines the roster row in ~1 poll. Injectable seam
+# (emit_reaped_fn) like emit_reap_fn; fail-safe — a raising emitter never breaks
+# the reap.
+
+def test_reap_emits_tombstone_seam():
+    """The injected emit_reaped_fn fires once per reaped session, post-capture."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        tombstoned = []
+        res = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda ident, reason="": None,
+            emit_reaped_fn=lambda ident: tombstoned.append( ident ),
+        )
+        assert res[ "bridges_deleted" ] == 1
+        assert len( tombstoned ) == 1
+        # session_id was captured pre-unlink; persona dict survives for the audit line
+        assert tombstoned[ 0 ][ "session_id" ] == "abcd1234-aaaa-bbbb"
+        assert tombstoned[ 0 ][ "persona" ][ "name" ] == "Tiffany"
+
+
+def test_reap_tombstone_failure_never_breaks_reap():
+    """A throwing emit_reaped_fn is swallowed — the reap result is still well-formed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        def boom( ident ):
+            raise RuntimeError( "fleet dir read-only" )
+        res = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda ident, reason="": None, emit_reaped_fn=boom,
+        )
+        assert res[ "bridges_deleted" ] == 1            # bridge still deleted despite tombstone blowup
+        assert bridge.exists() is False
+        assert res[ "dismissed" ][ 0 ][ "status" ] == "killed"
+
+
+def test_reap_no_bridge_emits_no_tombstone():
+    """No captured identity (no bridge) → no tombstone seam call."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, _ = _setup( tmp, with_bridge=False )
+        tombstoned = []
+        ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reaped_fn=lambda ident: tombstoned.append( ident ),
+        )
+        assert tombstoned == []
+
+
+def test_reap_default_tombstone_path_calls_emit_reaped( monkeypatch ):
+    """With NO injected seam, the DEFAULT path fires the real emit_reaped (covers
+    the default-selection branch + _default_emit_reaped_tombstone integration)."""
+    import lupin_cli.claude_code.hooks.lib.heartbeat_events as he
+    calls = []
+    monkeypatch.setattr( he, "emit_reaped",
+                         lambda session_id, persona=None: calls.append( ( session_id, persona ) ) or True )
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda ident, reason="": None,   # only the tombstone path is default here
+        )
+        assert calls == [ ( "abcd1234-aaaa-bbbb", "Tiffany" ) ]   # session_id + persona NAME
+
+
+# ── _default_emit_reaped_tombstone — the real producer, in isolation ──────────
+
+def test_default_tombstone_dict_persona_extracts_name( monkeypatch ):
+    import lupin_cli.claude_code.hooks.lib.heartbeat_events as he
+    calls = []
+    monkeypatch.setattr( he, "emit_reaped",
+                         lambda session_id, persona=None: calls.append( ( session_id, persona ) ) )
+    ss._default_emit_reaped_tombstone( { "session_id": "sid-1", "persona": { "name": "Rachel", "icon": "🌹" } } )
+    assert calls == [ ( "sid-1", "Rachel" ) ]
+
+
+def test_default_tombstone_string_persona_passthrough( monkeypatch ):
+    import lupin_cli.claude_code.hooks.lib.heartbeat_events as he
+    calls = []
+    monkeypatch.setattr( he, "emit_reaped",
+                         lambda session_id, persona=None: calls.append( ( session_id, persona ) ) )
+    ss._default_emit_reaped_tombstone( { "session_id": "sid-2", "persona": "Clayton" } )
+    assert calls == [ ( "sid-2", "Clayton" ) ]
+
+
+def test_default_tombstone_no_session_id_is_noop( monkeypatch ):
+    import lupin_cli.claude_code.hooks.lib.heartbeat_events as he
+    calls = []
+    monkeypatch.setattr( he, "emit_reaped", lambda *a, **k: calls.append( 1 ) )
+    ss._default_emit_reaped_tombstone( { "session_id": None, "persona": { "name": "X" } } )
+    assert calls == []   # best-effort: no id → fall back to the ~60-min age-out
+
+
+def test_default_tombstone_swallows_emit_failure( monkeypatch ):
+    import lupin_cli.claude_code.hooks.lib.heartbeat_events as he
+    monkeypatch.setattr( he, "emit_reaped",
+                         lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "down" ) ) )
+    # persona None exercises the non-dict (else) branch; must NOT raise
+    ss._default_emit_reaped_tombstone( { "session_id": "sid-3", "persona": None } )

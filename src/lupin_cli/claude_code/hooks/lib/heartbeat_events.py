@@ -80,6 +80,18 @@ EMITTED_OUTCOMES = ( OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_CAP_REACHED, EVENT_I
 # can never map through _STATE_BY_OUTCOME even if a filter were missed.
 EVENT_KIND_IDLE_PROMPT = "idle_prompt"
 
+# Fleet roster TOMBSTONE discriminator (reap-tombstone roster-eviction fix,
+# 2026-06-15). A manager-reaped session has its bridge DELETED before the
+# arbiter can read its PID, so the fast kill-0 death path (find_dead_sessions)
+# structurally can't fire — the row lingers "stale" for ~60 min until its event
+# ages out. The reaper appends ONE authoritative `kind="reaped"` record on the
+# event rail the arbiter already polls; the arbiter force-offlines the row and
+# reuses the existing publish-prune machinery. Like idle_prompt, the record
+# carries NO `outcome` key (never maps through _STATE_BY_OUTCOME) and is handled
+# OFF the activity axis. It is authoritative (written only by the host-side
+# reap), so a force-offline can only follow a REAL reap — no false-death risk.
+EVENT_KIND_REAPED = "reaped"
+
 
 def _resolve_base_dir( base_dir ):
     """
@@ -192,6 +204,53 @@ def emit_idle_prompt( session_id, persona=None, ts=None, base_dir=None ):
             "persona"        : persona,
             "ts"             : ts if ts is not None else _now_iso(),
             "kind"           : EVENT_KIND_IDLE_PROMPT,
+        }
+        path = events_path( session_id, base_dir=base_dir )
+        path.parent.mkdir( parents=True, exist_ok=True )
+        with open( path, "a" ) as f:
+            f.write( json.dumps( record ) + "\n" )
+        return True
+    except ( OSError, TypeError, ValueError ):
+        return False
+
+
+def emit_reaped( session_id, persona=None, ts=None, base_dir=None ):
+    """
+    Append one kind-tagged `reaped` TOMBSTONE event. NEVER raises.
+
+    Emitted by the host-side reaper (`session_spawner.dismiss_sessions`) for each
+    session it tears down, so the fleet arbiter can force-offline the row in ~1
+    poll instead of waiting ~60 min for the event age to cross `stale_seconds`.
+    The reap deletes the bridge FIRST — destroying the PID the fast kill-0 death
+    path needs — so this authoritative marker is the only fast death signal a
+    reaped session can carry.
+
+    The record carries `kind="reaped"` and DELIBERATELY OMITS `outcome`:
+    consumers filter on the `kind` discriminator so it is kept OFF the activity
+    axis (`state` / `last_event_ts` unaffected) — it is a membership + verdict
+    signal ONLY, mirroring how `idle_prompt` is handled.
+
+    Requires:
+        - session_id is a string
+        - persona is a string or None (the reaped worker's voice-persona name,
+          already captured by `_capture_reap_identity`; None is fine — the union
+          backfills from any surviving signal)
+
+    Ensures:
+        - Appends exactly one JSON line: schema_version · session_id · persona ·
+          ts (ISO-8601 UTC) · kind="reaped"  (NO `outcome` key)
+        - Creates the fleet dir if missing (parents, idempotent)
+        - Returns True on a successful append; False on any write/serialization
+          failure — NEVER raises into the caller (best-effort; a write failure
+          must never break the reap)
+    """
+    try:
+        record = {
+            "schema_version" : SCHEMA_VERSION,
+            "session_id"     : session_id,
+            "persona"        : persona,
+            "ts"             : ts if ts is not None else _now_iso(),
+            "kind"           : EVENT_KIND_REAPED,
         }
         path = events_path( session_id, base_dir=base_dir )
         path.parent.mkdir( parents=True, exist_ok=True )
@@ -329,6 +388,13 @@ def quick_smoke_test():
         assert emit_idle_prompt( sid, persona="Tiffany 💍", base_dir=tmp ) is True
         ip = read_events( sid, base_dir=tmp )[ -1 ]
         assert ip[ "kind" ] == EVENT_KIND_IDLE_PROMPT and "outcome" not in ip
+
+        # Reap tombstone — kind-tagged terminal marker (NO `outcome` key); the
+        # arbiter force-offlines the row on the next poll.
+        assert emit_reaped( sid, persona="Tiffany 💍", base_dir=tmp ) is True
+        rp = read_events( sid, base_dir=tmp )[ -1 ]
+        assert rp[ "kind" ] == EVENT_KIND_REAPED == "reaped" and "outcome" not in rp
+        assert rp[ "persona" ] == "Tiffany 💍"
 
     return True
 

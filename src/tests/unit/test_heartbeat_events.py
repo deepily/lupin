@@ -238,6 +238,52 @@ def test_emit_idle_prompt_serialization_error_returns_false( tmp_path ):
     assert e.emit_idle_prompt( "ip7", persona={ 1, 2 }, base_dir=tmp_path ) is False
 
 
+# ── emit_reaped — kind-tagged TOMBSTONE marker (reap-tombstone fix) ────────────
+
+def test_emit_reaped_writes_kind_tagged_record( tmp_path ):
+    ok = e.emit_reaped( "rp1", persona="Tiffany 💍", base_dir=tmp_path )
+    assert ok is True
+    r = e.read_events( "rp1", base_dir=tmp_path )[ 0 ]
+    assert r[ "kind" ]    == e.EVENT_KIND_REAPED == "reaped"
+    assert r[ "persona" ] == "Tiffany 💍"
+    assert r[ "session_id" ] == "rp1"
+    assert r[ "schema_version" ] == e.SCHEMA_VERSION
+    # NO `outcome` key → can never map through _STATE_BY_OUTCOME
+    assert "outcome" not in r
+
+
+def test_emit_reaped_persona_defaults_none( tmp_path ):
+    e.emit_reaped( "rp2", base_dir=tmp_path )
+    assert e.read_events( "rp2", base_dir=tmp_path )[ 0 ][ "persona" ] is None
+
+
+def test_emit_reaped_default_ts_is_iso_utc( tmp_path ):
+    e.emit_reaped( "rp3", base_dir=tmp_path )
+    ts = e.read_events( "rp3", base_dir=tmp_path )[ 0 ][ "ts" ]
+    assert ts.endswith( "+00:00" ) and "T" in ts
+
+
+def test_emit_reaped_explicit_ts_honored( tmp_path ):
+    e.emit_reaped( "rp4", ts="2026-06-15T12:00:00+00:00", base_dir=tmp_path )
+    assert e.read_events( "rp4", base_dir=tmp_path )[ 0 ][ "ts" ] == "2026-06-15T12:00:00+00:00"
+
+
+def test_emit_reaped_creates_missing_fleet_dir( tmp_path ):
+    nested = tmp_path / "no" / "dir" / "yet"
+    assert e.emit_reaped( "rp5", base_dir=nested ) is True
+    assert e.read_events( "rp5", base_dir=nested )[ 0 ][ "kind" ] == "reaped"
+
+
+def test_emit_reaped_oserror_returns_false( tmp_path ):
+    ( tmp_path / "rp6.jsonl" ).mkdir()   # path is a dir → open(..,"a") raises → False
+    assert e.emit_reaped( "rp6", base_dir=tmp_path ) is False
+
+
+def test_emit_reaped_serialization_error_returns_false( tmp_path ):
+    # Non-JSON-serializable persona → json.dumps raises TypeError → caught → False
+    assert e.emit_reaped( "rp7", persona={ 1, 2 }, base_dir=tmp_path ) is False
+
+
 # ── quick_smoke_test ──────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():

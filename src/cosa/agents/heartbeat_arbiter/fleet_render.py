@@ -287,6 +287,17 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         if _lookup_dead( process_dead, sid ):
             liveness[ "process_dead" ] = True
             liveness[ "verdict" ]      = "offline"
+        # REAP TOMBSTONE override (reap-tombstone roster-eviction fix): a
+        # host-side reap deletes the bridge BEFORE the arbiter can read the PID,
+        # so process_dead (kill-0) structurally can't fire for a reaped session.
+        # The authoritative kind="reaped" marker (carried on view["reaped"]) is
+        # the death signal kill-0 can't supply — force "offline" so the
+        # publish-prune evicts the row in ~1 poll instead of the ~60-min age-out.
+        # Additive sibling to process_dead (which still catches /exit'd sessions
+        # whose bridge lingers); the verdict STRING set is unchanged.
+        if view.get( "reaped" ):
+            liveness[ "reaped" ]  = True
+            liveness[ "verdict" ] = "offline"
         # D6 / §5.2: omit offline sessions from the PUBLISHED snapshot by default.
         if not include_offline and liveness.get( "verdict" ) == "offline":
             continue
@@ -516,13 +527,18 @@ def quick_smoke_test():
         "s4": { "session_id": "s4", "persona": "Di", "state": "unknown",
                 "holding_on": "none", "stuck": False,
                 "last_event_ts": None, "idle_prompt_ts": now - datetime.timedelta( seconds=8 ) },
+        # s5: REAPED — fresh commons would read LIVE, but the reap tombstone forces
+        # offline so the publish-prune evicts it (the reap-tombstone fix).
+        "s5": { "session_id": "s5", "persona": "Ed", "state": "unknown",
+                "holding_on": "none", "stuck": False, "reaped": True,
+                "last_event_ts": None, "commons_ts": now - datetime.timedelta( seconds=3 ) },
     }
     bridge_mtimes = { "s1": now.timestamp() - 4, "s2": None }   # s1 fresh bridge, s2 dark
 
     # include_offline=True keeps the offline s2 so the index-based assertions below
     # still exercise the offline path (the DEFAULT prune is asserted separately).
     snap = build_snapshot( view, bridge_mtimes, now, include_offline=True )
-    assert snap[ "session_count" ] == 4
+    assert snap[ "session_count" ] == 5
     s1 = snap[ "sessions" ][ 0 ]
     # s1: bridge 4s ⇒ LIVE, even though its event ts is 35m old (bridge is PRIMARY)
     assert s1[ "liveness" ][ "verdict" ] == "LIVE", s1[ "liveness" ]
@@ -542,6 +558,9 @@ def quick_smoke_test():
     # s4: LIVE purely by idle_prompt
     s4 = snap[ "sessions" ][ 3 ][ "liveness" ]
     assert s4[ "verdict" ] == "LIVE" and s4[ "idle_prompt_age_s" ] == 8
+    # s5: reaped tombstone force-offlines it despite a 3s-fresh commons signal
+    s5 = snap[ "sessions" ][ 4 ][ "liveness" ]
+    assert s5[ "verdict" ] == "offline" and s5[ "reaped" ] is True and s5[ "commons_age_s" ] == 3
 
     # hierarchy enrichment (Fleet-Status P1 §4): default snapshot carries the two
     # keys flat (role=worker, manager=None), and the injected seams light them up.
