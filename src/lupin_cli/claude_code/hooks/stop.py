@@ -1289,6 +1289,17 @@ def _run_heartbeat( session_id, transcript_path ):
     inbound       = _gather_unanswered_inbound_questions( session_id )
     open_inbound  = inbound[ "owed" ]    # fresh, reply-expected, un-acked → owed
     stale_inbound = inbound[ "stale" ]   # aged-out → surfaced for review, NOT owed
+    # ── Thread B (Rick 2026-06-16, "remove for the moment") ────────────────────
+    # The arbiter's OWN manager-stale poke-DMs land on this session's dm-topic and
+    # were counted as owed inbound → self-referential owed-count inflation that
+    # re-pokes on the arbiter's own poke. Gate the OWED-inbound feed behind
+    # settings.json heartbeat.count_inbound_questions_as_owed (DEFAULT False =
+    # removed; flip True to restore the v3 worker-inbound poke). Short-circuit so
+    # the settings key is read ONLY when there is owed inbound to drop — the ~17
+    # empty-inbound poke paths never touch the key. stale_inbound (review-only,
+    # never feeds the verdict or the poke) is untouched.
+    if open_inbound and not settings[ "count_inbound_questions_as_owed" ]:
+        open_inbound = [ ]
     verdict    = evaluate_work_owed(
         todo_items                   = owed_items,
         unanswered_inbound_questions = open_inbound,
@@ -1378,6 +1389,23 @@ def _run_heartbeat( session_id, transcript_path ):
             verdict, task_state, transcript_path, delegations, open_inbound, stale_inbound, result
         )
         _announce_poke( session_id, persona_name, total_owed, abstract=abstract )
+        # ── f0d79d71 (Krishna 2026-06-16; María root-cause) — tmux pairing ──────
+        # The poke emits decision:block (the logging + continue RECEIPT), but on a
+        # genuinely-STOPPED session the block alone is silent re-prompt context
+        # with no submit — it does NOT produce the continuation turn. The keystroke
+        # nudge is what fires it. Mirror the battle-tested pairing at stop.py:705 &
+        # 722 (qualifier-continue) and peer-DM delivery (hook_common.py:849): inject
+        # the poke reason ALONGSIDE the emit. wrap=False = VERBATIM (a system poke,
+        # not a human-voice reply) → NO speakerphone rider → silent, so it composes
+        # with auto-narrate without double-speak. This single site is the shared
+        # adapter for BOTH poke branches (speakerphone main():1446 + Branch-C 1526),
+        # exactly like _announce_poke above. EXACTLY-ONE-CONTINUATION: the
+        # stop_hook_active guard (main():1424) means a re-fire never re-enters
+        # _run_heartbeat, and poke_cap bounds OUTCOME_POKE — so the block+inject
+        # pair fires at most once per quiescence, never a double-submit.
+        poke_reason = result[ "hook_output" ].get( "reason" )
+        if poke_reason:
+            inject_qualifier_via_tmux( session_id, poke_reason, wrap=False )
         return result[ "hook_output" ]
     return None
 

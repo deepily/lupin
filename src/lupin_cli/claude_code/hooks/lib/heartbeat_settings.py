@@ -40,6 +40,12 @@ DEFAULT_ENABLED = False               # opt-in: heartbeat is dormant until wired
 # DEFAULT_POKE_CAP is owned by heartbeat_poke_cap (the counter module) — single
 # source of truth for the cap value; re-exported here for the settings default.
 
+# Thread B (Rick 2026-06-16): whether an unanswered inbound DM counts as OWED work
+# (the v3 worker-inbound poke signal). DEFAULT False = "removed for the moment" —
+# the arbiter's own manager-stale poke-DMs were self-inflating the owed count and
+# re-poking on the arbiter's own poke. Flip True in settings.json to restore.
+DEFAULT_COUNT_INBOUND_AS_OWED = False
+
 
 def load_heartbeat_settings() -> dict:
     """
@@ -49,7 +55,8 @@ def load_heartbeat_settings() -> dict:
         {
           "heartbeat": {
             "enabled"  : bool,
-            "poke_cap" : int    # > 0
+            "poke_cap" : int,   # > 0
+            "count_inbound_questions_as_owed" : bool   # Thread B; default False
           }
         }
 
@@ -65,8 +72,10 @@ def load_heartbeat_settings() -> dict:
         - Individual fields missing     → use individual defaults
         - "enabled" not bool            → coerced to bool (Python truthiness)
         - "poke_cap" not a positive int → raises ValueError (fail-loud)
-        - Returns dict with exactly two keys: "enabled" (bool), "poke_cap"
-          (int > 0)
+        - "count_inbound_questions_as_owed" missing → DEFAULT False; non-bool →
+          coerced to bool (Python truthiness)
+        - Returns dict with exactly three keys: "enabled" (bool), "poke_cap"
+          (int > 0), "count_inbound_questions_as_owed" (bool)
 
     Raises:
         ValueError: malformed poke_cap (non-int, bool, or value <= 0)
@@ -88,22 +97,26 @@ def load_heartbeat_settings() -> dict:
     if not isinstance( block, dict ):
         return _defaults()
 
-    enabled  = bool( block.get( "enabled", DEFAULT_ENABLED ) )
-    poke_cap = block.get( "poke_cap", DEFAULT_POKE_CAP )
+    enabled       = bool( block.get( "enabled", DEFAULT_ENABLED ) )
+    poke_cap      = block.get( "poke_cap", DEFAULT_POKE_CAP )
+    count_inbound = bool( block.get( "count_inbound_questions_as_owed",
+                                     DEFAULT_COUNT_INBOUND_AS_OWED ) )
 
     _validate_poke_cap( poke_cap )
 
     return {
-        "enabled"  : enabled,
-        "poke_cap" : poke_cap,
+        "enabled"                        : enabled,
+        "poke_cap"                       : poke_cap,
+        "count_inbound_questions_as_owed": count_inbound,
     }
 
 
 def _defaults() -> dict:
     """Return a fresh copy of the defaults."""
     return {
-        "enabled"  : DEFAULT_ENABLED,
-        "poke_cap" : DEFAULT_POKE_CAP,
+        "enabled"                        : DEFAULT_ENABLED,
+        "poke_cap"                       : DEFAULT_POKE_CAP,
+        "count_inbound_questions_as_owed": DEFAULT_COUNT_INBOUND_AS_OWED,
     }
 
 
@@ -141,7 +154,8 @@ def quick_smoke_test():
     """
     # Defaults shape — conservative opt-out
     d = _defaults()
-    assert d == { "enabled": False, "poke_cap": DEFAULT_POKE_CAP }, d
+    assert d == { "enabled": False, "poke_cap": DEFAULT_POKE_CAP,
+                  "count_inbound_questions_as_owed": False }, d
 
     # Valid poke_caps pass validation
     _validate_poke_cap( 1 )
@@ -159,6 +173,7 @@ def quick_smoke_test():
     loaded = load_heartbeat_settings()
     assert isinstance( loaded[ "enabled" ], bool )
     assert isinstance( loaded[ "poke_cap" ], int ) and loaded[ "poke_cap" ] > 0
+    assert isinstance( loaded[ "count_inbound_questions_as_owed" ], bool )
 
     return True
 
