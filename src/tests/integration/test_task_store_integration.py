@@ -36,6 +36,13 @@ import secrets
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories import UserRepository, ApiKeyRepository
 
+from lupin_mcp.task_store_tools import (
+    task_create_impl,
+    task_query_impl,
+    task_transition_impl,
+    task_correlate_impl,
+)
+
 
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 ENDPOINT = f"{BASE_URL}/api/tasks"
@@ -333,3 +340,117 @@ class TestTaskStorePhase2WritePaths:
                                 json={ "correlation_key": old_ck, "actor": "tiffany d03e6219" } )
         assert locked.status_code == 422
         assert any( "immutable" in e for e in locked.json()[ "detail" ][ "errors" ] )
+
+
+class TestTaskStoreWrapperE2E:
+    """
+    End-to-end through the MCP TOOL TRANSPORT layer (`task_*_impl`) against the
+    LIVE server — the exact code path the registered `task_create` /
+    `task_query` / `task_transition` / `task_correlate` MCP tools execute.
+
+    The classes above hit `/api/tasks/*` with raw `requests`; the unit suite
+    (test_task_store_tools.py) pins the wrapper contract with `requests` FULLY
+    MOCKED. Neither proves the wrappers work against a REAL server. THIS class
+    closes that gap: URL construction, header injection, params filtering, the
+    verbatim error-dict mapping (200/201 bodies AND live 422s), and the
+    fail-open contracts — all exercised against real Postgres. It is the
+    "four tools, end to end" verification Rick asked for when operationalizing
+    the store for daily use (live hand-run forensics:
+    src/rnd/v0.1.8/2026.06.15-task-store-phase2.1/01-build-plan.md).
+
+    Venue: :8000 monopolize-mode, SCHEDULED ONLY — mutates task rows, same as
+    the rest of this file. The `test_api_key` fixture (in-file) wires a real
+    X-API-Key into the test DB, so this suite is :8000-by-construction.
+    """
+
+    def test_four_tool_happy_path_through_wrappers( self, test_api_key ):
+        """create → query → transition (full lifecycle) → done-with-receipts, all via the impls."""
+        api_key = test_api_key[ "api_key" ]
+        actor   = "krishna 7e8fb0d6"
+
+        # task_create_impl → 201 item dict verbatim, status queued, created_by passthrough
+        created = task_create_impl(
+            api_base_url  = BASE_URL,
+            api_key       = api_key,
+            created_by    = actor,
+            item_class    = "task",
+            title         = "wrapper-e2e happy-path probe",
+            project       = "lupin",
+            owner_persona = "krishna",
+        )
+        assert created.get( "status" ) == "queued", created
+        assert created[ "created_by" ] == actor
+        task_id = created[ "id" ]
+
+        # task_query_impl → filter passthrough finds it; unset filters omitted entirely
+        q = task_query_impl( api_base_url=BASE_URL, api_key=api_key, owner_persona="krishna", status="queued" )
+        assert any( t[ "id" ] == task_id for t in q[ "tasks" ] ), q
+
+        # task_transition_impl → in_progress returns { item, event } verbatim
+        prog = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                     task_id=task_id, to_status="in_progress" )
+        assert prog[ "item" ][ "status" ] == "in_progress", prog
+        assert prog[ "event" ][ "transition" ] == "queued->in_progress"
+        assert prog[ "event" ][ "actor" ] == actor
+
+        # done-gate: missing receipts → the wrapper maps the live 422 to its error dict VERBATIM
+        bad = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                    task_id=task_id, to_status="done" )
+        assert bad[ "status" ] == "error" and bad[ "http_status" ] == 422, bad
+        assert any( "receipt_refs" in e for e in bad[ "errors" ] ), bad
+
+        # done with valid, scope-prefixed receipts → 200 { item, event }, receipt_refs persisted
+        receipts = { "commit": "0ca22758", "doc_path": "lupin/src/conf/lupin-app.ini" }
+        done = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                     task_id=task_id, to_status="done", receipt_refs=receipts )
+        assert done[ "item" ][ "status" ] == "done", done
+        assert done[ "event" ][ "receipt_refs" ] == receipts
+
+        # terminal lockout surfaces through the wrapper as a verbatim 422 error dict
+        locked = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                       task_id=task_id, to_status="in_progress" )
+        assert locked[ "status" ] == "error" and locked[ "http_status" ] == 422, locked
+        assert any( "append-only" in e for e in locked[ "errors" ] ), locked
+
+    def test_blocked_gate_and_correlate_through_wrappers( self, test_api_key ):
+        """→blocked gate (reject then accept) and task_correlate re-key, all via the impls."""
+        api_key = test_api_key[ "api_key" ]
+        actor   = "krishna 7e8fb0d6"
+
+        created = task_create_impl( api_base_url=BASE_URL, api_key=api_key, created_by=actor,
+                                    item_class="task", title="wrapper-e2e blocked+correlate probe",
+                                    project="lupin" )
+        task_id = created[ "id" ]
+        task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                              task_id=task_id, to_status="in_progress" )
+
+        # blocked-gate: missing typed refs + chase ts → verbatim 422 (I3 — no "pending X" graves)
+        bare = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                     task_id=task_id, to_status="blocked" )
+        assert bare[ "status" ] == "error" and bare[ "http_status" ] == 422, bare
+        assert any( "next_chase_ts" in e for e in bare[ "errors" ] ), bare
+
+        # blocked accepted with typed blocked_by + next_chase_ts
+        ok = task_transition_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                   task_id=task_id, to_status="blocked",
+                                   blocked_by=[ { "kind": "user", "id": "rick" } ],
+                                   next_chase_ts="2026-06-16T09:00:00-04:00" )
+        assert ok[ "item" ][ "status" ] == "blocked", ok
+        assert ok[ "item" ][ "blocked_by" ] == [ { "kind": "user", "id": "rick" } ]
+
+        # task_correlate_impl re-stamps the key on a non-terminal item + emits a re-correlated event
+        ck   = f"cc-task:wrapper-e2e:{uuid.uuid4()}"
+        corr = task_correlate_impl( api_base_url=BASE_URL, api_key=api_key, actor=actor,
+                                    task_id=task_id, correlation_key=ck )
+        assert corr[ "item" ][ "correlation_key" ] == ck, corr
+        assert corr[ "event" ][ "transition" ] == "re-correlated"
+
+    def test_wrapper_fail_open_contracts_live( self, test_api_key ):
+        """The transport NEVER raises — missing key and an unreachable host both return error dicts."""
+        # missing_auth: api_key=None short-circuits before any network call
+        miss = task_query_impl( api_base_url=BASE_URL, api_key=None )
+        assert miss[ "status" ] == "error" and miss[ "reason" ] == "missing_auth_header", miss
+
+        # server_unreachable: a dead port surfaces as an error dict, never an exception
+        dead = task_query_impl( api_base_url="http://localhost:1", api_key=test_api_key[ "api_key" ] )
+        assert dead[ "status" ] == "error" and dead[ "reason" ] == "server_unreachable", dead
