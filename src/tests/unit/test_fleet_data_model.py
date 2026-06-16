@@ -34,6 +34,10 @@ def _reaped_rec( ts, persona="Hal", sid="rp" ):
     return { "session_id": sid, "persona": persona, "kind": "reaped", "ts": ts }
 
 
+def _tasktrans_rec( ts, persona="Kim", sid="tt" ):
+    return { "session_id": sid, "persona": persona, "kind": "task_transition", "ts": ts }
+
+
 # ── _parse_iso ────────────────────────────────────────────────────────────────
 
 def test_parse_iso_none_and_non_str():
@@ -322,6 +326,57 @@ def test_build_view_reaped_persona_fallback_after_idle_prompt():
     # reaped-only (no idle_prompt) → tombstone persona is used
     only = { "s": [ _reaped_rec( _iso( 4 ), persona="Reap", sid="s" ) ] }
     assert m.build_fleet_view( only, None, NOW, 3600 )[ "s" ][ "persona" ] == "Reap"
+
+
+# ── task_transition (kind=task_transition) — PROGRESS beacon, off-axis ────────
+# Arbiter signs-of-life Fix 2: a task-store WRITE feeds last_task_transition_ts
+# ONLY (the progress signature consumes it) and must NEVER become state/liveness.
+
+def test_build_view_task_transition_only_member_off_axis():
+    """A kind=task_transition record makes the session a member, sets
+    last_task_transition_ts, and stays OFF the activity axis (never state, never
+    last_event_ts / idle_prompt_ts; never feeds liveness activity_ts/alive)."""
+    events = { "tt": [ _tasktrans_rec( _iso( 20 ), persona="Kim" ) ] }
+    v = m.build_fleet_view( events, None, NOW, 3600 )[ "tt" ]
+    assert v[ "last_task_transition_ts" ] is not None        # PROGRESS field set
+    assert v[ "state" ] == "unknown" and v[ "last_outcome" ] is None
+    assert v[ "last_event_ts" ] is None and v[ "idle_prompt_ts" ] is None
+    # PROGRESS is orthogonal to LIVENESS: a task_transition alone does NOT set
+    # activity_ts (so alive rests on the other signals — here none → not alive).
+    assert v[ "last_activity_ts" ] is None and v[ "alive" ] is False
+    assert v[ "persona" ] == "Kim"                           # persona fallback to the beacon
+
+
+def test_build_view_task_transition_ts_none_on_ordinary_session():
+    """The additive field defaults None for any row with no task write."""
+    v = m.build_fleet_view( { "s": [ _ev( "poked", _iso( 5 ) ) ] }, None, NOW, 3600 )[ "s" ]
+    assert v[ "last_task_transition_ts" ] is None
+
+
+def test_build_view_task_transition_does_not_corrupt_activity_axis():
+    """An activity record + a task_transition beacon: state/last_event_ts come
+    from the activity record; the beacon only sets last_task_transition_ts and
+    must NOT pull activity_ts forward (liveness stays event-derived)."""
+    events = { "s": [ _ev( "poked", _iso( 400 ), persona="Act" ),
+                      _tasktrans_rec( _iso( 5 ), sid="s" ) ] }
+    v = m.build_fleet_view( events, None, NOW, 3600 )[ "s" ]
+    assert v[ "state" ] == "working" and v[ "last_outcome" ] == "poked"
+    assert v[ "last_task_transition_ts" ] is not None
+    # activity_ts is the event ts (400s ago), NOT the fresher task_transition (5s).
+    assert v[ "last_activity_ts" ] == v[ "last_event_ts" ]
+    assert v[ "persona" ] == "Act"                           # activity persona preferred
+
+
+def test_build_view_task_transition_persona_last_resort():
+    """Persona precedence tail: idle_prompt/reaped win; task_transition is the
+    final fallback when it is the only persona-bearing signal."""
+    # idle_prompt present → idle_prompt persona wins over the beacon
+    events = { "s": [ _idle_rec( _iso( 8 ), persona="Idle", sid="s" ),
+                      _tasktrans_rec( _iso( 4 ), persona="Task", sid="s" ) ] }
+    assert m.build_fleet_view( events, None, NOW, 3600 )[ "s" ][ "persona" ] == "Idle"
+    # task_transition-only → its persona is used
+    only = { "s": [ _tasktrans_rec( _iso( 4 ), persona="Task", sid="s" ) ] }
+    assert m.build_fleet_view( only, None, NOW, 3600 )[ "s" ][ "persona" ] == "Task"
 
 
 def test_quick_smoke_test_passes():

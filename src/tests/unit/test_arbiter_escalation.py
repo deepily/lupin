@@ -247,5 +247,62 @@ class TestFleetStallCalibration:
         assert job._check_fleet_stall( mixed, NOW + datetime.timedelta( seconds=700 ) ) == 1
 
 
+# ── Fix 2: task-store transitions count as PROGRESS ────────────────────────────
+
+class TestTaskTransitionProgress:
+    """
+    Arbiter signs-of-life Fix 2: a task-store WRITE (last_task_transition_ts
+    advancing) is PROGRESS — it resets the stall timer, so an actively-
+    coordinating manager (creating/moving task items) no longer trips a false
+    WHOLE-FLEET-STALL. The ABSENCE of task writes is STILL 'no progress' — the
+    deliberate chatty-but-stuck blind spot stays CLOSED.
+    """
+
+    @staticmethod
+    def _stuck_with_task_ts( sid, task_ts, alive=True ):
+        return { **_stuck( sid, alive=alive ), "last_task_transition_ts": task_ts }
+
+    def test_signature_folds_last_task_transition_ts( self ):
+        """Two views identical except for last_task_transition_ts hash
+        differently; an identical ts (and the None default) hash the same."""
+        job = _job( _GW() )
+        t1  = datetime.datetime( 2026, 6, 6, 22, 0, 0, tzinfo=datetime.timezone.utc )
+        t2  = t1 + datetime.timedelta( minutes=5 )
+        sig_a  = job._fleet_progress_signature( { "s1": self._stuck_with_task_ts( "s1", t1 ) } )
+        sig_b  = job._fleet_progress_signature( { "s1": self._stuck_with_task_ts( "s1", t2 ) } )
+        sig_a2 = job._fleet_progress_signature( { "s1": self._stuck_with_task_ts( "s1", t1 ) } )
+        assert sig_a != sig_b           # a NEW task write changes the signature ⇒ progress
+        assert sig_a == sig_a2          # same ts → same signature (deterministic)
+        # the None default (a row with no task write) is handled without raising
+        assert job._fleet_progress_signature( { "s1": _stuck( "s1" ) } ) is not None
+
+    def test_task_write_alone_resets_stall_timer( self ):
+        """A stuck fleet whose ONLY change is a NEW task-transition ts registers as
+        PROGRESS → the stall timer re-arms → NO escalation past the window. This is
+        the false-stall fix: an actively-coordinating manager no longer stalls."""
+        escal  = [ ]
+        job    = _job( _GW(), stall_window=600, notify=lambda m, *a, **k: escal.append( m ) )
+        t0     = NOW
+        before = { "s1": self._stuck_with_task_ts( "s1", t0 ) }
+        assert job._check_fleet_stall( before, NOW ) == 0                                       # baseline
+        # a task write lands (ts advances) — SAME state/stuck/holding, but PROGRESS
+        after  = { "s1": self._stuck_with_task_ts( "s1", t0 + datetime.timedelta( minutes=5 ) ) }
+        assert job._check_fleet_stall( after, NOW + datetime.timedelta( seconds=700 ) ) == 0    # RESET, no stall
+        assert escal == [ ]
+
+    def test_blind_spot_stays_closed_no_task_write_still_stalls( self ):
+        """RIDER 1 (blind-spot regression): a LIVE-but-stuck fleet doing NO task
+        writes (last_task_transition_ts present but UNCHANGED) STILL stalls. Task
+        writes are the ONLY new progress source — their ABSENCE is still 'no
+        progress', so the deliberate chatty-but-stuck guard is NOT re-opened."""
+        escal  = [ ]
+        job    = _job( _GW(), stall_window=600, notify=lambda m, *a, **k: escal.append( m ) )
+        frozen = { "s1": self._stuck_with_task_ts( "s1", NOW ) }
+        assert job._check_fleet_stall( frozen, NOW ) == 0                                       # baseline
+        # identical view (task ts UNCHANGED — no new write) past the window → FIRES
+        assert job._check_fleet_stall( frozen, NOW + datetime.timedelta( seconds=700 ) ) == 1
+        assert "WHOLE-FLEET-STALL" in escal[ 0 ]
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

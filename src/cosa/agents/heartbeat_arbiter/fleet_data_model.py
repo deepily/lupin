@@ -37,7 +37,9 @@ import datetime
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     OUTCOME_POKE, OUTCOME_HONORED, OUTCOME_CAP_REACHED,
 )
-from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENT_IDLE, EVENT_KIND_REAPED
+from lupin_cli.claude_code.hooks.lib.heartbeat_events import (
+    EVENT_IDLE, EVENT_KIND_REAPED, EVENT_KIND_TASK_TRANSITION,
+)
 
 
 # last-outcome → coarse session state (doc 03 §4)
@@ -212,16 +214,25 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
           last_event_ts(datetime|None — STOP/non-idle_prompt) ·
           commons_ts(datetime|None; None when bridge-absent, see guard) ·
           idle_prompt_ts(datetime|None) ·
-          last_activity_ts(datetime|None; max of the three) · alive(bool) ·
+          last_task_transition_ts(datetime|None) ·
+          last_activity_ts(datetime|None; max of the LIVENESS ts) · alive(bool) ·
           state · holding_on · stuck · poke_count · cap · reaped(bool)
         - reaped is True iff a kind="reaped" tombstone is present (the host-side
           reaper appended it); kept OFF the activity axis (never `state` / never
           feeds last_event_ts), it makes the session a member so its row can be
           force-offlined + pruned (fleet_render.build_snapshot)
-        - the three distinct ts fields stay SEPARATE so the verdict seam
-          (fleet_render.compute_liveness) can derive four distinct ages
+        - last_task_transition_ts is the ts of the latest kind="task_transition"
+          PROGRESS beacon (arbiter signs-of-life Fix 2) — a task-store WRITE.
+          Kept OFF the activity axis (never `state`, never feeds last_event_ts /
+          last_activity_ts / `alive`): it is a PROGRESS-only signal, consumed
+          exclusively by _fleet_progress_signature, so liveness and progress stay
+          orthogonal. A task_transition record DOES confer membership.
+        - the LIVENESS ts fields (last_event_ts/commons_ts/idle_prompt_ts) stay
+          SEPARATE so the verdict seam (fleet_render.compute_liveness) can derive
+          its distinct ages; last_task_transition_ts is orthogonal (progress)
         - persona prefers the bridge-discovered name, then the last activity
-          record, then the idle_prompt record
+          record, then the idle_prompt record, then the reaped tombstone, then
+          the task_transition record
         - Never raises
     """
     events_by_session = events_by_session or { }
@@ -253,16 +264,22 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
             if isinstance( recs, list ):
                 records.extend( r for r in recs if isinstance( r, dict ) )
 
-        # The activity axis excludes BOTH off-axis kinds (idle_prompt recency AND
-        # the reaped tombstone): neither may become `state` or feed the stop-event
-        # age. The reaped tombstone is a membership + verdict signal ONLY.
-        activity_recs   = [ r for r in records if r.get( "kind" ) not in ( KIND_IDLE_PROMPT, EVENT_KIND_REAPED ) ]
-        idleprompt_recs = [ r for r in records if r.get( "kind" ) == KIND_IDLE_PROMPT ]
-        reaped_recs     = [ r for r in records if r.get( "kind" ) == EVENT_KIND_REAPED ]
+        # The activity axis excludes ALL THREE off-axis kinds (idle_prompt
+        # recency, the reaped tombstone, AND the task_transition progress beacon):
+        # none may become `state` or feed the stop-event age. The reaped tombstone
+        # is a membership + verdict signal ONLY; the task_transition record is a
+        # PROGRESS signal ONLY (arbiter signs-of-life Fix 2) — it feeds
+        # last_task_transition_ts (folded into the progress signature) and must
+        # NEVER map through _STATE_BY_OUTCOME (it carries no `outcome` key anyway).
+        activity_recs    = [ r for r in records if r.get( "kind" ) not in ( KIND_IDLE_PROMPT, EVENT_KIND_REAPED, EVENT_KIND_TASK_TRANSITION ) ]
+        idleprompt_recs  = [ r for r in records if r.get( "kind" ) == KIND_IDLE_PROMPT ]
+        reaped_recs      = [ r for r in records if r.get( "kind" ) == EVENT_KIND_REAPED ]
+        tasktrans_recs   = [ r for r in records if r.get( "kind" ) == EVENT_KIND_TASK_TRANSITION ]
 
         last_activity = activity_recs[ -1 ]   if activity_recs   else None
         last_idle     = idleprompt_recs[ -1 ] if idleprompt_recs else None
         last_reaped   = reaped_recs[ -1 ]     if reaped_recs     else None
+        last_tasktrans = tasktrans_recs[ -1 ] if tasktrans_recs  else None
 
         commons_ts = _commons_ts_for_session( who_rows, cid )
 
@@ -280,7 +297,7 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
         # Judged on the RAW commons signal (pre-guard) so a phantom stays an
         # auditable roster row instead of vanishing without trace.
         has_signal = bool( activity_recs ) or bool( idleprompt_recs ) or bool( reaped_recs ) \
-                     or commons_ts is not None or bridge_present
+                     or bool( tasktrans_recs ) or commons_ts is not None or bridge_present
         if not has_signal:
             continue
 
@@ -300,10 +317,15 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
         if not bridge_present:
             commons_ts = None
 
-        last_event_ts  = _parse_iso( last_activity.get( "ts" ) ) if last_activity else None
-        last_outcome   = last_activity.get( "outcome" ) if last_activity else None
-        idle_prompt_ts = _parse_iso( last_idle.get( "ts" ) ) if last_idle else None
-        activity_ts    = _newer( _newer( last_event_ts, commons_ts ), idle_prompt_ts )
+        last_event_ts       = _parse_iso( last_activity.get( "ts" ) ) if last_activity else None
+        last_outcome        = last_activity.get( "outcome" ) if last_activity else None
+        idle_prompt_ts      = _parse_iso( last_idle.get( "ts" ) ) if last_idle else None
+        # PROGRESS-ONLY (arbiter signs-of-life Fix 2): deliberately NOT folded into
+        # activity_ts / `alive`. Liveness is already broad (PreToolUse + PostToolUse
+        # bridge-mtime stamps cover a task-writing session); this ts feeds the
+        # PROGRESS signature ONLY, keeping liveness and progress orthogonal.
+        task_transition_ts  = _parse_iso( last_tasktrans.get( "ts" ) ) if last_tasktrans else None
+        activity_ts         = _newer( _newer( last_event_ts, commons_ts ), idle_prompt_ts )
 
         persona = bridge_persona
         if persona is None and last_activity is not None:
@@ -312,6 +334,8 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
             persona = last_idle.get( "persona" )
         if persona is None and last_reaped is not None:
             persona = last_reaped.get( "persona" )
+        if persona is None and last_tasktrans is not None:
+            persona = last_tasktrans.get( "persona" )
 
         view[ cid ] = {
             "session_id"       : cid,
@@ -320,6 +344,7 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
             "last_event_ts"    : last_event_ts,
             "commons_ts"       : commons_ts,
             "idle_prompt_ts"   : idle_prompt_ts,
+            "last_task_transition_ts" : task_transition_ts,
             "last_activity_ts" : activity_ts,
             "alive"            : _is_recent( activity_ts, now, alive_threshold_seconds ),
             "state"            : _STATE_BY_OUTCOME.get( last_outcome, "unknown" ),
