@@ -95,6 +95,7 @@ class TestRunHeartbeat:
                     return_value=[ ] ) as gd, \
              patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
                     return_value={ "owed": [ ], "stale": [ ] } ) as gq, \
+             patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" ) as inj, \
              patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
                     return_value="claude.code@lupin.deepily.ai#sid" ):
             # owed_items_from_state + is_empty_state run REAL on the replayed
@@ -110,6 +111,7 @@ class TestRunHeartbeat:
             self.mock_notify      = na
             self.mock_delegations = gd
             self.mock_inbound     = gq
+            self.mock_inject      = inj
             yield
 
     # ── gate / fail-safe ──
@@ -285,15 +287,32 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3 } )
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True } )
     def test_worker_with_open_inbound_dm_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
-        """The worker fix: an unhandled inbound assignment DM → poke to resume/finish."""
+        """The worker fix, OPT-IN (Thread B): with count_inbound_questions_as_owed
+        True, an unhandled inbound assignment DM → poke to resume/finish (the v3
+        behavior, now behind the gate)."""
         self.mock_inbound.return_value = { "owed": [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ], "stale": [ ] }
         out = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "unanswered inbound question" in out[ "reason" ]
         _, kwargs = self.mock_events.emit_outcome.call_args
         assert kwargs[ "work_owed" ] is True
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False } )
+    def test_worker_open_inbound_default_off_no_poke( self, mock_load, mock_read, mock_count, mock_incr ):
+        """Thread B DEFAULT-OFF (the Rick-visible fix): the SAME unhandled inbound
+        DM, with the gate key False, is gated OUT of the owed feed → NOT owed → no
+        poke, no increment, no tmux injection. The arbiter's own manager-stale
+        poke-DMs stop self-inflating the owed count."""
+        self.mock_inbound.return_value = { "owed": [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ], "stale": [ ] }
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        mock_incr.assert_not_called()
+        self.mock_inject.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
@@ -308,6 +327,67 @@ class TestRunHeartbeat:
         oracle = [ c.kwargs[ "extra" ] for c in mock_log.call_args_list
                    if c.kwargs[ "extra" ].get( "phase" ) == "heartbeat_oracle" ]
         assert oracle and oracle[ 0 ][ "delegations" ] == 0 and oracle[ 0 ][ "open_inbound" ] == 0
+
+    # ── f0d79d71: tmux pairing on the poke path (exactly-one-continuation) ──────
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False } )
+    def test_poke_pairs_block_with_single_tmux_inject( self, mock_load, mock_read, mock_count, mock_incr ):
+        """f0d79d71 EXACTLY-ONE-CONTINUATION: a poke returns the decision:block
+        dict (the continue receipt the caller emits ONCE) AND injects the poke
+        reason VERBATIM (wrap=False) into tmux EXACTLY once. Block + one keystroke
+        nudge = one continuation — never a block+tmux double-submit."""
+        self.mock_replay.return_value = _OWED_STATE
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out[ "decision" ] == "block"
+        self.mock_inject.assert_called_once_with( "sid", out[ "reason" ], wrap=False )
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False } )
+    def test_no_poke_does_not_inject( self, mock_load, mock_read, mock_count, mock_incr ):
+        """A fresh reasoned hold is honored → no poke → NO tmux injection."""
+        mock_read.return_value = _fresh_reasoned_hold()
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        self.mock_inject.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=3 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False } )
+    def test_cap_reached_does_not_inject( self, mock_load, mock_read, mock_count, mock_incr, mock_cap ):
+        """Re-entry bound: owed Task* but poke_cap reached → no poke → NO injection.
+        The cap is the guard that stops a re-fire from double-injecting."""
+        self.mock_replay.return_value = _OWED_STATE
+        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        self.mock_inject.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.decide_heartbeat" )
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False } )
+    def test_poke_empty_reason_skips_inject( self, mock_load, mock_read, mock_count, mock_incr, mock_decide ):
+        """Defensive `if poke_reason` False arm: a poke whose hook_output carries an
+        empty reason does NOT inject (inject requires non-empty text), yet still
+        returns the block. Reason is contract-guaranteed non-empty in production —
+        this exercises the guard's false branch explicitly (no pragma needed)."""
+        mock_decide.return_value = {
+            "outcome": OUTCOME_POKE, "should_increment": True, "should_notify_cap": False,
+            "hook_output": { "decision": "block", "reason": "" },
+        }
+        self.mock_replay.return_value = _OWED_STATE
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out == { "decision": "block", "reason": "" }
+        self.mock_inject.assert_not_called()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -839,6 +919,7 @@ class TestMainSpeakerphonePokeMatrix:
                     return_value={ "owed": [ ], "stale": [ ] } ), \
              patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
                     return_value="claude.code@lupin.deepily.ai#abc12345" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.inject_qualifier_via_tmux" ) as mock_inject, \
              patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" ) as mock_async, \
              patch( "lupin_cli.claude_code.hooks.stop.emit_json" ) as mock_emit:
             main()
@@ -848,6 +929,9 @@ class TestMainSpeakerphonePokeMatrix:
             crumb = mock_async.call_args[ 0 ][ 0 ]
             assert crumb.message  == "Tiberius stopped — 2 owed items, poked."
             assert crumb.priority == NotificationPriority.LOW   # silent card bubble — no double-speak
+            # f0d79d71 end-to-end in speakerphone: the block is paired with EXACTLY
+            # ONE verbatim tmux nudge (wrap=False) — the continuation actually fires.
+            mock_inject.assert_called_once_with( "abc12345", emitted[ "reason" ], wrap=False )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
