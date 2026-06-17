@@ -26,40 +26,12 @@ Design authority: lupin ->
     src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md §1.2.
 """
 
-import os
-from pathlib import Path
-
 from cosa.rest.voice_persona_helpers import pick_persona_chain_from_env, parse_persona_chain, PERSONA_CHAIN_WILDCARD
 from lupin_mcp.commons_persona_matcher import _normalize_for_match
-from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_path_by_id
+from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_path_by_id, resolve_project_name
 
 
 MANAGER_ROLE = "manager"
-
-
-def derive_project_name( environ=None ) -> str:
-    """
-    Derive the project name for the per-repo persona-chain env key.
-
-    Same rule as hook_credentials._derive_project_name: basename of
-    LUPIN_ROOT when set, else cwd basename, lowercased. (Kept separate
-    because hook_credentials' copy is private to its credential contract;
-    the rule is two lines and the env-key consumer here normalizes again
-    via pick_persona_chain_from_env anyway.)
-
-    Requires:
-        - environ is a Mapping or None (None → os.environ)
-
-    Ensures:
-        - Returns a lowercase, non-empty project name string
-        - Never raises
-    """
-    if environ is None:
-        environ = os.environ
-    lupin_root = environ.get( "LUPIN_ROOT", "" )
-    if lupin_root:
-        return Path( lupin_root ).name.lower()
-    return Path.cwd().name.lower()
 
 
 def _read_bridge_fields( session_id, _find_path=find_session_path_by_id ):
@@ -118,7 +90,7 @@ def is_manager_figure( session_id, environ=None, _find_path=find_session_path_by
         if not persona_name:
             return False
 
-        chain_raw = pick_persona_chain_from_env( derive_project_name( environ ), environ=environ )
+        chain_raw = pick_persona_chain_from_env( resolve_project_name( environ ), environ=environ )
         named     = [ e for e in parse_persona_chain( chain_raw ) if e != PERSONA_CHAIN_WILDCARD ]
         target    = _normalize_for_match( persona_name )
         return any( _normalize_for_match( e ) == target for e in named )

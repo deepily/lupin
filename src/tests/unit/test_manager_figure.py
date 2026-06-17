@@ -3,9 +3,13 @@
 Unit tests — manager-figure predicate (F4 write gate, Phase 2).
 
 Venue: :7999-eligible / local — bridge files under tmp_path, env injected.
-Covers derive_project_name / _read_bridge_fields / is_manager_figure to
-100% lines/branches/functions. The predicate gates WRITES, so every doubt
-case must resolve False (fail-closed).
+Covers _read_bridge_fields / is_manager_figure to 100% lines/branches/
+functions. The predicate gates WRITES, so every doubt case must resolve
+False (fail-closed). Project-name resolution converged onto the shared
+session_bridge.resolve_project_name (bug 9bf1dc4a); the is_manager_figure
+tests stub it so they exercise the predicate logic deterministically,
+independent of the ambient session bridge (resolve_project_name's own
+branches are covered in test_session_bridge_lookup::TestResolveProjectName).
 """
 import json
 import os
@@ -39,20 +43,6 @@ def bridge_factory( tmp_path ):
 ENV_LUPIN = { "LUPIN_ROOT": "/mnt/x/lupin", "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "Mr. Radio,Tiberius,*" }
 
 
-class TestDeriveProjectName:
-
-    def test_lupin_root_basename_lowercased( self ):
-        assert mf.derive_project_name( { "LUPIN_ROOT": "/mnt/x/LUPIN" } ) == "lupin"
-
-    def test_falls_back_to_cwd_basename( self, monkeypatch ):
-        monkeypatch.setattr( mf.Path, "cwd", classmethod( lambda cls: Path( "/somewhere/My-Repo" ) ) )
-        assert mf.derive_project_name( { } ) == "my-repo"
-
-    def test_environ_none_uses_os_environ( self, monkeypatch ):
-        monkeypatch.setenv( "LUPIN_ROOT", "/mnt/x/lupin" )
-        assert mf.derive_project_name() == "lupin"
-
-
 class TestReadBridgeFields:
 
     def test_reads_role_and_persona( self, tmp_path ):
@@ -76,6 +66,15 @@ class TestReadBridgeFields:
 
 
 class TestIsManagerFigure:
+
+    @pytest.fixture( autouse=True )
+    def _stub_project( self, monkeypatch ):
+        # is_manager_figure resolves the project via the shared, bridge-cwd-
+        # anchored session_bridge.resolve_project_name. Stub it to "lupin" so
+        # these tests deterministically exercise the predicate's role/persona-
+        # chain logic against ENV_LUPIN, independent of the ambient session
+        # bridge running the test suite.
+        monkeypatch.setattr( mf, "resolve_project_name", lambda environ=None: "lupin" )
 
     def test_explicit_manager_role_wins( self, tmp_path ):
         write, find = bridge_factory( tmp_path )

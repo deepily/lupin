@@ -1,8 +1,10 @@
 """
 Unit tests for hook credential resolution.
 
-Tests the unified config file reading, legacy fallback behavior,
-and project name derivation for Claude Code hook credentials.
+Tests the unified config file reading and legacy fallback behavior for
+Claude Code hook credentials. Project-name derivation converged onto the
+shared session_bridge.resolve_project_name (bug 9bf1dc4a) — its branches
+are covered in test_session_bridge_lookup::TestResolveProjectName.
 """
 
 import pytest
@@ -13,7 +15,6 @@ from unittest.mock import patch
 from lupin_cli.claude_code.hooks.lib.hook_credentials import (
     get_hook_credentials,
     get_owner_credentials,
-    _derive_project_name,
     _read_credentials_from_file,
     CREDENTIALS_FILE,
 )
@@ -42,6 +43,21 @@ api_key_file = /tmp/key
 
             assert email == "test@lupin.deepily.ai"
             assert password == "secret123"
+
+    def test_derives_project_via_shared_resolver_when_none( self, tmp_path ):
+        """project=None → resolved via the shared session_bridge.resolve_project_name (bug 9bf1dc4a)."""
+        config_file = tmp_path / 'config'
+        config_file.write_text( """[lupin]
+email = derived@lupin.deepily.ai
+password = derived-pass
+""" )
+
+        with patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.CREDENTIALS_FILE', config_file ), \
+             patch( 'lupin_cli.claude_code.hooks.lib.hook_credentials.resolve_project_name', return_value="lupin" ):
+            email, password = get_hook_credentials()
+
+            assert email    == "derived@lupin.deepily.ai"
+            assert password == "derived-pass"
 
     def test_reads_cosa_section( self, tmp_path ):
         """Test reading [cosa] section from unified config."""
@@ -150,32 +166,6 @@ password =   pass123
 
         result = _read_credentials_from_file( config_file, "lupin" )
         assert result == ( "test@test.com", "pass123" )
-
-
-class TestDeriveProjectName:
-    """Test suite for _derive_project_name() function."""
-
-    def test_uses_lupin_root_env_var( self, monkeypatch ):
-        """Test that LUPIN_ROOT env var is used when set."""
-        monkeypatch.setenv( 'LUPIN_ROOT', '/path/to/lupin' )
-
-        result = _derive_project_name()
-        assert result == "lupin"
-
-    def test_uses_cwd_when_no_env_var( self, monkeypatch ):
-        """Test fallback to cwd basename."""
-        monkeypatch.delenv( 'LUPIN_ROOT', raising=False )
-
-        result = _derive_project_name()
-        assert isinstance( result, str )
-        assert len( result ) > 0
-
-    def test_returns_lowercase( self, monkeypatch ):
-        """Test that project name is lowercased."""
-        monkeypatch.setenv( 'LUPIN_ROOT', '/path/to/LUPIN' )
-
-        result = _derive_project_name()
-        assert result == "lupin"
 
 
 class TestConstants:
