@@ -619,7 +619,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
         taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers )  # #7 / #8
-        managers_down = self._check_manager_acks( now, who_rows, active_managers )  # #9 Rick + all mgrs
+        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers )  # #9 Rick + all mgrs (bridge-mtime ACK)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers )  # #11 Rick + all mgrs
         pokes_fired   = self._auto_poke( fleet_view, now, active_managers )          # 2b-3 auto-poke
@@ -1430,15 +1430,65 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 best = ts
         return best
 
-    def _check_manager_acks( self, now, who_rows, active_managers=None ):
+    def _manager_bridge_activity( self, manager, fleet_view ):
+        """
+        Freshest bridge-file mtime (as an aware-UTC datetime) across the
+        session(s) whose persona is `manager`, or None.
+
+        The bridge mtime is bumped UNCONDITIONALLY by every PreToolUse hook
+        (touch_bridge_mtime — fires for ALL tools, MCP calls included), so a
+        fresh mtime PROVES an actively-working manager is alive even when they
+        post NOTHING to commons. This is the same wedge-resilient liveness clock
+        the fleet render already trusts (_publish_fleet_snapshot via
+        _bridge_mtime_fn); the manager-down detector consults it here so a
+        hard-working-but-commons-silent manager is never falsely declared down
+        (bug 9694fb11).
+
+        Requires:
+            - manager is a persona name (str)
+            - fleet_view is the build_fleet_view dict { session_id: VIEW } or None
+
+        Ensures:
+            - returns the most-recent bridge mtime (aware-UTC datetime) among the
+              manager's sessions, or None when fleet_view is None/empty, no view
+              matches the persona, or no bridge resolves
+            - NEVER raises (a single session's bridge-read hiccup is swallowed —
+              the observer invariant)
+        """
+        best = None
+        for view in ( fleet_view or { } ).values():
+            if not isinstance( view, dict ) or view.get( "persona" ) != manager:
+                continue
+            sid   = view.get( "session_id" )
+            mtime = self._bridge_mtime_fn( sid ) if sid else None
+            if mtime is None:
+                continue
+            try:
+                ts = datetime.datetime.fromtimestamp( mtime, tz=datetime.timezone.utc )
+            except ( TypeError, ValueError, OSError, OverflowError ):
+                ts = None
+            if ts is not None and ( best is None or ts > best ):
+                best = ts
+        return best
+
+    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None ):
         """
         B4/D4 manager-down detector via the liveness-proxy ACK.
 
         A manager tapped at T is treated as having "acked" (present-to-act) while
-        their liveness (commons activity from who()) is fresh AT/AFTER T. If a
-        TAPPED manager shows NO activity since the tap AND ≥
+        their liveness is fresh AT/AFTER T. Liveness is the UNION of two aliveness
+        sources: commons activity from who() AND a fresh bridge-mtime bump (the
+        wedge-resilient clock every PreToolUse touches). If a TAPPED manager shows
+        NO liveness from EITHER source since the tap AND ≥
         manager_ack_window_seconds have elapsed → MANAGER-DOWN → escalate to Rick
         (notify_fn) + HOLD.
+
+        Why the bridge-mtime source (bug 9694fb11): there is NO deliverable
+        tap-ACK path — a manager literally cannot DM the arbiter back. So the only
+        honest ACK is a liveness proxy, and commons-activity ALONE under-counts: a
+        manager working hard (edits/tools/MCP, all of which bump the bridge mtime)
+        but posting nothing to commons looked "down" and false-escalated to Rick.
+        Folding the bridge mtime in treats real work as the implicit ACK it is.
 
         IMPORTANT (semantics): the liveness-proxy proves ALIVENESS, not
         CONSUMPTION. That's correct for D4, whose trigger IS manager-DOWN —
@@ -1452,12 +1502,20 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - returns the count of NEW manager-down escalations this poll
-            - clears a manager's down-flag once it shows activity since its tap
+            - clears a manager's down-flag once it shows activity (commons OR
+              bridge) since its tap
             - never raises
         """
         down = 0
         for manager, tapped_at in list( self._last_tap_at.items() ):
-            last_activity = self._manager_last_activity( manager, who_rows )
+            commons_activity = self._manager_last_activity( manager, who_rows )
+            bridge_activity  = self._manager_bridge_activity( manager, fleet_view )
+            # Implicit tap-ACK from EITHER aliveness source (bug 9694fb11): the
+            # most-recent of commons-post liveness and the bridge-mtime clock. A
+            # fresh bridge bump means the manager is actively running tools right
+            # now — alive, hence acked — even with zero commons posts.
+            candidates    = [ t for t in ( commons_activity, bridge_activity ) if t is not None ]
+            last_activity = max( candidates ) if candidates else None
             if last_activity is not None and last_activity >= tapped_at:
                 self._manager_down_escalated.discard( manager )   # acked → clear
                 continue
