@@ -324,7 +324,7 @@ def build_dm_send_payload(
           `_emit_dm` remains the receipt-polling substrate
     """
     return {
-        "sender_session_id"  : sender_session_id,
+        "sender_session_id" : sender_session_id,
         "recipient_persona" : recipient_persona,
         "body"              : body,
         "thread_id"         : thread_id,
