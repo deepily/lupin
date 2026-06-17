@@ -8380,16 +8380,6 @@ class NotificationsUI {
         }
     }
 
-    escapeHtml( text ) {
-        /**
-         * Escape HTML special characters to prevent XSS.
-         */
-        if ( !text ) return '';
-        const div = document.createElement( 'div' );
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
     // ========================================
     // TIME SAVED DASHBOARD METHODS
     // ========================================
