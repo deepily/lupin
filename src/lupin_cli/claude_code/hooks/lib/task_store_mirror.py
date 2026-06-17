@@ -63,19 +63,39 @@ STATUS_TRANSITIONS = {
 DROPPED_REASON = "harness-deleted (TaskUpdate)"
 
 
-def build_correlation_key( stable_session_id, harness_id ):
+def build_correlation_key( stable_session_id, generation, harness_id ):
     """
     Build the C1 precedence-(a) correlation key for a harness task.
 
     Requires:
         - stable_session_id / harness_id are non-empty strings
+        - generation is an int (the session's map generation for this task)
 
     Ensures:
-        - Returns "cc-task:<stable_session_id>:<harness_id>" — scoped to the
-          STABLE session id so a /clear-rehydrated session re-correlates
-          instead of duplicating (design §2.1)
+        - Returns "cc-task:<stable_session_id>:g<generation>:<harness_id>" —
+          scoped to the STABLE session id AND the generation (bug 9b23d5bc).
+          Harness counters restart after /clear, so the generation segment is
+          what makes the post-clear counter "1" yield a DISTINCT key from the
+          pre-clear counter "1" — the server-side idempotency probe then never
+          adopts the stale prior-generation row.
     """
-    return f"cc-task:{stable_session_id}:{harness_id}"
+    return f"cc-task:{stable_session_id}:g{generation}:{harness_id}"
+
+
+def _entry_key( entry ):
+    """
+    Compose the generation-scoped map key for a spool-shaped op/entry.
+
+    Requires:
+        - entry carries "harness_id"; "generation" is present on every op built
+          by _build_op (legacy pre-fix spool lines may lack it ⇒ treated as 0)
+
+    Ensures:
+        - Returns "<generation>:<harness_id>" so order-preservation compares two
+          ops by the SAME identity the correlation map keys them under (a
+          post-clear counter never aliases a pre-clear spooled op)
+    """
+    return task_map.map_key( entry.get( "generation", 0 ), entry.get( "harness_id" ) )
 
 
 def _identity( session_id ):
@@ -171,22 +191,32 @@ def _execute_create( settings, api_key, session_id, entry, base_dir ):
         - Never raises (client never raises; map write failure → "spool")
     """
     harness_id = entry[ "harness_id" ]
+    generation = entry.get( "generation", 0 )
     ck         = entry[ "correlation_key" ]
 
     ok, status, body = client.query_by_correlation_key( settings, api_key, ck )
     if not ok and _is_transport_or_5xx( status ):
         return "spool", status
     existing = body.get( "tasks", [ ] ) if ok else [ ]
+    item_id  = None
     if existing:
-        item_id = existing[ 0 ].get( "id" )
-    else:
+        candidate = existing[ 0 ]
+        # COLLISION GUARD (bug 9b23d5bc): adopt the probed row ONLY when it is
+        # the SAME task — its title matches the create's. A title MISMATCH means
+        # the correlation key landed on an UNRELATED row (a residual collision
+        # the generation key did not catch — e.g. a never-recorded spooled
+        # create); refuse adoption and insert a FRESH item rather than mutate
+        # the stranger. A title match is the legit C8 lost-response replay.
+        if candidate.get( "title" ) == entry[ "payload" ].get( "title" ):
+            item_id = candidate.get( "id" )
+    if item_id is None:
         ok, status, body = client.create_task( settings, api_key, entry[ "payload" ] )
         if not ok:
             return ( "spool" if _is_transport_or_5xx( status ) else "drop" ), status
         item_id = body.get( "id" )
 
     try:
-        task_map.record_task( session_id, harness_id, item_id, entry[ "harness_status" ], base_dir )
+        task_map.record_task( session_id, generation, harness_id, item_id, entry[ "harness_status" ], base_dir )
     except OSError:
         return "spool", None
     return "ok", status
@@ -208,8 +238,8 @@ def _execute_transition( settings, api_key, session_id, entry, base_dir ):
         - Never raises
     """
     harness_id = entry[ "harness_id" ]
-    data       = task_map.read_map( session_id, base_dir )
-    task_entry = data[ "tasks" ].get( str( harness_id ) )
+    generation = entry.get( "generation", 0 )
+    task_entry = task_map.lookup_task( session_id, generation, harness_id, base_dir )
     if not task_entry or not task_entry.get( "item_id" ):
         return "drop", None
 
@@ -218,7 +248,7 @@ def _execute_transition( settings, api_key, session_id, entry, base_dir ):
         return ( "spool" if _is_transport_or_5xx( status ) else "drop" ), status
 
     try:
-        task_map.record_task( session_id, harness_id, task_entry[ "item_id" ], entry[ "harness_status" ], base_dir )
+        task_map.record_task( session_id, generation, harness_id, task_entry[ "item_id" ], entry[ "harness_status" ], base_dir )
     except OSError:
         pass  # state advanced server-side; a stale last_status only costs one redundant (422-rejected) retry
     return "ok", status
@@ -237,12 +267,13 @@ def _execute_correlate( settings, api_key, session_id, entry, base_dir ):
         - "ok": the map records harness_id → the ADOPTED item id
         - Never raises
     """
+    generation = entry.get( "generation", 0 )
     ok, status, body = client.correlate_task( settings, api_key, entry[ "item_id" ], entry[ "payload" ] )
     if not ok:
         return ( "spool" if _is_transport_or_5xx( status ) else "drop" ), status
 
     try:
-        task_map.record_task( session_id, entry[ "harness_id" ], entry[ "item_id" ], entry[ "harness_status" ], base_dir )
+        task_map.record_task( session_id, generation, entry[ "harness_id" ], entry[ "item_id" ], entry[ "harness_status" ], base_dir )
     except OSError:
         return "spool", None
     return "ok", status
@@ -302,22 +333,32 @@ def _drain_spool( settings, api_key, session_id, base_dir, now_epoch ):
     return replayed
 
 
-def _build_op( payload, session_id, actor, persona_lower ):
+def _build_op( payload, session_id, actor, persona_lower, base_dir ):
     """
     Map one Task* hook payload onto a spool-shaped store op (plan §2 table).
 
-    PURE given its inputs — all skip decisions happen in the caller (which
-    holds the map). Returns None for events that mirror to nothing
-    (metadata-only TaskUpdate, missing ids, unknown statuses — each logged
-    by the caller via the second tuple slot).
+    Resolves the GENERATION for the op (bug 9b23d5bc) — this is the one place
+    that may MUTATE the map (a generation bump on reset detection); every other
+    skip/idempotence decision still lives in the caller. Returns None for events
+    that mirror to nothing (metadata-only TaskUpdate, missing ids, unknown
+    statuses — each logged by the caller via the second tuple slot).
+
+    Generation rules:
+        - CREATE: read the current generation; if this harness counter is
+          ALREADY live in that generation (lookup_task hit), the harness counter
+          has restarted (post-/clear) ⇒ bump to a fresh generation. Sequential
+          NEW counters (2, 3, …) never hit, so they never false-bump.
+        - UPDATE: use the current generation as-is (the create that re-seeded the
+          generation already bumped it; the update resolves the live slot).
 
     Requires:
         - payload is the PostToolUse hook input dict
         - actor / persona_lower from _identity
+        - base_dir is the per-session runtime-artifact dir (for the map)
 
     Ensures:
         - Returns ( op_dict_or_None, skip_reason_or_None )
-        - op_dict carries: op, ts, harness_id, harness_status,
+        - op_dict carries: op, ts, generation, harness_id, harness_status,
           correlation_key, payload (+ item_id for correlate)
     """
     tool_name  = payload.get( "tool_name" )
@@ -333,13 +374,19 @@ def _build_op( payload, session_id, actor, persona_lower ):
         if not subject:
             return None, "create_missing_subject"
 
-        ck       = build_correlation_key( session_id, harness_id )
+        # Generation + RESET DETECTION (bug 9b23d5bc).
+        generation = task_map.current_generation( session_id, base_dir )
+        if task_map.lookup_task( session_id, generation, str( harness_id ), base_dir ) is not None:
+            generation = task_map.bump_generation( session_id, base_dir )
+
+        ck       = build_correlation_key( session_id, generation, str( harness_id ) )
         metadata = tool_input.get( "metadata" )
         adopt_id = metadata.get( "task_store_id" ) if isinstance( metadata, dict ) else None
         if adopt_id:
             return {
                 "op"             : "correlate",
                 "ts"             : time.time(),
+                "generation"     : generation,
                 "harness_id"     : str( harness_id ),
                 "harness_status" : "pending",
                 "item_id"        : str( adopt_id ),
@@ -349,6 +396,7 @@ def _build_op( payload, session_id, actor, persona_lower ):
         return {
             "op"             : "create",
             "ts"             : time.time(),
+            "generation"     : generation,
             "harness_id"     : str( harness_id ),
             "harness_status" : "pending",
             "correlation_key": ck,
@@ -376,15 +424,17 @@ def _build_op( payload, session_id, actor, persona_lower ):
     if to_status is None:
         return None, f"update_unknown_status:{status}"
 
+    generation         = task_map.current_generation( session_id, base_dir )
     transition_payload = { "to_status": to_status, "actor": actor, "authority": "standing" }
     if to_status == "dropped":
         transition_payload[ "reason" ] = DROPPED_REASON
     return {
         "op"             : "transition",
         "ts"             : time.time(),
+        "generation"     : generation,
         "harness_id"     : str( harness_id ),
         "harness_status" : status,
-        "correlation_key": build_correlation_key( session_id, str( harness_id ) ),
+        "correlation_key": build_correlation_key( session_id, generation, str( harness_id ) ),
         "payload"        : transition_payload,
     }, None
 
@@ -427,7 +477,7 @@ def mirror_task_tool_event( payload, session_id, base_dir=None, environ=None ):
         if replayed:
             _log( session_id, "task_store_mirror_spool_replayed", count=replayed )
 
-        op, skip_reason = _build_op( payload, session_id, actor, persona_lower )
+        op, skip_reason = _build_op( payload, session_id, actor, persona_lower, base_dir )
         if op is None:
             if skip_reason != "update_no_status_change":
                 _log( session_id, "task_store_mirror_skip", reason=skip_reason )
@@ -435,9 +485,10 @@ def mirror_task_tool_event( payload, session_id, base_dir=None, environ=None ):
 
         # Idempotence + terminal lockout, locally (no 422 noise): skip when
         # this harness status was already mirrored, or the item is locally
-        # known terminal (a dropped item never transitions again).
-        data       = task_map.read_map( session_id, base_dir )
-        task_entry = data[ "tasks" ].get( op[ "harness_id" ] )
+        # known terminal (a dropped item never transitions again). Resolve the
+        # entry by the GENERATION-scoped key (bug 9b23d5bc) so a post-/clear
+        # counter never reads the prior generation's last_status.
+        task_entry = task_map.lookup_task( session_id, op[ "generation" ], op[ "harness_id" ], base_dir )
         if op[ "op" ] == "transition" and task_entry:
             if task_entry.get( "last_status" ) == op[ "harness_status" ]:
                 return { "action": "skipped:status_unchanged" }
@@ -446,8 +497,11 @@ def mirror_task_tool_event( payload, session_id, base_dir=None, environ=None ):
 
         # Order preservation: if anything is still spooled for THIS task (its
         # create, or an earlier transition), the new op must queue behind it.
+        # Compared by the generation-scoped key so a reused counter in a NEW
+        # generation does not falsely queue behind the old generation's op.
         pending = spool.read_entries( session_id, base_dir )
-        if any( e.get( "harness_id" ) == op[ "harness_id" ] for e in pending ):
+        op_key  = _entry_key( op )
+        if any( _entry_key( e ) == op_key for e in pending ):
             spool.append_entry( session_id, op, base_dir )
             return { "action": f"spooled:{op['op']}" }
 
