@@ -306,11 +306,11 @@ def test_emit_dm_no_push_seams_is_disabled():
 def test_emit_dm_dm_seam_blowup_in_bottom_path_degrades():
     """A dm_push_fn exception in the bottom (mechanism=dm) path → push_unavailable; never raises."""
     log = _Log()
-    def boom( *a ): raise RuntimeError( "notify-peer down" )
+    def boom( *a ): raise RuntimeError( "dm-send down" )
     job = _job( log=log, dm_push_fn=boom, poke_wake_mechanism="dm" )
     job._emit_dm( "oid1", "stall", "Tiberius", "body", session_id="sess-1" )   # must not raise
     out = _push_results( log )[ 0 ]
-    assert out[ "outcome" ] == "push_unavailable" and "notify-peer down" in out[ "detail" ]
+    assert out[ "outcome" ] == "push_unavailable" and "dm-send down" in out[ "detail" ]
 
 
 def test_emit_dm_board_write_unconditional_even_on_post_error():

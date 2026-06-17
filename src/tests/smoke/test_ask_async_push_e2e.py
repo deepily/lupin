@@ -35,7 +35,7 @@ from fastapi.testclient import TestClient
 # This whole E2E file exercises the legacy POST/DELETE /api/commons/register-question
 # routes (+ the CommonsQuestionWatcher tick→dispatch push-back), which were RETIRED
 # FROM REGISTRATION in the cosa-voice token-reduction Phase 4 (2026-06-15): the path
-# is replaced by the notification-native dm_send / POST /api/notify-peer flow. The
+# is replaced by the notification-native dm_send / POST /api/dm/send flow. The
 # routes are commented out in commons.py, so every test below would now 404. The
 # file is SKIPPED (not deleted) so it is restorable if the routes are re-enabled;
 # the pure-logic cores remain unit-tested in test_commons_router.py and the watcher
@@ -43,7 +43,7 @@ from fastapi.testclient import TestClient
 # Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
 pytestmark = pytest.mark.skip(
     reason="register-question routes retired (cosa-voice token-reduction Phase 4) — "
-           "superseded by dm_send / /api/notify-peer; revisit at full-removal"
+           "superseded by dm_send / /api/dm/send; revisit at full-removal"
 )
 
 from cosa.rest.commons_ack_watcher import CommonsAckWatcher

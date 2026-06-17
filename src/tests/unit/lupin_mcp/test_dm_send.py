@@ -1,7 +1,7 @@
 """
 Unit tests for `_dm_send_impl` — the testable core of the `dm_send` MCP tool.
 
-`dm_send` is the notification-native peer-DM tool (POST /api/notify-peer, body
+`dm_send` is the notification-native peer-DM tool (POST /api/dm/send, body
 inline) that replaces the deprecated commons claim-check DM path. HTTP is
 injected via `post_fn`, so these tests need no live server.
 
@@ -62,7 +62,7 @@ def test_201_returns_sent_and_merges_body():
     assert out[ "message_id" ] == "m1"
     assert out[ "thread_id" ] == "t1"
     # endpoint + payload shape
-    assert captured[ "url" ].endswith( "/api/notify-peer" )
+    assert captured[ "url" ].endswith( "/api/dm/send" )
     assert captured[ "headers" ] == { "X-API-Key": "k-123" }
     assert captured[ "json" ][ "asker_session_id" ] == "asker-sess-1"
     assert captured[ "json" ][ "recipient_persona" ] == "tiberius"

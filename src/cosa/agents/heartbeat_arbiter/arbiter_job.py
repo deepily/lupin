@@ -273,7 +273,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # :8001 factory wires the real hops.
         dm_push_fn               : Optional[ Callable ] = None,   # §3.3 manager wake hop (persona, thread_id, body) -> outcome
         tmux_push_fn             : Optional[ Callable ] = None,   # Thread C+D wake hop: host-side tmux inject (session_id, thread_id, body) -> outcome
-        poke_wake_mechanism      : str                  = "tmux", # Thread C+D: "tmux" (direct host-side inject; wakes a dormant pane) | "dm" (notify-peer only; buffered for a non-idle pane)
+        poke_wake_mechanism      : str                  = "tmux", # Thread C+D: "tmux" (direct host-side inject; wakes a dormant pane) | "dm" (dm/send only; buffered for a non-idle pane)
         live_retry_fn            : Optional[ Callable ] = None,   # §3.5 dedup-BYPASSING live transport for re-announce
         outreach_ack_window_seconds : int               = 900,    # §3.4 manager threaded-ack window
         reannounce_interval_seconds : int               = 300,    # §3.5 Rick re-announce cadence
@@ -476,7 +476,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # With the INTERNAL self-poke (stop.py decision:block) confirmed broken
         # (pokes log but never effect a continuation turn — filed separately,
         # P1), this EXTERNAL tmux-wake is the PRIMARY fleet liveness path, not a
-        # fallback. "dm" keeps the notify-peer-only path. A malformed value
+        # fallback. "dm" keeps the dm/send-only path. A malformed value
         # coerces to the default "tmux" with a LOUD log — a typo must not
         # silently change wake behavior (mirrors arbiter_bootstrap's guard).
         self._tmux_push_fn               = tmux_push_fn
@@ -914,7 +914,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
           confirmed broken (filed separately, P1). On a tmux/bridge-unavailable
           outcome it degrades to the dm_push_fn hop (rider a).
         - "dm" (or tmux selected with no tmux seam / no session_id) → the
-          notify-peer dm_push_fn hop (register-question-era §3.3 path).
+          dm/send dm_push_fn hop (register-question-era §3.3 path).
 
         Ensures:
             - the board write stamps outreach_id + question_id metadata (the

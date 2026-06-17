@@ -15,7 +15,7 @@ escalation-path ONLY (never per-poll; detection stays :7999-free, R4):
     failures become outcome values, journaled by the caller under the
     outreach_id (no hop may fail silently — §1.5).
 
-  • the DM PUSH hop (`make_dm_push_fn`) — POST /api/notify-peer with
+  • the DM PUSH hop (`make_dm_push_fn`) — POST /api/dm/send with
     recipient_persona + the outreach body INLINE (notification-native AI↔AI
     DM, direction='ai_to_ai'): the recipient's listener delivers the body
     directly via `_handle_peer_dm` → tmux injection → the manager WAKES.
@@ -46,9 +46,9 @@ from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn, DELIVERED
 
 # the :7999 notification ingress (POST /api/notify; X-API-Key or JWT auth)
 NOTIFY_PATH      = "/api/notify"
-# the :7999 notification-native DM-push ingress (POST /api/notify-peer — §3.3,
+# the :7999 notification-native DM-push ingress (POST /api/dm/send — §3.3,
 # migrated off /api/commons/register-question 2026-06-15: body rides INLINE)
-NOTIFY_PEER_PATH = "/api/notify-peer"
+DM_SEND_PATH = "/api/dm/send"
 
 
 # Item A (2026.06.11 receipts design §2.3): the line shape has ONE owner —
@@ -299,7 +299,7 @@ def resolve_arbiter_api_key( get_api_config_fn, load_api_key_fn, *, env, log_fn=
 
 # ── the DM-push hop (§3.3 — manager-bound notification-native peer DM) ────────
 
-def build_notify_peer_payload(
+def build_dm_send_payload(
     *,
     recipient_persona : str,
     body              : str,
@@ -307,10 +307,10 @@ def build_notify_peer_payload(
     asker_session_id  : str,
 ):
     """
-    Build the JSON payload for the /api/notify-peer DM-push hop — PURE.
+    Build the JSON payload for the /api/dm/send DM-push hop — PURE.
 
     Migrated off register-question 2026-06-15: the body rides INLINE (no
-    commons board claim-check). notify-peer resolves the recipient persona →
+    commons board claim-check). dm/send resolves the recipient persona →
     active session (same-user scoped) and delivers `body` as a
     direction='ai_to_ai' notification — the manager WAKES with the text in hand.
 
@@ -318,8 +318,8 @@ def build_notify_peer_payload(
         - thread_id == the caller's outreach/question id (the dot-connect key:
           the manager's threaded reply names the outreach via thread_id, and
           §3.4 board-polling receipts still correlate on the same id)
-        - body travels inline (NotifyPeerRequest.body is required)
-        - no topic / question_id / ttl_seconds / expect_reply — notify-peer is
+        - body travels inline (DmSendRequest.body is required)
+        - no topic / question_id / ttl_seconds / expect_reply — dm/send is
           stateless (no tracker), the durable dm-<persona> board write in
           `_emit_dm` remains the receipt-polling substrate
     """
@@ -350,8 +350,8 @@ def make_dm_push_fn(
           default the urllib boundary
 
     Ensures:
-        - POSTs :7999/api/notify-peer with the body INLINE; a 201
-          (notify-peer always dispatches an ai_to_ai push on resolve) → outcome
+        - POSTs :7999/api/dm/send with the body INLINE; a 201
+          (dm/send always dispatches an ai_to_ai push on resolve) → outcome
           "dispatched" (the manager's listener delivers the body via
           _handle_peer_dm → tmux injection — they WAKE with the text in hand)
         - ANY failure (422 recipient-resolution, timeout, refused, non-2xx) →
@@ -361,11 +361,11 @@ def make_dm_push_fn(
     """
     http_post_json_fn = http_post_json_fn if http_post_json_fn is not None else _http_post_json
     log_fn            = log_fn            if log_fn            is not None else _default_log_fn
-    url               = f"{base_url.rstrip( '/' )}{NOTIFY_PEER_PATH}"
+    url               = f"{base_url.rstrip( '/' )}{DM_SEND_PATH}"
     headers           = { "X-API-Key": api_key, "Content-Type": "application/json" }
 
     def dm_push( recipient_persona: str, thread_id: str, body: str ) -> dict:
-        payload = build_notify_peer_payload(
+        payload = build_dm_send_payload(
             recipient_persona=recipient_persona, body=body,
             thread_id=thread_id, asker_session_id=asker_session_id,
         )
@@ -552,8 +552,8 @@ def quick_smoke_test():
     assert validate_live_notify_target( "" ) is not None
     assert validate_live_notify_target( "not-an-email" ) is not None
 
-    # dm_push outcome mapping — notification-native /api/notify-peer (body inline)
-    payload = build_notify_peer_payload(
+    # dm_push outcome mapping — notification-native /api/dm/send (body inline)
+    payload = build_dm_send_payload(
         recipient_persona="Mr Radio", body="WHOLE-FLEET-STALL — please advise",
         thread_id="o-1", asker_session_id="lupin-arbiter-app-8001",
     )

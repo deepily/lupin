@@ -305,7 +305,7 @@ def assemble_app(
         tmux_push_fn         = tmux_push_fn,
         # Thread C+D: the wake-surface selector. Default "tmux" (host-side direct
         # inject, wakes a dormant pane) — load-bearing now that the internal
-        # self-poke is confirmed broken; "dm" reverts to notify-peer-only.
+        # self-poke is confirmed broken; "dm" reverts to dm/send-only.
         poke_wake_mechanism  = cfg.get( "arbiter poke wake mechanism", default="tmux" ) or "tmux",
         live_retry_fn        = live_retry_fn,
         outreach_ack_window  = int( cfg.get( "arbiter outreach ack window seconds", default=900, return_type="int" ) ),

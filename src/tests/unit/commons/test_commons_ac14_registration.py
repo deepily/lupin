@@ -57,7 +57,7 @@ def test_ac14_router_prefix_and_tag():
 # ─── register-question endpoints — RETIRED (cosa-voice token-reduction Phase 4) ─
 # DEPRECATED (revisit-later): the POST/DELETE /api/commons/register-question routes
 # were COMMENTED OUT in commons.py (2026-06-15) — the legacy DM claim-check path is
-# superseded by the notification-native dm_send / POST /api/notify-peer path. The
+# superseded by the notification-native dm_send / POST /api/dm/send path. The
 # four former route-REGISTRATION assertions are inverted to actively guard the
 # DEREGISTRATION (the cutover regression guard); the pure-logic cores
 # (execute_register_question / execute_unregister_question) remain unit-tested in

@@ -21,10 +21,10 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from lupin_arbiter_app.arbiter_live_notify import (
-    build_notify_request, build_notify_peer_payload, make_dm_push_fn,
+    build_notify_request, build_dm_send_payload, make_dm_push_fn,
     make_live_notify_fn, make_notify_transport, parse_notify_outcome,
     resolve_arbiter_api_key, validate_live_notify_target,
-    _default_log_fn, quick_smoke_test, NOTIFY_PATH, NOTIFY_PEER_PATH,
+    _default_log_fn, quick_smoke_test, NOTIFY_PATH, DM_SEND_PATH,
 )
 from lupin_arbiter_app.fleet_arbiter_loop import make_escalation_notify_fn, ESCALATION_TOPIC
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
@@ -232,14 +232,14 @@ class TestValidateLiveNotifyTarget:
         assert "not an email" in validate_live_notify_target( "rick" )
 
 
-# ── make_dm_push_fn + payload — the §3.3 manager wake hop (notify-peer) ────────
+# ── make_dm_push_fn + payload — the §3.3 manager wake hop (dm/send) ───────────
 
 class TestDmPush:
     _ARGS = dict( base_url="http://x:7999/", api_key="k",
                   asker_session_id="lupin-arbiter-app-8001" )
 
     def test_payload_carries_body_inline_and_threads_on_outreach_id( self ):
-        p = build_notify_peer_payload(
+        p = build_dm_send_payload(
             recipient_persona="Mr Radio", body="WHOLE-FLEET-STALL — please advise",
             thread_id="oid-1", asker_session_id="lupin-arbiter-app-8001" )
         assert p[ "recipient_persona" ] == "Mr Radio"
@@ -247,7 +247,7 @@ class TestDmPush:
         assert p[ "body" ] == "WHOLE-FLEET-STALL — please advise"     # body travels INLINE
         assert p[ "asker_session_id" ] == "lupin-arbiter-app-8001"
 
-    def test_dispatched_201_posts_notify_peer_with_body( self ):
+    def test_dispatched_201_posts_dm_send_with_body( self ):
         seen = [ ]
         def post( url, headers, payload, timeout ):
             seen.append( ( url, headers, payload ) )
@@ -255,7 +255,7 @@ class TestDmPush:
         push = make_dm_push_fn( http_post_json_fn=post, log_fn=lambda e, **f: None, **self._ARGS )
         assert push( "Tiberius", "oid-1", "wake up — stall" )[ "outcome" ] == "dispatched"
         url, headers, payload = seen[ 0 ]
-        assert url == f"http://x:7999{NOTIFY_PEER_PATH}"              # trailing slash normalised
+        assert url == f"http://x:7999{DM_SEND_PATH}"                 # trailing slash normalised
         assert headers[ "X-API-Key" ] == "k" and payload[ "recipient_persona" ] == "Tiberius"
         assert payload[ "body" ] == "wake up — stall"                # inline body
 

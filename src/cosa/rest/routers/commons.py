@@ -1346,7 +1346,7 @@ async def get_broadcast_history(   # pragma: no cover
 # REGISTRATION as of the cosa-voice token-reduction Phase 4 (2026-06-15): the
 # legacy DM claim-check path (register-question → CommonsQuestionWatcher push →
 # commons_answer_received) is replaced by the notification-native path
-# (`dm_send` → POST /api/notify-peer, body inline). The route decorators below
+# (`dm_send` → POST /api/dm/send, body inline). The route decorators below
 # are COMMENTED OUT so the endpoints no longer register; the pure-logic cores
 # (`execute_register_question` / `execute_unregister_question`) and the
 # `CommonsQuestionWatcher` are LEFT IN PLACE (still unit-tested) for a later

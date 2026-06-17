@@ -3051,7 +3051,7 @@ def commons_send_to(
 # Notification-native AI↔AI direct messaging (cosa-voice token reduction)
 #
 # `dm_send` is the PREFERRED peer-DM tool — it carries the body INLINE via a
-# direction='ai_to_ai' notification (POST /api/notify-peer), so the recipient
+# direction='ai_to_ai' notification (POST /api/dm/send), so the recipient
 # processes it directly (~204 tokens) with zero `commons_read` re-fetch, vs the
 # commons claim-check path's ~3,700 tokens/received DM. `commons_send_to` /
 # `commons_ask_async` are deprecated in favor of this.
@@ -3090,7 +3090,7 @@ def _dm_send_impl(
     """
     if not api_key:
         return { "status": "error", "reason": "missing_auth_header",
-                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/notify-peer" }
+                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/send" }
 
     payload = {
         "asker_session_id" : session_id,
@@ -3105,7 +3105,7 @@ def _dm_send_impl(
     else:
         payload[ "recipient_persona" ] = recipient
 
-    url = f"{api_base_url}/api/notify-peer"
+    url = f"{api_base_url}/api/dm/send"
     try:
         resp = post_fn( url, json=payload, headers={ "X-API-Key": api_key }, timeout=10 )
     except Exception as e:
