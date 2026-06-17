@@ -53,7 +53,24 @@ type TaskUI = Record<string, unknown> & {
   _formatTaskChaseTime: ( iso: unknown, ianaZone: unknown ) => string;
   groupTasksByOwner: ( tasks: unknown ) => { totalCount: number; groups: TaskGroupModel[] };
   _renderTaskRow: ( task: Record<string, unknown>, ianaZone?: unknown ) => string;
-  renderTaskListTable: ( model: { groups: TaskGroupModel[] }, ianaZone?: unknown ) => string;
+  renderTaskListTable: ( model: { groups: TaskGroupModel[] }, ianaZone?: unknown, collapsedOwners?: Set<string> ) => string;
+  // Per-persona accordion (2026-06-17)
+  _taskGroupOwnerKey: ( group: TaskGroupModel ) => string | null;
+  _taskGroupIdSlug: ( ownerKey: unknown ) => string;
+  _escapeTaskAttr: ( value: unknown ) => string;
+  loadCollapsedTaskOwners: () => Set<string>;
+  saveCollapsedTaskOwners: ( collapsedSet: Iterable<string> ) => void;
+  toggleTaskOwnerCollapsed: ( ownerKey: string ) => boolean;
+  _applyTaskGroupCollapseState: ( tbody: HTMLElement, isCollapsed: boolean ) => void;
+  _handleTaskAccordionToggle: ( target: unknown ) => void;
+  _wireTaskListAccordion: () => void;
+  _taskListOwnerKeysInDom: () => string[];
+  collapseAllTaskOwners: () => void;
+  expandAllTaskOwners: () => void;
+  error: ( ...args: unknown[] ) => void;
+  TASK_LIST_COLLAPSED_KEY: string;
+  TASK_LIST_UNASSIGNED_KEY: string;
+  _taskListAccordionWired: boolean;
   renderTaskList: ( composite: unknown, stampUpdated?: boolean ) => void;
   _renderTaskListUnreachable: ( container: HTMLElement, countEl: HTMLElement | null ) => void;
   _stampTaskListUpdated: () => void;
@@ -78,10 +95,14 @@ function newUI(): TaskUI {
   const ui = Object.create( Ctor.prototype ) as TaskUI;
   ui.debug                      = false;
   ui.log                        = (): void => {};
+  ui.error                      = (): void => {};
   ui._taskListFetchInFlight     = false;
   ui._taskListLastGoodTasks     = null;
   ui.taskListPollIntervalHandle = null;
   ui.TASK_LIST_POLL_INTERVAL_MS = 60000;
+  ui.TASK_LIST_COLLAPSED_KEY    = "lupin.taskList.collapsedOwners";
+  ui.TASK_LIST_UNASSIGNED_KEY   = "__unassigned__";
+  ui._taskListAccordionWired    = false;
   return ui;
 }
 
@@ -115,7 +136,16 @@ const T_DONE    = { id: "t4", item_class: "task", title: "Shipped", status: "don
 const T_ORPHAN  = { id: "t5", item_class: "decision", title: "Who owns this?", status: "queued",
                     owner_persona: null, accountable_manager: null, priority: null, project: null };
 
-beforeEach( () => { document.body.replaceChildren(); } );
+beforeEach( () => { document.body.replaceChildren(); localStorage.clear(); } );
+
+// A small grouped DOM with three owner tbodies (Krishna · 1, Rio · 2,
+// (Unassigned) · 1) for the accordion DOM-manipulation tests.
+function buildAccordionDOM( ui: TaskUI ): void {
+  buildPanelDOM();
+  const model = ui.groupTasksByOwner( [ T_BLOCKED, T_ACTIVE, T_QUEUED, T_ORPHAN ] );
+  document.getElementById( "task-list-container" )!.innerHTML =
+    ui.renderTaskListTable( model, undefined, ui.loadCollapsedTaskOwners() );
+}
 
 // ─────────────────────────── isTaskOpenStatus (pure) ───────────────────────────
 
@@ -587,6 +617,312 @@ test( "startTaskListPolling is idempotent (clears a prior interval first)", () =
   const second = ui.taskListPollIntervalHandle;
   assert.notEqual( first, second, "a fresh interval replaced the old one" );
   ui.stopTaskListPolling();
+} );
+
+// ═══════════════════════════ PER-PERSONA ACCORDION ═══════════════════════════
+// Plan: src/rnd/v0.1.8/2026.06.17-task-list-accordion/01-design-and-build-plan.md
+
+// ─────────────── pure key / slug / attr helpers ───────────────
+
+test( "_taskGroupOwnerKey: owned group → persona; Unassigned group → sentinel", () => {
+  const ui = newUI();
+  assert.equal( ui._taskGroupOwnerKey( { ownerPersona: "Rio", isUnassigned: false, tasks: [] } ), "Rio" );
+  assert.equal( ui._taskGroupOwnerKey( { ownerPersona: null, isUnassigned: true, tasks: [] } ), "__unassigned__" );
+} );
+
+test( "_taskGroupIdSlug: prefixes + sanitizes non [A-Za-z0-9_-] to '-'; underscores survive", () => {
+  const ui = newUI();
+  assert.equal( ui._taskGroupIdSlug( "Rio" ), "task-group-Rio" );
+  assert.equal( ui._taskGroupIdSlug( "__unassigned__" ), "task-group-__unassigned__" );
+  assert.equal( ui._taskGroupIdSlug( "a b/c" ), "task-group-a-b-c" );
+  assert.equal( ui._taskGroupIdSlug( 42 as unknown as string ), "task-group-42" );   // String() coercion
+} );
+
+test( "_escapeTaskAttr: entity-encodes & \" < > ; coerces non-strings", () => {
+  const ui = newUI();
+  assert.equal( ui._escapeTaskAttr( 'a&b"c<d>e' ), "a&amp;b&quot;c&lt;d&gt;e" );
+  assert.equal( ui._escapeTaskAttr( "plain" ), "plain" );
+  assert.equal( ui._escapeTaskAttr( 7 as unknown as string ), "7" );
+} );
+
+// ─────────────── renderTaskListTable accordion markup (pure) ───────────────
+
+test( "renderTaskListTable: each owner is its own <tbody.task-group> with data-owner + id slug", () => {
+  const ui = newUI();
+  const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED, T_ORPHAN ] );   // Rio, Krishna, (none)
+  const html  = ui.renderTaskListTable( model, undefined, new Set() );
+  assert.match( html, /<tbody class="task-group" id="task-group-Rio" data-owner="Rio">/ );
+  assert.match( html, /<tbody class="task-group" id="task-group-Krishna" data-owner="Krishna">/ );
+  assert.match( html, /<tbody class="task-group" id="task-group-__unassigned__" data-owner="__unassigned__">/ );
+  // table no longer wraps groups in one shared tbody
+  assert.ok( !/<tbody>\s*<tr class="task-group-header/.test( html ), "no bare shared tbody wrapper" );
+} );
+
+test( "renderTaskListTable: expanded group → ▾ + aria-expanded=true + no collapsed class", () => {
+  const ui = newUI();
+  const model = ui.groupTasksByOwner( [ T_BLOCKED ] );          // Rio
+  const html  = ui.renderTaskListTable( model, undefined, new Set() );
+  assert.match( html, /<tbody class="task-group" id="task-group-Rio"/ );   // NOT "task-group collapsed"
+  assert.match( html, /aria-expanded="true"/ );
+  assert.match( html, /<span class="task-group-chevron" aria-hidden="true">▾<\/span>/ );
+} );
+
+test( "renderTaskListTable: collapsed owner → collapsed class + ▸ + aria-expanded=false", () => {
+  const ui = newUI();
+  const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED ] );           // Rio, Krishna
+  const html  = ui.renderTaskListTable( model, undefined, new Set( [ "Rio" ] ) );
+  assert.match( html, /<tbody class="task-group collapsed" id="task-group-Rio" data-owner="Rio">/ );
+  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="8"><span class="task-group-chevron" aria-hidden="true">▸/ );
+  // Krishna (not in the set) stays expanded
+  assert.match( html, /<tbody class="task-group" id="task-group-Krishna"/ );
+} );
+
+test( "renderTaskListTable: Unassigned collapses via the sentinel key", () => {
+  const ui = newUI();
+  const model = ui.groupTasksByOwner( [ T_ORPHAN ] );           // (Unassigned)
+  const html  = ui.renderTaskListTable( model, undefined, new Set( [ "__unassigned__" ] ) );
+  assert.match( html, /<tbody class="task-group collapsed" id="task-group-__unassigned__" data-owner="__unassigned__">/ );
+} );
+
+test( "renderTaskListTable: missing collapsedOwners arg defaults to all-expanded (first-load default)", () => {
+  const ui = newUI();
+  const model = ui.groupTasksByOwner( [ T_BLOCKED ] );
+  const html  = ui.renderTaskListTable( model, undefined );    // no 3rd arg → new Set()
+  assert.ok( !html.includes( "collapsed" ), "no group collapsed by default" );
+  assert.match( html, /aria-expanded="true"/ );
+} );
+
+// ─────────────── persistence (localStorage) ───────────────
+
+test( "loadCollapsedTaskOwners: absent key → empty set", () => {
+  const ui = newUI();
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+} );
+
+test( "loadCollapsedTaskOwners: valid JSON array → Set; non-string members filtered", () => {
+  const ui = newUI();
+  localStorage.setItem( ui.TASK_LIST_COLLAPSED_KEY, JSON.stringify( [ "Rio", "__unassigned__", 5, null ] ) );
+  const set = ui.loadCollapsedTaskOwners();
+  assert.deepEqual( Array.from( set ).sort(), [ "Rio", "__unassigned__" ].sort() );
+} );
+
+test( "loadCollapsedTaskOwners: non-array JSON → empty set", () => {
+  const ui = newUI();
+  localStorage.setItem( ui.TASK_LIST_COLLAPSED_KEY, JSON.stringify( { not: "an array" } ) );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+} );
+
+test( "loadCollapsedTaskOwners: empty-string value → empty set (falsy raw)", () => {
+  const ui = newUI();
+  localStorage.setItem( ui.TASK_LIST_COLLAPSED_KEY, "" );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+} );
+
+test( "loadCollapsedTaskOwners: malformed JSON → empty set (catch), error logged", () => {
+  const ui = newUI();
+  let logged = 0;
+  ui.error = (): void => { logged++; };
+  localStorage.setItem( ui.TASK_LIST_COLLAPSED_KEY, "{not json" );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+  assert.equal( logged, 1, "error path exercised" );
+} );
+
+test( "saveCollapsedTaskOwners: writes the set as a JSON array", () => {
+  const ui = newUI();
+  ui.saveCollapsedTaskOwners( new Set( [ "Rio", "Krishna" ] ) );
+  assert.deepEqual( JSON.parse( localStorage.getItem( ui.TASK_LIST_COLLAPSED_KEY )! ).sort(), [ "Krishna", "Rio" ] );
+} );
+
+test( "saveCollapsedTaskOwners: a throw inside the write is swallowed (error logged, no throw)", () => {
+  const ui = newUI();
+  let logged = 0;
+  ui.error = (): void => { logged++; };
+  // Array.from(null) throws "not iterable" INSIDE the try → exercises the catch
+  // without depending on a (non-reassignable, in happy-dom) localStorage.setItem.
+  ui.saveCollapsedTaskOwners( null as unknown as Iterable<string> );   // must not throw
+  assert.equal( logged, 1, "save error path exercised" );
+} );
+
+test( "toggleTaskOwnerCollapsed: absent → adds (returns true) + persists; present → removes (false)", () => {
+  const ui = newUI();
+  assert.equal( ui.toggleTaskOwnerCollapsed( "Rio" ), true );
+  assert.deepEqual( Array.from( ui.loadCollapsedTaskOwners() ), [ "Rio" ] );
+  assert.equal( ui.toggleTaskOwnerCollapsed( "Rio" ), false );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+} );
+
+// ─────────────── DOM state application ───────────────
+
+test( "_applyTaskGroupCollapseState: collapse=true sets class + aria=false + ▸; false reverses", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  const tbody = document.querySelector( 'tbody.task-group[data-owner="Rio"]' ) as HTMLElement;
+  assert.ok( tbody, "Rio tbody present" );
+
+  ui._applyTaskGroupCollapseState( tbody, true );
+  assert.ok( tbody.classList.contains( "collapsed" ) );
+  const header = tbody.querySelector( ".task-group-header" )!;
+  assert.equal( header.getAttribute( "aria-expanded" ), "false" );
+  assert.equal( header.querySelector( ".task-group-chevron" )!.textContent, "▸" );
+
+  ui._applyTaskGroupCollapseState( tbody, false );
+  assert.ok( !tbody.classList.contains( "collapsed" ) );
+  assert.equal( header.getAttribute( "aria-expanded" ), "true" );
+  assert.equal( header.querySelector( ".task-group-chevron" )!.textContent, "▾" );
+} );
+
+test( "_applyTaskGroupCollapseState: tbody with no header → no throw (guard)", () => {
+  const ui = newUI();
+  const tbody = document.createElement( "tbody" );   // no header inside
+  ui._applyTaskGroupCollapseState( tbody, true );     // must not throw
+  assert.ok( tbody.classList.contains( "collapsed" ) );
+} );
+
+test( "_applyTaskGroupCollapseState: header without a chevron span → no throw (guard)", () => {
+  const ui = newUI();
+  const tbody = document.createElement( "tbody" );
+  const tr    = document.createElement( "tr" );
+  tr.className = "task-group-header";                  // header but NO chevron child
+  tbody.appendChild( tr );
+  ui._applyTaskGroupCollapseState( tbody, true );      // must not throw
+  assert.equal( tr.getAttribute( "aria-expanded" ), "false" );
+} );
+
+// ─────────────── toggle handler ───────────────
+
+test( "_handleTaskAccordionToggle: target lacking .closest → no-op (defensive)", () => {
+  const ui = newUI();
+  ui._handleTaskAccordionToggle( {} );                 // {}.closest is undefined → return, no throw
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+} );
+
+test( "_handleTaskAccordionToggle: target with no header ancestor → no-op", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  const container = document.getElementById( "task-list-container" )!;   // not inside a header
+  ui._handleTaskAccordionToggle( container );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+} );
+
+test( "_handleTaskAccordionToggle: header detached from any tbody.task-group → no-op", () => {
+  const ui = newUI();
+  const tr = document.createElement( "tr" );
+  tr.className = "task-group-header";                   // a header with no tbody.task-group ancestor
+  document.body.appendChild( tr );
+  ui._handleTaskAccordionToggle( tr );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+} );
+
+test( "_handleTaskAccordionToggle: header inside a group → toggles class + persists", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  const header = document.querySelector( 'tbody.task-group[data-owner="Rio"] .task-group-header' ) as HTMLElement;
+  ui._handleTaskAccordionToggle( header );
+  assert.deepEqual( Array.from( ui.loadCollapsedTaskOwners() ), [ "Rio" ] );
+  assert.ok( document.querySelector( 'tbody.task-group[data-owner="Rio"]' )!.classList.contains( "collapsed" ) );
+  // toggling again expands + clears
+  ui._handleTaskAccordionToggle( header );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+} );
+
+// ─────────────── delegation wiring ───────────────
+
+test( "_wireTaskListAccordion: no container → no-op, stays unwired", () => {
+  const ui = newUI();
+  document.body.replaceChildren();
+  ui._wireTaskListAccordion();
+  assert.equal( ui._taskListAccordionWired, false );
+} );
+
+test( "_wireTaskListAccordion: wires once; second call is a guarded no-op", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  ui._wireTaskListAccordion();
+  assert.equal( ui._taskListAccordionWired, true );
+  ui._wireTaskListAccordion();   // guard: early return, no throw
+  assert.equal( ui._taskListAccordionWired, true );
+} );
+
+test( "delegation: a real click on a header toggles its group", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  ui._wireTaskListAccordion();
+  const header = document.querySelector( 'tbody.task-group[data-owner="Krishna"] .task-group-header' ) as HTMLElement;
+  header.dispatchEvent( new Event( "click", { bubbles: true } ) );
+  assert.ok( document.querySelector( 'tbody.task-group[data-owner="Krishna"]' )!.classList.contains( "collapsed" ) );
+} );
+
+test( "delegation: Enter on a header toggles; Space toggles; other keys ignored; non-header ignored", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  ui._wireTaskListAccordion();
+  const container = document.getElementById( "task-list-container" )!;
+  const header    = document.querySelector( 'tbody.task-group[data-owner="Rio"] .task-group-header' ) as HTMLElement;
+
+  // a non-toggle key on a header → ignored
+  header.dispatchEvent( new KeyboardEvent( "keydown", { key: "a", bubbles: true } ) );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0, "non-toggle key ignored" );
+
+  // Enter on a header → toggles (collapse)
+  header.dispatchEvent( new KeyboardEvent( "keydown", { key: "Enter", bubbles: true } ) );
+  assert.deepEqual( Array.from( ui.loadCollapsedTaskOwners() ), [ "Rio" ] );
+
+  // Space on a header → toggles (expand)
+  header.dispatchEvent( new KeyboardEvent( "keydown", { key: " ", bubbles: true } ) );
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+
+  // legacy "Spacebar" key → toggles (collapse again)
+  header.dispatchEvent( new KeyboardEvent( "keydown", { key: "Spacebar", bubbles: true } ) );
+  assert.deepEqual( Array.from( ui.loadCollapsedTaskOwners() ), [ "Rio" ] );
+
+  // a toggle key NOT on a header (target = container) → ignored (no further change)
+  container.dispatchEvent( new KeyboardEvent( "keydown", { key: "Enter", bubbles: true } ) );
+  assert.deepEqual( Array.from( ui.loadCollapsedTaskOwners() ), [ "Rio" ], "non-header keydown ignored" );
+} );
+
+// ─────────────── collapse-all / expand-all ───────────────
+
+test( "_taskListOwnerKeysInDom: returns rendered owner keys; empty when no table", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  assert.deepEqual( ui._taskListOwnerKeysInDom().sort(), [ "Krishna", "Rio", "__unassigned__" ] );
+  document.body.replaceChildren();
+  assert.deepEqual( ui._taskListOwnerKeysInDom(), [] );
+} );
+
+test( "collapseAllTaskOwners: persists every rendered owner + collapses each group DOM", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  ui.collapseAllTaskOwners();
+  assert.deepEqual( Array.from( ui.loadCollapsedTaskOwners() ).sort(), [ "Krishna", "Rio", "__unassigned__" ] );
+  const collapsed = Array.from( document.querySelectorAll( "tbody.task-group" ) )
+    .every( el => el.classList.contains( "collapsed" ) );
+  assert.ok( collapsed, "every group collapsed in DOM" );
+} );
+
+test( "expandAllTaskOwners: clears the persisted set + expands each group DOM", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  ui.collapseAllTaskOwners();         // start collapsed
+  ui.expandAllTaskOwners();
+  assert.equal( ui.loadCollapsedTaskOwners().size, 0 );
+  const anyCollapsed = Array.from( document.querySelectorAll( "tbody.task-group" ) )
+    .some( el => el.classList.contains( "collapsed" ) );
+  assert.ok( !anyCollapsed, "no group collapsed in DOM" );
+} );
+
+// ─────────────── renderTaskList wires delegation + honors persisted collapse ───────────────
+
+test( "renderTaskList: wires accordion delegation + renders persisted-collapsed group", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  localStorage.setItem( ui.TASK_LIST_COLLAPSED_KEY, JSON.stringify( [ "Rio" ] ) );
+  ui.renderTaskList( { tasks: [ T_BLOCKED, T_QUEUED ] } );   // Rio (collapsed), Krishna (open)
+  assert.equal( ui._taskListAccordionWired, true, "delegation wired during render" );
+  const rio = document.querySelector( 'tbody.task-group[data-owner="Rio"]' )!;
+  assert.ok( rio.classList.contains( "collapsed" ), "persisted collapse honored on render" );
+  const krishna = document.querySelector( 'tbody.task-group[data-owner="Krishna"]' )!;
+  assert.ok( !krishna.classList.contains( "collapsed" ) );
 } );
 
 if ( typeof process !== "undefined" && process.argv.includes( "--run" ) ) { /* node --test entry */ }

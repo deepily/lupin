@@ -276,6 +276,181 @@ class TestTaskListCardToolbarEntryPoint:
 
 
 # ---------------------------------------------------------------------------
+# Per-persona accordion (collapse/expand each owner group)
+# Plan: src/rnd/v0.1.8/2026.06.17-task-list-accordion/01-design-and-build-plan.md
+# ---------------------------------------------------------------------------
+
+# localStorage key + sentinel — the PARITY CONTRACT shared with the TS card.
+ACCORDION_KEY        = "lupin.taskList.collapsedOwners"
+ACCORDION_UNASSIGNED = "__unassigned__"
+
+
+class TestTaskListCardAccordion:
+    """
+    Each owner group header is a collapse/expand accordion bar; the collapsed
+    set persists per-persona across reload, with collapse-all / expand-all
+    controls in the #section-toolbar.
+    """
+
+    def test_groups_render_as_per_owner_tbodies_expanded( self, logged_in_page ):
+        """
+        Each owner renders as its own <tbody.task-group data-owner> — expanded by default.
+
+        Requires:
+            - Authenticated session, seeded rows via route interception
+
+        Ensures:
+            - one tbody.task-group per owner (tiberius, krishna, __unassigned__)
+            - each header carries role/tabindex/aria-expanded=true + a ▾ chevron
+            - first-load default is expanded (no `collapsed` class)
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        groups = logged_in_page.locator( "#task-list-container tbody.task-group" )
+        assert groups.count() == 3
+        for owner in ( "tiberius", "krishna", ACCORDION_UNASSIGNED ):
+            tb = logged_in_page.locator( f'#task-list-container tbody.task-group[data-owner="{owner}"]' )
+            assert tb.count() == 1, f"missing per-owner tbody for {owner!r}"
+            assert "collapsed" not in ( tb.get_attribute( "class" ) or "" )
+
+        header = logged_in_page.locator(
+            '#task-list-container tbody.task-group[data-owner="tiberius"] .task-group-header' )
+        assert header.get_attribute( "role" ) == "button"
+        assert header.get_attribute( "tabindex" ) == "0"
+        assert header.get_attribute( "aria-expanded" ) == "true"
+        assert "▾" in header.locator( ".task-group-chevron" ).text_content()
+
+    def test_header_click_collapses_only_that_owner( self, logged_in_page ):
+        """
+        Clicking an owner header hides ONLY that owner's rows; header + count stay.
+
+        Requires:
+            - Authenticated session, seeded rows
+
+        Ensures:
+            - the clicked owner's .task-row become hidden; its header stays visible
+              with its "owner · N" count; chevron flips to ▸; aria-expanded=false
+            - other owners' rows stay visible; the global count badge is unchanged
+            - the collapsed owner is persisted to localStorage
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        tib = logged_in_page.locator( '#task-list-container tbody.task-group[data-owner="tiberius"]' )
+        kri = logged_in_page.locator( '#task-list-container tbody.task-group[data-owner="krishna"]' )
+        header = tib.locator( ".task-group-header" )
+
+        assert tib.locator( ".task-row" ).first.is_visible()
+        header.click()
+        logged_in_page.wait_for_function(
+            "() => document.querySelector('tbody.task-group[data-owner=\"tiberius\"]').classList.contains('collapsed')"
+        )
+
+        assert not tib.locator( ".task-row" ).first.is_visible(), "tiberius rows should hide"
+        assert header.is_visible(), "header bar stays visible when collapsed"
+        assert "tiberius · 2" in header.text_content()
+        assert header.get_attribute( "aria-expanded" ) == "false"
+        assert "▸" in header.locator( ".task-group-chevron" ).text_content()
+        assert kri.locator( ".task-row" ).first.is_visible(), "other owners unaffected"
+        assert logged_in_page.locator( "#task-list-count" ).text_content() == str( OPEN_COUNT )
+
+        stored = logged_in_page.evaluate( f'JSON.parse( localStorage.getItem( "{ACCORDION_KEY}" ) || "[]" )' )
+        assert stored == [ "tiberius" ], f"collapsed owner not persisted; got {stored!r}"
+
+    def test_collapse_state_survives_reload( self, logged_in_page ):
+        """
+        A collapsed owner stays collapsed after a page reload (localStorage).
+
+        Requires:
+            - Authenticated session, seeded rows
+
+        Ensures:
+            - collapse tiberius → reload → tiberius renders collapsed (rows hidden)
+              while other owners render expanded
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        logged_in_page.locator(
+            '#task-list-container tbody.task-group[data-owner="tiberius"] .task-group-header' ).click()
+        logged_in_page.wait_for_function(
+            "() => document.querySelector('tbody.task-group[data-owner=\"tiberius\"]').classList.contains('collapsed')"
+        )
+
+        # Reload — render reads the persisted collapsed set.
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        tib = logged_in_page.locator( '#task-list-container tbody.task-group[data-owner="tiberius"]' )
+        assert "collapsed" in ( tib.get_attribute( "class" ) or "" ), "collapse did not survive reload"
+        assert not tib.locator( ".task-row" ).first.is_visible()
+        assert logged_in_page.locator(
+            '#task-list-container tbody.task-group[data-owner="krishna"] .task-row' ).first.is_visible()
+
+    def test_collapse_all_then_expand_all( self, logged_in_page ):
+        """
+        The #section-toolbar collapse-all / expand-all controls drive every group.
+
+        Requires:
+            - Authenticated session, seeded rows
+
+        Ensures:
+            - collapse-all: every group collapses; the persisted set holds all owner
+              keys incl. the Unassigned sentinel; no .task-row is visible
+            - expand-all: no group collapsed; persisted set empty; all rows visible
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        logged_in_page.get_by_test_id( "task-list-collapse-all-btn" ).click()
+        logged_in_page.wait_for_function(
+            "() => Array.from( document.querySelectorAll('#task-list-container tbody.task-group') )"
+            ".every( e => e.classList.contains('collapsed') )"
+        )
+        assert logged_in_page.locator( "#task-list-container .task-row:visible" ).count() == 0
+        stored = sorted( logged_in_page.evaluate( f'JSON.parse( localStorage.getItem( "{ACCORDION_KEY}" ) || "[]" )' ) )
+        assert stored == sorted( [ "tiberius", "krishna", ACCORDION_UNASSIGNED ] ), stored
+
+        logged_in_page.get_by_test_id( "task-list-expand-all-btn" ).click()
+        logged_in_page.wait_for_function(
+            "() => Array.from( document.querySelectorAll('#task-list-container tbody.task-group') )"
+            ".every( e => !e.classList.contains('collapsed') )"
+        )
+        assert logged_in_page.locator( "#task-list-container .task-row:visible" ).count() == OPEN_COUNT
+        stored = logged_in_page.evaluate( f'JSON.parse( localStorage.getItem( "{ACCORDION_KEY}" ) || "[]" )' )
+        assert stored == [ ], f"expand-all should clear the set; got {stored!r}"
+
+    def test_keyboard_enter_toggles_focused_header( self, logged_in_page ):
+        """
+        A focused header toggles on Enter (keyboard a11y).
+
+        Requires:
+            - Authenticated session, seeded rows
+
+        Ensures:
+            - focusing a header + pressing Enter collapses that owner's rows
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        header = logged_in_page.locator(
+            '#task-list-container tbody.task-group[data-owner="krishna"] .task-group-header' )
+        header.focus()
+        logged_in_page.keyboard.press( "Enter" )
+        logged_in_page.wait_for_function(
+            "() => document.querySelector('tbody.task-group[data-owner=\"krishna\"]').classList.contains('collapsed')"
+        )
+        assert not logged_in_page.locator(
+            '#task-list-container tbody.task-group[data-owner="krishna"] .task-row' ).first.is_visible()
+
+
+# ---------------------------------------------------------------------------
 # Seeded rows, grouped by owner — REAL shapes, RENDER asserted
 # ---------------------------------------------------------------------------
 

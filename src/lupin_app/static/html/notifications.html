@@ -39,6 +39,12 @@
         <button class="toolbar-btn active" data-section="section-notifications" data-testid="notifications-toolbar-notifs" title="Notifications">💬</button>
         <button class="toolbar-btn active" data-section="section-fleet-status" data-testid="fleet-status-toolbar-btn" title="Fleet Status">🛰️</button>
         <button class="toolbar-btn active" data-section="section-task-list" data-testid="task-list-toolbar-btn" title="Task List">🗒️</button>
+        <!-- Task-list per-persona accordion controls (2026-06-17). DISTINCT class
+             (task-accordion-btn, NOT toolbar-btn) + NO data-section so the
+             section-visibility click dispatcher ignores them — these are actions
+             (collapse/expand every owner group), not section-visibility toggles. -->
+        <button class="task-accordion-btn" id="task-list-collapse-all" data-testid="task-list-collapse-all-btn" type="button" title="Collapse all task owners">⊟</button>
+        <button class="task-accordion-btn" id="task-list-expand-all" data-testid="task-list-expand-all-btn" type="button" title="Expand all task owners">⊞</button>
         <button class="toolbar-btn active" data-section="filter-settings-section" data-testid="notifications-toolbar-filters" title="Filter Settings (Admin)">⚙️</button>
         <button class="toolbar-btn active" data-section="section-queues" data-testid="notifications-toolbar-queues" title="Job Queues">📋</button>
         <button class="toolbar-btn active" data-section="section-time-saved" data-testid="notifications-toolbar-time" title="Time Saved">⏱️</button>

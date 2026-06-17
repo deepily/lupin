@@ -394,6 +394,14 @@ class NotificationsUI {
         this.taskListPollIntervalHandle = null;       // setInterval handle (cleanup, mirrors fleetStatusPollIntervalHandle)
         this._taskListFetchInFlight     = false;       // debounce guard: manual ⟳ vs the interval tick
         this._taskListLastGoodTasks     = null;        // last successfully-fetched OPEN rows — replayed under the "store unreachable" indicator (degrade-safe, never blank)
+        // Per-persona accordion (2026-06-17): each owner group collapses/expands
+        // independently; the collapsed set persists across reload. The key shape +
+        // the "__unassigned__" sentinel + the expanded-first-load default are the
+        // PARITY CONTRACT shared verbatim with the TS multiplexer card.
+        // Plan: src/rnd/v0.1.8/2026.06.17-task-list-accordion/01-design-and-build-plan.md
+        this.TASK_LIST_COLLAPSED_KEY    = 'lupin.taskList.collapsedOwners'; // localStorage key: JSON array of collapsed owner keys
+        this.TASK_LIST_UNASSIGNED_KEY   = '__unassigned__';                 // sentinel owner key for the ownerless bucket
+        this._taskListAccordionWired    = false;                            // event-delegation guard (wire the container listener once)
 
         // STT for Q&A input
         this.qaAudioRecorder = null;
@@ -9344,11 +9352,56 @@ class NotificationsUI {
             </tr>`;
     }
 
-    renderTaskListTable( model, ianaZone ) {
+    _taskGroupOwnerKey( group ) {
+        /**
+         * Stable accordion key for an owner group: the persona itself, or the
+         * Unassigned sentinel for the ownerless bucket. This is the key used in
+         * data-owner, in the persisted collapsed set, and (as the parity contract)
+         * by the TS card too.
+         *
+         * Ensures:
+         *     - isUnassigned group → TASK_LIST_UNASSIGNED_KEY; else ownerPersona
+         *     - Pure: no DOM, no side effects
+         */
+        return group.isUnassigned ? this.TASK_LIST_UNASSIGNED_KEY : group.ownerPersona;
+    }
+
+    _taskGroupIdSlug( ownerKey ) {
+        /**
+         * Map an owner key to a DOM-id-safe slug for the group's <tbody> id /
+         * the header's aria-controls target.
+         *
+         * Ensures:
+         *     - "task-group-" + ownerKey with non [A-Za-z0-9_-] chars → "-"
+         *     - Pure: no DOM, no side effects
+         */
+        return "task-group-" + String( ownerKey ).replace( /[^a-zA-Z0-9_-]/g, "-" );
+    }
+
+    _escapeTaskAttr( value ) {
+        /**
+         * Escape a value for safe inclusion in a double-quoted HTML attribute
+         * (data-owner). escapeHtml() escapes text nodes but not quotes, so the
+         * accordion's attribute path needs its own escaper.
+         *
+         * Ensures:
+         *     - &, ", <, > are entity-encoded; non-strings are coerced first
+         *     - Pure: no DOM, no side effects
+         */
+        return String( value )
+            .replace( /&/g, "&amp;" )
+            .replace( /"/g, "&quot;" )
+            .replace( /</g, "&lt;" )
+            .replace( />/g, "&gt;" );
+    }
+
+    renderTaskListTable( model, ianaZone, collapsedOwners ) {
         /**
          * Render the owner-grouped model as a read-only table (mirrors
-         * renderFleetStatusTable). Each owner is a group-header row; its tasks render
-         * beneath; the Unassigned group renders last.
+         * renderFleetStatusTable). Each owner becomes its OWN <tbody class="task-group"
+         * data-owner="…"> holding a clickable group-header accordion bar (chevron +
+         * "owner · N" label) followed by that owner's task rows; the Unassigned group
+         * renders last.
          *
          * Eight columns: Title · Class · Status · Blocked by · Next chase ·
          * Accountable · Priority · Project.
@@ -9356,12 +9409,20 @@ class NotificationsUI {
          * Requires:
          *     - model is the { totalCount, groups } shape from groupTasksByOwner
          *     - ianaZone is the IANA zone for next-chase cells, or null/undefined
+         *     - collapsedOwners is a Set of collapsed owner keys, or undefined
+         *       (treated as empty → all groups expanded, the first-load default)
          *
          * Ensures:
          *     - Returns an HTML string (caller assigns to innerHTML)
+         *     - a group whose owner key ∈ collapsedOwners renders with the `collapsed`
+         *       class (CSS hides its .task-row), chevron ▸, aria-expanded="false";
+         *       otherwise chevron ▾, aria-expanded="true"
+         *     - the header bar carries role/tabindex/aria-controls for keyboard a11y
          *     - Read-only: no action column, no mutating controls
          *     - Pure: no DOM access, no side effects
          */
+        const collapsed = collapsedOwners instanceof Set ? collapsedOwners : new Set();
+
         const headerRow = `
             <thead>
                 <tr>
@@ -9377,20 +9438,27 @@ class NotificationsUI {
             </thead>`;
 
         const body = model.groups.map( group => {
+            const ownerKey    = this._taskGroupOwnerKey( group );
+            const isCollapsed = collapsed.has( ownerKey );
+            const idSlug      = this._taskGroupIdSlug( ownerKey );
+            const ownerAttr   = this._escapeTaskAttr( ownerKey );
+
             const headerLabel = group.isUnassigned
                 ? "(Unassigned)"
                 : `${this.escapeHtml( group.ownerPersona )} · ${group.tasks.length}`;
 
+            const chevron = `<span class="task-group-chevron" aria-hidden="true">${isCollapsed ? "▸" : "▾"}</span>`;
+
             const groupHeaderHtml = `
-                <tr class="task-group-header${group.isUnassigned ? " task-group-unassigned" : ""}">
-                    <td colspan="8">${headerLabel}</td>
+                <tr class="task-group-header${group.isUnassigned ? " task-group-unassigned" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
+                    <td colspan="8">${chevron}${headerLabel}</td>
                 </tr>`;
 
             const rows = group.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
-            return groupHeaderHtml + rows;
+            return `<tbody class="task-group${isCollapsed ? " collapsed" : ""}" id="${idSlug}" data-owner="${ownerAttr}">${groupHeaderHtml}${rows}</tbody>`;
         } ).join( "" );
 
-        return `<table class="task-list-table">${headerRow}<tbody>${body}</tbody></table>`;
+        return `<table class="task-list-table">${headerRow}${body}</table>`;
     }
 
     renderTaskList( composite, stampUpdated = true ) {
@@ -9418,6 +9486,11 @@ class NotificationsUI {
         const countEl   = document.getElementById( "task-list-count" );
         if ( !container ) return;
 
+        // Wire the per-persona accordion delegation once. The listener lives on the
+        // persistent container element (innerHTML is replaced each render, the element
+        // is not), so a single delegated listener survives every re-render.
+        this._wireTaskListAccordion();
+
         if ( composite && composite.status === "auth_required" ) {
             container.innerHTML = `<p class="task-list-message task-list-signin">🔒 Sign-in required.</p>`;
             if ( countEl ) countEl.textContent = "0";
@@ -9437,7 +9510,7 @@ class NotificationsUI {
             container.innerHTML = `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
         } else {
             const model = this.groupTasksByOwner( openTasks );
-            container.innerHTML = this.renderTaskListTable( model, undefined );
+            container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         }
 
         if ( stampUpdated ) this._stampTaskListUpdated();
@@ -9461,7 +9534,7 @@ class NotificationsUI {
         const indicator = `<p class="task-list-message task-list-unreachable">⚠️ Store unreachable.</p>`;
         const lastGood  = this._taskListLastGoodTasks;
         if ( lastGood && lastGood.length > 0 ) {
-            container.innerHTML = indicator + this.renderTaskListTable( this.groupTasksByOwner( lastGood ), undefined );
+            container.innerHTML = indicator + this.renderTaskListTable( this.groupTasksByOwner( lastGood ), undefined, this.loadCollapsedTaskOwners() );
             if ( countEl ) countEl.textContent = String( lastGood.length );
         } else {
             container.innerHTML = indicator + `<p class="task-list-message task-list-empty">No tasks loaded yet.</p>`;
@@ -9537,6 +9610,189 @@ class NotificationsUI {
             this.taskListPollIntervalHandle = null;
             this.log( "Task list polling stopped" );
         }
+    }
+
+    // ========================================
+    // TASK-LIST PER-PERSONA ACCORDION
+    // Plan: src/rnd/v0.1.8/2026.06.17-task-list-accordion/01-design-and-build-plan.md
+    // ========================================
+
+    loadCollapsedTaskOwners() {
+        /**
+         * Read the persisted set of collapsed owner keys from localStorage.
+         *
+         * Default state is "expanded on first load" — an absent/empty/garbled key
+         * yields an EMPTY set (nothing collapsed). Non-string array members are
+         * dropped defensively.
+         *
+         * Ensures:
+         *     - Returns a Set of strings (empty on absent/invalid/parse-error)
+         *     - Never throws
+         */
+        try {
+            const raw = localStorage.getItem( this.TASK_LIST_COLLAPSED_KEY );
+            const arr = raw ? JSON.parse( raw ) : [ ];
+            return new Set( Array.isArray( arr ) ? arr.filter( o => typeof o === "string" ) : [ ] );
+        } catch ( e ) {
+            this.error( "Error loading collapsed task owners:", e );
+            return new Set();
+        }
+    }
+
+    saveCollapsedTaskOwners( collapsedSet ) {
+        /**
+         * Persist the collapsed owner-key set to localStorage as a JSON array.
+         *
+         * Requires:
+         *     - collapsedSet is a Set (or any iterable of strings)
+         *
+         * Ensures:
+         *     - The TASK_LIST_COLLAPSED_KEY entry is written; errors are swallowed
+         *       (a private-mode / quota failure must never break rendering)
+         */
+        try {
+            localStorage.setItem( this.TASK_LIST_COLLAPSED_KEY, JSON.stringify( Array.from( collapsedSet ) ) );
+        } catch ( e ) {
+            this.error( "Error saving collapsed task owners:", e );
+        }
+    }
+
+    toggleTaskOwnerCollapsed( ownerKey ) {
+        /**
+         * Flip one owner's collapsed state and persist the result.
+         *
+         * Requires:
+         *     - ownerKey is a non-empty owner key (persona or the Unassigned sentinel)
+         *
+         * Ensures:
+         *     - ownerKey ∈ set → removed (now expanded); else added (now collapsed)
+         *     - the updated set is persisted
+         *     - returns the NEW collapsed boolean for ownerKey
+         */
+        const collapsed = this.loadCollapsedTaskOwners();
+        let isCollapsed;
+        if ( collapsed.has( ownerKey ) ) {
+            collapsed.delete( ownerKey );
+            isCollapsed = false;
+        } else {
+            collapsed.add( ownerKey );
+            isCollapsed = true;
+        }
+        this.saveCollapsedTaskOwners( collapsed );
+        return isCollapsed;
+    }
+
+    _applyTaskGroupCollapseState( tbody, isCollapsed ) {
+        /**
+         * Reflect a group's collapsed state into its already-rendered DOM (class +
+         * header aria-expanded + chevron glyph) WITHOUT a full re-render.
+         *
+         * Requires:
+         *     - tbody is a <tbody.task-group> element
+         *     - isCollapsed is the desired collapsed boolean
+         *
+         * Ensures:
+         *     - tbody.collapsed toggled; CSS hides/shows its .task-row rows
+         *     - the header's aria-expanded + chevron reflect the new state
+         */
+        tbody.classList.toggle( "collapsed", isCollapsed );
+        const header = tbody.querySelector( ".task-group-header" );
+        if ( header ) {
+            header.setAttribute( "aria-expanded", String( !isCollapsed ) );
+            const chevron = header.querySelector( ".task-group-chevron" );
+            if ( chevron ) chevron.textContent = isCollapsed ? "▸" : "▾";
+        }
+    }
+
+    _handleTaskAccordionToggle( target ) {
+        /**
+         * Toggle the owner group whose header was activated (click or Enter/Space).
+         *
+         * Requires:
+         *     - target is the activated DOM node (or a descendant of a header)
+         *
+         * Ensures:
+         *     - no-op if the activation was not within a .task-group-header
+         *     - otherwise flips + persists that owner's collapsed state and updates
+         *       its group DOM in place
+         */
+        const header = target.closest ? target.closest( ".task-group-header" ) : null;
+        if ( !header ) return;
+        const tbody = header.closest( "tbody.task-group" );
+        if ( !tbody ) return;
+        const isCollapsed = this.toggleTaskOwnerCollapsed( tbody.dataset.owner );
+        this._applyTaskGroupCollapseState( tbody, isCollapsed );
+    }
+
+    _wireTaskListAccordion() {
+        /**
+         * Install the single delegated click+keyboard listener for the accordion.
+         *
+         * The listener lives on the persistent #task-list-container element (its
+         * innerHTML is replaced each render, the element itself is not), so one
+         * delegated listener survives every re-render — no per-row re-binding.
+         *
+         * Ensures:
+         *     - listeners attached at most once (guarded by _taskListAccordionWired)
+         *     - no-op if the container is absent (degrade-safe)
+         */
+        if ( this._taskListAccordionWired ) return;
+        const container = document.getElementById( "task-list-container" );
+        if ( !container ) return;
+
+        container.addEventListener( "click", ( e ) => this._handleTaskAccordionToggle( e.target ) );
+        container.addEventListener( "keydown", ( e ) => {
+            // Enter / Space activate the focused header (a11y). " " is the modern
+            // key value; "Spacebar" is the legacy IE/Edge spelling.
+            if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
+            const header = e.target.closest( ".task-group-header" );
+            if ( !header ) return;
+            e.preventDefault();   // Space must toggle the group, not scroll the page
+            this._handleTaskAccordionToggle( e.target );
+        } );
+
+        this._taskListAccordionWired = true;
+        this.log( "Task list accordion delegation wired" );
+    }
+
+    _taskListOwnerKeysInDom() {
+        /**
+         * Collect the owner keys of every currently-rendered group.
+         *
+         * Ensures:
+         *     - Returns an array of data-owner values from the rendered <tbody>s
+         *       (empty array if the container/table is absent)
+         */
+        return Array.from(
+            document.querySelectorAll( "#task-list-container tbody.task-group[data-owner]" )
+        ).map( el => el.dataset.owner );
+    }
+
+    collapseAllTaskOwners() {
+        /**
+         * Collapse every currently-rendered owner group and persist the set.
+         *
+         * Ensures:
+         *     - all rendered owner keys are persisted as collapsed
+         *     - each rendered group's DOM reflects the collapsed state in place
+         */
+        const owners = this._taskListOwnerKeysInDom();
+        this.saveCollapsedTaskOwners( new Set( owners ) );
+        document.querySelectorAll( "#task-list-container tbody.task-group[data-owner]" )
+            .forEach( tbody => this._applyTaskGroupCollapseState( tbody, true ) );
+    }
+
+    expandAllTaskOwners() {
+        /**
+         * Expand every owner group: clear the persisted collapsed set.
+         *
+         * Ensures:
+         *     - the persisted collapsed set is emptied
+         *     - each rendered group's DOM reflects the expanded state in place
+         */
+        this.saveCollapsedTaskOwners( new Set() );
+        document.querySelectorAll( "#task-list-container tbody.task-group[data-owner]" )
+            .forEach( tbody => this._applyTaskGroupCollapseState( tbody, false ) );
     }
 
     // ========================================
@@ -9689,6 +9945,15 @@ class NotificationsUI {
         toolbar.querySelectorAll( '.toolbar-btn' ).forEach( btn => {
             btn.addEventListener( 'click', () => this.toggleSectionVisibility( btn.dataset.section ) );
         } );
+
+        // Task-list accordion collapse-all / expand-all controls. These live in the
+        // #section-toolbar beside the 🗒️ entry point but carry a DISTINCT class
+        // (.task-accordion-btn, NOT .toolbar-btn) so the section-visibility
+        // dispatcher above skips them — they are actions, not section toggles.
+        const collapseAllBtn = document.getElementById( 'task-list-collapse-all' );
+        const expandAllBtn   = document.getElementById( 'task-list-expand-all' );
+        if ( collapseAllBtn ) collapseAllBtn.addEventListener( 'click', () => this.collapseAllTaskOwners() );
+        if ( expandAllBtn )   expandAllBtn.addEventListener( 'click', () => this.expandAllTaskOwners() );
 
         // Apply saved visibility state
         this.applySectionVisibility();
