@@ -85,8 +85,23 @@ def logs( monkeypatch ):
 
 
 @pytest.fixture
-def manager_env( monkeypatch, fake_client, logs ):
-    """Default harness: settings enabled, manager-figure True, persona Tiffany."""
+def write_path_active( monkeypatch ):
+    """
+    Flip OFF the Step-5 stage-1 deprecation guard so the WRITE pipeline runs.
+
+    The mirror ships as a deprecated logged no-op (MIRROR_WRITES_DEPRECATED
+    True). Every test in this module that asserts the live write machinery
+    (create/transition/correlate/spool/drain/flag-once/collision) exercises the
+    reversible path with the guard OFF — that path is KEPT, not deleted, so it
+    must stay 100% covered. The deprecated no-op path is covered separately by
+    TestDeprecatedNoop (guard ON, the default).
+    """
+    monkeypatch.setattr( mr, "MIRROR_WRITES_DEPRECATED", False )
+
+
+@pytest.fixture
+def manager_env( monkeypatch, fake_client, logs, write_path_active ):
+    """Default harness: write path active, settings enabled, manager-figure True, persona Tiffany."""
     monkeypatch.setattr( mr, "load_task_store_settings", lambda: dict( SETTINGS ) )
     monkeypatch.setattr( mr, "is_manager_figure", lambda sid, environ=None: True )
     monkeypatch.setattr( mr, "get_voice_persona", lambda sid: { "name": "Tiffany" } )
@@ -120,6 +135,12 @@ def mirror( payload, tmp_path ):
 # ---------------------------------------------------------------------------
 
 class TestGates:
+
+    @pytest.fixture( autouse=True )
+    def _write_path( self, write_path_active ):
+        # The gates (disabled / not_manager / belt) live BELOW the deprecation
+        # guard, so they only run with the write path active.
+        pass
 
     def test_disabled_settings_short_circuit( self, tmp_path, fake_client, logs, monkeypatch ):
         monkeypatch.setattr( mr, "load_task_store_settings", lambda: { **SETTINGS, "enabled": False } )
@@ -589,3 +610,89 @@ class TestLegacySpoolTolerance:
         mirror( update_payload( "9", None ), tmp_path )   # triggers the opportunistic drain
         assert sp.read_entries( SID, base_dir=tmp_path ) == [ ]
         assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:5" ][ "item_id" ] == "uuid-1"
+
+
+# ---------------------------------------------------------------------------
+# Step-5 stage-1 — DEPRECATED logged no-op (MIRROR_WRITES_DEPRECATED True)
+# ---------------------------------------------------------------------------
+
+class TestDeprecatedNoop:
+    """
+    With the guard ON (the shipped default), the mirror is a LOGGED NO-OP: one
+    fire-log line per native TaskCreate/TaskUpdate, ZERO store writes, ZERO
+    map/spool mutation — and it fires BEFORE any settings/manager gate, so the
+    evidence is fleet-wide (managers and non-managers alike). This is the
+    population Stage-2's delete is gated on. The reversible write path stays
+    covered by every guard-OFF test above (write_path_active fixture).
+    """
+
+    @pytest.fixture
+    def noop_env( self, monkeypatch, fake_client, logs ):
+        # Guard is ON by default — NOT flipped here. Only the persona is stubbed
+        # for a deterministic stamp; settings/manager mocks are deliberately
+        # ABSENT to prove the no-op returns before any gate is consulted.
+        monkeypatch.setattr( mr, "get_voice_persona", lambda sid: { "name": "Tiffany" } )
+
+    def _noop_line( self, logs ):
+        lines = [ l for l in logs if l.get( "phase" ) == "task_store_mirror_deprecated_noop" ]
+        assert len( lines ) == 1     # exactly ONE fire-log line per call
+        return lines[ 0 ]
+
+    def test_guard_default_is_deprecated( self ):
+        # Shipped default: the mirror is deprecated out of the box.
+        assert mr.MIRROR_WRITES_DEPRECATED is True
+
+    def test_create_is_logged_noop_no_writes( self, tmp_path, noop_env, fake_client, logs ):
+        assert mirror( create_payload( harness_id="5", subject="Build the thing" ), tmp_path ) == { "action": "deprecated_noop" }
+        assert fake_client.calls == [ ]                            # NO store write
+        assert sp.read_entries( SID, base_dir=tmp_path ) == [ ]    # NO spool mutation
+        line = self._noop_line( logs )
+        assert line[ "tool" ]       == "TaskCreate"
+        assert line[ "harness_id" ] == "5"
+        assert line[ "detail" ]     == "Build the thing"
+        assert line[ "persona" ]    == "tiffany"
+
+    def test_update_with_status_is_logged_noop( self, tmp_path, noop_env, fake_client, logs ):
+        assert mirror( update_payload( "7", "completed" ), tmp_path ) == { "action": "deprecated_noop" }
+        assert fake_client.calls == [ ]
+        line = self._noop_line( logs )
+        assert ( line[ "tool" ], line[ "harness_id" ], line[ "detail" ] ) == ( "TaskUpdate", "7", "completed" )
+
+    def test_metadata_only_update_still_logged_with_null_detail( self, tmp_path, noop_env, logs ):
+        # The WRITE path skipped a no-status update silently; the evidence path
+        # STILL logs it (detail=None is the metadata-only signal) — one line per
+        # native call, never a silent drop.
+        assert mirror( update_payload( "7", None ), tmp_path ) == { "action": "deprecated_noop" }
+        line = self._noop_line( logs )
+        assert line[ "detail" ] is None and line[ "harness_id" ] == "7"
+
+    def test_fires_for_non_manager_too( self, tmp_path, monkeypatch, fake_client, logs ):
+        # Fleet-wide: a non-manager (which the WRITE path gated out as
+        # not_manager) STILL emits the evidence line — exactly the population we
+        # must watch for residual native-Task* usage.
+        monkeypatch.setattr( mr, "get_voice_persona", lambda sid: { "name": "Tiffany" } )
+        monkeypatch.setattr( mr, "is_manager_figure", lambda sid, environ=None: False )
+        assert mirror( create_payload(), tmp_path ) == { "action": "deprecated_noop" }
+        assert self._noop_line( logs )[ "tool" ] == "TaskCreate"
+
+    def test_create_falsy_response_logs_null_harness_id( self, tmp_path, noop_env, logs ):
+        # tool_response falsy → `or {}` branch; {}.get("task") None → harness_id
+        # None. Still exactly one line (never a skip / raise).
+        payload = create_payload()
+        payload[ "tool_response" ] = { }
+        assert mirror( payload, tmp_path ) == { "action": "deprecated_noop" }
+        assert self._noop_line( logs )[ "harness_id" ] is None
+
+    def test_create_non_dict_response_logs_null_harness_id( self, tmp_path, noop_env, logs ):
+        # tool_response truthy but non-dict → isinstance False → task_resp None.
+        payload = create_payload()
+        payload[ "tool_response" ] = "oops"
+        assert mirror( payload, tmp_path ) == { "action": "deprecated_noop" }
+        assert self._noop_line( logs )[ "harness_id" ] is None
+
+    def test_missing_tool_input_defaults_empty( self, tmp_path, noop_env, logs ):
+        # tool_input absent → `or {}` branch; update path → harness_id/detail None.
+        payload = { "tool_name": "TaskUpdate" }
+        assert mirror( payload, tmp_path ) == { "action": "deprecated_noop" }
+        line = self._noop_line( logs )
+        assert line[ "harness_id" ] is None and line[ "detail" ] is None
