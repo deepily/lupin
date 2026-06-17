@@ -177,9 +177,9 @@ class TestCreateMapping:
             "owner_persona"       : "tiffany",
             "accountable_manager" : "tiffany",
             "authority"           : "standing",
-            "correlation_key"     : f"cc-task:{SID}:5",
+            "correlation_key"     : f"cc-task:{SID}:g0:5",
         }
-        entry = tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "5" ]
+        entry = tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:5" ]
         assert entry == { "item_id": "uuid-1", "last_status": "pending" }
 
     def test_create_with_adoption_metadata_correlates( self, tmp_path, manager_env, fake_client ):
@@ -187,8 +187,8 @@ class TestCreateMapping:
         assert mirror( payload, tmp_path ) == { "action": "mirrored:correlate" }
         method, item_id, body = fake_client.calls[ -1 ]
         assert ( method, item_id ) == ( "correlate", "inherited-uuid" )
-        assert body == { "correlation_key": f"cc-task:{SID}:9", "actor": "tiffany d03e6219", "authority": "standing" }
-        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "9" ][ "item_id" ] == "inherited-uuid"
+        assert body == { "correlation_key": f"cc-task:{SID}:g0:9", "actor": "tiffany d03e6219", "authority": "standing" }
+        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:9" ][ "item_id" ] == "inherited-uuid"
 
     def test_create_missing_harness_id_skips( self, tmp_path, manager_env, fake_client, logs ):
         payload = create_payload()
@@ -220,12 +220,12 @@ class TestUpdateMapping:
     ] )
     def test_status_transitions( self, tmp_path, manager_env, fake_client, harness_status, to_status ):
         mirror( create_payload( harness_id="5" ), tmp_path )
-        tm.record_task( SID, "5", "uuid-1", "primed", tmp_path )   # avoid same-status skip for 'pending'
+        tm.record_task( SID, 0, "5", "uuid-1", "primed", tmp_path )   # avoid same-status skip for 'pending'
         assert mirror( update_payload( "5", harness_status ), tmp_path ) == { "action": "mirrored:transition" }
         method, item_id, payload = fake_client.calls[ -1 ]
         assert ( method, item_id ) == ( "transition", "uuid-1" )
         assert payload == { "to_status": to_status, "actor": "tiffany d03e6219", "authority": "standing" }
-        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "5" ][ "last_status" ] == harness_status
+        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:5" ][ "last_status" ] == harness_status
 
     def test_deleted_maps_to_dropped_with_reason( self, tmp_path, manager_env, fake_client ):
         mirror( create_payload( harness_id="5" ), tmp_path )
@@ -376,11 +376,13 @@ class TestOrderPreservation:
     def test_replay_adopts_existing_item_instead_of_duplicating( self, tmp_path, manager_env, fake_client ):
         fake_client.outcomes[ "query" ] = [ ( False, None, { "error": "down" } ) ]
         mirror( create_payload( harness_id="5" ), tmp_path )                       # spooled create
-        # The original POST actually landed server-side: the probe finds it.
-        fake_client.outcomes[ "query" ] = [ ( True, 200, { "tasks": [ { "id": "landed-uuid" } ], "count": 1 } ) ]
+        # The original POST actually landed server-side: the probe finds it. The
+        # store returns the full serialized item — its title MATCHES the create's,
+        # so the collision guard adopts it (legit C8 lost-response replay).
+        fake_client.outcomes[ "query" ] = [ ( True, 200, { "tasks": [ { "id": "landed-uuid", "title": "Build the thing" } ], "count": 1 } ) ]
         assert mirror( update_payload( "5", "in_progress" ), tmp_path ) == { "action": "mirrored:transition" }
         assert fake_client.created == 0   # no duplicate POST
-        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "5" ][ "item_id" ] == "landed-uuid"
+        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:5" ][ "item_id" ] == "landed-uuid"
         _, item_id, _ = fake_client.calls[ -1 ]
         assert item_id == "landed-uuid"
 
@@ -417,14 +419,14 @@ class TestDrainEdges:
 
     def test_drain_replayed_transition_resolves_item_from_map( self, tmp_path, manager_env, fake_client ):
         import time
-        tm.record_task( SID, "5", "uuid-5", "pending", tmp_path )
-        sp.append_entry( SID, { "op": "transition", "ts": time.time(), "harness_id": "5",
+        tm.record_task( SID, 0, "5", "uuid-5", "pending", tmp_path )
+        sp.append_entry( SID, { "op": "transition", "ts": time.time(), "generation": 0, "harness_id": "5",
                                 "harness_status": "completed",
-                                "correlation_key": f"cc-task:{SID}:5",
+                                "correlation_key": f"cc-task:{SID}:g0:5",
                                 "payload": { "to_status": "review", "actor": "a", "authority": "standing" } }, tmp_path )
         mirror( update_payload( "9", None ), tmp_path )
         assert ( "transition", "uuid-5", { "to_status": "review", "actor": "a", "authority": "standing" } ) in fake_client.calls
-        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "5" ][ "last_status" ] == "completed"
+        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:5" ][ "last_status" ] == "completed"
 
     def test_drain_orphan_transition_drops_and_flags( self, tmp_path, manager_env, fake_client, logs ):
         import time
@@ -489,4 +491,101 @@ class TestExecutorMapWriteFailures:
 class TestBuildCorrelationKey:
 
     def test_shape( self ):
-        assert mr.build_correlation_key( "sid-full", "7" ) == "cc-task:sid-full:7"
+        assert mr.build_correlation_key( "sid-full", 0, "7" ) == "cc-task:sid-full:g0:7"
+
+    def test_generation_segment_distinguishes_reused_counter( self ):
+        # The whole point of bug 9b23d5bc: same sid + same counter, different
+        # generation ⇒ DISTINCT key (the pre-clear/post-clear "1" never alias).
+        assert mr.build_correlation_key( "s", 0, "1" ) != mr.build_correlation_key( "s", 1, "1" )
+        assert mr.build_correlation_key( "s", 1, "1" ) == "cc-task:s:g1:1"
+
+
+# ---------------------------------------------------------------------------
+# bug 9b23d5bc — correlation-key / map collision across a /clear counter reset
+# ---------------------------------------------------------------------------
+
+class TestCollisionRegression:
+    """
+    The reproduction the fix exists for: a harness counter that RESTARTS after
+    /clear (same stable session id) must mint a DISTINCT store row, leave the
+    prior-generation same-numbered row untouched, and route a post-clear
+    TaskUpdate to the NEW item — never the stale old one.
+    """
+
+    def test_counter_reset_inserts_fresh_row_old_untouched_update_hits_new( self, tmp_path, manager_env, fake_client ):
+        # --- Generation 0 (pre-/clear): counter "1" → uuid-1, advanced to in_progress.
+        assert mirror( create_payload( harness_id="1", subject="Old task" ), tmp_path ) == { "action": "mirrored:create" }
+        assert mirror( update_payload( "1", "in_progress" ), tmp_path ) == { "action": "mirrored:transition" }
+        gen0_row = dict( tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:1" ] )
+        assert gen0_row[ "item_id" ] == "uuid-1"
+
+        # --- /clear: the harness counter restarts at "1" for a DIFFERENT task.
+        assert mirror( create_payload( harness_id="1", subject="New task" ), tmp_path ) == { "action": "mirrored:create" }
+
+        data = tm.read_map( SID, base_dir=tmp_path )
+        # (i) NEW item inserted under a fresh generation key + DISTINCT correlation key.
+        assert data[ "generation" ] == 1
+        assert data[ "tasks" ][ "1:1" ][ "item_id" ] == "uuid-2"
+        create_calls = [ c for c in fake_client.calls if c[ 0 ] == "create" ]
+        assert create_calls[ 0 ][ 1 ][ "correlation_key" ]  == f"cc-task:{SID}:g0:1"
+        assert create_calls[ -1 ][ 1 ][ "correlation_key" ] == f"cc-task:{SID}:g1:1"
+        # (ii) the OLD same-numbered row is byte-for-byte UNTOUCHED.
+        assert data[ "tasks" ][ "0:1" ] == gen0_row
+
+        # (iii) the post-clear TaskUpdate transitions the NEW item, never uuid-1.
+        assert mirror( update_payload( "1", "completed" ), tmp_path ) == { "action": "mirrored:transition" }
+        method, item_id, _ = fake_client.calls[ -1 ]
+        assert ( method, item_id ) == ( "transition", "uuid-2" )
+
+    def test_sequential_new_counters_do_not_false_trigger_reset( self, tmp_path, manager_env, fake_client ):
+        # Monotonic new counters (1, 2, 3) within one generation must NOT bump —
+        # only a re-seen counter is reset-proof.
+        for hid in ( "1", "2", "3" ):
+            assert mirror( create_payload( harness_id=hid, subject=f"t{hid}" ), tmp_path ) == { "action": "mirrored:create" }
+        data = tm.read_map( SID, base_dir=tmp_path )
+        assert data[ "generation" ] == 0
+        assert set( data[ "tasks" ] ) == { "0:1", "0:2", "0:3" }
+
+    def test_double_reset_advances_generation_twice( self, tmp_path, manager_env, fake_client ):
+        # Two successive /clears on the same counter → generations 0 → 1 → 2.
+        mirror( create_payload( harness_id="1", subject="g0" ), tmp_path )
+        mirror( create_payload( harness_id="1", subject="g1" ), tmp_path )
+        mirror( create_payload( harness_id="1", subject="g2" ), tmp_path )
+        data = tm.read_map( SID, base_dir=tmp_path )
+        assert data[ "generation" ] == 2
+        assert set( data[ "tasks" ] ) == { "0:1", "1:1", "2:1" }
+
+
+class TestCollisionGuard:
+    """The _execute_create title-match adoption guard (defense-in-depth)."""
+
+    def test_probe_title_mismatch_refuses_adoption_inserts_fresh( self, tmp_path, manager_env, fake_client ):
+        # The probe lands on a row whose title is NOT ours (residual collision):
+        # refuse adoption, POST a fresh item instead of mutating the stranger.
+        fake_client.outcomes[ "query" ] = [ ( True, 200, { "tasks": [ { "id": "stranger", "title": "Someone else" } ], "count": 1 } ) ]
+        assert mirror( create_payload( harness_id="5", subject="Mine" ), tmp_path ) == { "action": "mirrored:create" }
+        assert fake_client.created == 1
+        method, payload = fake_client.calls[ -1 ]
+        assert method == "create" and payload[ "title" ] == "Mine"
+        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:5" ][ "item_id" ] == "uuid-1"
+
+    def test_probe_title_match_adopts_without_duplicating( self, tmp_path, manager_env, fake_client ):
+        # Same-title probe row IS the same task (lost-response replay) → adopt it.
+        fake_client.outcomes[ "query" ] = [ ( True, 200, { "tasks": [ { "id": "landed", "title": "Build the thing" } ], "count": 1 } ) ]
+        assert mirror( create_payload( harness_id="5" ), tmp_path ) == { "action": "mirrored:create" }
+        assert fake_client.created == 0
+        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:5" ][ "item_id" ] == "landed"
+
+
+class TestLegacySpoolTolerance:
+
+    def test_legacy_spool_entry_without_generation_drains_into_gen0( self, tmp_path, manager_env, fake_client ):
+        import time
+        # A pre-fix spooled create line carries NO 'generation' field — the
+        # executor must default it to 0 and replay safely (never KeyError).
+        sp.append_entry( SID, { "op": "create", "ts": time.time(), "harness_id": "5",
+                                "harness_status": "pending", "correlation_key": "cc-task:legacy:5",
+                                "payload": { "title": "legacy" } }, tmp_path )
+        mirror( update_payload( "9", None ), tmp_path )   # triggers the opportunistic drain
+        assert sp.read_entries( SID, base_dir=tmp_path ) == [ ]
+        assert tm.read_map( SID, base_dir=tmp_path )[ "tasks" ][ "0:5" ][ "item_id" ] == "uuid-1"
