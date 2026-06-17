@@ -119,6 +119,33 @@ def _commons_ts_for_session( who_rows, sid ):
     return best
 
 
+def _dm_ts_for_session( dm_activity, sid ):
+    """
+    Most-recent SENT-DM ts for this session_id (prefix-matched), or None.
+
+    The DM-as-liveness mirror of `_commons_ts_for_session`: `dm_activity` is the
+    arbiter's per-poll { session_id: max(created_at) } map of SENT ai_to_ai DM
+    activity (the IMPURE store read lives in the orchestrator seam, NOT here).
+    Prefix-tolerant on the session-id (short 8-char vs full-uuid forms) so a map
+    keyed by one form matches a canonical view id of the other.
+
+    Requires:
+        - dm_activity is { session_id: datetime } (aware) or None; sid is a
+          canonical session-id string
+
+    Ensures:
+        - returns the MAX datetime among prefix-matching map entries, or None
+          (no match / empty / None map); never raises
+    """
+    best = None
+    for row_sid, ts in ( dm_activity or { } ).items():
+        if not _who_matches( row_sid, sid ) or ts is None:
+            continue
+        if best is None or ts > best:
+            best = ts
+    return best
+
+
 def _count_stuck_episodes( events ):
     """Count cap_reached records with work_owed True in the accumulated tail."""
     return sum(
@@ -163,18 +190,22 @@ def _canonicalize_ids( all_ids ):
     return canon
 
 
-def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds, bridge_sessions=None ):
+def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds, bridge_sessions=None, dm_activity=None ):
     """
     Build the per-session fleet view as the UNION of all liveness signals.
 
-    The roster is the UNION of FOUR sources (arbiter liveness fix, Part 7 /
-    Step 1.4) — a session enters the view if it appears in ANY of:
+    The roster is the UNION of FIVE sources (arbiter liveness fix, Part 7 /
+    Step 1.4 + DM-as-liveness toggle, 2026-06-17) — a session enters the view if
+    it appears in ANY of:
         (a) bridge-discovered   — `bridge_sessions` (the arbiter passes this IN;
             it does the IO via find_active_voice_persona_sessions — the leaf
             stays pure),
         (b) commons-active      — `who_rows`,
         (c) idle_prompt-recent  — kind=idle_prompt records in events_by_session,
-        (d) stop-event sessions — the prior event-sourced members.
+        (d) stop-event sessions — the prior event-sourced members,
+        (e) dm-active           — `dm_activity` (per-session SENT ai_to_ai DM ts;
+            the arbiter passes this IN — the store read is in the orchestrator
+            seam, the leaf stays pure).
     The old code iterated (d) ONLY and could merely ANNOTATE — so live workers
     with no stop-event were invisible (the false WHOLE-FLEET-STALL bug). Now we
     ADD union members.
@@ -195,12 +226,16 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
         - now is an aware datetime; alive_threshold_seconds is a positive number
         - bridge_sessions is { session_id: persona_name|None } (the arbiter's
           bridge discovery) or None — membership + naming source (a)
+        - dm_activity is { session_id: datetime(aware) } (the arbiter's per-poll
+          SENT ai_to_ai DM-activity map) or None — membership + liveness source
+          (e). None / empty ⇒ the prior 4-source behavior (no dm_ts anywhere)
 
     Ensures:
         - Returns dict { canonical_session_id: VIEW } for every session with ≥1
           REAL signal (an event record, an idle_prompt record, a commons match,
-          or a bridge presence); a bare empty event list with no other signal is
-          NOT a member (preserves the old "skip empty/untrackable" behavior)
+          a bridge presence, or a SENT-DM ts); a bare empty event list with no
+          other signal is NOT a member (preserves the old "skip empty/untrackable"
+          behavior)
         - PHANTOM GUARD (Fleet-Status §5.2(b)): a session ABSENT from
           bridge_sessions has its commons_ts NULLED — the commons echo of a
           reaped/dead process (commons_who retention) must not count as
@@ -214,6 +249,7 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
           last_event_ts(datetime|None — STOP/non-idle_prompt) ·
           commons_ts(datetime|None; None when bridge-absent, see guard) ·
           idle_prompt_ts(datetime|None) ·
+          dm_ts(datetime|None — SENT ai_to_ai DM ts; NOT phantom-guarded) ·
           last_task_transition_ts(datetime|None) ·
           last_activity_ts(datetime|None; max of the LIVENESS ts) · alive(bool) ·
           state · holding_on · stuck · poke_count · cap · reaped(bool)
@@ -227,9 +263,19 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
           last_activity_ts / `alive`): it is a PROGRESS-only signal, consumed
           exclusively by _fleet_progress_signature, so liveness and progress stay
           orthogonal. A task_transition record DOES confer membership.
-        - the LIVENESS ts fields (last_event_ts/commons_ts/idle_prompt_ts) stay
-          SEPARATE so the verdict seam (fleet_render.compute_liveness) can derive
-          its distinct ages; last_task_transition_ts is orthogonal (progress)
+        - dm_ts is the per-session MAX SENT ai_to_ai DM ts (DM-as-liveness
+          toggle). UNLIKE commons_ts it is NOT phantom-guarded by bridge presence
+          — the coverage hole it closes IS the bridge-absent coordination-only
+          manager (only activity is dm_send → bridge-mtime never bumps), so
+          guarding it on bridge presence would defeat the feature. Kept OFF the
+          activity axis (never `state`/last_event_ts/last_activity_ts/`alive`): a
+          LIFE signal consumed ONLY by the verdict seam (compute_liveness, where
+          the `arbiter count dm as liveness` toggle gates whether it drives the
+          verdict). A SENT-DM ts DOES confer membership.
+        - the LIVENESS ts fields (last_event_ts/commons_ts/idle_prompt_ts/dm_ts)
+          stay SEPARATE so the verdict seam (fleet_render.compute_liveness) can
+          derive its distinct ages; last_task_transition_ts is orthogonal
+          (progress)
         - persona prefers the bridge-discovered name, then the last activity
           record, then the idle_prompt record, then the reaped tombstone, then
           the task_transition record
@@ -237,12 +283,16 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
     """
     events_by_session = events_by_session or { }
     bridge_sessions   = bridge_sessions or { }
+    dm_activity       = dm_activity or { }
 
-    # 1. Gather every candidate session id across the four sources, then
-    #    canonicalize the heterogeneous id forms before dedup (N3).
+    # 1. Gather every candidate session id across the FIVE sources, then
+    #    canonicalize the heterogeneous id forms before dedup (N3). dm_activity
+    #    (DM-as-liveness toggle) is the 5th membership source: a session whose
+    #    ONLY signal is a SENT DM enters the roster (union doctrine).
     candidate_ids = set()
     candidate_ids.update( k for k in events_by_session.keys() if k )
     candidate_ids.update( k for k in bridge_sessions.keys() if k )
+    candidate_ids.update( k for k in dm_activity.keys() if k )
     for row in who_rows or [ ]:
         if isinstance( row, dict ) and row.get( "session_id" ):
             candidate_ids.add( row.get( "session_id" ) )
@@ -282,6 +332,14 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
         last_tasktrans = tasktrans_recs[ -1 ] if tasktrans_recs  else None
 
         commons_ts = _commons_ts_for_session( who_rows, cid )
+        # DM-as-liveness (toggle, 2026-06-17): the per-session SENT-DM ts. A pure
+        # lookup into the orchestrator-supplied map — kept OFF the activity axis
+        # (never state / last_event_ts / last_activity_ts / `alive`) and
+        # deliberately NOT phantom-guarded by bridge presence: the coverage hole
+        # this closes IS the bridge-absent coordination-only manager, so guarding
+        # dm_ts on bridge presence would defeat the feature. It feeds the verdict
+        # seam (fleet_render.compute_liveness, flag-gated) ONLY.
+        dm_ts = _dm_ts_for_session( dm_activity, cid )
 
         # Bridge presence + persona (source a). A raw id may be the bridge key.
         bridge_persona = None
@@ -293,11 +351,13 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
                     bridge_persona = bridge_sessions[ raw ]
 
         # Membership: a session is a member iff it has a REAL signal. An empty
-        # event list with no commons/idle/bridge signal is NOT trackable.
+        # event list with no commons/idle/bridge/dm signal is NOT trackable.
         # Judged on the RAW commons signal (pre-guard) so a phantom stays an
-        # auditable roster row instead of vanishing without trace.
+        # auditable roster row instead of vanishing without trace. dm_ts confers
+        # membership (a DMing-only session enters the roster) — union doctrine.
         has_signal = bool( activity_recs ) or bool( idleprompt_recs ) or bool( reaped_recs ) \
-                     or bool( tasktrans_recs ) or commons_ts is not None or bridge_present
+                     or bool( tasktrans_recs ) or commons_ts is not None or bridge_present \
+                     or dm_ts is not None
         if not has_signal:
             continue
 
@@ -344,6 +404,7 @@ def build_fleet_view( events_by_session, who_rows, now, alive_threshold_seconds,
             "last_event_ts"    : last_event_ts,
             "commons_ts"       : commons_ts,
             "idle_prompt_ts"   : idle_prompt_ts,
+            "dm_ts"            : dm_ts,
             "last_task_transition_ts" : task_transition_ts,
             "last_activity_ts" : activity_ts,
             "alive"            : _is_recent( activity_ts, now, alive_threshold_seconds ),
@@ -443,6 +504,32 @@ def quick_smoke_test():
     # bridge-only member: present + named, but no activity ⇒ state unknown, no stop-event ts
     bov = view[ "bridgeonly-no-events" ]
     assert bov[ "persona" ] == "Fred" and bov[ "state" ] == "unknown" and bov[ "last_event_ts" ] is None
+
+    # DM-as-liveness toggle (2026-06-17): with NO dm_activity passed, every view
+    # carries dm_ts=None (additive field, default off) — no spurious members.
+    assert all( v[ "dm_ts" ] is None for v in view.values() )
+
+    # With a dm_activity map: a DM-only session ("dm1") enters the roster (source
+    # e), dm_ts is set, and it stays OFF the activity axis (state unknown, no
+    # last_event_ts, last_activity_ts None, alive False — the verdict seam, not
+    # build_fleet_view, turns dm_ts into a LIVE verdict). dm_ts is NOT phantom-
+    # guarded: dm1 has NO bridge yet still carries its dm_ts (the coverage hole).
+    dm_recent   = now - datetime.timedelta( seconds=12 )
+    dm_activity = { "dm1": dm_recent, "s1": now - datetime.timedelta( seconds=5 ) }
+    dview = build_fleet_view(
+        events_by_session, who_rows, now, alive_threshold_seconds=3600,
+        bridge_sessions=bridge_sessions, dm_activity=dm_activity,
+    )
+    assert "dm1" in dview                                         # source (e) confers membership
+    dm1 = dview[ "dm1" ]
+    assert dm1[ "dm_ts" ] == dm_recent                           # set, NOT bridge-guarded
+    assert dm1[ "last_event_ts" ] is None and dm1[ "commons_ts" ] is None
+    assert dm1[ "last_activity_ts" ] is None and dm1[ "alive" ] is False   # off the activity axis
+    assert dm1[ "state" ] == "unknown"
+    # s1 (a stop-event session) ALSO gets its dm_ts folded in (prefix-matched),
+    # but its state/last_event_ts are unchanged by dm (liveness ≠ activity).
+    assert dview[ "s1" ][ "dm_ts" ] == dm_activity[ "s1" ]
+    assert dview[ "s1" ][ "state" ] == "working" and dview[ "s1" ][ "last_event_ts" ] is not None
     return True
 
 

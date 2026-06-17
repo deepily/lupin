@@ -313,6 +313,12 @@ def assemble_app(
         reannounce_ttl       = int( cfg.get( "arbiter outreach reannounce ttl seconds", default=86400, return_type="int" ) ),
         pending_ledger_path  = _pending_ledger_path( cfg ),
         lineage_carry_path   = _lineage_carry_path( cfg ),
+        # DM-as-liveness toggle (2026-06-17): a cfg-closed lambda re-read EACH poll
+        # (ConfigurationManager.get is mtime-gated) so `arbiter count dm as liveness`
+        # is runtime-tunable with NO :8001 bounce — flip the INI, takes effect on
+        # the next poll. Default TRUE (the feature is on out of the box; OFF is the
+        # rollback). dm_activity_fn defaults to the real DB reader inside the factory.
+        count_dm_as_liveness_fn = lambda: cfg.get( "arbiter count dm as liveness", default=True, return_type="boolean" ),
     )
     fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=arbiter_log_fn )
 
