@@ -73,6 +73,21 @@ CASE_AUTO_POKE_REAP_REC = 13
 CASE_MANAGER_STALE_ADVISORY = 14
 CASE_FLEET_DARK             = 15
 
+# L1 ADDITIONS (2026-06-17, arbiter detector gaps — design
+# src/rnd/v0.1.8/2026.06.17-arbiter-detector-gaps-L1/01-build-plan.md):
+# store-aware suppression of the two false-escalating detectors. A manager whose
+# only non-terminal owed work is Rick-gated (or who is owed-count 0) is NOT down
+# and NOT a stall — instead of the repeating MANAGER-DOWN / WHOLE-FLEET-STALL
+# loop, the arbiter emits at most ONE of these advisories per un-acked tap.
+#   16  MANAGER-AWAITING-USER advisory — a tapped manager correctly BLOCKED on
+#       Rick (every owed item ricks_court or blocked-on-user). Rick + ALL active
+#       managers: Rick is the one who unblocks; managers see the crew is parked.
+#   17  MANAGER-DONE advisory — a tapped manager with ZERO non-terminal owed work
+#       (consider reaping). Rick + ALL active managers (the reap is theirs to
+#       decide; the arbiter never reaps — the redline holds).
+CASE_MANAGER_AWAITING_USER  = 16
+CASE_MANAGER_DONE_ADVISORY  = 17
+
 CASE_TIERS = {
     1  : TIER_RICK_ONLY,
     2  : TIER_RICK_ONLY,
@@ -89,6 +104,8 @@ CASE_TIERS = {
     CASE_AUTO_POKE_REAP_REC : TIER_RICK_AND_MANAGERS,   # 2b-3 auto-poke escalation
     CASE_MANAGER_STALE_ADVISORY : TIER_RICK_AND_MANAGERS,   # post-game F2 (2026-06-11)
     CASE_FLEET_DARK             : TIER_RICK_ONLY,           # post-game F3 (2026-06-11)
+    CASE_MANAGER_AWAITING_USER  : TIER_RICK_AND_MANAGERS,   # L1 (2026-06-17) blocked-on-Rick advisory
+    CASE_MANAGER_DONE_ADVISORY  : TIER_RICK_AND_MANAGERS,   # L1 (2026-06-17) consider-reaping advisory
 }
 
 
@@ -110,14 +127,17 @@ def tier_for( case: int ) -> str:
 def quick_smoke_test():
     """Self-contained smoke test. Returns True or raises AssertionError."""
     # every case maps to a known tier (Part-6 1..12 + the 2b-3 reap-rec case 13
-    # + the post-game cases 14/15)
-    assert set( CASE_TIERS ) == set( range( 1, 16 ) )
+    # + the post-game cases 14/15 + the L1 advisory cases 16/17)
+    assert set( CASE_TIERS ) == set( range( 1, 18 ) )
     assert all( t in ALL_TIERS for t in CASE_TIERS.values() )
     assert tier_for( CASE_AUTO_POKE_REAP_REC ) == TIER_RICK_AND_MANAGERS   # 2b-3
     # post-game (2026-06-11): manager-stale fans to Rick + managers; fleet-dark
     # is Rick-only (no managers remain by definition)
     assert tier_for( CASE_MANAGER_STALE_ADVISORY ) == TIER_RICK_AND_MANAGERS
     assert tier_for( CASE_FLEET_DARK )             == TIER_RICK_ONLY
+    # L1 (2026-06-17): both store-aware advisories fan to Rick + managers
+    assert tier_for( CASE_MANAGER_AWAITING_USER ) == TIER_RICK_AND_MANAGERS
+    assert tier_for( CASE_MANAGER_DONE_ADVISORY ) == TIER_RICK_AND_MANAGERS
     # the three tiers + two cuts land where Part 6 says
     assert tier_for( 1 ) == tier_for( 2 ) == tier_for( 3 ) == TIER_RICK_ONLY
     assert tier_for( 6 ) == TIER_DROP                       # roster broadcast cut

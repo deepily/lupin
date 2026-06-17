@@ -30,6 +30,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     CASE_TIERS, tier_for, TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS,
     TIER_OWNING_MANAGER, TIER_BLOCKER_AND_MANAGER, TIER_DROP, TIER_LOG_THEN_RICK,
     CASE_AUTO_POKE_REAP_REC, CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
+    CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
 )
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 from cosa.agents.heartbeat_arbiter import manager_resolver as MR
@@ -95,7 +96,17 @@ def test_case_tiers_mirror_part6_table( case ):
 def test_case_tiers_is_exhaustive_part6_plus_2b3_reap_rec():
     # Part-6 outputs 1..12 + the 2b-3 auto-poke reap-recommendation (case 13)
     # + the post-game cases (14 manager-stale advisory, 15 fleet-dark — 2026-06-11)
-    assert set( CASE_TIERS ) == set( range( 1, 16 ) )
+    # + the L1 store-aware advisories (16 manager-awaiting-user, 17 manager-done — 2026-06-17)
+    assert set( CASE_TIERS ) == set( range( 1, 18 ) )
+
+
+def test_l1_store_aware_advisory_cases_route_rick_and_managers():
+    """L1 (2026-06-17): the two store-aware advisories that REPLACE a false
+    MANAGER-DOWN both fan to Rick + all active managers — Rick unblocks the
+    awaiting-user case; managers decide the reap for the done case."""
+    assert CASE_MANAGER_AWAITING_USER == 16 and CASE_MANAGER_DONE_ADVISORY == 17
+    assert tier_for( CASE_MANAGER_AWAITING_USER ) == TIER_RICK_AND_MANAGERS
+    assert tier_for( CASE_MANAGER_DONE_ADVISORY ) == TIER_RICK_AND_MANAGERS
 
 
 def test_auto_poke_reap_rec_routes_rick_and_managers():
