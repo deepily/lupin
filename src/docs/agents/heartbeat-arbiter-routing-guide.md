@@ -1,5 +1,7 @@
 # Heartbeat-Arbiter Routing & Recipients Guide
 
+> **Whole-system context**: this guide covers the arbiter's *routing* (who it contacts). For the **top-to-bottom** picture of how the arbiter fits with the unified task-store, the Stop-hook self-poke, the UI card, and the manager/worker lifecycle, see [`../fleet-liveness-and-task-store-architecture.md`](../fleet-liveness-and-task-store-architecture.md).
+>
 > **Audience**: Lupin operators reasoning about who the fleet arbiter contacts (and why), and developers maintaining or extending the arbiter's routing logic
 >
 > **Scope**: `src/cosa/agents/heartbeat_arbiter/` (routing table, consumer job, manager resolver) + `src/lupin_arbiter_app/` (the :8001 service that wires the two loops to their delivery sinks)
