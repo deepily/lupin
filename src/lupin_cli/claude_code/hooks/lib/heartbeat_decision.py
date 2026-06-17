@@ -36,7 +36,7 @@ Design authority (LOCKED): planning-is-prompting →
     src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.
 """
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import is_honored, declared_work_owed
-from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import build_poke_reason
+from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import build_poke_reason, POKE_PROMPT_SENTINEL
 
 
 # Outcome vocabulary (the adapter routes side effects off this)
@@ -46,13 +46,17 @@ OUTCOME_POKE        = "poked"         # owed + under cap → self-poke
 OUTCOME_CAP_REACHED = "cap_reached"   # owed + at/over cap → stop nudging
 
 # Reason used when work is owed via the hold's self-declared work_owed=True
-# but the oracle verdict has no specifics to quote.
+# but the oracle verdict has no specifics to quote. Opens with the shared
+# POKE_PROMPT_SENTINEL (c121037b — one descriptive name everywhere) so
+# is_heartbeat_poke_prompt recognizes this poke too; names the FULL session id
+# in the hold-write instruction (facet 2 — short-id holds are silently ignored).
 DECLARED_OWED_REASON = (
-    "Do not stop yet — you stopped with work owed and no fresh hold. "
+    POKE_PROMPT_SENTINEL + " and no fresh hold. "
     "Pick one and act before you stop:\n"
     "1. Owe work? Resume and finish it now.\n"
     '2. Blocked on someone? DM them for status ("where are we on X?"), then declare a fresh hold — '
-    "write .heartbeat-hold-<session_id>.json with a reason and awaiting: peer:<name>.\n"
+    "write .heartbeat-hold-<your-FULL-session-id>.json (use the full hyphenated session id, "
+    "NOT the short 8-char form) with a reason and awaiting: peer:<name>.\n"
     "3. Truly nothing to do? Declare it — write a hold with work_owed: false."
 )
 

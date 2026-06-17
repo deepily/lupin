@@ -420,6 +420,30 @@ class TestGroupBPokeCapAndReset:
         assert stop._run_heartbeat( sid, tp ) is None
         assert roots.events( sid )[ -1 ][ "outcome" ] == OUTCOME_CAP_REACHED
 
+    def test_b4_selfpoke_does_not_reset_cap_so_loop_halts( self, roots ):
+        """c121037b END-TO-END regression: the self-poke's reason is re-submitted as
+        a prompt via tmux (firing UserPromptSubmit). That hook must RECOGNIZE the
+        self-poke and SKIP the cap reset — otherwise the counter resets every turn
+        and the poke nags forever (the live FM: poke_count stuck at 1 across 23
+        pokes over ~9h). Here the counter ACCUMULATES 1→2→3 and the loop HALTS at
+        the cap, because every poke reason is recognized as a self-poke."""
+        from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import is_heartbeat_poke_prompt
+        roots.enable( cap=3 )
+        sid = "sidB4"
+        tp  = roots.task_transcript( _OWED )
+
+        for expected in ( 1, 2, 3 ):
+            out = stop._run_heartbeat( sid, tp )
+            assert out[ "decision" ] == "block"
+            assert roots.poke_count( sid ) == expected             # NOT reset between pokes
+            # The synthetic poke prompt is recognized → user_prompt_submit skips the
+            # reset (the skip itself is proven in the user_prompt_submit unit suite).
+            assert is_heartbeat_poke_prompt( out[ "reason" ] ) is True
+
+        assert stop._run_heartbeat( sid, tp ) is None              # cap reached → loop HALTS
+        assert roots.poke_count( sid ) == 3
+        assert roots.events( sid )[ -1 ][ "outcome" ] == OUTCOME_CAP_REACHED
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # GROUP C — hold ↔ oracle precedence (real hold file ↔ decision ↔ events)

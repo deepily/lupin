@@ -37,6 +37,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     kill_idle_waiter, set_idle_detection_field,
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import reset_poke_count
+from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import is_heartbeat_poke_prompt
 
 
 def main():
@@ -72,7 +73,17 @@ def main():
     # quiescence gets a fresh budget once the user actually comes back —
     # mirrors the backoff_index=0 reset above. See:
     # src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
-    reset_poke_count( session_id )
+    #
+    # c121037b (2026-06-16): SKIP the reset when this prompt is the heartbeat's
+    # OWN self-poke. The poke rides the Stop-hook `reason` field and is
+    # re-submitted as a prompt via tmux send-keys, which fires THIS hook —
+    # resetting the cap on the heartbeat's own poke made the counter reset every
+    # turn so the cap NEVER halted (empirically poke_count stuck at 1 across 23
+    # consecutive pokes spanning ~9h). Gating on the poke sentinel keeps the cap
+    # accumulating across pokes (1→2→3→halt) while a real user prompt still
+    # reopens the budget.
+    if not is_heartbeat_poke_prompt( payload.get( "prompt", "" ) ):
+        reset_poke_count( session_id )
 
     # Record turn start time for stop hook duration gating
     write_turn_start_marker( session_id )

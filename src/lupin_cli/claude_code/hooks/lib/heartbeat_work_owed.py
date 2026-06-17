@@ -55,18 +55,59 @@ TODO_COMPLETED   = "completed"
 # threshold + the partition itself are PURE (clock injected, never read here).
 INBOUND_STALE_AFTER_SECONDS = 86400
 
+# Poke-prompt sentinel (c121037b, 2026-06-16) — the SHARED opening clause of
+# every heartbeat self-poke `reason`. The poke is re-submitted as a prompt via
+# tmux send-keys, which fires the UserPromptSubmit hook; that hook must NOT treat
+# the heartbeat's OWN injected poke as genuine user re-engagement (doing so reset
+# the poke-cap every turn → the cap never halted → infinite self-nag, empirically
+# poke_count stuck at 1 across 23 pokes). `is_heartbeat_poke_prompt` keys on this
+# sentinel so user_prompt_submit skips the cap reset for a self-poke but still
+# resets on a real user prompt. Both POKE_REASON_TEMPLATE (oracle-owed) and
+# heartbeat_decision.DECLARED_OWED_REASON (self-declared) open with it (one
+# descriptive name everywhere — they derive their prefix from this constant).
+POKE_PROMPT_SENTINEL = "Do not stop yet — you stopped with work owed"
+
 # Poke reason template (rides the top-level `reason` field — NEVER systemMessage;
-# see 01-…-seam-analysis.md §ERRATA).
+# see 01-…-seam-analysis.md §ERRATA). The hold-write instruction names the FULL
+# hyphenated session id explicitly (c121037b facet 2): get_session_info hands an
+# agent the SHORT 8-char id, and a hold written at the short id while the hook
+# reads at the full stable id is silently ignored. read_hold also falls back
+# across id forms (heartbeat_hold._read_hold_path) as belt-and-suspenders.
 POKE_REASON_TEMPLATE = (
-    "Do not stop yet — you stopped with work owed ({specifics}) and no fresh hold. "
+    POKE_PROMPT_SENTINEL + " ({specifics}) and no fresh hold. "
     "Pick one and act before you stop:\n"
     "1. Owe work? Resume and finish it now.\n"
     '2. Blocked on someone? DM them for status ("where are we on X?"), then declare a fresh hold — '
-    "write .heartbeat-hold-<session_id>.json with a reason and awaiting: peer:<name>.\n"
+    "write .heartbeat-hold-<your-FULL-session-id>.json (use the full hyphenated session id, "
+    "NOT the short 8-char form) with a reason and awaiting: peer:<name>.\n"
     "3. Truly nothing to do? Declare it — write a hold with work_owed: false."
 )
 
 NO_WORK_SPECIFICS = "no owed work detected"
+
+
+def is_heartbeat_poke_prompt( prompt ):
+    """
+    Is `prompt` the heartbeat hook's OWN injected self-poke (not user input)?
+
+    The self-poke rides the Stop-hook `reason` field and is re-submitted as a
+    prompt via tmux send-keys; UserPromptSubmit must NOT treat that synthetic
+    prompt as user re-engagement — doing so resets the per-session poke-cap on
+    every poke, so the cap never halts (c121037b root cause: poke_count stuck at
+    1 across 23 consecutive pokes). Both heartbeat poke reasons open with
+    POKE_PROMPT_SENTINEL.
+
+    Requires:
+        - prompt is a string or None (foreign hook-payload data)
+
+    Ensures:
+        - Returns True iff prompt (left-stripped) starts with POKE_PROMPT_SENTINEL
+        - Returns False for None / non-string / empty / genuine user prompts
+        - Never raises
+    """
+    if not isinstance( prompt, str ):
+        return False
+    return prompt.lstrip().startswith( POKE_PROMPT_SENTINEL )
 
 
 def _actionable_todos( todo_items ):

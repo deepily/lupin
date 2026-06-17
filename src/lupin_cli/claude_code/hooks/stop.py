@@ -56,7 +56,7 @@ from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
 #    stop_hook_active loop guard; voice always wins. Leaf modules are pure +
 #    100%-covered; this file holds only the thin adapter. See:
 #    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold, resolve_hold_base_dir
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
     get_poke_count, increment_poke_count,
 )
@@ -1210,7 +1210,7 @@ def _gather_unanswered_inbound_questions( session_id ):
         return empty
 
 
-def _run_heartbeat( session_id, transcript_path ):
+def _run_heartbeat( session_id, transcript_path, cwd=None ):
     """
     Branch-C heartbeat self-poke adapter (thin; composes the pure leaf modules).
 
@@ -1269,7 +1269,11 @@ def _run_heartbeat( session_id, transcript_path ):
     if not settings[ "enabled" ]:
         return None
 
-    hold       = read_hold( session_id )
+    # c121037b facet 3: resolve the hold from the session's OWN cwd (threaded
+    # from the Stop payload), not the hardwired LUPIN_ROOT — so a non-lupin
+    # session's hold is visible to its own hook read. cwd None (older callers /
+    # missing key) falls back to cu.get_project_root() inside resolve_hold_base_dir.
+    hold       = read_hold( session_id, base_dir=resolve_hold_base_dir( cwd ) )
     poke_count = get_poke_count( session_id )
     # v2: REAL work-owed verdict from the session's own Task* state, replayed
     # from its transcript (§0.3). owned_by_me TRUE by construction; :7999-free;
@@ -1471,7 +1475,7 @@ def main():
         # Branch-C invariant (voice always wins): peek at the voice buffer
         # WITHOUT draining — pending voice ⇒ no poke, buffer left untouched.
         if not _has_pending_voice( session_id ):
-            heartbeat_output = _run_heartbeat( session_id, payload.get( "transcript_path" ) )
+            heartbeat_output = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
             if heartbeat_output is not None:
                 log_to_stream( "stop", {}, extra={
                     "phase"      : "speakerphone_poke",
@@ -1551,7 +1555,8 @@ def main():
         # Returns a block dict ONLY when the heartbeat pokes; otherwise None →
         # fall through to the existing idle-waiter / "Anything else?" path.
         # transcript_path (Stop payload) feeds the v2 Task*-replay work-owed oracle.
-        heartbeat_output = _run_heartbeat( session_id, payload.get( "transcript_path" ) )
+        # cwd (Stop payload) resolves the per-session hold base (c121037b facet 3).
+        heartbeat_output = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
         if heartbeat_output is not None:
             emit_json( heartbeat_output )
             return
