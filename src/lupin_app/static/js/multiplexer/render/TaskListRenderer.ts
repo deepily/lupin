@@ -28,6 +28,7 @@ import {
   type TaskListComposite,
 } from "./taskListModel";
 import { renderTaskListTable } from "./templates/taskListTable";
+import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
 
 export interface TaskListStoreLike {
   composite(): TaskListComposite | null;
@@ -110,6 +111,28 @@ class TaskListRendererImpl implements TaskListRenderer {
     refreshBtn.addEventListener( "click", () => void this.stores.taskList.refresh() );
     header.appendChild( refreshBtn );
 
+    // Per-persona accordion: collapse-all / expand-all. The JS card puts these in
+    // its #section-toolbar; the multiplexer has no such toolbar, so they live in
+    // the card header (parity is the persistence CONTRACT — shared localStorage
+    // key + sentinel + default — not button location).
+    const collapseAllBtn = document.createElement( "button" );
+    collapseAllBtn.type = "button";
+    collapseAllBtn.className = "task-list-collapse-all";
+    collapseAllBtn.setAttribute( "data-testid", "multiplexer-task-list-collapse-all" );
+    collapseAllBtn.setAttribute( "title", "Collapse all task owners" );
+    collapseAllBtn.textContent = "⊟";
+    collapseAllBtn.addEventListener( "click", () => this.collapseAll() );
+    header.appendChild( collapseAllBtn );
+
+    const expandAllBtn = document.createElement( "button" );
+    expandAllBtn.type = "button";
+    expandAllBtn.className = "task-list-expand-all";
+    expandAllBtn.setAttribute( "data-testid", "multiplexer-task-list-expand-all" );
+    expandAllBtn.setAttribute( "title", "Expand all task owners" );
+    expandAllBtn.textContent = "⊞";
+    expandAllBtn.addEventListener( "click", () => this.expandAll() );
+    header.appendChild( expandAllBtn );
+
     this.updatedEl = document.createElement( "span" );
     this.updatedEl.className = "task-list-updated";
     this.updatedEl.setAttribute( "data-testid", "multiplexer-task-list-updated" );
@@ -118,6 +141,19 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.container = document.createElement( "div" );
     this.container.className = "task-list-container";
     this.container.setAttribute( "data-testid", "multiplexer-task-list-container" );
+
+    // Accordion delegation: ONE click+keyboard listener on the persistent
+    // container (its children are replaced each render, the element is not), so a
+    // header toggle survives every re-render with no per-row re-binding.
+    this.container.addEventListener( "click", ( e ) => this.handleAccordionToggle( e.target ) );
+    this.container.addEventListener( "keydown", ( e ) => {
+      const ke = e as KeyboardEvent;
+      if ( ke.key !== "Enter" && ke.key !== " " && ke.key !== "Spacebar" ) return;
+      const header = ( e.target as Element ).closest( ".task-group-header" );
+      if ( !header ) return;
+      e.preventDefault();   // Space must toggle the group, not scroll the page
+      this.handleAccordionToggle( e.target );
+    } );
 
     root.replaceChildren( header, this.container );
 
@@ -177,7 +213,7 @@ class TaskListRendererImpl implements TaskListRenderer {
       this.container.replaceChildren( messageEl( "task-list-empty", "✅ No open tasks." ) );
     } else {
       const model = groupTasksByOwner( openTasks );
-      this.container.replaceChildren( renderTaskListTable( model, undefined ) );
+      this.container.replaceChildren( renderTaskListTable( model, undefined, loadCollapsedOwners() ) );
     }
 
     if ( stampUpdated ) this.stampUpdated();
@@ -196,7 +232,7 @@ class TaskListRendererImpl implements TaskListRenderer {
 
     if ( this.lastGoodTasks !== null && this.lastGoodTasks.length > 0 ) {
       const model = groupTasksByOwner( this.lastGoodTasks );
-      this.container.replaceChildren( indicator, renderTaskListTable( model, undefined ) );
+      this.container.replaceChildren( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners() ) );
       this.setCount( this.lastGoodTasks.length );
     } else {
       this.container.replaceChildren( indicator, messageEl( "task-list-empty", "No tasks loaded yet." ) );
@@ -212,6 +248,42 @@ class TaskListRendererImpl implements TaskListRenderer {
     /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container. Belt-and-suspenders.
     if ( this.updatedEl === null ) return;
     this.updatedEl.textContent = `updated ${formatFleetTimestamp( this.nowDateFn(), undefined )}`;
+  }
+
+  // -------------------------------------------------------------------------
+  // Per-persona accordion
+  // -------------------------------------------------------------------------
+
+  /**
+   * Toggle the owner group whose header was activated (click or Enter/Space):
+   * flip + persist its collapsed state, then re-render from the cached composite
+   * (no re-fetch) so the new collapse state paints. No-op outside a header.
+   */
+  private handleAccordionToggle( target: EventTarget | null ): void {
+    // target is the listener's e.target — always an Element for click/keydown.
+    const header = ( target as Element ).closest( ".task-group-header" );
+    if ( header === null ) return;
+    const tbody = header.closest<HTMLElement>( "tbody.task-group" );
+    /* c8 ignore next */ // defensive: a rendered header always sits inside its group <tbody data-owner>.
+    if ( tbody === null || tbody.dataset.owner === undefined ) return;
+    toggleCollapsedOwner( tbody.dataset.owner );
+    this.renderFromStore( false );
+  }
+
+  /** Collapse every currently-rendered owner group; persist + repaint. */
+  private collapseAll(): void {
+    /* c8 ignore next */ // defensive: the control only exists while mounted (container set).
+    if ( this.container === null ) return;
+    const owners = Array.from( this.container.querySelectorAll<HTMLElement>( "tbody.task-group[data-owner]" ) )
+      .map( ( el ) => el.dataset.owner as string );
+    saveCollapsedOwners( new Set( owners ) );
+    this.renderFromStore( false );
+  }
+
+  /** Expand every owner group: clear the persisted set + repaint. */
+  private expandAll(): void {
+    saveCollapsedOwners( new Set() );
+    this.renderFromStore( false );
   }
 }
 

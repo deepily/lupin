@@ -1,7 +1,7 @@
 // Task-list card — TaskListRenderer unit tests.
 // 100% lines/branches/functions per the multiplexer coverage mandate.
 
-import { test, before } from "node:test";
+import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
@@ -12,12 +12,16 @@ import {
 } from "../../../../lupin_app/static/js/multiplexer/render/TaskListRenderer";
 import type { TaskListComposite } from "../../../../lupin_app/static/js/multiplexer/render/taskListModel";
 import type { StoreTaskListChangedPayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
+import { TASK_LIST_COLLAPSED_KEY } from "../../../../lupin_app/static/js/multiplexer/render/taskListCollapse";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
     GlobalRegistrator.register();
   }
 });
+
+// Accordion state lives in localStorage — isolate every test.
+beforeEach(() => { localStorage.clear(); });
 
 interface FakeStore extends TaskListStoreLike {
   setComposite(c: TaskListComposite | null): void;
@@ -199,4 +203,115 @@ test("unmount clears the root subtree", () => {
   assert.equal(root.childNodes.length, 0);
   // After unmount the subscription is detached — a later emit is a no-op (no throw).
   bus.emit<StoreTaskListChangedPayload>({ type: "store_task_list_changed", payload: { stampUpdated: true }, source: "test", ts: 0 });
+});
+
+// ---------------------------------------------------------------------------
+// Per-persona accordion
+// ---------------------------------------------------------------------------
+
+const TWO_OWNERS = (): TaskListComposite => okComposite([
+  { id: "1", title: "a1", status: "queued", owner_persona: "amy" },
+  { id: "2", title: "b1", status: "queued", owner_persona: "bob" },
+]);
+
+test("accordion: mount renders collapse-all / expand-all controls in the header", () => {
+  const { root } = setup();
+  assert.ok(root.querySelector('[data-testid="multiplexer-task-list-collapse-all"]'));
+  assert.ok(root.querySelector('[data-testid="multiplexer-task-list-expand-all"]'));
+});
+
+test("accordion: a persisted-collapsed owner renders collapsed", () => {
+  localStorage.setItem(TASK_LIST_COLLAPSED_KEY, JSON.stringify(["amy"]));
+  const { store, emit, root } = setup();
+  store.setComposite(TWO_OWNERS());
+  emit(true);
+  const amy = root.querySelector<HTMLElement>('tbody.task-group[data-owner="amy"]');
+  const bob = root.querySelector<HTMLElement>('tbody.task-group[data-owner="bob"]');
+  assert.ok(amy?.classList.contains("collapsed"), "amy persisted-collapsed");
+  assert.ok(!bob?.classList.contains("collapsed"), "bob expanded");
+});
+
+test("accordion: clicking an owner header toggles + persists + repaints collapsed", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(TWO_OWNERS());
+  emit(true);
+  const header = root.querySelector<HTMLElement>('tbody.task-group[data-owner="amy"] .task-group-header');
+  header?.dispatchEvent(new Event("click", { bubbles: true }));
+
+  assert.deepEqual(JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]"), ["amy"]);
+  const amy = root.querySelector<HTMLElement>('tbody.task-group[data-owner="amy"]');
+  assert.ok(amy?.classList.contains("collapsed"), "amy collapsed after click");
+  // a second click expands again
+  root.querySelector<HTMLElement>('tbody.task-group[data-owner="amy"] .task-group-header')
+    ?.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.deepEqual(JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]"), []);
+});
+
+test("accordion: a click that is not on a header is a no-op", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(TWO_OWNERS());
+  emit(true);
+  const container = root.querySelector<HTMLElement>(".task-list-container");
+  container?.dispatchEvent(new Event("click", { bubbles: true }));   // target = container, no header
+  assert.equal(localStorage.getItem(TASK_LIST_COLLAPSED_KEY), null, "no toggle persisted");
+});
+
+test("accordion: keyboard — Enter & Space toggle a header; other keys + non-header ignored", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(TWO_OWNERS());
+  emit(true);
+  const headerSel = 'tbody.task-group[data-owner="amy"] .task-group-header';
+  const fire = (key: string, sel: string): void => {
+    root.querySelector<HTMLElement>(sel)?.dispatchEvent(
+      new KeyboardEvent("keydown", { key, bubbles: true }),
+    );
+  };
+
+  // a non-toggle key on a header → ignored
+  fire("a", headerSel);
+  assert.equal(localStorage.getItem(TASK_LIST_COLLAPSED_KEY), null);
+
+  // Enter toggles (collapse)
+  fire("Enter", headerSel);
+  assert.deepEqual(JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]"), ["amy"]);
+
+  // Space toggles (expand)
+  fire(" ", headerSel);
+  assert.deepEqual(JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]"), []);
+
+  // legacy "Spacebar" toggles (collapse)
+  fire("Spacebar", headerSel);
+  assert.deepEqual(JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]"), ["amy"]);
+
+  // a toggle key NOT on a header → ignored (state unchanged)
+  fire("Enter", ".task-list-container");
+  assert.deepEqual(JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]"), ["amy"]);
+});
+
+test("accordion: collapse-all persists every owner + repaints all collapsed", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(TWO_OWNERS());
+  emit(true);
+  root.querySelector<HTMLElement>('[data-testid="multiplexer-task-list-collapse-all"]')
+    ?.dispatchEvent(new Event("click", { bubbles: true }));
+
+  assert.deepEqual(
+    JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]").sort(),
+    ["amy", "bob"],
+  );
+  const collapsed = [...root.querySelectorAll("tbody.task-group")].every((e) => e.classList.contains("collapsed"));
+  assert.ok(collapsed, "every group collapsed after collapse-all");
+});
+
+test("accordion: expand-all clears the set + repaints all expanded", () => {
+  localStorage.setItem(TASK_LIST_COLLAPSED_KEY, JSON.stringify(["amy", "bob"]));
+  const { store, emit, root } = setup();
+  store.setComposite(TWO_OWNERS());
+  emit(true);
+  root.querySelector<HTMLElement>('[data-testid="multiplexer-task-list-expand-all"]')
+    ?.dispatchEvent(new Event("click", { bubbles: true }));
+
+  assert.deepEqual(JSON.parse(localStorage.getItem(TASK_LIST_COLLAPSED_KEY) ?? "[]"), []);
+  const anyCollapsed = [...root.querySelectorAll("tbody.task-group")].some((e) => e.classList.contains("collapsed"));
+  assert.ok(!anyCollapsed, "no group collapsed after expand-all");
 });
