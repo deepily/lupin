@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=20260530c">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260512a">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260617a">
 </head>
 <body>
     <!-- Master-detail two-pane shell (2026-05-21 — see
@@ -836,6 +837,29 @@
             <div class="section-content" id="fleet-status-section">
                 <div id="fleet-status-container" data-testid="fleet-status-container">
                     <!-- rendered grouped table (read-only) -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Task List Section (read-only consumer of GET /api/tasks) — brief:
+             src/rnd/v0.1.8/2026.06.16-task-list-ui-card-build-brief.md.
+             Ported from the Cheech-approved TS multiplexer card onto the
+             fleet-status section structure. Pure observability — NO mutating controls. -->
+        <div class="collapsible-section" id="section-task-list">
+            <div class="section-header" onclick="toggleSection('task-list-section')">
+                <h3>📋 Task List: <span id="task-list-count">0</span>
+                    <span id="task-list-updated" class="task-list-updated"
+                          data-testid="task-list-updated"
+                          title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
+                <button class="refresh-btn" id="task-list-refresh"
+                        data-testid="task-list-refresh-btn"
+                        onclick="event.stopPropagation(); window.notificationsUI.refreshTaskList()"
+                        title="Refresh now">⟳</button>
+                <button class="toggle-button" id="task-list-toggle">▼</button>
+            </div>
+            <div class="section-content" id="task-list-section">
+                <div id="task-list-container" data-testid="task-list-container">
+                    <!-- rendered owner-grouped table (read-only) -->
                 </div>
             </div>
         </div>

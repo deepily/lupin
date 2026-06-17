@@ -382,6 +382,19 @@ class NotificationsUI {
         this.fleetStatusPollIntervalHandle = null;    // setInterval handle (cleanup, mirrors healthCheckIntervalHandle)
         this._fleetStatusFetchInFlight     = false;   // debounce guard: manual ⟳ vs the interval tick
 
+        // ========================================
+        // TASK LIST PANEL (read-only consumer of GET /api/tasks)
+        // Brief:  src/rnd/v0.1.8/2026.06.16-task-list-ui-card-build-brief.md
+        // Cascade §F: src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md
+        // Ported from the Cheech-approved TS card (multiplexer/stores/TaskListStore.ts +
+        // render/{TaskListRenderer,taskListModel,templates/taskListTable}.ts) onto the
+        // monolithic fleet-status structure above.
+        // ========================================
+        this.TASK_LIST_POLL_INTERVAL_MS = 60000;      // 60s auto-poll (fleet parity)
+        this.taskListPollIntervalHandle = null;       // setInterval handle (cleanup, mirrors fleetStatusPollIntervalHandle)
+        this._taskListFetchInFlight     = false;       // debounce guard: manual ⟳ vs the interval tick
+        this._taskListLastGoodTasks     = null;        // last successfully-fetched OPEN rows — replayed under the "store unreachable" indicator (degrade-safe, never blank)
+
         // STT for Q&A input
         this.qaAudioRecorder = null;
         this.qaRecordingInterval = null;
@@ -515,6 +528,10 @@ class NotificationsUI {
             // Start Fleet Status panel polling (read-only operator view, 60s auto-poll + manual ⟳).
             // Design: src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §6.
             this.startFleetStatusPolling();
+
+            // Start Task List panel polling (read-only consumer of GET /api/tasks, 60s auto-poll + manual ⟳).
+            // Brief: src/rnd/v0.1.8/2026.06.16-task-list-ui-card-build-brief.md.
+            this.startTaskListPolling();
 
             // Auto-focus STT button for spacebar activation
             document.getElementById( 'qa-stt-button' ).focus();
@@ -9015,6 +9032,507 @@ class NotificationsUI {
             clearInterval( this.fleetStatusPollIntervalHandle );
             this.fleetStatusPollIntervalHandle = null;
             this.log( "Fleet status polling stopped" );
+        }
+    }
+
+    // ========================================
+    // TASK LIST PANEL METHODS (read-only consumer of GET /api/tasks)
+    // Brief: src/rnd/v0.1.8/2026.06.16-task-list-ui-card-build-brief.md
+    // Ported from the Cheech-approved TS card (TaskListStore / TaskListRenderer /
+    // taskListModel / taskListTable) onto the fleet-status structure above.
+    // ========================================
+
+    async fetchTaskList() {
+        /**
+         * Fetch the task-list rows from the JWT-authed :7999 endpoint
+         * GET /api/tasks (routers/tasks.py:419-477, full-row fidelity). Read-only
+         * consumer — this card never mutates the store and never touches tasks.py.
+         *
+         * The endpoint returns { tasks: [...], count } on 2xx; on failure we map to
+         * the same display-only sentinels the fleet card uses so the renderer
+         * degrades gracefully (last-known rows + indicator, never blank).
+         *
+         * Requires:
+         *     - this.authedFetch is available (handles JWT refresh)
+         *
+         * Ensures:
+         *     - Returns the parsed { tasks, count } body on 2xx
+         *     - Returns { status: "auth_required" } on a hard 401
+         *     - Returns { status: "unreachable", tasks: null } on any network throw
+         *       or non-2xx, non-401 status (never throws)
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks?limit=500" );
+            if ( response.status === 401 ) {
+                return { status: "auth_required" };
+            }
+            if ( !response.ok ) {
+                return { status: "unreachable", tasks: null };
+            }
+            return await response.json();
+        } catch ( error ) {
+            this.log( `Task list fetch failed: ${error}` );
+            return { status: "unreachable", tasks: null };
+        }
+    }
+
+    isTaskOpenStatus( status ) {
+        /**
+         * True when a task's status is non-terminal (work still owed). Terminal
+         * statuses are "done" / "dropped"; a missing status defaults to OPEN
+         * (degrade-safe — a row with no status is never silently hidden).
+         *
+         * Requires:
+         *     - status is a string, or null/undefined
+         *
+         * Ensures:
+         *     - falsy → true; "done"/"dropped" → false; anything else → true
+         *     - Pure: no DOM, no side effects
+         */
+        if ( !status ) return true;
+        return status !== "done" && status !== "dropped";
+    }
+
+    _taskStatusRank( status ) {
+        /**
+         * Sort rank for a status: most-urgent/most-active first, terminal last.
+         * An unknown/typo'd status sorts BETWEEN open and terminal so it never
+         * hides above genuinely-blocked work.
+         *
+         * Ensures:
+         *     - blocked 0 · in_progress 1 · claimed 2 · review 3 · queued 4 ·
+         *       done 6 · dropped 7; unknown/missing → 5
+         *     - Pure: no DOM, no side effects
+         */
+        const ranks = { blocked: 0, in_progress: 1, claimed: 2, review: 3, queued: 4, done: 6, dropped: 7 };
+        if ( !status ) return 5;
+        const rank = ranks[ status ];
+        return rank === undefined ? 5 : rank;
+    }
+
+    _taskPriorityRank( priority ) {
+        /**
+         * Secondary-sort rank for a `P<n>` priority: P0 highest (0), unknown last.
+         *
+         * Ensures:
+         *     - "P<n>" → n; null/undefined/non-`P<n>` → 99
+         *     - Pure: no DOM, no side effects
+         */
+        if ( !priority ) return 99;
+        const m = /^P(\d+)$/.exec( priority );
+        return m ? Number( m[ 1 ] ) : 99;
+    }
+
+    _taskOwnerLabel( task ) {
+        /**
+         * Resolve a task's owner label: `owner_persona` preferred, "Unassigned"
+         * when absent/empty.
+         *
+         * Ensures:
+         *     - non-empty owner_persona → that value; else "Unassigned"
+         *     - Pure: no DOM, no side effects
+         */
+        if ( task && task.owner_persona ) return task.owner_persona;
+        return "Unassigned";
+    }
+
+    _taskTitleLabel( task ) {
+        /**
+         * Title fallback so a row never renders an empty primary cell.
+         *
+         * Ensures:
+         *     - non-empty title → that value; else "(untitled)"
+         *     - Pure: no DOM, no side effects
+         */
+        if ( task && task.title ) return task.title;
+        return "(untitled)";
+    }
+
+    _taskCellOrDash( value ) {
+        /**
+         * Empty-cell guard: falsy / "none" → em-dash, else the value verbatim.
+         *
+         * Ensures:
+         *     - falsy or "none" → "—"; else the value
+         *     - Pure: no DOM, no side effects
+         */
+        if ( !value || value === "none" ) return "—";
+        return value;
+    }
+
+    _taskStatusClass( status ) {
+        /**
+         * Map a status word to its row-accent + status-dot color class. Keys on the
+         * trimmed lowercase status. Color is ALWAYS redundant with the status WORD
+         * in the Status cell (WCAG 1.4.1).
+         *
+         * Ensures:
+         *     - blocked→…-blocked · in_progress/claimed→…-active · review→…-review ·
+         *       queued→…-queued · done→…-done · dropped→…-dropped
+         *     - anything else (empty/unrecognized/non-string) → task-status-unknown
+         *     - Pure: no DOM, no side effects
+         */
+        const word = ( typeof status === "string" ? status.trim() : "" ).toLowerCase();
+        if ( word === "blocked" )                           return "task-status-blocked";
+        if ( word === "in_progress" || word === "claimed" ) return "task-status-active";
+        if ( word === "review" )                            return "task-status-review";
+        if ( word === "queued" )                            return "task-status-queued";
+        if ( word === "done" )                              return "task-status-done";
+        if ( word === "dropped" )                           return "task-status-dropped";
+        return "task-status-unknown";
+    }
+
+    _taskPriorityClass( priority ) {
+        /**
+         * Map a `P<n>` priority to its heat-tint class for the Priority cell.
+         *
+         * Ensures:
+         *     - P0/P1 → "task-prio-high" · P2 → "task-prio-mid" · P3+ → "task-prio-low"
+         *     - null/undefined/non-`P<n>` → "" (untinted)
+         *     - Pure: no DOM, no side effects
+         */
+        if ( typeof priority !== "string" ) return "";
+        const m = /^P(\d+)$/.exec( priority.trim() );
+        if ( !m ) return "";
+        const n = Number( m[ 1 ] );
+        if ( n <= 1 ) return "task-prio-high";
+        if ( n === 2 ) return "task-prio-mid";
+        return "task-prio-low";
+    }
+
+    _formatTaskChaseTime( iso, ianaZone ) {
+        /**
+         * Format an ISO-8601 next-chase timestamp as "MM-DD HH:MM" in the given IANA
+         * zone (DST-aware via Intl). CHEECH NIT: the `/api/tasks` columns are
+         * `DateTime(timezone=True)` so isoformat() carries an offset — but as
+         * belt-and-suspenders, a NAIVE ISO string (no `Z` and no ±HH:MM offset) is
+         * treated as UTC before `new Date()` parses it, so a browser-local misparse
+         * can never produce a wrong time.
+         *
+         * Requires:
+         *     - iso is an ISO-8601 string, or null/undefined
+         *     - ianaZone is an IANA zone string, or null/undefined (→ browser-local)
+         *
+         * Ensures:
+         *     - null/absent → "—"; unparseable → "—"
+         *     - a naive (tz-less) string is interpreted as UTC, not browser-local
+         *     - invalid IANA zone degrades to browser-local (never throws)
+         *     - Pure: no DOM, no side effects
+         */
+        if ( !iso ) return "—";
+        // Naive-UTC guard: append "Z" when the string carries no timezone designator
+        // (no trailing Z, and no ±HH:MM offset after the time component).
+        const hasTz   = /[zZ]$|[+-]\d{2}:?\d{2}$/.test( iso );
+        const safeIso = hasTz ? iso : `${iso}Z`;
+        const date    = new Date( safeIso );
+        if ( Number.isNaN( date.getTime() ) ) return "—";
+        const opts = { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" };
+        if ( ianaZone ) {
+            try {
+                return new Intl.DateTimeFormat( undefined, { ...opts, timeZone: ianaZone } ).format( date );
+            } catch ( error ) {
+                this.log( `Invalid task chase timezone "${ianaZone}", falling back to local: ${error}` );
+            }
+        }
+        return new Intl.DateTimeFormat( undefined, opts ).format( date );
+    }
+
+    groupTasksByOwner( tasks ) {
+        /**
+         * Build the owner-grouped model from a flat task array. Each distinct
+         * `owner_persona` becomes a group (persona-sorted); tasks with no owner
+         * collapse into a single trailing "Unassigned" bucket. Within a group,
+         * tasks sort by status-rank (blocked first), then priority (P0 first),
+         * then title.
+         *
+         * Requires:
+         *     - tasks is an array of task rows (or non-array → treated as empty)
+         *
+         * Ensures:
+         *     - Returns { totalCount, groups }; totalCount counts ALL input rows
+         *     - groups are owner-sorted alpha; the Unassigned bucket (if any) is LAST
+         *     - each group: { ownerPersona, isUnassigned, tasks: [...] }
+         *     - Pure + degrade-safe (falsy rows collapse to {}, never throw)
+         */
+        const rows = Array.isArray( tasks ) ? tasks : [];
+
+        const byOwner     = new Map();   // owner_persona → tasks[]
+        const unassigned  = [];
+        rows.forEach( raw => {
+            const task  = raw || {};
+            const owner = task.owner_persona;
+            if ( owner ) {
+                if ( byOwner.has( owner ) ) byOwner.get( owner ).push( task );
+                else byOwner.set( owner, [ task ] );
+            } else {
+                unassigned.push( task );
+            }
+        } );
+
+        const byUrgency = ( a, b ) => {
+            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
+            if ( sr !== 0 ) return sr;
+            const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
+            if ( pr !== 0 ) return pr;
+            return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
+        };
+
+        const groups = Array.from( byOwner.keys() )
+            .sort( ( a, b ) => a.localeCompare( b ) )
+            .map( owner => ( {
+                ownerPersona : owner,
+                isUnassigned : false,
+                tasks        : byOwner.get( owner ).slice().sort( byUrgency )
+            } ) );
+
+        if ( unassigned.length > 0 ) {
+            groups.push( { ownerPersona: null, isUnassigned: true, tasks: unassigned.slice().sort( byUrgency ) } );
+        }
+
+        return { totalCount: rows.length, groups };
+    }
+
+    _renderTaskRow( task, ianaZone ) {
+        /**
+         * Render a single task row (one <tr>) with the eight columns: Title · Class ·
+         * Status · Blocked by · Next chase · Accountable · Priority · Project. The
+         * owner_persona is the GROUP HEADER (not a per-row column), so a row never
+         * repeats its owner.
+         *
+         * EVERY store-sourced value is escapeHtml'd (the in-service card writes via
+         * innerHTML, so unlike the TS createElement card it must escape explicitly).
+         *
+         * Requires:
+         *     - task is a row object (fields rendered defensively — falsy → "—")
+         *     - ianaZone is the IANA zone for the next-chase cell, or null/undefined
+         *
+         * Ensures:
+         *     - the <tr> carries a `task-status-*` class (status→accent); the Priority
+         *       cell carries a `task-prio-*` heat class when recognized
+         *     - Status cell leads with a `.task-status-dot` span + the status word
+         *     - Blocked-by / Accountable / Project: falsy/"none" → "—"
+         *     - Next-chase: ISO → "MM-DD HH:MM" in zone; absent → "—"
+         *     - Pure: no DOM access, no side effects (string in → string out)
+         */
+        const statusWord  = this.escapeHtml( task.status || "unknown" );
+        const statusClass = this._taskStatusClass( task.status );
+        const prioClass   = this._taskPriorityClass( task.priority );
+
+        const title       = this.escapeHtml( this._taskTitleLabel( task ) );
+        const itemClass   = task.item_class || "task";
+        const classBadge  = this.escapeHtml( itemClass );
+        const classSlug   = this.escapeHtml( String( itemClass ).replace( /[^a-zA-Z0-9_-]/g, "" ) );
+        const blocked     = this.escapeHtml( this._taskCellOrDash( task.blocked_by ) );
+        const chase       = this.escapeHtml( this._formatTaskChaseTime( task.next_chase_ts, ianaZone ) );
+        const accountable = this.escapeHtml( this._taskCellOrDash( task.accountable_manager ) );
+        const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
+        const project     = this.escapeHtml( this._taskCellOrDash( task.project ) );
+
+        return `
+            <tr class="task-row ${statusClass}">
+                <td class="task-col-title">${title}</td>
+                <td class="task-col-class"><span class="task-class-badge task-class-${classSlug}">${classBadge}</span></td>
+                <td class="task-col-status"><span class="task-status-dot"></span>${statusWord}</td>
+                <td class="task-col-blocked">${blocked}</td>
+                <td class="task-col-chase">${chase}</td>
+                <td class="task-col-accountable">${accountable}</td>
+                <td class="task-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
+                <td class="task-col-project">${project}</td>
+            </tr>`;
+    }
+
+    renderTaskListTable( model, ianaZone ) {
+        /**
+         * Render the owner-grouped model as a read-only table (mirrors
+         * renderFleetStatusTable). Each owner is a group-header row; its tasks render
+         * beneath; the Unassigned group renders last.
+         *
+         * Eight columns: Title · Class · Status · Blocked by · Next chase ·
+         * Accountable · Priority · Project.
+         *
+         * Requires:
+         *     - model is the { totalCount, groups } shape from groupTasksByOwner
+         *     - ianaZone is the IANA zone for next-chase cells, or null/undefined
+         *
+         * Ensures:
+         *     - Returns an HTML string (caller assigns to innerHTML)
+         *     - Read-only: no action column, no mutating controls
+         *     - Pure: no DOM access, no side effects
+         */
+        const headerRow = `
+            <thead>
+                <tr>
+                    <th class="task-col-title">Title</th>
+                    <th class="task-col-class">Class</th>
+                    <th class="task-col-status">Status</th>
+                    <th class="task-col-blocked">Blocked by</th>
+                    <th class="task-col-chase">Next chase</th>
+                    <th class="task-col-accountable">Accountable</th>
+                    <th class="task-col-priority">Priority</th>
+                    <th class="task-col-project">Project</th>
+                </tr>
+            </thead>`;
+
+        const body = model.groups.map( group => {
+            const headerLabel = group.isUnassigned
+                ? "(Unassigned)"
+                : `${this.escapeHtml( group.ownerPersona )} · ${group.tasks.length}`;
+
+            const groupHeaderHtml = `
+                <tr class="task-group-header${group.isUnassigned ? " task-group-unassigned" : ""}">
+                    <td colspan="8">${headerLabel}</td>
+                </tr>`;
+
+            const rows = group.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
+            return groupHeaderHtml + rows;
+        } ).join( "" );
+
+        return `<table class="task-list-table">${headerRow}<tbody>${body}</tbody></table>`;
+    }
+
+    renderTaskList( composite, stampUpdated = true ) {
+        /**
+         * Dispatch the fetched composite to the correct render state and stamp the
+         * last-updated time. DOM-touching orchestrator; the table-building
+         * (renderTaskListTable) and model (groupTasksByOwner) stay pure.
+         *
+         * Four states (mirroring fleet-status):
+         *     auth_required → "Sign-in required" (don't show stale rows on auth loss)
+         *     unreachable   → "Store unreachable" indicator + LAST-KNOWN rows (never blank)
+         *     empty         → "No open tasks"
+         *     table         → owner-grouped table of OPEN (non-terminal) work
+         *
+         * Requires:
+         *     - composite is the object returned by fetchTaskList()
+         *     - #task-list-container / #task-list-count exist (no-op if absent)
+         *     - stampUpdated: true on a real fetch; false to skip re-stamping
+         *
+         * Ensures:
+         *     - count reflects the OPEN rows shown; last-known rows survive an outage
+         *     - never throws, never renders blank
+         */
+        const container = document.getElementById( "task-list-container" );
+        const countEl   = document.getElementById( "task-list-count" );
+        if ( !container ) return;
+
+        if ( composite && composite.status === "auth_required" ) {
+            container.innerHTML = `<p class="task-list-message task-list-signin">🔒 Sign-in required.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+            return;
+        }
+
+        if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
+            this._renderTaskListUnreachable( container, countEl );
+            return;
+        }
+
+        const openTasks = composite.tasks.filter( t => this.isTaskOpenStatus( ( t || {} ).status ) );
+        this._taskListLastGoodTasks = openTasks;
+        if ( countEl ) countEl.textContent = String( openTasks.length );
+
+        if ( openTasks.length === 0 ) {
+            container.innerHTML = `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
+        } else {
+            const model = this.groupTasksByOwner( openTasks );
+            container.innerHTML = this.renderTaskListTable( model, undefined );
+        }
+
+        if ( stampUpdated ) this._stampTaskListUpdated();
+    }
+
+    _renderTaskListUnreachable( container, countEl ) {
+        /**
+         * Store-unreachable / pre-first-poll branch. Shows a "store unreachable"
+         * indicator and, when a prior good fetch exists, replays its last-known rows
+         * beneath it (graceful degradation — never blank). Does NOT re-stamp (no
+         * fresh data) and does NOT overwrite `_taskListLastGoodTasks`.
+         *
+         * Requires:
+         *     - container is the #task-list-container element (non-null)
+         *     - countEl is the #task-list-count element, or null
+         *
+         * Ensures:
+         *     - last-known OPEN rows replay under the indicator when present
+         *     - otherwise a "No tasks loaded yet" message; count → last-known length or 0
+         */
+        const indicator = `<p class="task-list-message task-list-unreachable">⚠️ Store unreachable.</p>`;
+        const lastGood  = this._taskListLastGoodTasks;
+        if ( lastGood && lastGood.length > 0 ) {
+            container.innerHTML = indicator + this.renderTaskListTable( this.groupTasksByOwner( lastGood ), undefined );
+            if ( countEl ) countEl.textContent = String( lastGood.length );
+        } else {
+            container.innerHTML = indicator + `<p class="task-list-message task-list-empty">No tasks loaded yet.</p>`;
+            if ( countEl ) countEl.textContent = "0";
+        }
+    }
+
+    _stampTaskListUpdated() {
+        /**
+         * Stamp the #task-list-updated span with the current time. `/api/tasks`
+         * carries no top-level timezone (unlike the fleet composite), so the stamp
+         * uses the browser's own zone (DST-aware) via the shared fleet formatter.
+         *
+         * Ensures:
+         *     - Span text set to "updated HH:MM:SS TZ" on success; no-op if absent
+         */
+        const el = document.getElementById( "task-list-updated" );
+        if ( !el ) return;
+        el.textContent = `updated ${this._formatFleetTimestamp( new Date(), undefined )}`;
+    }
+
+    async refreshTaskList() {
+        /**
+         * Orchestrate one task-list refresh: fetch → render. Shared by the 60s
+         * interval tick and the manual ⟳ button. Debounced via an in-flight guard
+         * so a manual click landing on an interval tick can't double-fetch.
+         *
+         * Ensures:
+         *     - At most one fetch in flight at a time (guard reset in finally)
+         *     - Renders the resulting state via renderTaskList
+         */
+        if ( this._taskListFetchInFlight ) {
+            this.log( "Task list refresh skipped — fetch already in flight (debounce)" );
+            return;
+        }
+        this._taskListFetchInFlight = true;
+        try {
+            const composite = await this.fetchTaskList();
+            this.renderTaskList( composite );
+        } finally {
+            this._taskListFetchInFlight = false;
+        }
+    }
+
+    startTaskListPolling() {
+        /**
+         * Start the 60s task-list auto-poll. Fires one immediate refresh, then
+         * schedules the interval. Idempotent — clears any existing interval first
+         * (mirrors startFleetStatusPolling).
+         *
+         * Ensures:
+         *     - this.taskListPollIntervalHandle holds the live interval handle
+         *     - An immediate first refresh is kicked off (fire-and-forget)
+         */
+        this.stopTaskListPolling();
+        this.refreshTaskList();
+        this.taskListPollIntervalHandle = setInterval(
+            () => this.refreshTaskList(),
+            this.TASK_LIST_POLL_INTERVAL_MS
+        );
+        this.log( "Task list polling started (60s interval)" );
+    }
+
+    stopTaskListPolling() {
+        /**
+         * Stop the task-list auto-poll and clear the interval handle.
+         *
+         * Ensures:
+         *     - Clears setInterval if active; resets handle to null (no-op if inactive)
+         */
+        if ( this.taskListPollIntervalHandle ) {
+            clearInterval( this.taskListPollIntervalHandle );
+            this.taskListPollIntervalHandle = null;
+            this.log( "Task list polling stopped" );
         }
     }
 
