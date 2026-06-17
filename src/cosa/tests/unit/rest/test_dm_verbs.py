@@ -35,16 +35,16 @@ class TestDmRespondRequest( unittest.TestCase ):
 
         # Missing both threading fields → invalid.
         with self.assertRaises( ValidationError ):
-            DmRespondRequest( asker_session_id="s", body="b", recipient_persona="María" )
+            DmRespondRequest( sender_session_id="s", body="b", recipient_persona="María" )
 
         # Empty reply_to (min_length=1) → invalid.
         with self.assertRaises( ValidationError ):
-            DmRespondRequest( asker_session_id="s", body="b", reply_to="", thread_id="t" )
+            DmRespondRequest( sender_session_id="s", body="b", reply_to="", thread_id="t" )
 
     def test_valid_respond_body_round_trips_fields( self ):
         from cosa.rest.routers.dm import DmRespondRequest
         req = DmRespondRequest(
-            asker_session_id = "asker-1",
+            sender_session_id = "asker-1",
             body             = "yes — commit f4e0370",
             reply_to         = "m-7",
             thread_id        = "th-7",
@@ -60,7 +60,7 @@ class TestDmRespondRequest( unittest.TestCase ):
 def _send_body( **overrides ):
     from cosa.rest.routers.dm import DmSendRequest
     fields = dict(
-        asker_session_id  = "asker-session-aaaa",
+        sender_session_id  = "asker-session-aaaa",
         body              = "ready for review",
         recipient_persona = "María",
         sender_persona    = "Clayton",

@@ -436,7 +436,7 @@ def _build_arbiter_outreach_hops( cfg, gateway ):   # pragma: no cover - literal
         dm_push_fn = make_dm_push_fn(
             base_url         = base_url,
             api_key          = api_key,
-            asker_session_id = "lupin-arbiter-app-8001",
+            sender_session_id = "lupin-arbiter-app-8001",
             timeout_seconds  = timeout,
         )
 
