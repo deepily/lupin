@@ -122,7 +122,10 @@ export type LupinEventType =
   | "store_prediction_vote_changed"
   // WP12 (F12): FleetStatusStore emits when a fleet-state poll resolves
   //   (success, unreachable, or error) or the live-only/offline toggle flips.
-  | "store_fleet_status_changed";
+  | "store_fleet_status_changed"
+  // Step 4 (task-list card): TaskListStore emits when a `/api/tasks` poll
+  //   resolves (success, unreachable, or 401).
+  | "store_task_list_changed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -599,6 +602,10 @@ export interface BootCompletePayload {
     ttsPreviewSliderRenderer?    : string;
     missedBadgeRenderer?         : string;
     fleetStatusRenderer?         : string;
+    // Step 4 (store-canonical task mgmt, 2026-06-16): literal "mounted" emitted
+    // after the task-list card mounts. Optional per the same forward/backward-
+    // compat pattern + runtime-unconditional in boot.ts.
+    taskListRenderer?            : string;
   };
 }
 
@@ -733,5 +740,13 @@ export interface StorePredictionVoteChangedPayload {
 // fetch (re-stamp the "updated HH:MM:SS" label) from a pure view re-render
 // (the toggle — must NOT claim fresh data).
 export interface StoreFleetStatusChangedPayload {
+  stampUpdated : boolean;
+}
+
+// Step 4 (task-list card) — TaskListStore. Emitted when a `/api/tasks` poll
+// resolves (success / unreachable / 401). `stampUpdated` re-stamps the
+// "updated HH:MM:SS" label; always true here (this store has no view-only
+// toggle), but the field mirrors the fleet-status payload shape for symmetry.
+export interface StoreTaskListChangedPayload {
   stampUpdated : boolean;
 }

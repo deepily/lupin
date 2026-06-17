@@ -97,6 +97,12 @@ export {
   type FleetStatusRendererOptions,
   type FleetStoreLike,
 } from "./FleetStatusRenderer";
+export {
+  createTaskListRenderer,
+  type TaskListRenderer,
+  type TaskListRendererOptions,
+  type TaskListStoreLike,
+} from "./TaskListRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";

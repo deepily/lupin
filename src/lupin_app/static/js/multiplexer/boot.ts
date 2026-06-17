@@ -47,6 +47,7 @@ import {
   createTtsPreviewSliderRenderer,
   createMissedBadgeRenderer,
   createFleetStatusRenderer,
+  createTaskListRenderer,
   type TtsPreviewSliderRenderer,
 } from "./render";
 import { DEFAULT_TTS_FRACTION } from "./render/TtsPreviewSliderRenderer";
@@ -478,6 +479,18 @@ function bootMultiplexer(): void {
   fleetStatusRenderer.mount(fleetStatusMountEl);
   stores.fleetStatus.startPolling();
 
+  // Step 4 (store-canonical task mgmt) — read-only Task-List card. Same
+  // autonomous-timer pattern as fleet-status: startPolling() AFTER mount, OFF
+  // the WS transports; it polls /api/tasks on its own 60s timer.
+  const taskListRenderer = createTaskListRenderer({
+    eventBus,
+    stores : { taskList: stores.taskList },
+  });
+  const taskListMountEl = document.getElementById("task-list-pane");
+  if (taskListMountEl === null) throw new Error("multiplexer: #task-list-pane not found");
+  taskListRenderer.mount(taskListMountEl);
+  stores.taskList.startPolling();
+
   // Lane E WP14 — prediction-hint vote: the PredictionVoteStore is wired into
   // createStores(); the vote CONTROLS template (predictionVoteControls) is
   // invoked by the notification-item render path (NotificationsListRenderer),
@@ -518,6 +531,7 @@ function bootMultiplexer(): void {
       ttsPreviewSliderRenderer    : "mounted",
       missedBadgeRenderer         : "mounted",
       fleetStatusRenderer         : "mounted",
+      taskListRenderer            : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -543,6 +557,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] ttsPreviewSliderRenderer:mounted");
   console.log("[multiplexer] missedBadgeRenderer:mounted");
   console.log("[multiplexer] fleetStatusRenderer:mounted");
+  console.log("[multiplexer] taskListRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

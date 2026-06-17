@@ -30,6 +30,7 @@
     <link rel="stylesheet" href="/static/css/multiplexer/missed-badge.css">
     <link rel="stylesheet" href="/static/css/multiplexer/prediction-vote.css">
     <link rel="stylesheet" href="/static/css/multiplexer/fleet-status.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/task-list.css">
 >>>>>>> wt-mux-laneE
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
@@ -177,6 +178,13 @@
              auto-polls /api/arbiter/fleet-state every 60s. -->
         <section id="fleet-status-pane"
                  data-testid="multiplexer-fleet-status-pane"></section>
+
+        <!-- Step 4 mount point (store-canonical task mgmt): read-only Task-List
+             card (below Fleet-Status). TaskListRenderer builds its own chrome
+             (title · count · ⟳ refresh · updated stamp · container) here and
+             auto-polls /api/tasks every 60s. -->
+        <section id="task-list-pane"
+                 data-testid="multiplexer-task-list-pane"></section>
 
         <!-- Phase 6c Node B mount point (Step B1): focus-tray container.
              FocusTrayRenderer populates this with .focus-tray-row buttons

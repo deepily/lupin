@@ -53,6 +53,8 @@ import type { PredictionVoteStore } from "./PredictionVoteStore";
 import { createPredictionVoteStore } from "./PredictionVoteStore";
 import type { FleetStatusStore, FleetApiClient } from "./FleetStatusStore";
 import { createFleetStatusStore } from "./FleetStatusStore";
+import type { TaskListStore } from "./TaskListStore";
+import { createTaskListStore } from "./TaskListStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -79,6 +81,7 @@ export interface StoreSet {
   missed         : MissedStore;
   predictionVote : PredictionVoteStore;
   fleetStatus    : FleetStatusStore;
+  taskList       : TaskListStore;
 }
 
 export interface CreateStoresOptions {
@@ -133,8 +136,9 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const missed         = createMissedStore        ({ bus: opts.eventBus, api: opts.api });
   const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
   const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
+  const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -180,4 +184,6 @@ export type {
 export { createPredictionVoteStore } from "./PredictionVoteStore";
 export type { FleetStatusStore, FleetStatusStoreOptions, FleetApiClient } from "./FleetStatusStore";
 export { createFleetStatusStore } from "./FleetStatusStore";
+export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
+export { createTaskListStore } from "./TaskListStore";
 /* c8 ignore stop */
