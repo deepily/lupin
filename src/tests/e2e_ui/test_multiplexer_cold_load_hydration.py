@@ -251,3 +251,109 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
 
     empty_state = page.locator( '[data-testid="multiplexer-empty-state"]' ).count()
     assert empty_state == 0, "empty-state placeholder must be gone once hydration paints cards"
+
+
+# ---------------------------------------------------------------------------
+# 3 — FAIL-LOUD boot contract: zero 4xx on load + Jobs pane really hydrates
+# ---------------------------------------------------------------------------
+#
+# Closes the SAME 404 false-pass class the unit contract test
+# (src/tests/unit/test_multiplexer_api_contract.py) attacks at the API layer —
+# here at the live-boot layer. The historical JobStore bug
+# (`/api/queue/job-history` → 404) slipped EVERY tier because:
+#   GAP 1  JobsPaneRenderer.ts:169 `hydrateHistory(api).catch()` SWALLOWS the
+#          rejection — the page boots, "page-loads" e2e stays green.
+#   GAP 3  the boot e2e had no no-4xx / no-console-error assertion and no
+#          positive "Jobs pane actually hydrated" assertion.
+# This test adds BOTH guards, so a swallowed boot-time 4xx can no longer hide.
+#
+# >>> VENUE / RUN STATUS: NOT YET RUN. Requires the :8000 test server in
+# >>> monopolize mode (live backend + real `/api/job-history` data), scheduled
+# >>> via POST /api/test-suite/submit in the `test_multiplexer_*` E2E batch.
+# >>> The reviewing manager owns that scheduled run; this spec is written,
+# >>> compile-clean, and held — it has NOT been executed here. <<<
+
+def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
+    """
+    Ensures (live boot, real backend):
+        - NO response with a 4xx status is observed for any request issued
+          during the `/app/multiplexer` cold load. A swallowed JobStore 404
+          (or any sibling client-URL typo) shows up HERE even though the
+          renderer's `.catch()` keeps the page booting.
+        - the Jobs pane genuinely HYDRATES: `JobStore.isHistoryHydrated()` is
+          true AND the history bucket holds real rows — proving the
+          `/api/job-history` round-trip resolved and populated the store, not
+          that an empty error-catch left the pane blank.
+        - DOM corroboration: the jobs-pane mounts and renders `.job-card`
+          elements for the hydrated rows (defeats the store-only false-pass).
+
+    Pre-fix bundle (JobStore calling `/api/queue/job-history`): FAILS here —
+    the boot 4xx is observed AND the history bucket stays empty / not hydrated.
+    Post-fix bundle: PASSES.
+
+    Requires:
+        - live :8000 server with at least one terminal job in /api/job-history
+          for the test user (the E2E batch seeds queue history upstream).
+
+    Ensures:
+        - fail-loud assertions on both the negative (no 4xx) and positive
+          (store hydrated with rows) sides of the contract.
+    """
+    access, refresh, _email = _login_tokens()
+
+    # Capture every response status seen during the load. page.on("response")
+    # fires for the document, every XHR/fetch, and every static asset — exactly
+    # the surface a swallowed client-URL 404 would otherwise hide in.
+    bad_responses: list[ dict ] = []
+
+    def _record_response( response ):
+        status = response.status
+        if 400 <= status <= 499:
+            bad_responses.append( { "url": response.url, "status": status } )
+
+    page.on( "response", _record_response )
+
+    # Cold load against the REAL hydration path (no route stubs).
+    _open( page, access, refresh, stub_routes=False )
+
+    # Let the floated hydrateHistory promise settle (it is fire-and-forget off
+    # the renderer mount, so wait on the store's own hydration flag rather than
+    # a fixed sleep). The hook exposes the live store map.
+    page.wait_for_function(
+        "() => window.__multiplexerTestHook?.stores?.jobs?.isHistoryHydrated?.() === true",
+        timeout=15_000,
+    )
+
+    # --- Negative side: zero 4xx during the entire boot ---------------------
+    assert not bad_responses, (
+        "boot issued request(s) that returned 4xx — a swallowed client-URL "
+        "error (the JobStore 404 class):\n"
+        + "\n".join( f"  {r['status']}  {r['url']}" for r in bad_responses )
+    )
+
+    # --- Positive side: the Jobs pane really hydrated -----------------------
+    hydration = page.evaluate(
+        """() => {
+            const jobs = window.__multiplexerTestHook.stores.jobs;
+            return {
+                hydrated   : jobs.isHistoryHydrated(),
+                history_n  : jobs.bucket( "history" ).length,
+            };
+        }"""
+    )
+    assert hydration[ "hydrated" ] is True, (
+        "JobStore.isHistoryHydrated() must be true after boot — a swallowed "
+        "/api/job-history failure leaves this false while the page still boots"
+    )
+    assert hydration[ "history_n" ] >= 1, (
+        "the history bucket must hold real rows from /api/job-history "
+        f"(swallowed-empty-catch repro is 0); got { hydration['history_n'] }"
+    )
+
+    # --- DOM corroboration: hydrated rows actually paint --------------------
+    page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', timeout=10_000 )
+    card_count = page.locator( "#jobs-buckets-container .job-card" ).count()
+    assert card_count >= 1, (
+        "the jobs-pane must render .job-card elements for hydrated history "
+        f"rows (store reported { hydration['history_n'] } rows); got { card_count }"
+    )
