@@ -3093,7 +3093,7 @@ def _dm_send_impl(
                  "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/send" }
 
     payload = {
-        "asker_session_id" : session_id,
+        "sender_session_id" : session_id,
         "body"             : body,
         "sender_persona"   : sender_persona,
         "sender_icon"      : sender_icon,
@@ -3231,7 +3231,7 @@ def _dm_respond_impl(
                  "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/respond" }
 
     payload = {
-        "asker_session_id" : session_id,
+        "sender_session_id" : session_id,
         "body"             : body,
         "sender_persona"   : sender_persona,
         "sender_icon"      : sender_icon,
