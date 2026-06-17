@@ -155,10 +155,13 @@ class JobStoreImpl implements JobStore {
   async hydrateHistory(api: JobHistoryApiClient): Promise<void> {
     if (this.historyHydrated) return;
 
-    // /api/queue/job-history is mounted under the `/api/queue` router prefix.
-    // Phase 4 scope: fetch the first page (default limit=20). Phase 5+
-    // renderer can request more via paged calls.
-    const resp = await api.get<JobHistoryResponse>("/api/queue/job-history?limit=100");
+    // /api/job-history is mounted under the queues router, which uses the `/api`
+    // prefix (queues.py) — matches the legacy client (notifications.js). It is NOT
+    // `/api/queue/...`: that prefix is reserved for per-queue item ops, e.g.
+    // /api/queue/{queueName}/{jobId}. The endpoint accepts limit 1-100.
+    // Phase 4 scope: fetch the first page. Phase 5+ renderer can request more
+    // via paged calls.
+    const resp = await api.get<JobHistoryResponse>("/api/job-history?limit=100");
 
     const inSessionIds = new Set(this.buckets.history.map(j => j.id_hash));
     for (const raw of resp.jobs) {
@@ -338,7 +341,7 @@ class JobStoreImpl implements JobStore {
     });
   }
 
-  // Normalize a job-history row from /api/queue/job-history into a Job.
+  // Normalize a job-history row from /api/job-history into a Job.
   // Server response shape is loose; we extract the canonical fields and keep
   // the rest in `meta` for renderer access.
   /* c8 ignore start */ // Server-shape variation handling: this normalizer accepts multiple id keys (id_hash / job_id / id), multiple state keys (status / state), and three timestamp encodings (number / ISO string / undefined). Production server emits one canonical shape per release; the multi-key tolerance exists for cross-version robustness during rolling upgrades. Test fixtures cover the canonical shape; the alternate-key branches are exercised only against alternate-version servers.
