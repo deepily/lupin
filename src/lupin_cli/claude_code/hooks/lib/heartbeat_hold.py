@@ -65,6 +65,32 @@ def _resolve_base_dir( base_dir ):
     return Path( cu.get_project_root() )
 
 
+def resolve_hold_base_dir( cwd=None ):
+    """
+    Per-SESSION base dir for `.heartbeat-hold-*.json` artifacts (c121037b facet 3).
+
+    The hold lives in the session's OWN project root (runtime-state family with
+    .claude-session.md). Resolving it from the hardwired LUPIN_ROOT
+    (cu.get_project_root) made every NON-lupin session's hold land under lupin —
+    invisible to that session's own Stop-hook reads. The Stop hook now threads its
+    payload `cwd` (the session's actual working dir = where the poked agent writes
+    its hold) so the hold resolves per-session.
+
+    Requires:
+        - cwd is a path-like / string / None (the Stop-hook payload's cwd)
+
+    Ensures:
+        - Truthy cwd → Path( cwd )  (the session's own root — per-session)
+        - Falsy/None cwd → cu.get_project_root()  (LUPIN_ROOT fallback; the
+          test seam patches cu.get_project_root for isolation)
+        - Never raises
+    """
+    if cwd:
+        return Path( cwd )
+    import cosa.utils.util as cu
+    return Path( cu.get_project_root() )
+
+
 def hold_path( session_id, base_dir=None ):
     """
     Compute the per-session hold-file path.
@@ -161,6 +187,44 @@ def write_hold( session_id, persona, reason, work_owed=True,
     return hold
 
 
+def _read_hold_path( session_id, base_dir=None ):
+    """
+    Resolve which hold file `read_hold` should read — exact id first, else a
+    hold whose filename shares this session's 8-char id prefix (c121037b facet 2).
+
+    An agent that WRITES a hold may use the SHORT bridge id (get_session_info
+    hands it the 8-char form) while the Stop hook reads with the FULL stable id;
+    without this fallback that hold is silently ignored and the session is poked
+    forever despite having declared a hold.
+
+    Requires:
+        - session_id is a string (may be empty)
+        - base_dir is a path-like / string / None
+
+    Ensures:
+        - Returns the exact <base>/.heartbeat-hold-<session_id>.json when present
+        - Else, for a non-empty session_id, returns the hold file whose id-suffix
+          shares session_id[:8] (ignoring `.tmp` atomic-write artifacts); on
+          multiple id-form matches, prefers the longest suffix (a full hyphenated
+          id over a short 8-char form), then lexical — deterministic, clock-free
+        - Else returns the exact path (which read_hold treats as absent)
+        - Never raises (glob OSError → the exact path)
+    """
+    exact = hold_path( session_id, base_dir=base_dir )
+    if exact.exists() or not session_id:
+        return exact
+    prefix  = session_id[ :8 ]
+    pattern = HOLD_FILENAME_TEMPLATE.format( session_id=prefix + "*" )
+    try:
+        matches = [ p for p in _resolve_base_dir( base_dir ).glob( pattern )
+                    if not p.name.endswith( ".tmp" ) ]
+    except OSError:
+        return exact
+    if not matches:
+        return exact
+    return sorted( matches, key=lambda p: ( len( p.name ), p.name ), reverse=True )[ 0 ]
+
+
 def read_hold( session_id, base_dir=None ):
     """
     Read this session's hold artifact.
@@ -170,11 +234,13 @@ def read_hold( session_id, base_dir=None ):
 
     Ensures:
         - Returns the hold dict if the file exists and parses to a JSON object
-        - Returns None if the file is absent, unreadable, malformed, or
-          parses to a non-object JSON value
+        - Falls back across short/full id forms when the exact file is absent
+          (c121037b facet 2 — see _read_hold_path)
+        - Returns None if no hold is found, unreadable, malformed, or parses to a
+          non-object JSON value
         - Never raises
     """
-    path = hold_path( session_id, base_dir=base_dir )
+    path = _read_hold_path( session_id, base_dir=base_dir )
     try:
         if not path.exists():
             return None

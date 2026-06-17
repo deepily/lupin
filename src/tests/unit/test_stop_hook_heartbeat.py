@@ -726,10 +726,13 @@ class TestMainBranchCWiring:
         mock_read.return_value = {
             "stop_hook_active": False, "session_id": "abc12345",
             "transcript_path": "/home/u/.claude/projects/p/abc.jsonl",
+            "cwd": "/home/u/some/other-project",     # c121037b facet 3: threaded per-session
         }
         main()
         mock_emit.assert_called_once_with( { "decision": "block", "reason": "poke!" } )
-        mock_hb.assert_called_once_with( "abc12345", "/home/u/.claude/projects/p/abc.jsonl" )
+        # transcript_path AND cwd (Stop payload) are both threaded into _run_heartbeat.
+        mock_hb.assert_called_once_with( "abc12345", "/home/u/.claude/projects/p/abc.jsonl",
+                                         "/home/u/some/other-project" )
         mock_idle.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
@@ -748,9 +751,9 @@ class TestMainBranchCWiring:
                                             mock_sp, mock_drain, mock_emit, mock_reset,
                                             mock_hb, mock_idle, mock_arm, mock_behavior ):
         """Idle behavior 'ask' + no poke + idle enabled → arm the deferred waiter, allow stop."""
-        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }   # no transcript_path key
+        mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }   # no transcript_path/cwd keys
         main()
-        mock_hb.assert_called_once_with( "abc12345", None )   # missing key → None threaded
+        mock_hb.assert_called_once_with( "abc12345", None, None )   # missing keys → None threaded (transcript, cwd)
         mock_arm.assert_called_once()
         mock_emit.assert_called_once_with( {} )
 
@@ -802,11 +805,12 @@ class TestMainSpeakerphonePokeMatrix:
         the POKE FIRES — emit the block dict, return (heartbeat owns the stop),
         skip the idle announce. Pre-split this was unreachable."""
         payload = { "stop_hook_active": False, "session_id": "abc12345",
-                    "transcript_path": "/t.jsonl" }
+                    "transcript_path": "/t.jsonl", "cwd": "/work/proj" }
         stack, m = self._patches( payload=payload, heartbeat_output=dict( self._POKE ) )
         with stack:
             main()   # returns (no sys.exit) — the poke path mirrors Branch C
-            m[ "heartbeat" ].assert_called_once_with( "abc12345", "/t.jsonl" )
+            # c121037b facet 3: cwd is threaded on the speakerphone poke path too.
+            m[ "heartbeat" ].assert_called_once_with( "abc12345", "/t.jsonl", "/work/proj" )
             m[ "emit" ].assert_called_once_with( self._POKE )
             m[ "announce_idle" ].assert_not_called()
             # the split is observable in the log stream
@@ -827,7 +831,7 @@ class TestMainSpeakerphonePokeMatrix:
         with stack:
             with pytest.raises( SystemExit ):
                 main()
-            m[ "heartbeat" ].assert_called_once_with( "abc12345", None )
+            m[ "heartbeat" ].assert_called_once_with( "abc12345", None, None )   # no transcript/cwd keys
             m[ "announce_idle" ].assert_called_once_with( "abc12345", "Rachel" )
             m[ "emit" ].assert_called_once_with( {} )
 

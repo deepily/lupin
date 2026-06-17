@@ -489,7 +489,7 @@ class TestConversationModeGate:
         # §3 regression flip: the heartbeat DOES run for speakerphone sessions
         # (this exact assertion was impossible pre-split — the :990 early-exit
         # bailed before the poke; see the 2026.06.09 brief §2)
-        mock_hb.assert_called_once_with( "abc12345", None )
+        mock_hb.assert_called_once_with( "abc12345", None, None )
         # The interactive side effects MUST NOT fire
         mock_drain.assert_not_called()
         mock_notify.assert_not_called()

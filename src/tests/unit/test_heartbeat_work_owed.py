@@ -263,3 +263,49 @@ def test_partition_preserves_order_within_buckets():
     fresh, stale = o.partition_inbound_by_age( items, _NOW )
     assert [ e[ "question_id" ] for e in fresh ] == [ "a", "c" ]
     assert [ e[ "question_id" ] for e in stale ] == [ "b", "d" ]
+
+
+# ── is_heartbeat_poke_prompt — c121037b facet 1 (self-poke vs user re-engagement) ─
+#
+# The self-poke rides the Stop-hook `reason` field and is re-submitted as a prompt
+# via tmux send-keys; UserPromptSubmit must recognize it so it does NOT reset the
+# poke-cap on the heartbeat's OWN poke (that reset every turn was the FM that
+# defeated the cap — poke_count stuck at 1 across 23 pokes). Both poke reasons open
+# with POKE_PROMPT_SENTINEL.
+
+def test_sentinel_prefixes_both_poke_reasons():
+    """One-name rule: the oracle-owed AND self-declared reasons both open with it."""
+    from lupin_cli.claude_code.hooks.lib.heartbeat_decision import DECLARED_OWED_REASON
+    owed_reason = o.build_poke_reason(
+        o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] ) )
+    assert owed_reason.startswith( o.POKE_PROMPT_SENTINEL )
+    assert DECLARED_OWED_REASON.startswith( o.POKE_PROMPT_SENTINEL )
+
+
+def test_detects_oracle_owed_poke_reason():
+    reason = o.build_poke_reason(
+        o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] ) )
+    assert o.is_heartbeat_poke_prompt( reason ) is True
+
+
+def test_detects_declared_owed_poke_reason():
+    from lupin_cli.claude_code.hooks.lib.heartbeat_decision import DECLARED_OWED_REASON
+    assert o.is_heartbeat_poke_prompt( DECLARED_OWED_REASON ) is True
+
+
+def test_detects_poke_with_leading_whitespace():
+    # tmux/console may prepend whitespace; lstrip before the prefix match.
+    assert o.is_heartbeat_poke_prompt( "\n  " + o.POKE_PROMPT_SENTINEL + " (x) and no fresh hold." ) is True
+
+
+def test_genuine_user_prompt_is_not_a_poke():
+    assert o.is_heartbeat_poke_prompt( "please fix the failing test" ) is False
+    assert o.is_heartbeat_poke_prompt( "Do not stop — but this is the user talking" ) is False
+
+
+def test_non_string_and_empty_are_not_pokes():
+    assert o.is_heartbeat_poke_prompt( None )      is False
+    assert o.is_heartbeat_poke_prompt( "" )        is False
+    assert o.is_heartbeat_poke_prompt( "   " )     is False
+    assert o.is_heartbeat_poke_prompt( 12345 )     is False   # non-string foreign payload
+    assert o.is_heartbeat_poke_prompt( [ "x" ] )   is False

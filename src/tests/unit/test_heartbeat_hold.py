@@ -247,6 +247,97 @@ def test_declared_work_owed_non_bool_returns_none():
     assert hh.declared_work_owed( hold ) is None
 
 
+# ── _read_hold_path — c121037b facet 2 (short/full id-form fallback) ──────────
+#
+# An agent told to "write .heartbeat-hold-<session_id>.json" may use the SHORT
+# 8-char id (get_session_info hands it that form) while the Stop hook reads with
+# the FULL stable id. Without the fallback the hold is silently ignored and the
+# session is poked forever despite having declared a hold.
+
+_FULL  = "f6292818-1e6d-4a90-8079-37fea46b6db2"
+_SHORT = "f6292818"
+
+
+def test_read_hold_exact_match_takes_precedence( tmp_path ):
+    written = hh.write_hold( _FULL, "P", "exact wins", base_dir=tmp_path )
+    assert hh.read_hold( _FULL, base_dir=tmp_path ) == written          # exact path, no glob
+
+
+def test_read_hold_full_id_finds_hold_written_at_short_id( tmp_path ):
+    """The live FM: agent wrote at the SHORT id, hook reads at the FULL id."""
+    written = hh.write_hold( _SHORT, "P", "short-id hold", awaiting="peer:tiffany", base_dir=tmp_path )
+    got = hh.read_hold( _FULL, base_dir=tmp_path )
+    assert got == written
+    assert got[ "awaiting" ] == "peer:tiffany"
+
+
+def test_read_hold_short_id_finds_hold_written_at_full_id( tmp_path ):
+    """Symmetric: hook reads at the SHORT id, hold was written at the FULL id."""
+    written = hh.write_hold( _FULL, "P", "full-id hold", base_dir=tmp_path )
+    assert hh.read_hold( _SHORT, base_dir=tmp_path ) == written
+
+
+def test_read_hold_no_prefix_match_returns_none( tmp_path ):
+    hh.write_hold( "aaaaaaaa-1111", "P", "other session", base_dir=tmp_path )
+    assert hh.read_hold( "bbbbbbbb-2222", base_dir=tmp_path ) is None    # different 8-char prefix
+
+
+def test_read_hold_empty_session_id_no_fallback( tmp_path ):
+    # `not session_id` short-circuits the fallback (no bare-prefix glob).
+    assert hh.read_hold( "", base_dir=tmp_path ) is None
+
+
+def test_read_hold_fallback_ignores_tmp_artifact( tmp_path ):
+    # A half-written atomic-write `.tmp` sharing the prefix must be ignored.
+    ( tmp_path / f".heartbeat-hold-{_SHORT}.json.tmp" ).write_text( '{"reason": "partial"}' )
+    assert hh.read_hold( _FULL, base_dir=tmp_path ) is None             # only the .tmp shares the prefix
+
+
+def test_read_hold_fallback_prefers_longest_suffix( tmp_path ):
+    """Multiple id-form matches → the FULL hyphenated id wins over the short one."""
+    hh.write_hold( _SHORT, "P", "short form", base_dir=tmp_path )
+    full_hold = hh.write_hold( _FULL, "P", "full form", base_dir=tmp_path )
+    # Reading at a THIRD prefix-sharing id must resolve to the longest-suffix file.
+    got = hh.read_hold( "f6292818-9999", base_dir=tmp_path )
+    assert got == full_hold and got[ "reason" ] == "full form"
+
+
+def test_read_hold_fallback_glob_oserror_returns_none( tmp_path, monkeypatch ):
+    """Defensive: a glob OSError during fallback → treat as absent (exact path → None)."""
+    from pathlib import Path
+    def _boom( self, pattern ):
+        raise OSError( "glob blew up" )
+    monkeypatch.setattr( Path, "glob", _boom )
+    assert hh.read_hold( "ffffffff-1111-2222", base_dir=tmp_path ) is None
+
+
+# ── resolve_hold_base_dir — c121037b facet 3 (per-session base, not LUPIN_ROOT) ─
+
+def test_resolve_hold_base_dir_uses_cwd_when_given( tmp_path ):
+    """A truthy cwd (the Stop payload's working dir) → that dir, per-session."""
+    assert hh.resolve_hold_base_dir( str( tmp_path ) ) == tmp_path
+    assert hh.resolve_hold_base_dir( tmp_path ) == tmp_path             # path-like accepted
+
+
+def test_resolve_hold_base_dir_non_lupin_session_isolated( tmp_path ):
+    """A NON-lupin session's hold resolves to ITS root, not the lupin root."""
+    other_project = tmp_path / "some-other-repo"
+    other_project.mkdir()
+    base = hh.resolve_hold_base_dir( str( other_project ) )
+    assert base == other_project
+    # And a hold written there is read back from there (round-trip via the base).
+    written = hh.write_hold( "s9", "P", "non-lupin hold", base_dir=base )
+    assert hh.read_hold( "s9", base_dir=base ) == written
+
+
+def test_resolve_hold_base_dir_none_falls_back_to_project_root( monkeypatch, tmp_path ):
+    """Falsy/None cwd → cu.get_project_root() (the LUPIN_ROOT fallback seam)."""
+    import cosa.utils.util as cu
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path ) )
+    assert hh.resolve_hold_base_dir( None ) == tmp_path
+    assert hh.resolve_hold_base_dir( "" )   == tmp_path                 # empty string is falsy
+
+
 # ── quick_smoke_test ──────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():
