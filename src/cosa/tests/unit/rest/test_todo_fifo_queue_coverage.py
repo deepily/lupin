@@ -28,6 +28,7 @@ from unittest.mock import Mock, MagicMock, patch
 
 import cosa.rest.todo_fifo_queue as tfq
 from cosa.rest.todo_fifo_queue import TodoFifoQueue, MODE_TO_AGENT, AGENTIC_MODE_MAP
+from cosa.rest.queue_protocol import QueueableJob
 
 
 # Default config values used across push_job
@@ -604,7 +605,11 @@ class TestQueueOverrides( _TFQBase ):
 
     def _job( self ):
         from cosa.rest.job_state import JobState
-        j = Mock()
+        # spec=QueueableJob so the double satisfies push()'s hardened
+        # is_queueable_job() guard (bare Mock() fails the runtime_checkable
+        # data-member check under py3.12+); all attrs below are SET (not access-set),
+        # incl. the non-protocol original_args, which remains settable under spec.
+        j = Mock( spec=QueueableJob )
         j.id_hash            = "j1"
         j.user_id            = "u1"
         j.last_question_asked = "q?"

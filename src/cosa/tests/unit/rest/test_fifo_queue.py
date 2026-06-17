@@ -29,6 +29,7 @@ from unit_test_utilities import UnitTestUtilities
 
 # Import the module under test
 from cosa.rest.fifo_queue import FifoQueue
+from cosa.rest.queue_protocol import QueueableJob
 
 
 class TestFifoQueue( unittest.TestCase ):
@@ -57,18 +58,24 @@ class TestFifoQueue( unittest.TestCase ):
         self.mock_manager = MockManager()
         self.test_utilities = UnitTestUtilities()
         
-        # Common test data (jobs need id_hash attribute)
-        self.test_job = Mock()
+        # Common test data (jobs need id_hash attribute). spec=QueueableJob so the
+        # doubles satisfy FifoQueue.push()'s hardened is_queueable_job() protocol
+        # guard (a bare Mock() fails the runtime_checkable data-member check under
+        # py3.12+); extra non-protocol attrs (task, get_html) remain settable.
+        self.test_job = Mock( spec=QueueableJob )
         self.test_job.id_hash = "job1_hash"
         self.test_job.user_id = "user123"
         self.test_job.task = "test_task"
-        self.test_job.get_html.return_value = "<div>Test Job 1</div>"
+        # assign get_html as a whole Mock (not .get_html.return_value access-set) —
+        # get_html is not a QueueableJob member, so under spec= it must be SET, not
+        # auto-vivified via attribute access.
+        self.test_job.get_html = Mock( return_value="<div>Test Job 1</div>" )
         
-        self.test_job2 = Mock()
+        self.test_job2 = Mock( spec=QueueableJob )
         self.test_job2.id_hash = "job2_hash"
         self.test_job2.user_id = "user456"
         self.test_job2.task = "another_task"
-        self.test_job2.get_html.return_value = "<div>Test Job 2</div>"
+        self.test_job2.get_html = Mock( return_value="<div>Test Job 2</div>" )
         
         self.test_user_id = "test_user_123"
     
@@ -200,7 +207,7 @@ class TestFifoQueue( unittest.TestCase ):
         """
         queue, mocks = self._create_mocked_fifo_queue()
         
-        job1, job2, job3 = Mock(), Mock(), Mock()
+        job1, job2, job3 = Mock( spec=QueueableJob ), Mock( spec=QueueableJob ), Mock( spec=QueueableJob )
         job1.id_hash, job1.task = "job1_hash", "first"
         job2.id_hash, job2.task = "job2_hash", "second"
         job3.id_hash, job3.task = "job3_hash", "third"
@@ -268,7 +275,7 @@ class TestFifoQueue( unittest.TestCase ):
         """
         queue, mocks = self._create_mocked_fifo_queue()
         
-        job1, job2, job3 = Mock(), Mock(), Mock()
+        job1, job2, job3 = Mock( spec=QueueableJob ), Mock( spec=QueueableJob ), Mock( spec=QueueableJob )
         job1.id_hash, job1.task = "job1_hash", "first"
         job2.id_hash, job2.task = "job2_hash", "second"
         job3.id_hash, job3.task = "job3_hash", "third"
