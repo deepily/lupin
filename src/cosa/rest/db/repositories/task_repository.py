@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Optional, List
 import uuid
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
@@ -343,6 +344,46 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
 
         return query.order_by( TaskItem.created_ts.desc(), TaskItem.id ).limit( limit ).offset( offset ).all()
+
+    def count_tasks(
+        self,
+        owner_persona       : Optional[str] = None,
+        status              : Optional[str] = None,
+        gate_class          : Optional[str] = None,
+        accountable_manager : Optional[str] = None,
+        project             : Optional[str] = None,
+        item_class          : Optional[str] = None,
+        correlation_key     : Optional[str] = None,
+    ) -> int:
+        """
+        True COUNT(*) over the SAME filter set as query_tasks — no row materialization.
+
+        The O2 token win (cascade review §G): the owed-count callers (the Stop-hook
+        store-count seam) need a CARDINALITY, not the rows. query_tasks caps at
+        limit<=500 and the endpoint reports len(page) as its "count" — a page-length
+        that SATURATES once the true total exceeds the page size, so a session with
+        >100 owed rows would read exactly 100. This computes the genuine total via a
+        SQL COUNT(*) with identical AND-semantics filters, independent of any page
+        bound (and without serializing a single row).
+
+        Requires:
+            - each filter is either None (no constraint) or an exact-match value
+
+        Ensures:
+            - returns the integer count of items matching ALL provided filters
+            - no ORDER BY / LIMIT / OFFSET — a count is order- and page-independent
+        """
+        query = self.session.query( func.count( TaskItem.id ) )
+
+        if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
+        if status is not None:              query = query.filter( TaskItem.status == status )
+        if gate_class is not None:          query = query.filter( TaskItem.gate_class == gate_class )
+        if accountable_manager is not None: query = query.filter( TaskItem.accountable_manager == accountable_manager )
+        if project is not None:             query = query.filter( TaskItem.project == project )
+        if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
+        if correlation_key is not None:     query = query.filter( TaskItem.correlation_key == correlation_key )
+
+        return query.scalar()
 
     def get_events( self, item_id: uuid.UUID ) -> List[TaskEvent]:
         """

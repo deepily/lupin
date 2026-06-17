@@ -240,6 +240,55 @@ def test_query_tasks_filter_combinations( repo, session, kwargs, expected_filter
 
 
 # ---------------------------------------------------------------------------
+# count_tasks (O2 / §G — true COUNT(*), no row materialization)
+# ---------------------------------------------------------------------------
+
+def test_count_tasks_no_filters_returns_scalar_no_pagination( repo, session ):
+    query = session.query.return_value
+    query.scalar.return_value = 273                            # >100: no page saturation
+    result = repo.count_tasks()
+    assert result == 273
+    query.filter.assert_not_called()
+    query.scalar.assert_called_once()
+    # a count is order- and page-independent — never ordered/limited/offset
+    query.order_by.assert_not_called()
+    query.limit.assert_not_called()
+    query.offset.assert_not_called()
+
+
+def test_count_tasks_applies_every_provided_filter( repo, session ):
+    query = session.query.return_value
+    query.scalar.return_value = 0
+    repo.count_tasks(
+        owner_persona       = "krishna",
+        status              = "in_progress",
+        gate_class          = "ricks_court",
+        accountable_manager = "tiberius",
+        project             = "lupin",
+        item_class          = "task",
+        correlation_key     = "cc-task:sid:5",
+    )
+    assert query.filter.call_count == 7                       # one per provided filter, AND semantics
+
+
+@pytest.mark.parametrize( "kwargs, expected_filters", [
+    ( { "owner_persona": "krishna" }, 1 ),
+    ( { "status": "queued" }, 1 ),
+    ( { "gate_class": "manager" }, 1 ),
+    ( { "accountable_manager": "tiberius" }, 1 ),
+    ( { "project": "lupin" }, 1 ),
+    ( { "item_class": "bug" }, 1 ),
+    ( { "correlation_key": "cc-task:sid:5" }, 1 ),
+    ( { "owner_persona": "krishna", "status": "queued" }, 2 ),
+] )
+def test_count_tasks_filter_combinations( repo, session, kwargs, expected_filters ):
+    query = session.query.return_value
+    query.scalar.return_value = 0
+    repo.count_tasks( **kwargs )
+    assert query.filter.call_count == expected_filters
+
+
+# ---------------------------------------------------------------------------
 # get_by_id_for_update (cold-review N3 — the transition row lock)
 # ---------------------------------------------------------------------------
 

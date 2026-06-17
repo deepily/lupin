@@ -1344,33 +1344,18 @@ def _run_heartbeat( session_id, transcript_path ):
     # the genuine-idle empty-set signal from the single state (the Stop hook
     # fires every turn — halves the per-Stop transcript reads).
     task_state = replay_task_state( transcript_path )
-    # ── Spine Step-2 (flag-gated) — owed-items SOURCE ──────────────────────────
-    # DEFAULT = the transcript-replay path (owed_items_from_state below). When
-    # heartbeat.owed_source_from_store is on, the owed COUNT comes from the
-    # unified task store instead (the session's OWN rows). §B: ONLY this source
-    # swaps — task_state is still replayed ABOVE and feeds the genuine-idle
-    # beacon + poke abstract unchanged, and the delegations + inbound signals
-    # below are untouched. §C: a store that is unreachable / slow / malformed
-    # FAILS SAFE — do NOT poke + a distinct quiet hot-path log phase;
-    # replay_task_state stays the degraded fallback behind the flag (flip it
-    # back to restore the old source instantly — §A rollback). NOT deleted.
-    if settings[ "owed_source_from_store" ]:
-        store_count, store_ok = _owed_count_from_store( session_id )
-        if not store_ok:
-            log_to_stream( "stop", {}, extra={
-                "phase"      : "heartbeat_store_unreachable",
-                "session_id" : session_id,
-            } )
-            return None
-        owed_items = _synthesize_owed_items( store_count )
-    else:
-        owed_items = owed_items_from_state( task_state )
+    # ── O1 (cascade review O1) — LOCAL, store-INDEPENDENT signals gathered FIRST ─
     # v3 (Rick 2026-06-09): feed the two live signals the oracle defined but
     # production never populated — (a) MANAGER: alive un-reaped spawned workers
     # (a supervising manager owes review/reap even with zero Task* items, so it
     # must never idle-announce while workers are out); (b) WORKER: open inbound
     # assignment DMs not yet answered with a threaded reply. Both gatherers are
     # degrade-safe IO shells (any error ⇒ [] ⇒ signal silent, never block).
+    # These are filesystem / bridge reads (NO :7999 dependency), so they MUST
+    # still evaluate + poke during a store outage. Gathering them BEFORE the
+    # store-count seam below is the O1 fix: a store-down owed-count that fails
+    # safe to 0 (§C) can no longer suppress a pending-delegation / unanswered-
+    # inbound poke — only the store-owed COUNT fails safe, never the local signals.
     delegations = _gather_outstanding_delegations( session_id )
     inbound       = _gather_unanswered_inbound_questions( session_id )
     open_inbound  = inbound[ "owed" ]    # fresh, reply-expected, un-acked → owed
@@ -1386,6 +1371,31 @@ def _run_heartbeat( session_id, transcript_path ):
     # never feeds the verdict or the poke) is untouched.
     if open_inbound and not settings[ "count_inbound_questions_as_owed" ]:
         open_inbound = [ ]
+    # ── Spine Step-2 (flag-gated) — owed-items SOURCE ──────────────────────────
+    # DEFAULT = the transcript-replay path (owed_items_from_state below). When
+    # heartbeat.owed_source_from_store is on, the owed COUNT comes from the
+    # unified task store instead (the session's OWN rows). §B: ONLY this source
+    # swaps — task_state is still replayed ABOVE and feeds the genuine-idle
+    # beacon + poke abstract unchanged, and the delegations + inbound signals
+    # ABOVE are untouched. §C: a store that is unreachable / slow / malformed
+    # FAILS SAFE — owed_items contributes 0 (an empty list) + a distinct quiet
+    # hot-path log phase. This is NO LONGER an early return (O1 fix): the local
+    # delegations / inbound signals gathered ABOVE must still reach the verdict
+    # and poke during a store outage — only the store-owed COUNT fails safe.
+    # replay_task_state stays the degraded fallback behind the flag (flip it back
+    # to restore the old source instantly — §A rollback). NOT deleted.
+    if settings[ "owed_source_from_store" ]:
+        store_count, store_ok = _owed_count_from_store( session_id )
+        if not store_ok:
+            log_to_stream( "stop", {}, extra={
+                "phase"      : "heartbeat_store_unreachable",
+                "session_id" : session_id,
+            } )
+            owed_items = [ ]
+        else:
+            owed_items = _synthesize_owed_items( store_count )
+    else:
+        owed_items = owed_items_from_state( task_state )
     verdict    = evaluate_work_owed(
         todo_items                   = owed_items,
         unanswered_inbound_questions = open_inbound,

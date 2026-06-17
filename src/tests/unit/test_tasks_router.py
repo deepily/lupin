@@ -288,6 +288,43 @@ def test_query_returns_tasks_and_count( client, repo ):
     assert body[ "count" ] == 2 and len( body[ "tasks" ] ) == 2
 
 
+def test_query_count_only_returns_count_without_rows( client, repo ):
+    # O2 / §G: count_only=true returns { count } (NO "tasks" key), via count_tasks
+    # (the true COUNT(*)), and NEVER materializes rows through query_tasks.
+    repo.count_tasks.return_value = 273
+    r = client.get( "/api/tasks", params={ "count_only": "true" } )
+    assert r.status_code == 200
+    assert r.json() == { "count": 273 }                      # >100, no page saturation
+    repo.count_tasks.assert_called_once()
+    repo.query_tasks.assert_not_called()
+
+
+def test_query_count_only_forwards_filters_not_pagination( client, repo ):
+    repo.count_tasks.return_value = 0
+    r = client.get( "/api/tasks", params={
+        "owner_persona" : "krishna",
+        "status"        : "queued",
+        "project"       : "lupin",
+        "count_only"    : "true",
+        "limit"         : 7,                                  # ignored in count mode
+        "offset"        : 3,                                  # ignored in count mode
+    } )
+    assert r.status_code == 200 and r.json() == { "count": 0 }
+    kwargs = repo.count_tasks.call_args.kwargs
+    assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "status" ] == "queued"
+    assert kwargs[ "project" ] == "lupin"
+    # a count is page-independent — limit/offset are NOT forwarded to count_tasks
+    assert "limit" not in kwargs and "offset" not in kwargs
+
+
+def test_query_count_only_still_validates_enums( client, repo ):
+    # The enum gate fires BEFORE the count/list branch — a junk filter is still 422.
+    r = client.get( "/api/tasks", params={ "status": "finished", "count_only": "true" } )
+    assert r.status_code == 422
+    repo.count_tasks.assert_not_called()
+    repo.query_tasks.assert_not_called()
+
+
 def test_query_passes_all_filters_through( client, repo ):
     repo.query_tasks.return_value = [ ]
     r = client.get( "/api/tasks", params={
