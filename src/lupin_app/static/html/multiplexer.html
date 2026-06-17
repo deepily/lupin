@@ -14,24 +14,15 @@
     <link rel="stylesheet" href="/static/css/multiplexer/focus-tray.css">
     <link rel="stylesheet" href="/static/css/multiplexer/persona-modal.css">
     <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
     <link rel="stylesheet" href="/static/css/multiplexer/session-strip.css">
-=======
     <link rel="stylesheet" href="/static/css/multiplexer/reading-pane.css">
->>>>>>> wt-mux-laneC
-=======
     <link rel="stylesheet" href="/static/css/multiplexer/commons-activity.css">
->>>>>>> wt-mux-laneD
-=======
     <!-- Lane E full-parity quartet (WP12/13/14/15) -->
     <link rel="stylesheet" href="/static/css/multiplexer/tts-preview-slider.css">
     <link rel="stylesheet" href="/static/css/multiplexer/missed-badge.css">
     <link rel="stylesheet" href="/static/css/multiplexer/prediction-vote.css">
     <link rel="stylesheet" href="/static/css/multiplexer/fleet-status.css">
     <link rel="stylesheet" href="/static/css/multiplexer/task-list.css">
->>>>>>> wt-mux-laneE
     <script src="/static/js/vendor/marked.min.js"></script>
     <script src="/static/js/vendor/purify.min.js"></script>
 </head>
@@ -57,7 +48,6 @@
     <main class="container">
         <h1>Multiplexer</h1>
 
-<<<<<<< HEAD
         <!-- WP2 (parity bridge) CC-session strip mount point. Inert until
              SessionStripRenderer is wired in boot.ts (deferred thin step
              against Lane A's mount-slot convention); the renderer lifts the
@@ -75,7 +65,7 @@
                     data-testid="multiplexer-cc-hide-inactive-toggle"
                     data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
         </div>
-=======
+
         <!-- Lane E WP15 mount point: "N missed while away" badge + Reset.
              MissedBadgeRenderer paints into this when undelivered_count > 0;
              empty (badge hidden) otherwise. -->
@@ -84,7 +74,6 @@
         <!-- Lane E WP13 mount point: TTS preview-fraction slider control.
              TtsPreviewSliderRenderer owns this subtree. -->
         <div id="tts-preview-slider-mount" data-testid="multiplexer-tts-preview-slider-mount"></div>
->>>>>>> wt-mux-laneE
 
         <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
         <section id="notifications-pane" class="notifications-pane"
@@ -167,11 +156,11 @@
                  data-testid="multiplexer-tts-pane"
                  data-phase6-pending="true"></section>
 
-<<<<<<< HEAD
         <!-- WP2 retire (2026-06-10): #focus-tray (FocusTrayRenderer) removed —
-             the CC-session strip supersedes the interim focus tray. -->
+             the CC-session strip supersedes the interim focus tray. The mount
+             slot is intentionally NOT re-added here: the shipped bundle contains
+             zero references to #focus-tray (FocusTrayRenderer is unwired). -->
 
-=======
         <!-- Lane E WP12 mount point: read-only Fleet-Status table (below
              Notifications, per F12). FleetStatusRenderer builds its own chrome
              (title · count · ⟳ refresh · updated stamp · container) here and
@@ -185,14 +174,6 @@
              auto-polls /api/tasks every 60s. -->
         <section id="task-list-pane"
                  data-testid="multiplexer-task-list-pane"></section>
-
-        <!-- Phase 6c Node B mount point (Step B1): focus-tray container.
-             FocusTrayRenderer populates this with .focus-tray-row buttons
-             when focus mode is active; lifts hidden + data-phase6-pending
-             when it mounts. -->
-        <aside id="focus-tray" data-testid="multiplexer-focus-tray"
-               data-phase6-pending="true" hidden></aside>
->>>>>>> wt-mux-laneE
 
         <!-- Phase 6c Node A mount point (Step A5): persona-modal portal.
              PersonaModalRenderer appends one <div popover> per sender with a
