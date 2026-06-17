@@ -211,7 +211,7 @@ test("Test 6: mount() invokes hydrateHistory(api) exactly once (Q-A7 eager hydra
   // Let the floated promise resolve.
   await new Promise(r => setTimeout(r, 10));
   assert.equal(api.calls.length, 1, "hydrateHistory should fire exactly once on mount");
-  assert.match(api.calls[0]!, /^\/api\/queue\/job-history/);
+  assert.match(api.calls[0]!, /^\/api\/job-history/);
 
   renderer.unmount();
   jobs.disposeForTesting();

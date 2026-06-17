@@ -264,6 +264,24 @@ test("hydrateHistory is idempotent — second call is a no-op", async () => {
   assert.equal(hydrated.length, 1, "hydrated event emitted only once");
 });
 
+test("hydrateHistory calls the canonical /api/job-history?limit=100 endpoint (NOT /api/queue/...)", async () => {
+  // Regression guard for the migration 404 bug: the queues router mounts
+  // job-history under the `/api` prefix (matches the legacy client). A call to
+  // `/api/queue/job-history` 404s and is silently swallowed by the renderer's
+  // .catch(), so nothing else here would surface a wrong URL. Assert it explicitly.
+  const { store } = setup();
+  const calledPaths: string[] = [];
+  const api: JobHistoryApiClient = {
+    get: async (path: string) => {
+      calledPaths.push(path);
+      return { jobs: [] };
+    },
+  };
+  await store.hydrateHistory(api);
+  assert.deepEqual(calledPaths, ["/api/job-history?limit=100"]);
+  assert.ok(!calledPaths[0].startsWith("/api/queue/"), "must NOT use the /api/queue/ per-item prefix");
+});
+
 // ===========================================================================
 // 16 : Field bookkeeping (started_at on running, completed_at on terminal)
 // ===========================================================================
