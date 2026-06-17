@@ -304,7 +304,7 @@ def build_dm_send_payload(
     recipient_persona : str,
     body              : str,
     thread_id         : str,
-    sender_session_id  : str,
+    asker_session_id  : str,
 ):
     """
     Build the JSON payload for the /api/dm/send DM-push hop — PURE.
@@ -324,7 +324,7 @@ def build_dm_send_payload(
           `_emit_dm` remains the receipt-polling substrate
     """
     return {
-        "sender_session_id" : sender_session_id,
+        "asker_session_id"  : asker_session_id,
         "recipient_persona" : recipient_persona,
         "body"              : body,
         "thread_id"         : thread_id,
@@ -335,7 +335,7 @@ def make_dm_push_fn(
     *,
     base_url          : str,
     api_key           : str,
-    sender_session_id  : str,
+    asker_session_id  : str,
     timeout_seconds   : int                  = 5,
     http_post_json_fn : Optional[ Callable ] = None,
     log_fn            : Optional[ Callable ] = None,
@@ -367,7 +367,7 @@ def make_dm_push_fn(
     def dm_push( recipient_persona: str, thread_id: str, body: str ) -> dict:
         payload = build_dm_send_payload(
             recipient_persona=recipient_persona, body=body,
-            thread_id=thread_id, sender_session_id=sender_session_id,
+            thread_id=thread_id, asker_session_id=asker_session_id,
         )
         try:
             status, resp = http_post_json_fn( url, headers, payload, timeout_seconds )
@@ -555,15 +555,15 @@ def quick_smoke_test():
     # dm_push outcome mapping — notification-native /api/dm/send (body inline)
     payload = build_dm_send_payload(
         recipient_persona="Mr Radio", body="WHOLE-FLEET-STALL — please advise",
-        thread_id="o-1", sender_session_id="lupin-arbiter-app-8001",
+        thread_id="o-1", asker_session_id="lupin-arbiter-app-8001",
     )
     assert payload[ "recipient_persona" ] == "Mr Radio" and payload[ "thread_id" ] == "o-1"
     assert payload[ "body" ] == "WHOLE-FLEET-STALL — please advise"
-    push = make_dm_push_fn( base_url="http://x", api_key="k", sender_session_id="s",
+    push = make_dm_push_fn( base_url="http://x", api_key="k", asker_session_id="s",
                             http_post_json_fn=lambda u, h, p, t: ( 201, { "dispatched": True } ),
                             log_fn=quiet )
     assert push( "Tiberius", "o-2", "wake up" )[ "outcome" ] == "dispatched"
-    push = make_dm_push_fn( base_url="http://x", api_key="k", sender_session_id="s",
+    push = make_dm_push_fn( base_url="http://x", api_key="k", asker_session_id="s",
                             http_post_json_fn=lambda u, h, p, t: ( 422, { "detail": "recipient_not_found" } ),
                             log_fn=quiet )
     assert push( "Ghost", "o-3", "wake up" )[ "outcome" ] == "push_unavailable"

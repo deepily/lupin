@@ -64,7 +64,7 @@ def test_201_returns_sent_and_merges_body():
     # endpoint + payload shape
     assert captured[ "url" ].endswith( "/api/dm/send" )
     assert captured[ "headers" ] == { "X-API-Key": "k-123" }
-    assert captured[ "json" ][ "sender_session_id" ] == "asker-sess-1"
+    assert captured[ "json" ][ "asker_session_id" ] == "asker-sess-1"
     assert captured[ "json" ][ "recipient_persona" ] == "tiberius"
     assert captured[ "json" ][ "sender_persona" ] == "Mr. Radio"
     assert captured[ "json" ][ "sender_icon" ] == "🦉"

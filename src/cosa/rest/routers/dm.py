@@ -47,7 +47,7 @@ class DmSendRequest( BaseModel ):
     when omitted). `sender_persona`/`sender_icon` carry the SENDER's identity so
     the recipient can frame it as "[DM from <persona> <icon>]".
     """
-    sender_session_id    : str             = Field( ..., min_length=1, max_length=128 )
+    asker_session_id     : str             = Field( ..., min_length=1, max_length=128 )
     body                 : str             = Field( ..., min_length=1 )
     recipient_session_id : Optional[ str ] = Field( default=None, min_length=1, max_length=128 )
     recipient_persona    : Optional[ str ] = Field( default=None, min_length=1, max_length=64 )
@@ -118,7 +118,7 @@ def execute_dm_send(
         - resolve_recipient_fn( recipient_session_id, recipient_persona,
           authenticated_user_id ) -> {"http_status":200,"session_id","persona_name"}
           OR {"http_status":422,"detail"}
-        - build_sender_id( sender_session_id ) -> sender_id str
+        - build_sender_id( asker_session_id ) -> sender_id str
         - persist_fn( ... ) -> db notification id str
 
     Ensures:
@@ -143,7 +143,7 @@ def execute_dm_send(
 
     target_session_id = resolution[ "session_id" ]
     target_persona    = resolution.get( "persona_name" )
-    sender_id         = build_sender_id( body.sender_session_id )
+    sender_id         = build_sender_id( body.asker_session_id )
     job_id            = target_session_id[ :8 ]
 
     message_id = new_id_fn()
@@ -262,7 +262,7 @@ class DmRespondRequest( BaseModel ):
     Identical to DmSendRequest except `reply_to` and `thread_id` are REQUIRED:
     a reply must name the message it answers and the conversation it continues.
     """
-    sender_session_id    : str             = Field( ..., min_length=1, max_length=128 )
+    asker_session_id     : str             = Field( ..., min_length=1, max_length=128 )
     body                 : str             = Field( ..., min_length=1 )
     reply_to             : str             = Field( ..., min_length=1, max_length=64 )
     thread_id            : str             = Field( ..., min_length=1, max_length=64 )

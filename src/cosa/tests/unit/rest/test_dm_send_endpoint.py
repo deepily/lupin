@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 def _make_body( **overrides ):
     from cosa.rest.routers.dm import DmSendRequest
     fields = dict(
-        sender_session_id = "asker-session-aaaa",
+        asker_session_id = "asker-session-aaaa",
         body             = "ready for review",
         recipient_persona = "María",
         sender_persona    = "Rio",
