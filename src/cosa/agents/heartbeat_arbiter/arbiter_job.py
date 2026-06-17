@@ -80,6 +80,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS, TIER_OWNING_MANAGER,
     TIER_BLOCKER_AND_MANAGER, TIER_DROP, tier_for, CASE_AUTO_POKE_REAP_REC,
     CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
+    CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
 )
 
 
@@ -127,7 +128,59 @@ CASE_KINDS = {
     CASE_AUTO_POKE_REAP_REC     : "reap_rec",
     CASE_MANAGER_STALE_ADVISORY : "manager_stale_advisory",
     CASE_FLEET_DARK             : "fleet_dark",
+    CASE_MANAGER_AWAITING_USER  : "manager_awaiting_user",   # L1 (2026-06-17)
+    CASE_MANAGER_DONE_ADVISORY  : "manager_done_advisory",   # L1 (2026-06-17)
 }
+
+# ── L1 store-classification constants (2026-06-17, arbiter detector gaps) ────
+# Each tapped/owed-candidate manager is classified ONCE per poll from a
+# swallow-safe store read (the injected owed_work_fn). The class drives whether
+# the false-escalating detectors (D4 MANAGER-DOWN, D3 WHOLE-FLEET-STALL) suppress.
+CLASS_BLOCKED_ON_USER = "blocked_on_user"   # every non-terminal owed item is Rick-gated → not down, not a stall
+CLASS_DONE            = "done"              # zero non-terminal owed items → consider-reaping, not down
+CLASS_ACTIVE          = "active"           # has ≥1 normal (non-Rick-gated) owed item → today's behavior
+CLASS_UNKNOWN         = "unknown"          # store read failed / seam unwired → FAIL SAFE (today's behavior)
+
+
+def _default_owed_work_fn( personas ):   # pragma: no cover - production store-read IO boundary
+    """
+    Default owed-work store reader — the arbiter is reader #2 of the
+    one-store/three-readers design (see
+    src/docs/fleet-liveness-and-task-store-architecture.md).
+
+    Given the personas under evaluation this poll, return
+    { persona: [ { id, status, gate_class, blocked_by }, ... ] } of each
+    persona's NON-TERMINAL owed items (status not in {done, dropped}). ONE DB
+    session per poll. Exercised at the :8000 integration tier like
+    LupinArbiterGateway.from_environment; the classification LOGIC that consumes
+    this dict is fully unit-tested via an injected fake (so this IO boundary is
+    no-cover, mirroring build_arbiter_job).
+
+    Requires:
+        - personas is an iterable of persona-name strings
+
+    Ensures:
+        - returns the per-persona non-terminal owed-item dict (a persona with no
+          owed work maps to an empty list)
+        - raising is acceptable here — the caller (_classify_owed) swallows any
+          exception into the fail-SAFE UNKNOWN path (observer invariant)
+    """
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories.task_repository import TaskRepository
+    _TERMINAL = ( "done", "dropped" )
+    out = { }
+    with get_db() as session:
+        repo = TaskRepository( session )
+        for persona in personas:
+            items = repo.query_tasks( owner_persona=persona )
+            out[ persona ] = [
+                { "id"         : str( it.id ),
+                  "status"     : it.status,
+                  "gate_class" : it.gate_class,
+                  "blocked_by" : it.blocked_by }
+                for it in items if it.status not in _TERMINAL
+            ]
+    return out
 
 
 # Item A (2026.06.11 receipts design §2.3): the F1 default log seam now delegates
@@ -283,6 +336,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
+        owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
         bridge_discovery_fn      : Optional[ Callable ] = None,
         snapshot_sink            : Optional[ Callable ] = None,
         render_sink              : Optional[ Callable ] = None,
@@ -422,6 +476,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # server singleton), and the render sink (greppable log; default stdout,
         # captured by the container log). All injectable for 100% unit testing.
         self._bridge_mtime_fn = bridge_mtime_fn if bridge_mtime_fn is not None else _default_bridge_mtime_fn
+        # L1 (2026-06-17) store-awareness seam: per-poll owed-work reader (the
+        # arbiter as reader #2 of the one-store/three-readers design). Default
+        # None keeps the seam INERT — every manager classifies UNKNOWN → the two
+        # false-escalating detectors preserve TODAY'S behavior (fail SAFE; never
+        # silently suppress). The :8001 factory wires _default_owed_work_fn so the
+        # suppression actually activates live; in-pool / unit-fake construction
+        # stays inert unless a fake is injected. (Mirrors the Item B None-seam
+        # pattern: a None seam is visibly inert, never a hidden behavior change.)
+        self._owed_work_fn = owed_work_fn
         # v1.4 integrator seam: bridge discovery → {sid: persona} folded into the
         # build_fleet_view UNION roster (impure IO lives here, not in the leaf).
         self._bridge_discovery_fn = bridge_discovery_fn if bridge_discovery_fn is not None else _default_bridge_discovery
@@ -512,6 +575,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # their current (un-acked) tap — so manager-down escalates ONCE, not every
         # poll, until the manager re-acks (shows liveness after the tap).
         self._manager_down_escalated = set()
+        # L1 (2026-06-17) store-aware advisory tracking: a tapped-but-quiet manager
+        # classified BLOCKED_ON_USER / DONE is NOT escalated MANAGER-DOWN — instead
+        # it gets at most ONE advisory per un-acked tap. These sets are the
+        # escalate-once flags (siblings of _manager_down_escalated); all three clear
+        # together when the manager shows liveness after its tap (re-arm).
+        self._manager_blocked_advised = set()   # awaiting-Rick advisory already fired
+        self._manager_done_advised    = set()   # consider-reaping advisory already fired
         # v2.2 B3 state: decision-needed tail cursor (ISO ts; baselined on first
         # poll so a pre-arbiter backlog isn't re-escalated) + whole-fleet-stall
         # progress tracking (last PROGRESS signature + when it last advanced +
@@ -613,15 +683,27 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if isinstance( v, dict ) and v.get( "persona" )
         }
 
+        # L1 (2026-06-17): ONE swallow-safe store read per poll classifies every
+        # persona under evaluation (tapped managers ∪ live-owed-candidate sessions)
+        # into BLOCKED_ON_USER / DONE / ACTIVE / UNKNOWN; passed to BOTH false-
+        # escalating detectors so neither re-reads (build-plan §3.0 "one read per
+        # poll"). Seam unwired → all UNKNOWN → today's behavior (fail SAFE).
+        eval_personas = (
+            { v.get( "persona" ) for v in fleet_view.values()
+              if isinstance( v, dict ) and v.get( "persona" ) }
+            | set( self._last_tap_at.keys() )
+        )
+        owed_class = self._classify_owed( eval_personas, fleet_view )
+
         self._escalate_deadlocks( graph[ "cycles" ], active_managers )    # #5 Rick + all mgrs
         pings_fired = self._auto_ping( graph[ "edges" ], now, persona_to_sid )  # #4 blocker + cc mgr
         roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds )
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
         taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers )  # #7 / #8
-        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers )  # #9 Rick + all mgrs (bridge-mtime ACK)
+        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class )  # #9 (L1 store-aware)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
-        stalled       = self._check_fleet_stall( fleet_view, now, active_managers )  # #11 Rick + all mgrs
+        stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
         pokes_fired   = self._auto_poke( fleet_view, now, active_managers )          # 2b-3 auto-poke
         rendered      = self._publish_fleet_snapshot( fleet_view, now )
         # post-game F2/F3 detectors read the FULL (include_offline=True) detection
@@ -1471,7 +1553,99 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 best = ts
         return best
 
-    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None ):
+    @staticmethod
+    def _holding_on_by_persona( fleet_view ):
+        """
+        { persona: holding_on } for every view that carries a string holding_on.
+
+        L1 degrade-safe corroboration source: when the store read is UNKNOWN, a
+        holding_on starting "user:" is a best-effort HINT that a manager is parked
+        on Rick — recorded for the advisory wording ONLY (never the sole basis for
+        suppression; an UNKNOWN manager still escalates — fail SAFE).
+
+        Ensures:
+            - returns { persona: holding_on_str }; skips views without a persona or
+              a non-string holding_on; never raises
+        """
+        out = { }
+        for view in ( fleet_view or { } ).values():
+            if isinstance( view, dict ) and view.get( "persona" ):
+                holding = view.get( "holding_on" )
+                if isinstance( holding, str ):
+                    out[ view[ "persona" ] ] = holding
+        return out
+
+    @staticmethod
+    def _item_is_user_gated( item ):
+        """
+        Is a single non-terminal owed item gated on Rick (the human)?
+
+        TRUE iff gate_class == "ricks_court" OR (status == "blocked" AND blocked_by
+        carries ≥1 typed ref {kind: "user"}). These are the two store encodings of
+        "correctly waiting on the human" (build-plan §3.0).
+
+        Ensures:
+            - returns a bool; a non-dict / malformed item → False; never raises
+        """
+        if not isinstance( item, dict ):
+            return False
+        if item.get( "gate_class" ) == "ricks_court":
+            return True
+        if item.get( "status" ) == "blocked":
+            for ref in ( item.get( "blocked_by" ) or [ ] ):
+                if isinstance( ref, dict ) and ref.get( "kind" ) == "user":
+                    return True
+        return False
+
+    def _classify_owed( self, personas, fleet_view ):
+        """
+        L1 (2026-06-17): classify each persona under evaluation this poll into
+        BLOCKED_ON_USER / DONE / ACTIVE / UNKNOWN from a SINGLE swallow-safe store
+        read — the crux of the detector-gap fix (build-plan §3.0).
+
+        The injected owed_work_fn returns { persona: [ owed-item dicts ] } of each
+        persona's NON-TERMINAL owed items. Classification per persona:
+          - DONE             ⇔ zero non-terminal owed items
+          - BLOCKED_ON_USER  ⇔ ≥1 owed item AND every owed item is Rick-gated
+                               (_item_is_user_gated)
+          - ACTIVE           ⇔ ≥1 owed item that is NOT Rick-gated
+          - UNKNOWN          ⇔ the seam is unwired (owed_work_fn is None), the read
+                               raised, or the persona is absent from the result →
+                               FAIL SAFE: the detectors treat UNKNOWN exactly as
+                               today (escalate), never silently suppressing.
+
+        Observer invariant: ONE read per poll for the whole set; ANY exception from
+        the seam is swallowed → the entire result is UNKNOWN (never crashes the
+        poll, never silently suppresses a real escalation). The holding_on "user:"
+        corroboration (consumed by the detectors) is best-effort wording only.
+
+        Ensures:
+            - returns { persona: CLASS_* } for each non-empty persona in `personas`
+            - owed_work_fn is called AT MOST once (skipped when None or no personas)
+            - never raises
+        """
+        names = sorted( { p for p in ( personas or [ ] ) if p } )
+        owed  = None
+        if self._owed_work_fn is not None and names:
+            try:
+                owed = self._owed_work_fn( names )
+            except Exception:
+                owed = None        # store hiccup → UNKNOWN → fail SAFE (observer invariant)
+        result = { }
+        for persona in names:
+            if owed is None or persona not in owed:
+                result[ persona ] = CLASS_UNKNOWN          # unwired / hiccup / absent → fail SAFE
+                continue
+            items = owed.get( persona ) or [ ]
+            if not items:
+                result[ persona ] = CLASS_DONE
+            elif all( self._item_is_user_gated( it ) for it in items ):
+                result[ persona ] = CLASS_BLOCKED_ON_USER
+            else:
+                result[ persona ] = CLASS_ACTIVE
+        return result
+
+    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None ):
         """
         B4/D4 manager-down detector via the liveness-proxy ACK.
 
@@ -1500,12 +1674,39 @@ class ArbiterConsumerJob( AgenticJobBase ):
         acting-manager succession is V2). Escalates ONCE per un-acked tap (until
         the manager re-acks), not every poll.
 
+        L1 STORE-AWARENESS (2026-06-17, build-plan §3.1/§3.2/§3.3): a manager that
+        is tapped-but-quiet is NOT always down. Before escalating MANAGER-DOWN we
+        consult the per-poll store classification (owed_class):
+          - BLOCKED_ON_USER → the manager is CORRECTLY waiting on Rick (it makes no
+            tool calls, so no bridge/commons liveness — exactly the false-fire). It
+            is NOT down: emit at most ONE awaiting-Rick advisory (case 16), never
+            the repeating MANAGER-DOWN loop.
+          - DONE → the manager owes nothing (finished). Not down: emit at most ONE
+            consider-reaping advisory (case 17). (Matches the stall path, which is
+            already done-safe because an idle manager's state ∉ {working,stuck,
+            holding}.)
+          - ACTIVE / UNKNOWN → TODAY'S behavior: MANAGER-DOWN. UNKNOWN is the
+            fail-SAFE class (seam unwired / store hiccup) — we never silently
+            suppress; a holding_on starting "user:" only DECORATES the wording
+            (best-effort corroboration, never suppresses).
+        This honors §3.3 (tap-ACK window vs loop cadence) by OPTION (a): the
+        window is irrelevant for a correctly-waiting manager because the class —
+        not the clock — decides. Cross-ref memory
+        reference_arbiter_staleness_threshold_loop_cadence (the mgr loop must stay
+        below the staleness floor). The three escalate-once flags
+        (_manager_down_escalated / _manager_blocked_advised / _manager_done_advised)
+        all clear together on a re-ack so each fires at most once per un-acked tap.
+
         Ensures:
-            - returns the count of NEW manager-down escalations this poll
-            - clears a manager's down-flag once it shows activity (commons OR
-              bridge) since its tap
+            - returns the count of NEW manager-down escalations this poll (advisories
+              are NOT counted — they are not downs)
+            - clears a manager's down/advisory flags once it shows activity (commons
+              OR bridge) since its tap
+            - BLOCKED_ON_USER / DONE managers never escalate MANAGER-DOWN
             - never raises
         """
+        owed_class = owed_class or { }
+        holding    = self._holding_on_by_persona( fleet_view )
         down = 0
         for manager, tapped_at in list( self._last_tap_at.items() ):
             commons_activity = self._manager_last_activity( manager, who_rows )
@@ -1517,16 +1718,48 @@ class ArbiterConsumerJob( AgenticJobBase ):
             candidates    = [ t for t in ( commons_activity, bridge_activity ) if t is not None ]
             last_activity = max( candidates ) if candidates else None
             if last_activity is not None and last_activity >= tapped_at:
-                self._manager_down_escalated.discard( manager )   # acked → clear
+                self._manager_down_escalated.discard( manager )    # acked → clear (re-arm)
+                self._manager_blocked_advised.discard( manager )
+                self._manager_done_advised.discard( manager )
                 continue
-            if ( now - tapped_at ).total_seconds() >= self.manager_ack_window_seconds \
-               and manager not in self._manager_down_escalated:
+            if ( now - tapped_at ).total_seconds() < self.manager_ack_window_seconds:
+                continue                                            # window not yet elapsed
+            cls = owed_class.get( manager, CLASS_UNKNOWN )
+            if cls == CLASS_BLOCKED_ON_USER:
+                if manager not in self._manager_blocked_advised:    # L1 §3.1 advisory-once
+                    self._manager_blocked_advised.add( manager )
+                    self._route(
+                        CASE_MANAGER_AWAITING_USER,
+                        f"MANAGER-AWAITING-RICK (advisory, NOT manager-down): {manager} is "
+                        f"correctly BLOCKED on Rick — every owed item is Rick-gated. No "
+                        f"tap-ACK is expected while it waits; this is a one-time notice, "
+                        f"not a repeating escalation.",
+                        active_managers=active_managers
+                    )
+                continue
+            if cls == CLASS_DONE:
+                if manager not in self._manager_done_advised:       # L1 §3.2 advisory-once
+                    self._manager_done_advised.add( manager )
+                    self._route(
+                        CASE_MANAGER_DONE_ADVISORY,
+                        f"MANAGER-DONE (advisory, NOT manager-down): {manager} owes NO "
+                        f"non-terminal work — it appears finished/idle. Consider reaping "
+                        f"it (the arbiter never reaps — redline). One-time notice.",
+                        active_managers=active_managers
+                    )
+                continue
+            if manager not in self._manager_down_escalated:         # ACTIVE / UNKNOWN → today's MANAGER-DOWN
                 self._manager_down_escalated.add( manager )
+                note = ""
+                if cls == CLASS_UNKNOWN and holding.get( manager, "" ).startswith( "user:" ):
+                    note = ( f" (holding_on={holding[ manager ]} — possibly blocked on Rick, "
+                             f"but the task-store could not confirm; escalating to be SAFE)" )
                 self._route(                                   # Part-6 #9 manager-down
                     9,
                     f"MANAGER-DOWN: {manager} did not ack the arbiter tap within "
                     f"{self.manager_ack_window_seconds}s (no liveness since tap) — "
-                    f"escalating to Rick + active managers + HOLDING (no auto-assign)",
+                    f"escalating to Rick + active managers + HOLDING (no auto-assign)"
+                    f"{note}",
                     active_managers=active_managers
                 )
                 down += 1
@@ -1629,7 +1862,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         ) )
 
     @staticmethod
-    def _has_live_owed_work( fleet_view ):
+    def _has_live_owed_work( fleet_view, owed_class=None ):
         """
         Calibration GATE (2b-1): is there ≥1 session that is BOTH alive AND owes
         work? — the liveness precondition the whole-fleet-stall trigger evaluates.
@@ -1648,17 +1881,29 @@ class ArbiterConsumerJob( AgenticJobBase ):
         is a REAL stall and STILL fires (commons chatter is liveness, not
         progress; it never reaches the signature).
 
-        Ensures:
-            - returns True iff some view is alive is True AND state ∈
-              {working, stuck, holding}; never raises
-        """
-        return any(
-            isinstance( v, dict ) and v.get( "alive" ) is True
-            and v.get( "state" ) in ( "working", "stuck", "holding" )
-            for v in fleet_view.values()
-        )
+        L1 STORE-AWARENESS (2026-06-17, build-plan §3.1): a session whose persona
+        classifies BLOCKED_ON_USER (every owed item Rick-gated) is EXCLUDED from
+        the live-owed set — a fleet whose ONLY live owed work is parked on Rick is
+        NOT a stall (the manager-in-`holding`-on-Rick false-fire). owed_class is
+        the per-poll store classification; when it is None/empty (seam unwired,
+        store UNKNOWN), NO session is excluded → TODAY'S behavior (fail SAFE).
 
-    def _check_fleet_stall( self, fleet_view, now, active_managers=None ):
+        Ensures:
+            - returns True iff some view is alive AND state ∈ {working, stuck,
+              holding} AND its persona is NOT classified BLOCKED_ON_USER; never raises
+        """
+        owed_class = owed_class or { }
+        for v in fleet_view.values():
+            if not ( isinstance( v, dict ) and v.get( "alive" ) is True
+                     and v.get( "state" ) in ( "working", "stuck", "holding" ) ):
+                continue
+            persona = v.get( "persona" )
+            if persona is not None and owed_class.get( persona ) == CLASS_BLOCKED_ON_USER:
+                continue                                # Rick-gated owed work is not a stall
+            return True
+        return False
+
+    def _check_fleet_stall( self, fleet_view, now, active_managers=None, owed_class=None ):
         """
         D3 catch-all: no FLEET PROGRESS for ≥ fleet_stall_window_seconds while
         LIVE work is owed → escalate to Rick + ALL active managers (Part-6 #11).
@@ -1684,6 +1929,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
               ≥ the window AND a LIVE session owes work; re-arms on the next
               progress
             - a dead/offline roster (no LIVE owed work) never escalates
+            - a fleet whose only live owed work is BLOCKED_ON_USER never escalates
+              (L1 §3.1; owed_class None/empty → today's behavior, fail SAFE)
             - returns 1 on a new escalation else 0; never raises
         """
         sig = self._fleet_progress_signature( fleet_view )
@@ -1692,7 +1939,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             self._last_progress_at  = now
             self._stall_escalated   = False
             return 0
-        has_owed = self._has_live_owed_work( fleet_view )
+        has_owed = self._has_live_owed_work( fleet_view, owed_class )
         if ( has_owed and self._last_progress_at is not None
              and ( now - self._last_progress_at ).total_seconds() >= self.fleet_stall_window_seconds
              and not self._stall_escalated ):

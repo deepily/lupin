@@ -39,7 +39,7 @@ import threading
 from typing import Any, Callable, Optional
 
 from lupin_arbiter_app.health_watcher import SystemClock
-from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_owed_work_fn
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
 
@@ -170,6 +170,11 @@ def build_fleet_arbiter_job_factory(
     pending_ledger_path  : Optional[ str ]      = None,
     # F-A (2026.06.11 lineage-persistence design): the restart-surviving carry file.
     lineage_carry_path   : Optional[ str ]      = None,
+    # L1 (2026-06-17 arbiter detector gaps): the per-poll owed-work store reader
+    # (arbiter = reader #2). Defaults to the real DB reader so the :8001 service
+    # activates the store-aware suppression of the false-escalating detectors;
+    # injectable for tests (construction is pure — the reader is never CALLED here).
+    owed_work_fn         : Optional[ Callable ] = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -185,6 +190,9 @@ def build_fleet_arbiter_job_factory(
     """
     clock  = clock  if clock  is not None else SystemClock()
     log_fn = log_fn if log_fn is not None else _default_log_fn
+    # L1: wire the real DB owed-work reader by default so the :8001 service gets
+    # store-aware detector suppression; an injected fake overrides it for tests.
+    owed_work_fn = owed_work_fn if owed_work_fn is not None else _default_owed_work_fn
     escalation_notify = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn )
 
     def factory() -> ArbiterConsumerJob:
@@ -192,6 +200,7 @@ def build_fleet_arbiter_job_factory(
         warmup_notify = make_warmup_notify_fn( escalation_notify, job_start, start_period_seconds, clock, log_fn )
         return ArbiterConsumerJob(
             commons                    = gateway,
+            owed_work_fn               = owed_work_fn,                              # L1 store-aware seam
             poll_seconds               = poll_seconds,
             manager_recipient          = manager_on_duty,
             declared_managers          = declared_managers,
