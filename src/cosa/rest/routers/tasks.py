@@ -160,6 +160,36 @@ def _serialize_item( item ) -> dict:
     }
 
 
+def _serialize_item_terse( item ) -> dict:
+    """
+    Serialize a TaskItem to the TERSE projection (§G token win).
+
+    The on-demand "see my list" query (a manager board glance, a worker's
+    owed-work peek) needs the at-a-glance fields, NOT the full row — `body` in
+    particular can be multi-paragraph, and the audit trail (/events) is already
+    a separate surface. This projection drops `body` and every non-glance field,
+    keeping ONLY id / title / status / blocked_by / next_chase_ts / priority —
+    so a list query over MCP costs a fraction of the full-row token weight
+    (cosa-voice token-efficiency is goal #1). Field names are IDENTICAL to the
+    full shape (one name at every layer) — a terse row is a strict subset.
+
+    Requires:
+        - item is a flushed TaskItem (id populated)
+
+    Ensures:
+        - returns a JSON-safe dict with EXACTLY the six glance keys; nullable
+          next_chase_ts serializes as None
+    """
+    return {
+        "id"            : str( item.id ),
+        "title"         : item.title,
+        "status"        : item.status,
+        "blocked_by"    : item.blocked_by,
+        "next_chase_ts" : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
+        "priority"      : item.priority,
+    }
+
+
 def _serialize_event( event ) -> dict:
     """
     Serialize a TaskEvent to the wire shape.
@@ -423,7 +453,10 @@ def patch_task(
                   "AND semantics, newest first. Junk enum filter values are "
                   "rejected (422), never silently empty. count_only=true returns "
                   "{count} as a true COUNT(*) without serializing any rows (the "
-                  "owed-count token win, §G). Auth: X-API-Key or Bearer JWT."
+                  "owed-count token win, §G). terse=true returns the at-a-glance "
+                  "projection (id/title/status/blocked_by/next_chase_ts/priority "
+                  "— drops body) for cheap 'see my list' queries. Auth: X-API-Key "
+                  "or Bearer JWT."
 )
 def query_tasks(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
@@ -435,6 +468,7 @@ def query_tasks(
     item_class          : Optional[str] = None,
     correlation_key     : Optional[str] = None,
     count_only          : bool = False,
+    terse               : bool = False,
     limit               : int = Query( default=100, ge=0, le=500 ),
     offset              : int = Query( default=0, ge=0 ),
 ):
@@ -459,6 +493,12 @@ def query_tasks(
           SQL COUNT(*) over the SAME filters — NO rows serialized, independent
           of limit/offset (those params are ignored in this mode). The owed
           source reads this so a session with >100 owed rows is counted exactly.
+          count_only takes precedence over terse (a count needs no rows at all).
+        - terse=True (§G token win, count_only=False): returns { tasks: [...],
+          count } where each row is the at-a-glance projection (id / title /
+          status / blocked_by / next_chase_ts / priority — `body` and the other
+          full-row fields dropped), so an on-demand "see my list" query over MCP
+          costs a fraction of the full-row token weight.
     """
     errors = [ ]
     if status is not None and status not in rules.VALID_STATUSES:
@@ -495,7 +535,9 @@ def query_tasks(
             limit               = limit,
             offset              = offset,
         )
-        tasks = [ _serialize_item( item ) for item in items ]
+        # terse → the at-a-glance projection (§G); else the full wire shape.
+        serialize = _serialize_item_terse if terse else _serialize_item
+        tasks = [ serialize( item ) for item in items ]
         return { "tasks": tasks, "count": len( tasks ) }
 
 

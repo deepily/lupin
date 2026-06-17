@@ -185,6 +185,7 @@ class TestTaskQueryWrapper:
             "correlation_key"     : None,
             "limit"               : None,
             "offset"              : None,
+            "terse"               : False,                     # §G: defaults off (full rows)
         }
 
     def test_filters_pass_through( self, stamped_identity, monkeypatch ):
@@ -202,3 +203,12 @@ class TestTaskQueryWrapper:
         assert captured[ "correlation_key" ]     == "todo:abc123"
         assert captured[ "limit" ]               == 7
         assert captured[ "offset" ]              == 14
+        assert captured[ "terse" ]               is False     # default when unset
+
+    def test_terse_passes_through( self, stamped_identity, monkeypatch ):
+        # §G token win: the terse flag reaches the transport impl verbatim.
+        captured = { }
+        monkeypatch.setattr( cv, "task_query_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+        cv.task_query.fn( owner_persona="sam", terse=True )
+        assert captured[ "terse" ]         is True
+        assert captured[ "owner_persona" ] == "sam"
