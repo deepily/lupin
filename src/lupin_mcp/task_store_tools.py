@@ -220,6 +220,7 @@ def task_query_impl(
     correlation_key     = None,
     limit               = None,
     offset              = None,
+    terse               = False,
 ):
     """
     GET /api/tasks — the deterministic owed-work query (design R4).
@@ -230,6 +231,10 @@ def task_query_impl(
           call is "everything, newest first" — the manager board glance
         - `correlation_key` exact-match filter passes through (spec amendment
           2026-06-12 / Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
+        - terse=True (§G token win) requests the at-a-glance projection
+          (id/title/status/blocked_by/next_chase_ts/priority — body dropped);
+          passed to the server as the canonical lowercase "true" (a pre-§G
+          server simply ignores the unknown param and returns full rows)
     """
     filters = {
         "owner_persona"       : owner_persona,
@@ -243,4 +248,6 @@ def task_query_impl(
         "offset"              : offset,
     }
     params = { key: value for key, value in filters.items() if value is not None }
+    if terse:
+        params[ "terse" ] = "true"
     return task_store_request( "GET", "/api/tasks", api_base_url, api_key, params=params )

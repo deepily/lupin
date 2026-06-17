@@ -342,3 +342,17 @@ class TestTaskQueryImpl:
         calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
         task_query_impl( BASE_URL, API_KEY, limit=0, offset=0 )
         assert calls[ "params" ] == { "limit": 0, "offset": 0 }
+
+    def test_terse_default_omits_param( self, capture_request ):
+        # §G: terse defaults False → the param is NOT sent (full-row contract
+        # unchanged for every existing caller).
+        calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, owner_persona="sam" )
+        assert "terse" not in calls[ "params" ]
+
+    def test_terse_true_sends_canonical_lowercase_true( self, capture_request ):
+        # §G token win: terse=True rides the wire as the canonical lowercase
+        # "true" alongside the filters (a pre-§G server ignores the unknown param).
+        calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, owner_persona="sam", status="queued", terse=True )
+        assert calls[ "params" ] == { "owner_persona": "sam", "status": "queued", "terse": "true" }

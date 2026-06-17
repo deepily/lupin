@@ -22,6 +22,7 @@ Design authority: lupin ->
     src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md §1.5.
 """
 
+import http.client
 import json
 import os
 import urllib.error
@@ -170,6 +171,87 @@ def query_by_correlation_key( settings, api_key, correlation_key ):
     return _request( "GET", f"{settings['api_base_url']}/api/tasks?{query}", api_key, settings[ "timeout_seconds" ] )
 
 
+def _open_owed_connection( api_base_url, timeout ):
+    """
+    Open ONE keep-alive HTTP(S) connection for the multi-status owed loop (O3).
+
+    `query_owed` issues one `count_only` GET per owed status. The previous
+    urllib.urlopen path opened a FRESH socket per status (urllib does no
+    connection pooling) — pure per-Stop latency, paid every turn. A single
+    http.client connection reused across the status loop amortizes the TCP
+    handshake to once per Stop (O3, cascade review §D residue). Scheme-aware:
+    an https base resolves to HTTPSConnection (the hook lane is http `:7999`
+    today, but the seam must not silently downgrade an https config).
+
+    Requires:
+        - api_base_url is the Lupin base URL ("http(s)://host:port", no path)
+        - timeout is a positive float — the per-operation socket timeout, so the
+          §C ≤1-2s Stop-hot-path budget still bounds each request
+
+    Ensures:
+        - Returns an http.client.HTTP(S)Connection (lazy — it connects on the
+          first request, never in the constructor)
+        - Returns None on ANY parse/constructor failure (e.g. a non-numeric port,
+          where urlsplit.port raises ValueError) — the caller fails safe to
+          ( False, 0 ); NEVER raises (degrade-safe IO shell)
+    """
+    try:
+        parts = urllib.parse.urlsplit( api_base_url )
+        if parts.scheme == "https":
+            return http.client.HTTPSConnection( parts.hostname, parts.port, timeout=timeout )
+        return http.client.HTTPConnection( parts.hostname, parts.port, timeout=timeout )
+    except Exception:
+        return None
+
+
+def _count_on_connection( connection, path_with_query, api_key ):
+    """
+    Issue ONE `count_only` GET on an existing connection; parse the count (O3).
+
+    Reuses `connection`'s socket (HTTP/1.1 keep-alive). The response body is read
+    in FULL so the connection is left ready for the next status query on the
+    SAME socket (an unread response would wedge it as ResponseNotReady).
+
+    Requires:
+        - connection is an open http.client.HTTP(S)Connection
+        - path_with_query is the "/api/tasks?..." count_only owed query
+        - api_key is a string (may be empty — server 401s it)
+
+    Ensures:
+        - Returns ( ok, count ):
+            ok    : True iff a 2xx response carried an integer `count`
+            count : that integer (0 when ok is False)
+        - ANY transport error / non-2xx / unparseable-or-non-dict body / missing
+          or non-int `count` (bool rejected — a JSON true/false must never read
+          as 1/0) → ( False, 0 )  (the §C fail-safe)
+        - NEVER raises
+    """
+    try:
+        connection.request( "GET", path_with_query, headers={ "X-API-Key": api_key } )
+        response = connection.getresponse()
+        status   = response.status
+        raw      = response.read().decode( "utf-8" )
+    except Exception:
+        # Transport failure (refused / timeout / DNS / socket reset) — fail safe.
+        return False, 0
+
+    if not ( 200 <= status < 300 ):
+        # A received server verdict (4xx/5xx) is NOT a clean count — fail safe.
+        return False, 0
+    try:
+        parsed = json.loads( raw )
+    except json.JSONDecodeError:
+        return False, 0
+    if not isinstance( parsed, dict ):
+        return False, 0
+    count = parsed.get( "count" )
+    # bool is a subclass of int — reject a JSON `true`/`false` count explicitly
+    # so it never slips through as 1/0 (house no-defensive rule).
+    if isinstance( count, bool ) or not isinstance( count, int ):
+        return False, 0
+    return True, count
+
+
 def query_owed( settings, api_key, owner_persona, statuses, project=None, timeout=None ):
     """
     GET /api/tasks owed-row COUNT for one owner (Spine Step-2 store-count seam).
@@ -180,9 +262,14 @@ def query_owed( settings, api_key, owner_persona, statuses, project=None, timeou
     `count_only=true` (O2 / §G): the server returns a true SQL COUNT(*) WITHOUT
     serializing a single row, so the count is the genuine total — it can NEVER
     saturate at the endpoint's page `limit` the way the default `len(page)`
-    "count" does once a status exceeds 100 rows. Bounded by an AGGRESSIVE
-    per-request timeout (the Stop hook fires every turn — a slow `:7999` must
-    never stall turn-end; cascade review §C).
+    "count" does once a status exceeds 100 rows.
+
+    O3 (cascade review §D residue): all per-status queries ride ONE reused
+    http.client connection (open once, close in `finally`) instead of a fresh
+    urllib socket per status — the TCP handshake is paid once per Stop, not once
+    per owed status. Bounded by an AGGRESSIVE per-operation socket timeout (the
+    Stop hook fires every turn — a slow `:7999` must never stall turn-end;
+    cascade review §C).
 
     Requires:
         - settings is the load_task_store_settings() dict (provides api_base_url)
@@ -199,32 +286,40 @@ def query_owed( settings, api_key, owner_persona, statuses, project=None, timeou
                     carried an integer `count`
             count : the summed owed-row count across `statuses` (0 when ok is
                     False, or when `statuses` is empty)
+        - An empty `statuses` set short-circuits to ( True, 0 ) WITHOUT opening
+          a connection (genuinely no owed work — no IO)
         - ANY transport failure / non-2xx / malformed body (missing or non-int
-          `count`) → ( False, 0 ) — the §C fail-safe: the caller does NOT poke
-          on a not-ok read (never guess when the store can't be reached)
-        - NEVER raises (rides _request's never-raises seam)
+          `count`) / unresolvable base URL → ( False, 0 ) — the §C fail-safe:
+          the caller does NOT poke on a not-ok read (never guess when the store
+          can't be reached)
+        - The reused connection is ALWAYS closed (success or short-circuit)
+        - NEVER raises
     """
     if timeout is None:
         timeout = DEFAULT_OWED_TIMEOUT_SECONDS
 
-    total = 0
-    for status in statuses:
-        # count_only=true (O2): true COUNT(*), never a page-length saturating at
-        # the endpoint's limit cap — a session with >100 owed rows counts exactly.
-        params = { "owner_persona": owner_persona, "status": status, "count_only": "true" }
-        if project:
-            params[ "project" ] = project
-        query = urllib.parse.urlencode( params )
-        ok, _status_code, body = _request(
-            "GET", f"{settings['api_base_url']}/api/tasks?{query}", api_key, timeout
-        )
-        if not ok:
-            return False, 0
-        count = body.get( "count" )
-        # bool is a subclass of int — reject a JSON `true`/`false` count
-        # explicitly so it never slips through as 1/0 (house no-defensive rule).
-        if isinstance( count, bool ) or not isinstance( count, int ):
-            return False, 0
-        total += count
+    statuses = list( statuses )
+    if not statuses:
+        return True, 0                       # genuinely no owed work — no IO, no socket
 
-    return True, total
+    connection = _open_owed_connection( settings[ "api_base_url" ], timeout )
+    if connection is None:
+        return False, 0                      # bad base URL → fail safe (never raise)
+
+    try:
+        total = 0
+        for status in statuses:
+            # count_only=true (O2): true COUNT(*), never a page-length saturating
+            # at the endpoint's limit cap — a session with >100 owed rows counts
+            # exactly. All statuses ride the SAME socket (O3).
+            params = { "owner_persona": owner_persona, "status": status, "count_only": "true" }
+            if project:
+                params[ "project" ] = project
+            path = f"/api/tasks?{urllib.parse.urlencode( params )}"
+            ok, count = _count_on_connection( connection, path, api_key )
+            if not ok:
+                return False, 0
+            total += count
+        return True, total
+    finally:
+        connection.close()                   # release the socket (close is idempotent)

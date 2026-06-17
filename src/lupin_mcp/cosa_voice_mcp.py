@@ -3666,6 +3666,7 @@ def task_query(
     correlation_key     : Optional[ str ] = None,
     limit               : Optional[ int ] = None,
     offset              : Optional[ int ] = None,
+    terse               : bool            = False,
 ) -> dict:
     """
     **[READ — always allowed, no user permission needed]** Query the task store.
@@ -3674,14 +3675,20 @@ def task_query(
     semantics, newest first. Junk enum filter values are rejected by the
     server (422), never silently empty.
 
+    TOKEN-EFFICIENCY (goal #1): pass terse=True for any "see my list" / board
+    glance. It returns the at-a-glance projection (id / title / status /
+    blocked_by / next_chase_ts / priority — `body` and the other full-row fields
+    dropped), a fraction of the full-row token weight. Reach for the full shape
+    (terse=False) ONLY when you actually need a row's body/audit context.
+
     Examples:
-        # Manager board glance — everything, newest first:
-        task_query()
+        # Manager board glance — everything, newest first, CHEAP projection:
+        task_query(terse=True)
 
-        # My owed work:
-        task_query(owner_persona="sam", status="in_progress")
+        # My owed work (terse list):
+        task_query(owner_persona="sam", status="in_progress", terse=True)
 
-        # Rick's court:
+        # Rick's court, full rows (need the body):
         task_query(gate_class="ricks_court")
 
     Args:
@@ -3695,9 +3702,12 @@ def task_query(
             (Phase-2 contract §1.11(C); pre-Phase-2 server ignores it)
         limit: Max rows (server default 100, cap 500)
         offset: Pagination offset
+        terse: True → the at-a-glance projection (§G token win); False (default)
+            → the full wire shape including body
 
     Returns:
-        { tasks: [...], count } verbatim, or an error dict (see task_create).
+        { tasks: [...], count } verbatim (terse rows when terse=True), or an
+        error dict (see task_create).
     """
     return task_query_impl(
         api_base_url        = _get_server_url(),
@@ -3711,6 +3721,7 @@ def task_query(
         correlation_key     = correlation_key,
         limit               = limit,
         offset              = offset,
+        terse               = terse,
     )
 
 

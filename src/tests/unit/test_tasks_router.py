@@ -325,6 +325,51 @@ def test_query_count_only_still_validates_enums( client, repo ):
     repo.query_tasks.assert_not_called()
 
 
+def test_query_terse_returns_glance_projection_only( client, repo ):
+    # §G: terse=true serializes the at-a-glance projection — EXACTLY the six
+    # glance keys, with `body` (and every other full-row field) dropped.
+    repo.query_tasks.return_value = [
+        make_item( body="a multi-paragraph body that must NOT ride the wire", priority="P1" ),
+    ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    assert r.status_code == 200
+    body = r.json()
+    assert body[ "count" ] == 1
+    row = body[ "tasks" ][ 0 ]
+    assert set( row.keys() ) == { "id", "title", "status", "blocked_by", "next_chase_ts", "priority" }
+    assert "body" not in row                                  # the token win — body dropped
+    assert row[ "priority" ] == "P1" and row[ "status" ] == "queued"
+    repo.query_tasks.assert_called_once()                    # rows ARE materialized (not count mode)
+    repo.count_tasks.assert_not_called()
+
+
+def test_query_terse_serializes_nullable_next_chase_ts( client, repo ):
+    # The terse projection's only conditional: next_chase_ts → None when unset.
+    repo.query_tasks.return_value = [ make_item( next_chase_ts=NOW ), make_item( next_chase_ts=None ) ]
+    r = client.get( "/api/tasks", params={ "terse": "true" } )
+    rows = r.json()[ "tasks" ]
+    assert rows[ 0 ][ "next_chase_ts" ] == NOW.isoformat()
+    assert rows[ 1 ][ "next_chase_ts" ] is None
+
+
+def test_query_terse_false_returns_full_rows( client, repo ):
+    # Default (terse omitted) → the full wire shape, body included (unchanged).
+    repo.query_tasks.return_value = [ make_item( body="full body here" ) ]
+    r = client.get( "/api/tasks" )
+    row = r.json()[ "tasks" ][ 0 ]
+    assert row[ "body" ] == "full body here" and "created_ts" in row
+
+
+def test_query_count_only_precedes_terse( client, repo ):
+    # count_only wins over terse — a count needs no rows at all, so query_tasks
+    # is never called even when terse is also requested.
+    repo.count_tasks.return_value = 5
+    r = client.get( "/api/tasks", params={ "count_only": "true", "terse": "true" } )
+    assert r.status_code == 200 and r.json() == { "count": 5 }
+    repo.count_tasks.assert_called_once()
+    repo.query_tasks.assert_not_called()
+
+
 def test_query_passes_all_filters_through( client, repo ):
     repo.query_tasks.return_value = [ ]
     r = client.get( "/api/tasks", params={
