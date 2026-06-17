@@ -236,16 +236,16 @@ class TestValidateLiveNotifyTarget:
 
 class TestDmPush:
     _ARGS = dict( base_url="http://x:7999/", api_key="k",
-                  asker_session_id="lupin-arbiter-app-8001" )
+                  sender_session_id="lupin-arbiter-app-8001" )
 
     def test_payload_carries_body_inline_and_threads_on_outreach_id( self ):
         p = build_dm_send_payload(
             recipient_persona="Mr Radio", body="WHOLE-FLEET-STALL — please advise",
-            thread_id="oid-1", asker_session_id="lupin-arbiter-app-8001" )
+            thread_id="oid-1", sender_session_id="lupin-arbiter-app-8001" )
         assert p[ "recipient_persona" ] == "Mr Radio"
         assert p[ "thread_id" ] == "oid-1"                            # threaded reply names the outreach
         assert p[ "body" ] == "WHOLE-FLEET-STALL — please advise"     # body travels INLINE
-        assert p[ "asker_session_id" ] == "lupin-arbiter-app-8001"
+        assert p[ "sender_session_id" ] == "lupin-arbiter-app-8001"
 
     def test_dispatched_201_posts_dm_send_with_body( self ):
         seen = [ ]
