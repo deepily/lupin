@@ -183,6 +183,64 @@ def _default_owed_work_fn( personas ):   # pragma: no cover - production store-r
     return out
 
 
+# DM-as-liveness window (2026-06-17): bound the SENT-DM scan to the verdict's
+# stale ceiling — a DM older than this ages to "offline" anyway, so a 1h lookback
+# is the natural, index-cheap bound (mirrors fleet_render.DEFAULT_STALE_SECONDS).
+_DM_ACTIVITY_LOOKBACK_SECONDS = 3600
+
+
+def _default_dm_activity_fn():   # pragma: no cover - production store-read IO boundary
+    """
+    Default SENT-DM activity reader — the DM-as-liveness store source (design §2).
+
+    Returns { session_id: max(created_at) } over SENT ai_to_ai DM rows in the
+    last ~1h. The session_id is parsed from the DM sender_id's '#'-suffix
+    (build_sender_id format '<agent>@<project>.deepily.ai#<session_id>'); rows
+    with no suffix are skipped (cannot be attributed to a session). SENT-only:
+    the sender doing dm_send is the genuine sign of life — a dormant recipient
+    does NOT wake on an inbound DM (reference_dm_send_does_not_wake_parked_workers),
+    so RECEIVED-DM liveness over-reports (design §2; SENT∪RECEIVED kept as a
+    future opt-in).
+
+    The bounded scan filters direction='ai_to_ai' AND created_at >= since (the
+    created_at index keeps it cheap). Exercised at the :8000 integration tier
+    like _default_owed_work_fn / LupinArbiterGateway.from_environment; the
+    GROUPING + freshest-age LOGIC that consumes this map is fully unit-tested via
+    an injected fake, so this IO boundary is no-cover.
+
+    NOTE (design §7 Q3, Tiberius): the exact group-by lives inline here for now
+    (queries the model directly, no NotificationRepository edit) — if Tiberius
+    prefers a named NotificationRepository method, this body moves there
+    verbatim; the seam contract (no-arg → { session_id: ts }) is unchanged.
+
+    Ensures:
+        - returns { session_id: aware-datetime } of the latest SENT-DM per session
+        - raising is acceptable — the caller swallows any exception into an inert
+          empty map (observer invariant); the other 4 signals carry liveness
+    """
+    from cosa.rest.db.database import get_db
+    from cosa.rest.postgres_models import Notification
+    since = datetime.datetime.now( datetime.timezone.utc ) - datetime.timedelta( seconds=_DM_ACTIVITY_LOOKBACK_SECONDS )
+    out   = { }
+    with get_db() as session:
+        rows = (
+            session.query( Notification.sender_id, Notification.created_at )
+            .filter( Notification.direction == "ai_to_ai",
+                     Notification.created_at >= since )
+            .all()
+        )
+    for sender_id, created_at in rows:
+        if not sender_id or "#" not in sender_id or created_at is None:
+            continue
+        session_id = sender_id.split( "#", 1 )[ 1 ]
+        if not session_id:
+            continue
+        prior = out.get( session_id )
+        if prior is None or created_at > prior:
+            out[ session_id ] = created_at
+    return out
+
+
 # Item A (2026.06.11 receipts design §2.3): the F1 default log seam now delegates
 # to arbiter_journal.make_log_fn — the ONE owner of the line shape (ts + ts_local).
 # In-pool arbiter events keep the historical "heartbeat-arbiter" service tag; the
@@ -337,6 +395,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
         owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
+        count_dm_as_liveness_fn  : Optional[ Callable ] = None,   # DM-toggle: per-poll INI re-read (None → lambda True; runtime-tunable)
+        dm_activity_fn           : Optional[ Callable ] = None,   # DM-toggle: per-poll SENT-DM store read (None → inert; dm_ts None everywhere)
         bridge_discovery_fn      : Optional[ Callable ] = None,
         snapshot_sink            : Optional[ Callable ] = None,
         render_sink              : Optional[ Callable ] = None,
@@ -485,6 +545,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # stays inert unless a fake is injected. (Mirrors the Item B None-seam
         # pattern: a None seam is visibly inert, never a hidden behavior change.)
         self._owed_work_fn = owed_work_fn
+        # DM-as-liveness toggle (2026-06-17): two seams. (1) the runtime-flag
+        # re-read — None → `lambda: True` (inert-safe; reproduces the INI default
+        # so in-pool / unit-fake construction needs no wiring; the :8001 factory
+        # wires a per-poll mtime-gated INI read for no-bounce tunability). (2) the
+        # SENT-DM store reader — None → INERT (no query; dm_ts None everywhere →
+        # compute_liveness excludes dm_age → byte-identical to the 4-signal
+        # behavior). Mirrors the owed_work_fn None-seam pattern: a None seam is
+        # visibly inert, never a hidden behavior change.
+        self._count_dm_as_liveness_fn = count_dm_as_liveness_fn if count_dm_as_liveness_fn is not None else ( lambda: True )
+        self._dm_activity_fn          = dm_activity_fn
         # v1.4 integrator seam: bridge discovery → {sid: persona} folded into the
         # build_fleet_view UNION roster (impure IO lives here, not in the leaf).
         self._bridge_discovery_fn = bridge_discovery_fn if bridge_discovery_fn is not None else _default_bridge_discovery
@@ -667,9 +737,28 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         who_rows        = self._commons.who()
         bridge_sessions = self._bridge_discovery_fn()              # impure discovery → UNION source (a)
+        # DM-as-liveness toggle (2026-06-17): read the runtime flag ONCE this poll
+        # (the seam re-reads the mtime-gated INI → runtime-tunable, no bounce). When
+        # OFF, SKIP the SENT-DM store query ENTIRELY (zero added DB load) so the
+        # poll is byte-identical to the prior 4-signal behavior — dm_ts is None
+        # everywhere and compute_liveness excludes dm_age. The flag is threaded to
+        # _publish_fleet_snapshot → build_snapshot so the verdict gate matches.
+        count_dm        = self._count_dm_as_liveness_fn()
+        # UNION source (e). Swallow-safe per the observer invariant + the
+        # _default_dm_activity_fn contract (a raising reader degrades to NO dm
+        # signal; the other 4 signals carry liveness) — mirrors the sibling
+        # owed_work_fn seam's try/except→inert. WITHOUT this a raising reader
+        # (e.g. a DB timeout) would propagate out of _poll_once, abort the WHOLE
+        # poll, and surface as a false "arbiter down" loop-level escalation.
+        dm_activity     = { }
+        if count_dm and self._dm_activity_fn is not None:
+            try:
+                dm_activity = self._dm_activity_fn()
+            except Exception:
+                dm_activity = { }
         fleet_view      = build_fleet_view(
             self._acc.snapshot(), who_rows, now, self.alive_threshold_seconds,
-            bridge_sessions=bridge_sessions,
+            bridge_sessions=bridge_sessions, dm_activity=dm_activity,
         )
         graph = build_graph( fleet_view )
 
@@ -705,7 +794,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
         pokes_fired   = self._auto_poke( fleet_view, now, active_managers )          # 2b-3 auto-poke
-        rendered      = self._publish_fleet_snapshot( fleet_view, now )
+        rendered      = self._publish_fleet_snapshot( fleet_view, now, count_dm )
         # post-game F2/F3 detectors read the FULL (include_offline=True) detection
         # snapshot + published count the publish step just stashed on the instance.
         manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers )
@@ -745,13 +834,17 @@ class ArbiterConsumerJob( AgenticJobBase ):
             self._log( "arbiter_poll_activity", **summary )
         return summary
 
-    def _publish_fleet_snapshot( self, fleet_view, now ):
+    def _publish_fleet_snapshot( self, fleet_view, now, count_dm=True ):
         """
         Build + render + push the v2.1 direct-state fleet snapshot (§10.2-§10.4).
 
         Requires:
             - fleet_view is the per-session view dict (build_fleet_view output)
             - now is an aware datetime
+            - count_dm is the DM-as-liveness toggle (read once per poll in
+              _poll_once), threaded to build_snapshot(count_dm_as_liveness=...):
+              True ⇒ dm_age joins the freshest-of union; False ⇒ each row's
+              liveness verdict is byte-identical to the prior 4-signal block
 
         Ensures:
             - reads each session's bridge-mtime (the wedge-resilient liveness
@@ -782,11 +875,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # only flatten the hierarchy — never crash the poll or mis-parent a worker.
         snapshot      = build_snapshot(
             fleet_view, bridge_mtimes, now,
-            resolve_manager_fn = self._resolve_manager_fn,
-            list_managers_fn   = self._list_managers_fn,
-            process_dead       = process_dead,
-            declared_managers  = self.declared_managers,
-            include_offline    = True,        # FULL view for the post-game F2/F3 detectors
+            resolve_manager_fn   = self._resolve_manager_fn,
+            list_managers_fn     = self._list_managers_fn,
+            process_dead         = process_dead,
+            declared_managers    = self.declared_managers,
+            include_offline      = True,        # FULL view for the post-game F2/F3 detectors
+            count_dm_as_liveness = count_dm,    # DM-as-liveness toggle (read once in _poll_once)
         )
         # Fleet-Status offline-lineage carry (2026-06-10): a reaped worker loses both
         # lineage sources at once (bridge unlink + manifest drop), so its still-decaying

@@ -110,32 +110,51 @@ def _verdict( freshest_age, live_seconds, quiet_seconds, stale_seconds ):
 def compute_liveness( view, bridge_mtime, now,
                       live_seconds  = DEFAULT_LIVE_SECONDS,
                       quiet_seconds = DEFAULT_QUIET_SECONDS,
-                      stale_seconds = DEFAULT_STALE_SECONDS ):
+                      stale_seconds = DEFAULT_STALE_SECONDS,
+                      count_dm      = True ):
     """
-    Build the per-session LIVENESS block — FOUR distinct ages + verdict.
+    Build the per-session LIVENESS block — FIVE distinct ages + verdict.
 
-    The verdict rides the FRESHEST of FOUR direct-signal ages (arbiter liveness
-    fix, Part 7 / Step 1.5) — the OLD code saw only {bridge, event}, so a worker
-    live-by-commons or live-by-idle_prompt (but with a stale stop-event) read
-    `offline`: the false WHOLE-FLEET-STALL bug. The four ages stay DISTINCT
-    columns (never collapsed):
+    The verdict rides the FRESHEST of up-to-FIVE direct-signal ages (arbiter
+    liveness fix, Part 7 / Step 1.5 + DM-as-liveness toggle, 2026-06-17) — the
+    OLD code saw only {bridge, event}, so a worker live-by-commons or
+    live-by-idle_prompt (but with a stale stop-event) read `offline`: the false
+    WHOLE-FLEET-STALL bug. The ages stay DISTINCT columns (never collapsed):
         - bridge_age_s      — bridge-file mtime (wedge-resilient PRIMARY, §10.1)
         - event_age_s       — last STOP/non-idle_prompt event ts (stop-event age)
         - commons_age_s     — last commons_who activity ts
         - idle_prompt_age_s — last kind=idle_prompt recency beacon ts (Step 1.3)
-    A session is LIVE if ANY signal is fresh (bias-to-alive); offline only when
-    NONE is recent.
+        - dm_age_s          — last SENT ai_to_ai DM ts (DM-as-liveness toggle):
+          an EXPLICIT, store-sourced, hook-independent sign of LIFE that closes
+          the coordination-only / MCP-tool coverage hole — a manager whose only
+          activity is dm_send (no Read/Edit/Bash, so its bridge-mtime may never
+          bump) is genuinely alive but today ages into STALE. dm_age_s is ALWAYS
+          computed (an auditable column — "LIVE by DM @HH:MM"), but enters the
+          freshest-of union ONLY when `count_dm` is True (the runtime toggle
+          `arbiter count dm as liveness`, default TRUE). count_dm=False
+          reproduces the prior 4-signal verdict BYTE-IDENTICALLY (the
+          reversibility guarantee). DM is a LIFE signal, never a PROGRESS or
+          STATE signal (C4): dm_ts feeds liveness ONLY, never the progress
+          signature.
+    A session is LIVE if ANY counted signal is fresh (bias-to-alive); offline
+    only when NONE is recent.
 
     Requires:
         - view is a per-session fleet-view dict (build_fleet_view output) — it
-          carries last_event_ts / commons_ts / idle_prompt_ts as DISTINCT fields
+          carries last_event_ts / commons_ts / idle_prompt_ts / dm_ts as
+          DISTINCT fields
         - bridge_mtime is an epoch-seconds float or None (get_bridge_mtime)
         - now is an aware datetime; thresholds are positive seconds
+        - count_dm is a bool — whether dm_age joins the freshest-of union
 
     Ensures:
         - returns { bridge_age_s, event_age_s, commons_age_s, idle_prompt_age_s,
-          freshest_age_s, verdict } — ages are int seconds (or None), verdict is
-          the §10.2 label off `freshest_age_s = min(present ages)`
+          dm_age_s, freshest_age_s, verdict } — ages are int seconds (or None),
+          verdict is the §10.2 label off `freshest_age_s = min(present counted
+          ages)`
+        - dm_age_s is ALWAYS present (auditable) regardless of count_dm; it joins
+          the freshest-of union ONLY when count_dm is True. count_dm=False ⇒ the
+          freshest_age_s + verdict are byte-identical to the prior 4-signal block
         - state is NOT consulted here (orthogonal columns, C4)
         - never raises
     """
@@ -144,8 +163,14 @@ def compute_liveness( view, bridge_mtime, now,
     event_age       = _event_age( view.get( "last_event_ts" )  if is_view else None, now )
     commons_age     = _event_age( view.get( "commons_ts" )     if is_view else None, now )
     idle_prompt_age = _event_age( view.get( "idle_prompt_ts" ) if is_view else None, now )
+    # dm_age is ALWAYS computed (auditable column) but joins the freshest-of
+    # union ONLY when the toggle is on — so count_dm=False is byte-identical to
+    # the prior 4-signal verdict (the reversibility guarantee).
+    dm_age          = _event_age( view.get( "dm_ts" )          if is_view else None, now )
 
     candidates = [ a for a in ( bridge_age, event_age, commons_age, idle_prompt_age ) if a is not None ]
+    if count_dm and dm_age is not None:
+        candidates.append( dm_age )
     freshest   = min( candidates ) if candidates else None
 
     def _int( a ):
@@ -156,6 +181,7 @@ def compute_liveness( view, bridge_mtime, now,
         "event_age_s"       : _int( event_age ),
         "commons_age_s"     : _int( commons_age ),
         "idle_prompt_age_s" : _int( idle_prompt_age ),
+        "dm_age_s"          : _int( dm_age ),
         "freshest_age_s"    : _int( freshest ),
         "verdict"           : _verdict( freshest, live_seconds, quiet_seconds, stale_seconds ),
     }
@@ -195,14 +221,15 @@ def _lookup_dead( process_dead, sid ):
 
 
 def build_snapshot( fleet_view, bridge_mtimes, now,
-                    live_seconds       = DEFAULT_LIVE_SECONDS,
-                    quiet_seconds      = DEFAULT_QUIET_SECONDS,
-                    stale_seconds      = DEFAULT_STALE_SECONDS,
-                    resolve_manager_fn = None,
-                    list_managers_fn   = None,
-                    process_dead       = None,
-                    include_offline    = False,
-                    declared_managers  = None ):
+                    live_seconds         = DEFAULT_LIVE_SECONDS,
+                    quiet_seconds        = DEFAULT_QUIET_SECONDS,
+                    stale_seconds        = DEFAULT_STALE_SECONDS,
+                    resolve_manager_fn   = None,
+                    list_managers_fn     = None,
+                    process_dead         = None,
+                    include_offline      = False,
+                    declared_managers    = None,
+                    count_dm_as_liveness = True ):
     """
     Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
     with per-session hierarchy (Fleet-Status P1, design §4) and live-only-by-default
@@ -231,6 +258,13 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
           reading overrides; an absent sid keeps its age verdict. The verdict
           STRING set is unchanged (the frontend offline-split is untouched);
           `process_dead` is an additive transparency flag on the liveness block.
+        - count_dm_as_liveness (default True, the `arbiter count dm as liveness`
+          toggle) is threaded verbatim to compute_liveness(count_dm=...): True ⇒
+          a session's SENT-DM age joins the freshest-of liveness union (a
+          coordination-only manager reads LIVE); False ⇒ each row's liveness
+          block is byte-identical to the prior 4-signal verdict (dm_age_s still
+          present for audit, just excluded from the union). DM feeds LIVENESS
+          only, never STATE / the progress signature (C4)
         - each row keeps STATE and LIVENESS as separate keys (C4) PLUS the two
           hierarchy keys (role, manager):
           { session_id, persona, state, holding_on, stuck, liveness{...},
@@ -278,6 +312,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         liveness = compute_liveness(
             view, ( bridge_mtimes or { } ).get( sid ), now,
             live_seconds, quiet_seconds, stale_seconds,
+            count_dm = count_dm_as_liveness,
         )
         # PID fast-death override (kill-0): a CONFIRMED-dead process forces
         # "offline" now, regardless of how recent its last signal was — so a
@@ -616,6 +651,27 @@ def quick_smoke_test():
     # a row gone from the snapshot forgets its lineage (eviction prune)
     _, pruned = carry_forward_lineage( { "sessions": [ ] }, lineage )
     assert pruned == { }
+
+    # DM-as-liveness toggle (2026-06-17): a DM-only session (only signal is a
+    # fresh SENT-DM ts — no bridge/event/commons/idle_prompt) reads LIVE when the
+    # toggle is ON, and offline when OFF (the prior 4-signal verdict). dm_age_s is
+    # an auditable column either way; the toggle governs only the freshest union.
+    dm_view = { "dm1": { "session_id": "dm1", "persona": "Dee", "state": "working",
+                         "holding_on": "none", "stuck": False,
+                         "last_event_ts": None,
+                         "dm_ts": now - datetime.timedelta( seconds=7 ) } }
+    on_snap  = build_snapshot( dm_view, { }, now, include_offline=True, count_dm_as_liveness=True )
+    on_live  = on_snap[ "sessions" ][ 0 ][ "liveness" ]
+    assert on_live[ "verdict" ] == "LIVE" and on_live[ "dm_age_s" ] == 7
+    assert on_live[ "freshest_age_s" ] == 7
+    off_snap = build_snapshot( dm_view, { }, now, include_offline=True, count_dm_as_liveness=False )
+    off_live = off_snap[ "sessions" ][ 0 ][ "liveness" ]
+    # toggle OFF: dm_age_s still computed (auditable) but EXCLUDED from the union →
+    # no counted signal → offline (byte-identical to the prior 4-signal verdict)
+    assert off_live[ "dm_age_s" ] == 7 and off_live[ "freshest_age_s" ] is None
+    assert off_live[ "verdict" ] == "offline"
+    # dm_age_s is present on EVERY liveness block (auditable column)
+    assert "dm_age_s" in s1[ "liveness" ]
     return True
 
 

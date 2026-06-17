@@ -39,7 +39,7 @@ import threading
 from typing import Any, Callable, Optional
 
 from lupin_arbiter_app.health_watcher import SystemClock
-from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_owed_work_fn
+from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_owed_work_fn, _default_dm_activity_fn
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
 
@@ -175,6 +175,13 @@ def build_fleet_arbiter_job_factory(
     # activates the store-aware suppression of the false-escalating detectors;
     # injectable for tests (construction is pure — the reader is never CALLED here).
     owed_work_fn         : Optional[ Callable ] = None,
+    # DM-as-liveness toggle (2026-06-17): (1) the per-poll runtime-flag re-read
+    # (None → the job defaults to `lambda: True`; app.py wires a per-poll
+    # mtime-gated INI read so the flag is runtime-tunable with no bounce). (2) the
+    # SENT-DM store reader — defaults to the real DB reader so the :8001 service
+    # activates the 5th signal; injectable for tests (never CALLED at construction).
+    count_dm_as_liveness_fn : Optional[ Callable ] = None,
+    dm_activity_fn          : Optional[ Callable ] = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -193,6 +200,11 @@ def build_fleet_arbiter_job_factory(
     # L1: wire the real DB owed-work reader by default so the :8001 service gets
     # store-aware detector suppression; an injected fake overrides it for tests.
     owed_work_fn = owed_work_fn if owed_work_fn is not None else _default_owed_work_fn
+    # DM-as-liveness: wire the real SENT-DM reader by default so the :8001 service
+    # activates the 5th signal; an injected fake overrides it for tests. The
+    # runtime-flag re-read is wired by app.py (cfg-closed lambda); None here lets
+    # the job default to `lambda: True` (feature ON, the INI default).
+    dm_activity_fn = dm_activity_fn if dm_activity_fn is not None else _default_dm_activity_fn
     escalation_notify = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn )
 
     def factory() -> ArbiterConsumerJob:
@@ -201,6 +213,8 @@ def build_fleet_arbiter_job_factory(
         return ArbiterConsumerJob(
             commons                    = gateway,
             owed_work_fn               = owed_work_fn,                              # L1 store-aware seam
+            count_dm_as_liveness_fn    = count_dm_as_liveness_fn,                   # DM-toggle runtime flag (app.py wires cfg read)
+            dm_activity_fn             = dm_activity_fn,                            # DM-toggle SENT-DM store reader
             poll_seconds               = poll_seconds,
             manager_recipient          = manager_on_duty,
             declared_managers          = declared_managers,
