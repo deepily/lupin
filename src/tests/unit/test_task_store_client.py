@@ -214,6 +214,15 @@ class TestQueryOwed:
         capture_seq[ "outcomes" ] = [ _rows( 0 ), _rows( 0 ) ]
         assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( True, 0 )
 
+    def test_count_only_true_on_every_owed_query( self, capture_seq ):
+        # O2 / §G: each owed query rides count_only=true so the server returns a
+        # true COUNT(*), never a page-length saturating at the endpoint's limit.
+        capture_seq[ "outcomes" ] = [ _rows( 250 ), _rows( 175 ) ]
+        ok, count = tc.query_owed( SETTINGS, "k", "p", OWED )
+        assert ( ok, count ) == ( True, 425 )                 # >100 counted exactly, no saturation
+        urls = [ r.full_url for r in capture_seq[ "requests" ] ]
+        assert all( "count_only=true" in u for u in urls )
+
     def test_transport_failure_short_circuits( self, capture_seq ):
         # first status raises (refused) → return immediately, second never attempted
         capture_seq[ "outcomes" ] = [ ConnectionRefusedError( "refused" ), _rows( 9 ) ]

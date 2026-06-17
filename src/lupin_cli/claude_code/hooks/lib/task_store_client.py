@@ -176,10 +176,13 @@ def query_owed( settings, api_key, owner_persona, statuses, project=None, timeou
 
     The flag-gated replacement for the Stop hook's transcript-replay owed
     source. `GET /api/tasks` filters ONE status per call, so this sums the
-    server-computed `count` across each owed status — owed-status row sets are
-    tiny, so each query is small and never brushes the endpoint's limit cap.
-    Bounded by an AGGRESSIVE per-request timeout (the Stop hook fires every
-    turn — a slow `:7999` must never stall turn-end; cascade review §C).
+    server-computed `count` across each owed status. Each call rides
+    `count_only=true` (O2 / §G): the server returns a true SQL COUNT(*) WITHOUT
+    serializing a single row, so the count is the genuine total — it can NEVER
+    saturate at the endpoint's page `limit` the way the default `len(page)`
+    "count" does once a status exceeds 100 rows. Bounded by an AGGRESSIVE
+    per-request timeout (the Stop hook fires every turn — a slow `:7999` must
+    never stall turn-end; cascade review §C).
 
     Requires:
         - settings is the load_task_store_settings() dict (provides api_base_url)
@@ -206,7 +209,9 @@ def query_owed( settings, api_key, owner_persona, statuses, project=None, timeou
 
     total = 0
     for status in statuses:
-        params = { "owner_persona": owner_persona, "status": status }
+        # count_only=true (O2): true COUNT(*), never a page-length saturating at
+        # the endpoint's limit cap — a session with >100 owed rows counts exactly.
+        params = { "owner_persona": owner_persona, "status": status, "count_only": "true" }
         if project:
             params[ "project" ] = project
         query = urllib.parse.urlencode( params )

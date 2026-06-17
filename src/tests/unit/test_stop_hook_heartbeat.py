@@ -1262,15 +1262,64 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
-    def test_flag_on_store_unreachable_no_poke( self, mock_load, mock_read, mock_count,
-                                                 mock_incr, mock_store, mock_log ):
-        """§C fail-safe: store unreachable/timeout/malformed → NO poke, distinct
-        log phase, no emit, no increment (don't guess when the store is down)."""
+    def test_flag_on_store_unreachable_no_local_signals_no_poke( self, mock_load, mock_read, mock_count,
+                                                                 mock_incr, mock_store, mock_log ):
+        """§C fail-safe: store unreachable/timeout/malformed AND no local signals
+        → store-owed fails safe to 0, the verdict is not_owed, NO poke, distinct
+        log phase, no increment (don't guess the STORE count when it's down).
+        O1: this is NO LONGER an early return — the oracle still runs over the
+        (empty) local signals, so emit_outcome fires the not_owed/idle beacon."""
         assert _run_heartbeat( "sid", "/t.jsonl" ) is None
         assert "heartbeat_store_unreachable" in [ c.kwargs[ "extra" ][ "phase" ]
                                                   for c in mock_log.call_args_list ]
-        self.mock_events.emit_outcome.assert_not_called()
+        # The oracle now runs to completion (no early return): the outcome is
+        # not_owed, never a poke, and the poke counter is never incremented.
+        emitted_outcomes = [ c.args[ 2 ] for c in self.mock_events.emit_outcome.call_args_list ]
+        assert OUTCOME_POKE not in emitted_outcomes
         mock_incr.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) )
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
+    def test_O1_store_unreachable_with_delegation_STILL_pokes( self, mock_load, mock_read, mock_count,
+                                                               mock_incr, mock_store, mock_log ):
+        """O1 REGRESSION GUARD: with the flag ON and the store UNREACHABLE, a live
+        un-reaped spawned worker MUST still poke. The local delegations signal is
+        filesystem-derived (store-independent) — before O1 the store-down early
+        return suppressed it, silencing the manager. Now the store-owed count
+        fails safe to 0 but the delegation survives the outage → poke."""
+        self.mock_delegations.return_value = [ { "session_name": "cc-reviewer-x-1", "session_id": "c1" } ]
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out is not None and out[ "decision" ] == "block"
+        assert "1 live worker(s) still out" in out[ "reason" ]
+        # The store-unreachable log still fires (the count failed safe)...
+        assert "heartbeat_store_unreachable" in [ c.kwargs[ "extra" ][ "phase" ]
+                                                  for c in mock_log.call_args_list ]
+        # ...but the local signal drove a real poke (the O1 fix).
+        mock_incr.assert_called_once()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) )
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True,
+                           "owed_source_from_store": True } )
+    def test_O1_store_unreachable_with_inbound_STILL_pokes( self, mock_load, mock_read, mock_count,
+                                                            mock_incr, mock_store, mock_log ):
+        """O1 REGRESSION GUARD (worker side): store UNREACHABLE + an unanswered
+        inbound DM (gate ON) → still pokes. Inbound is bridge-derived
+        (store-independent) and must survive a store outage."""
+        self.mock_inbound.return_value = { "owed": [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ],
+                                           "stale": [ ] }
+        out = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out is not None and out[ "decision" ] == "block"
+        assert "unanswered inbound question" in out[ "reason" ]
+        mock_incr.assert_called_once()
 
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store" )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )

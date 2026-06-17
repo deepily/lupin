@@ -421,7 +421,9 @@ def patch_task(
     summary     = "Query task-store items",
     description = "The deterministic owed-work query (R4): exact-match filters, "
                   "AND semantics, newest first. Junk enum filter values are "
-                  "rejected (422), never silently empty. Auth: X-API-Key or Bearer JWT."
+                  "rejected (422), never silently empty. count_only=true returns "
+                  "{count} as a true COUNT(*) without serializing any rows (the "
+                  "owed-count token win, §G). Auth: X-API-Key or Bearer JWT."
 )
 def query_tasks(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
@@ -432,6 +434,7 @@ def query_tasks(
     project             : Optional[str] = None,
     item_class          : Optional[str] = None,
     correlation_key     : Optional[str] = None,
+    count_only          : bool = False,
     limit               : int = Query( default=100, ge=0, le=500 ),
     offset              : int = Query( default=0, ge=0 ),
 ):
@@ -448,8 +451,14 @@ def query_tasks(
           an honest-looking empty result
 
     Ensures:
-        - returns { tasks: [...], count } matching ALL provided filters
-        - ordered created_ts descending, stable tiebreak on id
+        - count_only=False (default): returns { tasks: [...], count } matching
+          ALL provided filters, ordered created_ts descending, stable tiebreak
+          on id. NOTE: `count` here is the PAGE length (len(tasks)) — it
+          saturates at `limit`; use count_only for a true total.
+        - count_only=True (O2 / §G token win): returns { count } as a true
+          SQL COUNT(*) over the SAME filters — NO rows serialized, independent
+          of limit/offset (those params are ignored in this mode). The owed
+          source reads this so a session with >100 owed rows is counted exactly.
     """
     errors = [ ]
     if status is not None and status not in rules.VALID_STATUSES:
@@ -461,7 +470,20 @@ def query_tasks(
     _reject_if_errors( errors )
 
     with get_db() as session:
-        repo  = TaskRepository( session )
+        repo = TaskRepository( session )
+        if count_only:
+            # True COUNT(*) — no row materialization (§G). limit/offset are
+            # deliberately NOT forwarded: a count is page-independent.
+            count = repo.count_tasks(
+                owner_persona       = owner_persona,
+                status              = status,
+                gate_class          = gate_class,
+                accountable_manager = accountable_manager,
+                project             = project,
+                item_class          = item_class,
+                correlation_key     = correlation_key,
+            )
+            return { "count": count }
         items = repo.query_tasks(
             owner_persona       = owner_persona,
             status              = status,
