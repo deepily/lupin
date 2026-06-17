@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   formatChaseTime,
+  formatTaskBlockedBy,
   groupTasksByOwner,
   isOpenStatus,
   taskCellOrDash,
@@ -13,6 +14,7 @@ import {
   taskPriorityClass,
   taskStatusClass,
   taskTitleLabel,
+  type TaskBlockedRef,
   type TaskItem,
 } from "../../../../lupin_app/static/js/multiplexer/render/taskListModel";
 
@@ -125,6 +127,38 @@ test("taskCellOrDash: falsy / 'none' → em-dash; else the value", () => {
   assert.equal(taskCellOrDash(""), "—");
   assert.equal(taskCellOrDash("none"), "—");
   assert.equal(taskCellOrDash("P1"), "P1");
+});
+
+// ---------------------------------------------------------------------------
+// formatTaskBlockedBy — REAL typed-ref ARRAY shape (bug 336289ab; JS parity 2724b80d)
+// ---------------------------------------------------------------------------
+
+test("formatTaskBlockedBy: typed-ref ARRAY → 'kind:id' joined with ', '", () => {
+  const refs: TaskBlockedRef[] = [
+    { kind: "item", id: "82e4eaf0-7968-47f8-8720-d67f0baeb9e2" },
+    { kind: "persona", id: "krishna" },
+  ];
+  assert.equal(
+    formatTaskBlockedBy(refs),
+    "item:82e4eaf0-7968-47f8-8720-d67f0baeb9e2, persona:krishna",
+  );
+});
+
+test("formatTaskBlockedBy: ref with no kind → bare id; non-object member → String(member)", () => {
+  assert.equal(formatTaskBlockedBy([{ id: "abc" }]), "abc");
+  // a non-object array member is coerced (defensive — never throws)
+  assert.equal(formatTaskBlockedBy(["raw" as unknown as TaskBlockedRef]), "raw");
+});
+
+test("formatTaskBlockedBy: empty array → '' (caller's taskCellOrDash renders the em-dash)", () => {
+  assert.equal(formatTaskBlockedBy([]), "");
+  assert.equal(taskCellOrDash(formatTaskBlockedBy([])), "—");
+});
+
+test("formatTaskBlockedBy: string / null / undefined pass through unchanged (back-compat)", () => {
+  assert.equal(formatTaskBlockedBy("decision:abc"), "decision:abc");
+  assert.equal(formatTaskBlockedBy(null), null);
+  assert.equal(formatTaskBlockedBy(undefined), undefined);
 });
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@
 
 import {
   formatChaseTime,
+  formatTaskBlockedBy,
   taskCellOrDash,
   taskPriorityClass,
   taskStatusClass,
@@ -77,7 +78,7 @@ export function renderTaskRow(
   statusCell.appendChild( document.createTextNode( status ) );
   tr.appendChild( statusCell );
 
-  tr.appendChild( td( "task-col-blocked", taskCellOrDash( task.blocked_by ) ) );
+  tr.appendChild( td( "task-col-blocked", taskCellOrDash( formatTaskBlockedBy( task.blocked_by ) ) ) );
   tr.appendChild( td( "task-col-chase", formatChaseTime( task.next_chase_ts, ianaZone ) ) );
   tr.appendChild( td( "task-col-accountable", taskCellOrDash( task.accountable_manager ) ) );
 

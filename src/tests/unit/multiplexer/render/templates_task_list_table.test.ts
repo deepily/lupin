@@ -84,6 +84,30 @@ test("renderTaskRow: defaults — missing status/class, falsy cells → dashes, 
   assert.equal(tr.querySelector(".task-col-project")?.textContent, "—");
 });
 
+test("renderTaskRow: typed-ref ARRAY blocked_by renders 'kind:id' joined (bug 336289ab)", () => {
+  const tr = renderTaskRow(
+    {
+      title: "blocked one",
+      status: "blocked",
+      blocked_by: [
+        { kind: "item", id: "82e4eaf0-7968" },
+        { kind: "persona", id: "krishna" },
+      ],
+    },
+    undefined,
+  );
+  // The real API shape is an ARRAY — must NOT crash and must show kind:id labels.
+  assert.equal(
+    tr.querySelector(".task-col-blocked")?.textContent,
+    "item:82e4eaf0-7968, persona:krishna",
+  );
+});
+
+test("renderTaskRow: empty blocked_by array → em-dash cell", () => {
+  const tr = renderTaskRow({ title: "x", status: "queued", blocked_by: [] }, undefined);
+  assert.equal(tr.querySelector(".task-col-blocked")?.textContent, "—");
+});
+
 // ---------------------------------------------------------------------------
 // renderTaskListTable
 // ---------------------------------------------------------------------------
