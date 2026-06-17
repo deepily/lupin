@@ -245,7 +245,7 @@ class TestGroupPCLoopClosure:
         thing neither side's unit tests can show (each mocks the other half).
         """
         # producer harness (real leaves, isolated roots)
-        monkeypatch.setattr( stop, "load_heartbeat_settings", lambda: { "enabled": True, "poke_cap": 3 } )
+        monkeypatch.setattr( stop, "load_heartbeat_settings", lambda: { "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
         monkeypatch.setattr( stop, "get_voice_persona", lambda _s: { "name": "Mr. Radio 🦉" } )
         import cosa.utils.util as cu
         proj = tmp_path / "proj"; proj.mkdir()
