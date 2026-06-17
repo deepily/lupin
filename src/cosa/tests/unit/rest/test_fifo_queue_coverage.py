@@ -33,6 +33,7 @@ from unittest.mock import Mock, patch
 
 from cosa.rest.fifo_queue import FifoQueue
 from cosa.rest.job_state  import JobState
+from cosa.rest.queue_protocol import QueueableJob
 
 
 def _job( id_hash, state=JobState.QUEUED, scheduled_at=None, user_email="u@test.com" ):
@@ -41,7 +42,11 @@ def _job( id_hash, state=JobState.QUEUED, scheduled_at=None, user_email="u@test.
     artifacts defaults to an empty dict so `_notify`'s abstract auto-promotion
     reads a real (empty) mapping rather than an auto-vivified Mock attribute.
     """
-    j              = Mock()
+    # spec=QueueableJob so the double satisfies FifoQueue.push()'s hardened
+    # is_queueable_job() protocol guard (a bare Mock() fails the runtime_checkable
+    # data-member check under py3.12+); extra non-protocol attrs (artifacts) remain
+    # settable. Stale-test fix — the product guard is correct.
+    j              = Mock( spec=QueueableJob )
     j.id_hash      = id_hash
     j.state        = state
     j.scheduled_at = scheduled_at

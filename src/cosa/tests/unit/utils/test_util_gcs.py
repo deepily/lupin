@@ -30,6 +30,25 @@ class _FakeDefaultCredentialsError( Exception ):
     """Stand-in for google.auth.exceptions.DefaultCredentialsError."""
 
 
+# CAUSE-B (task 51980026): the tests below exercise the GCS_AVAILABLE-True paths by
+# patching gcs.auth_default / gcs.storage / gcs.DefaultCredentialsError. Those module
+# globals are bound ONLY when `from google.cloud import storage` / `from google.auth
+# import default` succeed at import time. When google-cloud-storage is NOT installed in
+# the test venv (the current state), GCS_AVAILABLE is False and those names are unbound,
+# so patch.object() raises AttributeError before the test body runs. This is NOT a
+# product defect (util_gcs gracefully gates every entry point on GCS_AVAILABLE) and NOT a
+# stale test — it is a genuine optional-dependency gap in the test environment. We skip
+# the SDK-requiring tests when the SDK is absent (the SDK-UNAVAILABLE-path tests in each
+# class still run). Coverage-preserving remediation = add google-cloud-storage to the
+# test dependencies (a dependency decision, deferred to a maintainer).
+_requires_gcs_sdk = unittest.skipUnless(
+    gcs.GCS_AVAILABLE,
+    "requires google-cloud-storage installed in the test venv — GCS_AVAILABLE-True paths "
+    "patch gcs.auth_default/storage/DefaultCredentialsError, which are unbound when the "
+    "SDK is absent (task 51980026 CAUSE-B; remediation: add google-cloud-storage to test deps)"
+)
+
+
 class TestParseGcsUri( unittest.TestCase ):
     """
     URI parsing: prefix validation + bucket/blob split.
@@ -88,17 +107,20 @@ class TestValidateCredentials( unittest.TestCase ):
         with patch.object( gcs, "GCS_AVAILABLE", False ):
             self.assertFalse( validate_gcs_credentials( debug=True ) )
 
+    @_requires_gcs_sdk
     def test_credentials_present_returns_true( self ):
         with patch.object( gcs, "GCS_AVAILABLE", True ), \
              patch.object( gcs, "auth_default", return_value=( MagicMock(), "proj" ) ):
             self.assertTrue( validate_gcs_credentials( debug=True ) )
 
+    @_requires_gcs_sdk
     def test_default_credentials_error_returns_false( self ):
         with patch.object( gcs, "GCS_AVAILABLE", True ), \
              patch.object( gcs, "DefaultCredentialsError", _FakeDefaultCredentialsError ), \
              patch.object( gcs, "auth_default", side_effect=_FakeDefaultCredentialsError( "nope" ) ):
             self.assertFalse( validate_gcs_credentials( debug=True ) )
 
+    @_requires_gcs_sdk
     def test_unexpected_exception_returns_false( self ):
         with patch.object( gcs, "GCS_AVAILABLE", True ), \
              patch.object( gcs, "DefaultCredentialsError", _FakeDefaultCredentialsError ), \
@@ -130,6 +152,7 @@ class TestValidateBucketAccess( unittest.TestCase ):
         with patch.object( gcs, "GCS_AVAILABLE", False ):
             self.assertFalse( validate_gcs_bucket_access( "gs://b/", debug=True ) )
 
+    @_requires_gcs_sdk
     def test_accessible_bucket_returns_true( self ):
         bucket = MagicMock()
         bucket.exists.return_value = True
@@ -138,6 +161,7 @@ class TestValidateBucketAccess( unittest.TestCase ):
             self.assertTrue( validate_gcs_bucket_access( "gs://b/", debug=True ) )
         bucket.reload.assert_called_once()
 
+    @_requires_gcs_sdk
     def test_missing_bucket_returns_false( self ):
         bucket = MagicMock()
         bucket.exists.return_value = False
@@ -145,6 +169,7 @@ class TestValidateBucketAccess( unittest.TestCase ):
              patch.object( gcs, "storage", self._client_with_bucket( bucket ) ):
             self.assertFalse( validate_gcs_bucket_access( "gs://b/", debug=True ) )
 
+    @_requires_gcs_sdk
     def test_reload_failure_returns_false( self ):
         bucket = MagicMock()
         bucket.exists.return_value = True
@@ -153,6 +178,7 @@ class TestValidateBucketAccess( unittest.TestCase ):
              patch.object( gcs, "storage", self._client_with_bucket( bucket ) ):
             self.assertFalse( validate_gcs_bucket_access( "gs://b/", debug=True ) )
 
+    @_requires_gcs_sdk
     def test_default_credentials_error_returns_false( self ):
         storage = MagicMock()
         storage.Client.side_effect = _FakeDefaultCredentialsError( "no creds" )
@@ -161,6 +187,7 @@ class TestValidateBucketAccess( unittest.TestCase ):
              patch.object( gcs, "storage", storage ):
             self.assertFalse( validate_gcs_bucket_access( "gs://b/", debug=True ) )
 
+    @_requires_gcs_sdk
     def test_outer_exception_returns_false( self ):
         storage = MagicMock()
         storage.Client.side_effect = RuntimeError( "network" )
@@ -185,12 +212,14 @@ class TestWriteText( unittest.TestCase ):
             with self.assertRaises( RuntimeError ):
                 write_text_to_gcs( "gs://b/f.md", "hi" )
 
+    @_requires_gcs_sdk
     def test_bucket_only_uri_raises_value_error( self ):
         with patch.object( gcs, "GCS_AVAILABLE", True ), \
              patch.object( gcs, "storage", MagicMock() ):
             with self.assertRaises( ValueError ):
                 write_text_to_gcs( "gs://bucket-only/", "hi" )
 
+    @_requires_gcs_sdk
     def test_write_uploads_and_returns_uri( self ):
         blob   = MagicMock()
         bucket = MagicMock()
@@ -225,12 +254,14 @@ class TestReadText( unittest.TestCase ):
             with self.assertRaises( RuntimeError ):
                 read_text_from_gcs( "gs://b/f.md" )
 
+    @_requires_gcs_sdk
     def test_bucket_only_uri_raises_value_error( self ):
         with patch.object( gcs, "GCS_AVAILABLE", True ), \
              patch.object( gcs, "storage", MagicMock() ):
             with self.assertRaises( ValueError ):
                 read_text_from_gcs( "gs://bucket-only/" )
 
+    @_requires_gcs_sdk
     def test_read_returns_downloaded_text( self ):
         blob   = MagicMock()
         blob.download_as_text.return_value = "# Report"
@@ -260,6 +291,7 @@ class TestBucketExists( unittest.TestCase ):
         with patch.object( gcs, "GCS_AVAILABLE", False ):
             self.assertFalse( gcs_bucket_uri_exists( "gs://b/" ) )
 
+    @_requires_gcs_sdk
     def test_returns_bucket_exists_result( self ):
         bucket = MagicMock()
         bucket.exists.return_value = True
@@ -271,6 +303,7 @@ class TestBucketExists( unittest.TestCase ):
              patch.object( gcs, "storage", storage ):
             self.assertTrue( gcs_bucket_uri_exists( "gs://b/" ) )
 
+    @_requires_gcs_sdk
     def test_exception_returns_false( self ):
         storage = MagicMock()
         storage.Client.side_effect = RuntimeError( "boom" )
@@ -290,6 +323,7 @@ class TestImportFallback( unittest.TestCase ):
     state. No production source is modified.
     """
 
+    @_requires_gcs_sdk
     def test_missing_sdk_sets_unavailable_false( self ):
         import importlib
         import sys

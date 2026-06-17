@@ -31,7 +31,23 @@ from mock_manager import MockManager
 from unit_test_utilities import UnitTestUtilities
 
 # Import the module under test
+import cosa.training.peft_trainer as _pt
 from cosa.training.peft_trainer import PeftTrainer
+
+
+# CAUSE-B (task 51980026): this test patches cosa.training.peft_trainer.PeftModel.
+# from_pretrained, but PeftModel is bound only when `from peft import ... PeftModel`
+# succeeds at import time. When the optional 'peft' package is NOT installed (the
+# current test venv), the module sets PEFT_AVAILABLE=False and PeftModel=None, so the
+# patch target is None.from_pretrained → AttributeError before the test body runs. NOT
+# a product defect and NOT a stale test — an optional-dep gap in the test environment.
+# Skip when peft is absent. Remediation: add peft to the test deps.
+_requires_peft = unittest.skipUnless(
+    _pt.PEFT_AVAILABLE,
+    "requires the optional 'peft' package (absent in this test venv); PeftModel is None "
+    "so patch('...PeftModel.from_pretrained') raises AttributeError "
+    "(task 51980026 CAUSE-B; remediation: add peft to test deps)"
+)
 
 
 class TestPeftTrainer( unittest.TestCase ):
@@ -407,6 +423,7 @@ class TestPeftTrainer( unittest.TestCase ):
             self.mock_model.save_pretrained.assert_called_once()
             self.mock_tokenizer.save_pretrained.assert_called_once()
     
+    @_requires_peft
     def test_load_and_merge_adapter_success( self ):
         """
         Test successful adapter loading and merging.
