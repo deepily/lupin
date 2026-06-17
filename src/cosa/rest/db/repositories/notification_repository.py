@@ -138,6 +138,87 @@ class NotificationRepository( BaseRepository[Notification] ):
             desc( Notification.created_at )
         ).limit( limit ).offset( offset ).all()
 
+    def get_dm_thread(
+        self,
+        thread_id: str,
+        recipient_id: uuid.UUID,
+        since: Optional[datetime] = None,
+        limit: int = 200
+    ) -> List[Notification]:
+        """
+        Load one peer-DM conversation thread (the `/api/dm/list?thread_id=` read).
+
+        A peer DM persists in the notifications table with direction='ai_to_ai' and
+        a `thread_id` correlating every message in a conversation. This returns that
+        thread in chronological (ascending) order — the natural read order for a
+        conversation — optionally tailing only messages newer than `since` (poll).
+
+        Requires:
+            - thread_id: the conversation id (Notification.thread_id)
+            - recipient_id: Valid user UUID (same-user scoping — peer DMs land on the
+              sender's own user, so this is always the authenticated user's uuid)
+            - since: None (whole thread) or a datetime (only created_at > since)
+            - limit: positive int cap on rows returned
+
+        Ensures:
+            - returns ai_to_ai, non-hidden rows for this thread + recipient
+            - when since is set, only rows strictly newer than `since`
+            - ordered by created_at ascending (oldest first — conversation order)
+            - honors limit
+
+        Returns:
+            List of Notification instances in chronological order
+        """
+        query = self.session.query( Notification ).filter(
+            Notification.recipient_id == recipient_id,
+            Notification.thread_id    == thread_id,
+            Notification.direction    == "ai_to_ai",
+            Notification.is_hidden    == False
+        )
+        if since is not None:
+            query = query.filter( Notification.created_at > since )
+        return query.order_by(
+            Notification.created_at.asc()
+        ).limit( limit ).all()
+
+    def get_dm_inbox(
+        self,
+        recipient_id: uuid.UUID,
+        since: Optional[datetime] = None,
+        limit: int = 50
+    ) -> List[Notification]:
+        """
+        Load the peer-DM inbox (the `/api/dm/list` no-thread read / poll).
+
+        All of a user's received peer DMs (direction='ai_to_ai'), newest first — the
+        cross-thread inbox view. Optionally tails only messages newer than `since`
+        for a lightweight poll.
+
+        Requires:
+            - recipient_id: Valid user UUID (same-user scoping)
+            - since: None (whole inbox) or a datetime (only created_at > since)
+            - limit: positive int cap on rows returned
+
+        Ensures:
+            - returns ai_to_ai, non-hidden rows for this recipient
+            - when since is set, only rows strictly newer than `since`
+            - ordered by created_at descending (newest first — inbox order)
+            - honors limit
+
+        Returns:
+            List of Notification instances, newest first
+        """
+        query = self.session.query( Notification ).filter(
+            Notification.recipient_id == recipient_id,
+            Notification.direction    == "ai_to_ai",
+            Notification.is_hidden    == False
+        )
+        if since is not None:
+            query = query.filter( Notification.created_at > since )
+        return query.order_by(
+            desc( Notification.created_at )
+        ).limit( limit ).all()
+
     def get_sender_last_activities( self, recipient_id: uuid.UUID ) -> List[Dict]:
         """
         Get last activity timestamp per sender for a recipient.

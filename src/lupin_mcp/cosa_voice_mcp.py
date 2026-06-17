@@ -3186,6 +3186,260 @@ def dm_send(
 
 
 # ============================================================================
+# DM verb family — dm_respond / dm_get / dm_list (Phase 2)
+#
+# Mirrors of the /api/dm/<verb> REST routes (1:1). `dm_respond` is the threaded
+# reply (POST /api/dm/respond — like dm_send but reply_to + thread_id required);
+# `dm_get` fetches one DM by id; `dm_list` lists/polls a thread or the inbox.
+# Each testable core injects HTTP (post_fn / get_fn) so unit tests need no server.
+# Design: src/rnd/v0.1.8/2026.06.16-dm-api-namespace-design.md §3 + §5
+#
+# NOTE (post-Phase-1 unification): once dm_send's URL becomes /api/dm/send,
+# _dm_send_impl and _dm_respond_impl can collapse into one `_dm_post_impl(path,...)`.
+# Kept separate now for worktree isolation from the in-flight Phase-1 rename.
+# ============================================================================
+
+def _dm_respond_impl(
+    *,
+    recipient,
+    body,
+    reply_to,
+    thread_id,
+    recipient_session_id,
+    session_id,
+    sender_persona,
+    sender_icon,
+    api_base_url,
+    api_key,
+    post_fn,
+):
+    """
+    Testable core for `dm_respond` — POST /api/dm/respond (threaded reply).
+
+    Identical contract to `_dm_send_impl` but targets /api/dm/respond and carries
+    the mandatory `reply_to` + `thread_id`. HTTP is injected via `post_fn`.
+
+    Ensures:
+        - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
+        - 201 → {"status":"sent", **body_json}
+        - 422 → {"status":"error","reason":"recipient_unresolved","detail":...}
+        - other status → {"status":"error","reason":"http_<code>","detail":...}
+        - transport exception → {"status":"error","reason":"request_failed","detail":str(e)}
+    """
+    if not api_key:
+        return { "status": "error", "reason": "missing_auth_header",
+                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/respond" }
+
+    payload = {
+        "asker_session_id" : session_id,
+        "body"             : body,
+        "sender_persona"   : sender_persona,
+        "sender_icon"      : sender_icon,
+        "reply_to"         : reply_to,
+        "thread_id"        : thread_id,
+    }
+    if recipient_session_id:
+        payload[ "recipient_session_id" ] = recipient_session_id
+    else:
+        payload[ "recipient_persona" ] = recipient
+
+    url = f"{api_base_url}/api/dm/respond"
+    try:
+        resp = post_fn( url, json=payload, headers={ "X-API-Key": api_key }, timeout=10 )
+    except Exception as e:
+        return { "status": "error", "reason": "request_failed", "detail": str( e ) }
+
+    if resp.status_code == 201:
+        return { "status": "sent", **resp.json() }
+    if resp.status_code == 422:
+        try:
+            detail = resp.json().get( "detail" )
+        except Exception:
+            detail = resp.text[ :200 ]
+        return { "status": "error", "reason": "recipient_unresolved", "detail": detail }
+    return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
+
+
+def _dm_get_impl( *, message_id, api_base_url, api_key, get_fn ):
+    """
+    Testable core for `dm_get` — GET /api/dm/get?message_id=... (fetch one DM).
+
+    Ensures:
+        - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
+        - 200 → {"status":"ok", **dm_json}
+        - 404 → {"status":"error","reason":"not_found","detail":...}
+        - 400 → {"status":"error","reason":"bad_request","detail":...}
+        - other status → {"status":"error","reason":"http_<code>","detail":...}
+        - transport exception → {"status":"error","reason":"request_failed","detail":str(e)}
+    """
+    if not api_key:
+        return { "status": "error", "reason": "missing_auth_header",
+                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/get" }
+
+    url = f"{api_base_url}/api/dm/get"
+    try:
+        resp = get_fn( url, params={ "message_id": message_id }, headers={ "X-API-Key": api_key }, timeout=10 )
+    except Exception as e:
+        return { "status": "error", "reason": "request_failed", "detail": str( e ) }
+
+    if resp.status_code == 200:
+        return { "status": "ok", **resp.json() }
+    if resp.status_code == 404:
+        return { "status": "error", "reason": "not_found", "detail": resp.text[ :200 ] }
+    if resp.status_code == 400:
+        return { "status": "error", "reason": "bad_request", "detail": resp.text[ :200 ] }
+    return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
+
+
+def _dm_list_impl( *, thread_id, since, limit, api_base_url, api_key, get_fn ):
+    """
+    Testable core for `dm_list` — GET /api/dm/list (list/poll a thread or inbox).
+
+    Ensures:
+        - missing api_key short-circuits to {"status":"error","reason":"missing_auth_header"}
+        - params carry thread_id/since only when provided; limit always sent
+        - 200 → {"status":"ok", **list_json}
+        - 400 → {"status":"error","reason":"bad_request","detail":...}
+        - other status → {"status":"error","reason":"http_<code>","detail":...}
+        - transport exception → {"status":"error","reason":"request_failed","detail":str(e)}
+    """
+    if not api_key:
+        return { "status": "error", "reason": "missing_auth_header",
+                 "detail": "MCP outbound X-API-Key unavailable; cannot reach /api/dm/list" }
+
+    params = { "limit": limit }
+    if thread_id:
+        params[ "thread_id" ] = thread_id
+    if since:
+        params[ "since" ] = since
+
+    url = f"{api_base_url}/api/dm/list"
+    try:
+        resp = get_fn( url, params=params, headers={ "X-API-Key": api_key }, timeout=10 )
+    except Exception as e:
+        return { "status": "error", "reason": "request_failed", "detail": str( e ) }
+
+    if resp.status_code == 200:
+        return { "status": "ok", **resp.json() }
+    if resp.status_code == 400:
+        return { "status": "error", "reason": "bad_request", "detail": resp.text[ :200 ] }
+    return { "status": "error", "reason": f"http_{resp.status_code}", "detail": resp.text[ :200 ] }
+
+
+@mcp.tool
+def dm_respond(
+    recipient            : str,
+    body                 : str,
+    reply_to             : str,
+    thread_id            : str,
+    recipient_session_id : Optional[ str ] = None,
+) -> dict:
+    """
+    **[DM — directed attention-demanding]** Reply to a peer DM IN-THREAD.
+
+    A `dm_respond` is a `dm_send` whose threading is mandatory: `reply_to` (the
+    message_id you are answering) and `thread_id` (the conversation) are REQUIRED.
+    Use it to answer a DM you received — both ids are surfaced in the inbound DM
+    framing. The body travels INLINE (direction='ai_to_ai'), zero re-fetch.
+
+    (Equivalent to `dm_send(..., reply_to=..., thread_id=...)`; this verb exists so
+    the contract reads itself — every /api/dm/<verb> mirrors a dm_<verb> tool — and
+    so the threading fields are enforced, not optional.)
+
+    Args:
+        recipient: Recipient persona name (case/punctuation-tolerant resolution).
+        body: Reply body (delivered inline — no re-fetch).
+        reply_to: message_id of the DM you are answering (required).
+        thread_id: conversation id the reply belongs to (required).
+        recipient_session_id: precise session addressing; takes precedence over
+                   `recipient` when supplied.
+
+    Returns:
+        Success: {"status":"sent","message_id","thread_id","recipient_session",
+                  "recipient_persona","dispatched":True}.
+        Recipient-resolution failure: {"status":"error",
+                  "reason":"recipient_unresolved","detail":<RecipientResolutionError>}.
+        Transport/auth failure: {"status":"error","reason":...,"detail":...}.
+    """
+    persona = _commons_persona_fields()
+    return _dm_respond_impl(
+        recipient            = recipient,
+        body                 = body,
+        reply_to             = reply_to,
+        thread_id            = thread_id,
+        recipient_session_id = recipient_session_id,
+        session_id           = SESSION_ID,
+        sender_persona       = persona[ "persona_name" ],
+        sender_icon          = persona[ "persona_icon" ],
+        api_base_url         = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ),
+        api_key              = _mcp_outbound_api_key(),
+        post_fn              = requests.post,
+    )
+
+
+@mcp.tool
+def dm_get( message_id: str ) -> dict:
+    """
+    **[READ]** Fetch a single peer DM by its message id.
+
+    Returns one direction='ai_to_ai' DM (scoped to you). Useful to re-read the
+    full body/threading of a DM you only have the id for. 404 if it does not
+    exist, is not a DM, or belongs to another user.
+
+    Args:
+        message_id: the DM's message_id (a UUID string).
+
+    Returns:
+        Success: {"status":"ok","message_id","thread_id","reply_to","sender_id",
+                  "sender_persona","sender_icon","body","direction","state",
+                  "job_id","created_at"}.
+        Not found: {"status":"error","reason":"not_found","detail":...}.
+        Bad id: {"status":"error","reason":"bad_request","detail":...}.
+        Transport/auth failure: {"status":"error","reason":...,"detail":...}.
+    """
+    return _dm_get_impl(
+        message_id   = message_id,
+        api_base_url = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ),
+        api_key      = _mcp_outbound_api_key(),
+        get_fn       = requests.get,
+    )
+
+
+@mcp.tool
+def dm_list(
+    thread_id : Optional[ str ] = None,
+    since     : Optional[ str ] = None,
+    limit     : int             = 50,
+) -> dict:
+    """
+    **[READ]** List or poll peer DMs — a thread or your inbox.
+
+    With `thread_id`, returns that conversation oldest-first (read order). Without
+    it, returns your peer-DM inbox newest-first. `since` (an ISO-8601 timestamp)
+    tails only messages newer than that instant — the lightweight poll for new
+    replies. `limit` is clamped server-side to [1, 200].
+
+    Args:
+        thread_id: a conversation id (thread view) or omit for the inbox view.
+        since: ISO-8601 timestamp — return only messages created after it (poll).
+        limit: max messages to return (default 50, capped at 200).
+
+    Returns:
+        Success: {"status":"ok","thread_id","since","count","messages":[ ... ]}.
+        Bad `since`: {"status":"error","reason":"bad_request","detail":...}.
+        Transport/auth failure: {"status":"error","reason":...,"detail":...}.
+    """
+    return _dm_list_impl(
+        thread_id    = thread_id,
+        since        = since,
+        limit        = limit,
+        api_base_url = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" ),
+        api_key      = _mcp_outbound_api_key(),
+        get_fn       = requests.get,
+    )
+
+
+# ============================================================================
 # Task-Store Tools (Phase 1 — unified work-queue wrappers)
 # ============================================================================
 #
