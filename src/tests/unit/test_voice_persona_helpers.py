@@ -37,6 +37,7 @@ from cosa.rest.voice_persona_helpers import (
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_voice_persona, set_voice_persona, find_active_voice_persona_sessions,
+    find_active_sessions,
     find_session_path_by_id, prune_dead_persona_bridges
 )
 
@@ -337,6 +338,168 @@ class TestFindActiveVoicePersonaSessions:
 
             with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
                 results = find_active_voice_persona_sessions()
+
+            assert results == []
+
+
+# ── find_active_sessions: persona-optional discovery (bug d57dbfea) ───────────
+
+def _bridge_without_persona( session_id, pid=None ):
+    """A live bridge for a worker that booted with NO voice_persona."""
+    return {
+        "session_id"        : session_id,
+        "stable_session_id" : session_id,
+        "cwd"               : "/tmp",
+        "cc_pid"            : pid if pid is not None else os.getpid(),
+        "hook_ppid"         : 1,
+    }
+
+
+class TestFindActiveSessions:
+    """`find_active_sessions( require_persona=... )` — the general scanner that
+    makes null-persona workers discoverable for inbound DM resolution."""
+
+    def test_require_persona_false_includes_null_persona( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            _write_bridge( sessions_dir, os.getpid(),
+                           _bridge_with_persona( "named001-aaaa-bbbb-cccc-dddddddddddd", "maria" ) )
+            _write_bridge( sessions_dir, os.getpid() + 1,
+                           _bridge_without_persona( "nullp001-aaaa-bbbb-cccc-dddddddddddd",
+                                                    pid=os.getpid() + 1 ) )
+
+            # Bypass the host-PID liveness check (its pid+1 liveness is racy) so the
+            # null-persona bridge deterministically reaches the persona filter.
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=False ):
+                results = find_active_sessions( require_persona=False )
+
+            by_sid = { sid: persona for _p, sid, persona in results }
+            assert any( s.startswith( "named001" ) for s in by_sid )
+            assert any( s.startswith( "nullp001" ) for s in by_sid )
+            # null-persona session projected to {} (never None) so downstream
+            # `p.get(...)` consumers stay safe.
+            null_sid    = next( s for s in by_sid if s.startswith( "nullp001" ) )
+            assert by_sid[ null_sid ] == {}
+
+    def test_require_persona_true_excludes_null_persona( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            _write_bridge( sessions_dir, os.getpid(),
+                           _bridge_with_persona( "named001-aaaa-bbbb-cccc-dddddddddddd", "maria" ) )
+            _write_bridge( sessions_dir, os.getpid() + 1,
+                           _bridge_without_persona( "nullp001-aaaa-bbbb-cccc-dddddddddddd",
+                                                    pid=os.getpid() + 1 ) )
+
+            # trust=False → the null bridge reaches the persona filter and is
+            # excluded THERE (not by the racy pid check), exercising the
+            # `require_persona and not has_persona` continue branch deterministically.
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=False ):
+                results = find_active_sessions( require_persona=True )
+
+            sids = [ sid for _p, sid, _persona in results ]
+            assert any( s.startswith( "named001" ) for s in sids )
+            assert not any( s.startswith( "nullp001" ) for s in sids )
+
+    def test_delegate_equals_require_persona_true( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            _write_bridge( sessions_dir, os.getpid(),
+                           _bridge_with_persona( "named001-aaaa-bbbb-cccc-dddddddddddd", "maria" ) )
+            _write_bridge( sessions_dir, os.getpid() + 1,
+                           _bridge_without_persona( "nullp001-aaaa-bbbb-cccc-dddddddddddd",
+                                                    pid=os.getpid() + 1 ) )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=False ):
+                delegated = find_active_voice_persona_sessions()
+                direct    = find_active_sessions( require_persona=True )
+
+            assert [ ( s, p ) for _pa, s, p in delegated ] == [ ( s, p ) for _pa, s, p in direct ]
+
+    def test_skips_bridge_without_session_id( self ):
+        # persona-less AND id-less → reaches the `if not sid` guard and is skipped.
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            data = { "cwd": "/tmp", "cc_pid": os.getpid(), "hook_ppid": 1 }  # no (stable_)session_id
+            _write_bridge( sessions_dir, os.getpid(), data )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_sessions( require_persona=False )
+
+            assert results == []
+
+    def test_returns_empty_when_session_dir_missing( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path( tmp ) / "does-not-exist"
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", missing ):
+                assert find_active_sessions( require_persona=False ) == []
+
+    def test_skips_buffer_and_listener_files( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            ( sessions_dir / f"cc-{os.getpid()}-buffer.json" ).write_text(
+                json.dumps( _bridge_without_persona( "buf00001-aaaa-bbbb-cccc-dddddddddddd" ) )
+            )
+            ( sessions_dir / f"cc-{os.getpid()}-listener.json" ).write_text(
+                json.dumps( _bridge_without_persona( "lis00001-aaaa-bbbb-cccc-dddddddddddd" ) )
+            )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_sessions( require_persona=False )
+
+            assert results == []
+
+    def test_skips_stale_mtime( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            path = _write_bridge( sessions_dir, os.getpid(),
+                                  _bridge_without_persona( "stale001-aaaa-bbbb-cccc-dddddddddddd" ) )
+            old = time.time() - 100_000   # well past the 10s threshold below
+            os.utime( path, ( old, old ) )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_sessions( stale_threshold_seconds=10, require_persona=False )
+
+            assert results == []
+
+    def test_skips_dead_pid( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            _write_bridge( sessions_dir, 999999,
+                           _bridge_without_persona( "deadpid0-aaaa-bbbb-cccc-dddddddddddd", pid=999999 ) )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids",
+                        return_value=True ):
+                results = find_active_sessions( require_persona=False )
+
+            assert results == []
+
+    def test_skips_malformed_json( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            ( sessions_dir / f"cc-{os.getpid()}.json" ).write_text( "{not valid json" )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_sessions( require_persona=False )
+
+            assert results == []
+
+    def test_skips_on_stat_oserror( self ):
+        # A dangling symlink: glob finds it, but path.stat() raises OSError →
+        # covers the mtime `except OSError: continue` branch.
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            link = sessions_dir / f"cc-{os.getpid()}.json"
+            os.symlink( str( sessions_dir / "nonexistent-target.json" ), str( link ) )
+
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ):
+                results = find_active_sessions( require_persona=False )
 
             assert results == []
 

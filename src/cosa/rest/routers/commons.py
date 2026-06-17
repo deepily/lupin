@@ -898,6 +898,42 @@ def make_question_inject_fn(
     return _inject
 
 
+def _session_id_matches( canonical: Optional[ str ], supplied: str ) -> bool:
+    """
+    True when a supplied recipient session id addresses a candidate's canonical
+    session id, tolerating the short/full forms a session advertises about
+    itself (bug d57dbfea).
+
+    `get_session_info()` reports a session's `session_id` in SHORT (8-char)
+    form, while the bridge scan keys candidates on the FULL `stable_session_id`.
+    So a manager replying to a worker that advertised its short id supplies a
+    PREFIX of the candidate's canonical id — exact equality would miss it. This
+    is the only addressing channel for a null-persona worker (no name to resolve
+    by), so prefix tolerance is what makes it reachable.
+
+    Exact equality is tried first; otherwise the shorter of the two must be a
+    >= 8-char prefix of the longer. The 8-char floor avoids a 1-2 char id
+    colliding with every candidate. Ambiguity (more than one candidate matching
+    a short prefix) is detected and reported by the caller, not collapsed here.
+
+    Requires:
+        - supplied is a non-empty string (pydantic enforces min_length=1)
+
+    Ensures:
+        - returns True iff canonical == supplied, OR the shorter of the pair is
+          a >= 8-char prefix of the longer
+        - returns False when canonical is falsy (a null-persona candidate still
+          carries a real session_id, so this only guards genuinely-empty ids)
+        - never raises
+    """
+    if not canonical or not supplied:
+        return False
+    if canonical == supplied:
+        return True
+    shorter, longer = sorted( ( canonical, supplied ), key=len )
+    return len( shorter ) >= 8 and longer.startswith( shorter )
+
+
 def _resolve_dm_recipient(
     *,
     recipient_session_id  : Optional[ str ],
@@ -946,22 +982,37 @@ def _resolve_dm_recipient(
     ]
 
     if recipient_session_id is not None:
-        match = next( ( s for s in active_sessions if s.get( "session_id" ) == recipient_session_id ), None )
-        if match is None:
+        # Short/full-tolerant matching (d57dbfea): a worker advertises its SHORT
+        # session id, but candidates are keyed on the FULL canonical id. Collect
+        # every candidate the supplied id addresses; resolve only when exactly
+        # one does (an ambiguous short prefix is reported, not silently picked).
+        matches = [ s for s in active_sessions if _session_id_matches( s.get( "session_id" ), recipient_session_id ) ]
+        if len( matches ) == 1:
+            match = matches[ 0 ]
+            return {
+                "http_status"  : 200,
+                "session_id"   : str( match.get( "session_id" ) ),
+                "persona_name" : match.get( "persona_name" ),
+            }
+        if len( matches ) > 1:
             err = RecipientResolutionError(
-                error                      = "recipient_inactive",
+                error                      = "recipient_session_id_ambiguous",
                 supplied_persona           = recipient_persona,
                 supplied_session_id        = recipient_session_id,
-                resolution_chain_attempted = [ "session_id_direct" ],
+                resolution_chain_attempted = [ "session_id_direct", "session_id_prefix" ],
                 candidate_alternatives     = candidate_alternatives,
-                suggested_next_action      = "Call commons_who() to enumerate currently-active sessions; the supplied recipient_session_id is not present (or owned by a different user).",
+                suggested_next_action      = "The supplied recipient_session_id is a prefix of more than one active session; supply the full session id (call commons_who() to list them).",
             )
             return { "http_status": 422, "detail": err.model_dump() }
-        return {
-            "http_status"  : 200,
-            "session_id"   : recipient_session_id,
-            "persona_name" : match.get( "persona_name" ),
-        }
+        err = RecipientResolutionError(
+            error                      = "recipient_inactive",
+            supplied_persona           = recipient_persona,
+            supplied_session_id        = recipient_session_id,
+            resolution_chain_attempted = [ "session_id_direct", "session_id_prefix" ],
+            candidate_alternatives     = candidate_alternatives,
+            suggested_next_action      = "Call commons_who() to enumerate currently-active sessions; the supplied recipient_session_id is not present (or owned by a different user).",
+        )
+        return { "http_status": 422, "detail": err.model_dump() }
 
     if recipient_persona is not None:
         candidate_personas = [ s.get( "persona_name", "" ) for s in active_sessions if s.get( "persona_name" ) ]

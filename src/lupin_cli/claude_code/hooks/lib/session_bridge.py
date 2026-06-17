@@ -1648,13 +1648,30 @@ def prune_dead_persona_bridges():
     return pruned
 
 
-def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
+def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True ):
     """
-    Scan all bridge files for sessions whose voice_persona is non-null.
+    Scan all bridge files for live CC sessions, with an optional persona filter.
 
-    Used by the voice-persona HTTP endpoints to compute pool occupancy:
-    `/allocate` excludes occupied persona names so each session gets a
-    unique voice; `/pool` returns a snapshot for diagnostics.
+    This is the general session-discovery scanner. The same liveness filters
+    always apply; `require_persona` chooses whether persona-less sessions are
+    included:
+
+    - `require_persona=True` (default) — only bridges with a non-null
+      `voice_persona` dict are returned. This is the pool-occupancy semantics
+      the voice-persona HTTP endpoints rely on (`/allocate` excludes occupied
+      persona names; `/pool` snapshots). `find_active_voice_persona_sessions`
+      delegates here with this flag.
+
+    - `require_persona=False` — persona-LESS ("null persona") live sessions are
+      ALSO returned, their persona element projected to `{}` (empty dict) so
+      every existing consumer that does `isinstance( p, dict )` / `p.get(...)`
+      stays safe with zero changes. This is the source the inter-session DM
+      recipient-resolution path uses: a worker that booted when the persona
+      pool was exhausted (or whose allocation raced/failed) has a null persona
+      and is otherwise a BLACK HOLE for inbound DMs — its manager cannot reach
+      it back by session_id because it was filtered out of the candidate list
+      entirely (bug d57dbfea). Including it restores the reachability invariant:
+      any live session addressable by its exact session_id must be reachable.
 
     Two staleness filters apply, in order:
 
@@ -1671,20 +1688,22 @@ def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
        heartbeat updates bridge mtime periodically, so an actively-used
        session keeps its mtime fresh within this window.
 
-    A dead-PID OR stale-mtime bridge with a non-null voice_persona is
-    treated as "free" — its slot is implicitly reclaimed by being
-    filtered out here.
+    A dead-PID OR stale-mtime bridge is treated as "free" — its slot is
+    implicitly reclaimed by being filtered out here.
 
     See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+         src/rnd/v0.1.8/2026.06.17-unified-task-store-followups-plan.md (L4 / d57dbfea)
 
     Requires:
         - stale_threshold_seconds is a positive integer (default 12 hours)
 
     Ensures:
-        - Returns a list of (Path, session_id, persona) tuples for every
-          bridge with a non-null voice_persona dict whose liveness checks pass
+        - When require_persona is True: returns a (Path, session_id, persona)
+          tuple for every live bridge with a non-null voice_persona dict;
+          persona is the dict as stored in the bridge.
+        - When require_persona is False: ALSO returns live persona-less
+          bridges, with persona projected to `{}`.
         - session_id is the canonical id (stable_session_id preferred)
-        - persona is the dict as stored in the bridge
         - Never raises exceptions
         - Skips bridge files that fail to parse or open
         - Skips bridge files whose stat() fails
@@ -1719,20 +1738,40 @@ def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
             with open( path ) as f:
                 data = json.load( f )
 
-            persona = data.get( "voice_persona" )
-            if not isinstance( persona, dict ) or not persona:
+            persona     = data.get( "voice_persona" )
+            has_persona = isinstance( persona, dict ) and bool( persona )
+            if require_persona and not has_persona:
                 continue
 
             sid = data.get( "stable_session_id" ) or data.get( "session_id" )
             if not sid:
                 continue
 
-            results.append( ( path, sid, persona ) )
+            results.append( ( path, sid, persona if has_persona else {} ) )
 
         except ( json.JSONDecodeError, OSError ):
             continue
 
     return results
+
+
+def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
+    """
+    Scan all bridge files for sessions whose voice_persona is non-null.
+
+    Thin delegate over `find_active_sessions( require_persona=True )` — the
+    persona-required projection that the voice-persona HTTP endpoints use to
+    compute pool occupancy (`/allocate` excludes occupied persona names so each
+    session gets a unique voice; `/pool` returns a diagnostics snapshot). The
+    liveness filters and return shape are documented on `find_active_sessions`.
+
+    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+
+    Returns:
+        list[ tuple[ Path, str, dict ] ]: (bridge_path, session_id, persona)
+        for every live bridge with a non-null voice_persona dict.
+    """
+    return find_active_sessions( stale_threshold_seconds=stale_threshold_seconds, require_persona=True )
 
 
 def find_session_by_tmux( tmux_session ):

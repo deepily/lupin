@@ -201,7 +201,7 @@ async def post_dm_send(   # pragma: no cover
     # commons module's runtime-initialized active-session threshold.
     from cosa.rest.routers import commons as _commons
     from lupin_cli.claude_code.hooks.lib.session_bridge import (
-        find_active_voice_persona_sessions, build_sender_id_for_cc,
+        find_active_sessions, build_sender_id_for_cc,
     )
 
     def _resolve( recipient_session_id, recipient_persona, authenticated_user_id ):
@@ -209,7 +209,12 @@ async def post_dm_send(   # pragma: no cover
             recipient_session_id             = recipient_session_id,
             recipient_persona                = recipient_persona,
             authenticated_user_id            = authenticated_user_id,
-            raw_sessions_fn                  = find_active_voice_persona_sessions,
+            # require_persona=False so a null-persona worker (pool exhausted /
+            # allocation raced) is still addressable by its session_id — it has
+            # no persona name to resolve by, so excluding it makes it a black
+            # hole for inbound DMs (bug d57dbfea). The persona-name resolution
+            # path inside _resolve_dm_recipient skips persona-less candidates.
+            raw_sessions_fn                  = lambda: find_active_sessions( require_persona=False ),
             bridge_loader                    = _commons._load_bridge_fields,
             active_session_threshold_seconds = getattr( _commons, "_active_session_threshold_seconds", 600.0 ),
         )
@@ -281,7 +286,7 @@ async def post_dm_respond(   # pragma: no cover
     # core; only the request model differs (threading mandatory).
     from cosa.rest.routers import commons as _commons
     from lupin_cli.claude_code.hooks.lib.session_bridge import (
-        find_active_voice_persona_sessions, build_sender_id_for_cc,
+        find_active_sessions, build_sender_id_for_cc,
     )
 
     def _resolve( recipient_session_id, recipient_persona, authenticated_user_id ):
@@ -289,7 +294,9 @@ async def post_dm_respond(   # pragma: no cover
             recipient_session_id             = recipient_session_id,
             recipient_persona                = recipient_persona,
             authenticated_user_id            = authenticated_user_id,
-            raw_sessions_fn                  = find_active_voice_persona_sessions,
+            # require_persona=False — null-persona workers stay reachable by
+            # session_id on the reply path too (bug d57dbfea); see post_dm_send.
+            raw_sessions_fn                  = lambda: find_active_sessions( require_persona=False ),
             bridge_loader                    = _commons._load_bridge_fields,
             active_session_threshold_seconds = getattr( _commons, "_active_session_threshold_seconds", 600.0 ),
         )
