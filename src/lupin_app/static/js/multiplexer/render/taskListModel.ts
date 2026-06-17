@@ -15,6 +15,17 @@
 // Wire shapes (all fields optional — rendered defensively)
 // ---------------------------------------------------------------------------
 
+/**
+ * One blocked-by dependency: a TYPED ref. Real `/api/tasks` rows return
+ * `blocked_by` as an ARRAY of these (postgres_models.TaskItem.blocked_by is a
+ * JSONB list [{kind: item|persona|user, id}]). Both fields are optional so a
+ * malformed ref never throws the render (mirrors the JS card's 2724b80d fix).
+ */
+export interface TaskBlockedRef {
+  kind? : string;
+  id?   : string;
+}
+
 /** One `/api/tasks` row (server `_serialize_item`, tasks.py:131-160). */
 export interface TaskItem {
   id?                  : string;
@@ -26,7 +37,8 @@ export interface TaskItem {
   accountable_manager? : string | null;
   created_by?          : string | null;
   status?              : string;
-  blocked_by?          : string | null;
+  // Real rows return a typed-ref ARRAY; string|null kept for defensive back-compat.
+  blocked_by?          : string | TaskBlockedRef[] | null;
   next_chase_ts?       : string | null;
   gate_class?          : string | null;
   priority?            : string | null;
@@ -191,6 +203,28 @@ export function groupTasksByOwner( tasks: unknown ): TaskListModel {
 export function taskCellOrDash( value: string | null | undefined ): string {
   if ( !value || value === "none" ) return "—";
   return value;
+}
+
+/**
+ * Stringify a `blocked_by` value to a single cell string. Real `/api/tasks` rows
+ * return a typed-ref ARRAY [{kind, id}]; each ref renders "kind:id" (or just the
+ * id when kind is absent), joined with ", ". A plain string / null passes through
+ * unchanged (defensive back-compat). MIRRORS the in-service JS card's _renderTaskRow
+ * (2724b80d) VERBATIM so the two cards render blocked_by identically. Pure.
+ *
+ * Ensures:
+ *   - array → each ref "kind:id" (or "id" when kind falsy; String(ref) when not an
+ *     object), joined ", "; an empty array → "" (caller's taskCellOrDash → "—")
+ *   - string|null|undefined → returned unchanged
+ *   - never throws (the latent array-crash the JS card hit pre-2724b80d)
+ */
+export function formatTaskBlockedBy(
+  blockedBy: string | TaskBlockedRef[] | null | undefined,
+): string | null | undefined {
+  if ( !Array.isArray( blockedBy ) ) return blockedBy;
+  return blockedBy
+    .map( ( ref ) => ( ref && typeof ref === "object" ) ? ( ref.kind ? `${ref.kind}:${ref.id}` : `${ref.id}` ) : String( ref ) )
+    .join( ", " );
 }
 
 /**

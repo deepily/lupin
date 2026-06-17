@@ -13,6 +13,7 @@
 
 import {
   formatChaseTime,
+  formatTaskBlockedBy,
   taskCellOrDash,
   taskPriorityClass,
   taskStatusClass,
@@ -21,6 +22,7 @@ import {
   type TaskItem,
   type TaskListModel,
 } from "../taskListModel";
+import { ownerKeyForGroup, taskGroupIdSlug } from "../taskListCollapse";
 
 const TASK_COLSPAN = 8;
 
@@ -76,7 +78,7 @@ export function renderTaskRow(
   statusCell.appendChild( document.createTextNode( status ) );
   tr.appendChild( statusCell );
 
-  tr.appendChild( td( "task-col-blocked", taskCellOrDash( task.blocked_by ) ) );
+  tr.appendChild( td( "task-col-blocked", taskCellOrDash( formatTaskBlockedBy( task.blocked_by ) ) ) );
   tr.appendChild( td( "task-col-chase", formatChaseTime( task.next_chase_ts, ianaZone ) ) );
   tr.appendChild( td( "task-col-accountable", taskCellOrDash( task.accountable_manager ) ) );
 
@@ -89,18 +91,31 @@ export function renderTaskRow(
   return tr;
 }
 
-function renderGroupHeader( group: TaskGroup ): HTMLTableRowElement {
+function renderGroupHeader( group: TaskGroup, isCollapsed: boolean, idSlug: string ): HTMLTableRowElement {
   // Non-unassigned groups always carry a non-null ownerPersona (groupTasksByOwner
   // invariant); the Unassigned bucket takes the literal label.
   const label = group.isUnassigned
     ? "(Unassigned)"
     : `${group.ownerPersona} · ${group.tasks.length}`;
 
+  // The header doubles as the per-persona ACCORDION bar: a chevron + the label,
+  // keyboard-activatable (role/tabindex/aria). The chevron is decorative
+  // (aria-hidden); collapse state lives on the parent <tbody> (toggled by class).
   const headerRow = document.createElement( "tr" );
   headerRow.className = "task-group-header" + ( group.isUnassigned ? " task-group-unassigned" : "" );
+  headerRow.setAttribute( "role", "button" );
+  headerRow.setAttribute( "tabindex", "0" );
+  headerRow.setAttribute( "aria-expanded", String( !isCollapsed ) );
+  headerRow.setAttribute( "aria-controls", idSlug );
+
   const cell = document.createElement( "td" );
   cell.colSpan = TASK_COLSPAN;
-  cell.textContent = label;
+  const chevron = document.createElement( "span" );
+  chevron.className = "task-group-chevron";
+  chevron.setAttribute( "aria-hidden", "true" );
+  chevron.textContent = isCollapsed ? "▸" : "▾";
+  cell.appendChild( chevron );
+  cell.appendChild( document.createTextNode( label ) );
   headerRow.appendChild( cell );
   return headerRow;
 }
@@ -114,12 +129,17 @@ function renderGroupHeader( group: TaskGroup ): HTMLTableRowElement {
  *   - ianaZone is the IANA zone for next-chase cells, or null/undefined
  * Ensures:
  *   - Returns a `.task-list-table` <table> element
+ *   - each owner group is its OWN <tbody class="task-group" data-owner> (the
+ *     accordion seam): a group whose owner key ∈ collapsedOwners gets the
+ *     `collapsed` class (CSS hides its rows; the header bar stays), chevron ▸,
+ *     aria-expanded="false"; otherwise chevron ▾, aria-expanded="true"
  *   - Read-only: no action column, no mutating controls
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; all internal branches are exercised by tests.
 export function renderTaskListTable(
-  model    : TaskListModel,
-  ianaZone : string | null | undefined,
+  model           : TaskListModel,
+  ianaZone        : string | null | undefined,
+  collapsedOwners : ReadonlySet<string> = new Set(),
 ): HTMLTableElement {
   const table = document.createElement( "table" );
   table.className = "task-list-table";
@@ -145,14 +165,24 @@ export function renderTaskListTable(
   thead.appendChild( headRow );
   table.appendChild( thead );
 
-  const tbody = document.createElement( "tbody" );
+  // Each owner group is its OWN <tbody class="task-group" data-owner> so a
+  // collapse is a single class flip on that tbody (CSS hides its .task-row).
   for ( const group of model.groups ) {
-    tbody.appendChild( renderGroupHeader( group ) );
+    const ownerKey    = ownerKeyForGroup( group );
+    const isCollapsed = collapsedOwners.has( ownerKey );
+    const idSlug      = taskGroupIdSlug( ownerKey );
+
+    const tbody = document.createElement( "tbody" );
+    tbody.className = "task-group" + ( isCollapsed ? " collapsed" : "" );
+    tbody.id = idSlug;
+    tbody.dataset.owner = ownerKey;
+
+    tbody.appendChild( renderGroupHeader( group, isCollapsed, idSlug ) );
     for ( const task of group.tasks ) {
       tbody.appendChild( renderTaskRow( task, ianaZone ) );
     }
+    table.appendChild( tbody );
   }
-  table.appendChild( tbody );
 
   return table;
 }
