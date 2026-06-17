@@ -192,7 +192,7 @@ def execute_dm_send(
     summary     = "Send a notification-native AI↔AI direct message (body inline)",
     description = "Notification-native peer DM: resolves the recipient persona/session (same-user scoped) and delivers the message body INLINE via a direction='ai_to_ai' notification — no commons board, no claim-check, no commons_read re-fetch. Returns 201 with {message_id, thread_id}, or 422 (RecipientResolutionError) if the recipient can't be resolved.",
 )
-async def post_dm_send(   # pragma: no cover
+async def post_dm_send(
     body: DmSendRequest,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
     notification_queue: NotificationFifoQueue = Depends( get_notification_queue ),
@@ -277,7 +277,7 @@ class DmRespondRequest( BaseModel ):
     summary     = "Reply to a peer DM in-thread (body inline, reply_to + thread_id required)",
     description = "Threaded peer-DM reply: a /api/dm/send whose `reply_to` (message answered) and `thread_id` (conversation) are mandatory. Resolves the recipient (same-user scoped), persists a direction='ai_to_ai' notification carrying the body inline + threading, and pushes it to the recipient session. Returns 201 with {message_id, thread_id}, or 422 if the recipient can't be resolved.",
 )
-async def post_dm_respond(   # pragma: no cover
+async def post_dm_respond(
     body: DmRespondRequest,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
     notification_queue: NotificationFifoQueue = Depends( get_notification_queue ),

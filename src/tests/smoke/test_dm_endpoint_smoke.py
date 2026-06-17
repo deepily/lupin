@@ -1,45 +1,81 @@
 """
-AC9b smoke for Inter-Session DM endpoint (Phase 0 implementation 2026-05-15).
+Route-level smoke for the LIVE inter-session DM endpoints — `/api/dm/send` and
+`/api/dm/respond` (the nested DM API that superseded the retired
+`/api/commons/register-question` DM path).
 
-Per AC9b in
-`src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md`:
+History: this file originally targeted `POST /api/commons/register-question`
+with `recipient_persona`/`recipient_session_id` (the Phase-0 DM-over-commons
+design, 2026-05-15). That route was retired when the notification-native AI↔AI
+DM API landed (`src/cosa/rest/routers/dm.py`,
+`src/rnd/v0.1.8/2026.06.16-dm-api-namespace-design.md`); the old assertions
+404'd. This rewrite re-points at the live routes AND closes the route-level
+coverage gap on the two handlers that feed the null-inclusive recipient scanner.
 
-> "test_dm_endpoint_smoke.py — TestClient: POST /api/commons/register-question
->  with recipient_persona='radio' → 201 + watcher registered + notification
->  dispatched on the in-process notification_queue mock"
+What this proves (route-level, end-to-end through the real resolver):
+    `post_dm_send` / `post_dm_respond` were previously `# pragma: no cover` thin
+    wiring — the L4 fix (commit 1f40d0dd) gave `_resolve_dm_recipient` +
+    `find_active_sessions(require_persona=False)` + `_session_id_matches` UNIT
+    coverage, but the HTTP handlers that wire them together had none. These
+    tests remove that pragma and drive each handler to 100% by exercising the
+    real resolver (NOT mocked) against on-disk fixture bridges:
 
-Venue: :7999 AI-discretionary — non-destructive (tempdir), fast (<5s),
-no shared external state. Mirrors the fixture pattern of
-`test_ask_async_push_e2e.py` with the extra wrinkle that DM resolution
-requires the session-enumeration callables to be monkey-patched with
-fixture data (no real bridges on disk in unit-test context).
+      1. a normal persona-addressed DM            → 201 (resolve-by-persona)
+      2. a NULL-persona worker reached by SHORT    → 201 (the d57dbfea path:
+         session id (8-char prefix)                  null persona ⇒ no name to
+                                                      resolve by ⇒ reachable
+                                                      ONLY by session_id)
+      3. an ambiguous short-prefix recipient_      → 422 recipient_session_id_
+         session_id                                  ambiguous (two candidates
+                                                      share the 8-char prefix)
 
-Build approach: stripped FastAPI app with commons router; auth bypass to
-fixed user_id; mock notification_queue captures dispatches; monkeypatched
-`find_active_voice_persona_sessions` + `_load_bridge_fields` to return a
-controlled set of "active sessions" the resolver can match against.
+Venue: :7999 AI-discretionary — NON-DESTRUCTIVE. The DB persist
+(`_persist_dm_send_sync`) is monkeypatched to a capture-only fake (no
+notification row is written) and the notification queue is a mock, so nothing
+outlives the test. The recipient scanner runs for real against real bridge
+JSON files written into a `tmp_path` dir (so the default
+`mtime_fn = path.stat().st_mtime` liveness gate sees genuinely-fresh files).
+Fast (<5s), no shared external state — needs neither :8000 nor server monopoly.
+
+Build approach: stripped FastAPI app mounting ONLY the dm router; auth bypass
+to a fixed user_id; mock notification_queue captures dispatches; the session
+enumeration (`find_active_sessions`) + sender-id builder (`build_sender_id_for_cc`)
+are monkeypatched on their source module (the dm handlers re-import them lazily
+at call time, so patching the source module is what the handler picks up).
 """
 
-import tempfile
+import json
 import time
-from typing import Any, Dict, List
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from cosa.rest.commons_ack_watcher import CommonsAckWatcher
-from cosa.rest.commons_question_watcher import CommonsQuestionWatcher
-from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
-from cosa.rest.routers.commons import init_commons_state, router as commons_router
-from lupin_mcp.commons_store import CommonsStore
+from cosa.rest.routers.dm import router as dm_router
+from cosa.rest.routers.notifications import get_notification_queue
 
 
-_TEST_USER_ID = "ac9b-dm-test-user"
+# A real UUID — the authenticated caller. Fixture bridges are stamped with this
+# as `owner_user_id` so same-user scoping in filter_and_project_sessions admits
+# them (and proves the scope check, rather than relying on the un-stamped
+# graceful-passthrough branch).
+_TEST_USER_ID = "11111111-2222-3333-4444-555555555555"
 
 
-# ─── Fixtures ───────────────────────────────────────────────────────────────
+# ─── Session-id design ───────────────────────────────────────────────────────
+# Full canonical ids are >8 chars with DISTINCT 8-char prefixes, except the
+# ambiguous pair which deliberately SHARES one. The null worker's prefix is
+# unique so a short-id DM resolves to exactly one candidate (the d57dbfea path).
+
+_SID_RADIO   = "radiosess0000000001"   # prefix "radioses"
+_SID_RACHEL  = "rachelsess000000002"   # prefix "rachelse"
+_SID_NULL    = "null0001worker00009"   # prefix "null0001"  (persona-LESS worker)
+_SID_AMBIG_A = "ambig777aaaa000010"    # shared prefix "ambig777"
+_SID_AMBIG_B = "ambig777bbbb000011"    # shared prefix "ambig777"
+
+
+# ─── Fixtures ────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
@@ -55,243 +91,223 @@ def mock_notification_queue( captured_pushes ):
     return _Q()
 
 
-def _build_raw_session( session_id: str, persona_name: str ):
-    persona_dict = { "name": persona_name, "icon": "🌸", "color": "#F06292" }
-    return ( f"/fake/bridge/{session_id}.json", session_id, persona_dict )
+@pytest.fixture
+def persisted_rows():
+    return [ ]
 
 
-def _build_fixture_bridge( session_id: str, user_id: str = _TEST_USER_ID ):
-    return {
-        "stable_session_id"   : session_id,
-        "session_id"          : session_id,
-        "user_id"             : user_id,
-        "owner_user_id"       : user_id,
-        "last_activity_iso"   : "2026-05-15T12:00:00+00:00",
-        "idle_detection"      : { "last_interaction_at" : time.time() },
+def _write_bridge( tmp: Path, sid: str ) -> Path:
+    """Write a real bridge JSON file (fresh mtime) and return its Path."""
+    bridge = {
+        "stable_session_id" : sid,
+        "session_id"        : sid,
+        "owner_user_id"     : _TEST_USER_ID,
+        "last_activity_iso" : "2026-06-17T12:00:00+00:00",
+        "speakerphone_on"   : False,
+        "idle_detection"    : { "last_interaction_at" : time.time() },
     }
+    path = tmp / f"cc-{sid}.json"
+    path.write_text( json.dumps( bridge ) )
+    return path
 
 
 @pytest.fixture
-def fixture_sessions():
-    """Two same-user sessions for the resolver to enumerate."""
+def fixture_sessions( tmp_path ):
+    """
+    Five live sessions as the (Path, session_id, persona) 3-tuples that
+    `find_active_sessions` yields. The null worker carries persona `{}` exactly
+    as `find_active_sessions(require_persona=False)` projects a persona-less
+    bridge.
+    """
+    def persona( name ):
+        return { "name": name, "icon": "🌸", "color": "#F06292" }
+
     return [
-        _build_raw_session( "sid_radio",  "radio"  ),
-        _build_raw_session( "sid_rachel", "rachel" ),
+        ( _write_bridge( tmp_path, _SID_RADIO ),   _SID_RADIO,   persona( "radio"    ) ),
+        ( _write_bridge( tmp_path, _SID_RACHEL ),  _SID_RACHEL,  persona( "rachel"   ) ),
+        ( _write_bridge( tmp_path, _SID_NULL ),    _SID_NULL,    { } ),
+        ( _write_bridge( tmp_path, _SID_AMBIG_A ), _SID_AMBIG_A, persona( "ambigone" ) ),
+        ( _write_bridge( tmp_path, _SID_AMBIG_B ), _SID_AMBIG_B, persona( "ambigtwo" ) ),
     ]
 
 
 @pytest.fixture
-def fixture_bridges( fixture_sessions ):
-    bridges : Dict[ str, Dict[ str, Any ] ] = { }
-    for path, sid, _persona in fixture_sessions:
-        bridges[ path ] = _build_fixture_bridge( sid )
-    return bridges
+def app_and_state( mock_notification_queue, persisted_rows, fixture_sessions, monkeypatch ):
+    """Stripped app mounting the dm router + patched session enumeration + persist."""
+    # The dm handlers lazily `from lupin_cli...session_bridge import
+    # find_active_sessions, build_sender_id_for_cc` AT CALL TIME, so patching
+    # the SOURCE module is what they pick up.
+    def _fake_find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True ):
+        # The DM resolver always calls this with require_persona=False; honor the
+        # contract so a persona-required caller would still get only personas.
+        if require_persona:
+            return [ t for t in fixture_sessions if t[ 2 ] ]
+        return list( fixture_sessions )
 
+    monkeypatch.setattr(
+        "lupin_cli.claude_code.hooks.lib.session_bridge.find_active_sessions",
+        _fake_find_active_sessions,
+    )
+    monkeypatch.setattr(
+        "lupin_cli.claude_code.hooks.lib.session_bridge.build_sender_id_for_cc",
+        lambda session_id=None: f"claude.code@lupin.deepily.ai#{ ( session_id or '' )[ :8 ] }",
+    )
 
-@pytest.fixture
-def app_and_state( mock_notification_queue, fixture_sessions, fixture_bridges, monkeypatch ):
-    """Bootstrapped app + monkeypatched session enumeration."""
-    with tempfile.TemporaryDirectory() as tmp:
-        store           = CommonsStore( tmp )
-        rate_limiter    = CommonsBroadcastRateLimiter( window_seconds=30 )
-        ack_watcher     = CommonsAckWatcher( store=store, push_notification_fn=mock_notification_queue.push_notification )
-        question_watcher = CommonsQuestionWatcher(
-            store        = store,
-            per_user_max = 50,
-            global_max   = 1000,
-        )
+    # DB-boundary persist → capture-only fake (no notification row written). The
+    # real _persist_dm_send_sync has its own unit coverage (TestPersistDmSendSync
+    # in src/cosa/tests/unit/rest/test_dm_send_endpoint.py); here we keep the
+    # smoke non-destructive while still exercising the full handler wiring.
+    def _fake_persist( **kwargs ):
+        persisted_rows.append( kwargs )
+        return f"row-{ len( persisted_rows ) }"
 
-        init_commons_state(
-            store                            = store,
-            rate_limiter                     = rate_limiter,
-            ack_watcher                      = ack_watcher,
-            active_session_threshold_seconds = 600.0,
-            question_watcher                 = question_watcher,
-        )
+    monkeypatch.setattr( "cosa.rest.routers.dm._persist_dm_send_sync", _fake_persist )
 
-        # Monkeypatch the module-level imports the route handler passes through
-        monkeypatch.setattr(
-            "cosa.rest.routers.commons.find_active_voice_persona_sessions",
-            lambda: fixture_sessions,
-        )
-        monkeypatch.setattr(
-            "cosa.rest.routers.commons._load_bridge_fields",
-            lambda path: fixture_bridges.get( path ),
-        )
+    app = FastAPI()
+    app.include_router( dm_router )
 
-        app = FastAPI()
-        app.include_router( commons_router )
+    async def _fake_auth():
+        return _TEST_USER_ID
+    app.dependency_overrides[ require_api_key_or_jwt ] = _fake_auth
+    app.dependency_overrides[ get_notification_queue ] = lambda: mock_notification_queue
 
-        async def _fake_auth():
-            return _TEST_USER_ID
-        app.dependency_overrides[ require_api_key_or_jwt ] = _fake_auth
-
-        from cosa.rest.routers.commons import get_notification_queue
-        app.dependency_overrides[ get_notification_queue ] = lambda: mock_notification_queue
-
-        try:
-            yield app, store, question_watcher
-        finally:
-            init_commons_state(
-                store                            = store,
-                rate_limiter                     = rate_limiter,
-                ack_watcher                      = ack_watcher,
-                active_session_threshold_seconds = 600.0,
-                question_watcher                 = None,
-            )
+    return app
 
 
 @pytest.fixture
 def client( app_and_state ):
-    app, _, _ = app_and_state
-    return TestClient( app )
+    return TestClient( app_and_state )
 
 
-# ─── AC9b smoke assertions ───────────────────────────────────────────────────
+# ─── /api/dm/send ────────────────────────────────────────────────────────────
 
 
-def test_dm_register_with_recipient_persona_returns_201( client, captured_pushes ):
-    """POST with recipient_persona='radio' → 201 + dm_dispatched=True + dispatch fired."""
+def test_dm_send_persona_addressed_returns_201( client, captured_pushes, persisted_rows ):
+    """recipient_persona='radio' → 201 + ai_to_ai dispatch resolved to the radio session."""
     resp = client.post(
-        "/api/commons/register-question",
+        "/api/dm/send",
         json = {
-            "topic"             : "dm-radio",
-            "question_id"       : "qid-dm-1",
-            "asker_session_id"  : "sid_asker",
-            "recipient_persona" : "radio",
+            "asker_session_id" : "sid_asker",
+            "body"             : "ready for review",
+            "recipient_persona": "radio",
+            "sender_persona"   : "tiffany",
+            "sender_icon"      : "💍",
         },
     )
+    import uuid
     assert resp.status_code == 201, resp.text
     data = resp.json()
-    assert data[ "question_id" ]    == "qid-dm-1"
-    assert data[ "dm_dispatched" ]  is True
-    # Verify dispatch fired with the right shape
+    assert data[ "recipient_persona" ] == "radio"
+    assert data[ "recipient_session" ] == _SID_RADIO
+    assert data[ "dispatched" ] is True
+    # message_id is the persisted DB id; with no thread_id supplied, thread_id
+    # seeds from a freshly-generated uuid (a NEW thread) — a parseable uuid4.
+    assert data[ "message_id" ] == "row-1"
+    assert str( uuid.UUID( data[ "thread_id" ] ) ) == data[ "thread_id" ]
+
+    # The DM persisted + pushed once, carrying the ai_to_ai provenance.
+    assert len( persisted_rows ) == 1
+    assert persisted_rows[ 0 ][ "direction" ] == "ai_to_ai"
     assert len( captured_pushes ) == 1
     push = captured_pushes[ 0 ]
-    assert push[ "type" ]    == "user_initiated_message"
-    assert push[ "title" ]   == "action:commons_question_received"
-    assert push[ "payload" ][ "question_id" ]       == "qid-dm-1"
-    assert push[ "payload" ][ "topic" ]             == "dm-radio"
-    assert push[ "payload" ][ "recipient_persona" ] == "radio"
+    assert push[ "direction" ]      == "ai_to_ai"
+    assert push[ "message" ]        == "ready for review"
+    assert push[ "sender_persona" ] == "tiffany"
+    assert push[ "job_id" ]         == _SID_RADIO[ :8 ]
 
 
-def test_dm_register_with_recipient_session_id_returns_201( client, captured_pushes ):
-    """POST with recipient_session_id='sid_rachel' → 201 + dispatch fired."""
+def test_dm_send_null_persona_worker_by_short_sid_returns_201( client, captured_pushes ):
+    """
+    The d57dbfea path: a NULL-persona worker has no name to resolve by, so it is
+    reachable ONLY by session_id. The manager supplies the worker's SHORT
+    (8-char) id; _session_id_matches resolves the short prefix to the single
+    full-id candidate → 201, recipient_persona=None.
+    """
     resp = client.post(
-        "/api/commons/register-question",
+        "/api/dm/send",
         json = {
-            "topic"                : "dm-rachel",
-            "question_id"          : "qid-dm-2",
-            "asker_session_id"     : "sid_asker",
-            "recipient_session_id" : "sid_rachel",
+            "asker_session_id"     : "sid_manager",
+            "body"                 : "you are reachable",
+            "recipient_session_id" : _SID_NULL[ :8 ],   # "null0001" — short form
         },
     )
     assert resp.status_code == 201, resp.text
     data = resp.json()
-    assert data[ "dm_dispatched" ] is True
+    assert data[ "recipient_session" ] == _SID_NULL
+    assert data[ "recipient_persona" ] is None          # null-persona worker
+    assert data[ "dispatched" ] is True
     assert len( captured_pushes ) == 1
-    assert captured_pushes[ 0 ][ "payload" ][ "recipient_persona" ] == "rachel"
+    assert captured_pushes[ 0 ][ "job_id" ] == _SID_NULL[ :8 ]
 
 
-def test_dm_register_with_unknown_persona_returns_422_resolution_error( client, captured_pushes ):
-    """POST with unknown recipient_persona → 422 with RecipientResolutionError body."""
+def test_dm_send_ambiguous_short_prefix_returns_422( client, captured_pushes ):
+    """Two candidates share the 8-char prefix → 422 recipient_session_id_ambiguous, no dispatch."""
     resp = client.post(
-        "/api/commons/register-question",
+        "/api/dm/send",
         json = {
-            "topic"             : "dm-tiberius",
-            "question_id"       : "qid-dm-3",
-            "asker_session_id"  : "sid_asker",
-            "recipient_persona" : "tiberius",
+            "asker_session_id"     : "sid_manager",
+            "body"                 : "who are you",
+            "recipient_session_id" : "ambig777",        # prefix of BOTH ambig A and B
         },
     )
     assert resp.status_code == 422, resp.text
-    body = resp.json()
-    # FastAPI wraps HTTPException(detail=...) under "detail"; the RecipientResolutionError dict is nested
-    detail = body.get( "detail" ) if isinstance( body, dict ) else body
-    # detail may be the model_dump or a list (FastAPI validation list); our path is the model_dump
-    assert isinstance( detail, dict )
-    assert detail[ "error" ] == "recipient_not_found"
-    assert detail[ "supplied_persona" ] == "tiberius"
-    assert "exact" in detail[ "resolution_chain_attempted" ]
-    assert any( c[ "persona" ] == "radio"  for c in detail[ "candidate_alternatives" ] )
-    assert any( c[ "persona" ] == "rachel" for c in detail[ "candidate_alternatives" ] )
-    # On resolution failure, no dispatch should have fired
-    assert captured_pushes == [ ]
-
-
-def test_dm_register_with_unknown_session_id_returns_422_inactive( client, captured_pushes ):
-    """POST with non-existent recipient_session_id → 422 recipient_inactive."""
-    resp = client.post(
-        "/api/commons/register-question",
-        json = {
-            "topic"                : "dm-phantom",
-            "question_id"          : "qid-dm-4",
-            "asker_session_id"     : "sid_asker",
-            "recipient_session_id" : "sid_phantom",
-        },
-    )
-    assert resp.status_code == 422
     detail = resp.json().get( "detail" )
     assert isinstance( detail, dict )
-    assert detail[ "error" ] == "recipient_inactive"
-    assert detail[ "supplied_session_id" ] == "sid_phantom"
+    assert detail[ "error" ] == "recipient_session_id_ambiguous"
+    assert detail[ "supplied_session_id" ] == "ambig777"
+    assert "session_id_prefix" in detail[ "resolution_chain_attempted" ]
+    # On resolution failure nothing is dispatched.
     assert captured_pushes == [ ]
 
 
-def test_dm_register_case_insensitive_persona_match( client, captured_pushes ):
-    """POST with recipient_persona='Radio' (capitalized) → 201 + matched 'radio'."""
+# ─── /api/dm/respond ─────────────────────────────────────────────────────────
+
+
+def test_dm_respond_threaded_reply_returns_201( client, captured_pushes, persisted_rows ):
+    """
+    /api/dm/respond is send-with-mandatory-threading: reply_to + thread_id are
+    REQUIRED and the supplied thread_id is preserved (NOT overwritten). Proves
+    the respond handler feeds the same null-inclusive resolver.
+    """
     resp = client.post(
-        "/api/commons/register-question",
+        "/api/dm/respond",
         json = {
-            "topic"             : "dm-radio",
-            "question_id"       : "qid-dm-5",
-            "asker_session_id"  : "sid_asker",
-            "recipient_persona" : "Radio",
-        },
-    )
-    assert resp.status_code == 201
-    assert captured_pushes[ 0 ][ "payload" ][ "recipient_persona" ] == "radio"
-
-
-def test_dm_register_resolution_failure_unwinds_watcher( client, app_and_state, captured_pushes ):
-    """422 resolution failure must unregister the question so the asker can retry."""
-    _, _, question_watcher = app_and_state
-    resp = client.post(
-        "/api/commons/register-question",
-        json = {
-            "topic"             : "dm-ghost",
-            "question_id"       : "qid-dm-6",
-            "asker_session_id"  : "sid_asker",
-            "recipient_persona" : "ghost",
-        },
-    )
-    assert resp.status_code == 422
-    # The watcher should NOT have the question registered anymore
-    # (asker can retry with the same question_id)
-    resp_retry = client.post(
-        "/api/commons/register-question",
-        json = {
-            "topic"             : "dm-radio",
-            "question_id"       : "qid-dm-6",
-            "asker_session_id"  : "sid_asker",
-            "recipient_persona" : "radio",
-        },
-    )
-    assert resp_retry.status_code == 201, "watcher unwind should let same question_id retry"
-
-
-def test_non_dm_register_still_works_returns_201( client, captured_pushes ):
-    """POST without any recipient_* fields → 201 with dm_dispatched=None (preserves Phase 3 contract)."""
-    resp = client.post(
-        "/api/commons/register-question",
-        json = {
-            "topic"            : "free-topic",
-            "question_id"      : "qid-no-dm",
             "asker_session_id" : "sid_asker",
+            "body"             : "ack — verdict GREEN",
+            "recipient_persona": "rachel",
+            "reply_to"         : "msg-original-1",
+            "thread_id"        : "conv-42",
+            "sender_persona"   : "tiffany",
+            "sender_icon"      : "💍",
         },
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 201, resp.text
     data = resp.json()
-    assert data[ "dm_dispatched" ] is None
-    # No dispatch should have fired for the non-DM register
+    assert data[ "recipient_persona" ] == "rachel"
+    assert data[ "recipient_session" ] == _SID_RACHEL
+    assert data[ "thread_id" ] == "conv-42"             # supplied thread preserved
+    assert data[ "dispatched" ] is True
+    assert len( captured_pushes ) == 1
+    push = captured_pushes[ 0 ]
+    assert push[ "reply_to" ]  == "msg-original-1"
+    assert push[ "thread_id" ] == "conv-42"
+    assert persisted_rows[ 0 ][ "reply_to" ] == "msg-original-1"
+
+
+def test_dm_respond_ambiguous_short_prefix_returns_422( client, captured_pushes ):
+    """The respond handler's 422 branch: an ambiguous recipient_session_id prefix."""
+    resp = client.post(
+        "/api/dm/respond",
+        json = {
+            "asker_session_id"     : "sid_asker",
+            "body"                 : "reply into the void",
+            "recipient_session_id" : "ambig777",
+            "reply_to"             : "msg-original-2",
+            "thread_id"            : "conv-43",
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    detail = resp.json().get( "detail" )
+    assert isinstance( detail, dict )
+    assert detail[ "error" ] == "recipient_session_id_ambiguous"
     assert captured_pushes == [ ]
