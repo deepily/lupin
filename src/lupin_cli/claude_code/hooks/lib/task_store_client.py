@@ -30,6 +30,14 @@ import urllib.request
 
 KEY_FILE_RELATIVE = "src/conf/keys/notification-api-claude-code-dev"
 
+# Spine Step-2 (store-count seam) — bounded AGGRESSIVE per-request timeout for the
+# owed-count read. The Stop hook fires EVERY turn, so this read is the FIRST
+# `:7999` dependency on the Stop hot path; a slow/hung server must never stall
+# turn-end (cascade review §C). Deliberately tighter than the mirror's
+# DEFAULT_TIMEOUT_SECONDS (3.0s) — a 1s cap keeps the worst case (both owed-status
+# queries hang) at ~2s, the §C "≤1-2s" budget. Caller may override per-call.
+DEFAULT_OWED_TIMEOUT_SECONDS = 1.0
+
 
 def read_api_key( environ=None ) -> str:
     """
@@ -160,3 +168,58 @@ def query_by_correlation_key( settings, api_key, correlation_key ):
     """
     query = urllib.parse.urlencode( { "correlation_key": correlation_key } )
     return _request( "GET", f"{settings['api_base_url']}/api/tasks?{query}", api_key, settings[ "timeout_seconds" ] )
+
+
+def query_owed( settings, api_key, owner_persona, statuses, project=None, timeout=None ):
+    """
+    GET /api/tasks owed-row COUNT for one owner (Spine Step-2 store-count seam).
+
+    The flag-gated replacement for the Stop hook's transcript-replay owed
+    source. `GET /api/tasks` filters ONE status per call, so this sums the
+    server-computed `count` across each owed status — owed-status row sets are
+    tiny, so each query is small and never brushes the endpoint's limit cap.
+    Bounded by an AGGRESSIVE per-request timeout (the Stop hook fires every
+    turn — a slow `:7999` must never stall turn-end; cascade review §C).
+
+    Requires:
+        - settings is the load_task_store_settings() dict (provides api_base_url)
+        - api_key is a string (may be empty — server 401s it)
+        - owner_persona is the persona string the PostToolUse mirror stamped on
+          the rows (lowercased; "unknown" when the bridge had no persona)
+        - statuses is an iterable of store status strings (the owed set)
+        - project is the resolve_project_name() scope, or None to omit the filter
+        - timeout overrides DEFAULT_OWED_TIMEOUT_SECONDS (seconds, per request)
+
+    Ensures:
+        - Returns ( ok, count ):
+            ok    : True iff EVERY per-status query returned a 2xx whose body
+                    carried an integer `count`
+            count : the summed owed-row count across `statuses` (0 when ok is
+                    False, or when `statuses` is empty)
+        - ANY transport failure / non-2xx / malformed body (missing or non-int
+          `count`) → ( False, 0 ) — the §C fail-safe: the caller does NOT poke
+          on a not-ok read (never guess when the store can't be reached)
+        - NEVER raises (rides _request's never-raises seam)
+    """
+    if timeout is None:
+        timeout = DEFAULT_OWED_TIMEOUT_SECONDS
+
+    total = 0
+    for status in statuses:
+        params = { "owner_persona": owner_persona, "status": status }
+        if project:
+            params[ "project" ] = project
+        query = urllib.parse.urlencode( params )
+        ok, _status_code, body = _request(
+            "GET", f"{settings['api_base_url']}/api/tasks?{query}", api_key, timeout
+        )
+        if not ok:
+            return False, 0
+        count = body.get( "count" )
+        # bool is a subclass of int — reject a JSON `true`/`false` count
+        # explicitly so it never slips through as 1/0 (house no-defensive rule).
+        if isinstance( count, bool ) or not isinstance( count, int ):
+            return False, 0
+        total += count
+
+    return True, total

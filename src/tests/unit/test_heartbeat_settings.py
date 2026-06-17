@@ -27,10 +27,11 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_settings as hs
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import DEFAULT_POKE_CAP
 
 
-# Full default dict (3 keys as of Thread B). Single source for the many
-# "returns defaults" assertions below — bump it here if a 4th key ever lands.
+# Full default dict (4 keys as of Spine Step-2). Single source for the many
+# "returns defaults" assertions below — bump it here if a 5th key ever lands.
 _DEFAULTS = { "enabled": False, "poke_cap": DEFAULT_POKE_CAP,
-              "count_inbound_questions_as_owed": False }
+              "count_inbound_questions_as_owed": False,
+              "owed_source_from_store": False }
 
 
 # ── Fixture: point the loader's expanduser at a tmp settings.json ─────────────
@@ -101,7 +102,8 @@ def test_block_not_dict_returns_defaults( settings_file ):
 def test_enabled_true_poke_cap_read( settings_file ):
     settings_file( { "heartbeat": { "enabled": True, "poke_cap": 5 } } )
     assert hs.load_heartbeat_settings() == { "enabled": True, "poke_cap": 5,
-                                             "count_inbound_questions_as_owed": False }
+                                             "count_inbound_questions_as_owed": False,
+                                             "owed_source_from_store": False }
 
 
 def test_enabled_coerced_to_bool( settings_file ):
@@ -115,13 +117,15 @@ def test_enabled_coerced_to_bool( settings_file ):
 def test_enabled_present_poke_cap_missing_uses_default( settings_file ):
     settings_file( { "heartbeat": { "enabled": True } } )
     assert hs.load_heartbeat_settings() == { "enabled": True, "poke_cap": DEFAULT_POKE_CAP,
-                                             "count_inbound_questions_as_owed": False }
+                                             "count_inbound_questions_as_owed": False,
+                                             "owed_source_from_store": False }
 
 
 def test_poke_cap_present_enabled_missing_defaults_off( settings_file ):
     settings_file( { "heartbeat": { "poke_cap": 7 } } )
     assert hs.load_heartbeat_settings() == { "enabled": False, "poke_cap": 7,
-                                             "count_inbound_questions_as_owed": False }
+                                             "count_inbound_questions_as_owed": False,
+                                             "owed_source_from_store": False }
 
 
 # ── Thread B: count_inbound_questions_as_owed gate key ────────────────────────

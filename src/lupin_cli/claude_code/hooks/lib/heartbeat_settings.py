@@ -46,6 +46,16 @@ DEFAULT_ENABLED = False               # opt-in: heartbeat is dormant until wired
 # re-poking on the arbiter's own poke. Flip True in settings.json to restore.
 DEFAULT_COUNT_INBOUND_AS_OWED = False
 
+# Spine Step-2 (store-canonical task management) — owed-items SOURCE selector.
+# DEFAULT False = the OLD transcript-replay path (the work-owed verdict reads the
+# session's own Task* state from its transcript). Flip True in settings.json to
+# source the owed COUNT from the unified task store instead. DEFAULT-old is the
+# BLOCKING sequencing gate (cascade review §A): the seam ships behind this flag
+# so merging it is a NO-OP until the fleet-wide cutover explicitly flips it — an
+# obeying session must never go dark on an empty transcript before the store is
+# the source. Rollback = flip back to False (no redeploy).
+DEFAULT_OWED_SOURCE_FROM_STORE = False
+
 
 def load_heartbeat_settings() -> dict:
     """
@@ -56,7 +66,8 @@ def load_heartbeat_settings() -> dict:
           "heartbeat": {
             "enabled"  : bool,
             "poke_cap" : int,   # > 0
-            "count_inbound_questions_as_owed" : bool   # Thread B; default False
+            "count_inbound_questions_as_owed" : bool,  # Thread B; default False
+            "owed_source_from_store" : bool            # Step-2; default False
           }
         }
 
@@ -74,8 +85,11 @@ def load_heartbeat_settings() -> dict:
         - "poke_cap" not a positive int → raises ValueError (fail-loud)
         - "count_inbound_questions_as_owed" missing → DEFAULT False; non-bool →
           coerced to bool (Python truthiness)
-        - Returns dict with exactly three keys: "enabled" (bool), "poke_cap"
-          (int > 0), "count_inbound_questions_as_owed" (bool)
+        - "owed_source_from_store" missing → DEFAULT False (the old transcript
+          path); non-bool → coerced to bool (Python truthiness)
+        - Returns dict with exactly four keys: "enabled" (bool), "poke_cap"
+          (int > 0), "count_inbound_questions_as_owed" (bool),
+          "owed_source_from_store" (bool)
 
     Raises:
         ValueError: malformed poke_cap (non-int, bool, or value <= 0)
@@ -101,6 +115,8 @@ def load_heartbeat_settings() -> dict:
     poke_cap      = block.get( "poke_cap", DEFAULT_POKE_CAP )
     count_inbound = bool( block.get( "count_inbound_questions_as_owed",
                                      DEFAULT_COUNT_INBOUND_AS_OWED ) )
+    owed_source_from_store = bool( block.get( "owed_source_from_store",
+                                              DEFAULT_OWED_SOURCE_FROM_STORE ) )
 
     _validate_poke_cap( poke_cap )
 
@@ -108,6 +124,7 @@ def load_heartbeat_settings() -> dict:
         "enabled"                        : enabled,
         "poke_cap"                       : poke_cap,
         "count_inbound_questions_as_owed": count_inbound,
+        "owed_source_from_store"         : owed_source_from_store,
     }
 
 
@@ -117,6 +134,7 @@ def _defaults() -> dict:
         "enabled"                        : DEFAULT_ENABLED,
         "poke_cap"                       : DEFAULT_POKE_CAP,
         "count_inbound_questions_as_owed": DEFAULT_COUNT_INBOUND_AS_OWED,
+        "owed_source_from_store"         : DEFAULT_OWED_SOURCE_FROM_STORE,
     }
 
 
@@ -155,7 +173,8 @@ def quick_smoke_test():
     # Defaults shape — conservative opt-out
     d = _defaults()
     assert d == { "enabled": False, "poke_cap": DEFAULT_POKE_CAP,
-                  "count_inbound_questions_as_owed": False }, d
+                  "count_inbound_questions_as_owed": False,
+                  "owed_source_from_store": False }, d
 
     # Valid poke_caps pass validation
     _validate_poke_cap( 1 )
@@ -174,6 +193,7 @@ def quick_smoke_test():
     assert isinstance( loaded[ "enabled" ], bool )
     assert isinstance( loaded[ "poke_cap" ], int ) and loaded[ "poke_cap" ] > 0
     assert isinstance( loaded[ "count_inbound_questions_as_owed" ], bool )
+    assert isinstance( loaded[ "owed_source_from_store" ], bool )
 
     return True
 

@@ -209,7 +209,8 @@ class _Chain:
     def enable( self, enabled=True, cap=3 ):
         """Patch the settings loader (the live flag must not bleed in)."""
         self._mp.setattr( stop, "load_heartbeat_settings",
-                          lambda: { "enabled": enabled, "poke_cap": cap } )
+                          lambda: { "enabled": enabled, "poke_cap": cap,
+                                    "owed_source_from_store": False } )
 
     def persona( self, value ):
         """Override the (external) voice-bridge persona resolver."""

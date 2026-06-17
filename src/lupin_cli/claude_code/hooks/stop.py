@@ -39,7 +39,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_speakerphone, get_session_metadata, get_voice_persona,
     get_idle_detection, set_idle_detection_field, kill_idle_waiter,
     get_last_autonarrated_turn_id, set_last_autonarrated_turn_id,
-    find_active_voice_persona_sessions,
+    find_active_voice_persona_sessions, resolve_project_name,
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notify_user_async import notify_user_async
@@ -67,8 +67,14 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_settings import load_heartbeat_se
 from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
-    evaluate_work_owed, partition_inbound_by_age,
+    evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS,
 )
+# Spine Step-2 (store-canonical task management) — the flag-gated store-count
+# owed source. DEFAULT-old (transcript replay) until the fleet cutover flips
+# heartbeat.owed_source_from_store. See cascade review §A/§B/§C, lupin ->
+# src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md
+from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
+from lupin_cli.claude_code.hooks.lib.task_store_client import read_api_key, query_owed
 # v4 acked-inbound ledger (Rick 2026-06-10) — explicit "looked-at" qids the
 # unanswered-inbound gatherer subtracts (spec part (c)).
 from lupin_cli.claude_code.hooks.lib.heartbeat_acked_ledger import read_acked_qids
@@ -1210,6 +1216,66 @@ def _gather_unanswered_inbound_questions( session_id ):
         return empty
 
 
+# ── Spine Step-2 (store-canonical task management) store-count seam ───────────
+# The owed store-statuses queried for the work-owed verdict. The store's
+# {queued, in_progress} == the owed set (cascade review §B); a module constant
+# is the single source of truth (one-name rule).
+STORE_OWED_STATUSES = ( "queued", "in_progress" )
+
+
+def _owed_count_from_store( session_id ):
+    """
+    Resolve THIS session's owed-row COUNT from the unified task store.
+
+    The flag-gated (cascade review §A) replacement for the transcript-replay
+    owed source. Scopes to the session's OWN owed work via the SAME identity the
+    PostToolUse mirror stamps on rows: owner_persona = the lowercased voice
+    persona (mirror's "unknown" fallback when the bridge has none) AND project =
+    resolve_project_name() (the Step-1 canonical resolver).
+
+    Requires:
+        - session_id is the resolved stable session id string
+
+    Ensures:
+        - Returns ( count, ok ): ok True iff the store answered every owed-status
+          query cleanly; count is the summed owed-row count (0 when not ok)
+        - store unreachable / timeout / malformed config or body → ( 0, False )
+          (§C fail-safe: the caller does NOT poke — never guess on a bad read)
+        - NEVER raises (degrade-safe IO shell — any error ⇒ ( 0, False ))
+    """
+    try:
+        settings = load_task_store_settings()
+        api_key  = read_api_key()
+        persona  = get_voice_persona( session_id )
+        persona_lower = ( persona.get( "name" ) or "unknown" ).lower() if isinstance( persona, dict ) else "unknown"
+        project  = resolve_project_name()
+        ok, count = query_owed( settings, api_key, persona_lower, STORE_OWED_STATUSES, project=project )
+        return count, ok
+    except Exception:
+        return 0, False
+
+
+def _synthesize_owed_items( count ):
+    """
+    Build a `todo_items` list of `count` synthetic owed entries for the oracle.
+
+    The store-count seam yields a COUNT, but evaluate_work_owed consumes a LIST
+    of owned/in_progress dicts. Synthesize `count` owed items in the SAME shape
+    owed_items_from_state emits ({ status, owned_by_me }) so the verdict, the
+    oracle log's owed_items length, the §4 poke abstract, and total_owed all read
+    the store count transparently — no other call site changes.
+
+    Requires:
+        - count is a non-negative int
+
+    Ensures:
+        - Returns a list of length `count`, each
+          { "status": in_progress, "owned_by_me": True }
+        - count 0 → [] (genuinely no owed work)
+    """
+    return [ { "status": TODO_IN_PROGRESS, "owned_by_me": True } for _ in range( count ) ]
+
+
 def _run_heartbeat( session_id, transcript_path ):
     """
     Branch-C heartbeat self-poke adapter (thin; composes the pure leaf modules).
@@ -1278,7 +1344,27 @@ def _run_heartbeat( session_id, transcript_path ):
     # the genuine-idle empty-set signal from the single state (the Stop hook
     # fires every turn — halves the per-Stop transcript reads).
     task_state = replay_task_state( transcript_path )
-    owed_items = owed_items_from_state( task_state )
+    # ── Spine Step-2 (flag-gated) — owed-items SOURCE ──────────────────────────
+    # DEFAULT = the transcript-replay path (owed_items_from_state below). When
+    # heartbeat.owed_source_from_store is on, the owed COUNT comes from the
+    # unified task store instead (the session's OWN rows). §B: ONLY this source
+    # swaps — task_state is still replayed ABOVE and feeds the genuine-idle
+    # beacon + poke abstract unchanged, and the delegations + inbound signals
+    # below are untouched. §C: a store that is unreachable / slow / malformed
+    # FAILS SAFE — do NOT poke + a distinct quiet hot-path log phase;
+    # replay_task_state stays the degraded fallback behind the flag (flip it
+    # back to restore the old source instantly — §A rollback). NOT deleted.
+    if settings[ "owed_source_from_store" ]:
+        store_count, store_ok = _owed_count_from_store( session_id )
+        if not store_ok:
+            log_to_stream( "stop", {}, extra={
+                "phase"      : "heartbeat_store_unreachable",
+                "session_id" : session_id,
+            } )
+            return None
+        owed_items = _synthesize_owed_items( store_count )
+    else:
+        owed_items = owed_items_from_state( task_state )
     # v3 (Rick 2026-06-09): feed the two live signals the oracle defined but
     # production never populated — (a) MANAGER: alive un-reaped spawned workers
     # (a supervising manager owes review/reap even with zero Task* items, so it

@@ -161,3 +161,104 @@ class TestWireShape:
         assert req.data is None
         assert req.full_url == "http://test:7999/api/tasks?correlation_key=cc-task%3Asid%3A1"
         assert ok is True
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# query_owed — Spine Step-2 store-count owed reader (100% L/B/F)
+# ═════════════════════════════════════════════════════════════════════════════
+
+OWED = ( "queued", "in_progress" )
+
+
+@pytest.fixture
+def capture_seq( monkeypatch ):
+    """
+    urlopen stand-in that serves a QUEUE of outcomes (one per query_owed call)
+    and records EVERY Request + timeout. An outcome that is an Exception is
+    raised (transport/HTTP failure); otherwise it's returned. Running past the
+    queue is a test bug surfaced loudly (IndexError), proving call-count.
+    """
+    state = { "requests": [ ], "timeouts": [ ], "outcomes": [ ] }
+
+    def fake_urlopen( request, timeout=None ):
+        state[ "requests" ].append( request )
+        state[ "timeouts" ].append( timeout )
+        outcome = state[ "outcomes" ].pop( 0 )
+        if isinstance( outcome, Exception ):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr( tc.urllib.request, "urlopen", fake_urlopen )
+    return state
+
+
+def _rows( count ):
+    return FakeResponse( 200, json.dumps( { "tasks": [ ], "count": count } ) )
+
+
+class TestQueryOwed:
+
+    def test_sums_counts_across_statuses( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ _rows( 2 ), _rows( 3 ) ]
+        ok, count = tc.query_owed( SETTINGS, "k", "krishna", OWED, project="lupin" )
+        assert ( ok, count ) == ( True, 5 )
+        # one GET per owed status, owner + status + project all wired
+        assert len( capture_seq[ "requests" ] ) == 2
+        urls = [ r.full_url for r in capture_seq[ "requests" ] ]
+        assert all( u.startswith( "http://test:7999/api/tasks?" ) for u in urls )
+        assert "owner_persona=krishna" in urls[ 0 ] and "status=queued" in urls[ 0 ] and "project=lupin" in urls[ 0 ]
+        assert "status=in_progress" in urls[ 1 ]
+        assert capture_seq[ "requests" ][ 0 ].get_method() == "GET"
+
+    def test_store_up_zero_rows_is_ok_zero( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ _rows( 0 ), _rows( 0 ) ]
+        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( True, 0 )
+
+    def test_transport_failure_short_circuits( self, capture_seq ):
+        # first status raises (refused) → return immediately, second never attempted
+        capture_seq[ "outcomes" ] = [ ConnectionRefusedError( "refused" ), _rows( 9 ) ]
+        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+        assert len( capture_seq[ "requests" ] ) == 1          # short-circuit proven
+
+    def test_timeout_is_not_ok( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ TimeoutError( "slow store" ) ]
+        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+
+    def test_http_error_is_not_ok( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ http_error( 500, '{"detail": "boom"}' ) ]
+        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+
+    def test_malformed_missing_count( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ FakeResponse( 200, '{"tasks": []}' ) ]
+        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+
+    def test_malformed_non_int_count( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ FakeResponse( 200, '{"count": "5"}' ) ]
+        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+
+    def test_malformed_bool_count_rejected( self, capture_seq ):
+        # JSON `true` is a bool (an int subclass) — must NOT slip through as 1
+        capture_seq[ "outcomes" ] = [ FakeResponse( 200, '{"count": true}' ) ]
+        assert tc.query_owed( SETTINGS, "k", "p", OWED ) == ( False, 0 )
+
+    def test_empty_statuses_is_ok_zero_no_calls( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ ]
+        assert tc.query_owed( SETTINGS, "k", "p", () ) == ( True, 0 )
+        assert capture_seq[ "requests" ] == [ ]
+
+    def test_project_omitted_when_none( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ _rows( 1 ) ]
+        tc.query_owed( SETTINGS, "k", "p", ( "queued", ) )            # no project
+        assert "project=" not in capture_seq[ "requests" ][ 0 ].full_url
+
+    def test_uses_bounded_default_timeout( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ _rows( 0 ) ]
+        tc.query_owed( SETTINGS, "k", "p", ( "queued", ) )
+        # §C/§J6: the Stop-hot-path read is bounded by an aggressive default
+        assert capture_seq[ "timeouts" ][ 0 ] == tc.DEFAULT_OWED_TIMEOUT_SECONDS
+        assert tc.DEFAULT_OWED_TIMEOUT_SECONDS <= 2.0                 # never stalls turn-end
+
+    def test_timeout_override_passed_through( self, capture_seq ):
+        capture_seq[ "outcomes" ] = [ _rows( 0 ) ]
+        tc.query_owed( SETTINGS, "k", "p", ( "queued", ), timeout=0.5 )
+        assert capture_seq[ "timeouts" ][ 0 ] == 0.5
