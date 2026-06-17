@@ -41,8 +41,8 @@ Design authority: lupin ->
 import time
 
 from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
-from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona
-from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure, derive_project_name
+from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona, resolve_project_name
+from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
 from lupin_cli.claude_code.hooks.lib import task_store_client as client
 from lupin_cli.claude_code.hooks.lib import task_store_map as task_map
@@ -404,7 +404,7 @@ def _build_op( payload, session_id, actor, persona_lower, base_dir ):
                 "item_class"          : "task",
                 "title"               : subject,
                 "body"                : tool_input.get( "description" ),
-                "project"             : derive_project_name(),
+                "project"             : resolve_project_name(),
                 "created_by"          : actor,
                 "owner_persona"       : persona_lower,
                 "accountable_manager" : persona_lower,

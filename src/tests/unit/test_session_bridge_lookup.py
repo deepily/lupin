@@ -21,7 +21,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     find_session_by_id, find_session_by_tmux,
     find_session_path_by_id, get_speakerphone, set_speakerphone,
     find_active_speakerphone_sessions,
-    build_sender_id_for_cc, _resolve_project_from_bridge_cwd,
+    build_sender_id_for_cc, _resolve_project_from_bridge_cwd, resolve_project_name,
     find_dead_sessions, _pid_confirmed_dead,
 )
 from lupin_cli.claude_code.hooks.register_session import main
@@ -1194,6 +1194,47 @@ class TestBuildSenderIdForCcBridgeCwdAnchoring:
                 project = _resolve_project_from_bridge_cwd()
 
             assert project == "plan"
+
+
+# ── Tests: resolve_project_name (the ONE shared project-name resolver) ───────
+
+
+class TestResolveProjectName:
+    """
+    Coverage for the canonical `resolve_project_name` (bug 9bf1dc4a fix): the
+    bridge-cwd-anchored resolver that the manager-figure write gate, the
+    persona-chain env-key lookup, AND hook credential resolution now share.
+    Every branch: bridge resolves → bridge wins; bridge None → LUPIN_ROOT
+    basename; bridge None + no LUPIN_ROOT → live-cwd basename; environ=None →
+    os.environ.
+    """
+
+    _RESOLVER = "lupin_cli.claude_code.hooks.lib.session_bridge._resolve_project_from_bridge_cwd"
+
+    def test_bridge_cwd_wins_for_non_lupin_session( self ):
+        # The bug 9bf1dc4a fix: a non-lupin session resolves to its OWN
+        # project from the bridge, NOT the LUPIN_ROOT basename ("lupin").
+        with patch( self._RESOLVER, return_value="cosa-voice" ):
+            assert resolve_project_name( { "LUPIN_ROOT": "/mnt/x/lupin" } ) == "cosa-voice"
+
+    def test_bridge_alias_plan_wins( self ):
+        # Alias normalization is inherited from the bridge resolver.
+        with patch( self._RESOLVER, return_value="plan" ):
+            assert resolve_project_name( { "LUPIN_ROOT": "/mnt/x/lupin" } ) == "plan"
+
+    def test_falls_back_to_lupin_root_basename_when_no_bridge( self ):
+        with patch( self._RESOLVER, return_value=None ):
+            assert resolve_project_name( { "LUPIN_ROOT": "/mnt/x/LUPIN" } ) == "lupin"
+
+    def test_falls_back_to_cwd_basename_when_no_bridge_no_root( self, monkeypatch ):
+        monkeypatch.setattr( Path, "cwd", classmethod( lambda cls: Path( "/somewhere/My-Repo" ) ) )
+        with patch( self._RESOLVER, return_value=None ):
+            assert resolve_project_name( { } ) == "my-repo"
+
+    def test_environ_none_uses_os_environ( self, monkeypatch ):
+        monkeypatch.setenv( "LUPIN_ROOT", "/mnt/x/lupin" )
+        with patch( self._RESOLVER, return_value=None ):
+            assert resolve_project_name() == "lupin"
 
 
 # ── Tests: _pid_confirmed_dead (bias-to-alive death probe) ───────────────────

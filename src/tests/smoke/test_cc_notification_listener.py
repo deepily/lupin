@@ -48,9 +48,9 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
 )
 from lupin_cli.claude_code.hooks.lib.hook_credentials import (
     get_hook_credentials,
-    _derive_project_name,
     CREDENTIALS_FILE,
 )
+from lupin_cli.claude_code.hooks.lib.session_bridge import resolve_project_name
 from lupin_cli.claude_code.hooks.lib.cc_notification_listener import (
     CCNotificationListener,
     SESSION_DIR,
@@ -264,9 +264,11 @@ class TestCredentialResolution:
         assert email_c == "cosa@test.ai"
 
     def test_project_derivation_from_lupin_root( self ):
-        """Project name derived from LUPIN_ROOT basename."""
-        with patch.dict( os.environ, { "LUPIN_ROOT": "/path/to/lupin" } ):
-            assert _derive_project_name() == "lupin"
+        """Project name falls back to LUPIN_ROOT basename when no bridge resolves."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge._resolve_project_from_bridge_cwd",
+                    return_value=None ), \
+             patch.dict( os.environ, { "LUPIN_ROOT": "/path/to/lupin" } ):
+            assert resolve_project_name() == "lupin"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

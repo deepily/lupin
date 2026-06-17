@@ -90,7 +90,7 @@ def manager_env( monkeypatch, fake_client, logs ):
     monkeypatch.setattr( mr, "load_task_store_settings", lambda: dict( SETTINGS ) )
     monkeypatch.setattr( mr, "is_manager_figure", lambda sid, environ=None: True )
     monkeypatch.setattr( mr, "get_voice_persona", lambda sid: { "name": "Tiffany" } )
-    monkeypatch.setattr( mr, "derive_project_name", lambda environ=None: "lupin" )
+    monkeypatch.setattr( mr, "resolve_project_name", lambda environ=None: "lupin" )
 
 
 def create_payload( harness_id="5", subject="Build the thing", metadata=None ):

@@ -434,6 +434,50 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
         return None
 
 
+def resolve_project_name( environ=None ) -> str:
+    """
+    Resolve the current session's project name — the ONE project-name
+    resolver shared by every hook consumer (the task-store write gate's
+    manager-figure predicate, the per-repo persona-chain env-key lookup,
+    and hook credential resolution). One name at every layer; the former
+    `manager_figure.derive_project_name` and `hook_credentials.
+    _derive_project_name` duplicates were converged here (bug 9bf1dc4a).
+
+    Resolution order:
+        1. The bridge file's SessionStart cwd → nearest `.git` ancestor
+           (via `_resolve_project_from_bridge_cwd`, alias-normalized). This
+           is the CORRECT source: it is anchored to where `claude` was
+           actually launched, so a NON-lupin session resolves to its OWN
+           project instead of always collapsing to the `LUPIN_ROOT`
+           basename. The old `LUPIN_ROOT`-basename rule returned "lupin"
+           for EVERY session regardless of where it ran — bug 9bf1dc4a:
+           the persona-chain lookup and credential section both keyed off
+           the wrong project for any non-lupin session.
+        2. Fallback ONLY when no bridge resolves (no bridge file, no `cwd`
+           field, no `.git` ancestor): the `LUPIN_ROOT` basename, then the
+           live cwd basename — the legacy rule, kept as a degraded last
+           resort so callers always get a non-empty name.
+
+    Requires:
+        - environ is a Mapping or None (None → os.environ)
+
+    Ensures:
+        - Returns a lowercase, non-empty project name string
+        - Prefers the bridge-cwd-anchored project; only falls back to
+          LUPIN_ROOT/cwd when the bridge cannot resolve one
+        - Never raises
+    """
+    project = _resolve_project_from_bridge_cwd()
+    if project:
+        return project
+    if environ is None:
+        environ = os.environ
+    lupin_root = environ.get( "LUPIN_ROOT", "" )
+    if lupin_root:
+        return Path( lupin_root ).name.lower()
+    return Path.cwd().name.lower()
+
+
 def build_sender_id_for_cc( session_id: Optional[str] = None ) -> Optional[str]:
     """
     Build a Claude Code sender_id for notification routing.

@@ -24,7 +24,10 @@ INI Format (unified ~/.lupin/config):
     ...
 
 Resolution:
-    1. Derive project name from cwd (basename of project root)
+    1. Derive project name via session_bridge.resolve_project_name (the ONE
+       shared resolver — bridge-cwd-anchored, so a non-lupin session reads
+       its OWN credential section instead of always collapsing to [lupin];
+       see bug 9bf1dc4a)
     2. Read ~/.lupin/config (fail hard if missing)
     3. Read matching INI section
     4. Return (email, password) tuple
@@ -35,9 +38,10 @@ Usage:
 """
 
 import configparser
-import os
 from pathlib import Path
 from typing import Tuple, Optional
+
+from lupin_cli.claude_code.hooks.lib.session_bridge import resolve_project_name
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -71,7 +75,7 @@ def get_hook_credentials( project: Optional[str] = None ) -> Tuple[str, str]:
         ValueError: If project section or required keys not found
     """
     if project is None:
-        project = _derive_project_name()
+        project = resolve_project_name()
 
     if not CREDENTIALS_FILE.exists():
         raise FileNotFoundError(
@@ -187,33 +191,13 @@ def _read_credentials_from_file( file_path: Path, project: str ) -> Optional[Tup
     return email, password
 
 
-def _derive_project_name() -> str:
-    """
-    Derive project name from current working directory.
-
-    Uses LUPIN_ROOT env var if set, otherwise falls back to cwd basename.
-
-    Ensures:
-        - Returns lowercase project name string
-        - Never returns empty string
-
-    Returns:
-        str: Project name (e.g., "lupin", "cosa")
-    """
-    lupin_root = os.environ.get( "LUPIN_ROOT", "" )
-    if lupin_root:
-        return Path( lupin_root ).name.lower()
-
-    return Path.cwd().name.lower()
-
-
 # ── Quick smoke test ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
 
     print( f"Credentials file: {CREDENTIALS_FILE}" )
     print( f"  Exists: {CREDENTIALS_FILE.exists()}" )
-    print( f"Derived project: {_derive_project_name()}" )
+    print( f"Derived project: {resolve_project_name()}" )
 
     try:
         email, password = get_hook_credentials()
