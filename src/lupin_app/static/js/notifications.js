@@ -9322,7 +9322,10 @@ class NotificationsUI {
         const itemClass   = task.item_class || "task";
         const classBadge  = this.escapeHtml( itemClass );
         const classSlug   = this.escapeHtml( String( itemClass ).replace( /[^a-zA-Z0-9_-]/g, "" ) );
-        const blocked     = this.escapeHtml( this._taskCellOrDash( task.blocked_by ) );
+        const blockedRaw  = Array.isArray( task.blocked_by )
+            ? task.blocked_by.map( b => ( b && typeof b === "object" ) ? ( b.kind ? `${b.kind}:${b.id}` : `${b.id}` ) : String( b ) ).join( ", " )
+            : task.blocked_by;
+        const blocked     = this.escapeHtml( this._taskCellOrDash( blockedRaw ) );
         const chase       = this.escapeHtml( this._formatTaskChaseTime( task.next_chase_ts, ianaZone ) );
         const accountable = this.escapeHtml( this._taskCellOrDash( task.accountable_manager ) );
         const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
@@ -15252,7 +15255,11 @@ class NotificationsUI {
      * @returns {string} - HTML-escaped text
      */
     escapeHtml( text ) {
-        if ( !text ) return '';
+        if ( text === null || text === undefined || text === '' ) return '';
+        // Defense-in-depth: coerce non-strings (e.g. arrays/objects from store rows)
+        // so a non-string value can never throw "text.replace is not a function"
+        // and abort a render. Callers should still stringify meaningfully upstream.
+        const str = typeof text === 'string' ? text : String( text );
         const escapeMap = {
             '&': '&amp;',
             '<': '&lt;',
@@ -15260,7 +15267,7 @@ class NotificationsUI {
             '"': '&quot;',
             "'": '&#039;'
         };
-        return text.replace( /[&<>"']/g, char => escapeMap[ char ] );
+        return str.replace( /[&<>"']/g, char => escapeMap[ char ] );
     }
 
     updateElement( elementId, content ) {
