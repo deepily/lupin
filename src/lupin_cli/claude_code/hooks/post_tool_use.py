@@ -95,12 +95,16 @@ def main():
             last_interaction_at = _dt.datetime.now().astimezone().isoformat( timespec="seconds" ),
         )
 
-    # Task-store mirror (Phase 2 write path): harness Task* events flow into
-    # the unified task store. Gated INSIDE the mirror on settings.json
-    # ["task_store"]["enabled"] (default OFF) + the F4 manager-figure
-    # predicate; never-raises by contract, bounded by its client timeout.
-    # Lazy import keeps the every-tool-call hot path untouched for the ~all
-    # tool events that are not Task*.
+    # Task-store mirror — DEPRECATED (Step-5 stage-1, 2026-06-17): now a LOGGED
+    # NO-OP. The store-canonical cutover is live, so the harness→store auto-
+    # mirror is obsolete; instead of writing, mirror_task_tool_event emits one
+    # fire-log line per native TaskCreate/TaskUpdate (greppable phase=
+    # task_store_mirror_deprecated_noop) so we can see, fleet-wide, which
+    # sessions still use native Task* for owed work. Stage-2 (DELETE this call +
+    # drop the dead TASK_STORE_WRITE_TOOLS entries below) is evidence-gated on
+    # that fire-log going quiet. The mirror's MIRROR_WRITES_DEPRECATED guard
+    # keeps the old write path reversible. never-raises by contract; lazy import
+    # keeps the every-tool-call hot path untouched for the ~all non-Task* events.
     if tool_name in ( "TaskCreate", "TaskUpdate" ):
         from lupin_cli.claude_code.hooks.lib.task_store_mirror import mirror_task_tool_event
         mirror_task_tool_event( payload, session_id )

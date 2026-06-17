@@ -1,6 +1,24 @@
 """
 Task-store mirror — Phase-2 write-path orchestrator (PostToolUse seam).
 
+⚠️ DEPRECATED (Step-5 stage-1, 2026-06-17) — the mirror NO LONGER WRITES.
+The store-canonical cutover is live (one store, three readers); every session
+now writes its OWN owed work to the store via the MCP `task_create` path, so
+the harness→store auto-mirror is obsolete. As of stage-1 the orchestrator is a
+DEPRECATED, LOGGED NO-OP: `mirror_task_tool_event` emits ONE fire-log line per
+native TaskCreate/TaskUpdate (greppable phase=`task_store_mirror_deprecated_noop`,
+stamped with persona + session + tool + harness id + subject/status) so we can
+watch, fleet-wide, which sessions are STILL using native TaskCreate for owed
+work — then performs no store write at all. Stage-2 (DELETE the mirror + drop
+the dead TASK_STORE_WRITE_TOOLS entries) is evidence-gated on that fire-log
+going quiet fleet-wide and is NOT done here.
+
+REVERSIBILITY: the entire write pipeline below is intentionally KEPT, not
+deleted. The single module guard `MIRROR_WRITES_DEPRECATED` (below) selects the
+behavior — flip it to False and the orchestrator resumes the exact pre-cutover
+write path verbatim (the bridge for any not-yet-migrated session). Plan:
+src/rnd/v0.1.8/2026.06.17-unified-task-store-followups-plan.md §C.
+
 Mirrors the session's harness task list (Task* tool family) into the unified
 task store: "use the harness task list as you always have; the store follows
 you" (task-store-discipline.md §1). One entry point,
@@ -48,6 +66,15 @@ from lupin_cli.claude_code.hooks.lib import task_store_client as client
 from lupin_cli.claude_code.hooks.lib import task_store_map as task_map
 from lupin_cli.claude_code.hooks.lib import task_store_spool as spool
 
+
+# Step-5 stage-1 deprecation guard (2026-06-17): when True, the mirror is a
+# LOGGED NO-OP — it emits one fire-log line per native Task* event and writes
+# NOTHING to the store. Flip to False to resume the full pre-cutover write path
+# verbatim (the entire pipeline below is kept intact). This is the single,
+# clearly-named reversibility switch (there is no settings flag for the mirror's
+# deprecation — settings.json["task_store"]["enabled"] gates the WRITE path, a
+# distinct concern). See module docstring + plan §C.
+MIRROR_WRITES_DEPRECATED = True
 
 TASK_CREATE = "TaskCreate"
 TASK_UPDATE = "TaskUpdate"
@@ -439,6 +466,43 @@ def _build_op( payload, session_id, actor, persona_lower, base_dir ):
     }, None
 
 
+def _deprecated_noop_log( payload, session_id ):
+    """
+    Stage-1 deprecation path: emit ONE fire-log line for a native Task* event
+    and write NOTHING. The line is the fleet-wide evidence Stage-2 is gated on
+    — "which sessions are STILL using native TaskCreate/TaskUpdate for owed
+    work?" — so it carries the identity needed to answer that.
+
+    Requires:
+        - payload is the PostToolUse hook input dict (tool_name ∈
+          {TaskCreate, TaskUpdate})
+        - session_id is the resolved STABLE session id
+
+    Ensures:
+        - Emits exactly one stream-log line, phase=task_store_mirror_deprecated_noop,
+          stamped with persona, tool, harness_id, and detail (subject for a
+          create, status for an update — None when absent, which is itself the
+          signal of a benign metadata-only update)
+        - Performs NO store write and NO map/spool mutation
+        - Returns { "action": "deprecated_noop" }
+        - Never raises (caller's belt + _identity/_log are no-throw)
+    """
+    _, persona_lower = _identity( session_id )
+    tool_name  = payload.get( "tool_name" )
+    tool_input = payload.get( "tool_input" ) or { }
+    if tool_name == TASK_CREATE:
+        response   = payload.get( "tool_response" ) or { }
+        task_resp  = response.get( "task" ) if isinstance( response, dict ) else None
+        harness_id = task_resp.get( "id" ) if isinstance( task_resp, dict ) else None
+        detail     = tool_input.get( "subject" )
+    else:
+        harness_id = tool_input.get( "taskId" )
+        detail     = tool_input.get( "status" )
+    _log( session_id, "task_store_mirror_deprecated_noop",
+          persona=persona_lower, tool=tool_name, harness_id=harness_id, detail=detail )
+    return { "action": "deprecated_noop" }
+
+
 def mirror_task_tool_event( payload, session_id, base_dir=None, environ=None ):
     """
     The PostToolUse entry point: mirror one TaskCreate/TaskUpdate event.
@@ -448,9 +512,12 @@ def mirror_task_tool_event( payload, session_id, base_dir=None, environ=None ):
         - session_id is the resolved STABLE session id
 
     Ensures:
+        - DEPRECATED (stage-1): with MIRROR_WRITES_DEPRECATED True (default),
+          returns { "action": "deprecated_noop" } after emitting one fire-log
+          line — NO store write. Flip the guard False to restore the write path.
         - Returns a summary dict { "action": ... } (for tests/logs):
-          disabled | not_manager | skipped:<reason> | mirrored:<op> |
-          spooled:<op> | dropped:<op>
+          deprecated_noop | disabled | not_manager | skipped:<reason> |
+          mirrored:<op> | spooled:<op> | dropped:<op>
         - settings malformed (ValueError) → fail SAFE: action=disabled, logged
         - F4: non-manager-figure sessions NEVER write (fail-closed gate)
         - C8: spool drained opportunistically BEFORE the new op; transport/5xx
@@ -459,6 +526,9 @@ def mirror_task_tool_event( payload, session_id, base_dir=None, environ=None ):
           proceeds untouched
     """
     try:
+        if MIRROR_WRITES_DEPRECATED:
+            return _deprecated_noop_log( payload, session_id )
+
         try:
             settings = load_task_store_settings()
         except ValueError as e:
