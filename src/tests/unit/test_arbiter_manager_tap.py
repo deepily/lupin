@@ -221,6 +221,81 @@ class TestManagerAckTracking:
         assert job._manager_last_activity( "Nobody", who ) is None
         assert job._manager_last_activity( "Tiberius", None ) is None
 
+    # ── bug 9694fb11: bridge-mtime is an implicit tap-ACK (active-but-silent mgr) ──
+
+    def test_fresh_bridge_mtime_acks_commons_silent_manager( self ):
+        """
+        REPRODUCTION (bug 9694fb11): an actively-working manager whose bridge
+        mtime is fresh (every PreToolUse bumps it) but who has posted NOTHING to
+        commons must NOT trip MANAGER-DOWN — even when the 600s window has fully
+        elapsed since the tap. Before the fix this false-escalated to Rick.
+        """
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late = NOW + datetime.timedelta( seconds=700 )                 # past the 600s window
+        # bridge bumped at +650s (still working) → fresh AT/AFTER the tap
+        fresh = ( NOW + datetime.timedelta( seconds=650 ) ).timestamp()
+        job._bridge_mtime_fn = lambda sid: fresh
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius" } }
+        down = job._check_manager_acks( late, [ ], fleet_view )        # who=[] → ZERO commons activity
+        assert down == 0 and escal == [ ]
+        assert "Tiberius" not in job._manager_down_escalated
+
+    def test_stale_bridge_mtime_no_commons_still_downs( self ):
+        """Regression guard: a bridge mtime OLDER than the tap is not a valid
+        ACK — with no commons activity either, MANAGER-DOWN still fires."""
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late  = NOW + datetime.timedelta( seconds=700 )
+        stale = ( NOW - datetime.timedelta( seconds=50 ) ).timestamp()  # before the tap
+        job._bridge_mtime_fn = lambda sid: stale
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius" } }
+        down = job._check_manager_acks( late, [ ], fleet_view )
+        assert down == 1 and len( escal ) == 1 and "MANAGER-DOWN" in escal[ 0 ]
+
+    def test_no_bridge_no_commons_still_downs( self ):
+        """Regression guard: no resolvable bridge (mtime None) AND no commons
+        activity → MANAGER-DOWN still fires (the genuine down case)."""
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late = NOW + datetime.timedelta( seconds=700 )
+        job._bridge_mtime_fn = lambda sid: None                        # no bridge resolves
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius" } }
+        down = job._check_manager_acks( late, [ ], fleet_view )
+        assert down == 1 and "MANAGER-DOWN" in escal[ 0 ]
+
+    def test_manager_bridge_activity_picks_freshest_and_handles_edges( self ):
+        """Direct unit of the helper: freshest mtime across the manager's
+        sessions wins; non-dict views, persona mismatches, missing session_id,
+        unresolved bridges (None), and un-convertible mtimes are all skipped."""
+        job  = _job( _Gateway(), { } )
+        base = NOW.timestamp()
+        mtimes = {
+            "s-new"    : base + 99,
+            "s-old"    : base + 10,     # older than s-new → does NOT update best
+            "s-newest" : base + 150,    # newest → updates best
+            "s-none"   : None,          # no bridge resolves → skipped
+            "s-bad"    : "garbage",     # fromtimestamp raises (TypeError) → skipped
+        }
+        job._bridge_mtime_fn = lambda sid: mtimes.get( sid )
+        fleet_view = {
+            "s-new"    : { "session_id": "s-new",    "persona": "Tiberius" },
+            "s-old"    : { "session_id": "s-old",    "persona": "Tiberius" },
+            "s-newest" : { "session_id": "s-newest", "persona": "Tiberius" },
+            "s-none"   : { "session_id": "s-none",   "persona": "Tiberius" },
+            "s-bad"    : { "session_id": "s-bad",    "persona": "Tiberius" },
+            "s-other"  : { "session_id": "s-other",  "persona": "SomeoneElse" },  # persona mismatch
+            "s-nosid"  : { "persona": "Tiberius" },                               # no session_id → None
+            "not-dict" : "x",                                                     # non-dict view → skipped
+        }
+        best = job._manager_bridge_activity( "Tiberius", fleet_view )
+        assert best == datetime.datetime.fromtimestamp( base + 150, tz=datetime.timezone.utc )
+        assert job._manager_bridge_activity( "Nobody",   fleet_view ) is None    # no persona match
+        assert job._manager_bridge_activity( "Tiberius", None )       is None    # None fleet_view
+
 
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
