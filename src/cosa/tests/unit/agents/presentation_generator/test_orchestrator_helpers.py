@@ -729,6 +729,11 @@ class TestRenderVisualsAsync:
 
     def test_happy_renders_visual( self, capsys, _silence_voice_io ):
         agent = _agent( debug=True )
+        # Hermetic: pre-seed the lazy api_client so the real PresentationAPIClient is
+        # never constructed (it raises ValueError when the gitignored firewalled key is
+        # absent — clean checkouts / CI). The renderer.render call is mocked, so the
+        # forwarded api_client value is never exercised.
+        agent._api_client = MagicMock()
         agent._presentation_state[ "marp_path" ] = "/p/x.md"
         marp = "## S\n<!-- VISUAL: diagram | a flow diagram -->\n"
         slide = _slide( visual_type="diagram", visual_description="a flow diagram", title="Flow Slide" )
@@ -747,6 +752,10 @@ class TestRenderVisualsAsync:
 
     def test_renderer_returns_none_uses_placeholder_fallback( self, _silence_voice_io ):
         agent = _agent()
+        # Hermetic: pre-seed the lazy api_client so the real PresentationAPIClient is
+        # never constructed (it raises ValueError when the gitignored firewalled key is
+        # absent — clean checkouts / CI). The renderer.render call is mocked.
+        agent._api_client = MagicMock()
         agent._presentation_state[ "marp_path" ] = "/p/x.md"
         marp = "<!-- VISUAL: chart | bar chart of sales -->\n"
         pres = _presentation( slides=[ _slide( visual_type="chart", visual_description="bar chart of sales" ) ] )
