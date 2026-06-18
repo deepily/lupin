@@ -568,5 +568,105 @@ test("reconnect-parity: permanent-auth close during auth phase (4002) → failed
   assert.equal(t.state, "failed");
 });
 
+// --- auth-handshake-timeout watchdog (audit 391781cd, fix d9fc037b) ----------
+//
+// Parity with legacy ws-channel.js's HANDSHAKE_TIMEOUT_MS: bound the connect+auth
+// window so a server that completes the WS handshake but never returns
+// auth_success cannot park the CSM in `connecting` forever. The expiry LOGIC is
+// split into onHandshakeTimeout() so it is covered by a direct call; the thin
+// setTimeout wrapper is exercised via mock.timers (same pattern as the backoff
+// timer). Author: Cheech (picked up during Rick's "14 items parked" broadcast).
+
+test("handshake-timeout: timer is armed at openSocket() (covers the connect+auth window)", () => {
+  const Ctor = freshMockCtor();
+  const t = createQueueTransport({ authManager: makeMockAuth(), bus: createEventBusForTesting(), baseUrl: "", WebSocketCtor: Ctor });
+  t.start("wise penguin");
+  // Armed synchronously in openSocket() — BEFORE auth_success, so a silent server
+  // is still bounded.
+  assert.notEqual((t as unknown as { handshakeTimer: unknown }).handshakeTimer, null);
+});
+
+test("handshake-timeout: expiry (mock.timers) force-closes the unauthed socket → backoff", async () => {
+  const { mock } = await import("node:test");
+  mock.timers.enable({ apis: [ "setTimeout" ] });
+  try {
+    const Ctor = freshMockCtor();
+    const t = createQueueTransport({ authManager: makeMockAuth(), bus: createEventBusForTesting(), baseUrl: "", WebSocketCtor: Ctor, maxAttempts: 10 });
+    t.start("wise penguin");
+    // No auth_success ever arrives. Advance past the 10s handshake bound.
+    mock.timers.tick(10_000);
+    // Force-closed → socket_close from `connecting` → backoff (attempt incremented),
+    // composing with the reconnect budget exactly like any other failure.
+    assert.equal(t.state, "backoff");
+    assert.equal(MockWebSocket.instances[0]!.closed, true);
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("handshake-timeout: onHandshakeTimeout() force-closes + drives socket_close (direct, both guards present)", async () => {
+  const Ctor = freshMockCtor();
+  const t = createQueueTransport({ authManager: makeMockAuth(), bus: createEventBusForTesting(), baseUrl: "", WebSocketCtor: Ctor, maxAttempts: 10 });
+  t.start("wise penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));   // let getToken settle (still unauthed — no auth_success)
+  (t as unknown as { onHandshakeTimeout: () => void }).onHandshakeTimeout();
+  assert.equal(MockWebSocket.instances[0]!.closed, true);   // wsChannel.stop() ran (true-arm)
+  assert.equal(t.state, "backoff");                         // csm.send(socket_close) ran (true-arm)
+  assert.equal((t as unknown as { handshakeTimer: unknown }).handshakeTimer, null);
+});
+
+test("handshake-timeout: onHandshakeTimeout() on an unstarted transport is a silent no-op (both guard false-arms)", () => {
+  const t = createQueueTransport({ authManager: makeMockAuth(), bus: createEventBusForTesting(), baseUrl: "", WebSocketCtor: freshMockCtor() });
+  // Never started → wsChannel === null AND csm === null. Both `if` guards take the
+  // false arm; must not throw.
+  assert.doesNotThrow(() => (t as unknown as { onHandshakeTimeout: () => void }).onHandshakeTimeout());
+});
+
+test("handshake-timeout: auth_success disarms the watchdog", async () => {
+  const Ctor = freshMockCtor();
+  const t = createQueueTransport({ authManager: makeMockAuth(), bus: createEventBusForTesting(), baseUrl: "", WebSocketCtor: Ctor });
+  t.start("wise penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ type: "auth_success", data: {} }));
+  assert.equal(t.state, "connected");
+  assert.equal((t as unknown as { handshakeTimer: unknown }).handshakeTimer, null);   // disarmed
+});
+
+test("handshake-timeout: a socket close disarms the watchdog", async () => {
+  const Ctor = freshMockCtor();
+  const t = createQueueTransport({ authManager: makeMockAuth(), bus: createEventBusForTesting(), baseUrl: "", WebSocketCtor: Ctor, maxAttempts: 10 });
+  t.start("wise penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+  MockWebSocket.instances[0]!.fireClose(1006, "transient");
+  assert.equal((t as unknown as { handshakeTimer: unknown }).handshakeTimer, null);   // disarmed on close
+});
+
+test("handshake-timeout: stop() disarms the watchdog", () => {
+  const Ctor = freshMockCtor();
+  const t = createQueueTransport({ authManager: makeMockAuth(), bus: createEventBusForTesting(), baseUrl: "", WebSocketCtor: Ctor });
+  t.start("wise penguin");
+  t.stop();
+  assert.equal((t as unknown as { handshakeTimer: unknown }).handshakeTimer, null);   // disarmed on teardown
+});
+
+test("handshake-timeout: network_offline disarms the watchdog (offline branch)", () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({ authManager: makeMockAuth(), bus, baseUrl: "", WebSocketCtor: Ctor });
+  t.start("wise penguin");
+  bus.emit({ type: "network_offline", payload: {}, source: "test", ts: 0 });
+  assert.equal(t.state, "offline");
+  assert.equal((t as unknown as { handshakeTimer: unknown }).handshakeTimer, null);   // disarmed in the offline/failed branch
+});
+
+test("handshake-timeout: cancelHandshakeTimer() is a no-op when nothing is armed (false-arm)", () => {
+  const t = createQueueTransport({ authManager: makeMockAuth(), bus: createEventBusForTesting(), baseUrl: "", WebSocketCtor: freshMockCtor() });
+  // Never started → handshakeTimer is null → the `!== null` guard takes the false arm.
+  assert.doesNotThrow(() => (t as unknown as { cancelHandshakeTimer: () => void }).cancelHandshakeTimer());
+});
+
 // Defuse a noisy unused-import warning during type-cast; harmless to runtime.
 void ({} as AuthStateChangePayload);
