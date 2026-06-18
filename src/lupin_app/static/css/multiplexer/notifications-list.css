@@ -67,8 +67,14 @@
     border-radius: 8px;
     overflow: hidden;
     background-color: #fff;
-    box-shadow: 0 1px 3px rgb( 0, 0, 0, 0.04 );
-    transition: border-color 0.2s, box-shadow 0.2s;
+    /* CSS-parity 2026-06-17: restore legacy double box-shadow (ring + drop) —
+       notifications.css .sender-card. The persona-tinted ring resolves once
+       --persona-color-rgb is set by senderCard.ts (this milestone's JS fix);
+       falls back to neutral black before then. */
+    box-shadow:
+        0 0 0 1px rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
+        0 2px 6px  rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
 .sender-card:hover {
@@ -242,6 +248,11 @@
     padding: 6px 8px;
     max-height: 60vh;
     overflow-y: auto;
+    /* CSS-parity 2026-06-17: restore legacy message-well inset background +
+       top separator (notifications.css .date-accordion-messages). max-height
+       intentionally kept at the Phase-5 60vh value (legacy was 250px). */
+    border-top: 1px solid #e9ecef;
+    background-color: #fafafa;
 }
 
 .date-accordion[ data-collapsed="true" ] .date-accordion-messages {

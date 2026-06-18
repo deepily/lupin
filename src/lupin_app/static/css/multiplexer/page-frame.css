@@ -1,0 +1,52 @@
+/* ============================================================================
+   Multiplexer page-frame stylesheet — CSS-parity restore (2026-06-17, Tiffany).
+
+   Audit: src/rnd/v0.1.8/2026.06.17-multiplexer-css-parity-audit.md
+
+   ROOT CAUSE this file fixes: when notifications.css was split into the
+   css/multiplexer/*.css set, the PAGE-CHROME rules at the top of
+   notifications.css (lines 6-115: `body` margin, `.container`, `h1`) were
+   dropped on the assumption lupin-base.css would supply them. It does not —
+   lupin-base.css styles `body` (background/font) only, NOT `.container`/`h1`.
+   The missing base `.container` rule (the white, centered, 1000px, padded,
+   rounded, shadowed page card) is the single most visually dominant loss and
+   the dominant reason /app/multiplexer read as "no CSS ported."
+
+   DESIGN CHOICE (per Mr. Radio's directive — author's call, documented):
+   a NEW dedicated stylesheet rather than folding into notifications-list.css,
+   so the page-frame concern is reviewable in isolation and these generic
+   selectors (`.container`, `h1`, `body`) stay clearly page-scoped. This file
+   is linked ONLY by multiplexer.html, so the generic selectors cannot bleed
+   to other pages.
+
+   Rules are verbatim-adapted from notifications.css:6-115.
+
+   ⚠️ Interaction with reading-pane.css: the horizontal-layout override
+   `body[data-layout-mode="horizontal"] .content-shell.pane-open .container`
+   has higher specificity and continues to win in horizontal mode. The base
+   `.container` rule below governs ONLY the default (vertical) layout.
+   ============================================================================ */
+
+/* notifications.css:6-9 — page body margin (background already supplied by
+   lupin-base.css; margin was the parity-relevant property). */
+body {
+    margin: 20px;
+}
+
+/* notifications.css:102-109 — the page card frame: centered, width-capped,
+   white, padded, rounded, shadowed. THE dominant missing rule. */
+.container {
+    max-width: 1000px;
+    margin: 0 auto;
+    background-color: #ffffff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba( 0, 0, 0, 0.1 );
+}
+
+/* notifications.css:111-115 — centered page title. */
+h1 {
+    color: #333;
+    text-align: center;
+    margin-bottom: 30px;
+}

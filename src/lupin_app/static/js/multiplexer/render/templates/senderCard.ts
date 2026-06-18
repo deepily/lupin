@@ -54,6 +54,15 @@ export function renderSenderCard(
   const persona = sender.voice_persona;
   if (persona !== undefined) {
     root.style.setProperty("--persona-color", persona.color);
+    // CSS-parity 2026-06-17: the header gradient, card box-shadow ring, and
+    // `.sender-message.incoming` gradient all consume `--persona-color-rgb`
+    // (an "r, g, b" triplet inside `rgb(...)/rgba(...)`). Only `--persona-color`
+    // (hex) was being set, so every persona-tinted surface silently fell back
+    // to the neutral default. Derive + set the triplet so the tint engages.
+    const rgbTriplet = hexToRgbTriplet(persona.color);
+    if (rgbTriplet !== null) {
+      root.style.setProperty("--persona-color-rgb", rgbTriplet);
+    }
   }
 
   // Header chrome. Persona-badge class is computed before template
@@ -156,4 +165,32 @@ function groupByDateKey(notifications: ReadonlyArray<Notification>, appTimezone?
   }
   groups.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
   return groups;
+}
+
+/**
+ * Convert a CSS hex color to an "r, g, b" triplet string for use inside
+ * `rgb(...)` / `rgba(...)`. Accepts `#RGB`, `#RRGGBB`, or the same without the
+ * leading `#`. Returns null for unparseable input so the caller skips setting
+ * `--persona-color-rgb` (leaving the stylesheet's neutral fallback in place).
+ *
+ * Requires:
+ *   - `hex` is a string
+ * Ensures:
+ *   - returns "r, g, b" with 0-255 decimal channels for valid 3/6-digit hex
+ *   - returns null for any input that is not a valid 3/6-digit hex color
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; the body is always entered when called — same convention as groupByDateKey above).
+export function hexToRgbTriplet(hex: string): string | null {
+  let h = hex.trim();
+  if (h.startsWith("#")) h = h.slice(1);
+  // Expand shorthand #RGB → RRGGBB (each char doubled; avoids indexed access
+  // for strict noUncheckedIndexedAccess).
+  if (h.length === 3) {
+    h = h.replace(/./g, (c) => c + c);
+  }
+  if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return null;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
 }
