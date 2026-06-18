@@ -108,8 +108,17 @@ CREATE TABLE IF NOT EXISTS notifications (
     response_type VARCHAR(50),
     response_value JSONB,
     response_default VARCHAR(255),
+    response_options JSONB,
     timeout_seconds BIGINT,
     state VARCHAR(50) NOT NULL DEFAULT 'created',
+    -- Routing / content / soft-delete columns added by migration e5f6a7b8c9d0
+    -- (migration<->ORM drift fix). The companion direction/sender_persona/
+    -- sender_icon/reply_to/thread_id columns are added by migration
+    -- c3d4e5f6a7b8 (NOT redeclared here).
+    job_id VARCHAR(256),
+    progress_group_id VARCHAR(24),
+    abstract TEXT,
+    is_hidden BOOLEAN NOT NULL DEFAULT FALSE,
     FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -119,6 +128,9 @@ CREATE INDEX IF NOT EXISTS idx_notifications_state ON notifications(state);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_sender_recipient ON notifications(sender_id, recipient_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type);
+CREATE INDEX IF NOT EXISTS idx_notifications_job_id ON notifications(job_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_progress_group_id ON notifications(progress_group_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_is_hidden ON notifications(is_hidden);
 
 -- Table: auth_audit_log
 CREATE TABLE IF NOT EXISTS auth_audit_log (
@@ -160,4 +172,92 @@ CREATE INDEX IF NOT EXISTS idx_job_history_user_id ON job_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_job_history_status ON job_history(status);
 CREATE INDEX IF NOT EXISTS idx_job_history_job_type ON job_history(job_type);
 CREATE INDEX IF NOT EXISTS idx_job_history_created_at ON job_history(created_at DESC);
+
+-- ============================================================================
+-- Decision-proxy + prediction + server-lifecycle tables.
+-- Added by migration e5f6a7b8c9d0 (migration<->ORM drift fix). These four
+-- tables previously existed in deployed DBs only because the app-boot
+-- auto-migrator bootstraps via Base.metadata.create_all; the migration chain
+-- now creates them so a pure `alembic upgrade head` reaches ORM parity.
+-- Maps to ProxyDecision / TrustState / PredictionLog / ServerLifecycle in
+-- src/cosa/rest/postgres_models.py.
+-- ============================================================================
+
+-- Table: proxy_decisions
+CREATE TABLE IF NOT EXISTS proxy_decisions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    notification_id VARCHAR(255) NOT NULL,
+    domain VARCHAR(50) NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    question TEXT NOT NULL,
+    sender_id VARCHAR(255),
+    action VARCHAR(50) NOT NULL,
+    decision_value TEXT,
+    confidence FLOAT,
+    trust_level INTEGER NOT NULL,
+    reason TEXT,
+    ratification_state VARCHAR(50) NOT NULL DEFAULT 'not_required',
+    ratified_by VARCHAR(255),
+    ratified_at TIMESTAMP WITH TIME ZONE,
+    ratification_feedback TEXT,
+    metadata_json JSONB,
+    data_origin VARCHAR(50) NOT NULL DEFAULT 'organic',
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_decisions_domain ON proxy_decisions(domain);
+CREATE INDEX IF NOT EXISTS idx_proxy_decisions_category ON proxy_decisions(category);
+CREATE INDEX IF NOT EXISTS idx_proxy_decisions_action ON proxy_decisions(action);
+CREATE INDEX IF NOT EXISTS idx_proxy_decisions_ratification ON proxy_decisions(ratification_state);
+CREATE INDEX IF NOT EXISTS idx_proxy_decisions_created_at ON proxy_decisions(created_at);
+CREATE INDEX IF NOT EXISTS idx_proxy_decisions_domain_category ON proxy_decisions(domain, category);
+CREATE INDEX IF NOT EXISTS idx_proxy_decisions_data_origin ON proxy_decisions(data_origin);
+
+-- Table: trust_states
+CREATE TABLE IF NOT EXISTS trust_states (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_email VARCHAR(255) NOT NULL,
+    domain VARCHAR(50) NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    trust_level INTEGER NOT NULL,
+    total_decisions INTEGER NOT NULL,
+    successful_decisions INTEGER NOT NULL,
+    rejected_decisions INTEGER NOT NULL,
+    circuit_breaker_state JSONB,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_trust_states_user_domain ON trust_states(user_email, domain);
+CREATE INDEX IF NOT EXISTS idx_trust_states_category ON trust_states(category);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_trust_states_user_domain_category ON trust_states(user_email, domain, category);
+
+-- Table: prediction_log
+CREATE TABLE IF NOT EXISTS prediction_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    notification_id UUID NOT NULL,
+    response_type VARCHAR(50) NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    predicted_value JSONB,
+    prediction_confidence FLOAT NOT NULL,
+    prediction_strategy VARCHAR(50) NOT NULL,
+    similar_case_count INTEGER NOT NULL,
+    actual_value JSONB,
+    accuracy_match BOOLEAN,
+    accuracy_detail JSONB,
+    predicted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    responded_at TIMESTAMP WITH TIME ZONE,
+    sender_id VARCHAR(255),
+    FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_prediction_log_response_type_category ON prediction_log(response_type, category);
+CREATE INDEX IF NOT EXISTS idx_prediction_log_predicted_at ON prediction_log(predicted_at);
+
+-- Table: server_lifecycle (single-row downtime marker)
+CREATE TABLE IF NOT EXISTS server_lifecycle (
+    key VARCHAR(32) PRIMARY KEY,
+    last_available_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
 CREATE INDEX IF NOT EXISTS idx_job_history_user_status ON job_history(user_id, status);

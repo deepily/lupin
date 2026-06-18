@@ -25,7 +25,7 @@ from cosa.rest.db.auto_migrate import build_alembic_config
 
 # The TRUE baseline (migration zero) and the current head.
 _BASELINE_REVISION = "000000000000"
-_HEAD_REVISION     = "d4e5f6a7b8c9"
+_HEAD_REVISION     = "e5f6a7b8c9d0"
 
 # The post-baseline span that MUST be preserved, base-first.
 _POST_BASELINE_CHAIN = [
@@ -34,7 +34,8 @@ _POST_BASELINE_CHAIN = [
     "a1b2c3d4e5f6",   # fcm_tokens
     "b2c3d4e5f6a7",   # task_event_reason
     "c3d4e5f6a7b8",   # notification direction + DM fields
-    "d4e5f6a7b8c9",   # is_protected (head)
+    "d4e5f6a7b8c9",   # is_protected
+    "e5f6a7b8c9d0",   # proxy/trust/prediction/server_lifecycle tables + 5 notif cols (head)
 ]
 
 # The eight pre-baseline revisions absorbed INTO the baseline — they must no
