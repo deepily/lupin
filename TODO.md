@@ -512,17 +512,6 @@ Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`). Full draft + 6 adversari
 
 ---
 
-## ✅ DONE 2026-05-28 — Tiberius persona emoji contrast fix: 🌑 → 👑 (Rio ⚡, session `a507b1a5`)
-
-**Context**: Rick flagged that Tiberius's persona badge renders as a dark blob. The icon `🌑` (U+1F311 new moon — a near-black filled disc) sits on color `#3F51B5` (Material Indigo 500), giving near-zero contrast. Rick ratified the replacement `👑` (crown) — high-contrast gold-on-indigo, and it reinforces the Roman-Emperor namesake.
-
-**The change** (config-only — no code):
-
-- [x] **[LUPIN]** `src/conf/lupin-app.ini`: `cc session voice persona Tiberius icon` — changed `🌑` → `👑`
-- [x] **[LUPIN]** `src/conf/lupin-app-splainer.ini`: paired splainer entry updated to `Default: 👑.` + change note
-
----
-
 ## 🎨 NEW — Retire-no-green-color-rule sweep: deferred references (filed 2026-05-28 by Rio ⚡, session `a507b1a5`)
 
 **Context**: Rick retired the no-green persona-color rule on 2026-05-28 ("no longer in effect, remove all references"). Active config + auto-memory were cleaned this session. The following references remain and were deferred for parallel-session-safety / historical-record reasons:
@@ -597,20 +586,6 @@ Filed 2026-05-29 by Tiberius 👑 (session `c9c582b7`). Full draft + 6 adversari
 - Parent design: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md` Cluster D Q-D3
 
 **Not blocking Phase 6c** — Section D ships with pin-glow + focus-flash mechanics; mic-monopoly indicator is purely additive.
-
----
-
-## ✅ DONE 2026-05-17 AM — history.md archive (resolved both deferred priority-1 entries from 2026-05-15 and 2026-05-16)
-
-**Executed by**: Tiberius 🌑 (session `2d916480`) at 2026-05-17 ~17:10 EDT, per Rick's voice approval ("affirmative Tiberius let's go ahead and archive the history before anything else") after reviewing the top-5 queues.
-
-**Pre-archive health**: 41,266 tokens / 165.1% of 25k / 🚨 CRITICAL (4x deferred archive over two sessions — María's 2026-05-15 PM deferral + 2026-05-16 PM deferral).
-**Post-archive health**: 9,854 tokens / 39.4% / ✅ HEALTHY.
-**Reduction**: 31,413 tokens moved to archive (76% reduction).
-**Archive file**: `history/2026-05-12-to-15-history.md` (4 days, 25 sessions).
-**Retention**: 2026-05-16 only (1 day, 5 sessions — Checkpoint 5 MCP discovery / Model-server carve-out / Daily LoC Delta / doc-viewer 404 fix / voice persona stale-bridge fix).
-**Boundary rationale**: token-based fallback (canonical workflow Priority 4) — 5-day retention minimum infeasible at this density.
-**Index updated**: `history/README.md` row added; counts bumped 22→23 archives, 384→409 sessions; last-updated date flipped to 2026-05-17.
 
 ---
 
@@ -832,36 +807,9 @@ All test tiers green:
 
 ---
 
-## ✅ DONE 2026-05-15 — history.md archive (Mr. Radio, session 23ff8512)
-
-- [x] **[LUPIN] Archived history.md** — was 27,657 tokens / 110.6% of 25k (🚨 OVER LIMIT, 4x deferred). Cut at clean date boundary line 619/620: kept 2026.05.12-2026.05.14 in main file (13,151 tokens / 52.6% / ✅ HEALTHY); archived 2026.05.07-2026.05.12-AM as `history/2026-05-07-to-11-history.md` (14,506 tokens, 12 sessions). Banner + README index + quick stats all refreshed.
-
----
-
 ## 🐛 Inter-Session Commons follow-on (filed 2026-05-13 PM by Maria 🌸)
 
 - [ ] **[LUPIN] Host-side stale-bridge sweeper daemon** (Option 2 from `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`) — once-per-hour scan of `~/.claude/sessions/cc-*.json` that deletes bridges whose host PID is dead. Tightens the activity-threshold-vs-phantom trade-off so the `commons broadcast active session threshold seconds` INI key could safely return to a shorter value. ~30-50 LOC + systemd timer or shell hook + tests.
-
----
-
-## ✅ Inter-Session Commons broadcast-UI arc — FULLY CLOSED 2026-05-13 PM (Maria 🌸, session b28069a6)
-
-12 commits today across Phase 3 + broadcast-UI bug fixes + UI iteration + Playwright test repair. End-to-end working: 5 active sessions detected, voice-first mic input wired, compose-row layout matches CC-session button refs.
-
-- [x] **[LUPIN] Inter-Session Commons Phase 3 Steps 3-9 barrel-through** — 7 commits `27b82f1` → `ac5c4aa`. CommonsQuestionWatcher + commons_xml_models + LLM disambiguator (PHI-4 wired, Haiku stubbed per Q5) + register-question router endpoints + ask_async push-mode wiring + listener `commons_answer_received` branch + final test pyramid + lifespan wiring. **398/398 tests** green on :7999, **7/7 integration tests** green on :8000 (AC15).
-- [x] **[LUPIN] Broadcast UI "no active sessions" bug** — `4cb5fe1` Option 1 graceful filter + `93b302d` Option 2 listener stamps `user_id` on bridge at startup. Diagnosis at `src/rnd/v0.1.7/2026.05.13-broadcast-ui-no-active-sessions-bug.md`.
-- [x] **[LUPIN] Broadcast UI phantom dead-bridge** — `2dff191`. `_bridge_last_activity_epoch` falls back to `idle_detection.last_interaction_at`; `commons broadcast active session threshold seconds` bumped 600 → 28800 for dev-workday idle. Diagnosis at `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`.
-- [x] **[LUPIN] Broadcast panel UX iteration** — 4 commits: `54c8e05` relocation above focus bar + mic, `26874fb` compose-row redesign, `300b3c0` button sizes match cc-session refs + status/aggregate artifact divs removed, `8771c33` Playwright tests repaired + 6 new compose-row tests.
-- [x] **[LUPIN] Playwright broadcast E2E coverage refresh** — `8771c33`. 5 retired (preview + aggregate DOM gone), 6 new (mic-sized, send-sized, compose-row order, retired-divs-gone, panel-in-accordion, confirm-modal-XSS). Live :8000 verified: **11/11 PASSED**.
-- [x] **[LUPIN-COSA] CoSA-side commits pending** — `src/cosa/rest/routers/commons.py` (Option 1 graceful filter + stale-bridge filter), `src/cosa/rest/commons_question_watcher.py` (NEW), `src/cosa/rest/routers/notifications.py` (valid_types += "commons_answer_received"). Handle in a CoSA-context session per `feedback_lupin_only_never_cosa`.
-
----
-
-## ✅ TTS preview-and-pause — IMPLEMENTED 2026-05-13 PM (Arnold)
-
-- [x] **[LUPIN] Broadcast munger mode + JS wiring** — `multimodal text broadcast` + 20 smoke cases passing. Wired to broadcast accordion mic via `recordingMode="broadcast"`. CoSA-side commits (multimodal_munger.py) pending in a separate CoSA-context session.
-- [x] **[LUPIN] TTS preview-and-pause feature** — sentence splitter + queue evolution + auto-pause + remainder resume + bubble-controls fix. INI plumbing through `/api/config/client`. Live-verified by Rick. CoSA-side commit (system.py) pending separately.
-- [x] **[LUPIN-COSA] Commit CoSA-side TTS preview + broadcast munger edits** — 2 files in `src/cosa/`: `rest/multimodal_munger.py` (broadcast mode + smoke tests), `rest/routers/system.py` (config endpoint extension). Handle in a CoSA-context session per `feedback_lupin_only_never_cosa`.
 
 ---
 
@@ -903,12 +851,6 @@ Each delivered question must include: proposed answer + alternatives walked + pe
 ### Phase 6c predecessor closure
 
 Phase 6b CLOSED 2026-05-12 (Rachel 🕊️, session `56ee76d6`). All 22 ACs green; c8 100% on 9 TS files; boot gz = 34,647 B (5,029 B headroom under AC7 ceiling). See `97-phase6b-closure.md`.
-
----
-
-## ✅ Multimodal munger — `munge_text_punctuation` strips periods + commas from prose (filed 2026-05-13 by Arnold)
-
-- [x] ~~**[LUPIN-COSA] Prose-mode period-stripping bug at `src/cosa/rest/multimodal_munger.py:757`**~~ → **RESOLVED 2026-05-13 by Arnold** (collateral fix while resolving a related broadcast-munger issue). User-confirmed complete via voice 2026-05-13.
 
 ---
 
@@ -1093,41 +1035,6 @@ Spoken `notify(message=…)` / `ask_multiple_choice(question=…)` body is **hea
 
 ---
 
-## ✅ Inter-Session Commons Phase 3 — ALL 4 PLAN-REVIEW PASSES CLOSED 2026-05-12 PM (Tiberius 🌑, session 6a054460)
-
-**Primary doc**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md`
-
-### State
-
-- **Pass 0** ✅ — 8/8 Q-decisions ratified
-- **REUSE pass** ✅ — 8 F-mappings + 4 new F-findings + 3 corrections applied
-- **Pass 1 Fitness** ✅ — 13/13 findings ratified + Rick's AC15 amendment
-- **Pydantic-native validation retrofit** ✅ — AC1/AC2/AC6 + §8 model use `Field` + `field_validator` declaratively (memory `feedback_pydantic_native_validation` saved)
-- **Pass 2 Adversarial** ✅ — 8/8 threats T1-T8 ratified + apply phase
-- **Final state**: 20 ACs (AC1-AC15 Pass 1 + AC16-AC20 Pass 2 tests), 10 new INI keys, 9 NEW files + 8 MODIFIED, NEW §6 Testing Ownership Mandate, NEW §8 PHI-4 prompt envelope, NEW Pass 2 ratifications table in §3.
-
-### Next gate (when implementation begins)
-
-Per CLAUDE.local.md §"THE USER IS NEVER A TESTER" + §6 Testing Ownership Mandate:
-
-The AI executes the §6 test-pyramid tiers (`py_compile` → unit → smoke → router-registration → coverage gate → scheduled `:8000` integration E2E AC15) during + at closure of implementation. Tabular pass/fail reported per tier. The user is never asked to verify or run tests.
-
-Implementation flow: §5 sequencing → 9 steps → at each step, the AI runs the appropriate tier → at all-steps-closure, AI runs full pyramid + reports tabular → user authorizes APPROVED FOR CODE-WRITE flip (which is really "approved for the next phase").
-
-### Standing directive (mandatory)
-
-Every multi-option `ask_multiple_choice` carries per-option pros + cons + a "My recommendation: X because Y" block in both spoken `question` and `abstract`, plus a "becomes correct if..." flip-condition. See memory `feedback_always_include_pros_cons_recommendation`.
-
----
-
-## ✅ Inter-Session Commons Phase 2 — ALL CLOSED 2026-05-12 (session 6a054460 Tiberius 🌑, AM)
-
-**Closure doc**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/92-phase2-closure.md`
-
-Phase 2 is functionally complete. Phase 3 skeleton ready (see above). The original "FIRST THING NEXT SESSION" pointer below is retained as historical context.
-
----
-
 ## Historical resume pointer (kept for reference)
 
 **Original pointer**: `src/rnd/v0.1.7/2026.05.09-inter-session-commons/90-phase2-execution-log.md` — steps 1-8 ✅ CLOSED, steps 9-13 ⏳ pending.
@@ -1226,34 +1133,6 @@ User-authorized test-server bounce at 17:13 EDT → 3 batch-1 submissions fired 
 
 ---
 
-## ✅ DONE — Voice Persona Rename "Domi" → "Rio" (session 77e1bb27 Mr. Radio, 2026-05-11 PM)
-
-**User directive**: name-only rename, preserve icon ⚡ / color `#880E4F` / profile "Young & energetic female" / voice_id `AZnzlk1XvdvUeBnXmlld`.
-
-**Files edited** (4): `src/conf/lupin-app.ini` (5 lines), `src/conf/lupin-app-splainer.ini` (6 surgical edits sparing line 175 ElevenLabs catalog ref), `src/tests/unit/test_voice_persona_helpers.py` (7 hits replace_all), `src/tests/smoke/test_voice_persona_allocation.py` (2 hits replace_all). Plan doc `src/rnd/v0.1.7/2026.05.11-rename-persona-domi-to-rio.md` (orphaned by 68edb64b session-end) folded into this commit.
-
-**Verification**: py_compile clean | unit 34/34 pass (0.08s) | smoke 7/7 pass (0.39s) | live `:7999` `GET /api/cosa-voice/voice-persona/pool` returns `Rio` with preserved attributes. No `:7999` bounce needed — pool query re-reads INI per request.
-
-**Audit trail** preserved in splainer line 297 (`Renamed on 2026-05-11: Domi → Rio (label rotation only — ElevenLabs voice_id unchanged)`) and line 319 (`Renamed from 'Domi' on 2026-05-11 (label rotation only — voice_id, icon, color, and profile unchanged)`), mirroring the existing Nora→maria + Quentin→mr radio + Adam→Tiberius pattern.
-
-**Mobile sub-repo** — deferred to mobile-context session per plan-handoff convention (parent never touches `src/lupin-mobile/` git). 4 mobile R&D docs reference "Domi" in cheat-sheets; they are frozen historical context and stay as-is.
-
----
-
-## ✅ D1 RATIFIED — A-extended (2026-05-04 PM)
-
-User ratified **Option A-extended** for D1 after investigating the legacy `/api/claude-code/ws/{task_id}` endpoint and finding it structurally defective. ClaudeCodeTransport is OUT OF SCOPE for Phase 3 + all subsequent multiplexer phases. The endpoint is queued for elimination — see `bug-fix-queue.md` "🔥 Top of Queue — IMMEDIATE" section. A future CC transport will be built only when UI surfaces a missing-functionality gap, against a properly authenticated endpoint.
-
-**Audit trail**:
-- Bug-fix-queue entry: `bug-fix-queue.md` "🔥 Top of Queue — IMMEDIATE" — 4 distinct bugs catalogued + suggested fix sequencing.
-- Design doc amendment: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/04-phase3-transport-design.md` (top-of-doc banner).
-- Execution log subsection: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md` "Phase 3 — D1 Ratification Amendment".
-- 11 file changes applied (2 deletions + 9 edits) over Phase 3 commit `703ab5a`; verification re-run with 122/122 unit tests + 12/12 smoke + tsc + ESLint + build all clean.
-
-## ✅ Q12 RATIFIED — Single-tab application (2026-05-04 PM)
-
-User ratified Q12 (added 2026-05-04 PM) during Phase 4 plan-review pipeline / D-G walkthrough. Multi-tab support is OUT OF SCOPE for the multiplexer; users wanting two views open a second window of the same tab. Sidesteps Phase 4 Q4 cross-tab BroadcastChannel question entirely. See `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/01-phase0-decisions.md` Q12 for the policy + rationale.
-
 ## ✅ Q2 OPTION C RATIFIED — P1 server-replay deferred (2026-05-04 PM)
 
 During Phase 4 implementation kick-off, the design doc's pre-implementation prerequisite verifications surfaced that **server-side event replay on `auth_success` is NOT implemented** (`src/cosa/rest/routers/websocket.py:467-472` sends `auth_success` and falls straight into the receive loop; `websocket_manager.py` has no buffer/replay mechanism). Per design doc Q2 ratification this was a hard blocker requiring escalation.
@@ -1334,33 +1213,6 @@ The 6-endpoint legacy `/api/claude-code/dispatch` cluster was retired today. Two
 ## 🧩 MULTIPLEXER FOLLOW-UPS (Session 658ea35d, 2026-05-11)
 
 - [ ] [LUPIN] **Multiplexer R&D consumer notice: CC card normalization landed 2026-05-11**. The notifications-page CC card was reshaped to sibling shape (form + submit + status div; no response panel, no inject controls, no session-info row). `JobsPaneRenderer.ts` is unchanged — it's agent-agnostic via `metadata.agent_type` (`stores/JobStore.ts:215`) and CC jobs continue to render uniformly. **Phase 6b visual baseline impact**: if Phase 6b touches CC card screenshots, expect to regenerate baselines (parent already scheduled Phase 5.9 to regen Lupin-side baselines). Full context: handoff doc at `src/rnd/v0.1.7/2026.05.09-cc-card-normalization/02-handoff-summary.md`. Q8 verdict = PRIMARY (alias live for one release cycle).
-
----
-
-## 🪞 MCP SELF-INTROSPECTION FOLLOW-UPS (Session 2622c356, 2026-05-05 PM)
-
-Surfaced when user called Claude "Maria" (the assigned voice persona name). Claude had no programmatic way to know its own persona — `get_session_info()` returns session metadata but no persona field. Two related extensions filed; first one IMPLEMENTED, second still pending.
-
-### Pending
-
-- [x] [LUPIN-MCP] **Add a "neither" / "discuss-further" option to cosa-voice `ask_yes_no()`** — ✅ **LANDED Session 6d544991 (Arnold, 2026-05-11 PM)**. Third button labelled **Neither** wired end-to-end: HTML render (notifications.js), CSS neutral gray (notifications.css), regex extension (CoSA notification_utils.py — staged for CoSA-context commit), `format_qualified_response` "neither" branch with explicit re-frame directive, MCP tool docstring updated, 4 new unit tests in test_stop_hook.py (12/12 green), 3 notification-api.md rows + 1 CLAUDE.md row. R&D doc set at `src/rnd/v0.1.7/2026.05.11-ask-yes-no-neither-button/` (00-index, 01-design with Pass 1 Fitness + Pass 2 Adversarial inline, 02-handoff-summary, 90-execution-log). **Current session won't see docstring change** — fresh CC session required (MCP stdio subprocess restart). See ☀️ FIRST THING NEXT SESSION below for the CoSA-context commit followup.
-
-- [x] [LUPIN-COSA OR LUPIN] **Investigate explicit conversation-mode-exit notification to MCP client.** — **RESOLVED Session 05da2b39 (2026-05-05 PM, checkpoint).** Confirmed the gap experimentally + via code audit: the displace path (Session B activates → A's listener gets `action:exit_conversation_mode` push → tmux-injected `<system-reminder>`) was fully wired and worked. The self-exit path (UI toggle / MCP `exit_conversation_mode()` / voice phrase / slash) was NOT — the router's `else:` branch only flipped the bridge and broadcast a `conversation_mode_changed` UI event, never pushing the listener-targeted action. Result: model retained the contract from prior `<system-reminder>` blocks until they scrolled out. **Fix shipped**: (a) Lupin — `conv_mode_exit_reminder()` body made reason-agnostic in `hook_common.py`. (b) CoSA — symmetric self-exit action push added to `conversation_mode.py` router (mirror of displace branch's per-session push). (c) Tests updated: `test_deactivate_pushes_ui_sync_and_self_action` + `test_body_announces_deactivation`. Auto-tier verification 100% green (3950 unit + 13 router + 41 wrap + 10 MCP + 50 WS smoke). Design + execution log: `src/rnd/v0.1.7/2026.05.05-conv-mode-self-exit-signal-gap/`. Cross-repo handoff: Lupin commit done in checkpoint; CoSA commit pending in separate context. Manual live verification deferred (would disrupt active conv-mode dialogue — surfaces naturally on next user-initiated off→on cycle).
-
-### What landed (this session)
-
-- ✅ **`voice_persona` added to `get_session_info()` MCP response** — implemented in `src/lupin_mcp/cosa_voice_mcp.py` (Lupin parent, not CoSA submodule as I'd initially scoped — the cosa-voice MCP server source actually lives in Lupin parent under `src/lupin_mcp/`). 5-line addition to the bridge-metadata branch at line 1289+: reads `cc_meta.get("voice_persona")` from the same session bridge that the existing `conversation_mode_active` lookup uses (None if Phase 4.5 hook allocation failed; server falls back to "Sam" for TTS). Docstring updated to list the new field. `py_compile` clean.
-- ✅ **Voice Persona Self-Announcement (Phase A.5) protocol added to MCP server instructions** — appended to the `mcp = FastMCP(instructions=...)` field at line 605+. Instructs Claude to send a TTS greeting by persona `display_name` at session start: time-of-day-appropriate greeting + display_name + brief duty announcement (e.g. "Good morning, Maria reporting for duty, setting things up."). Skips if `voice_persona` is None. Fires once per Phase A startup including after /clear (persona persists across /clear).
-
-### Activation requirement
-
-Both changes are SERVER-SIDE in the cosa-voice MCP server source. They require the **MCP server process to be restarted** before they take effect:
-
-- The cosa-voice MCP runs as a stdio subprocess of Claude Code (`Type: stdio` per `claude mcp get cosa-voice`). The Python process loaded `cosa_voice_mcp.py` once at startup; it does not re-read the file on disk.
-- To pick up the new code, restart Claude Code (close + relaunch the CC session). `/clear` is NOT sufficient — that clears Claude's context but leaves the MCP subprocess intact.
-- The CURRENT session (2622c356) won't see the changes. A fresh session opened after restart will: hook allocates persona → `get_session_info()` returns `voice_persona` → Claude reads updated instructions → Claude TTS-announces by name at Phase A.
-
-If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that would be a less disruptive path than full Claude Code restart — worth checking before next session.
 
 ---
 
@@ -1502,40 +1354,6 @@ If `claude mcp restart cosa-voice` (or similar) exists as a CLI subcommand, that
 
 ---
 
-## ✅ DONE — Phase 6b Pass 1 Fitness ratification (2026-05-11, session 017dc1cc, Mr. Radio)
-
-All 14 Pass 1 findings ratified + resolutions applied to `09-phase6b-interactive-widgets-design.md`. Pass 1 closed subsection appended to `95-phase6b-review-findings.md`.
-
-- [x] [LUPIN] Walk Pass 1 ratification — 9 turns (1 Minors batch + 8 individual Majors). Per-decision routing via cosa-voice `ask_yes_no` action-required UI per user directive ("push every decision point into the action-required UI"). All firings returned `yes`.
-
-**Cycle state**:
-- Q-decisions ✅ CLOSED 12/12 (2026-05-07)
-- REUSE pre-pass ✅ CLOSED 28 RE + 5 L3 (2026-05-07)
-- Pass 1 Fitness ✅ CLOSED 14/14 (2026-05-11) — all resolutions applied
-- Pass 2 Adversarial ⏳ gated on user go-ahead
-- Code-execution plan ⏳
-- Implementation ⏳
-
-**Resolutions applied** (full record in `95-phase6b-review-findings.md` § "Pass 1 Fitness — closed 2026-05-11"):
-- F-1 → AC10b ceiling 500 → 700 (tts-chrome.css per Q-B12)
-- F-2 → AC5 ≥18 cases enumerated in new sub-table (subtotal 21)
-- F-3 → New "Q-B1 dispatch contract" subsection with template-internal switch
-- F-4 → Q-B3 state machine extended (expired_visual + responded_default); Q-B5 ratified text rewritten (local RAF timer); new Phase 0 prereq #7 (countdown_expires_at payload)
-- F-5 → AC2d grep regex replaced with unit-test contract
-- F-6 → Phase 0 #6 reworded; new "Phase 4 sub-step DOD" subsection with 4A (8 rows) + 4B (11 rows) DOD tables; `delete()` returns `{ restoreState: () => void }`
-- F-7 → Inertness-lift mechanism specified as single-write template swap; AC2c rewritten as MutationObserver assertion
-- F-8 → AC7 post-6a baseline capture as pre-implementation step
-- F-9 → AC5b ≥12 cases enumerated in new sub-table
-- F-10 → Q-B9 throttling specified as renderer-side (not store-side)
-- F-11 → Phase 0 #3 target API shape specified (`currentNotificationIdHash(): string | null` preferred)
-- F-12 → Boot wiring "mount() is synchronous" addendum
-- F-13 → Q-B9 ratified text: state-change events RAF-coalesced (not 100ms throttle); new R7 risk row; AC5b storm-safety case (b) added
-- F-14 → AC10e pytest command rewritten as unified `-k "pending_count"` over both files
-
-**Next**: when user gives go-ahead, dispatch Pass 2 Adversarial (Explore agent, clean context, walks Pass-1-resolved doc state for security/DOS/race/contract-drift cluster).
-
----
-
 ## ☀️ HISTORICAL — was "FIRST THING IN THE MORNING — 2026.05.08"
 
 (Superseded by 2026-05-11 ratification above. Kept as audit trail.)
@@ -1581,59 +1399,6 @@ All 14 Pass 1 findings ratified + resolutions applied to `09-phase6b-interactive
 - [ ] [LUPIN] **Open Phase 6b** when AC11a/AC11b close. Phase 6b scope per `07-phase6-slicing-manifest.md`: TTS chrome + action-required interactive widgets + delete-button handler (Q-A6 wires the disabled `×` from 6a). Phase 6c (voice-persona modal + audio recorder + focus tray + conversation-mode UI pin) follows.
 
 - [ ] [LUPIN] **Optional**: history.md is at 19,719 tokens (CRITICAL threshold per session-end workflow). User deferred archival from this session-end. Consider invoking `/plan-history-management mode=archive` early in next session before adding new content.
-
----
-
-## ☀️ FIRST THING IN THE MORNING — 2026.05.06
-
-### ✅ Closed — Multiplexer Phase 6a Pass 1 Fitness ratification gate (2026-05-06 AM)
-
-All 17 findings ratified via cosa-voice walkthrough (Session `5ced4868`, Mr. Radio persona): 7 Minors walked individually after the batch yes/no was rejected; 10 Majors walked individually. Apply pass complete: design doc `08-phase6a-jobs-surface-design.md` updated for all 17; Risks table + AC table updated; "Pass 1 Fitness — closed" subsection appended to `94-phase6a-review-findings.md`.
-
-**F15 ratification produced a global side-effect**: 100% c8 coverage mandate for multiplexer TypeScript codebase. See project `CLAUDE.md` "100% COVERAGE MANDATE" subsection + `feedback_100pct_coverage_multiplexer.md` auto-memory.
-
-### ✅ Closed — Phase 4 + Phase 5 coverage backfill (2026-05-06 PM)
-
-**ALL 26 multiplexer TS files at 100%** lines + branches + functions + statements per `c8 --100`. **400 unit tests passing** (was 325 baseline; +75 new tests across the two backfill passes).
-
-**Files closed in PM session (10)**: `auth/AuthManager.ts`, `stores/ActionRequiredStore.ts`, `render/html.ts`, `shared/StorageService.ts`, `stores/SenderStore.ts`, `transport/QueueTransport.ts`, `stores/AudioStore.ts`, `stores/NotificationStore.ts`, `shared/EventBus.ts`, `api/ApiClient.ts`.
-
-**Per-file diff summary** lives at `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/91-resume-here-coverage-backfill.md` § "Files closed in PM session".
-
-**Pattern playbook** validated across both passes:
-- File-header phantom + function-declaration phantom + class closing-brace phantom — `/* c8 ignore next */` with named artifact reason
-- Production-default fallbacks (`opts.x ?? defaultX()`) — `/* c8 ignore next */ // production-default fallback: <reason>` (tests always inject; the `??` arm fires only in production browsers)
-- Defensive guards with provable invariants — `/* c8 ignore next */ // defensive: <invariant>` naming what makes the branch unreachable
-- Tagged-template literal phantoms — `/* c8 ignore start/stop */` wrapping the template block with explicit reason
-- Real behavioral branches — add targeted unit tests; never c8-ignore
-
-**One real bug surfaced + fixed during backfill**: `AuthManager.ChainMutexLockManager.request()` line 65 — the `tail === prev.then(() => next)` comparison created a NEW promise on the right side each time, so the cleanup `if` branch was always false → memory leak (entries never removed). Fixed by assigning the chained promise to a local `chained` variable and using that for both `set()` and the comparison.
-
-**Phase 6a code-writing cycle is unblocked from the coverage side.** Pass 2 Adversarial ratification remains as the documentation gate.
-
-### ✅ Closed — Multiplexer Phase 6a Pass 2 Adversarial ratification (2026-05-06 PM)
-
-All 15 Pass 2 findings + 1 Layer 3 (C-6) ratified via cosa-voice walkthrough (Session `5ced4868`, Mr. Radio persona; per `feedback_pip_plan_review_is_sequential`): 5 Minors batch-walked + 10 Majors walked individually + C-6 walked via `ask_multiple_choice`. Apply pass complete; convergence re-grep clean; Phase 6a documentation cycle CLOSED. Commit `6fd95f5`.
-
-### ✅ Closed — Multiplexer Phase 6a code-writing cycle, Phases 0-7 (2026-05-06 PM/eve)
-
-All 7 implementation phases shipped across 8 commits (`362fa5d` → `744b6dd`). AC1-AC10d all green on `:7999`; AC11a/AC11b await user `:8000` slot-coordination (see new Pending below). Coverage: c8 100% (lines + branches + functions + statements) on every new render file (`JobsPaneRenderer.ts`, `templates/jobCard.ts`, `templates/jobBucket.ts`). Test pyramid: 23 (renderer) + 38 (templates) + 8 (formatDuration) + 5 (smoke) + 1 (E2E authored, not yet scheduled). Build: `boot.65c779ac946b.js` gz=31484B, AC7 ceiling 60382 ✓ (+1822B vs Phase 5 baseline 29662). Full audit trail in `90-execution-log.md` Phase 6a sub-section.
-
-### Reference — Pass 1 Fitness Findings (closed 2026-05-06)
-
-  **Recommended ratification path** (mirrors REUSE-step pattern that worked well 2026-05-05):
-  1. Mechanical batch yes/no for the 7 Minors (F1, F2, F9, F10, F11, F12, F15) via `mcp__cosa-voice__ask_yes_no`
-  2. Meaningful walkthrough for the 10 Majors (F3, F4, F5, F6, F7, F8, F13, F14, F16, F17) via per-row `ask_yes_no` or `ask_multiple_choice`
-
-  **After ratification**: I apply approved fixes to `08-phase6a-jobs-surface-design.md`, run convergence re-grep (TBD + Open-sub-question per PIP §7), append "Pass 1 Fitness — closed" subsection to `94-phase6a-review-findings.md`, then surface results before Pass 2 Adversarial fires (clean-context Agent, sees Pass-1-resolved state per Q11 amendment + sequential PIP).
-
-  **Standout Major findings to walk first**: F3 (`hydrateHistory` rejection path unspecified), F4 (`createJobsPaneRenderer({stores})` shape contract), F7 (AC8a `data-phase6-pending` count fixture mechanism), F14 (Q-A2 "Match legacy" lacks file:line citation), F17 (Q-A7 mount sequence ordering).
-
-  **Anchor docs to skim before the gate**:
-  - `01-phase0-decisions.md` Q11 amendment (sequential PIP mandate)
-  - `08-phase6a-jobs-surface-design.md` § "Q-decisions — RATIFIED" + § "Prior art referenced"
-  - `94-phase6a-review-findings.md` § "Pass 1 Fitness Findings" (the table itself)
-  - `feedback_pip_plan_review_is_sequential` auto-memory
 
 ---
 
@@ -1761,12 +1526,6 @@ The 19:00 EDT all-test-suite post-mortem work from the now-stale "FIRST THING IN
 
 ---
 
-## 📚 HISTORY ARCHIVE — Resolved by parallel session (Session f742b1bc, 2026-05-01)
-
-- [x] [LUPIN] **history.md archival** — peaked at **24,126 tokens (96.5% of 25k limit)** after Session f742b1bc's checkpoint entry pushed it from 22.2k → 24.1k. User declined inline archival; deferred to next session. **Resolved mid-workflow by parallel session 31172845** — produced `history/2026-04-25-to-28-history.md` archive file; history.md now at **12,156 tokens (48.6%, HEALTHY)**. Next session-start should still verify archive looks clean before appending. — Session f742b1bc / handled by 31172845
-
----
-
 ## 🎯 CC SESSION FOCUS MODE — Phase 2 + design follow-ups (Session 488ca8bd, 2026-04-30)
 
 **Plan**: `~/.claude/plans/i-want-to-start-parsed-blossom.md`
@@ -1883,18 +1642,6 @@ The 19:00 EDT all-test-suite post-mortem work from the now-stale "FIRST THING IN
 
 ---
 
-## ✅ COMPLETED — Session c7333045 (2026-04-28, all-day mixed bug fix + feature work)
-
-- [x] [LUPIN] **Bug A: Duplicate "Received:" echo** — `WebSocketManager.emit_to_user_or_listener_sync()` listener-already-in-user-fanout dedup guard. Verified live on listener log: 2 events → 1 event per voice message.
-- [x] [LUPIN] **Bug B: Stop-hook gate on conversation mode** — `stop.py::main()` early-emit `{}` when `get_conversation_mode(session_id)=True`. 2 new unit tests covering both directions.
-- [x] [LUPIN] **Bug: 404 from container PID-namespace** — `find_session_path_by_id` now skips `_is_pid_alive` when running in container (`/.dockerenv` exists).
-- [x] [LUPIN] **Bug: UI toggle position** — moved sender-conversation-mode-btn from sender-card-header into cc-voice-input-row alongside record button.
-- [x] [LUPIN] **Bug: Duplicate Lupin/Cosa pane for one session** — `build_sender_id_for_cc()` now anchors on bridge SessionStart cwd snapshot via new `_resolve_project_from_bridge_cwd()` helper. 6 new regression tests.
-- [x] [LUPIN] **Feature: Corner pause button** on currently-playing notification — absolutely-positioned `.notification-corner-pause-btn`, click routes through `pauseTTS()`/`resumeTTS()` (Web Audio AudioContext-aware).
-- [x] [LUPIN] **Feature: Mutex + pinning across CC sessions** (5 phases of `~/.claude/plans/drifting-skipping-porcupine.md`) — coordinated bridge files, asyncio.Lock auto-displace, `displaced=true` WS payload, in-flight TTS auto-pause, soft-glow border, sort-respecting card insertion. MCP `_flip_conversation_mode` refactored to call canonical HTTP endpoint with HTTP fallback to direct write. User-only-initiation guardrail in 3 layers (instructions block + tool docstrings + new global skill).
-- [x] [LUPIN] **EmbeddingProvider HTTP-routing refactor** — `_is_in_process_engine_owner` flag + `declare_in_process_engine_owner()` classmethod, FastAPI startup wires it, runtime URL via `_resolve_server_url()` reading `LUPIN_APP_SERVER_URL` per-call. 16 new tests across 4 new test classes. SolutionSnapshot init requires zero changes.
-- [x] [LUPIN] **History archive** — `2026-04-22-to-24-history.md` created (~10k tokens). Main file 21,442 → 9,889 tokens.
-
 ## 🌅 FOLLOW-UPS — for the user (Session c7333045)
 
 - [ ] [LUPIN] **Per-session TTS queue isolation** (so B's new audio plays while A's queued audio stays paused on displacement) — current model is global `pauseTTS` on displacement, user manually resumes. Separate UX cycle.
@@ -1917,19 +1664,6 @@ The 19:00 EDT all-test-suite post-mortem work from the now-stale "FIRST THING IN
 - [ ] [LUPIN] **(Optional) Route uv.lock R&D doc to external `uv` expert** — open questions (in the doc itself): did `pydantic-ai==0.6.2` ever expose a `slim` extra? did `uv` tighten extras-validation between lock-time and sync-time? should we file a `uv` bug for the lock-writer-accepts-impossible-extras inconsistency? **Lower priority now** that the build is unblocked, but the questions remain interesting for `uv` toolchain governance.
 
 ---
-
-## ✅ COMPLETED — Session ba7138c4 (2026.04.28, all-day test-suite anomaly remediation)
-
-- [x] [LUPIN] **WG-1 docker image rebuild + retag** — `lupin:1.0.0-fonts` built, both containers recreated, retagged to `:1.0.0` after visual-regression verification.
-- [x] [LUPIN] **WG-8a orphan + dead-Calculator cleanup** — user manually nuked.
-- [x] [LUPIN] **`:8000` verification re-run (ts-976bdc44)** — 4524P / 15F / 12E / 54S, completed cleanly.
-- [x] [LUPIN] **WG-6 survivor verification** — both `test_notification_proxy_script_matching` and `test_tfe_error_capture_smoke` STILL FAIL → OOS-3 trigger confirmed.
-- [x] [LUPIN] **OOS-4 hotfix Parts A + B** at `src/cosa/rest/running_fifo_queue.py:276,294`.
-- [x] [LUPIN] **CalculatorAgent codeless replay fix** at `src/cosa/memory/solution_snapshot.py:run_code()` — user's intuition confirmed.
-- [x] [LUPIN] **dev/test container parity fix** — added `~/.lupin` + `~/.claude/sessions` bind mounts to `lupin-rest-test`. Plus seeded `claude.code@lupin.deepily.ai` into `lupin_db_test`.
-- [x] [LUPIN] **WG-9 forward-compat breadcrumbs** — splainer note + `_delegate_to_predictor()` stub + `05-voice-gate-policy-evolution.md`.
-- [x] [LUPIN] **All 4 OOS plans drafted with prewarm forensic findings**.
-- [x] [LUPIN] **Orchestration plan** at `04-execution-orchestration.md`.
 
 ## 🌅 FOLLOW-UPS — for the user (Session ba7138c4 follow-on)
 
@@ -1965,10 +1699,6 @@ The 19:00 EDT all-test-suite post-mortem work from the now-stale "FIRST THING IN
 
 ---
 
-## ✅ COMPLETED — Session aabece5e (2026-04-27, late evening)
-
-- [x] [LUPIN] **Conversation mode for Claude Code (cosa-voice MCP)** — per-session toggle that, when on, makes Claude auto-`notify(full_text, suppress_ding=True)` after every turn so the user can hold a voice dialogue at a distance without re-prompting. Pattern 3 Feature Dev, ~1 week scope, executed end-to-end via plan-then-auto-mode. Four convergent activation surfaces: voice phrase ("enter/exit conversation mode" pattern-matched in cosa-voice server-instructions), slash command (`/conversation-mode-on` / `/conversation-mode-off`), MCP tool (`enter_conversation_mode()` / `exit_conversation_mode()`), UI toggle button (📞/🔔 in sender-card header). Server-canonical state in `~/.claude/sessions/cc-{PPID}.json` bridge file (extends existing schema with `conversation_mode_active: bool`). WebSocket `conversation_mode_changed` event broadcasts toggle changes to all UI tabs of the authenticated user via `emit_to_user()`. New router `src/cosa/rest/routers/conversation_mode.py` (CoSA-side per existing convention — plan deviation logged because `src/lupin_app/routers/` doesn't exist). Bind-mount fix added live: `:7999` Docker container had no `~/.claude/sessions/` mount; added rw mount in `docker-compose.yml` and recreated container. 23 new pytest tests across 3 files, 52/52 pass. R&D doc at `src/rnd/v0.1.7/2026.04.27-conversation-mode-design.md`.
-
 ## 🌅 FOLLOW-UPS — for the user (no urgency, conversation mode work)
 
 - [ ] [LUPIN] **Phase 6 E2E execution** — `src/tests/e2e_ui/test_conversation_mode.py` is written but not submitted. Schedule via `POST /api/test-suite/submit` with non-overlapping `scheduled_at` slot once `:8000` is free.
@@ -1979,10 +1709,6 @@ The 19:00 EDT all-test-suite post-mortem work from the now-stale "FIRST THING IN
 - [ ] [LUPIN] **Manifest-tracking discipline** — this session never updated `.claude-session.md` while editing files; surfaced at session-end as a missing section. Worth a future session to either bake manifest-update into the auto-mode flow or relax the manifest mandate when auto-mode is the only writer.
 
 ---
-
-## ✅ COMPLETED — Session 49c27830 (2026-04-27, afternoon — Bug Fix Mode)
-
-- [x] [LUPIN] **Notification dispatch unification — extracted `WebSocketManager.emit_to_user_or_listener_sync` + migrated 5 sites** — Started from a USER-REPORTED bug (3 user-initiated messages from the LookML CC notifications panel UI silently dropped because `notify_user` short-circuited on `is_user_connected(target_system_id)=False` even though the `cc-listener-{job_id}` was active under a different shared service-account user_id). Day's arc: narrow fire-and-forget fix (5 unit tests) → comprehensive audit found 6 dispatch sites with duplicated logic and 2 sites missing the listener fallback entirely → planned full unification (`~/.claude/plans/dazzling-napping-frost.md`) → executed Phases A-F. Helper added at `src/cosa/rest/websocket_manager.py` as a sibling to the canonical `emit_to_user_and_admins_sync` precedent. Migrations: (1) `notify_user` fire-and-forget — replaced narrow inline fix with helper; (2) `notification_expired` SSE-timeout broadcast — gained listener fallback; (3) `notification_responded` response-submission broadcast — gained listener fallback; (4) `send_job_message` (queues.py) — collapsed 40-line dual-emit; (5) `_emit_notification_added` (notification_fifo_queue.py) — collapsed targeted-user + listener emits. Result: zero `emit_to_session_sync` calls remain in 3 migrated routers (helper is single chokepoint). Lupin unit suite 3672/0 fail (was 3638 → +34 tests across A-E). Wrapped yesterday's 7-test fix entry in bug-fix-queue.md. Files: CoSA × 4 (websocket_manager.py + 3 routers + notification_fifo_queue.py — separate user commit), Lupin × 3 (test_websocket_manager_dispatch.py NEW, test_notify_cc_listener_fallback.py UPDATED, bug-fix-queue.md / history.md).
 
 ## 🌅 FOLLOW-UPS — for the user (notification dispatch work)
 
@@ -1995,54 +1721,12 @@ The 19:00 EDT all-test-suite post-mortem work from the now-stale "FIRST THING IN
 
 ---
 
-## ✅ COMPLETED — Session 09f4c557 (2026-04-27, evening)
-
-- [x] [LUPIN] **Docker image hygiene + rebuilds — 130 GB → 31.6 GB** — Tier 0+1 (Python 3.13.7 + uv-managed venv + uv sync vs 20+ pip layers + BuildKit cache mounts), cuda-compat-12-4 purge fix (CUDA Error 804 on consumer RTX 4090s), drop recursive chown (single USER rruiz switch + --chown= per COPY + uv-cache mount uid retarget), audioop-lts fix (pydub on Python 3.13). Three rebuilds across the day: 130 → 72 → 31.6 GB. lupin:1.0.0 promoted to the audioop-fixed build. New artifacts: `pyproject.toml`, `uv.lock`, `docker/lupin/scripts/patch-pytest-playwright-visual-snapshot.py`. Plans serialized to `src/rnd/v0.1.7/`.
-- [x] [LUPIN] **docker-compose.yml pinned both services to `lupin:1.0.0`** (lines 34 + 93) — dev :7999 + test :8000 bounced onto new image, both healthy. lupin:0.9.0 retained as fallback.
-- [x] [LUPIN] **Lance DB cleanup script** — `src/scripts/cleanup_lupin_lancedb.py` created (uses `tbl.optimize(cleanup_older_than=...)` — modern combined compaction+cleanup API). First run with 7-day cutoff reclaimed 16.67 GB (43.4 → 26.7 GB). Pre-cleanup backup deleted after smoke tests. Script later refactored to default `--older-than-days 1` and dropped per-script backup function (Lupin has nightly ecosystem-level backups).
-- [x] [LUPIN] **Disk cleanup**: removed 6 unused images (genie-in-the-box 0.6/0.7/0.8, peft 0.2/0.3, hf-tgi), 25 zombie containers, 84 GB build cache. /mnt/DATA01: 78 GB → 93 GB free.
-- [x] [LUPIN] **Memory feedback rules added**: `feedback_no_auto_promote_tags.md` (park rebuild outputs at candidate tag), `feedback_backups_only_to_dedicated_drive.md` (per-script backups → dedicated drive only).
-- [x] [LUPIN] **Dockerfile follow-up: added `COPY --chown=rruiz:rruiz src/lupin_cli /var/lupin/src/lupin_cli`** — lupin_cli was missing from COPY list (production worked because of bind-mount; image isn't self-contained without it). Takes effect on next rebuild.
-
 ## 🌅 FOLLOW-UPS — for the user (no urgency)
 
 - [ ] [LUPIN] **Tonight's full test suite run on lupin:1.0.0** — user plans to run all tests this evening to validate the new image under realistic load. Surface any new regressions (especially additional Python 3.13 incompats lurking in import chains we didn't exercise during sanity boots).
 - [ ] [LUPIN] **Provide dedicated backup drive's mount path** — when convenient. Future maintenance scripts that do need to back up will default there. `feedback_backups_only_to_dedicated_drive.md` captures the policy.
 - [ ] [LUPIN] **Tier 2 / Tier 3 docker hygiene (rainy day)** — multi-stage builder/runtime split (drops cuda-toolkit-12-4 from runtime, ~6 GB saved); HF models via runtime mount / GCS-FUSE (~13 GB saved); pinned base-image digest + Renovate; checksum-pinned d2/MARP/Claude Code installers; BuildKit secret mounts for `src/conf/keys`. Captured as out-of-scope in `src/rnd/v0.1.7/2026.04.27-drop-recursive-chown-image-bloat-audit.md`.
 - [ ] [LUPIN] **Periodic / scheduled lance cleanup** — wire `tbl.optimize(cleanup_older_than=timedelta(days=1))` into FastAPI lifespan as a daily background task. Integration point: `src/lupin_app/main.py:388` alongside existing `clock_loop`, `websocket_heartbeat_loop`, `websocket_cleanup_loop`. Adds INI key like `solution snapshots cleanup older than days = 1`.
-
----
-
-## ✅ COMPLETED — Session 6c798a07 (2026-04-25)
-
-- [x] [LUPIN] **Podcast generator completion abstract — clickable URLs** — Listen routes to in-app `/app/audio` player page (HTML5 player + script subtitle + embedded download); Download → `/api/io/file?path=...&download=true`; View Script → `/app/docs?path=...`. Path-normalization helper `_to_rel()` handles abs / `io/` / `/` input shapes, mirrors `presentation_generator/job.py` pattern. Artifacts now store relative paths (UI job-card consumption). 6/6 podcast completion unit tests pass + 26/26 broader podcast-related. **Code in CoSA submodule** (managed separately): `src/cosa/agents/podcast_generator/job.py`. **Parent Lupin**: `src/tests/unit/test_podcast_completion_report.py` (test updates + new parametrized normalization test).
-- [x] [LUPIN] **History archive** — 24,283 → 11,715 tokens (97.1% → 46.8%); created `history/2026-04-14-to-21-history.md` (12 sessions, 12,979 tokens); index updated.
-
----
-
-## 🌅 FIRST THING IN THE MORNING — 2026-04-25
-
-**Review evening test runs** (both scheduled before user stepped away):
-
-1. **`ts-e81ca54c`** (submitted 17:42 EDT for 17:44 EDT) — `e2e --update-snapshots -k visual` regeneration. Rewrites the 12 stale visual-regression PNG baselines under `io/test-suite/visual-baselines/test_visual_regression/test_visual_page/`. On completion, the baselines are current against Phase 2+fix code. Check `docker exec lupin-rest-test tail -30 /tmp/e2e-ui-latest.log` for exit code.
-
-2. **`ts-4139484f`** (Phase 3 validation run, scheduled 17:49:24 EDT against freshly-bounced :8000 carrying Phase 3 code at commit `2379233`) — full `e2e,integration` gate. Expected: 0 failures in integration (dispatcher test now accepts both cosa_mcp variants per 17:40 fix); 0 failures in e2e (Opus→Sonnet fix from 14:40 + fresh visual baselines from ts-e81ca54c).
-
-   If Phase 3 gate is green → v0.1.7 async-pool ready for PR/merge.
-   If new failures appear → investigate vs Phase 2 baseline (today's 17:19 EDT TFE report saved at `io/swe-team/reports/interactive.job.tester@lupin.deepily.ai/2026.04.24-at-17:19-EST-ts-ff11fb27-completed-test_fix_expediter-report.md`).
-
-3. **Decision on prod `N=1 → N=3` bump** — separate deliberate action after morning review. Edit `[Lupin: Baseline]` from `= 1` to `= 3`, redeploy.
-
-4. **Pre-flip FIFO audit** (8-step checklist in `92-phase-3-execution-log.md §F.1–F.8`) — required before prod bump. Grep for tests implicitly assuming "queue size 1" or "first-submitted is first-done"; categorize low/med/high; re-verify under N=3 dev.
-
-5. **Deferred items** (non-gating, pick up as bandwidth allows):
-   - 9 Phase 2 MVP unit tests still deferred (see `91-phase-2-execution-log.md` Step 2.4 rationale)
-   - DR `cli.py::estimate_total_time` migration — dev utility only
-   - Visual regression: commit the regenerated baselines if the tool stores them under a gitignored path (`io/test-suite/visual-baselines/`) they don't get committed; if under `src/tests/e2e_ui/__snapshots__/` they need commit. Check which path was written.
-
----
-
-## 🔥 SESSION 616112aa — COMPLETE WORK (2026-04-24)
 
 ---
 
@@ -2124,43 +1808,6 @@ The Block 1a item from Session 9934d315 ("5 × `test_lancedb_gcs_integration.py`
 
 ---
 
-## 🌅 NEXT-MORNING BRIEFING — 2026-04-22
-
-### TL;DR
-
-Session 9934d315 (2026-04-21 afternoon/evening) cleared a deep stack of silent test-health bugs that had been breaking dual-container mode for weeks. Two root causes, two tiny fixes, massive unlock:
-
-1. **`auth.js` hardcoded `http://localhost:7999`** → every auth-dependent E2E test under dual-container mode (browser served by :8000) was POSTing credentials to :7999. Session cookies went to the wrong server, page loads on :8000 had no auth, screenshots captured the login redirect instead of the target page. Fixed to `${window.location.origin}`.
-2. **12 integration test files hardcoded `BASE_URL = "http://localhost:7999"`** (copy-paste propagation) → every integration test was silently hitting the dev server. Fixed all 12 to use `os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )` to match the conftest pattern.
-
-Plus the smaller straggler cleanup (Phase A.1-A.3): WS cred var rename, smoke/integration timeout bumps in `test_suite/job.py`, and `notifications.js` `renderHistoryActions` surgery.
-
-### Pending work for 2026-04-22
-
-**Block 1 — 6 remaining integration failures** (triaged, none are routing bugs):
-
-- **5 × `test_lancedb_gcs_integration.py::TestLanceDBGCSIntegration::*`** — all `RuntimeError: CUDA out of memory` in `ProseEmbeddingEngine` (nomic-bert-2048 embedding model). GPU pressure from user's other workloads. **USER-RUN territory** per `feedback_never_grab_gpu`. Options: (a) force these tests onto CPU, (b) skip when CUDA unavailable via `pytest.mark.skipif`, (c) defer to a quieter GPU window.
-- **1 × `test_conftest_clean_test_db.py::test_clean_test_db_removes_prior_test_users`** — `psycopg2.errors.DatatypeMismatch: column "id" is of type uuid but expression is of type text`. Pre-existing fixture bug in the meta-test. Fix: cast `gen_random_uuid()` explicitly, or use Python `uuid.uuid4()` + server-side generation.
-
-**Block 2 — 2 remaining E2E failures** (separate root causes, NOT auth.js):
-
-- **`test_cj_flow_pause_schedule.py::TestPauseResumeButtonClick::test_click_pause_button_updates_card`** — Playwright click-retry log shows `<div class="queue-category">`, `<div class="queue-header">`, and `<a class="lupin-nav-active">` all intercepting pointer events on the pause button. CSS z-index / pointer-events layering bug. Possibly related to parallel session b802e633's commit `82243e4` ("Fix bulk-delete 404 + truncate job-id chip") which touched `notifications.js`.
-- **`test_job_history_ui.py::TestJobHistoryEdgeCases::test_admin_can_manage_other_users_jobs`** — Admin user tries to retry another user's failed job via `.retry-btn` click; Playwright times out 30s waiting for `/retry` response. Either retry endpoint is broken for admin→other-user path, the button click doesn't fire the request, or the endpoint auth boundary is mis-configured.
-
-**Block 3 — uncommitted work from this session** (session-end will stage what's mine):
-
-- Parent Lupin: `auth.js`, 12 integration test files, `run-websocket-smoke-tests.sh`, `notifications.js` (from Phase C earlier), `fifo_queue.py` (wait — that's CoSA), plus 5 regenerated visual baseline PNGs under `io/test-suite/visual-baselines/`, plus `test_fifo_queue_notify_abstract.py` new test file (Phase 3 Item A).
-- CoSA submodule (user commits separately from CoSA session): `shared/fix_executor.py`, `bug_fix_expediter/state.py`, `bug_fix_expediter/job.py`, `test_fix_expediter/job.py`, `test_suite/job.py`, `rest/fifo_queue.py`.
-
-### Today's landings (reference)
-
-- Part 1 (stop.py rebaseline + TFE telemetry demotion + stderr capture) + Part 2 (BFE parity) checkpoint committed as `f533c08` at 13:20 EDT.
-- Straggler Phase A+C completed earlier in afternoon.
-- auth.js + integration BASE_URL bulk fix completed evening.
-- Test-health final: unit **3549** / WS **50/50** / integration **226 passed, 6 failed** (all 6 pre-existing env/fixture bugs) / E2E visual **12/12** / E2E full **355 passed, 2 failed** (pause-button + admin retry, both separate bugs).
-
----
-
 ## 🌅 NEXT-MORNING BRIEFING — 2026-04-18
 
 ### TL;DR
@@ -2222,78 +1869,6 @@ Session 44581b8c spent the day walking the TFE Resume path end-to-end. Every blo
 
 ---
 
-## 🌅 MORNING STATUS — 2026-04-17 11:20 EDT (historical — superseded by NEXT-MORNING BRIEFING above)
-
-The Bug 14 decision gate captured here was answered later today (factory-routed + DB patch chosen). Kept for session-continuity reference.
-
----
-
----
-
-## 🌅 MORNING BRIEFING — 2026-04-17
-
-### TL;DR
-
-Bug 12 + Bug 13 landed and **validated live tonight** via `tfe-3436c5b8`. A stalled TFE with 8 clusters + 17 proposals is waiting on `:8000` — primed for the **first real end-to-end TFE Resume** (Doc 18 D2 first half). Intentionally did NOT apply any of the proposed fixes manually tonight so you can exercise the Resume path in the morning.
-
-### Boot-up sequence (strict order)
-
-1. ~~**Finish your DB seed-protection migration work first**~~ ✅ DONE Session eb50bd56. `is_protected` column deployed to both DBs; 3-layer guard landed; 4 unit tests pass. Committed this session.
-2. **Then bounce `lupin-rest-test`** — ✅ DONE Session eb50bd56 (`docker restart lupin-rest-test`). Seed script confirmed companions present on startup.
-3. **Then click Resume** on `tfe-3436c5b8` in the UI (or `POST http://localhost:8000/api/jobs/tfe-3436c5b8/resume`).
-
-### What to expect on Resume
-
-- Phase 2 voice gate re-fires with its full (formerly >5000 char) abstract visible — this is the FIRST real proof the Bug 13 cap removal works in the Resume path, not just fresh runs.
-- You select proposals you trust. TFE's first 4 proposals are the same 4 one-liners that keep reappearing: `PRODUCT_NAMES` entry, `len == 9 → 10` in 3 sites, `resume_from` in `all_agents`, placeholder type assertion cleanup. Retires ~27 of 38 failures if all four land.
-- Phase 3 FixExecutor writes inside `.claude/worktrees/tfe-3436c5b8/` (NOT your live tree, since worktree default is now `true` + container has been bounced to pick it up).
-- Phase 5 GitStrategist creates branch + commits + PR from the worktree.
-- Phase 6 auto-queues a validation `TestSuiteJob` to confirm the selected fixes retired the failures.
-
-### What Bug 9 worktree isolation DOES and does NOT cover
-
-Covered (safe from contamination): Python + JS source edits under `src/` via FixExecutor's `Edit` / `Write` tool calls; the GitStrategist branch cut off `origin/main`.
-
-NOT covered (reasons it might still hit your tree): visual-baseline PNG regeneration (TFE proposal 1, needs `pytest --update-snapshots` outside the FixExecutor pattern) — if you select that, it'll run `pytest` against your live Chromium install, not the worktree. Skip it unless you've stashed your dev work.
-
-### Rollback points if you're unhappy
-
-| target | what it undoes |
-|---|---|
-| `git reset --hard aed7c6d^` | drops worktree `enabled=true` flip; keeps Bug 12 + 13 + validation commits |
-| `git reset --hard bcbf5af` | drops Bug 13 fix + worktree flip; keeps Bug 12 + Bug 9 scaffolding |
-| `git reset --hard 67dbd21^` | reverts ALL of tonight's work back to pre-session state |
-
-CoSA submodule changes on disk (dispatcher + orchestrator edits + new `worktree_context.py`) are NOT git-committed by me — `git checkout -- agents/...` inside `src/cosa/` reverts those independently. `src/cosa/agents/shared/worktree_context.py` is untracked; delete it manually if rolling back.
-
-### What I did NOT do tonight (intentional)
-
-- No manual code fixes for the 38 failures — saved for Resume to exercise
-- No `pytest` runs — respected your in-flight DB work
-- No test-server interaction beyond the single `aed7c6d` INI flip (the running container hasn't seen it yet)
-- No CoSA git commits — yours to handle when ready
-
-### If Resume misbehaves
-
-1. First: verify container bounce happened after the INI flip — `docker exec lupin-rest-test grep "cosa worktree enabled" /var/lupin/src/conf/lupin-app.ini` should show `true`.
-2. Second: check `git status` inside `src/cosa/` — tonight's edits are uncommitted there and expected.
-3. Third: full root-cause + context in `~/.claude/plans/let-s-start-a-new-zany-thimble.md` (postmortem-style plan file) and `src/rnd/v0.1.6/2026.04.16-bug-13-*.md` (design doc — wait, I never wrote one for Bug 13; see commit `3709139` message instead).
-4. Fourth: if truly stuck, the 4 one-liner fixes are safe to apply by hand — same as TFE's first 4 proposals.
-
-### Tonight's commit chain (newest → oldest)
-
-```
-aed7c6d  worktree enabled=true (default flip)
-a389bc4  session close — Bug 12+13 validated via tfe-3436c5b8
-bcbf5af  checkpoint: ts-d3df4d87 scheduled for Bug 13 validation
-3709139  Bug 13: remove 5000-char caps + ValidationError→stall
-029a55c  checkpoint: ts-e4089cf2 scheduled
-5817533  Bug 12 + Bug 9 + 34 unit tests
-67dbd21  overnight forensics + Bug 12 filed
-```
-
----
-
 ## Active TODO below
 
 ## ~~🚨 First-thing next session — archive history (still pending from 2026-04-15)~~ ✅ DONE 2026-04-16
@@ -2340,10 +1915,6 @@ bcbf5af  checkpoint: ts-d3df4d87 scheduled for Bug 13 validation
 - [ ] [LUPIN] **Full attended TFE live run (D2)** — schedule a live TFE where operator answers voice gate, selects real proposals, walks Phase 3/5/6 with real commits + PR. Prereq: overnight `ts-79829a75` outcome reviewed + Bug 9 worktree isolation ideally landed first (so operator's working tree can't contaminate PR).
 
 - [ ] [LUPIN] **Pre-merge E2E gate (D3)** — parallel session's proposed `POST /api/test-suite/submit` with `test_types="e2e"` + `monopolize=true`. Fine to run post-archive; exercises all today's UI fixes (Bug 1 io/file, Bug 2 dedup, Bug 8 labels) but NOT the Claude Agent SDK path.
-
-## 🔖 Carryover TODO entries (from 2026-04-14 and earlier)
-
-- [x] [LUPIN] **Review midnight `all` run outputs** (Session 6ae2513c — ran as `ts-d2d890ed` 2026-04-15 00:56 EDT) — SUPERSEDED by Session f01fdc2f which surfaced the SDK creds + ops routing issues. New overnight run `ts-79829a75` replaces this.
 
 ## 🔖 Resume tomorrow — active triage plan
 
@@ -2553,3 +2124,4 @@ bcbf5af  checkpoint: ts-d3df4d87 scheduled for Bug 13 validation
 ## 📦 Archived
 
 - [`todo-history/2026-04-10-to-2026-05-01-todo.md`](todo-history/2026-04-10-to-2026-05-01-todo.md) — 21 CLOSED + 10 MIXED-excerpt sections, 198 closed bullets, archived 2026-05-01 (Session 92ece47c)
+- [`todo-history/2026-04-14-to-2026-05-28-todo.md`](todo-history/2026-04-14-to-2026-05-28-todo.md) — 27 CLOSED sections (2026-04-14 → 2026-05-28), archived 2026-06-18 (Session 3364493b, Tiffany 💍; task 02f1e0d5)
