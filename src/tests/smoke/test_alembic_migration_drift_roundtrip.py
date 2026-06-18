@@ -32,8 +32,13 @@ from cosa.rest.db import database as db_module
 from cosa.rest.db.auto_migrate import build_alembic_config
 
 
-_HEAD_REVISION  = "e5f6a7b8c9d0"
-_PRIOR_HEAD     = "d4e5f6a7b8c9"
+# This round-trip exercises the e5f6a7b8c9d0 drift migration SPECIFICALLY (its
+# own upgrade()/downgrade() DDL), so it targets that revision BY ID — never
+# "head". Head moves as later migrations land (f6a7b8c9d0e1 now sits above
+# e5f6a7b8c9d0); a naive "head" target would make `downgrade -1` stop AT
+# e5f6a7b8c9d0 with the drift objects still present — a false failure.
+_DRIFT_REVISION = "e5f6a7b8c9d0"   # the migration under test (stable id, not "head")
+_PRIOR_REVISION = "d4e5f6a7b8c9"   # its down_revision
 _DRIFT_TABLES   = [ "proxy_decisions", "trust_states", "prediction_log", "server_lifecycle" ]
 _NOTIF_COLUMNS  = [ "job_id", "progress_group_id", "abstract", "response_options", "is_hidden" ]
 
@@ -130,9 +135,9 @@ def test_full_drift_roundtrip( throwaway_db_url ):
     config = build_alembic_config( database_url=throwaway_db_url )
 
     # ── 1) upgrade head on an empty DB (pure migration path, NO create_all) ────
-    command.upgrade( config, "head" )
+    command.upgrade( config, _DRIFT_REVISION )
 
-    assert _current_rev( throwaway_db_url ) == _HEAD_REVISION
+    assert _current_rev( throwaway_db_url ) == _DRIFT_REVISION
     tables = _table_names( throwaway_db_url )
     for t in _DRIFT_TABLES:
         assert t in tables, f"upgrade head did not create table {t!r}"
@@ -143,7 +148,7 @@ def test_full_drift_roundtrip( throwaway_db_url ):
     # ── 2) downgrade -1 → back to the prior head, drift objects gone ───────────
     command.downgrade( config, "-1" )
 
-    assert _current_rev( throwaway_db_url ) == _PRIOR_HEAD
+    assert _current_rev( throwaway_db_url ) == _PRIOR_REVISION
     tables = _table_names( throwaway_db_url )
     for t in _DRIFT_TABLES:
         assert t not in tables, f"downgrade did not drop table {t!r}"
@@ -152,9 +157,9 @@ def test_full_drift_roundtrip( throwaway_db_url ):
         assert c not in cols, f"downgrade did not drop notifications column {c!r}"
 
     # ── 3) re-upgrade head → idempotent re-application ─────────────────────────
-    command.upgrade( config, "head" )
+    command.upgrade( config, _DRIFT_REVISION )
 
-    assert _current_rev( throwaway_db_url ) == _HEAD_REVISION
+    assert _current_rev( throwaway_db_url ) == _DRIFT_REVISION
     tables = _table_names( throwaway_db_url )
     for t in _DRIFT_TABLES:
         assert t in tables, f"re-upgrade head did not re-create table {t!r}"
@@ -163,7 +168,7 @@ def test_full_drift_roundtrip( throwaway_db_url ):
 def test_prediction_log_fk_targets_notifications( throwaway_db_url ):
     """prediction_log.notification_id is a CASCADE FK onto notifications.id."""
     config = build_alembic_config( database_url=throwaway_db_url )
-    command.upgrade( config, "head" )
+    command.upgrade( config, _DRIFT_REVISION )
 
     eng = create_engine( throwaway_db_url )
     try:

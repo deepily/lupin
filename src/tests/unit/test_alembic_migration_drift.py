@@ -55,10 +55,17 @@ def test_revision_present_and_rebased_onto_prior_head():
     )
 
 
-def test_revision_is_the_single_head():
-    """After the drift fix, e5f6a7b8c9d0 is the ONE head of the chain."""
+def test_chain_has_a_single_head():
+    """The migration chain has exactly ONE head (no fork).
+
+    Head IDENTITY moves as later migrations land — e5f6a7b8c9d0 was the head when
+    this guard was written, but f6a7b8c9d0e1 (the task-project-alias migration)
+    has since superseded it. So this guards the single-head INVARIANT (a forked
+    chain breaks ``upgrade head``), NOT a frozen revision id that rots on every
+    new migration.
+    """
     heads = list( _script_dir().get_heads() )
-    assert heads == [ _REVISION ], f"expected single head {_REVISION!r}, got {heads!r}"
+    assert len( heads ) == 1, f"expected a single migration head (no fork), got {heads!r}"
 
 
 def test_script_file_present():
