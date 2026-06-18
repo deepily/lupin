@@ -49,7 +49,14 @@ export function renderNotificationItem(
 
   // Build a div + use DOM ops directly so we can return HTMLElement (not DocumentFragment).
   const root = document.createElement("div");
-  root.className = expired ? "sender-message expired-response" : "sender-message";
+  // CSS-parity 2026-06-17: apply the `.incoming` chat-bubble variant. Legacy
+  // notifications.js (13698/14061) tagged each message `incoming`|`outgoing`
+  // off an `isResponse` flag; the multiplexer Notification model has NO
+  // direction field (every item in this store is an inbound notification from
+  // a persona), so all messages are `.incoming`. Without this class the
+  // `.sender-message.incoming` gradient + left-offset never engaged and
+  // messages rendered as flat undifferentiated rows.
+  root.className = expired ? "sender-message incoming expired-response" : "sender-message incoming";
   root.setAttribute("data-id-hash", notification.id_hash);
   if (inProgressGrp) {
     root.setAttribute("data-progress-group", notification.progress_group_id as string);

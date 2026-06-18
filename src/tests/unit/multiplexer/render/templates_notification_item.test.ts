@@ -51,6 +51,24 @@ test("notificationItem: was_expired=true adds .expired-response class + EXPIRED 
   assert.equal(badge!.textContent, "EXPIRED");
 });
 
+// CSS-parity 2026-06-17: every message is an inbound notification → `.incoming`
+// chat-bubble variant must be applied (the Notification model has no direction
+// field, so there is no `.outgoing` case). Covers both the plain and the
+// expired class-string branches.
+test("notificationItem: applies .incoming on the plain message", () => {
+  const el = renderNotificationItem(makeNotification(), { appTimezone: "UTC" });
+  assert.ok(el.classList.contains("sender-message"));
+  assert.ok(el.classList.contains("incoming"));
+  assert.equal(el.classList.contains("outgoing"), false);
+});
+
+test("notificationItem: applies .incoming alongside .expired-response", () => {
+  const el = renderNotificationItem(makeNotification({ was_expired: true }), { appTimezone: "UTC" });
+  assert.ok(el.classList.contains("sender-message"));
+  assert.ok(el.classList.contains("incoming"));
+  assert.ok(el.classList.contains("expired-response"));
+});
+
 test("notificationItem: time_display backend override beats formatHM", () => {
   const el = renderNotificationItem(makeNotification({ time_display: "23:10 EST" }), { appTimezone: "UTC" });
   const timeText = el.querySelector(".message-time")!.textContent;
