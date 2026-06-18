@@ -1,78 +1,124 @@
 #!/usr/bin/env python3
 """
-Claude API Client for COSA Podcast Generator Agent.
+Claude script-generation client for the COSA Podcast Generator Agent.
 
-Provides async wrapper for Claude API with:
-- Model selection (Opus for script generation)
-- Structured JSON output support
-- Per-request cost tracking
-- Graceful error handling with retries
+BOUNDED-CC MIGRATION (Phase 1 — 2026-06-18)
+===========================================
+This client was migrated from the direct firewalled Anthropic SDK
+(`AsyncAnthropic.messages.create`) to the **in-process Claude Agent SDK**
+(`claude_agent_sdk.query`), matching the shipped BFE/TFE bounded-CC pattern
+(ratified D-DR1 Option X). The four script-phase LLM methods now run on the
+Max-subscription OAuth path.
 
-Follows the firewalled API key pattern from Deep Research Agent.
+This is a COST-SHIFT, NOT "free": the SDK still reports `total_cost_usd`
+telemetry per call, but that spend is covered by the fixed Max plan — the
+firewalled Anthropic console balance does not move. See:
+  - Scope:        src/rnd/v0.1.8/2026.06.18-podcast-phase1-bounded-cc-scope.md
+  - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md
+  - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
+
+Podcast script generation is PURE TEXT SYNTHESIS, so the bounded-CC shape is
+the simplest of the migration candidates: tools=[], no web search, no
+can_use_tool callback, no progress-event translation. The audio (TTS) phase
+is untouched and still uses ElevenLabs.
+
+NOTE: `ClaudeAgentOptions` exposes no per-call `temperature`, so the historical
+per-method creativity steer (e.g. 0.8 for script, 0.5 for JSON) is folded into
+the system prompt instead (see `_temperature_to_steer`).
 """
 
-import os
-import json
-import asyncio
 import logging
 from typing import Optional, Any
-from dataclasses import dataclass, field
-
-try:
-    import anthropic
-    from anthropic import AsyncAnthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:  # pragma: no cover - anthropic SDK is installed in the canonical test/prod venv; this optional-dependency fallback is unreachable here
-    ANTHROPIC_AVAILABLE = False
-    AsyncAnthropic = None
+from dataclasses import dataclass
 
 from .config import PodcastConfig
+# D6-LENIENT JSON recovery — single source of truth lives in the parsing module
+from .prompts.script_generation import lenient_json_loads
+
+# Claude Agent SDK — graceful fallback (mirrors the BFE/TFE import guard)
+try:
+    from claude_agent_sdk import (
+        ClaudeAgentOptions,
+        AssistantMessage,
+        TextBlock,
+        ResultMessage,
+        query as sdk_query,
+    )
+    SDK_AVAILABLE = True
+except ImportError:  # pragma: no cover - claude-agent-sdk is installed in the canonical test/prod venv; this optional-dependency fallback is unreachable here
+    SDK_AVAILABLE = False
 
 logger = logging.getLogger( __name__ )
 
 
 # =============================================================================
-# API Key Configuration - FIREWALL PATTERN
+# Bounded-CC invocation constants (pure text synthesis)
 # =============================================================================
-# NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI
-# Using the same env var could cause billing confusion or conflicts
-#
-# Priority order for key retrieval:
-#   1. Explicit api_key parameter (highest priority)
-#   2. Environment variable ANTHROPIC_API_KEY_FIREWALLED (testing/production)
-#   3. Local file via cu.get_api_key() (development)
-# =============================================================================
+# Script generation needs NO tools — it is pure dialogue synthesis. An empty
+# allow-list disables every built-in tool, so the model can only emit text.
+PODCAST_SCRIPT_TOOLS = []
 
-ENV_VAR_NAME  = "ANTHROPIC_API_KEY_FIREWALLED"
-KEY_FILE_NAME = "anthropic-api-key-firewalled"
+# With tools=[] there is nothing to permit, so the permission mode never gates
+# a real tool. "plan" keeps the session read-only as belt-and-suspenders should
+# any built-in ever leak through.
+PODCAST_PERMISSION_MODE = "plan"
+
+
+def _temperature_to_steer( temperature: float ) -> str:
+    """
+    Map a legacy per-call temperature into a system-prompt creativity steer.
+
+    `ClaudeAgentOptions` exposes no per-call temperature, so the historical
+    creativity intent — higher temperature meant more creative dialogue, lower
+    meant more focused/precise output — is expressed in the prompt instead.
+
+    Requires:
+        - temperature is a float
+
+    Ensures:
+        - returns a non-empty steer string for high (>= 0.75) or low (<= 0.55)
+          temperatures
+        - returns "" for mid-range temperatures (no explicit steer)
+    """
+    if temperature >= 0.75:
+        return "Write with creative, natural, varied phrasing."
+    if temperature <= 0.55:
+        return "Write with precise, focused, deterministic phrasing."
+    return ""
 
 
 @dataclass
 class APIResponse:
     """
-    Structured response from an API call.
+    Structured response from a script-phase LLM call.
 
-    Contains the response content, usage data, and model information.
+    Contains the response text, token usage, stop reason, and the SDK-reported
+    cost telemetry (covered by the Max plan — see module docstring).
     """
     content       : str
     model         : str
     input_tokens  : int
     output_tokens : int
     stop_reason   : str
-    raw_response  : Any = None
+    sdk_cost_usd  : float = 0.0
+    raw_response  : Any   = None
 
 
 @dataclass
 class CostEstimate:
     """
-    Simple cost tracking for API calls.
+    Cost tracking for script-phase LLM calls.
 
-    Tracks token usage and estimates cost based on model pricing.
+    Tracks token usage with a token-based price estimate (`estimated_cost_usd`,
+    used by the orchestrator's metadata) AND the SDK-reported telemetry
+    (`total_sdk_cost_usd`). Under the bounded-CC path the SDK telemetry is
+    covered by the fixed Max plan and is NOT billed per token.
     """
     total_input_tokens  : int   = 0
     total_output_tokens : int   = 0
     total_api_calls     : int   = 0
     estimated_cost_usd  : float = 0.0
+    total_sdk_cost_usd  : float = 0.0
 
     # Pricing per million tokens (approximate, as of 2025)
     OPUS_INPUT_PRICE    : float = 15.0
@@ -82,7 +128,7 @@ class CostEstimate:
 
     def add_usage( self, model: str, input_tokens: int, output_tokens: int ):
         """
-        Add usage from an API call.
+        Add token usage from an LLM call (token-based price estimate).
 
         Args:
             model: Model name used
@@ -103,91 +149,83 @@ class CostEstimate:
 
         self.estimated_cost_usd += cost
 
+    def add_sdk_cost( self, cost_usd: float ):
+        """
+        Accumulate the SDK-reported per-call cost telemetry.
+
+        Args:
+            cost_usd: `ResultMessage.total_cost_usd` for one call (telemetry only —
+                      covered by the Max plan, not billed per token)
+        """
+        self.total_sdk_cost_usd += cost_usd
+
     def get_summary( self ) -> str:
-        """Get human-readable cost summary."""
+        """Get human-readable cost summary (with the Max-plan disclaimer)."""
         return (
             f"API Calls: {self.total_api_calls} | "
             f"Tokens: {self.total_input_tokens:,} in, {self.total_output_tokens:,} out | "
-            f"Est. Cost: ${self.estimated_cost_usd:.4f}"
+            f"Est. Cost: ${self.estimated_cost_usd:.4f} | "
+            f"SDK telemetry: ${self.total_sdk_cost_usd:.4f} (covered by Max plan — not billed per-token)"
         )
 
 
 class PodcastAPIClient:
     """
-    Async Anthropic API client for podcast script generation.
+    Bounded-CC script-generation client (in-process Claude Agent SDK).
 
     Requires:
-        - anthropic SDK is installed
-        - One of the following API key sources:
-          1. api_key parameter (explicit)
-          2. ANTHROPIC_API_KEY_FIREWALLED environment variable
-          3. src/conf/keys/anthropic-api-key-firewalled file
+        - claude_agent_sdk is installed (SDK_AVAILABLE == True)
 
     Ensures:
-        - Async execution for non-blocking calls
-        - Integrated cost tracking
+        - Async, non-blocking script-phase LLM calls via `sdk_query`
+        - Max-plan OAuth billing (no API key — see module docstring)
+        - Integrated token + SDK-cost tracking
         - JSON output support for structured responses
+
+    No API key is required: `sdk_query` authenticates via the Claude Code /
+    Claude Agent SDK Max-subscription OAuth path. The former firewalled-key
+    machinery was removed in the bounded-CC migration.
     """
 
     def __init__(
         self,
         config: Optional[ PodcastConfig ] = None,
-        api_key: Optional[ str ] = None,
         debug: bool = False,
         verbose: bool = False
     ):
         """
-        Initialize the API client.
+        Initialize the script-generation client.
+
+        Requires:
+            - claude_agent_sdk is installed
+
+        Ensures:
+            - Raises ImportError if the SDK is unavailable
+            - cost tracking is initialized
 
         Args:
             config: Podcast configuration (uses defaults if None)
-            api_key: Anthropic API key (uses env var/file if None)
             debug: Enable debug output
             verbose: Enable verbose output
+
+        Raises:
+            ImportError: if claude_agent_sdk is not installed
         """
-        if not ANTHROPIC_AVAILABLE:
+        if not SDK_AVAILABLE:
             raise ImportError(
-                "anthropic SDK not installed. "
-                "Install with: pip install anthropic"
+                "claude_agent_sdk not installed. "
+                "Install with: pip install claude-agent-sdk"
             )
 
         self.config  = config or PodcastConfig()
         self.debug   = debug
         self.verbose = verbose
 
-        # Get API key using firewalled pattern
-        self.api_key    = api_key
-        self.key_source = "parameter"
-
-        if not self.api_key:
-            self.api_key = os.environ.get( ENV_VAR_NAME )
-            self.key_source = "environment"
-
-        if not self.api_key:
-            try:
-                import cosa.utils.util as cu
-                self.api_key = cu.get_api_key( KEY_FILE_NAME )
-                self.key_source = "local file"
-            except Exception as e:
-                if self.debug:
-                    print( f"[PodcastAPIClient] Could not load local key file: {e}" )
-
-        if not self.api_key:
-            raise ValueError(
-                f"Anthropic API key not found. Either:\n"
-                f"  1. Pass api_key parameter\n"
-                f"  2. Set {ENV_VAR_NAME} environment variable\n"
-                f"  3. Create src/conf/keys/{KEY_FILE_NAME} file"
-            )
-
-        # Initialize async client
-        self._client = AsyncAnthropic( api_key=self.api_key )
-
-        # Initialize cost tracking
+        # Cost tracking
         self.cost_estimate = CostEstimate()
 
         if self.debug:
-            print( f"[PodcastAPIClient] API key source: {self.key_source}" )
+            print( f"[PodcastAPIClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
             print( f"[PodcastAPIClient] Script model: {self.config.script_model}" )
 
     async def call_for_analysis(
@@ -203,8 +241,8 @@ class PodcastAPIClient:
         Args:
             system_prompt: System prompt for analysis
             user_message: Content to analyze
-            max_tokens: Maximum response tokens
-            temperature: Sampling temperature
+            max_tokens: Retained for signature parity (unused on the bounded path)
+            temperature: Folded into the system-prompt creativity steer
 
         Returns:
             APIResponse: Structured response with analysis
@@ -228,13 +266,13 @@ class PodcastAPIClient:
         """
         Call Claude for script generation.
 
-        Uses slightly higher temperature for more creative dialogue.
+        Uses a higher creativity steer for more natural dialogue.
 
         Args:
             system_prompt: System prompt with personality instructions
             user_message: Script generation request
-            max_tokens: Maximum response tokens (scripts can be long)
-            temperature: Sampling temperature (higher for creativity)
+            max_tokens: Retained for signature parity (unused on the bounded path)
+            temperature: Folded into the system-prompt creativity steer
 
         Returns:
             APIResponse: Structured response with script
@@ -258,13 +296,11 @@ class PodcastAPIClient:
         """
         Call Claude for script revision.
 
-        Uses lower temperature for more focused revisions.
-
         Args:
             system_prompt: System prompt for revision
             user_message: Revision request with feedback
-            max_tokens: Maximum response tokens
-            temperature: Sampling temperature (lower for precision)
+            max_tokens: Retained for signature parity (unused on the bounded path)
+            temperature: Folded into the system-prompt creativity steer
 
         Returns:
             APIResponse: Structured response with revised script
@@ -285,46 +321,40 @@ class PodcastAPIClient:
         max_tokens: int = 4096
     ) -> dict:
         """
-        Call API expecting JSON output.
+        Call the model expecting JSON output (D6-LENIENT extraction).
 
         Ensures:
-            - Parses response as JSON
-            - Raises ValueError if response is not valid JSON
+            - Strips markdown code fences
+            - Recovers a JSON object embedded in surrounding prose (bounded CC
+              completions can be chattier than `messages.create`)
+            - Raises ValueError only if no JSON object can be recovered
 
         Args:
             system_prompt: System prompt (should request JSON output)
             user_message: User message
-            max_tokens: Maximum tokens
+            max_tokens: Retained for signature parity (unused on the bounded path)
 
         Returns:
             dict: Parsed JSON response
+
+        Raises:
+            ValueError: if no valid JSON object can be recovered
         """
         response = await self._call_api(
             model         = self.config.script_model,
             system_prompt = system_prompt,
             user_message  = user_message,
             max_tokens    = max_tokens,
-            temperature   = 0.5,  # Lower temp for structured output
+            temperature   = 0.5,  # low → "precise" steer for structured output
             call_type     = "json_output",
         )
 
-        # Parse JSON from response
-        content = response.content.strip()
-
-        # Handle markdown code blocks
-        if content.startswith( "```json" ):
-            content = content[ 7: ]
-        if content.startswith( "```" ):
-            content = content[ 3: ]
-        if content.endswith( "```" ):
-            content = content[ :-3 ]
-
-        try:
-            return json.loads( content.strip() )
-        except json.JSONDecodeError as e:
-            logger.error( f"Failed to parse JSON response: {e}" )
+        parsed = lenient_json_loads( response.content )
+        if parsed is None:
+            logger.error( "Failed to recover JSON object from response" )
             logger.debug( f"Raw content: {response.content}" )
-            raise ValueError( f"Response was not valid JSON: {e}" )
+            raise ValueError( "Response did not contain a recoverable JSON object" )
+        return parsed
 
     async def _call_api(
         self,
@@ -336,206 +366,175 @@ class PodcastAPIClient:
         temperature: float = 0.7
     ) -> APIResponse:
         """
-        Internal method to call the Anthropic API.
+        Internal bounded-CC call via in-process `sdk_query`.
+
+        Requires:
+            - SDK_AVAILABLE is True
+
+        Ensures:
+            - Builds tools=[] / read-only options (pure synthesis)
+            - Folds temperature into the system-prompt creativity steer
+            - Concatenates all assistant TextBlocks into the response content
+            - Records token usage + SDK cost telemetry
 
         Args:
             model: Model to use
             system_prompt: System prompt
             user_message: User message
             call_type: Type of call for logging
-            max_tokens: Maximum tokens
-            temperature: Sampling temperature
+            max_tokens: Retained for signature parity (unused on the bounded path)
+            temperature: Folded into the creativity steer
 
         Returns:
             APIResponse: Structured response
         """
-        messages = [
-            { "role": "user", "content": user_message }
-        ]
+        steer            = _temperature_to_steer( temperature )
+        effective_system = system_prompt or ""
+        if steer:
+            effective_system = ( effective_system + "\n\n" + steer ).strip()
 
-        kwargs = {
-            "model"       : model,
-            "max_tokens"  : max_tokens,
-            "messages"    : messages,
-            "temperature" : temperature,
-        }
-
-        if system_prompt:
-            kwargs[ "system" ] = system_prompt
-
-        if self.debug:
-            print( f"[PodcastAPIClient] Calling {model} for {call_type}" )
-
-        # Make API call with retry
-        response = await self._call_with_retry( kwargs )
-
-        # Extract content
-        content = ""
-        for block in response.content:
-            if hasattr( block, "text" ):
-                content += block.text
-
-        # Record usage
-        self.cost_estimate.add_usage(
-            model         = model,
-            input_tokens  = response.usage.input_tokens,
-            output_tokens = response.usage.output_tokens,
+        options = ClaudeAgentOptions(
+            model           = model,
+            system_prompt   = effective_system or None,
+            tools           = PODCAST_SCRIPT_TOOLS,
+            permission_mode = PODCAST_PERMISSION_MODE,
+            max_turns       = self.config.script_max_turns,
         )
 
         if self.debug:
-            print( f"[PodcastAPIClient] Response: {response.usage.input_tokens} in, {response.usage.output_tokens} out" )
+            print( f"[PodcastAPIClient] sdk_query {model} for {call_type} (max_turns={self.config.script_max_turns})" )
+
+        collected      = []
+        input_tokens   = 0
+        output_tokens  = 0
+        sdk_cost_usd   = 0.0
+        stop_reason    = "end_turn"
+
+        async for message in sdk_query( prompt=user_message, options=options ):
+            if isinstance( message, AssistantMessage ):
+                for block in message.content:
+                    if isinstance( block, TextBlock ):
+                        collected.append( block.text )
+            elif isinstance( message, TextBlock ):
+                collected.append( message.text )
+            elif isinstance( message, ResultMessage ):
+                usage         = message.usage or {}
+                input_tokens  = usage.get( "input_tokens", 0 )
+                output_tokens = usage.get( "output_tokens", 0 )
+                sdk_cost_usd  = message.total_cost_usd or 0.0
+                stop_reason   = message.stop_reason or "end_turn"
+
+        content = "".join( collected ).strip()
+
+        # Record usage (token estimate) + SDK cost telemetry (Max-plan covered)
+        self.cost_estimate.add_usage(
+            model         = model,
+            input_tokens  = input_tokens,
+            output_tokens = output_tokens,
+        )
+        self.cost_estimate.add_sdk_cost( sdk_cost_usd )
+
+        if self.debug:
+            print( f"[PodcastAPIClient] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f}" )
 
         return APIResponse(
             content       = content,
             model         = model,
-            input_tokens  = response.usage.input_tokens,
-            output_tokens = response.usage.output_tokens,
-            stop_reason   = response.stop_reason,
-            raw_response  = response,
+            input_tokens  = input_tokens,
+            output_tokens = output_tokens,
+            stop_reason   = stop_reason,
+            sdk_cost_usd  = sdk_cost_usd,
+            raw_response  = None,
         )
-
-    async def _call_with_retry(
-        self,
-        kwargs: dict,
-        max_retries: int = 3,
-        initial_delay: float = 1.0
-    ) -> Any:
-        """
-        Call API with exponential backoff retry.
-
-        Args:
-            kwargs: API call parameters
-            max_retries: Maximum retry attempts
-            initial_delay: Initial delay in seconds
-
-        Returns:
-            API response object
-        """
-        last_error = None
-        delay = initial_delay
-
-        for attempt in range( max_retries + 1 ):
-            try:
-                return await self._client.messages.create( **kwargs )
-
-            except anthropic.RateLimitError as e:
-                last_error = e
-                if attempt < max_retries:
-                    logger.warning( f"Rate limited, retrying in {delay:.0f}s (attempt {attempt + 1})" )
-                    await asyncio.sleep( delay )
-                    delay *= 2
-
-            except anthropic.APIStatusError as e:
-                if e.status_code >= 500:
-                    last_error = e
-                    if attempt < max_retries:
-                        logger.warning( f"Server error {e.status_code}, retrying in {delay:.0f}s" )
-                        await asyncio.sleep( delay )
-                        delay *= 2
-                else:
-                    raise
-
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries:
-                    logger.warning( f"API call failed: {e}, retrying in {delay:.0f}s" )
-                    await asyncio.sleep( delay )
-                    delay *= 2
-
-        raise last_error
 
     def get_cost_summary( self ) -> str:
         """Get human-readable cost summary."""
         return self.cost_estimate.get_summary()
 
     async def close( self ):
-        """Close the API client and release resources."""
-        if hasattr( self._client, "close" ):
-            await self._client.close()
+        """
+        Release client resources.
+
+        No-op under the bounded-CC path: `sdk_query` is stateless (no persistent
+        client/connection to close). Retained for API compatibility.
+        """
+        return None
 
 
 def quick_smoke_test():
-    """Quick smoke test for PodcastAPIClient."""
+    """Quick smoke test for PodcastAPIClient (bounded-CC path)."""
     import cosa.utils.util as cu
 
-    cu.print_banner( "PodcastAPIClient Smoke Test", prepend_nl=True )
+    cu.print_banner( "PodcastAPIClient Smoke Test (bounded-CC)", prepend_nl=True )
 
     try:
-        # Test 1: Check import
-        print( "Testing anthropic import..." )
-        if not ANTHROPIC_AVAILABLE:
-            print( "⚠ anthropic SDK not installed - skipping API tests" )
-            print( "  Install with: pip install anthropic" )
+        # Test 1: SDK availability
+        print( "Testing claude_agent_sdk import..." )
+        if not SDK_AVAILABLE:
+            print( "⚠ claude_agent_sdk not installed - skipping bounded-CC tests" )
+            print( "  Install with: pip install claude-agent-sdk" )
             return
-        print( "✓ anthropic SDK available" )
+        print( "✓ claude_agent_sdk available" )
 
-        # Test 2: Check API key presence
-        print( "Testing API key detection (firewalled pattern)..." )
-        print( f"  Checking env var: {ENV_VAR_NAME}" )
-        print( f"  Checking local file: src/conf/keys/{KEY_FILE_NAME}" )
-
-        api_key = os.environ.get( ENV_VAR_NAME )
-        key_source = "environment"
-
-        if not api_key:
-            try:
-                api_key = cu.get_api_key( KEY_FILE_NAME )
-                key_source = "local file"
-            except Exception:
-                pass
-
-        if not api_key:
-            print( f"⚠ API key not found - skipping live API tests" )
-            print( f"  For testing: export {ENV_VAR_NAME}=your-key" )
-            print( f"  For development: create src/conf/keys/{KEY_FILE_NAME}" )
-            return
-
-        print( f"✓ API key found via {key_source}" )
-
-        # Test 3: Instantiation
+        # Test 2: Instantiation (no API key needed — OAuth path)
         print( "Testing instantiation..." )
         client = PodcastAPIClient( debug=True )
         assert client.config.script_model is not None
         print( f"✓ Client instantiated (model={client.config.script_model})" )
 
-        # Test 4: APIResponse dataclass
+        # Test 3: APIResponse dataclass
         print( "Testing APIResponse dataclass..." )
         response = APIResponse(
             content       = "Test content",
-            model         = "claude-opus-4",
+            model         = "claude-opus-4-6",
             input_tokens  = 100,
             output_tokens = 50,
             stop_reason   = "end_turn",
         )
         assert response.content == "Test content"
+        assert response.sdk_cost_usd == 0.0
         print( "✓ APIResponse dataclass works" )
 
-        # Test 5: CostEstimate tracking
+        # Test 4: CostEstimate tracking (+ SDK telemetry)
         print( "Testing CostEstimate..." )
         cost = CostEstimate()
-        cost.add_usage( "claude-opus-4", 1000, 500 )
-        cost.add_usage( "claude-sonnet-4", 2000, 1000 )
+        cost.add_usage( "claude-opus-4-6", 1000, 500 )
+        cost.add_usage( "claude-sonnet-4-6", 2000, 1000 )
+        cost.add_sdk_cost( 0.2051 )
         assert cost.total_api_calls == 2
         assert cost.total_input_tokens == 3000
         summary = cost.get_summary()
         assert "API Calls: 2" in summary
+        assert "Max plan" in summary
         print( f"✓ CostEstimate: {summary}" )
 
-        # Test 6: Live API call
-        print( "\nTesting live API call..." )
-        print( "  (This will use API credits)" )
+        # Test 5: temperature → steer mapping
+        print( "Testing temperature steer mapping..." )
+        assert _temperature_to_steer( 0.8 ) != ""
+        assert _temperature_to_steer( 0.5 ) != ""
+        assert _temperature_to_steer( 0.7 ) == ""
+        print( "✓ Temperature steer mapping works" )
+
+        # Test 6: lenient JSON recovery (canonical helper in script_generation)
+        print( "Testing lenient JSON recovery..." )
+        assert lenient_json_loads( '```json\n{"a": 1}\n```' ) == { "a": 1 }
+        assert lenient_json_loads( 'Here you go: {"b": 2} cheers!' ) == { "b": 2 }
+        assert lenient_json_loads( "no json here" ) is None
+        print( "✓ Lenient JSON recovery works" )
+
+        # Test 7: Live bounded-CC call
+        print( "\nTesting live bounded-CC call (Max-plan OAuth — covered cost)..." )
 
         async def test_live_call():
-            response = await client.call_for_analysis(
+            return await client.call_for_analysis(
                 system_prompt = "You are a helpful assistant. Respond briefly.",
                 user_message  = "Say 'Hello, podcast test!' and nothing else.",
                 max_tokens    = 50,
             )
-            return response
 
         import asyncio
         response = asyncio.run( test_live_call() )
-        print( f"✓ Live API call succeeded" )
+        print( f"✓ Live bounded-CC call succeeded" )
         print( f"  Response: {response.content[ :100 ]}" )
         print( f"  {client.get_cost_summary()}" )
 

@@ -363,96 +363,163 @@ Return the revised script in the same JSON format."""
 
 
 # =============================================================================
+# Lenient JSON recovery (D6 — bounded-CC completions can be chatty)
+# =============================================================================
+# The podcast script phase was migrated to in-process Claude Agent SDK
+# (`sdk_query`), whose completions can be chattier than the old
+# `messages.create` path (leading prose, trailing remarks, stray fences).
+# These helpers recover the JSON object best-effort. They are also imported by
+# api_client.py (single source of truth — see CLAUDE.md one-name rule).
+
+def extract_json_object( text: str ) -> Optional[ str ]:
+    """
+    Extract the last balanced JSON object from text by matching braces.
+
+    Recovers a JSON object embedded in surrounding prose (e.g. "Here's the
+    script: { ... }"). Ports the BFE/TFE forensic-parser approach.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns the substring of the last balanced {...} object, or None
+    """
+    close_idx = text.rfind( "}" )
+    if close_idx == -1:
+        return None
+
+    depth = 0
+    for i in range( close_idx, -1, -1 ):
+        if text[ i ] == "}":
+            depth += 1
+        elif text[ i ] == "{":
+            depth -= 1
+            if depth == 0:
+                return text[ i : close_idx + 1 ]
+
+    return None
+
+
+def lenient_json_loads( response_content: str ) -> Optional[ dict ]:
+    """
+    Best-effort recovery of a JSON object from a (possibly chatty) completion.
+
+    Strategy (D6-LENIENT):
+        1. Strip leading/trailing markdown code fences.
+        2. Try a direct `json.loads`.
+        3. On failure, extract the last balanced {...} object from the prose
+           and retry.
+
+    Requires:
+        - response_content is a string
+
+    Ensures:
+        - returns the parsed dict, or None if no JSON object can be recovered
+    """
+    content = response_content.strip()
+
+    # Strip markdown code fences
+    if content.startswith( "```json" ):
+        content = content[ 7: ]
+    if content.startswith( "```" ):
+        content = content[ 3: ]
+    if content.endswith( "```" ):
+        content = content[ :-3 ]
+    content = content.strip()
+
+    try:
+        return json.loads( content )
+    except json.JSONDecodeError:
+        pass
+
+    extracted = extract_json_object( content )
+    if extracted is None:
+        return None
+
+    try:
+        return json.loads( extracted )
+    except json.JSONDecodeError:
+        return None
+
+
+# =============================================================================
 # Response Parsers
 # =============================================================================
 
 def parse_analysis_response( response_content: str ) -> dict:
     """
-    Parse the content analysis response from Claude.
+    Parse the content analysis response from Claude (D6-LENIENT).
 
     Requires:
-        - response_content contains JSON (possibly with markdown)
+        - response_content contains JSON (possibly with markdown / prose)
 
     Ensures:
         - Returns dictionary with analysis fields
-        - Returns default structure if parsing fails
+        - Recovers JSON embedded in surrounding prose (bounded-CC tolerant)
+        - Returns default structure if no JSON object can be recovered
 
     Args:
-        response_content: Raw response from Claude API
+        response_content: Raw response from Claude
 
     Returns:
         dict: Parsed content analysis
     """
-    # Clean up markdown code blocks if present
-    content = response_content.strip()
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    if content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
+    parsed = lenient_json_loads( response_content )
+    if parsed is not None:
+        return parsed
 
-    try:
-        return json.loads( content.strip() )
-    except json.JSONDecodeError:
-        # Return default structure if parsing fails
-        return {
-            "main_topic"              : "Unknown Topic",
-            "key_subtopics"           : [],
-            "interesting_facts"       : [],
-            "discussion_questions"    : [],
-            "analogies_suggested"     : [],
-            "target_audience"         : "general audience",
-            "complexity_level"        : "intermediate",
-            "estimated_coverage_minutes" : 10,
-        }
+    # Return default structure if no JSON object can be recovered
+    return {
+        "main_topic"              : "Unknown Topic",
+        "key_subtopics"           : [],
+        "interesting_facts"       : [],
+        "discussion_questions"    : [],
+        "analogies_suggested"     : [],
+        "target_audience"         : "general audience",
+        "complexity_level"        : "intermediate",
+        "estimated_coverage_minutes" : 10,
+    }
 
 
 def parse_script_response( response_content: str ) -> dict:
     """
-    Parse the script generation response from Claude.
+    Parse the script generation response from Claude (D6-LENIENT).
 
     Requires:
-        - response_content contains JSON script
+        - response_content contains a JSON script (possibly with markdown / prose)
 
     Ensures:
         - Returns dictionary with title, segments, key_topics
-        - Returns default structure if parsing fails
+        - Recovers JSON embedded in surrounding prose (bounded-CC tolerant)
+        - Returns default structure if no JSON object can be recovered
+
+    Floor invariant: a recovered object with zero segments still yields an
+    empty-segment script; the downstream audio phase enforces the
+    "no segments → real failure" floor (orchestrator Phase 5 guards), so a
+    cosmetic formatting drift never silently produces a broken podcast.
 
     Args:
-        response_content: Raw response from Claude API
+        response_content: Raw response from Claude
 
     Returns:
         dict: Parsed script data
     """
-    # Clean up markdown code blocks
-    content = response_content.strip()
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    if content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-
-    try:
-        parsed = json.loads( content.strip() )
-
+    parsed = lenient_json_loads( response_content )
+    if parsed is not None:
         # Validate required fields
         if "segments" not in parsed:
             parsed[ "segments" ] = []
         if "title" not in parsed:
             parsed[ "title" ] = "Untitled Podcast"
-
         return parsed
 
-    except json.JSONDecodeError:
-        # Return default structure if parsing fails
-        return {
-            "title"                      : "Untitled Podcast",
-            "segments"                   : [],
-            "key_topics"                 : [],
-            "estimated_duration_minutes" : 0,
-        }
+    # Return default structure if no JSON object can be recovered
+    return {
+        "title"                      : "Untitled Podcast",
+        "segments"                   : [],
+        "key_topics"                 : [],
+        "estimated_duration_minutes" : 0,
+    }
 
 
 def extract_prosody_from_text( text: str ) -> tuple[ str, list[ str ] ]:

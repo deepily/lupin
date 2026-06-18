@@ -172,16 +172,17 @@ When migrating an existing direct-SDK agent to bounded CC, follow this order:
 
 - **BFE** (Bug Fix Expediter) — `src/cosa/agents/bug_fix_expediter/`. Autonomous bug-fix workflow.
 - **TFE** (Test Fix Expediter) — `src/cosa/agents/test_fix_expediter/`. Autonomous test-fix workflow.
+- **Podcast script generation** (`src/cosa/agents/podcast_generator/`) — migrated 2026-06-18 (bounded-CC Phase 1). The four script-phase LLM methods in `PodcastAPIClient` (`call_for_analysis`/`call_for_script`/`call_for_revision`/`call_with_json_output`) swapped from `AsyncAnthropic.messages.create` to in-process `claude_agent_sdk.query` (D-DR1 Option X) with `tools=[]` (pure text synthesis), `permission_mode="plan"`, and `max_turns=podcast script max turns` (INI, default 5). Parsers made D6-LENIENT (recover JSON from chatty completions). The audio (TTS/ElevenLabs) phase is unchanged. Scope: `src/rnd/v0.1.8/2026.06.18-podcast-phase1-bounded-cc-scope.md`.
 
-Both ride the CJ Flow agentic pool with `task_type=BOUNDED` and have been in production for some weeks at the time of writing without consuming firewalled-key budget. Use them as code-shape references when migrating new agents.
+The first three ride the CJ Flow agentic pool with `task_type=BOUNDED` (BFE/TFE) or in-process `sdk_query` (Podcast); all have been validated without consuming firewalled-key budget. Use them as code-shape references when migrating new agents.
 
 ### Candidates (tracked in `TODO.md`)
 
 | Agent | Current state | Notes |
 |---|---|---|
-| **Deep Research** (`src/cosa/agents/deep_research/`) | Path B — uses firewalled key for multi-turn research + synthesis | Largest current firewalled-account line-item. WebSearch + WebFetch are core to its work, both available in CC tool surface. Good fit. |
-| **Podcast script generation** (`src/cosa/agents/podcast_generator/`) | Path B — direct SDK for script-generation phase | Script generation is pure text synthesis; perfect fit. Audio TTS phase stays on whatever path it currently uses. |
-| **Presentation generation** (`src/cosa/agents/presentation_generator/`) | Path B — direct SDK for content phase | Same shape as podcast — text synthesis with structured output. pptx-assembly phase stays as-is. |
+| **Deep Research** (`src/cosa/agents/deep_research/`) | Path B — uses firewalled key for multi-turn research + synthesis | Largest current firewalled-account line-item. WebSearch + WebFetch are core to its work, both available in CC tool surface. Good fit. **Phase 3** (ratified D1=A ordering). |
+| ~~**Podcast script generation**~~ | ✅ **MIGRATED 2026-06-18** (Phase 1) | See "Precedent — already migrated" above. |
+| **Presentation generation** (`src/cosa/agents/presentation_generator/`) | Path B — direct SDK for content phase | Same shape as podcast — text synthesis with structured output. pptx-assembly phase stays as-is. **Phase 2** (ratified D1=A ordering). |
 
 ### NOT candidates
 

@@ -274,6 +274,11 @@ class PodcastConfig:
     target_duration_minutes    : int   = 10
     min_exchanges              : int   = 8
     max_exchanges              : int   = 20
+    # Bounded-CC (in-process sdk_query) turn cap for script-phase calls.
+    # Script generation is effectively single-shot (1 synthesis turn, maybe a
+    # revision turn); 5 gives generous headroom. The bounded path REQUIRES an
+    # explicit max_turns.
+    script_max_turns           : int   = 5
     include_intro              : bool  = True
     include_outro              : bool  = True
     prosody_annotation_level   : Literal[ "minimal", "moderate", "detailed" ] = "moderate"
@@ -437,6 +442,7 @@ class PodcastConfig:
             target_duration_minutes   = _get( "podcast target duration minutes",   "10",   "int" ),
             min_exchanges             = _get( "podcast min exchanges",             "8",    "int" ),
             max_exchanges             = _get( "podcast max exchanges",             "20",   "int" ),
+            script_max_turns          = _get( "podcast script max turns",          "5",    "int" ),
             include_intro             = _get( "podcast include intro",             "True", "boolean" ),
             include_outro             = _get( "podcast include outro",             "True", "boolean" ),
             prosody_annotation_level  = _get( "podcast prosody annotation level",  "moderate" ),

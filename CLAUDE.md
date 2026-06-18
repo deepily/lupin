@@ -83,9 +83,9 @@ The bounded CC pattern is the cost-optimal default for LLM-driven agents that:
 3. Tolerate ~1-3s SDK-subprocess spawn overhead per invocation
 4. Use Anthropic-backed models only
 
-Already migrated: **BFE** (`src/cosa/agents/bug_fix_expediter/`), **TFE** (`src/cosa/agents/test_fix_expediter/`).
+Already migrated: **BFE** (`src/cosa/agents/bug_fix_expediter/`), **TFE** (`src/cosa/agents/test_fix_expediter/`), **Podcast script generation** (`src/cosa/agents/podcast_generator/` — Phase 1, 2026-06-18; in-process `sdk_query`, `tools=[]`, D6-lenient parsers).
 
-Migration candidates (tracked in TODO.md): **Deep Research**, **podcast script generation**, **presentation content generation**.
+Migration candidates (tracked in TODO.md), in ratified order: **Presentation content generation** (Phase 2), **Deep Research** (Phase 3).
 
 **Framing**: this is a **cost-shift, not zero-cost**. The Max 200 plan is a fixed monthly bill. Migrations convert per-token metered spend into already-paid fixed cost. Never describe a migration as "free" — describe it as "covered by existing fixed cost."
 

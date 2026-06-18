@@ -34,6 +34,8 @@ from cosa.agents.podcast_generator.prompts.script_generation import (
     parse_analysis_response,
     parse_script_response,
     extract_prosody_from_text,
+    extract_json_object,
+    lenient_json_loads,
 )
 
 
@@ -246,6 +248,83 @@ class TestExtractProsodyFromText( unittest.TestCase ):
         clean, annotations = extract_prosody_from_text( "plain dialogue with no markers" )
         self.assertEqual( annotations, [] )
         self.assertEqual( clean, "plain dialogue with no markers" )
+
+
+class TestExtractJsonObject( unittest.TestCase ):
+    """extract_json_object — last balanced {...} recovery (D6-LENIENT)."""
+
+    def test_clean_object( self ):
+        self.assertEqual( extract_json_object( '{"a": 1}' ), '{"a": 1}' )
+
+    def test_embedded_in_prose( self ):
+        self.assertEqual(
+            extract_json_object( 'Here you go: {"a": 1} cheers!' ), '{"a": 1}'
+        )
+
+    def test_nested_braces_returns_outermost( self ):
+        # Exercises the depth>0 (397->392) arc: an inner `{` decrements depth to 1,
+        # not 0, so the loop continues to the true outer opening brace.
+        self.assertEqual(
+            extract_json_object( 'x {"a": {"b": 2}} y' ), '{"a": {"b": 2}}'
+        )
+
+    def test_no_closing_brace_returns_none( self ):
+        self.assertIsNone( extract_json_object( "no braces at all" ) )
+
+    def test_closing_without_matching_open_returns_none( self ):
+        # `}` present but no balancing `{` → loop exhausts → return None (line 400).
+        self.assertIsNone( extract_json_object( "dangling } brace" ) )
+
+
+class TestLenientJsonLoads( unittest.TestCase ):
+    """lenient_json_loads — fence-strip → direct → prose-extract fallbacks."""
+
+    def test_direct_parse( self ):
+        self.assertEqual( lenient_json_loads( '{"a": 1}' ), { "a": 1 } )
+
+    def test_json_fence_strip( self ):
+        self.assertEqual( lenient_json_loads( '```json\n{"a": 1}\n```' ), { "a": 1 } )
+
+    def test_bare_fence_strip( self ):
+        self.assertEqual( lenient_json_loads( '```\n{"b": 2}\n```' ), { "b": 2 } )
+
+    def test_prose_recovery( self ):
+        self.assertEqual( lenient_json_loads( 'Sure! {"c": 3} done.' ), { "c": 3 } )
+
+    def test_no_json_returns_none( self ):
+        self.assertIsNone( lenient_json_loads( "absolutely no json here" ) )
+
+    def test_extracted_but_invalid_returns_none( self ):
+        # Direct parse fails; extract returns "{not: valid}" which is still not
+        # valid JSON → second json.loads fails → None (lines 441-442).
+        self.assertIsNone( lenient_json_loads( "prefix {not valid json} suffix" ) )
+
+
+class TestLenientParsers( unittest.TestCase ):
+    """parse_*_response now recover JSON from chatty bounded-CC completions."""
+
+    def test_script_recovers_from_prose( self ):
+        out = parse_script_response( 'Here is the script: {"title": "T", "segments": [{"speaker": "A"}]}' )
+        self.assertEqual( out[ "title" ], "T" )
+        self.assertEqual( len( out[ "segments" ] ), 1 )
+
+    def test_script_fills_missing_fields( self ):
+        out = parse_script_response( '{"key_topics": ["x"]}' )   # no title/segments
+        self.assertEqual( out[ "title" ], "Untitled Podcast" )
+        self.assertEqual( out[ "segments" ], [] )
+
+    def test_script_unrecoverable_returns_default( self ):
+        out = parse_script_response( "totally not json" )
+        self.assertEqual( out[ "title" ], "Untitled Podcast" )
+        self.assertEqual( out[ "segments" ], [] )
+
+    def test_analysis_recovers_from_prose( self ):
+        out = parse_analysis_response( 'Analysis: {"main_topic": "AI"}' )
+        self.assertEqual( out[ "main_topic" ], "AI" )
+
+    def test_analysis_unrecoverable_returns_default( self ):
+        out = parse_analysis_response( "not json" )
+        self.assertEqual( out[ "main_topic" ], "Unknown Topic" )
 
 
 if __name__ == "__main__":
