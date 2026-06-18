@@ -238,7 +238,9 @@ def assemble_app(
           with a fake cfg + fake gateway)
     """
     from lupin_arbiter_app.health_watcher import HealthWatcherLoop, docker_inspect_health
-    from lupin_arbiter_app.fleet_arbiter_loop import FleetArbiterLoop, build_fleet_arbiter_job_factory
+    from lupin_arbiter_app.fleet_arbiter_loop import (
+        FleetArbiterLoop, build_fleet_arbiter_job_factory, make_follow_through_watcher_factory,
+    )
     from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
     # Relocated 2026-06-11 (fleet-roster reserve-from-random): the roster
     # reader lives with its env-var siblings in voice_persona_helpers now
@@ -275,6 +277,15 @@ def assemble_app(
         _arbiter_project = "lupin"
     declared_managers = pick_declared_managers_from_env( _arbiter_project )
     log_fn( "declared_managers_resolved", project=_arbiter_project, managers=declared_managers )
+
+    # ── eng#7 (2026-06-17): the follow-through aged-escalation watcher factory.
+    # Built here (cfg + gateway in hand) and threaded into every recycled job so
+    # the watcher rides the arbiter poll loop (build-plan §3b). REUSES the job's
+    # session_is_not_owed predicate for §4.5 hygiene (bound per-job inside the
+    # factory). Inert at runtime until `follow through escalation enabled` flips
+    # true (default false) — wiring it in is behavior-neutral.
+    follow_through_watcher_factory = make_follow_through_watcher_factory(
+        cfg, gateway, log_fn=arbiter_log_fn )
 
     # ── fleet arbiter (L3): the standing v2.2 arbiter on the recycle supervisor ──
     fleet_arbiter_factory = build_fleet_arbiter_job_factory(
@@ -319,6 +330,7 @@ def assemble_app(
         # the next poll. Default TRUE (the feature is on out of the box; OFF is the
         # rollback). dm_activity_fn defaults to the real DB reader inside the factory.
         count_dm_as_liveness_fn = lambda: cfg.get( "arbiter count dm as liveness", default=True, return_type="boolean" ),
+        follow_through_watcher_factory = follow_through_watcher_factory,        # eng#7 §3b
     )
     fleet_arbiter_loop = FleetArbiterLoop( fleet_arbiter_factory, log_fn=arbiter_log_fn )
 

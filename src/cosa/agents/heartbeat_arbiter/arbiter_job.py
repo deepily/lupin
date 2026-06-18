@@ -432,6 +432,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         resolve_manager_fn       : Optional[ Callable ] = None,
         resolve_active_managers_fn : Optional[ Callable ] = None,
         list_managers_fn         : Optional[ Callable ] = None,
+        follow_through_watcher_factory : Optional[ Callable ] = None,   # eng#7: (job) -> watcher | None (chicken-egg resolver; None → inert)
         log_fn                   : Optional[ Callable ] = None,
         user_id      : str  = None,
         user_email   : str  = None,
@@ -745,6 +746,21 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # Item B §3.4: terminal-unacked facts that ride the NEXT Rick-bound
         # advisory body (never a fresh escalation loop).
         self._unacked_notes = [ ]
+        # eng#7 (2026-06-17, Mr Radio): the follow-through aged-escalation watcher
+        # rides THIS poll loop (build-plan §3b). A FACTORY seam — not an instance —
+        # resolves the chicken-egg: the watcher's §4.5 hold_check_fn IS
+        # self.session_is_not_owed (the arbiter's already-built store-owed
+        # suppression predicate, REUSED not re-implemented), which exists only once
+        # self is built. None → INERT (in-pool / unit-fake / legacy construction):
+        # the flag-gated sweep is simply never called. The :8001 factory wires a
+        # real factory that builds FollowThroughEscalationWatcher( config_mgr,
+        # escalate_fn=<directed manager poke>, hold_check_fn=self.session_is_not_owed ).
+        # Mirrors the other None-seam patterns in this ctor: a None seam is visibly
+        # inert, never a hidden behavior change.
+        self._follow_through_watcher = (
+            follow_through_watcher_factory( self )
+            if follow_through_watcher_factory is not None else None
+        )
 
     def last_question_asked( self ) -> str:
         """Human-readable display string for the queue UI (QueueableJob protocol)."""
@@ -851,6 +867,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # receipts (§3.4) + Rick re-announce of pending advisories (§3.5).
         outreach_acks = self._check_outreach_receipts( now )
         reannounces   = self._check_pending_outreach( now )
+        # eng#7 (2026-06-17): ONE follow-through aged-escalation sweep on the poll
+        # path (build-plan §3b). Doubly inert — no watcher wired OR flag OFF — and
+        # swallow-safe (the observer invariant); see _sweep_follow_through.
+        ft_escalated  = self._sweep_follow_through()
 
         self._poll_count += 1
         summary = {
@@ -868,6 +888,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "fleet_dark"          : fleet_dark,
             "outreach_acks"       : outreach_acks,
             "reannounces"         : reannounces,
+            "ft_escalated"        : ft_escalated,            # eng#7 follow-through one-shot escalations this poll
             "rendered"            : rendered,
         }
         # post-game F1: promote the summary to the journal whenever ANY outreach
@@ -875,9 +896,41 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if any( summary[ k ] for k in (
                 "pings_fired", "taps_fired", "managers_down", "decisions",
                 "stalled", "pokes_fired", "manager_stale_pokes", "fleet_dark", "cycles",
-                "outreach_acks", "reannounces" ) ):
+                "outreach_acks", "reannounces", "ft_escalated" ) ):
             self._log( "arbiter_poll_activity", **summary )
         return summary
+
+    def _sweep_follow_through( self ):
+        """
+        eng#7 (2026-06-17): run ONE follow-through aged-escalation sweep on the
+        arbiter poll path (build-plan §3b). Inert in TWO independent layers:
+
+          (a) no watcher wired — `follow_through_watcher_factory` was None at
+              construction (in-pool / unit-fake / legacy) → return 0, no work; AND
+          (b) watcher wired but `follow through escalation enabled`=False → the
+              watcher's own sweep_once() short-circuits (no DB access) and reports
+              {enabled:False, escalated:0, …}.
+
+        Swallow-safe per the observer invariant: a watcher / store hiccup is
+        DEMOTED to a render-sink line and never kills the poll. (The watcher's own
+        daemon `_loop` guards exceptions, but THIS direct-sweep path bypasses that
+        loop, so the guard must live here.)
+
+        Ensures:
+            - no watcher → returns 0 (sweep_once never called)
+            - watcher present → calls sweep_once() and returns its `escalated`
+              count (0 when the flag is OFF); any exception is swallowed to a
+              render-sink log and returns 0
+            - never raises
+        """
+        if self._follow_through_watcher is None:
+            return 0
+        try:
+            result = self._follow_through_watcher.sweep_once()
+            return result.get( "escalated", 0 ) if isinstance( result, dict ) else 0
+        except Exception as e:
+            self._render_sink( f"follow-through sweep error (swallowed, observer invariant): {e!r}" )
+            return 0
 
     def _publish_fleet_snapshot( self, fleet_view, now, count_dm=True ):
         """
