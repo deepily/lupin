@@ -276,7 +276,7 @@ class TestGroupAWholeChainProducer:
         """FM-19 headline: no hold + owed Task* (in_progress) → block dict + real poke event + counter==1."""
         roots.enable( cap=3 )
         tp  = roots.task_transcript( _OWED )
-        out = stop._run_heartbeat( "sidA1", tp )
+        out, _ = stop._run_heartbeat( "sidA1", tp )
 
         assert out[ "decision" ] == "block"
         assert "in-progress" in out[ "reason" ]                # oracle specifics quoted
@@ -296,7 +296,7 @@ class TestGroupAWholeChainProducer:
         """create→completed: not owed, task set NON-empty → no poke, no event line, NO idle."""
         roots.enable()
         tp  = roots.task_transcript( _DONE )
-        out = stop._run_heartbeat( "sidA2", tp )
+        out, _ = stop._run_heartbeat( "sidA2", tp )
 
         assert out is None                                     # not_owed → no block
         assert roots.events( "sidA2" ) == [ ]                  # not_owed skipped; non-empty set → no idle
@@ -306,10 +306,10 @@ class TestGroupAWholeChainProducer:
         """in_progress → poke; append completed (next turn) → not owed, non-empty set → no poke, no idle."""
         roots.enable()
         tp = roots.task_transcript( _OWED )
-        assert stop._run_heartbeat( "sidA3", tp )[ "decision" ] == "block"
+        assert stop._run_heartbeat( "sidA3", tp )[ 0 ][ "decision" ] == "block"
 
         roots.append_update( tp, 1, "completed" )              # the work got finished
-        out2 = stop._run_heartbeat( "sidA3", tp )
+        out2, _ = stop._run_heartbeat( "sidA3", tp )
         assert out2 is None
         ev = roots.events( "sidA3" )
         assert [ r[ "outcome" ] for r in ev ] == [ OUTCOME_POKE ]   # only the first poke; no new line
@@ -318,7 +318,7 @@ class TestGroupAWholeChainProducer:
         """Empty Task* set + no hold → not_owed AND empty set → exactly ONE idle beacon."""
         roots.enable()
         tp  = roots.task_transcript( _EMPTY )
-        out = stop._run_heartbeat( "sidA4", tp )
+        out, _ = stop._run_heartbeat( "sidA4", tp )
 
         assert out is None
         ev = roots.events( "sidA4" )
@@ -333,11 +333,11 @@ class TestGroupAWholeChainProducer:
         roots.enable()
         # task 1: pending → in_progress → completed  ⇒ final completed ⇒ NOT owed
         tp1 = roots.task_transcript( [ ( "create", ), ( "update", 1, "in_progress" ), ( "update", 1, "completed" ) ] )
-        assert stop._run_heartbeat( "sidA5a", tp1 ) is None
+        assert stop._run_heartbeat( "sidA5a", tp1 )[ 0 ] is None
 
         # task 1: pending → completed → in_progress  ⇒ final in_progress ⇒ OWED
         tp2 = roots.task_transcript( [ ( "create", ), ( "update", 1, "completed" ), ( "update", 1, "in_progress" ) ] )
-        assert stop._run_heartbeat( "sidA5b", tp2 )[ "decision" ] == "block"
+        assert stop._run_heartbeat( "sidA5b", tp2 )[ 0 ][ "decision" ] == "block"
 
     def test_a6_ordinal_taskid_mapping( self, roots ):
         """Sequential ordinal ids: create×2 then update BOTH to completed → not owed (proves Nth-create→str(N))."""
@@ -348,7 +348,7 @@ class TestGroupAWholeChainProducer:
         ] )
         # If ordinal mapping were wrong, an update could miss a created task → a
         # phantom pending task → false poke. Correct mapping ⇒ both terminal ⇒ no poke.
-        assert stop._run_heartbeat( "sidA6", tp ) is None
+        assert stop._run_heartbeat( "sidA6", tp )[ 0 ] is None
 
     def test_a7_many_events_replay_correct( self, roots ):
         """Scale/correctness (Tiberius): 30 creates, most completed, a few left in_progress → owed poke."""
@@ -359,7 +359,7 @@ class TestGroupAWholeChainProducer:
         events.append( ( "update", 29, "in_progress" ) )       # 29 still working
         # task 30 left at created/pending
         tp  = roots.task_transcript( events )
-        out = stop._run_heartbeat( "sidA7", tp )
+        out, _ = stop._run_heartbeat( "sidA7", tp )
         assert out[ "decision" ] == "block"                    # 29 in_progress + 30 pending ⇒ owed
         # the real oracle saw exactly the two owed tasks
         from lupin_cli.claude_code.hooks.lib.heartbeat_task_state import fetch_task_work_owed
@@ -380,11 +380,11 @@ class TestGroupBPokeCapAndReset:
         tp  = roots.task_transcript( _OWED )
 
         for expected in ( 1, 2, 3 ):
-            out = stop._run_heartbeat( sid, tp )
+            out, _ = stop._run_heartbeat( sid, tp )
             assert out[ "decision" ] == "block"
             assert roots.poke_count( sid ) == expected
 
-        out4 = stop._run_heartbeat( sid, tp )                  # at cap
+        out4, _ = stop._run_heartbeat( sid, tp )                  # at cap
         assert out4 is None                                    # cap_reached → no block
         assert roots.poke_count( sid ) == 3                    # NOT incremented past cap
 
@@ -402,12 +402,12 @@ class TestGroupBPokeCapAndReset:
 
         stop._run_heartbeat( sid, tp )
         stop._run_heartbeat( sid, tp )                         # count now 2 == cap
-        assert stop._run_heartbeat( sid, tp ) is None          # cap_reached
+        assert stop._run_heartbeat( sid, tp )[ 0 ] is None          # cap_reached
         assert roots.poke_count( sid ) == 2
 
         roots.reset_via_user_prompt( sid )                     # genuine user re-engagement
         assert roots.poke_count( sid ) == 0
-        out = stop._run_heartbeat( sid, tp )                   # budget reopened
+        out, _ = stop._run_heartbeat( sid, tp )                   # budget reopened
         assert out[ "decision" ] == "block"
         assert roots.poke_count( sid ) == 1
 
@@ -416,9 +416,9 @@ class TestGroupBPokeCapAndReset:
         roots.enable( cap=1 )
         sid = "sidB3"
         tp  = roots.task_transcript( _OWED )
-        assert stop._run_heartbeat( sid, tp )[ "decision" ] == "block"
+        assert stop._run_heartbeat( sid, tp )[ 0 ][ "decision" ] == "block"
         assert roots.poke_count( sid ) == 1
-        assert stop._run_heartbeat( sid, tp ) is None
+        assert stop._run_heartbeat( sid, tp )[ 0 ] is None
         assert roots.events( sid )[ -1 ][ "outcome" ] == OUTCOME_CAP_REACHED
 
     def test_b4_selfpoke_does_not_reset_cap_so_loop_halts( self, roots ):
@@ -434,14 +434,14 @@ class TestGroupBPokeCapAndReset:
         tp  = roots.task_transcript( _OWED )
 
         for expected in ( 1, 2, 3 ):
-            out = stop._run_heartbeat( sid, tp )
+            out, _ = stop._run_heartbeat( sid, tp )
             assert out[ "decision" ] == "block"
             assert roots.poke_count( sid ) == expected             # NOT reset between pokes
             # The synthetic poke prompt is recognized → user_prompt_submit skips the
             # reset (the skip itself is proven in the user_prompt_submit unit suite).
             assert is_heartbeat_poke_prompt( out[ "reason" ] ) is True
 
-        assert stop._run_heartbeat( sid, tp ) is None              # cap reached → loop HALTS
+        assert stop._run_heartbeat( sid, tp )[ 0 ] is None              # cap reached → loop HALTS
         assert roots.poke_count( sid ) == 3
         assert roots.events( sid )[ -1 ][ "outcome" ] == OUTCOME_CAP_REACHED
 
@@ -459,7 +459,7 @@ class TestGroupCHoldOraclePrecedence:
         roots.seed_hold( sid, reason="holding on Rachel", work_owed=True, fresh=True, awaiting="peer:Rachel" )
         tp  = roots.task_transcript( _OWED )                   # oracle WOULD owe
 
-        assert stop._run_heartbeat( sid, tp ) is None          # honored wins over oracle
+        assert stop._run_heartbeat( sid, tp )[ 0 ] is None          # honored wins over oracle
         assert roots.poke_count( sid ) == 0
         rec = roots.events( sid )[ -1 ]
         assert rec[ "outcome" ]  == OUTCOME_HONORED
@@ -472,7 +472,7 @@ class TestGroupCHoldOraclePrecedence:
         roots.seed_hold( sid, reason="was holding", work_owed=True, fresh=False, awaiting="none" )
         tp  = roots.task_transcript( _EMPTY )                  # oracle NOT owed
 
-        out = stop._run_heartbeat( sid, tp )
+        out, _ = stop._run_heartbeat( sid, tp )
         assert out[ "decision" ] == "block"
         assert out[ "reason" ]   == DECLARED_OWED_REASON       # declared (not oracle) reason text
         assert roots.events( sid )[ -1 ][ "work_owed" ] is False   # oracle verdict is the emitted bool
@@ -484,7 +484,7 @@ class TestGroupCHoldOraclePrecedence:
         roots.seed_hold( sid, reason="was holding", work_owed=True, fresh=False )
         tp  = roots.task_transcript( _OWED )
 
-        out = stop._run_heartbeat( sid, tp )
+        out, _ = stop._run_heartbeat( sid, tp )
         assert out[ "decision" ] == "block"
         assert "in-progress" in out[ "reason" ]                # oracle specifics win the reason text
         assert roots.events( sid )[ -1 ][ "work_owed" ] is True
@@ -496,7 +496,7 @@ class TestGroupCHoldOraclePrecedence:
         roots.seed_hold( sid, reason="", work_owed=True, fresh=True )
         tp  = roots.task_transcript( _EMPTY )
 
-        out = stop._run_heartbeat( sid, tp )
+        out, _ = stop._run_heartbeat( sid, tp )
         assert out is not None and out[ "decision" ] == "block"   # reasonless ⇒ not a defended quiescence
         assert roots.events( sid )[ -1 ][ "outcome" ] == OUTCOME_POKE
 
@@ -507,7 +507,7 @@ class TestGroupCHoldOraclePrecedence:
         roots.seed_hold( sid, reason="all finished", work_owed=False, fresh=False )
         tp  = roots.task_transcript( _OWED )                   # oracle WOULD owe
 
-        assert stop._run_heartbeat( sid, tp ) is None          # declared done short-circuits
+        assert stop._run_heartbeat( sid, tp )[ 0 ] is None          # declared done short-circuits
         assert roots.poke_count( sid ) == 0
         # not_owed with a NON-empty task set ⇒ no idle, no event line at all
         assert roots.events( sid ) == [ ]
@@ -518,7 +518,7 @@ class TestGroupCHoldOraclePrecedence:
         sid = "sidC5"
         roots.seed_hold( sid, reason="mid long run", work_owed=True, fresh=True, awaiting="commons:coordination" )
         tp  = roots.task_transcript( _OWED )
-        assert stop._run_heartbeat( sid, tp ) is None
+        assert stop._run_heartbeat( sid, tp )[ 0 ] is None
         assert roots.events( sid )[ -1 ][ "outcome" ] == OUTCOME_HONORED
 
     def test_c6_fresh_reasoned_hold_empty_taskset_honored_not_idle( self, roots ):
@@ -528,7 +528,7 @@ class TestGroupCHoldOraclePrecedence:
         roots.seed_hold( sid, reason="paused deliberately", work_owed=True, fresh=True )
         tp  = roots.task_transcript( _EMPTY )                  # would otherwise emit an idle beacon
 
-        assert stop._run_heartbeat( sid, tp ) is None
+        assert stop._run_heartbeat( sid, tp )[ 0 ] is None
         outcomes = [ r[ "outcome" ] for r in roots.events( sid ) ]
         assert outcomes == [ OUTCOME_HONORED ]                 # honored, NOT idle
         assert EVENT_IDLE not in outcomes
@@ -539,7 +539,7 @@ class TestGroupCHoldOraclePrecedence:
         sid = "sidC6b"
         roots.seed_hold( sid, reason="", work_owed=True, fresh=True )   # reasonless ⇒ not honored
         tp  = roots.task_transcript( _EMPTY )
-        out = stop._run_heartbeat( sid, tp )
+        out, _ = stop._run_heartbeat( sid, tp )
         assert out[ "decision" ] == "block"
         assert out[ "reason" ]   == DECLARED_OWED_REASON
 
@@ -556,7 +556,7 @@ class TestGroupDIdleEdgeTrigger:
         sid = "sidD1"
         tp  = roots.task_transcript( _EMPTY )
         for _ in range( 3 ):
-            assert stop._run_heartbeat( sid, tp ) is None
+            assert stop._run_heartbeat( sid, tp )[ 0 ] is None
         outcomes = [ r[ "outcome" ] for r in roots.events( sid ) ]
         assert outcomes == [ EVENT_IDLE ]                      # de-duped: one beacon, not three
 
@@ -600,7 +600,7 @@ class TestGroupEFireAndForgetDegradation:
         monkeypatch.setattr( stop.heartbeat_events, "emit_outcome",
                              lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "disk gone" ) ) )
         tp  = roots.task_transcript( _OWED )
-        out = stop._run_heartbeat( "sidE1", tp )
+        out, _ = stop._run_heartbeat( "sidE1", tp )
         assert out[ "decision" ] == "block"                    # the §0 #2 invariant
         assert "heartbeat_emit_error" in logged
 
@@ -616,7 +616,7 @@ class TestGroupEFireAndForgetDegradation:
         monkeypatch.setattr( stop.heartbeat_events, "is_idle_transition",
                              lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "boom" ) ) )
         tp = roots.task_transcript( _EMPTY )
-        assert stop._run_heartbeat( "sidE2", tp ) is None      # stop still allowed
+        assert stop._run_heartbeat( "sidE2", tp )[ 0 ] is None      # stop still allowed
         assert "heartbeat_idle_emit_error" in logged
 
     def test_e3_events_dir_unwritable_returns_false_poke_proceeds( self, roots, monkeypatch ):
@@ -628,7 +628,7 @@ class TestGroupEFireAndForgetDegradation:
         blocker.write_text( "i am a file, not a dir" )
         monkeypatch.setattr( heartbeat_events, "FLEET_EVENTS_DIR", blocker / "events" )
         tp  = roots.task_transcript( _OWED )
-        out = stop._run_heartbeat( "sidE3", tp )
+        out, _ = stop._run_heartbeat( "sidE3", tp )
         assert out[ "decision" ] == "block"                    # poke unaffected by the write failure
         assert heartbeat_events.emit_outcome( "sidE3", "p", OUTCOME_POKE, 1, 3, base_dir=blocker / "events" ) is False
 
@@ -646,7 +646,7 @@ class TestGroupEFireAndForgetDegradation:
         )
         # last VALID outcome is "honored" ⇒ a fresh empty stop is a real idle transition
         tp = roots.task_transcript( _EMPTY )
-        assert stop._run_heartbeat( sid, tp ) is None
+        assert stop._run_heartbeat( sid, tp )[ 0 ] is None
         assert [ r[ "outcome" ] for r in roots.events( sid ) ] == [ "honored", EVENT_IDLE ]
 
     # ── conservative degradation: a sick transcript NEVER false-pokes / crashes (Rachel #9) ──
@@ -654,7 +654,7 @@ class TestGroupEFireAndForgetDegradation:
     def test_e5_none_transcript_path_no_poke_no_crash( self, roots ):
         """transcript_path=None → reader empty → not_owed (+empty set ⇒ idle beacon) → no poke, no crash."""
         roots.enable()
-        assert stop._run_heartbeat( "sidE5", None ) is None
+        assert stop._run_heartbeat( "sidE5", None )[ 0 ] is None
         assert roots.poke_count( "sidE5" ) == 0
         assert [ r[ "outcome" ] for r in roots.events( "sidE5" ) ] == [ EVENT_IDLE ]
 
@@ -662,7 +662,7 @@ class TestGroupEFireAndForgetDegradation:
         """A transcript_path that does not exist → reader empty → no poke, no crash."""
         roots.enable()
         ghost = str( roots.transcripts / "does-not-exist.jsonl" )
-        assert stop._run_heartbeat( "sidE6", ghost ) is None
+        assert stop._run_heartbeat( "sidE6", ghost )[ 0 ] is None
         assert roots.poke_count( "sidE6" ) == 0
 
     def test_e7_partial_truncated_last_line_uses_valid_prefix( self, roots ):
@@ -672,7 +672,7 @@ class TestGroupEFireAndForgetDegradation:
         # second line is a half-flushed JSON object (no closing) AND no trailing newline
         broken = '{ "type": "assistant", "message": { "role": "assistant", "content": [ { "type": "tool_us'
         tp     = roots.raw_transcript( valid + "\n" + broken )
-        out    = stop._run_heartbeat( "sidE7", tp )
+        out, _ = stop._run_heartbeat( "sidE7", tp )
         # the one valid TaskCreate ⇒ a pending (owed) task ⇒ poke; the broken line is simply skipped
         assert out[ "decision" ] == "block"
 
@@ -923,7 +923,7 @@ class TestGroupSSettingsLoaderSeam:
         monkeypatch.setenv( "HOME", str( home ) )
         # NOTE: do NOT call roots.enable() — we want the REAL loader to run.
         tp = roots.task_transcript( _OWED )
-        assert stop._run_heartbeat( "sidS1", tp )[ "decision" ] == "block"
+        assert stop._run_heartbeat( "sidS1", tp )[ 0 ][ "decision" ] == "block"
 
     def test_s2_real_loader_missing_file_defaults_off_no_poke( self, roots, monkeypatch ):
         """No settings.json → REAL loader returns the conservative default (enabled=False) → NO poke even if owed."""
@@ -931,5 +931,5 @@ class TestGroupSSettingsLoaderSeam:
         home.mkdir()
         monkeypatch.setenv( "HOME", str( home ) )              # ~/.claude/settings.json absent
         tp = roots.task_transcript( _OWED )
-        assert stop._run_heartbeat( "sidS2", tp ) is None      # dormant by default → no exhaust
+        assert stop._run_heartbeat( "sidS2", tp )[ 0 ] is None      # dormant by default → no exhaust
         assert roots.events( "sidS2" ) == [ ]

@@ -122,7 +122,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": False, "poke_cap": 3 } )
     def test_disabled_returns_none_no_reads( self, mock_load, mock_read ):
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         mock_read.assert_not_called()
         self.mock_replay.assert_not_called()
         self.mock_events.emit_outcome.assert_not_called()
@@ -132,7 +132,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             side_effect=ValueError( "bad poke_cap" ) )
     def test_malformed_config_fails_safe( self, mock_load, mock_read, mock_log ):
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         mock_read.assert_not_called()
         self.mock_events.emit_outcome.assert_not_called()
         assert "heartbeat_settings_invalid" in [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
@@ -147,7 +147,7 @@ class TestRunHeartbeat:
     def test_v2_fm19_catch_no_hold_owed_task_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """FM-19: no hold + owed Task* (in_progress) → poke (the v2 headline catch)."""
         self.mock_replay.return_value = _OWED_STATE
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert out[ "reason" ]                                    # oracle-owed reason (quotes specifics)
         mock_incr.assert_called_once_with( "sid" )
@@ -169,7 +169,7 @@ class TestRunHeartbeat:
         """v1 preserved: stale self-declared-owed hold pokes even with no owed Task*."""
         mock_read.return_value       = _stale_owed_hold()
         self.mock_replay.return_value = _EMPTY_STATE
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out == { "decision": "block", "reason": DECLARED_OWED_REASON }
         mock_incr.assert_called_once_with( "sid" )
         # §4 breadcrumb: declared-owed poke has no Task* count → self-declared text
@@ -186,7 +186,7 @@ class TestRunHeartbeat:
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_fresh_hold_honored( self, mock_load, mock_read, mock_count, mock_incr ):
         mock_read.return_value = _fresh_reasoned_hold()
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         mock_incr.assert_not_called()
         self.mock_notify.assert_not_called()    # §4 breadcrumb rides ONLY the poke
 
@@ -197,7 +197,7 @@ class TestRunHeartbeat:
     def test_not_owed_empty_taskset_emits_idle( self, mock_load, mock_read, mock_count ):
         """not_owed + empty Task* set → genuine-idle beacon (transition)."""
         self.mock_replay.return_value = _EMPTY_STATE
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         # idle beacon emitted (is_idle_transition True by fixture)
         self.mock_events.is_idle_transition.assert_called_once_with( "sid" )
         idle_calls = [ c for c in self.mock_events.emit_outcome.call_args_list
@@ -212,7 +212,7 @@ class TestRunHeartbeat:
     def test_not_owed_nonempty_taskset_no_idle( self, mock_load, mock_read, mock_count ):
         """not_owed but tasks exist (all completed) → NOT genuine-idle → no beacon."""
         self.mock_replay.return_value = _DONE_STATE        # nothing owed, but task set NON-empty
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         self.mock_events.is_idle_transition.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
@@ -225,7 +225,7 @@ class TestRunHeartbeat:
                                                  mock_incr, mock_notify ):
         """Owed Task* but at cap → no poke, cap FYI, no increment."""
         self.mock_replay.return_value = _OWED_STATE
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         mock_notify.assert_called_once_with( "sid" )
         mock_incr.assert_not_called()
 
@@ -256,7 +256,7 @@ class TestRunHeartbeat:
         """§0 #2: emission failure must NOT break the poke."""
         self.mock_replay.return_value = _OWED_STATE
         self.mock_events.emit_outcome.side_effect = RuntimeError( "disk full" )
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "heartbeat_emit_error" in [ c.kwargs[ "extra" ][ "phase" ] for c in mock_log.call_args_list ]
 
@@ -270,7 +270,7 @@ class TestRunHeartbeat:
     def test_manager_with_alive_worker_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """The manager bug fix: zero Task* items, one live spawned worker → poke."""
         self.mock_delegations.return_value = [ { "session_name": "cc-reviewer-x-1", "session_id": "c1" } ]
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "1 live worker(s) still out" in out[ "reason" ]
         _, kwargs = self.mock_events.emit_outcome.call_args
@@ -283,7 +283,7 @@ class TestRunHeartbeat:
     def test_manager_all_workers_reaped_idles( self, mock_load, mock_read, mock_count ):
         """All children reaped (gatherer returns []) → no delegation signal → idle path."""
         self.mock_delegations.return_value = [ ]
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
@@ -295,7 +295,7 @@ class TestRunHeartbeat:
         True, an unhandled inbound assignment DM → poke to resume/finish (the v3
         behavior, now behind the gate)."""
         self.mock_inbound.return_value = { "owed": [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ], "stale": [ ] }
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "unanswered inbound question" in out[ "reason" ]
         _, kwargs = self.mock_events.emit_outcome.call_args
@@ -312,7 +312,7 @@ class TestRunHeartbeat:
         poke, no increment, no tmux injection. The arbiter's own manager-stale
         poke-DMs stop self-inflating the owed count."""
         self.mock_inbound.return_value = { "owed": [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ], "stale": [ ] }
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         mock_incr.assert_not_called()
         self.mock_inject.assert_not_called()
 
@@ -343,7 +343,7 @@ class TestRunHeartbeat:
         reason VERBATIM (wrap=False) into tmux EXACTLY once. Block + one keystroke
         nudge = one continuation — never a block+tmux double-submit."""
         self.mock_replay.return_value = _OWED_STATE
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         self.mock_inject.assert_called_once_with( "sid", out[ "reason" ], wrap=False )
 
@@ -355,7 +355,7 @@ class TestRunHeartbeat:
     def test_no_poke_does_not_inject( self, mock_load, mock_read, mock_count, mock_incr ):
         """A fresh reasoned hold is honored → no poke → NO tmux injection."""
         mock_read.return_value = _fresh_reasoned_hold()
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         self.mock_inject.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
@@ -368,7 +368,7 @@ class TestRunHeartbeat:
         """Re-entry bound: owed Task* but poke_cap reached → no poke → NO injection.
         The cap is the guard that stops a re-fire from double-injecting."""
         self.mock_replay.return_value = _OWED_STATE
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
         self.mock_inject.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop.decide_heartbeat" )
@@ -387,7 +387,7 @@ class TestRunHeartbeat:
             "hook_output": { "decision": "block", "reason": "" },
         }
         self.mock_replay.return_value = _OWED_STATE
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out == { "decision": "block", "reason": "" }
         self.mock_inject.assert_not_called()
 
@@ -712,7 +712,7 @@ class TestMainBranchCWiring:
 
     @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings" )
     @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat",
-            return_value={ "decision": "block", "reason": "poke!" } )
+            return_value=( { "decision": "block", "reason": "poke!" }, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
@@ -739,7 +739,7 @@ class TestMainBranchCWiring:
     @patch( "lupin_cli.claude_code.hooks.stop._arm_idle_waiter" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
             return_value={ "enabled": True, "backoff_minutes": [ 5 ] } )
-    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.emit_json" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
@@ -771,7 +771,7 @@ class TestMainBranchCWiring:
 class TestMainSpeakerphonePokeMatrix:
 
     def _patches( self, *, payload, pending_voice=False, heartbeat_output=None,
-                  idle_behavior="idle_announce", persona=None ):
+                  owed_unknown=False, idle_behavior="idle_announce", persona=None ):
         """One ExitStack-style patch bundle for the speakerphone matrix."""
         from contextlib import ExitStack
         stack = ExitStack()
@@ -785,7 +785,7 @@ class TestMainSpeakerphonePokeMatrix:
             "speakerphone"  : p( "get_speakerphone", return_value=True ),
             "auto_narrate"  : p( "_try_auto_narrate" ),
             "voice_peek"    : p( "_has_pending_voice", return_value=pending_voice ),
-            "heartbeat"     : p( "_run_heartbeat", return_value=heartbeat_output ),
+            "heartbeat"     : p( "_run_heartbeat", return_value=( heartbeat_output, owed_unknown ) ),
             "idle_behavior" : p( "_stop_hook_idle_behavior", return_value=idle_behavior ),
             "persona"       : p( "get_voice_persona", return_value=persona ),
             "announce_idle" : p( "_announce_idle" ),
@@ -832,7 +832,7 @@ class TestMainSpeakerphonePokeMatrix:
             with pytest.raises( SystemExit ):
                 main()
             m[ "heartbeat" ].assert_called_once_with( "abc12345", None, None )   # no transcript/cwd keys
-            m[ "announce_idle" ].assert_called_once_with( "abc12345", "Rachel" )
+            m[ "announce_idle" ].assert_called_once_with( "abc12345", "Rachel", owed_unknown=False )
             m[ "emit" ].assert_called_once_with( {} )
 
     def test_speakerphone_blocking_ask_still_suppressed( self ):
@@ -1177,6 +1177,36 @@ class TestOwedCountFromStore:
         assert _args[ 3 ] == STORE_OWED_STATUSES
         assert kwargs[ "project" ] == "lupin"
 
+    def test_accented_persona_queries_canonical_key_FLIP( self ):
+        """FACET-1 FLIP (the persona-axis false-idle): a persona whose name carries
+        an accent ("María") must query the store's CANONICAL key "maria" — not the
+        bare-.lower() "maría" that matched ZERO rows and false-idled. Neutralize
+        canonical_persona_key (revert to .lower()) and the asserted key flips to
+        "maría" → this test fails → it genuinely guards the fix."""
+        self.vp.return_value = { "name": "María" }
+        self.qo.return_value = ( True, 7 )
+        assert _owed_count_from_store( "sid" ) == ( 7, True )
+        assert self.qo.call_args[ 0 ][ 2 ] == "maria"
+
+    def test_punctuated_persona_keeps_internal_space_FLIP( self ):
+        """FACET-1 FLIP: "Mr. Radio" → "mr radio" (period dropped, INTERNAL SPACE
+        KEPT — exactly the store's owner_persona form). Guards against accidentally
+        substituting _norm_persona, which would strip the space to "mrradio" and
+        still miss every row."""
+        self.vp.return_value = { "name": "Mr. Radio" }
+        self.qo.return_value = ( True, 2 )
+        assert _owed_count_from_store( "sid" ) == ( 2, True )
+        assert self.qo.call_args[ 0 ][ 2 ] == "mr radio"
+
+    def test_already_normalized_pool_name_is_idempotent( self ):
+        """Regression-safety: the live bridge already holds the normalized pool
+        form ("mr radio"); the canonical key is IDEMPOTENT so it still queries
+        "mr radio" (no double-normalization breakage)."""
+        self.vp.return_value = { "name": "mr radio" }
+        self.qo.return_value = ( True, 5 )
+        _owed_count_from_store( "sid" )
+        assert self.qo.call_args[ 0 ][ 2 ] == "mr radio"
+
     def test_persona_name_none_falls_back_to_unknown( self ):
         self.vp.return_value = { "name": None }
         self.qo.return_value = ( True, 0 )
@@ -1242,7 +1272,7 @@ class TestRunHeartbeatStoreSource:
         """flag ON + store reports owed rows → poke, even with an EMPTY transcript
         (proves the owed source is the STORE, not replay)."""
         self.mock_replay.return_value = { }                  # empty transcript
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         _, kwargs = self.mock_events.emit_outcome.call_args
         assert kwargs[ "work_owed" ] is True
@@ -1255,8 +1285,12 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
     def test_flag_on_store_zero_idles( self, mock_load, mock_read, mock_count, mock_store ):
-        """flag ON + store reports zero owed → not owed; empty transcript → idle beacon."""
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        """flag ON + store reports zero owed → not owed; empty transcript → idle beacon.
+        FACET-2 CONTRAST: store ANSWERED (store_ok=True, count 0) → owed_unknown is
+        False → genuine "nothing owed" is correct here (vs the unreachable case)."""
+        out, owed_unknown = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out is None
+        assert owed_unknown is False
         idle = [ c for c in self.mock_events.emit_outcome.call_args_list if c.args[ 2 ] == "idle" ]
         assert len( idle ) == 1
 
@@ -1272,8 +1306,14 @@ class TestRunHeartbeatStoreSource:
         → store-owed fails safe to 0, the verdict is not_owed, NO poke, distinct
         log phase, no increment (don't guess the STORE count when it's down).
         O1: this is NO LONGER an early return — the oracle still runs over the
-        (empty) local signals, so emit_outcome fires the not_owed/idle beacon."""
-        assert _run_heartbeat( "sid", "/t.jsonl" ) is None
+        (empty) local signals, so emit_outcome fires the not_owed/idle beacon.
+
+        FACET-2 FLIP: the returned owed_unknown is True (store source ON but the
+        read FAILED) — the caller must NOT then claim "nothing owed". Neutralize
+        the owed_unknown=True assignment and this flips to False → test fails."""
+        out, owed_unknown = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out is None
+        assert owed_unknown is True
         assert "heartbeat_store_unreachable" in [ c.kwargs[ "extra" ][ "phase" ]
                                                   for c in mock_log.call_args_list ]
         # The oracle now runs to completion (no early return): the outcome is
@@ -1296,7 +1336,7 @@ class TestRunHeartbeatStoreSource:
         return suppressed it, silencing the manager. Now the store-owed count
         fails safe to 0 but the delegation survives the outage → poke."""
         self.mock_delegations.return_value = [ { "session_name": "cc-reviewer-x-1", "session_id": "c1" } ]
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out is not None and out[ "decision" ] == "block"
         assert "1 live worker(s) still out" in out[ "reason" ]
         # The store-unreachable log still fires (the count failed safe)...
@@ -1320,7 +1360,7 @@ class TestRunHeartbeatStoreSource:
         (store-independent) and must survive a store outage."""
         self.mock_inbound.return_value = { "owed": [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ],
                                            "stale": [ ] }
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out is not None and out[ "decision" ] == "block"
         assert "unanswered inbound question" in out[ "reason" ]
         mock_incr.assert_called_once()
@@ -1337,7 +1377,7 @@ class TestRunHeartbeatStoreSource:
         """DEFAULT (flag OFF): owed source is the transcript replay; the store
         reader is NEVER consulted."""
         self.mock_replay.return_value = { "1": "in_progress" }     # owed via transcript
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         mock_store.assert_not_called()
 
@@ -1351,7 +1391,7 @@ class TestRunHeartbeatStoreSource:
         """§B: with the store owed-count 0, a LIVE spawned worker still pokes —
         the manager delegations signal survives the source swap."""
         self.mock_delegations.return_value = [ { "session_name": "cc-reviewer-x-1", "session_id": "c1" } ]
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "1 live worker(s) still out" in out[ "reason" ]
 
@@ -1368,6 +1408,6 @@ class TestRunHeartbeatStoreSource:
         inbound DM still pokes — the worker-inbound signal survives the swap."""
         self.mock_inbound.return_value = { "owed": [ { "question_id": "q1", "ts": "2026-06-10T01:00:00+00:00" } ],
                                            "stale": [ ] }
-        out = _run_heartbeat( "sid", "/t.jsonl" )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "unanswered inbound question" in out[ "reason" ]

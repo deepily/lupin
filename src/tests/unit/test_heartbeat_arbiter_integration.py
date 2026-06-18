@@ -260,7 +260,7 @@ class TestGroupPCLoopClosure:
         ] } } )
         tp.write_text( line + "\n" )
 
-        out = stop._run_heartbeat( "ha-sid-1", str( tp ) )
+        out, _ = stop._run_heartbeat( "ha-sid-1", str( tp ) )
         assert out[ "decision" ] == "block"                       # producer poked (sanity)
 
         # the REAL emitted file lands in the conftest-redirected fleet dir
