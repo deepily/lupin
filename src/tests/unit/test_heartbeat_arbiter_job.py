@@ -492,3 +492,97 @@ class TestDeclaredManagers:
                          bridge_mtime_fn=lambda sid: None )
         job._publish_fleet_snapshot( { }, _dt.datetime( 2026, 6, 11, tzinfo=_dt.timezone.utc ) )
         assert seen[ "declared_managers" ] == [ "Mr. Radio", "Tiberius" ]
+
+
+# ── eng#7: follow-through aged-escalation watcher wiring (build-plan §3b) ───────
+#
+# Proves (a) the watcher rides the poll path (sweep_once invoked from _poll_once),
+# (b) the factory seam is invoked ONCE at construction with the job (chicken-egg
+# resolver), (c) the `follow through escalation enabled`=False flag gates it OFF
+# end-to-end through a REAL watcher, and (d) the sweep is swallow-safe + inert when
+# unwired. Lane: Rachel (eng#7 wiring). Manager: Mr. Radio.
+
+class _FakeFollowThroughWatcher:
+    """Records sweep_once() calls; returns a scripted result or raises."""
+    def __init__( self, result=None, raises=False ):
+        self._result = result
+        self._raises  = raises
+        self.calls    = 0
+    def sweep_once( self ):
+        self.calls += 1
+        if self._raises:
+            raise RuntimeError( "sweep boom" )
+        return self._result
+
+
+class _FakeCfg:
+    """Minimal ConfigurationManager stand-in for the REAL watcher's flag read."""
+    def __init__( self, values ):
+        self._v = values
+    def get( self, key, default=None, return_type=None ):
+        return self._v.get( key, default )
+
+
+def test_follow_through_watcher_none_by_default( tmp_path ):
+    # No factory wired (in-pool / unit-fake / legacy construction) → INERT.
+    job = _make_job( tmp_path )
+    assert job._follow_through_watcher is None
+    assert job._sweep_follow_through() == 0                       # direct: None → 0
+    summary = job._poll_once()
+    assert summary[ "ft_escalated" ] == 0                         # poll-path: inert → 0
+
+
+def test_follow_through_factory_invoked_once_with_job_at_construction( tmp_path ):
+    seen    = [ ]
+    watcher = _FakeFollowThroughWatcher( result={ "enabled": True, "escalated": 0, "candidates": 0 } )
+    def fac( job ):
+        seen.append( job )
+        return watcher
+    job = _make_job( tmp_path, follow_through_watcher_factory=fac )
+    assert seen == [ job ]                                        # called ONCE, with the job itself
+    assert job._follow_through_watcher is watcher                 # the chicken-egg resolver bound it
+
+
+def test_follow_through_sweep_invoked_from_poll_path_and_counted( tmp_path ):
+    watcher = _FakeFollowThroughWatcher( result={ "enabled": True, "escalated": 2, "candidates": 3 } )
+    job     = _make_job( tmp_path, follow_through_watcher_factory=lambda j: watcher )
+    summary = job._poll_once()
+    assert watcher.calls == 1                                     # swept exactly once from _poll_once
+    assert summary[ "ft_escalated" ] == 2                         # escalated count surfaced in the summary
+
+
+def test_follow_through_flag_off_gates_sweep_off_through_real_watcher( tmp_path ):
+    # The activation gate proof: a REAL FollowThroughEscalationWatcher with the
+    # enable flag FALSE → sweep_once short-circuits (no DB, no escalate_fn) → 0.
+    from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
+    escalations = [ ]
+    watcher = FollowThroughEscalationWatcher(
+        _FakeCfg( { "follow through escalation enabled": False } ),
+        escalate_fn = lambda *a: escalations.append( a ),
+    )
+    job     = _make_job( tmp_path, follow_through_watcher_factory=lambda j: watcher )
+    summary = job._poll_once()
+    assert summary[ "ft_escalated" ] == 0                         # flag OFF → zero escalations
+    assert escalations == [ ]                                     # escalate_fn never fired
+
+
+def test_follow_through_sweep_swallows_exception( tmp_path ):
+    # Observer invariant: a watcher hiccup is demoted to a render-sink line, not a
+    # dead poll. (sweep_once raises only on THIS direct path — its daemon _loop is
+    # bypassed — so the guard lives in _sweep_follow_through.)
+    rendered = [ ]
+    watcher  = _FakeFollowThroughWatcher( raises=True )
+    job      = _make_job( tmp_path, follow_through_watcher_factory=lambda j: watcher,
+                          render_sink=rendered.append )
+    assert job._sweep_follow_through() == 0                       # swallowed → 0
+    assert any( "follow-through sweep error" in line for line in rendered )
+    # and the whole poll still completes (never raises)
+    assert job._poll_once()[ "ft_escalated" ] == 0
+
+
+def test_follow_through_sweep_non_dict_result_returns_zero( tmp_path ):
+    # A non-dict sweep_once result (defensive) → 0, never an attribute error.
+    watcher = _FakeFollowThroughWatcher( result=None )
+    job     = _make_job( tmp_path, follow_through_watcher_factory=lambda j: watcher )
+    assert job._sweep_follow_through() == 0
+    assert watcher.calls == 1

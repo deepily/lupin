@@ -134,6 +134,70 @@ def make_warmup_notify_fn(
     return notify_fn
 
 
+# ── eng#7 follow-through watcher factory (build-plan §3b) ───────────────────
+
+def make_follow_through_watcher_factory(
+    config_mgr,
+    gateway,
+    *,
+    log_fn : Optional[ Callable ] = None,
+) -> Callable[ [ Any ], Any ]:
+    """
+    Build the eng#7 follow-through-watcher FACTORY: a `(job) -> FollowThroughEscalationWatcher`
+    callable the ArbiterConsumerJob invokes ONCE at construction.
+
+    The factory (not a bare instance) is what resolves the chicken-egg in the job
+    ctor: the watcher's §4.5 hold_check_fn IS `job.session_is_not_owed` — the
+    arbiter's already-built store-owed suppression predicate (Clayton's lane-4
+    primitive). REUSING it means #7 never duplicates the store-read + classification
+    and never contends on the poke path. The escalate_fn fires ONE directed poke at
+    the accountable manager via the bridge-less gateway when an awaiting:manager item
+    has aged past T_escalate.
+
+    Gating lives in the watcher: `follow through escalation enabled` (default False)
+    makes sweep_once() a no-op, so wiring this factory in changes ZERO runtime
+    behavior until a deliberate post-soak flip.
+
+    Requires:
+        - config_mgr exposes .get( key, default=, return_type= ) (the watcher reads
+          the enable flag, tick multiplier, and live `arbiter poll seconds`)
+        - gateway exposes send_to( recipient, body ) (the directed manager poke)
+
+    Ensures:
+        - returns factory( job ) -> a FollowThroughEscalationWatcher wired with
+          config_mgr, the directed-manager-poke escalate_fn, and
+          hold_check_fn = job.session_is_not_owed
+        - the escalate_fn is degrade-safe: a gateway.send_to blow-up is logged
+          (follow_through_escalation_error), never raised — escalation must never
+          kill a poll (observer invariant)
+        - construction is pure in-memory (no DB / clock / hold-file IO until the
+          flag is flipped AND sweep_once runs); fully testable with a fake gateway
+          + fake cfg + a stub job exposing session_is_not_owed
+    """
+    log_fn = log_fn if log_fn is not None else _default_log_fn
+
+    def _escalate_fn( item, manager, worker, awaited_since ):
+        body = ( f"FOLLOW-THROUGH ESCALATION — you ({manager}) owe verification on an aged "
+                 f"awaiting-manager item: '{item.title}' (worker {worker}, awaiting since "
+                 f"{awaited_since.isoformat()}). Ack it or verify the work." )
+        try:
+            gateway.send_to( manager, body )
+            log_fn( "follow_through_escalation", item=str( item.id ), manager=manager,
+                    worker=worker, awaited_since=awaited_since.isoformat() )
+        except Exception as e:                       # escalation degrade-safe (observer invariant)
+            log_fn( "follow_through_escalation_error", item=str( item.id ), error=str( e ) )
+
+    def factory( job ) -> Any:
+        from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
+        return FollowThroughEscalationWatcher(
+            config_mgr,
+            escalate_fn   = _escalate_fn,
+            hold_check_fn = job.session_is_not_owed,   # §4.5: reuse the store-owed predicate
+        )
+
+    return factory
+
+
 # ── the standing-job factory ────────────────────────────────────────────────
 
 def build_fleet_arbiter_job_factory(
@@ -182,6 +246,12 @@ def build_fleet_arbiter_job_factory(
     # activates the 5th signal; injectable for tests (never CALLED at construction).
     count_dm_as_liveness_fn : Optional[ Callable ] = None,
     dm_activity_fn          : Optional[ Callable ] = None,
+    # eng#7 (2026-06-17): the follow-through aged-escalation watcher factory
+    # ((job) -> watcher). None keeps it INERT (no watcher wired); app.py builds the
+    # real one (make_follow_through_watcher_factory) so the :8001 job rides it. Even
+    # wired, the `follow through escalation enabled`=False flag keeps sweep_once a
+    # no-op until a deliberate flip — zero runtime behavior change on wiring-in.
+    follow_through_watcher_factory : Optional[ Callable ] = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -238,6 +308,7 @@ def build_fleet_arbiter_job_factory(
             reannounce_interval_seconds = reannounce_interval,
             reannounce_ttl_seconds      = reannounce_ttl,
             pending_ledger_path         = pending_ledger_path,
+            follow_through_watcher_factory = follow_through_watcher_factory,        # eng#7 §3b
             snapshot_sink              = lambda snap: store.set_section( "fleet_arbiter", snap ),
             render_sink                = lambda line: log_fn( "fleet_arbiter_render", line=line ),
             notify_fn                  = warmup_notify,

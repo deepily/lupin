@@ -208,3 +208,86 @@ def test_build_factory_default_no_declared_managers():
                                            manager_on_duty="dut" )()
     assert job.declared_managers == [ ]
     assert job.declared_fallback_manager == "dut"                # INI fallback unchanged
+
+
+# ── eng#7: follow-through watcher factory (build-plan §3b) ───────────────────
+
+import types
+
+from lupin_arbiter_app.fleet_arbiter_loop import make_follow_through_watcher_factory
+
+
+class _StubJob:
+    """Stands in for ArbiterConsumerJob — exposes only session_is_not_owed."""
+    def session_is_not_owed( self, persona, fleet_view=None ):
+        return False
+
+
+class _FakeCfg:
+    def __init__( self, values=None ): self._v = values or { }
+    def get( self, key, default=None, return_type=None ): return self._v.get( key, default )
+
+
+def _item( id="i-1", title="Verify lane 4" ):
+    return types.SimpleNamespace( id=id, title=title )
+
+
+def test_follow_through_factory_builds_watcher_with_bound_hold_check():
+    from cosa.rest.follow_through_escalation_watcher import FollowThroughEscalationWatcher
+    cfg, gw, job = _FakeCfg(), FakeGateway(), _StubJob()
+    factory = make_follow_through_watcher_factory( cfg, gw, log_fn=lambda *a, **k: None )
+    watcher = factory( job )
+    assert isinstance( watcher, FollowThroughEscalationWatcher )
+    assert watcher._config_mgr is cfg
+    # §4.5: hold_check IS the job's store-owed predicate (REUSED, not re-implemented)
+    assert watcher._hold_check_fn == job.session_is_not_owed
+
+
+def test_follow_through_escalate_fn_pokes_accountable_manager():
+    gw, rec = FakeGateway(), Recorder()
+    watcher = make_follow_through_watcher_factory( _FakeCfg(), gw, log_fn=rec.log )( _StubJob() )
+    awaited = T0
+    watcher._escalate_fn( _item( id="i-9", title="Aged item" ), "Mr. Radio", "Rachel", awaited )
+    assert len( gw.sends ) == 1
+    recipient, body = gw.sends[ 0 ]
+    assert recipient == "Mr. Radio"
+    assert "Aged item" in body and "Rachel" in body              # names the item + the waiting worker
+    ev = [ f for e, f in rec.logs if e == "follow_through_escalation" ]
+    assert ev and ev[ 0 ][ "item" ] == "i-9" and ev[ 0 ][ "manager" ] == "Mr. Radio"
+
+
+def test_follow_through_escalate_fn_error_swallowed():
+    rec = Recorder()
+    class BadGW( FakeGateway ):
+        def send_to( self, recipient, body, metadata=None ): raise RuntimeError( "commons down" )
+    watcher = make_follow_through_watcher_factory( _FakeCfg(), BadGW(), log_fn=rec.log )( _StubJob() )
+    watcher._escalate_fn( _item(), "Mr. Radio", "Rachel", T0 )   # must NOT raise
+    assert any( e == "follow_through_escalation_error" for e, _ in rec.logs )
+
+
+def test_follow_through_factory_default_log_fn( capsys ):
+    # No log_fn → the module default (_default_log_fn) is used (else-branch cover).
+    watcher = make_follow_through_watcher_factory( _FakeCfg(), FakeGateway() )( _StubJob() )
+    watcher._escalate_fn( _item( id="i-d" ), "Mgr", "Wkr", T0 )
+    p = json.loads( capsys.readouterr().out.strip() )
+    assert p[ "event" ] == "follow_through_escalation" and p[ "item" ] == "i-d"
+
+
+def test_build_factory_threads_follow_through_watcher_factory():
+    gw, store = FakeGateway(), LocalSnapshotStore()
+    sentinel = object()
+    seen     = [ ]
+    def fac( job ):
+        seen.append( job )
+        return sentinel
+    job = build_fleet_arbiter_job_factory(
+        gw, store, log_fn=lambda *a, **k: None,
+        follow_through_watcher_factory=fac )()
+    assert job._follow_through_watcher is sentinel               # threaded → wired into the job
+    assert seen == [ job ]                                       # factory called once, with the job
+
+
+def test_build_factory_default_no_follow_through_watcher():
+    gw, store = FakeGateway(), LocalSnapshotStore()
+    job = build_fleet_arbiter_job_factory( gw, store, log_fn=lambda *a, **k: None )()
+    assert job._follow_through_watcher is None                   # default → inert
