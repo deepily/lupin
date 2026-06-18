@@ -270,5 +270,153 @@ def test_malformed_rows_and_snapshot_are_safe():
     assert "m3" not in job._mgr_stale_since
 
 
+# ── L1 store-awareness (lane 4, 2026-06-17): BLOCKED_ON_USER / DONE suppress ──
+#    the case-14 poke; ACTIVE / UNKNOWN keep today's behavior. The discriminator
+#    is the per-poll store classification (owed_class), mirroring _check_manager_acks.
+
+from cosa.agents.heartbeat_arbiter.arbiter_job import (
+    CLASS_BLOCKED_ON_USER, CLASS_DONE, CLASS_ACTIVE, CLASS_UNKNOWN,
+)
+
+
+def _awaiting( escal ):
+    return [ m for m in escal if "MANAGER-AWAITING-RICK" in m ]
+
+def _done_adv( escal ):
+    return [ m for m in escal if "MANAGER-DONE" in m ]
+
+
+def test_blocked_on_user_manager_suppressed_to_case16():
+    """BLOCKED_ON_USER: a manager whose every owed item is Rick-gated is silent
+    BECAUSE it correctly waits — NO case-14 poke; exactly ONE case-16 advisory."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
+    fired = job._check_manager_staleness( snap, NOW, active_managers=[ ],
+                                          owed_class={ "Tiberius": CLASS_BLOCKED_ON_USER } )
+    assert fired == 0                                       # no staleness poke
+    assert _stale_pokes( gw ) == [ ]                        # nothing sent to the manager
+    assert len( _awaiting( escal ) ) == 1                  # ONE awaiting-Rick advisory
+    assert "Tiberius" in _awaiting( escal )[ 0 ]
+    assert [ m for m in escal if "MANAGER-STALE" in m ] == [ ]   # NOT the case-14 advisory
+    assert "m1" not in job._mgr_stale_since                # no staleness episode opened
+    assert "Tiberius" in job._manager_blocked_advised
+
+
+def test_done_manager_suppressed_to_case17():
+    """DONE: a manager owing zero non-terminal work is finished/idle — NO case-14
+    poke; exactly ONE case-17 consider-reaping advisory."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Rachel" ) )
+    fired = job._check_manager_staleness( snap, NOW, active_managers=[ ],
+                                          owed_class={ "Rachel": CLASS_DONE } )
+    assert fired == 0 and _stale_pokes( gw ) == [ ]
+    assert len( _done_adv( escal ) ) == 1 and "Rachel" in _done_adv( escal )[ 0 ]
+    assert "m1" not in job._mgr_stale_since
+    assert "Rachel" in job._manager_done_advised
+
+
+def test_active_manager_still_poked():
+    """ACTIVE (≥1 non-Rick-gated owed item) → today's case-14 staleness poke."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Krishna" ) )
+    fired = job._check_manager_staleness( snap, NOW, active_managers=[ ],
+                                          owed_class={ "Krishna": CLASS_ACTIVE } )
+    assert fired == 1 and len( _stale_pokes( gw ) ) == 1
+    assert len( [ m for m in escal if "MANAGER-STALE" in m ] ) == 1   # case-14 advisory
+    assert _awaiting( escal ) == [ ] and _done_adv( escal ) == [ ]
+
+
+def test_unknown_class_fails_safe_to_poke():
+    """UNKNOWN (seam unwired / store hiccup / persona absent from owed_class) →
+    FAIL SAFE: today's case-14 poke (never silently suppress). This preserves the
+    quota-freeze true positive (all-stale-UNKNOWN still escalates)."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Ghost" ) )
+    # owed_class explicitly UNKNOWN AND, separately, persona absent → both fail-safe
+    fired = job._check_manager_staleness( snap, NOW, active_managers=[ ],
+                                          owed_class={ "Ghost": CLASS_UNKNOWN } )
+    assert fired == 1 and len( _stale_pokes( gw ) ) == 1
+    # absent-from-owed_class path (defaults to UNKNOWN) on a fresh job
+    gw2, escal2 = _GW(), [ ]
+    job2 = _job( gw2, notify=lambda m, *a, **k: escal2.append( m ) )
+    assert job2._check_manager_staleness( snap, NOW, active_managers=[ ], owed_class={ } ) == 1
+
+
+def test_blocked_advisory_fires_once_then_silent():
+    """The case-16 advisory is one-time: repeated polls over the same blocked
+    manager never re-fire it (anti-storm; shared advised flag)."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
+    for k in range( 6 ):
+        job._check_manager_staleness( snap, NOW + datetime.timedelta( seconds=k * 60 ),
+                                      active_managers=[ ],
+                                      owed_class={ "Tiberius": CLASS_BLOCKED_ON_USER } )
+    assert len( _awaiting( escal ) ) == 1 and _stale_pokes( gw ) == [ ]
+
+
+def test_done_advisory_fires_once_then_silent():
+    """The case-17 advisory is one-time too: repeated polls over the same DONE
+    manager never re-fire it (covers the `persona in _manager_done_advised`
+    skip-branch — the DONE twin of the blocked anti-storm)."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Rachel" ) )
+    for k in range( 5 ):
+        job._check_manager_staleness( snap, NOW + datetime.timedelta( seconds=k * 60 ),
+                                      active_managers=[ ], owed_class={ "Rachel": CLASS_DONE } )
+    assert len( _done_adv( escal ) ) == 1 and _stale_pokes( gw ) == [ ]
+
+
+def test_blocked_then_freshens_rearms_case16():
+    """RE-ARM: a suppressed BLOCKED manager that freshens below threshold clears
+    the shared advised flag, so a FUTURE blocked episode re-advises once."""
+    gw, escal = _GW(), [ ]
+    job   = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    stale = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
+    fresh = _snap( _row( "m1", "manager", 60, persona="Tiberius" ) )
+    bl    = { "Tiberius": CLASS_BLOCKED_ON_USER }
+    job._check_manager_staleness( stale, NOW, [ ], owed_class=bl )                 # ep1: case-16
+    assert "Tiberius" in job._manager_blocked_advised and "m1" in job._mgr_stale_suppressed
+    job._check_manager_staleness( fresh, NOW + datetime.timedelta( seconds=60 ), [ ], owed_class=bl )  # freshen → re-arm
+    assert "Tiberius" not in job._manager_blocked_advised and "m1" not in job._mgr_stale_suppressed
+    job._check_manager_staleness( stale, NOW + datetime.timedelta( seconds=120 ), [ ], owed_class=bl ) # ep2: case-16 again
+    assert len( _awaiting( escal ) ) == 2
+
+
+def test_done_then_freshens_rearms_case17():
+    """RE-ARM for the DONE branch (the else-arm of the suppressed-clear loop)."""
+    gw, escal = _GW(), [ ]
+    job   = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    stale = _snap( _row( "m1", "manager", 3000, persona="Rachel" ) )
+    fresh = _snap( _row( "m1", "manager", 60, persona="Rachel" ) )
+    dn    = { "Rachel": CLASS_DONE }
+    job._check_manager_staleness( stale, NOW, [ ], owed_class=dn )
+    assert "Rachel" in job._manager_done_advised
+    job._check_manager_staleness( fresh, NOW + datetime.timedelta( seconds=60 ), [ ], owed_class=dn )
+    assert "Rachel" not in job._manager_done_advised and "m1" not in job._mgr_stale_suppressed
+    job._check_manager_staleness( stale, NOW + datetime.timedelta( seconds=120 ), [ ], owed_class=dn )
+    assert len( _done_adv( escal ) ) == 2
+
+
+def test_cross_detector_dedup_blocked_advised_already_set():
+    """CROSS-DETECTOR DE-DUPE: if _check_manager_acks already fired the case-16
+    advisory (persona in the SHARED _manager_blocked_advised), the staleness path
+    suppresses the poke but does NOT double-page Rick."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    job._manager_blocked_advised.add( "Tiberius" )         # acks path already advised
+    snap = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
+    fired = job._check_manager_staleness( snap, NOW, [ ],
+                                          owed_class={ "Tiberius": CLASS_BLOCKED_ON_USER } )
+    assert fired == 0 and _stale_pokes( gw ) == [ ]        # poke still suppressed
+    assert _awaiting( escal ) == [ ]                       # but NO second advisory
+    assert "m1" not in job._mgr_stale_suppressed           # staleness didn't claim the flag
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

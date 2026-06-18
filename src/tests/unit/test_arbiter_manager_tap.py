@@ -46,11 +46,13 @@ def _job( gw, resolve_map, *, min_interval=300, notify=None ):
     )
 
 
-def _stuck( sid, persona ):
-    return { "session_id": sid, "persona": persona, "state": "stuck", "stuck": True, "holding_on": "none" }
+def _stuck( sid, persona, alive=True ):
+    return { "session_id": sid, "persona": persona, "state": "stuck", "stuck": True,
+             "holding_on": "none", "alive": alive }
 
-def _working( sid, persona ):
-    return { "session_id": sid, "persona": persona, "state": "working", "stuck": False, "holding_on": "none" }
+def _working( sid, persona, alive=True ):
+    return { "session_id": sid, "persona": persona, "state": "working", "stuck": False,
+             "holding_on": "none", "alive": alive }
 
 _NO_GRAPH = { "edges": { }, "cycles": [ ] }
 
@@ -75,6 +77,29 @@ class TestAttentionWorkers:
         job = _job( _Gateway(), { } )
         out = job._attention_workers( { "bad": "x", "ok": _stuck( "ok", "K" ) }, _NO_GRAPH )
         assert [ v[ "persona" ] for v in out ] == [ "K" ]
+
+    def test_reaped_offline_stuck_pruned( self ):
+        # lane 4: a stuck-but-non-alive view (reaped/offline phantom) is EXCLUDED
+        # from the attention roster — the manager-tap token-burn fix.
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "live": _stuck( "live", "Stuckie" ),
+            "dead": _stuck( "dead", "Rio", alive=False ),   # reaped/offline → pruned
+        }
+        out = job._attention_workers( fleet, _NO_GRAPH )
+        assert { v[ "persona" ] for v in out } == { "Stuckie" }
+
+    def test_offline_holder_pruned( self ):
+        # a non-alive holder (stale `holding_on: peer:X` on a dead session) whose
+        # persona is in the blocker edges is STILL excluded — alive gates first.
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "live": _working( "live", "Holder" ),
+            "dead": _working( "dead", "Ghost", alive=False ),
+        }
+        graph = { "edges": { "Holder": "Peer", "Ghost": "Peer" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Holder" }
 
 
 # ── tap firing / throttle ──────────────────────────────────────────────────────

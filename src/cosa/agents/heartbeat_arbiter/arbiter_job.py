@@ -141,6 +141,35 @@ CLASS_DONE            = "done"              # zero non-terminal owed items → c
 CLASS_ACTIVE          = "active"           # has ≥1 normal (non-Rick-gated) owed item → today's behavior
 CLASS_UNKNOWN         = "unknown"          # store read failed / seam unwired → FAIL SAFE (today's behavior)
 
+# The owed-classes that SUPPRESS a blocking escalation (lane 4, 2026-06-17): a
+# session is "not owed" — not a stall, not down — iff its owed work is entirely
+# Rick-gated (BLOCKED_ON_USER) or zero (DONE). ACTIVE / UNKNOWN never suppress
+# (UNKNOWN is fail-SAFE: never silently swallow a real escalation).
+NOT_OWED_CLASSES = ( CLASS_BLOCKED_ON_USER, CLASS_DONE )
+
+
+def owed_class_suppresses( cls ):
+    """
+    The shared store-owed SUPPRESSION PREDICATE (lane 4, 2026-06-17).
+
+    The single, named home for "does this owed-work classification mean DO-NOT-
+    escalate?" — extracted so it is NOT re-inlined per caller. Consumed by the
+    arbiter's three false-escalating detectors (#9 MANAGER-DOWN acks, #11
+    WHOLE-FLEET-STALL, #F2 MANAGER-STALENESS) AND, once this unit lands, by Mr
+    Radio's engagement-#7 follow-through-accountability watcher (its §4.5 "read
+    the worker's declared not-owed state BEFORE firing a blocking-escalation").
+    Reusing this one predicate keeps #7 from duplicating the decision and from
+    contending over the poke path.
+
+    Requires:
+        - cls is a CLASS_* string (or any value; non-members → False)
+
+    Ensures:
+        - returns True iff cls in {CLASS_BLOCKED_ON_USER, CLASS_DONE}
+        - ACTIVE / UNKNOWN / anything else → False (fail-SAFE); never raises
+    """
+    return cls in NOT_OWED_CLASSES
+
 
 def _default_owed_work_fn( personas ):   # pragma: no cover - production store-read IO boundary
     """
@@ -689,6 +718,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._mgr_stale_since  = { }                               # sid -> episode-start datetime
         self._mgr_poke_count   = { }                               # sid -> staleness pokes this episode
         self._mgr_advised      = set()                             # sids whose Rick advisory fired this episode
+        # L1 store-awareness (lane 4, 2026-06-17): sids whose case-14 staleness
+        # poke was SUPPRESSED because the manager classified BLOCKED_ON_USER/DONE.
+        # sid -> (CLASS_*, persona) so the re-arm can clear the SHARED case-16/17
+        # advised flag when the manager freshens out of staleness eligibility.
+        self._mgr_stale_suppressed = { }
         # post-game F3: fleet-dark hybrid trigger state. The edge (prev>0 → 0) is
         # primary; the recovery arm (boot straight into 0 with recent corpses) only
         # runs while NO nonzero roster has been seen this process.
@@ -785,7 +819,18 @@ class ArbiterConsumerJob( AgenticJobBase ):
         owed_class = self._classify_owed( eval_personas, fleet_view )
 
         self._escalate_deadlocks( graph[ "cycles" ], active_managers )    # #5 Rick + all mgrs
-        pings_fired = self._auto_ping( graph[ "edges" ], now, persona_to_sid )  # #4 blocker + cc mgr
+        # REAPED/OFFLINE-PRUNE (lane 4, 2026-06-17): only auto-ping on behalf of an
+        # ALIVE holder. A reaped/long-offline session whose stale `holding_on:
+        # peer:X` lingers on its view row was generating phantom blocker pings (+
+        # owning-manager cc's) every backoff window — a chunk of Mr Radio's token
+        # burn. Deadlock detection (#5) keeps the full graph; only the outbound
+        # ping feed is pruned. A re-activated holder re-enters next poll.
+        alive_personas = {
+            v.get( "persona" ) for v in fleet_view.values()
+            if isinstance( v, dict ) and v.get( "alive" ) is True and v.get( "persona" )
+        }
+        live_edges  = { h: a for h, a in graph[ "edges" ].items() if h in alive_personas }
+        pings_fired = self._auto_ping( live_edges, now, persona_to_sid )  # #4 blocker + cc mgr
         roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds )
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
@@ -797,7 +842,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         rendered      = self._publish_fleet_snapshot( fleet_view, now, count_dm )
         # post-game F2/F3 detectors read the FULL (include_offline=True) detection
         # snapshot + published count the publish step just stashed on the instance.
-        manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers )
+        manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers, owed_class=owed_class )  # #F2 (L1 store-aware, lane 4)
         fleet_dark          = self._check_fleet_dark( self._last_full_snapshot, self._last_published_n, now )
         # post-game F1: why-not-poked gate evaluation — runs AFTER both poke tiers
         # so the emitted vectors reflect this poll's episode state.
@@ -1476,15 +1521,27 @@ class ArbiterConsumerJob( AgenticJobBase ):
         The workers needing a manager's attention: STUCK sessions ∪ holders
         blocked on a peer (the §4 blocked-edge holders).
 
+        REAPED/OFFLINE-PRUNE (lane 4, 2026-06-17): only ALIVE views qualify. A
+        reaped tombstone (Rio, gone from the fleet) or a long-offline session
+        whose STALE `holding_on: peer:X` still lingers on its view row was
+        inflating the manager-tap roster ("N blocked / recommend cajole" listing
+        reaped + non-blocked personas), and each re-tap re-invokes the manager
+        session = full context reload = the token burn Mr Radio flagged. A dead
+        worker's block is not actionable (the arbiter can't poke a session with no
+        process); a re-activated worker re-enters the roster the very next poll.
+        This also stabilizes `_tap_signature`, so the tap fires far less often.
+
         Ensures:
-            - returns a list of view dicts (stuck OR a blocked-edge holder by
-              persona); never raises
+            - returns a list of ALIVE view dicts (stuck OR a blocked-edge holder by
+              persona); reaped/offline views are excluded; never raises
         """
         holders = set( graph[ "edges" ].keys() )
         out     = [ ]
         for view in fleet_view.values():
             if not isinstance( view, dict ):
                 continue
+            if view.get( "alive" ) is not True:
+                continue                                  # reaped/offline-prune (lane 4)
             if view.get( "stuck" ) or view.get( "persona" ) in holders:
                 out.append( view )
         return out
@@ -1738,6 +1795,33 @@ class ArbiterConsumerJob( AgenticJobBase ):
             else:
                 result[ persona ] = CLASS_ACTIVE
         return result
+
+    def session_is_not_owed( self, persona, fleet_view=None ):
+        """
+        Single-session reusable suppression seam (lane 4, 2026-06-17): True iff
+        `persona`'s owed work means it is NOT a stall / NOT down — the canonical
+        store-owed decision in ONE call, so a caller need not pre-compute the
+        per-poll owed_class map.
+
+        This is the named primitive Mr Radio's engagement-#7 follow-through
+        watcher reuses (Tiberius, 2026-06-17): its §4.5 hygiene — "consult the
+        worker's declared not-owed state BEFORE firing a blocking-escalation" — is
+        EXACTLY this decision, so #7 calls this instead of re-implementing the
+        store read + classification (no duplication, no poke-path contention). It
+        composes `_classify_owed` (one swallow-safe store read) with the pure
+        `owed_class_suppresses` predicate.
+
+        Requires:
+            - persona is a string; fleet_view is the per-poll view dict or None
+              (only used for the holding_on "user:" best-effort corroboration)
+
+        Ensures:
+            - returns True iff persona classifies BLOCKED_ON_USER or DONE
+            - ACTIVE / UNKNOWN (incl. unwired seam / store hiccup / absent) → False
+              (fail-SAFE — never suppress a real escalation); one store read; never raises
+        """
+        cls = self._classify_owed( [ persona ], fleet_view or { } ).get( persona, CLASS_UNKNOWN )
+        return owed_class_suppresses( cls )
 
     def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None ):
         """
@@ -2172,13 +2256,33 @@ class ArbiterConsumerJob( AgenticJobBase ):
             f"Post your status or resume. Rick has been advised. (Non-destructive nudge.)"
         )
 
-    def _check_manager_staleness( self, snapshot, now, active_managers ):
+    def _check_manager_staleness( self, snapshot, now, active_managers, owed_class=None ):
         """
         F2: the SECOND, role-gated pokeable criterion — a MANAGER-role session
         whose freshest union signal is older than the threshold gets a bounded
         poke AND a Rick advisory, even with ZERO stuck workers (the 2026-06-10
         gap: stale 27m/34m/30m+ manager verdicts produced no outreach because the
         stuck-tier requires alive∧stuck and taps require attention workers).
+
+        L1 STORE-AWARENESS (lane 4, 2026-06-17): this is the THIRD detector folded
+        into the per-poll store classification (`owed_class`) — the one the L1
+        store-aware pass (build-plan §3.1/§3.2) left out, so it kept false-firing
+        MANAGER-STALE at an interactive, no-`/loop` manager that emits NONE of the
+        5 liveness signals while CORRECTLY waiting on Rick (every owed item
+        Rick-gated). The discriminator is NOT "is there a signal?" (there cannot be
+        one while it idle-waits) but "does it OWE non-Rick-gated work?":
+          - BLOCKED_ON_USER → silence IS the expected state → at most ONE case-16
+            (MANAGER-AWAITING-USER) advisory, NEVER the repeating case-14 poke.
+          - DONE → owes nothing (finished) → at most ONE case-17 (consider-reaping)
+            advisory, never case-14.
+          - ACTIVE / UNKNOWN → today's case-14 staleness poke. UNKNOWN is the
+            fail-SAFE class (seam unwired / store hiccup): we never silently
+            suppress a real escalation — this preserves the quota-freeze true
+            positive (all-stale-UNKNOWN still escalates).
+        The case-16/17 advised flags are SHARED with `_check_manager_acks` (#9),
+        so a manager that is BOTH tapped and stale gets the advisory at most ONCE
+        across both detectors (no Rick double-page). A suppressed manager that
+        later freshens below threshold re-arms (see `_mgr_stale_suppressed`).
 
         Workers are UNTOUCHED — the gate is role == "manager" (manager-manifest
         via the injected list_managers_fn, surfaced on the snapshot row), so
@@ -2213,7 +2317,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if self.manager_stale_poke_threshold_seconds <= 0:
             return 0
 
-        eligible = { }
+        owed_class = owed_class or { }
+        eligible   = { }
         for row in ( snapshot or { } ).get( "sessions", [ ] ):
             if not isinstance( row, dict ) or row.get( "role" ) != "manager":
                 continue
@@ -2235,9 +2340,52 @@ class ArbiterConsumerJob( AgenticJobBase ):
             self._mgr_poke_count.pop( sid, None )
             self._mgr_advised.discard( sid )
 
+        # L1 store-awareness re-arm (lane 4): a previously-suppressed BLOCKED/DONE
+        # manager that freshened below threshold (left `eligible`) clears its SHARED
+        # case-16/17 advised flag so a FUTURE blocked/done episode re-notifies once.
+        for sid in [ s for s in self._mgr_stale_suppressed if s not in eligible ]:
+            kind, persona = self._mgr_stale_suppressed.pop( sid )
+            if kind == CLASS_BLOCKED_ON_USER:
+                self._manager_blocked_advised.discard( persona )
+            else:
+                self._manager_done_advised.discard( persona )
+
         fired = 0
         for sid, ( row, age ) in eligible.items():
             persona = row.get( "persona" ) or sid
+            cls     = owed_class.get( persona, CLASS_UNKNOWN )
+            # L1 store-awareness: a manager whose owed work is entirely Rick-gated
+            # (BLOCKED_ON_USER) or zero (DONE) is NOT stale — its silence is the
+            # CORRECT waiting/finished state. Suppress the repeating case-14 poke;
+            # emit at most ONE case-16/17 advisory (SHARED advised-sets with
+            # _check_manager_acks → cross-detector de-dupe, no Rick double-page).
+            if cls == CLASS_BLOCKED_ON_USER:
+                if persona not in self._manager_blocked_advised:
+                    self._manager_blocked_advised.add( persona )
+                    self._mgr_stale_suppressed[ sid ] = ( CLASS_BLOCKED_ON_USER, persona )
+                    self._route(
+                        CASE_MANAGER_AWAITING_USER,
+                        f"MANAGER-AWAITING-RICK (advisory, NOT manager-stale): {persona} is "
+                        f"silent {_fmt_minutes( age )} but correctly BLOCKED on Rick — every "
+                        f"owed item is Rick-gated. The silence IS the expected state, not a "
+                        f"stall; one-time notice, no poke.",
+                        active_managers=active_managers,
+                    )
+                continue
+            if cls == CLASS_DONE:
+                if persona not in self._manager_done_advised:
+                    self._manager_done_advised.add( persona )
+                    self._mgr_stale_suppressed[ sid ] = ( CLASS_DONE, persona )
+                    self._route(
+                        CASE_MANAGER_DONE_ADVISORY,
+                        f"MANAGER-DONE (advisory, NOT manager-stale): {persona} is silent "
+                        f"{_fmt_minutes( age )} and owes NO non-terminal work — it appears "
+                        f"finished/idle. Consider reaping it (the arbiter never reaps). "
+                        f"One-time notice, no poke.",
+                        active_managers=active_managers,
+                    )
+                continue
+            # ACTIVE / UNKNOWN → today's case-14 poke + Rick advisory (UNKNOWN = fail-SAFE)
             if sid not in self._mgr_stale_since:
                 self._mgr_stale_since[ sid ] = now                # episode start
                 self._mgr_poke_count[ sid ]  = 0
