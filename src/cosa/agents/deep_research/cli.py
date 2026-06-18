@@ -31,7 +31,7 @@ import yaml
 
 from .config import ResearchConfig
 from .cost_tracker import CostTracker, BudgetExceededError
-from .api_client import ResearchAPIClient, ANTHROPIC_AVAILABLE, ENV_VAR_NAME, KEY_FILE_NAME
+from .api_client import ResearchAPIClient, ANTHROPIC_AVAILABLE
 from .orchestrator import ResearchOrchestratorAgent, OrchestratorState  # noqa: F401 — reserved for Phase-3 orchestrator; unused here BY DESIGN (run_research uses a Phase-2 inline flow). Keep, do not strip. Ratified Rick 2026-06-01. See orchestrator.py module docstring.
 from . import cosa_interface
 from . import voice_io
@@ -196,35 +196,16 @@ def check_prerequisites() -> bool:
     Returns:
         bool: True if all prerequisites are met
     """
-    # Check anthropic SDK
+    # Check the Claude Agent SDK is importable (the only hard prerequisite).
     if not ANTHROPIC_AVAILABLE:
-        print( "ERROR: anthropic SDK not installed" )
-        print( "  Install with: pip install anthropic" )
+        print( "ERROR: claude_agent_sdk not installed" )
+        print( "  Install with: pip install claude-agent-sdk" )
         return False
 
-    # Check API key using firewalled pattern
-    # Priority: Environment variable (prod/test) → Local file (dev)
-    api_key = os.environ.get( ENV_VAR_NAME )
-    key_source = "environment"
-
-    if not api_key:
-        # Try local file for development
-        try:
-            import cosa.utils.util as cu
-            api_key = cu.get_api_key( KEY_FILE_NAME )
-            key_source = "local file"
-        except Exception:
-            pass
-
-    if not api_key:
-        print( "ERROR: Anthropic API key not found" )
-        print( f"  For testing/production: export {ENV_VAR_NAME}=your-key" )
-        print( f"  For development: create src/conf/keys/{KEY_FILE_NAME}" )
-        print( "" )
-        print( "  NOTE: Do NOT use ANTHROPIC_API_KEY (reserved for Claude Code)" )
-        return False
-
-    print( f"✓ API key found ({key_source})" )
+    # BOUNDED-CC (Phase 3): there is NO firewalled API key to check. sdk_query
+    # authenticates via the Claude Code / Max-subscription OAuth session, so the
+    # pre-migration key-presence gate (ENV_VAR_NAME / local key file) is retired.
+    print( "✓ Claude Agent SDK available (bounded-CC / Max-plan OAuth — no API key required)" )
     return True
 
 

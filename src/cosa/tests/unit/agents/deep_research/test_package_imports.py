@@ -23,7 +23,7 @@ class TestPackageInit( unittest.TestCase ):
     cost / api / voice / narrowing symbols and pins a version."""
 
     def test_version_pinned( self ):
-        self.assertEqual( dr.__version__, "0.2.2" )
+        self.assertEqual( dr.__version__, "0.3.0" )
 
     def test_key_config_constants_reexported( self ):
         # Firewalled-key constant names are part of the public contract.
