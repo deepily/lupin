@@ -338,6 +338,54 @@ def test_resolve_hold_base_dir_none_falls_back_to_project_root( monkeypatch, tmp
     assert hh.resolve_hold_base_dir( "" )   == tmp_path                 # empty string is falsy
 
 
+# ── read_hold_resilient — bug 1789f197 (cwd vs project-root write/read mismatch) ─
+
+def test_read_hold_resilient_finds_hold_in_cwd( tmp_path, monkeypatch ):
+    """A per-session hold under the session's cwd is found (cwd-first preference)."""
+    import cosa.utils.util as cu
+    cwd_dir  = tmp_path / "cwd";  cwd_dir.mkdir()
+    root_dir = tmp_path / "root"; root_dir.mkdir()
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( root_dir ) )
+    hh.write_hold( "sid12345", "Rio", "holding", base_dir=cwd_dir )
+    hold = hh.read_hold_resilient( "sid12345", cwd=str( cwd_dir ) )
+    assert hold is not None
+    assert hold[ "persona" ] == "Rio"
+
+
+def test_read_hold_resilient_finds_hold_at_project_root_when_cwd_differs( tmp_path, monkeypatch ):
+    """THE BUG: write_hold default lands at project root; a reader whose cwd is a
+    worktree (≠ project root) must STILL find the honored hold via the fallback."""
+    import cosa.utils.util as cu
+    cwd_dir  = tmp_path / "worktree"; cwd_dir.mkdir()
+    root_dir = tmp_path / "root";     root_dir.mkdir()
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( root_dir ) )
+    hh.write_hold( "sid12345", "Rio", "holding", base_dir=root_dir )   # default-write location
+    # cwd dir holds NO file — resilient read must fall through to the project root.
+    hold = hh.read_hold_resilient( "sid12345", cwd=str( cwd_dir ) )
+    assert hold is not None
+    assert hold[ "persona" ] == "Rio"
+
+
+def test_read_hold_resilient_returns_none_when_absent_everywhere( tmp_path, monkeypatch ):
+    """No hold in cwd OR project root → None (both candidates exhausted)."""
+    import cosa.utils.util as cu
+    cwd_dir  = tmp_path / "cwd";  cwd_dir.mkdir()
+    root_dir = tmp_path / "root"; root_dir.mkdir()
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( root_dir ) )
+    assert hh.read_hold_resilient( "sid12345", cwd=str( cwd_dir ) ) is None
+
+
+def test_read_hold_resilient_dedups_when_cwd_is_project_root( tmp_path, monkeypatch ):
+    """cwd IS the project root → the two candidates collapse to one (dedup); the
+    hold is still found (exercises the `key in seen → continue` branch)."""
+    import cosa.utils.util as cu
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( tmp_path ) )
+    hh.write_hold( "sid12345", "Rio", "holding", base_dir=tmp_path )
+    hold = hh.read_hold_resilient( "sid12345", cwd=str( tmp_path ) )
+    assert hold is not None
+    assert hold[ "persona" ] == "Rio"
+
+
 # ── quick_smoke_test ──────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():
