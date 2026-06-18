@@ -50,6 +50,12 @@ env/
 **/.venv
 **/venv/
 
+# Node deps — the multiplexer-builder stage regenerates these with `npm ci`,
+# so a host-installed node_modules must never bloat the build context (already
+# .gitignore'd). Bare name matches root; **/ catches any nested copy.
+node_modules/
+**/node_modules/
+
 # IDE (top-level + nested)
 .vscode/
 .idea/
