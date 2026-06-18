@@ -232,6 +232,14 @@ export interface ConnectionStateChangePayload {
   // `source: "ConnectionStateMachine"` event source, so consumers filter
   // by `payload.transport` (e.g. "QueueTransport", "AudioTransport").
   transport : string;
+  // Present ONLY on a transition into `failed` via a permanent-auth close
+  // (server close code 4001/4002/4003). `reason` is "auth-permanent" and
+  // `code` is the WebSocket close code, so the cutover consumer can route
+  // 4001 → token-refresh, 4002 → session-displaced, 4003 → permission-denied
+  // (parity with legacy ws-channel.js CIRCUIT_OPEN_EVENT.detail). Absent on
+  // every other transition (incl. budget-exhausted `failed`).
+  reason?   : string;
+  code?     : number;
 }
 
 export interface ConnectionReconnectingPayload {
