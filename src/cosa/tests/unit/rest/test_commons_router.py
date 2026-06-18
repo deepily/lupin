@@ -13,9 +13,7 @@ design split — route handlers are `# pragma: no cover`'d thin dispatchers):
 - History aggregator: `_entry_passes_same_user_scoping`, `_project_history_entry`,
   `_resolve_since_cutoff`, `_dedupe_broadcasts_by_id`,
   `_dedupe_broadcast_acks_by_recipient`, `execute_broadcast_history`.
-- Register-question helpers: `make_question_inject_fn`, `_resolve_dm_recipient`,
-  `_dispatch_commons_question_received`, `execute_register_question`,
-  `execute_unregister_question`.
+- DM recipient resolution: `_resolve_dm_recipient`, `RecipientResolutionError`.
 
 Zero external dependencies — the commons store, rate limiter, ack/question
 watchers, notification queue, and `match_persona` are all boundary-mocked or
@@ -36,12 +34,10 @@ from fastapi import HTTPException
 import cosa.rest.routers.commons as commons
 from cosa.rest.routers.commons import (
     BroadcastRequestBody,
-    RegisterQuestionRequest,
     RecipientResolutionError,
     init_commons_state,
     get_notification_queue,
     _require_initialized,
-    _require_question_watcher,
     _body_contains_reminder_framing,
     validate_broadcast_body,
     validate_broadcast_id,
@@ -58,13 +54,8 @@ from cosa.rest.routers.commons import (
     _dedupe_broadcasts_by_id,
     _dedupe_broadcast_acks_by_recipient,
     execute_broadcast_history,
-    make_question_inject_fn,
     _resolve_dm_recipient,
-    _dispatch_commons_question_received,
-    execute_register_question,
-    execute_unregister_question,
 )
-from cosa.rest.commons_question_watcher import CapExceededError, QuestionNotFound
 
 P = "cosa.rest.routers.commons"
 
@@ -81,7 +72,6 @@ class TestInitCommonsState( unittest.TestCase ):
             commons._commons_store,
             commons._commons_rate_limiter,
             commons._commons_ack_watcher,
-            commons._commons_question_watcher,
             commons._active_session_threshold_seconds,
         )
         self.addCleanup( self._restore )
@@ -90,43 +80,35 @@ class TestInitCommonsState( unittest.TestCase ):
         ( commons._commons_store,
           commons._commons_rate_limiter,
           commons._commons_ack_watcher,
-          commons._commons_question_watcher,
           commons._active_session_threshold_seconds ) = self._snapshot
 
-    def test_wires_all_singletons_with_question_watcher( self ):
-        store, rl, ack, qw = MagicMock(), MagicMock(), MagicMock(), MagicMock()
-        init_commons_state( store, rl, ack, 123, question_watcher=qw )
+    def test_wires_all_singletons( self ):
+        store, rl, ack = MagicMock(), MagicMock(), MagicMock()
+        init_commons_state( store, rl, ack, 123 )
         self.assertIs( commons._commons_store, store )
         self.assertIs( commons._commons_rate_limiter, rl )
         self.assertIs( commons._commons_ack_watcher, ack )
-        self.assertIs( commons._commons_question_watcher, qw )
         self.assertEqual( commons._active_session_threshold_seconds, 123.0 )
-
-    def test_question_watcher_defaults_to_none( self ):
-        init_commons_state( MagicMock(), MagicMock(), MagicMock(), 600 )
-        self.assertIsNone( commons._commons_question_watcher )
 
 
 # ── DI accessors + readiness guards ─────────────────────────────────────────────
 
 
 class TestAccessorsAndGuards( unittest.TestCase ):
-    """`get_notification_queue` + `_require_initialized` + `_require_question_watcher`."""
+    """`get_notification_queue` + `_require_initialized`."""
 
     def setUp( self ):
         self._snapshot = (
             commons._commons_store,
             commons._commons_rate_limiter,
             commons._commons_ack_watcher,
-            commons._commons_question_watcher,
         )
         self.addCleanup( self._restore )
 
     def _restore( self ):
         ( commons._commons_store,
           commons._commons_rate_limiter,
-          commons._commons_ack_watcher,
-          commons._commons_question_watcher ) = self._snapshot
+          commons._commons_ack_watcher ) = self._snapshot
 
     def test_get_notification_queue( self ):
         mock_main = MagicMock()
@@ -147,16 +129,6 @@ class TestAccessorsAndGuards( unittest.TestCase ):
         commons._commons_ack_watcher  = MagicMock()
         with self.assertRaises( HTTPException ) as c:
             _require_initialized()
-        self.assertEqual( c.exception.status_code, 503 )
-
-    def test_require_question_watcher_passes_when_wired( self ):
-        commons._commons_question_watcher = MagicMock()
-        _require_question_watcher()  # no raise
-
-    def test_require_question_watcher_raises_503_when_none( self ):
-        commons._commons_question_watcher = None
-        with self.assertRaises( HTTPException ) as c:
-            _require_question_watcher()
         self.assertEqual( c.exception.status_code, 503 )
 
 
@@ -725,23 +697,7 @@ class TestExecuteBroadcastHistory( unittest.TestCase ):
         self.assertEqual( len( res[ "entries" ] ), 2 )
 
 
-# ── register-question helpers ───────────────────────────────────────────────────
-
-
-class TestMakeQuestionInjectFn( unittest.TestCase ):
-
-    def test_inject_pushes_notification( self ):
-        nq = MagicMock()
-        inject = make_question_inject_fn(
-            notification_queue=nq, user_id="u", question_id="q1",
-            asker_session_id="askersession", build_sender_id=lambda s: f"sender-{s}",
-        )
-        inject( { "body": "answer", "persona_name": "Rio", "sender_session_id": "ans", "ts": "T" } )
-        nq.push_notification.assert_called_once()
-        _, kwargs = nq.push_notification.call_args
-        self.assertEqual( kwargs[ "title" ], "action:commons_answer_received" )
-        self.assertEqual( kwargs[ "payload" ][ "question_id" ], "q1" )
-        self.assertEqual( kwargs[ "payload" ][ "body" ], "answer" )
+# ── DM recipient resolution ─────────────────────────────────────────────────────
 
 
 class TestResolveDmRecipient( unittest.TestCase ):
@@ -797,106 +753,6 @@ class TestResolveDmRecipient( unittest.TestCase ):
         res = _resolve_dm_recipient( **self._kwargs() )
         self.assertEqual( res[ "http_status" ], 422 )
         self.assertEqual( res[ "detail" ][ "error" ], "recipient_required" )
-
-
-class TestDispatchCommonsQuestionReceived( unittest.TestCase ):
-
-    def _kwargs( self, nq ):
-        return dict(
-            notification_queue=nq, target_session_id="targetsession", target_persona="Rio",
-            question_id="q", topic="dm-rio", asker_session_id="asker",
-            authenticated_user_id="u", build_sender_id=lambda s: s,
-        )
-
-    def test_dispatch_success( self ):
-        nq = MagicMock()
-        self.assertTrue( _dispatch_commons_question_received( **self._kwargs( nq ) ) )
-        nq.push_notification.assert_called_once()
-
-    def test_dispatch_failure_returns_false( self ):
-        nq = MagicMock()
-        nq.push_notification.side_effect = Exception( "down" )
-        self.assertFalse( _dispatch_commons_question_received( **self._kwargs( nq ) ) )
-
-
-class TestExecuteRegisterQuestion( unittest.TestCase ):
-
-    def _body( self, **over ):
-        base = dict( topic="dm-rio", question_id="q1", asker_session_id="asker" )
-        base.update( over )
-        return RegisterQuestionRequest( **base )
-
-    def _kwargs( self, qw, **over ):
-        base = dict(
-            authenticated_user_id="u", question_watcher=qw, notification_queue=MagicMock(),
-            build_sender_id=lambda s: s,
-            raw_sessions_fn=lambda: [ ( "p", "sid-active", { "name": "Rio" } ) ],
-            bridge_loader=lambda p: { "owner_user_id": "u" },
-            active_session_threshold_seconds=600, now_epoch_fn=lambda: 1000.0,
-            mtime_fn=lambda p: 1000.0,   # fresh bridge mtime → alive
-        )
-        base.update( over )
-        return base
-
-    def test_cap_exceeded_429( self ):
-        qw = MagicMock()
-        qw.register_question.side_effect = CapExceededError( "cap" )
-        res = execute_register_question( body=self._body(), **self._kwargs( qw ) )
-        self.assertEqual( res[ "http_status" ], 429 )
-
-    def test_collision_409( self ):
-        qw = MagicMock()
-        qw.register_question.side_effect = ValueError( "dup" )
-        res = execute_register_question( body=self._body(), **self._kwargs( qw ) )
-        self.assertEqual( res[ "http_status" ], 409 )
-
-    def test_success_no_recipient_201( self ):
-        qw = MagicMock()
-        res = execute_register_question( body=self._body(), **self._kwargs( qw ) )
-        self.assertEqual( res[ "http_status" ], 201 )
-        self.assertIsNone( res[ "dm_dispatched" ] )
-
-    def test_recipient_set_but_resolvers_none_skips_dm( self ):
-        qw = MagicMock()
-        body = self._body( recipient_persona="rio" )
-        res = execute_register_question( body=body, **self._kwargs( qw, raw_sessions_fn=None, bridge_loader=None ) )
-        self.assertEqual( res[ "http_status" ], 201 )
-        self.assertIsNone( res[ "dm_dispatched" ] )
-
-    def test_resolution_422_unregisters_and_returns( self ):
-        qw = MagicMock()
-        body = self._body( recipient_session_id="ghost" )
-        res = execute_register_question( body=body, **self._kwargs( qw ) )
-        self.assertEqual( res[ "http_status" ], 422 )
-        qw.unregister_question.assert_called_once()
-
-    def test_resolution_422_unregister_question_not_found_swallowed( self ):
-        qw = MagicMock()
-        qw.unregister_question.side_effect = QuestionNotFound( "gone" )
-        body = self._body( recipient_session_id="ghost" )
-        res = execute_register_question( body=body, **self._kwargs( qw ) )
-        self.assertEqual( res[ "http_status" ], 422 )
-
-    def test_resolution_success_dispatches_dm( self ):
-        qw = MagicMock()
-        body = self._body( recipient_session_id="sid-active" )
-        res = execute_register_question( body=body, **self._kwargs( qw ) )
-        self.assertEqual( res[ "http_status" ], 201 )
-        self.assertTrue( res[ "dm_dispatched" ] )
-
-
-class TestExecuteUnregisterQuestion( unittest.TestCase ):
-
-    def test_question_not_found_404( self ):
-        qw = MagicMock()
-        qw.unregister_question.side_effect = QuestionNotFound( "x" )
-        res = execute_unregister_question( authenticated_user_id="u", question_id="q", question_watcher=qw )
-        self.assertEqual( res[ "http_status" ], 404 )
-
-    def test_success_204( self ):
-        qw = MagicMock()
-        res = execute_unregister_question( authenticated_user_id="u", question_id="q", question_watcher=qw )
-        self.assertEqual( res[ "http_status" ], 204 )
 
 
 # ── Pydantic model smoke (RecipientResolutionError default factories) ───────────

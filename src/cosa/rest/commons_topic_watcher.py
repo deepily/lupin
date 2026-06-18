@@ -14,7 +14,7 @@ subclasses that tail a commons topic and dispatch on matches:
 - `_prune_expired_locked(now_monotonic)` — caller must hold `self._lock`;
   removes entries past their `expires_at_monotonic` field.
 
-Subclasses (`CommonsAckWatcher`, `CommonsQuestionWatcher`) provide:
+Subclasses (e.g. `CommonsAckWatcher`) provide:
 
 - Domain-typed in-flight record class (must expose `expires_at_monotonic`)
 - Domain-named public API wrapping `_register` / `_unregister`

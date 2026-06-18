@@ -4,27 +4,19 @@ Unit tests for Inter-Session DM (Phase 0 implementation 2026-05-15).
 Covers AC9a layer of `src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md`:
 - `RecipientResolutionError` Pydantic model
 - `_resolve_dm_recipient` helper (chain levels, error paths)
-- `_dispatch_commons_question_received` helper (success + T7 isolation)
-- `execute_register_question` DM extension (resolution success + 422 unwind)
-- `commons_ask.ask_async` recipient-kwarg passthrough
-- `commons_send_to` MCP wrapper delegates to `commons_ask_async` correctly
 
 All tests run on :7999 venue (AI-discretionary per CLAUDE.md §TESTING VENUES).
 Coverage target: 100% lines + branches on new code paths.
 """
 import time
 from typing import Any, Dict, List, Optional, Tuple
-from unittest.mock import MagicMock
 
 import pytest
 
 from cosa.rest.routers.commons import (
     RecipientResolutionError,
-    RegisterQuestionRequest,
-    _dispatch_commons_question_received,
     _resolve_dm_recipient,
     _session_id_matches,
-    execute_register_question,
 )
 
 
@@ -109,40 +101,6 @@ class TestRecipientResolutionError:
                 error                  = "",
                 suggested_next_action  = "x",
             )
-
-
-# ─── RegisterQuestionRequest field validation ────────────────────────────────
-
-
-class TestRegisterQuestionRequestDmFields:
-    def test_recipient_session_id_optional( self ):
-        body = RegisterQuestionRequest(
-            topic            = "dm-radio",
-            question_id      = "q1",
-            asker_session_id = "asker",
-        )
-        assert body.recipient_session_id is None
-        assert body.recipient_persona is None
-        assert body.expect_reply is True   # default
-
-    def test_recipient_persona_accepts_unicode( self ):
-        body = RegisterQuestionRequest(
-            topic             = "dm-maria",
-            question_id       = "q1",
-            asker_session_id  = "asker",
-            recipient_persona = "María",
-        )
-        assert body.recipient_persona == "María"
-
-    def test_expect_reply_can_be_false( self ):
-        body = RegisterQuestionRequest(
-            topic            = "dm-radio",
-            question_id      = "q1",
-            asker_session_id = "asker",
-            recipient_persona = "radio",
-            expect_reply     = False,
-        )
-        assert body.expect_reply is False
 
 
 # ─── _resolve_dm_recipient ───────────────────────────────────────────────────
@@ -254,96 +212,6 @@ class TestResolveDmRecipient:
         )
         assert result[ "http_status" ] == 422
         assert result[ "detail" ][ "error" ] == "recipient_required"
-
-
-# ─── _dispatch_commons_question_received ─────────────────────────────────────
-
-
-class TestDispatchCommonsQuestionReceived:
-    def test_success_calls_push_notification( self ):
-        nq   = MagicMock()
-        result = _dispatch_commons_question_received(
-            notification_queue    = nq,
-            target_session_id     = "sid_target",
-            target_persona        = "radio",
-            question_id           = "q1",
-            topic                 = "dm-radio",
-            asker_session_id      = "sid_asker",
-            authenticated_user_id = "rick@example.com",
-            build_sender_id       = lambda sid: f"sender:{sid}",
-        )
-        assert result is True
-        nq.push_notification.assert_called_once()
-        kwargs = nq.push_notification.call_args.kwargs
-        assert kwargs[ "type" ]  == "user_initiated_message"
-        assert kwargs[ "title" ] == "action:commons_question_received"
-        assert kwargs[ "payload" ][ "question_id" ]       == "q1"
-        assert kwargs[ "payload" ][ "topic" ]             == "dm-radio"
-        assert kwargs[ "payload" ][ "recipient_persona" ] == "radio"
-
-    def test_dispatch_exception_returns_false( self ):
-        nq = MagicMock()
-        nq.push_notification.side_effect = RuntimeError( "queue down" )
-        result = _dispatch_commons_question_received(
-            notification_queue    = nq,
-            target_session_id     = "sid_target",
-            target_persona        = "radio",
-            question_id           = "q1",
-            topic                 = "dm-radio",
-            asker_session_id      = "sid_asker",
-            authenticated_user_id = "rick@example.com",
-            build_sender_id       = lambda sid: f"sender:{sid}",
-        )
-        assert result is False
-
-
-# ─── commons_ask.ask_async recipient passthrough ─────────────────────────────
-
-
-class TestAskAsyncRecipientPassthrough:
-    def test_stamps_recipient_persona_on_metadata( self, tmp_path ):
-        from lupin_mcp.commons_ask import ask_async
-        from lupin_mcp.commons_store import CommonsStore
-
-        store = CommonsStore( str( tmp_path ) )
-        result = ask_async(
-            store              = store,
-            topic              = "dm-radio",
-            body               = "hello",
-            sender_session_id  = "sid_asker",
-            persona_name       = "maria",
-            persona_icon       = "🌸",
-            persona_color      = "#F06292",
-            recipient_persona  = "radio",
-            expect_reply       = False,
-        )
-        # Verify the post happened with the recipient metadata stamped
-        entries = store.read( "dm-radio", limit=10 )
-        assert len( entries ) == 1
-        meta = entries[ 0 ][ "metadata" ]
-        assert meta[ "kind" ]                 == "question"
-        assert meta[ "question_id" ]          == result[ "question_id" ]
-        assert meta[ "recipient_persona" ]    == "radio"
-        assert meta[ "expect_reply" ]         is False
-
-    def test_non_dm_call_omits_recipient_metadata( self, tmp_path ):
-        from lupin_mcp.commons_ask import ask_async
-        from lupin_mcp.commons_store import CommonsStore
-
-        store = CommonsStore( str( tmp_path ) )
-        result = ask_async(
-            store              = store,
-            topic              = "free-topic",
-            body               = "broadcast question",
-            sender_session_id  = "sid_asker",
-            persona_name       = "maria",
-        )
-        entries = store.read( "free-topic", limit=10 )
-        assert len( entries ) == 1
-        meta = entries[ 0 ][ "metadata" ]
-        assert "recipient_persona" not in meta
-        assert "recipient_session_id" not in meta
-        assert "expect_reply" not in meta
 
 
 # ─── d57dbfea: null-persona worker inbound reachability ───────────────────────

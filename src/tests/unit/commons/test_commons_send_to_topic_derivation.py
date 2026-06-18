@@ -1,11 +1,18 @@
 """
-Unit tests for `_derive_dm_topic` — wrapper-side topic derivation for
-`commons_send_to`, plus regression coverage on the server-side unicode-
-broadened topic pattern.
+Unit tests for `_derive_dm_topic` — wrapper-side DM topic derivation (used by
+the cascade heartbeat scheduler + dm-topic migration tooling for `dm-<persona>`
+topic-file routing).
 
 Per `src/rnd/v0.1.7/2026.05.17-commons-dm-topic-case-and-truncation/01-design.md`
 §2.1 (Sub-bug A topic-case + Sub-bug C persona-space-in-topic, unified fix
 ratified Q8 with unicode broadening 2026-05-17).
+
+Note: the server-side `RegisterQuestionRequest`-pattern regression class was
+removed in the cosa-voice token-reduction full-removal pass (2026-06-17) — the
+register-question endpoint + its topic pattern are gone. The wrapper/server
+charset contract is still locked by
+`TestDeriveDmTopic.test_output_always_matches_server_topic_pattern` (inline
+`[\\w-]+` assertion).
 
 **Venue: :7999** (AI-discretionary — pure unit tests, no state mutation,
 no MCP subprocess involvement). Run via `pytest src/tests/unit/commons/
@@ -15,7 +22,6 @@ test_commons_send_to_topic_derivation.py -v`.
 import re
 
 import pytest
-from pydantic import ValidationError
 
 from lupin_mcp.cosa_voice_mcp import _derive_dm_topic
 
@@ -138,77 +144,3 @@ class TestDeriveDmTopic:
             f"Derived topic {result!r} from input {persona_input!r} does NOT "
             f"match server-side pattern; wrapper/server contract broken."
         )
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# TestServerTopicPatternUnicodeBroadening — regression on the cross-file change
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-class TestServerTopicPatternUnicodeBroadening:
-    """
-    Regression coverage on the server-side topic pattern at
-    `src/cosa/rest/routers/commons.py:_TOPIC_OR_QID_PATTERN`. Exercised via
-    Pydantic's `RegisterQuestionRequest` model — if the pattern accepts
-    unicode topics the model validates; if not, ValidationError fires.
-    """
-
-    @pytest.fixture
-    def request_model( self ):
-        # Late import — keeps the module-load cheap if Pydantic isn't on path
-        from cosa.rest.routers.commons import RegisterQuestionRequest
-        return RegisterQuestionRequest
-
-    def _valid_kwargs( self, **overrides ):
-        base = {
-            "topic"            : "dm-tiberius",
-            "question_id"      : "q-test",
-            "asker_session_id" : "session-test",
-            "ttl_seconds"      : 3600,
-        }
-        base.update( overrides )
-        return base
-
-    def test_ascii_topic_accepted( self, request_model ):
-        """Backwards compat: ASCII topic still validates."""
-        instance = request_model( **self._valid_kwargs( topic="dm-tiberius" ) )
-        assert instance.topic == "dm-tiberius"
-
-    def test_unicode_topic_accepted_maria( self, request_model ):
-        """Q8 broadening: unicode topic with diacritic validates."""
-        instance = request_model( **self._valid_kwargs( topic="dm-maría" ) )
-        assert instance.topic == "dm-maría"
-
-    def test_unicode_topic_accepted_cjk( self, request_model ):
-        """Q8 broadening: CJK topic validates."""
-        instance = request_model( **self._valid_kwargs( topic="dm-中文" ) )
-        assert instance.topic == "dm-中文"
-
-    def test_hyphen_in_topic_accepted( self, request_model ):
-        """Literal `-` remains in the charset (used by every `dm-` topic)."""
-        instance = request_model( **self._valid_kwargs( topic="dm-jean-luc" ) )
-        assert instance.topic == "dm-jean-luc"
-
-    def test_underscore_in_topic_accepted( self, request_model ):
-        """`_` is matched by `\\w`; topics from `_derive_dm_topic` with space-collapse work."""
-        instance = request_model( **self._valid_kwargs( topic="dm-mr_radio" ) )
-        assert instance.topic == "dm-mr_radio"
-
-    # ── Negative cases: path-dangerous chars still rejected ──
-
-    def test_space_in_topic_rejected( self, request_model ):
-        """Defense-in-depth: literal space NEVER allowed (pre-fix Sub-bug C 422 path)."""
-        with pytest.raises( ValidationError ):
-            request_model( **self._valid_kwargs( topic="dm-mr radio" ) )
-
-    def test_path_separator_rejected( self, request_model ):
-        """Defense-in-depth: forward slash never allowed."""
-        with pytest.raises( ValidationError ):
-            request_model( **self._valid_kwargs( topic="dm-evil/path" ) )
-
-    def test_question_id_unicode_accepted( self, request_model ):
-        """`question_id` shares the same pattern; unicode IDs validate too."""
-        instance = request_model(
-            **self._valid_kwargs( question_id="q-maría-001" )
-        )
-        assert instance.question_id == "q-maría-001"
