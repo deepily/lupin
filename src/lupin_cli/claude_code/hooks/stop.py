@@ -40,6 +40,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_idle_detection, set_idle_detection_field, kill_idle_waiter,
     get_last_autonarrated_turn_id, set_last_autonarrated_turn_id,
     find_active_voice_persona_sessions, resolve_project_name,
+    canonical_persona_key,
 )
 from lupin_cli.notifications.notify_user_sync import notify_user_sync
 from lupin_cli.notifications.notify_user_async import notify_user_async
@@ -285,19 +286,23 @@ def _stop_hook_idle_behavior() -> str:
         return DEFAULT_IDLE_BEHAVIOR
 
 
-def _idle_sentence( persona_name ) -> str:
+def _idle_sentence( persona_name, owed_unknown=False ) -> str:
     """
     The first-person idle status sentence for the `idle_announce` behavior
     (seeded from the dropped poke-scaffold's NOT_OWED case). Pure.
 
     Ensures:
-        - returns "Momentarily idle." (persona-agnostic; the sender_id already
-          renders the card AS the persona, so the sentence need not name itself)
+        - owed_unknown False → "Momentarily idle." (persona-agnostic; the
+          sender_id already renders the card AS the persona)
+        - owed_unknown True  → "Owed status unknown." — the store was
+          unreachable, so genuine-idle CANNOT be asserted (UNKNOWN ≠ IDLE)
     """
+    if owed_unknown:
+        return "Owed status unknown."
     return "Momentarily idle."
 
 
-def _announce_idle( session_id, persona_name ):
+def _announce_idle( session_id, persona_name, owed_unknown=False ):
     """
     Fire ONE low-priority, non-blocking idle status notify for the
     `idle_announce` behavior. The persona "speaks" its own idle state.
@@ -307,18 +312,33 @@ def _announce_idle( session_id, persona_name ):
     prediction hot path is offloaded via asyncio.to_thread (f3cfabf), but it
     stays low-priority + failsafe so it never dings and never blocks the Stop.
 
+    The THREE-STATE verdict (Tiberius 2026-06-18): a no-poke Stop is NOT always
+    genuine-idle. When the store-owed source is ON but the store was unreachable
+    (owed_unknown=True), the §C fail-safe correctly suppresses the POKE — but the
+    beacon must NOT then claim "nothing owed", which conflates UNKNOWN (store
+    down) with NOT-OWED (store answered, count 0). The whole-fleet false-idle
+    that fired during the :7999 outage was exactly this conflation. So gate the
+    MESSAGE on owed_unknown, not only the poke.
+
     Ensures:
         - posts a low-priority AsyncNotificationRequest carrying _idle_sentence,
           stamped with this session's CC sender_id so it renders AS the persona
+        - owed_unknown False → abstract "Heartbeat: idle — nothing owed."
+        - owed_unknown True  → abstract "Heartbeat: owed status unknown (task
+          store unreachable) — NOT idle; verify manually." (no "nothing owed")
         - NEVER raises / never blocks the Stop (try/except; mirrors the
           emit-outcome invariant)
     """
+    if owed_unknown:
+        abstract = "Heartbeat: owed status unknown (task store unreachable) — NOT idle; verify manually."
+    else:
+        abstract = "Heartbeat: idle — nothing owed."
     try:
         request = AsyncNotificationRequest(
-            message   = _idle_sentence( persona_name ),
+            message   = _idle_sentence( persona_name, owed_unknown=owed_unknown ),
             priority  = NotificationPriority.LOW,
             sender_id = build_sender_id_for_cc( session_id ),
-            abstract  = "Heartbeat: idle — nothing owed.",
+            abstract  = abstract,
         )
         notify_user_async( request )
     except Exception as e:
@@ -1247,9 +1267,14 @@ def _owed_count_from_store( session_id ):
         settings = load_task_store_settings()
         api_key  = read_api_key()
         persona  = get_voice_persona( session_id )
-        persona_lower = ( persona.get( "name" ) or "unknown" ).lower() if isinstance( persona, dict ) else "unknown"
+        # Route the persona name through the SAME canonical key the WRITE seam
+        # uses (accent/punct-stripped, lowercased, spaces kept) so an accented /
+        # punctuated persona ("María", "Mr. Radio") matches its store rows
+        # ("maria", "mr radio") instead of false-idling on a bare-.lower() miss.
+        # Idempotent → safe whether the bridge holds the display or pool form.
+        persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
         project  = resolve_project_name()
-        ok, count = query_owed( settings, api_key, persona_lower, STORE_OWED_STATUSES, project=project )
+        ok, count = query_owed( settings, api_key, persona_key, STORE_OWED_STATUSES, project=project )
         return count, ok
     except Exception:
         return 0, False
@@ -1311,11 +1336,16 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
           wins; never poke on a re-fire
 
     Ensures:
-        - Returns {"decision":"block","reason": …} ONLY when the heartbeat
-          pokes (OUTCOME_POKE) — the caller emits it and skips the idle path
-        - Returns None on disabled / malformed config / honored hold / nothing
+        - Returns a ( hook_output, owed_unknown ) tuple.
+        - hook_output is {"decision":"block","reason": …} ONLY when the heartbeat
+          pokes (OUTCOME_POKE) — the caller emits it and skips the idle path;
+          else None on disabled / malformed config / honored hold / nothing
           owed / cap reached — the caller falls through to the existing
-          idle-waiter / "Anything else?" path UNCHANGED
+          idle-waiter / "Anything else?" path UNCHANGED.
+        - owed_unknown is True iff the store-owed source was ON and the store
+          read FAILED (count is unknowable) — the caller's idle beacon then
+          renders "owed status unknown" instead of "nothing owed". False on the
+          transcript-replay path and on every determinate store answer.
         - Applies the counter increment (on poke) + cap FYI (at cap) +
           fire-and-forget event emission side effects
         - On a poke, ALSO fires the §4 low-pri breadcrumb to the user's card
@@ -1330,10 +1360,10 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
             "session_id" : session_id,
             "error"      : str( e ),
         } )
-        return None
+        return None, False
 
     if not settings[ "enabled" ]:
-        return None
+        return None, False
 
     # c121037b facet 3: resolve the hold from the session's OWN cwd (threaded
     # from the Stop payload), not the hardwired LUPIN_ROOT — so a non-lupin
@@ -1388,6 +1418,12 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
     # and poke during a store outage — only the store-owed COUNT fails safe.
     # replay_task_state stays the degraded fallback behind the flag (flip it back
     # to restore the old source instantly — §A rollback). NOT deleted.
+    # owed_unknown distinguishes UNKNOWN (store source ON but unreachable) from
+    # genuine NOT-OWED (store answered, count 0). Only the store path can be
+    # UNKNOWN; the transcript-replay path is always determinate. Threaded out so
+    # the idle-announce beacon does NOT claim "nothing owed" during a store
+    # outage (the poke is already suppressed by the §C fail-safe below).
+    owed_unknown = False
     if settings[ "owed_source_from_store" ]:
         store_count, store_ok = _owed_count_from_store( session_id )
         if not store_ok:
@@ -1395,7 +1431,8 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
                 "phase"      : "heartbeat_store_unreachable",
                 "session_id" : session_id,
             } )
-            owed_items = [ ]
+            owed_items   = [ ]
+            owed_unknown = True
         else:
             owed_items = _synthesize_owed_items( store_count )
     else:
@@ -1506,8 +1543,8 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
         poke_reason = result[ "hook_output" ].get( "reason" )
         if poke_reason:
             inject_qualifier_via_tmux( session_id, poke_reason, wrap=False )
-        return result[ "hook_output" ]
-    return None
+        return result[ "hook_output" ], owed_unknown
+    return None, owed_unknown
 
 
 def main():
@@ -1570,8 +1607,9 @@ def main():
         #
         # Branch-C invariant (voice always wins): peek at the voice buffer
         # WITHOUT draining — pending voice ⇒ no poke, buffer left untouched.
+        owed_unknown = False
         if not _has_pending_voice( session_id ):
-            heartbeat_output = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+            heartbeat_output, owed_unknown = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
             if heartbeat_output is not None:
                 log_to_stream( "stop", {}, extra={
                     "phase"      : "speakerphone_poke",
@@ -1606,7 +1644,7 @@ def main():
         if _stop_hook_idle_behavior() == "idle_announce":
             persona      = get_voice_persona( session_id )
             persona_name = persona.get( "name" ) if persona else None
-            _announce_idle( session_id, persona_name )
+            _announce_idle( session_id, persona_name, owed_unknown=owed_unknown )
 
         # Speakerphone/chorus sessions skip ONLY the blocking "Anything else?"
         # prompt path below (it would interrupt the user's live voice
@@ -1652,7 +1690,7 @@ def main():
         # fall through to the existing idle-waiter / "Anything else?" path.
         # transcript_path (Stop payload) feeds the v2 Task*-replay work-owed oracle.
         # cwd (Stop payload) resolves the per-session hold base (c121037b facet 3).
-        heartbeat_output = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+        heartbeat_output, owed_unknown = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
         if heartbeat_output is not None:
             emit_json( heartbeat_output )
             return
@@ -1691,7 +1729,7 @@ def main():
         elif idle_behavior == "idle_announce":
             persona      = get_voice_persona( session_id )
             persona_name = persona.get( "name" ) if persona else None
-            _announce_idle( session_id, persona_name )
+            _announce_idle( session_id, persona_name, owed_unknown=owed_unknown )
             emit_json( {} )  # allow stop — v2.1 owns liveness; this is a courtesy ping
         else:   # "none": silent allow-stop
             emit_json( {} )

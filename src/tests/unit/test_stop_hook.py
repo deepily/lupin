@@ -285,7 +285,7 @@ class TestVoiceDrain:
 
     @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
             return_value={ "enabled": False, "backoff_minutes": [ ] } )
-    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False )
     @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
@@ -370,7 +370,7 @@ class TestVoiceBlocking:
 
     @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
             return_value={ "enabled": False, "backoff_minutes": [ ] } )
-    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False )
     @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
@@ -446,7 +446,7 @@ class TestConversationModeGate:
 
     @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="none" )
     @patch( "lupin_cli.claude_code.hooks.stop._has_pending_voice", return_value=False )
-    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" )
     @patch( "lupin_cli.claude_code.hooks.stop.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
@@ -499,7 +499,7 @@ class TestConversationModeGate:
 
     @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
             return_value={ "enabled": False, "backoff_minutes": [ ] } )
-    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
@@ -617,7 +617,7 @@ class TestNotifyUserSync:
         )
         monkeypatch.setattr(
             "lupin_cli.claude_code.hooks.stop._run_heartbeat",
-            lambda *a, **k: None
+            lambda *a, **k: ( None, False )
         )
         monkeypatch.setattr(
             "lupin_cli.claude_code.hooks.stop.load_idle_settings",

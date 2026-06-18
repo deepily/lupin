@@ -40,6 +40,7 @@ import re
 import signal as signal_mod
 import sys
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Optional, Tuple
@@ -55,6 +56,50 @@ _fallback_session_id: str = uuid.uuid4().hex[:8]
 SOURCE_PPID         = "ppid"
 SOURCE_GRANDPARENT  = "grandparent"
 SOURCE_CWD_FALLBACK = "cwd_fallback"
+
+
+def canonical_persona_key( name ) -> str:
+    """
+    Canonical persona key for cross-seam task-store matching.
+
+    THE single normalizer both the owed-work READ seam (stop hook
+    `_owed_count_from_store`) and the task-store WRITE seam must agree on, so a
+    persona's `owner_persona` rows are ALWAYS found regardless of which surface
+    spelled the name. The store holds names in the form the voice pool defines —
+    accent-stripped + punctuation-stripped + lowercased, INTERNAL SPACES KEPT
+    (e.g. display "María" → "maria", "Mr. Radio" → "mr radio"). This mirrors that
+    transform and is IDEMPOTENT, so it is safe whether the caller passes the
+    display form ("María") or the already-normalized pool form ("maria").
+
+    Drift history (the bug this kills): the READ seam previously used a bare
+    `.lower()`, so a persona whose name carried an accent/period ("María",
+    "Mr. Radio") queried "maría"/"mr. radio" and matched ZERO of the store's
+    "maria"/"mr radio" rows → false "nothing owed". Note this is DISTINCT from
+    `follow_through_escalation_watcher._norm_persona`, which strips spaces too
+    ("mr radio" → "mrradio") and would NOT match the store — do not substitute it.
+
+    Requires:
+        - name is a string or None
+
+    Ensures:
+        - None / non-string / empty / whitespace-only → "" (unmatchable sentinel)
+        - otherwise: NFKD-decomposed, combining marks dropped, lowercased,
+          reduced to [a-z0-9 ] (punctuation/emoji removed, single spaces kept),
+          internal runs of whitespace collapsed to one space, ends trimmed
+        - IDEMPOTENT: canonical_persona_key( canonical_persona_key( x ) ) == canonical_persona_key( x )
+
+    Args:
+        name: A persona name in display or already-normalized form
+
+    Returns:
+        str: the canonical store key
+    """
+    if not name or not isinstance( name, str ):
+        return ""
+    decomposed = unicodedata.normalize( "NFKD", name )
+    ascii_only = "".join( c for c in decomposed if not unicodedata.combining( c ) )
+    stripped   = re.sub( r"[^a-z0-9 ]", "", ascii_only.lower() )
+    return re.sub( r"\s+", " ", stripped ).strip()
 
 
 def _is_pid_alive( pid: int ) -> bool:

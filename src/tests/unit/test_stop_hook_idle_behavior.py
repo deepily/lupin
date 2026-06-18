@@ -63,6 +63,13 @@ class TestIdleSentence:
     def test_without_persona( self ):
         assert _idle_sentence( None ) == "Momentarily idle."
 
+    def test_owed_unknown_says_unknown_not_idle( self ):
+        """FACET-2: store unreachable → the sentence must NOT assert idle."""
+        assert _idle_sentence( "Rio", owed_unknown=True ) == "Owed status unknown."
+
+    def test_owed_unknown_false_default_is_idle( self ):
+        assert _idle_sentence( "Rio", owed_unknown=False ) == "Momentarily idle."
+
 
 # ── _announce_idle ────────────────────────────────────────────────────────────
 
@@ -90,6 +97,29 @@ class TestAnnounceIdle:
         mock_log.assert_called_once()
         assert mock_log.call_args[ 1 ][ "extra" ][ "phase" ] == "idle_announce_error"
 
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
+            return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" )
+    def test_owed_unknown_beacon_does_not_claim_nothing_owed( self, mock_notify, mock_sender ):
+        """FACET-2 FLIP: store unreachable → the beacon must render the UNKNOWN
+        message + abstract, NEVER "nothing owed" (which conflates UNKNOWN with
+        genuine IDLE — the whole-fleet :7999-outage false-idle)."""
+        _announce_idle( "abc12345", "Rio", owed_unknown=True )
+        request = mock_notify.call_args[ 0 ][ 0 ]
+        assert request.message == "Owed status unknown."
+        assert "nothing owed" not in request.abstract
+        assert "unknown" in request.abstract.lower()
+        assert "verify manually" in request.abstract.lower()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.build_sender_id_for_cc",
+            return_value="claude.code@lupin.deepily.ai#abc12345" )
+    @patch( "lupin_cli.claude_code.hooks.stop.notify_user_async" )
+    def test_owed_known_beacon_keeps_nothing_owed( self, mock_notify, mock_sender ):
+        """Determinate not-owed (default) keeps the genuine-idle beacon verbatim."""
+        _announce_idle( "abc12345", "Rio" )
+        request = mock_notify.call_args[ 0 ][ 0 ]
+        assert request.abstract == "Heartbeat: idle — nothing owed."
+
 
 # ── main() Branch-C gate: the new enum branches ───────────────────────────────
 
@@ -100,7 +130,7 @@ class TestIdleBehaviorGate:
              patch( "lupin_cli.claude_code.hooks.stop._arm_idle_waiter" ) as mock_arm, \
              patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else" ) as mock_ask, \
              patch( "lupin_cli.claude_code.hooks.stop._announce_idle" ) as mock_announce, \
-             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) ), \
              patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="none" ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False ), \
              patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] ), \
@@ -121,7 +151,7 @@ class TestIdleBehaviorGate:
              patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else" ) as mock_ask, \
              patch( "lupin_cli.claude_code.hooks.stop._announce_idle" ) as mock_announce, \
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value={ "name": "Rio" } ), \
-             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) ), \
              patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="idle_announce" ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False ), \
              patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] ), \
@@ -131,10 +161,30 @@ class TestIdleBehaviorGate:
              patch( "lupin_cli.claude_code.hooks.stop.read_hook_input",
                     return_value={ "stop_hook_active": False, "session_id": "abc12345" } ):
             main()
-            mock_announce.assert_called_once_with( "abc12345", "Rio" )
+            mock_announce.assert_called_once_with( "abc12345", "Rio", owed_unknown=False )
             mock_emit.assert_called_once_with( {} )
             mock_arm.assert_not_called()
             mock_ask.assert_not_called()
+
+    def test_store_unreachable_threads_owed_unknown_to_announce( self ):
+        """FACET-2 END-TO-END: when _run_heartbeat reports owed_unknown=True
+        (store down, no poke), main() must thread it into _announce_idle so the
+        beacon renders UNKNOWN, not "nothing owed"."""
+        with patch( "lupin_cli.claude_code.hooks.stop.emit_json" ) as mock_emit, \
+             patch( "lupin_cli.claude_code.hooks.stop._announce_idle" ) as mock_announce, \
+             patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value={ "name": "Rio" } ), \
+             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, True ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="idle_announce" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False ), \
+             patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] ), \
+             patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x ), \
+             patch( "lupin_cli.claude_code.hooks.stop.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.stop.read_hook_input",
+                    return_value={ "stop_hook_active": False, "session_id": "abc12345" } ):
+            main()
+            mock_announce.assert_called_once_with( "abc12345", "Rio", owed_unknown=True )
+            mock_emit.assert_called_once_with( {} )
 
     def test_ask_handles_invalid_idle_settings( self ):
         """'ask' + load_idle_settings raises ValueError → logged, fail-safe to immediate ask."""
@@ -144,7 +194,7 @@ class TestIdleBehaviorGate:
              patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" ) as mock_log, \
              patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
                     side_effect=ValueError( "bad backoff" ) ), \
-             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) ), \
              patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False ), \
              patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] ), \
@@ -165,7 +215,7 @@ class TestIdleBehaviorGate:
         with patch( "lupin_cli.claude_code.hooks.stop.emit_json" ) as mock_emit, \
              patch( "lupin_cli.claude_code.hooks.stop._announce_idle" ) as mock_announce, \
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=None ), \
-             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) ), \
              patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="idle_announce" ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False ), \
              patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] ), \
@@ -175,7 +225,7 @@ class TestIdleBehaviorGate:
              patch( "lupin_cli.claude_code.hooks.stop.read_hook_input",
                     return_value={ "stop_hook_active": False, "session_id": "abc12345" } ):
             main()
-            mock_announce.assert_called_once_with( "abc12345", None )   # None persona threaded
+            mock_announce.assert_called_once_with( "abc12345", None, owed_unknown=False )   # None persona threaded
             mock_emit.assert_called_once_with( {} )
 
 
@@ -194,7 +244,7 @@ class TestSpeakerphoneIdleAnnounce:
         with patch( "lupin_cli.claude_code.hooks.stop._announce_idle" ) as mock_announce, \
              patch( "lupin_cli.claude_code.hooks.stop.emit_json" ) as mock_emit, \
              patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" ), \
-             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) ), \
              patch( "lupin_cli.claude_code.hooks.stop._has_pending_voice", return_value=False ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_voice_persona", return_value=persona ), \
              patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value=idle_behavior ), \
@@ -212,12 +262,12 @@ class TestSpeakerphoneIdleAnnounce:
     def test_speakerphone_idle_announce_fires_silent_bubble( self ):
         """speakerphone + idle_announce → _announce_idle fires (LOW pri → silent DOM bubble)."""
         mock_announce = self._run_speakerphone_main( "idle_announce", { "name": "Rachel" } )
-        mock_announce.assert_called_once_with( "abc12345", "Rachel" )
+        mock_announce.assert_called_once_with( "abc12345", "Rachel", owed_unknown=False )
 
     def test_speakerphone_idle_announce_missing_persona( self ):
         """speakerphone + idle_announce + no persona → _announce_idle fires with None threaded."""
         mock_announce = self._run_speakerphone_main( "idle_announce", None )
-        mock_announce.assert_called_once_with( "abc12345", None )
+        mock_announce.assert_called_once_with( "abc12345", None, owed_unknown=False )
 
     def test_speakerphone_ask_stays_fully_silent( self ):
         """speakerphone + ask → NO announce (blocking ask skipped, no silent-degrade per Rick)."""
