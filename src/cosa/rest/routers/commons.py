@@ -29,17 +29,12 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Callable, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.commons_ack_watcher import CommonsAckWatcher
-from cosa.rest.commons_question_watcher import (
-    CapExceededError,
-    CommonsQuestionWatcher,
-    QuestionNotFound,
-)
 from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
@@ -57,7 +52,6 @@ router = APIRouter( prefix="/api/commons", tags=[ "commons" ] )
 _commons_store         : Optional[ CommonsStore ]                  = None
 _commons_rate_limiter  : Optional[ CommonsBroadcastRateLimiter ]   = None
 _commons_ack_watcher   : Optional[ CommonsAckWatcher ]             = None
-_commons_question_watcher : Optional[ CommonsQuestionWatcher ]     = None  # Phase 3 step 6
 # Threshold for "active enough to receive a broadcast" — set at startup from INI.
 _active_session_threshold_seconds : float = 600.0
 
@@ -67,20 +61,13 @@ def init_commons_state(
     rate_limiter                       : CommonsBroadcastRateLimiter,
     ack_watcher                        : CommonsAckWatcher,
     active_session_threshold_seconds   : float,
-    question_watcher                   : Optional[ CommonsQuestionWatcher ] = None,
 ) -> None:
-    """Wire singletons at FastAPI startup. Idempotent for testing.
-
-    `question_watcher` is Optional only to preserve backward compatibility
-    with Phase 2 callers in `main.py` lifespan — Step 9 extends the
-    lifespan to construct + start it and pass it in.
-    """
-    global _commons_store, _commons_rate_limiter, _commons_ack_watcher, _commons_question_watcher
+    """Wire singletons at FastAPI startup. Idempotent for testing."""
+    global _commons_store, _commons_rate_limiter, _commons_ack_watcher
     global _active_session_threshold_seconds
     _commons_store                    = store
     _commons_rate_limiter             = rate_limiter
     _commons_ack_watcher              = ack_watcher
-    _commons_question_watcher         = question_watcher
     _active_session_threshold_seconds = float( active_session_threshold_seconds )
 
 
@@ -95,74 +82,11 @@ class BroadcastRequestBody( BaseModel ):
     include_originator : bool            = True
 
 
-# AC1 Pydantic-native validation per `feedback_pydantic_native_validation`.
-# Field constraints declared HERE; FastAPI returns 422 on validation failure.
-# Topic + question_id share the same charset/length contract (T1 compatibility).
-# Unicode-broadened 2026-05-17 per Q8 ratification (`feedback_unicode_persona_keys_all_the_way_down`):
-# topic names preserve exact unicode persona spelling (e.g., `dm-maría`). Python's `\w` with
-# `re.UNICODE` (default in Py3) matches letters/digits in any script + underscore; literal
-# `-` is also allowed. Path-dangerous chars (path separators, control, whitespace) excluded.
-# Paired with `src/lupin_mcp/cosa_voice_mcp.py:_derive_dm_topic` on the wrapper side.
-_TOPIC_OR_QID_PATTERN = r"^[\w-]+$"
-_QID_TOPIC_MIN        = 1
-_QID_TOPIC_MAX        = 64
-_TTL_MIN_SECONDS      = 1
-_TTL_MAX_SECONDS      = 604800   # 7 days — the absolute upper bound (per Q4 envelope)
-_TTL_DEFAULT_SECONDS  = 3600     # 1h (Q4 ratified default)
-
-
-class RegisterQuestionRequest( BaseModel ):
-    """
-    POST /register-question request body — Phase 3 push-mode `ask_async`
-    cross-process registration primitive (per C3 Q2 sub-question resolution).
-
-    Pydantic-native validation per `feedback_pydantic_native_validation`:
-    - `topic`            — free-form commons topic; T1 charset + ≤64 chars
-    - `question_id`      — asker-supplied unique id; T1 charset + ≤64 chars
-    - `asker_session_id` — the CC session that owns the question; used in
-                           inject_fn closure for sender_id routing.
-                           Loosely constrained: must be a non-empty string.
-    - `ttl_seconds`      — Q4 1h default, 1..604800 (7d cap)
-
-    Inter-Session DM extension (2026-05-15 design Phase 0 §14):
-    - `recipient_session_id` — if set, dispatch `commons_question_received`
-                               to this session's listener at register time.
-                               Precedence over `recipient_persona` if both supplied.
-    - `recipient_persona`    — if set (and session_id NOT set), resolve to
-                               session_id via the persona resolution chain
-                               (exact → case-insensitive → punct-tolerant →
-                               PHI-4 LLM disambiguator). Unicode-tolerant.
-    - `expect_reply`         — when False, sender does NOT need the asker-side
-                               watcher push (fire-and-forget DM); when True
-                               (default), Phase 3 watcher tracks for replies.
-    """
-    topic            : str = Field(
-        ...,
-        min_length = _QID_TOPIC_MIN,
-        max_length = _QID_TOPIC_MAX,
-        pattern    = _TOPIC_OR_QID_PATTERN,
-    )
-    question_id      : str = Field(
-        ...,
-        min_length = _QID_TOPIC_MIN,
-        max_length = _QID_TOPIC_MAX,
-        pattern    = _TOPIC_OR_QID_PATTERN,
-    )
-    asker_session_id : str = Field( ..., min_length=1, max_length=128 )
-    ttl_seconds      : int = Field(
-        default = _TTL_DEFAULT_SECONDS,
-        gt      = 0,
-        le      = _TTL_MAX_SECONDS,
-    )
-    recipient_session_id : Optional[ str ] = Field( default=None, min_length=1, max_length=128 )
-    recipient_persona    : Optional[ str ] = Field( default=None, min_length=1, max_length=64 )
-    expect_reply         : bool            = Field( default=True )
-
-
 class RecipientResolutionError( BaseModel ):
     """
     422 response body when recipient resolution fails for an inter-session DM
-    register-question call (per Phase 0 Q3-rev amendment 2026-05-15).
+    (`_resolve_dm_recipient`, the dm_send / POST /api/dm/send path; per Phase 0
+    Q3-rev amendment 2026-05-15).
 
     Surfaces actionable feedback so the AI caller can self-correct without
     involving the human user. Fields:
@@ -853,49 +777,7 @@ def execute_broadcast_history(
     }
 
 
-# ─── Step 6: register-question pure-logic helpers ───────────────────────────
-
-
-def make_question_inject_fn(
-    notification_queue : Any,
-    user_id            : str,
-    question_id        : str,
-    asker_session_id   : str,
-    build_sender_id    : Callable[ [ str ], Optional[ str ] ],
-) -> Callable[ [ Dict[ str, Any ] ], None ]:
-    """
-    Build the per-question `inject_fn` closure that the watcher fires on
-    answer-detection. Pushes a `user_initiated_message` notification with
-    `title="action:commons_answer_received"` so the asker's CC listener
-    (Step 8) injects a `<system-reminder>` into the tmux pane.
-
-    Per Q3 framing — the stamped `persona_name` on the answer entry is
-    read by the listener (F9-fit immutability principle, NOT a live lookup).
-
-    Per T8 isolation — exceptions are caught and re-raised; the watcher's
-    `_tick_one_question()` wraps the inject_fn call in its own try/except.
-    """
-    def _inject( entry: Dict[ str, Any ] ) -> None:
-        notification_queue.push_notification(
-            message            = "",
-            type               = "user_initiated_message",
-            title              = "action:commons_answer_received",
-            sender_id          = build_sender_id( asker_session_id ),
-            job_id             = asker_session_id[ :8 ],
-            user_id            = user_id,
-            suppress_ding      = True,
-            response_requested = False,
-            payload            = {
-                "question_id"     : question_id,
-                "body"            : entry.get( "body", "" ),
-                "persona_name"    : entry.get( "persona_name" ),
-                "persona_icon"    : entry.get( "persona_icon" ),
-                "persona_color"   : entry.get( "persona_color" ),
-                "answerer_session": entry.get( "sender_session_id" ),
-                "answer_ts"       : entry.get( "ts" ),
-            },
-        )
-    return _inject
+# ─── DM recipient-resolution helpers ───────────────────────────────────────
 
 
 def _session_id_matches( canonical: Optional[ str ], supplied: str ) -> bool:
@@ -1063,171 +945,6 @@ def _resolve_dm_recipient(
     return { "http_status": 422, "detail": err.model_dump() }
 
 
-def _dispatch_commons_question_received(
-    *,
-    notification_queue    : Any,
-    target_session_id     : str,
-    target_persona        : Optional[ str ],
-    question_id           : str,
-    topic                 : str,
-    asker_session_id      : str,
-    authenticated_user_id : str,
-    build_sender_id       : Callable[ [ str ], Optional[ str ] ],
-) -> bool:
-    """
-    Fire-and-forget dispatch of a `commons_question_received` notification to
-    the recipient session's listener. Per Phase 0 Q2-rev + T7 isolation:
-    dispatch failures log + return False; sender's register-question call is
-    NOT undone.
-    """
-    try:
-        notification_queue.push_notification(
-            message            = "",
-            type               = "user_initiated_message",
-            title              = "action:commons_question_received",
-            sender_id          = build_sender_id( target_session_id ),
-            job_id             = target_session_id[ :8 ],
-            user_id            = authenticated_user_id,
-            suppress_ding      = True,
-            response_requested = False,
-            payload            = {
-                "question_id"       : question_id,
-                "topic"             : topic,
-                "asker_session"     : asker_session_id,
-                "recipient_persona" : target_persona,
-                "recipient_session" : target_session_id,
-            },
-        )
-        return True
-    except Exception:
-        return False
-
-
-def execute_register_question(
-    *,
-    authenticated_user_id : str,
-    body                  : "RegisterQuestionRequest",
-    question_watcher      : CommonsQuestionWatcher,
-    notification_queue    : Any,
-    build_sender_id       : Callable[ [ str ], Optional[ str ] ],
-    raw_sessions_fn       : Optional[ Callable[ [ ], List[ Tuple[ Any, str, Dict[ str, Any ] ] ] ] ] = None,
-    bridge_loader         : Optional[ Callable[ [ Any ], Optional[ Dict[ str, Any ] ] ] ]            = None,
-    active_session_threshold_seconds : float = 600.0,
-    now_epoch_fn          : Callable[ [ ], float ] = time.time,
-    mtime_fn              : Callable[ [ Any ], float ] = lambda p: p.stat().st_mtime,
-) -> Dict[ str, Any ]:
-    """
-    Pure-logic core for POST /api/commons/register-question.
-
-    Returns a dict with one of these shapes (route handler translates to FastAPI):
-      {"http_status": 201, "question_id": "...", "ttl_seconds": int, "dm_dispatched": bool | None}
-      {"http_status": 409, "detail": "question_id collision"}
-      {"http_status": 429, "detail": "tracker cap reached", "retry_after": None}
-      {"http_status": 422, "detail": <RecipientResolutionError model_dump>}
-
-    Body-level field validation already happened at Pydantic instantiation
-    (FastAPI auto-422'd before this helper was called).
-
-    T3: per-user + global caps enforced by the watcher (`CapExceededError`).
-    T9: question_id collision raises `ValueError` from `_register()`.
-
-    Inter-Session DM extension (Phase 0 §14 2026-05-15):
-    - If `body.recipient_session_id` OR `body.recipient_persona` set AND
-      resolver callables wired:
-        1. Resolve recipient via `_resolve_dm_recipient` (same-user scoped).
-        2. On 422: unregister the question (undo Phase 3 reservation) +
-           return the 422 error body so the AI caller can rectify per
-           Rick's Q3-rev amendment.
-        3. On success: dispatch `commons_question_received` via
-           `notification_queue.push_notification` (fire-and-forget per
-           Q2-rev, T7-isolated). Set `dm_dispatched` on the 201 body.
-    - When resolver callables are None (Phase-3 unit-test injection
-      ergonomics), DM resolution is silently skipped — preserves
-      backward compat for non-DM Phase-3 callers.
-    """
-    inject_fn = make_question_inject_fn(
-        notification_queue = notification_queue,
-        user_id            = authenticated_user_id,
-        question_id        = body.question_id,
-        asker_session_id   = body.asker_session_id,
-        build_sender_id    = build_sender_id,
-    )
-    try:
-        question_watcher.register_question(
-            question_id  = body.question_id,
-            user_id      = authenticated_user_id,
-            topic        = body.topic,
-            inject_fn    = inject_fn,
-            ttl_seconds  = float( body.ttl_seconds ),
-        )
-    except CapExceededError as e:
-        return { "http_status": 429, "detail": "question tracker cap reached", "reason": str( e ) }
-    except ValueError:
-        return { "http_status": 409, "detail": "question_id collision" }
-
-    dm_dispatched : Optional[ bool ] = None
-    if ( body.recipient_session_id is not None or body.recipient_persona is not None ) \
-       and raw_sessions_fn is not None and bridge_loader is not None:
-        resolution = _resolve_dm_recipient(
-            recipient_session_id             = body.recipient_session_id,
-            recipient_persona                = body.recipient_persona,
-            authenticated_user_id            = authenticated_user_id,
-            raw_sessions_fn                  = raw_sessions_fn,
-            bridge_loader                    = bridge_loader,
-            active_session_threshold_seconds = active_session_threshold_seconds,
-            now_epoch_fn                     = now_epoch_fn,
-            mtime_fn                         = mtime_fn,
-        )
-        if resolution.get( "http_status" ) == 422:
-            try:
-                question_watcher.unregister_question( body.question_id, authenticated_user_id )
-            except QuestionNotFound:
-                pass
-            return resolution
-
-        dm_dispatched = _dispatch_commons_question_received(
-            notification_queue    = notification_queue,
-            target_session_id     = resolution[ "session_id" ],
-            target_persona        = resolution.get( "persona_name" ),
-            question_id           = body.question_id,
-            topic                 = body.topic,
-            asker_session_id      = body.asker_session_id,
-            authenticated_user_id = authenticated_user_id,
-            build_sender_id       = build_sender_id,
-        )
-
-    return {
-        "http_status"   : 201,
-        "question_id"   : body.question_id,
-        "ttl_seconds"   : int( body.ttl_seconds ),
-        "dm_dispatched" : dm_dispatched,
-    }
-
-
-def execute_unregister_question(
-    *,
-    authenticated_user_id : str,
-    question_id           : str,
-    question_watcher      : CommonsQuestionWatcher,
-) -> Dict[ str, Any ]:
-    """
-    Pure-logic core for DELETE /api/commons/register-question/{question_id}.
-
-    T5 — uniform 404 for both unknown ids AND wrong-owner ids via single
-    internal path (`CommonsQuestionWatcher.unregister_question` raises
-    `QuestionNotFound` either way). No log differentiation.
-
-    Returns:
-      {"http_status": 204}
-      {"http_status": 404, "detail": "question_id not found or not owned by caller"}
-    """
-    try:
-        question_watcher.unregister_question( question_id, authenticated_user_id )
-    except QuestionNotFound:
-        return { "http_status": 404, "detail": "question_id not found or not owned by caller" }
-    return { "http_status": 204 }
-
-
 # ─── Dependency-injection accessors ─────────────────────────────────────────
 
 
@@ -1241,12 +958,6 @@ def _require_initialized():
     """Raise if commons singletons not yet wired (step 8 wires them at app startup)."""
     if _commons_store is None or _commons_rate_limiter is None or _commons_ack_watcher is None:
         raise HTTPException( status_code=503, detail="commons subsystem not initialized" )
-
-
-def _require_question_watcher():
-    """Raise if the Phase 3 question watcher hasn't been wired yet."""
-    if _commons_question_watcher is None:
-        raise HTTPException( status_code=503, detail="commons question watcher not initialized" )
 
 
 # ─── Route handlers (thin — # pragma: no cover) ─────────────────────────────
@@ -1319,7 +1030,7 @@ async def post_broadcast_to_cc_sessions(   # pragma: no cover
     return JSONResponse( status_code=200, content=result )
 
 
-# ─── Step 6: register-question endpoints (Phase 3 push-mode) ────────────────
+# ─── broadcast-history endpoint ─────────────────────────────────────────────
 
 
 @router.get(
@@ -1392,67 +1103,3 @@ async def get_broadcast_history(   # pragma: no cover
     return JSONResponse( content=result )
 
 
-# ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
-# The POST/DELETE /api/commons/register-question HTTP routes are RETIRED FROM
-# REGISTRATION as of the cosa-voice token-reduction Phase 4 (2026-06-15): the
-# legacy DM claim-check path (register-question → CommonsQuestionWatcher push →
-# commons_answer_received) is replaced by the notification-native path
-# (`dm_send` → POST /api/dm/send, body inline). The route decorators below
-# are COMMENTED OUT so the endpoints no longer register; the pure-logic cores
-# (`execute_register_question` / `execute_unregister_question`) and the
-# `CommonsQuestionWatcher` are LEFT IN PLACE (still unit-tested) for a later
-# full-removal pass. The CommonsQuestionWatcher DAEMON is no longer started
-# (lupin_app/main.py lifespan wiring is likewise commented out).
-# Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
-#
-# @router.post(
-#     "/register-question",
-#     summary     = "Register an outstanding `ask_async` question for push-mode answer dispatch",
-#     description = "Phase 3 push-mode. The MCP-side `ask_async()` calls this endpoint to register a (topic, question_id, asker_session_id) tracker entry. The server-side CommonsQuestionWatcher then tails the topic and pushes a `commons_answer_received` notification when a matching `in_reply_to` answer appears. Returns 201 on success, 409 on collision, 429 on cap-hit. FastAPI auto-422s on Pydantic validation failure.",
-# )
-# async def post_register_question(   # pragma: no cover
-#     body: RegisterQuestionRequest,
-#     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
-#     notification_queue=Depends( get_notification_queue ),
-# ) -> JSONResponse:
-#     _require_question_watcher()
-#     # FM-7 mitigation: register-question resolves the recipient via bridge-dir
-#     # enumeration + per-bridge reads (blocking I/O); run it OFF the event loop so the
-#     # DM/ask push-registration flood can't stall the shared :7999 loop. Mirrors broadcast.
-#     result = await asyncio.to_thread(
-#         execute_register_question,
-#         authenticated_user_id            = authenticated_user_id,
-#         body                             = body,
-#         question_watcher                 = _commons_question_watcher,
-#         notification_queue               = notification_queue,
-#         build_sender_id                  = build_sender_id_for_cc,
-#         raw_sessions_fn                  = find_active_voice_persona_sessions,
-#         bridge_loader                    = _load_bridge_fields,
-#         active_session_threshold_seconds = _active_session_threshold_seconds,
-#     )
-#     http_status = result.pop( "http_status" )
-#     if http_status >= 400:
-#         raise HTTPException( status_code=http_status, detail=result[ "detail" ] )
-#     return JSONResponse( status_code=http_status, content=result )
-#
-#
-# @router.delete(
-#     "/register-question/{question_id}",
-#     summary     = "Unregister an outstanding question (asker-side cleanup or cancellation)",
-#     description = "T5 uniform 404 for both unknown question_ids AND known-but-not-owned. Returns 204 on success.",
-# )
-# async def delete_register_question(   # pragma: no cover
-#     authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
-#     question_id           : str = Path( ..., min_length=_QID_TOPIC_MIN, max_length=_QID_TOPIC_MAX, pattern=_TOPIC_OR_QID_PATTERN ),
-# ) -> JSONResponse:
-#     _require_question_watcher()
-#     result = execute_unregister_question(
-#         authenticated_user_id = authenticated_user_id,
-#         question_id           = question_id,
-#         question_watcher      = _commons_question_watcher,
-#     )
-#     http_status = result.pop( "http_status" )
-#     if http_status == 404:
-#         raise HTTPException( status_code=404, detail=result[ "detail" ] )
-#     # 204 No Content
-#     return JSONResponse( status_code=204, content=None )

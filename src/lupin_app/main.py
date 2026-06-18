@@ -106,7 +106,6 @@ commons_store            = None
 commons_rate_limiter     = None
 commons_ack_watcher      = None
 commons_activity_watcher = None
-commons_question_watcher = None  # Phase 3 step 9
 
 # WebSocket connection management
 websocket_manager = WebSocketManager()
@@ -583,16 +582,12 @@ async def lifespan( app: FastAPI ):
     # AC14 (router) + AC7 (CommonsAckWatcher daemon). Gated by `commons enabled`
     # INI key — when False, the subsystem is fully absent and the router
     # endpoints will 503 per `_require_initialized()`.
-    global commons_store, commons_rate_limiter, commons_ack_watcher, commons_question_watcher, commons_activity_watcher
+    global commons_store, commons_rate_limiter, commons_ack_watcher, commons_activity_watcher
     if config_mgr.get( "commons enabled", default=True, return_type="boolean" ):
         try:
             import os
             from cosa.rest.commons_ack_watcher import CommonsAckWatcher
             from cosa.rest.commons_activity_watcher import CommonsActivityWatcher
-            # DEPRECATED (revisit-later): CommonsQuestionWatcher daemon retired in the
-            # cosa-voice token-reduction Phase 4 (2026-06-15) — the legacy DM claim-check
-            # path is superseded by the notification-native dm_send / /api/dm/send path.
-            # from cosa.rest.commons_question_watcher import CommonsQuestionWatcher
             from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
             from cosa.rest.routers.commons import init_commons_state, _load_bridge_fields
             from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
@@ -610,29 +605,13 @@ async def lifespan( app: FastAPI ):
                 push_notification_fn   = jobs_notification_queue.push_notification,
                 poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
             )
-            # DEPRECATED (revisit-later): Phase 3 CommonsQuestionWatcher for push-mode
-            # ask_async — retired in the cosa-voice token-reduction Phase 4 (2026-06-15).
-            # The daemon is no longer created/started and is no longer wired into
-            # init_commons_state (question_watcher now defaults to None); the legacy DM
-            # claim-check path is superseded by dm_send / POST /api/dm/send. The
-            # CommonsQuestionWatcher class + the register-question routes are LEFT IN
-            # PLACE behind comments for a later full-removal pass.
-            # commons_question_watcher = CommonsQuestionWatcher(
-            #     store                  = commons_store,
-            #     poll_interval_seconds  = config_mgr.get( "commons broadcast ack watch interval seconds", default=1, return_type="int" ),
-            #     in_flight_ttl_seconds  = float( config_mgr.get( "commons question tracker ttl seconds", default=3600, return_type="int" ) ),
-            #     per_user_max           = config_mgr.get( "commons question tracker per user max", default=50, return_type="int" ),
-            #     global_max             = config_mgr.get( "commons question tracker global max", default=1000, return_type="int" ),
-            # )
             init_commons_state(
                 store                            = commons_store,
                 rate_limiter                     = commons_rate_limiter,
                 ack_watcher                      = commons_ack_watcher,
                 active_session_threshold_seconds = config_mgr.get( "commons broadcast liveness threshold seconds", default=28800, return_type="int" ),
-                # question_watcher                 = commons_question_watcher,   # DEPRECATED (revisit-later) — daemon retired
             )
             commons_ack_watcher.start()
-            # commons_question_watcher.start()   # DEPRECATED (revisit-later) — daemon retired
 
             # Phase 2.5/3.5 — CommonsActivityWatcher for broadcast-card Recent Activity WS push.
             # Per src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (AC3).
@@ -987,17 +966,6 @@ async def lifespan( app: FastAPI ):
         except Exception as e:
             print( f"[COMMONS] Error stopping watcher: {e}" )
 
-    # DEPRECATED (revisit-later): CommonsQuestionWatcher daemon retired in the
-    # cosa-voice token-reduction Phase 4 (2026-06-15) — never started, so nothing
-    # to stop. Left in place behind comments for a later full-removal pass.
-    # # Stop the commons question watcher daemon (Phase 3)
-    # if commons_question_watcher is not None:
-    #     try:
-    #         print( "[COMMONS] Stopping CommonsQuestionWatcher daemon..." )
-    #         commons_question_watcher.stop( join_timeout=3.0 )
-    #         print( "[COMMONS] CommonsQuestionWatcher stopped" )
-    #     except Exception as e:
-    #         print( f"[COMMONS] Error stopping question watcher: {e}" )
 
     # Add any other cleanup code here if needed
 

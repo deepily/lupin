@@ -54,16 +54,14 @@ def test_ac14_router_prefix_and_tag():
     assert "commons" in commons_router.tags
 
 
-# ─── register-question endpoints — RETIRED (cosa-voice token-reduction Phase 4) ─
-# DEPRECATED (revisit-later): the POST/DELETE /api/commons/register-question routes
-# were COMMENTED OUT in commons.py (2026-06-15) — the legacy DM claim-check path is
-# superseded by the notification-native dm_send / POST /api/dm/send path. The
-# four former route-REGISTRATION assertions are inverted to actively guard the
-# DEREGISTRATION (the cutover regression guard); the pure-logic cores
-# (execute_register_question / execute_unregister_question) remain unit-tested in
-# test_commons_router.py. Restore these to the positive form if the routes are
-# ever re-enabled.
-# Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
+# ─── register-question endpoints — REMOVED (cosa-voice token-reduction Phase 4) ─
+# The POST/DELETE /api/commons/register-question routes — and their pure-logic
+# cores (execute_register_question / execute_unregister_question) + the
+# CommonsQuestionWatcher daemon — were physically DELETED (full-removal pass,
+# 2026-06-17): the legacy DM claim-check path is superseded by the
+# notification-native dm_send / POST /api/dm/send path. The two assertions below
+# guard that the routes stay deregistered (cutover regression guard).
+# Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md §9
 
 
 def test_register_question_post_route_deregistered():

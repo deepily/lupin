@@ -766,7 +766,6 @@ mcp = FastMCP(
         f"  **planning-is-prompting → workflow/cross-session-communication.md**\n\n"
         f"Key sections to bookmark:\n"
         f"- §1.5 — DM mechanics, threading, receipt etiquette, channel-choice\n"
-        f"- §1.5.1 — Result-shape table for `push_mode_active` / `dm_dispatched` / `register_skip_reason`\n"
         f"- §1.5.3 — Threading conventions (`in_reply_to` chains, sender-mailbox topic routing, loop-avoidance)\n"
         f"- §2 — Three-tier autonomy (READ / SELF-DISCLOSURE / ATTENTION-DEMANDING)\n"
         f"- §3 — Reserved topic vocabulary\n"
@@ -2347,7 +2346,7 @@ from lupin_mcp.commons_archival import CommonsArchiver
 def _mcp_outbound_api_key() -> Optional[ str ]:
     """
     Load the X-API-Key value used for MCP-server outbound HTTP calls
-    to the Lupin REST API (e.g. `/api/commons/register-question`).
+    to the Lupin REST API (e.g. `/api/dm/send`).
 
     Mirrors the canonical pattern in
     `cosa/memory/embedding_provider.py:177` `_http_api_key()` — reads
@@ -2552,14 +2551,12 @@ def commons_post(
     Persona fields are stamped from the session bridge at post-time and are
     immutable thereafter (per C4 ratification) — you cannot spoof another persona.
 
-    **Threading callout**: to reply to a `COMMONS PEER MESSAGE` or
-    `COMMONS PEER REPLY` system-reminder, pass `metadata={"in_reply_to": <qid>}`
-    where `<qid>` is the `question_id` from the system-reminder. The original
-    asker's Phase 3 watcher (if running) will push your reply back to their
-    tmux via `commons_answer_received`. **Threading isn't free**: if the asker
-    forgot `expect_reply=True` or already unregistered the question, the reply
-    lands silently on the blackboard — the asker will see it only on their
-    next `commons_read` poll.
+    **Threading callout**: for a directed peer reply, use `dm_send(reply_to=...,
+    thread_id=...)` — the body travels inline and the recipient processes it
+    directly. `commons_post` is for the topic blackboard; a reply posted here
+    with `metadata={"in_reply_to": <qid>}` correlates to the original question
+    but lands on the blackboard only — the asker sees it on their next
+    `commons_read` poll (no push-back).
 
     **Failure-mode hint**: posting user-sensitive data is prohibited —
     see cross-session-communication.md §5 for the sensitive-content rules.
@@ -2739,103 +2736,40 @@ def commons_ask_async(
     topic                : str,
     body                 : str,
     question_id          : Optional[ str ] = None,
-    # ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
-    # DM-mode parameters RETIRED as of cosa-voice token-reduction Phase 4
-    # (2026-06-15): directed peer DMs go through `dm_send` (body inline). These
-    # params are COMMENTED OUT so the registered tool is POLLING-ONLY (post a
-    # question to a topic at large); the dispatch call below no longer forwards
-    # them. Left in place for a later full-removal pass.
-    # recipient_session_id : Optional[ str ] = None,
-    # recipient_persona    : Optional[ str ] = None,
-    # expect_reply         : bool            = True,
 ) -> dict:
     """
-    **⚠️ DM-mode RETIRED — use `dm_send` instead.** The directed-DM parameters
-    (`recipient_persona` / `recipient_session_id` / `expect_reply`) were removed
-    in the cosa-voice token-reduction Phase 4 (2026-06-15): they routed through
-    the commons claim-check path (forced `commons_read` re-fetch, ~3,700
-    tokens/received DM). For directed peer DMs use `dm_send` (body inline, ~204
-    tokens). This tool is now POLLING-ONLY (post a question to a topic at large).
-
     **[ATTENTION-DEMANDING — requires user trigger or clear coordination need]**
-    Post a question to commons and return immediately (fire-and-forget).
+    Post a question to a topic at large and return immediately (fire-and-forget,
+    polling-mode). For directed peer DMs use `dm_send` (body inline) instead.
 
-    Examples:
+    Example:
         # Polling-mode: ask the topic at large, poll for replies yourself
         result = commons_ask_async(topic="builds", body="latest hash?")
         # Later: commons_read(topic="builds", since=result["posted_ts"]) → filter on in_reply_to
 
-        # DM-mode: directed to a specific persona, push-back to asker
-        result = commons_ask_async(
-            topic             = "dm-tiberius",
-            body              = "any blockers on the doctrine refresh?",
-            recipient_persona = "tiberius",
-            expect_reply      = True,
-        )
-        # If result["push_mode_active"] is True, tiberius's listener got pushed.
-        # His reply will arrive in YOUR tmux as a COMMONS PEER REPLY system-reminder.
+    The message lands on the blackboard `topic`; peers see it on their next
+    `commons_read` poll, and the entry is durable. Correlate replies via
+    `metadata.in_reply_to == question_id`.
 
-    **`expect_reply` side-effect** (default True): when True, the server starts
-    an asker-side Phase 3 `CommonsQuestionWatcher` that polls the answer topic
-    + pushes the recipient's reply back to your tmux via `commons_answer_received`
-    notification injection. When False, the watcher is skipped — fire-and-forget,
-    no asker-side correlation. Set False for status pings / acknowledgments;
-    leave True when you genuinely need the reply pushed back.
-
-    **Recipient experience** — when push fires (push_mode_active: true), the
-    recipient sees this as a `COMMONS PEER MESSAGE` `<system-reminder>` block
-    injected into their next turn. When push fails (push_mode_active: false),
-    the message lands on the blackboard topic and the recipient sees it only
-    on their next `commons_read` poll. Either way the entry is durable.
-
-    **Failure-mode hint** — check `push_mode_active` and `register_skip_reason`
-    in the result:
-
-    - `push_mode_active: true, dm_dispatched: true` → recipient got auto-injection ✅
-    - `push_mode_active: false` → polling fallback. Check `register_skip_reason`:
-        - `missing_auth_header` → MCP couldn't build the X-API-Key (key file issue)
-        - `register_network_error` → :7999 server unreachable
-        - `register_failed_status_N` → non-2xx (rate limit, server error)
-        - `register_failed_422` → recipient resolution failed — see `recipient_resolution_error`
-    - `recipient_resolution_error: {...}` → recipient persona/session_id didn't resolve.
-      The dict carries `resolution_chain_attempted` + `candidate_alternatives` +
-      `suggested_next_action`. Read those before retrying with a different recipient.
-
-    Inter-Session DM mode (auto-activated when `recipient_session_id` OR
-    `recipient_persona` is supplied):
-    - Push-mode forced on; HTTP register fires with recipient kwargs
-    - Server resolves recipient (session_id wins, else persona via
-      exact → case-insensitive → punct-tolerant match)
-    - Dispatches `commons_question_received` to recipient's listener fire-and-forget
+    (The directed-DM / push-back-to-asker mode was removed in the cosa-voice
+    token-reduction full-removal pass, 2026-06-17 — it routed through the commons
+    claim-check path at ~3,700 tokens/received DM. Use `dm_send`, ~204 tokens.)
 
     Args:
         topic: Topic to post the question to
         body: The question text
         question_id: Optional UUID; if omitted, auto-generated
-        recipient_session_id: Optional explicit recipient session_id (precise)
-        recipient_persona: Optional recipient persona name (fuzzy-resolved)
-        expect_reply: When False, server skips reply-tracking watcher overhead
 
     Returns:
-        dict — Phase 1: `{question_id, posted_ts, push_mode_active}`;
-        DM mode adds: `dm_dispatched: bool | None`;
-        push-mode skip adds: `register_skip_reason: str`;
-        on recipient resolution failure: `recipient_resolution_error: dict`
+        dict `{question_id, posted_ts}`
 
     See: planning-is-prompting → workflow/cross-session-communication.md
-         (§1.5 DM mechanics + threading + receipt etiquette;
-          §1.5.1 result-shape table for push_mode_active / dm_dispatched / register_skip_reason)
+         (§1.5 DM mechanics — for directed DMs use `dm_send`)
     """
     return _commons_ask_async_dispatch(
-        topic                = topic,
-        body                 = body,
-        question_id          = question_id,
-        # DEPRECATED (revisit-later): DM-mode dispatch retired — see param note
-        # above. Polling-only: no recipient / expect_reply forwarded → the
-        # dispatch helper's push_mode stays False (post-to-topic).
-        # recipient_session_id = recipient_session_id,
-        # recipient_persona    = recipient_persona,
-        # expect_reply         = expect_reply,
+        topic       = topic,
+        body        = body,
+        question_id = question_id,
     )
 
 
@@ -2870,32 +2804,21 @@ def _commons_ask_async_dispatch(
     topic                : str,
     body                 : str,
     question_id          : Optional[ str ]  = None,
-    recipient_session_id : Optional[ str ]  = None,
-    recipient_persona    : Optional[ str ]  = None,
-    expect_reply         : bool             = True,
 ) -> dict:
     """
-    Shared dispatch helper for `commons_ask_async` and `commons_send_to`.
-
-    NOTE (cosa-voice token-reduction Phase 4, 2026-06-15): the DM-mode of this
-    helper (push_mode auto-enable when a recipient is supplied) is DEPRECATED
-    (revisit-later) — superseded by `dm_send` / the notification-native path.
-    `commons_ask_async` is now polling-only and `commons_send_to` is deregistered,
-    so the recipient/push branch below is reachable only from retired code; it is
-    LEFT IN PLACE for a later full-removal pass.
+    Dispatch helper for the `commons_ask_async` MCP tool (polling-mode).
 
     Necessary because `@mcp.tool`-decorated functions are wrapped into
     `FunctionTool` instances which are NOT directly callable as Python
-    functions. Without this private helper, `commons_send_to` calling
-    `commons_ask_async` by name raises
-    `TypeError: 'FunctionTool' object is not callable` at runtime.
+    functions; the tool body delegates here so the persona/store construction
+    lives in one plain callable.
 
-    Both MCP tools delegate here so they share the persona / auth /
-    base-URL construction and the push-mode auto-enable rule.
+    (The push-mode / directed-DM dispatch branch was removed in the cosa-voice
+    token-reduction full-removal pass, 2026-06-17 — directed peer DMs now use
+    `dm_send`. `commons_ask_async` is polling-only.)
 
     Requires:
         - `topic` and `body` are non-empty strings
-        - `recipient_session_id` XOR `recipient_persona` may be supplied (or neither)
 
     Ensures:
         - Returns the `_commons_ask_async_impl` result dict verbatim
@@ -2904,147 +2827,16 @@ def _commons_ask_async_dispatch(
     if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
     persona = _commons_persona_fields()
 
-    # Push-mode auto-enables when caller wants directed DM dispatch
-    push_mode    = recipient_session_id is not None or recipient_persona is not None
-    api_base_url = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
-    api_key      = _mcp_outbound_api_key()
-    auth_header  = { "X-API-Key": api_key } if api_key else None
-
     return _commons_ask_async_impl(
-        store                = _get_commons_store(),
-        topic                = topic,
-        body                 = body,
-        sender_session_id    = SESSION_ID,
-        persona_name         = persona[ "persona_name" ],
-        persona_icon         = persona[ "persona_icon" ],
-        persona_color        = persona[ "persona_color" ],
-        question_id          = question_id,
-        push_mode_enabled    = push_mode,
-        api_base_url         = api_base_url,
-        auth_header          = auth_header,
-        recipient_session_id = recipient_session_id,
-        recipient_persona    = recipient_persona,
-        expect_reply         = expect_reply,
+        store             = _get_commons_store(),
+        topic             = topic,
+        body              = body,
+        sender_session_id = SESSION_ID,
+        persona_name      = persona[ "persona_name" ],
+        persona_icon      = persona[ "persona_icon" ],
+        persona_color     = persona[ "persona_color" ],
+        question_id       = question_id,
     )
-
-
-# ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
-# The `commons_send_to` MCP tool is RETIRED FROM REGISTRATION as of the cosa-voice
-# token-reduction Phase 4 (2026-06-15): peers now DM via `dm_send` (body inline,
-# ~204 tokens) instead of this commons claim-check wrapper (~3,700 tokens/received
-# DM). The `@mcp.tool` decorator below is COMMENTED OUT so the tool no longer
-# registers / appears in the tool list; the implementation is LEFT IN PLACE behind
-# this comment for a later full-removal pass.
-# Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
-# @mcp.tool
-def commons_send_to(
-    recipient    : str,
-    body         : str,
-    expect_reply : bool            = False,
-    in_reply_to  : Optional[ str ] = None,
-    topic        : Optional[ str ] = None,
-    question_id  : Optional[ str ] = None,
-) -> dict:
-    """
-    **⚠️ DEPRECATED — use `dm_send` instead.** This routes through the commons
-    claim-check path (empty-body push → forced `commons_read` re-fetch,
-    ~3,700 tokens/received DM). `dm_send` carries the body inline (~204 tokens,
-    ~18× cheaper) and is the supported peer-DM tool. Kept temporarily for
-    backward compatibility; will be removed.
-
-    **[DM — directed attention-demanding]** Thin persona-routed wrapper over `commons_ask_async`.
-    Send a directed inter-session DM to another CC session.
-
-    Examples:
-        # Basic DM by persona name (most common):
-        commons_send_to(recipient="tiberius", body="have you touched src/auth.py today?")
-
-        # Threaded reply to a prior received DM:
-        commons_send_to(
-            recipient   = "tiberius",
-            body        = "yes — landed in commit f4e0370 around 21:00 UTC",
-            in_reply_to = "<question_id_from_their_system_reminder>",
-        )
-
-        # Fire-and-forget status ping that doesn't need a reply pushed back:
-        commons_send_to(recipient="rachel", body="thanks for the doc-scope work", expect_reply=False)
-
-    Per Phase 0 Q1-rev (2026-05-15 ratified): thin ergonomic wrapper around
-    `commons_ask_async` that defaults to fire-and-forget semantics and
-    addresses the recipient by persona name. The underlying register-question
-    endpoint resolves the persona (exact → case-insensitive → punct-tolerant),
-    dispatches `commons_question_received` to the recipient's listener via
-    tmux injection, and stamps `metadata.recipient_persona` on the topic
-    entry so Recent Activity renders a DM badge.
-
-    **`expect_reply` side-effect** (default False for this wrapper, vs True
-    for `commons_ask_async`): when True, the server starts an asker-side
-    Phase 3 watcher that pushes the recipient's reply back to your tmux via
-    `commons_answer_received` notification injection. Use True for genuine
-    questions where you need the reply; leave False for status pings.
-
-    **Recipient experience** — same as `commons_ask_async` DM mode: when push
-    fires, the recipient sees this as a `COMMONS PEER MESSAGE` `<system-reminder>`
-    block injected into their next turn. When push fails (`push_mode_active: false`
-    in the result), the message lands on the blackboard topic at `dm-{recipient}`
-    and the recipient sees it only on their next `commons_read` poll.
-
-    **Failure-mode hint** — identical to `commons_ask_async`: check
-    `push_mode_active` and `register_skip_reason` in the result dict.
-    `register_skip_reason: missing_auth_header` is the most common (the MCP
-    server's outbound X-API-Key couldn't be loaded — usually means the
-    cosa-voice MCP subprocess started before commit `f4e0370` landed).
-
-    Power users who need session_id-precise addressing or finer-grained
-    control over topic + question_id can call `commons_ask_async` directly
-    with the equivalent kwargs.
-
-    Args:
-        recipient: Recipient persona name (e.g. "radio", "rachel", "Maria").
-                   Server-side persona resolution is fuzzy: case-insensitive
-                   and punctuation/whitespace-tolerant.
-        body: Message body
-        expect_reply: Default False (fire-and-forget). When True, the asker-side
-                      watcher tracks for replies via Phase 3 push-back-to-asker.
-        in_reply_to: Optional question_id from a prior received DM (threads
-                      the reply via metadata; recipient sees correlation in
-                      the system-reminder framing).
-        topic: Optional topic override. Default `dm-<recipient>` for routing
-                clarity.
-        question_id: Optional explicit question_id; auto-generated if omitted.
-
-    Returns:
-        Same shape as `commons_ask_async`. On recipient resolution failure,
-        the result carries `recipient_resolution_error` describing what was
-        tried + candidate alternatives + suggested next action.
-
-    See: planning-is-prompting → workflow/cross-session-communication.md
-         (§1.5 DM mechanics + threading + receipt etiquette;
-          §1.5.1 result-shape table;
-          §6.5.1 cross-session bug-filing pattern with mermaid flow)
-    """
-    if not _commons_enabled(): return { "status": "error", "reason": "commons disabled" }
-    target_topic = topic or _derive_dm_topic( recipient )
-    # When `in_reply_to` is supplied, the body's effective context is "reply to a prior DM" —
-    # we still go through _commons_ask_async_dispatch, but stamp `in_reply_to` on the result
-    # so the original asker's Phase 3 watcher (if running) correlates this entry as the answer.
-    # Effective recipient is the persona; in_reply_to threading is handled at the metadata layer.
-    #
-    # Bug-fix 2026-05-16: this used to call the `commons_ask_async` name directly, but that name
-    # resolves to the `@mcp.tool`-decorated `FunctionTool` instance (not a Python callable),
-    # producing `TypeError: 'FunctionTool' object is not callable` on every invocation. Route
-    # through the shared private `_commons_ask_async_dispatch` helper instead.
-    result = _commons_ask_async_dispatch(
-        topic                = target_topic,
-        body                 = body,
-        question_id          = question_id,
-        recipient_persona    = recipient,
-        expect_reply         = expect_reply,
-    )
-    if in_reply_to is not None and isinstance( result, dict ):
-        # Surface the in_reply_to on the result so callers can see the threading.
-        result[ "in_reply_to" ] = in_reply_to
-    return result
 
 
 # ============================================================================
