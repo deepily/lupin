@@ -18,6 +18,8 @@ Failure contract (spec §4):
 
 import requests
 
+from cosa.agents.utils.sender_id import canonicalize_project_name
+
 # Transport timeout for /api/tasks/* calls. Deliberately finite: a hung store
 # must surface as a `server_unreachable` error dict, never a hung tool call.
 TASK_STORE_TIMEOUT_SECONDS = 10.0
@@ -113,11 +115,18 @@ def task_create_impl(
     Ensures:
         - returns the serialized item dict (201 body) verbatim on success
         - returns the task_store_request error contract otherwise
+        - `project` is canonicalized through the shared `_PROJECT_ALIASES` map
+          (e.g. "planning-is-prompting" -> "plan") at THIS write seam so the
+          stored value matches what the owed-work oracle queries on READ
+          (resolve_project_name() aliases identically). Without this, an
+          aliased-repo session writes the raw repo name, the oracle queries the
+          alias, query_owed returns 0, and the session false-idles while owing
+          work (bug c6751cf8). One alias table, no duplication.
     """
     payload = {
         "item_class"          : item_class,
         "title"               : title,
-        "project"             : project,
+        "project"             : canonicalize_project_name( project ),
         "created_by"          : created_by,
         "authority"           : authority,
         "body"                : body,
@@ -235,13 +244,17 @@ def task_query_impl(
           (id/title/status/blocked_by/next_chase_ts/priority — body dropped);
           passed to the server as the canonical lowercase "true" (a pre-§G
           server simply ignores the unknown param and returns full rows)
+        - the `project` filter is canonicalized through the shared
+          `_PROJECT_ALIASES` map (mirror of the write seam) so an agent-facing
+          query by the raw repo name still matches the canonically-stored rows
+          (read == write; the same alias the oracle applies — bug c6751cf8)
     """
     filters = {
         "owner_persona"       : owner_persona,
         "status"              : status,
         "gate_class"          : gate_class,
         "accountable_manager" : accountable_manager,
-        "project"             : project,
+        "project"             : canonicalize_project_name( project ),
         "item_class"          : item_class,
         "correlation_key"     : correlation_key,
         "limit"               : limit,

@@ -18,8 +18,31 @@ from unittest.mock import patch
 
 import pytest
 
-from cosa.agents.utils.sender_id import detect_project, build_sender_id, _worktree_owner_basename
+from cosa.agents.utils.sender_id import (
+    detect_project, build_sender_id, _worktree_owner_basename, canonicalize_project_name
+)
 from cosa.utils.notification_utils import is_known_project, KNOWN_PROJECTS
+
+
+class TestCanonicalizeProjectName:
+    """
+    The bare name-in -> name-out alias step shared by the task-store write/read
+    seams (bug c6751cf8). Same `_PROJECT_ALIASES` table detect_project() uses.
+    """
+
+    def test_known_alias_maps_to_short_name( self ):
+        assert canonicalize_project_name( "planning-is-prompting" ) == "plan"
+
+    def test_already_canonical_short_name_unchanged( self ):
+        # "plan" is the alias VALUE, not a key -> passes through untouched.
+        assert canonicalize_project_name( "plan" ) == "plan"
+
+    def test_non_aliased_repo_unchanged( self ):
+        assert canonicalize_project_name( "lupin" ) == "lupin"
+
+    def test_none_returns_none( self ):
+        # No-op for optional query filters (project=None means "all projects").
+        assert canonicalize_project_name( None ) is None
 
 
 class TestIsKnownProject:
