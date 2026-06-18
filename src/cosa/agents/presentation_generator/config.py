@@ -34,6 +34,10 @@ class PresentationConfig:
     # Model selection
     content_model            : str   = "claude-opus-4-6"
     automated_content_model  : str   = "claude-sonnet-4-6"
+    # Bounded-CC (in-process sdk_query) turn cap for each content-phase LLM call
+    # (analysis/outline/elaboration/mermaid/matplotlib/d2/json). Each call is
+    # single-shot; the bounded path REQUIRES an explicit max_turns.
+    content_max_turns        : int   = 5
 
     # Presentation parameters
     target_duration_minutes  : int   = 15
@@ -80,6 +84,7 @@ class PresentationConfig:
         return cls(
             content_model           = _get( "content model",           default="claude-opus-4-6" ),
             automated_content_model = _get( "automated content model", default="claude-sonnet-4-6" ),
+            content_max_turns       = _get( "content max turns",        default=5,     return_type="int" ),
             target_duration_minutes = _get( "target duration minutes", default=15,    return_type="int" ),
             slides_per_minute       = _get( "slides per minute",       default=1.0,   return_type="float" ),
             title_style             = _get( "title style",             default="assertion" ),

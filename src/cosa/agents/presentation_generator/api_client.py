@@ -1,78 +1,126 @@
 #!/usr/bin/env python3
 """
-Claude API Client for Presentation Generator Agent.
+Claude content-generation client for the Presentation Generator Agent.
 
-Provides async wrapper for Claude API with:
-- Model selection (content model from config)
-- Structured JSON output support
-- Per-request cost tracking
-- Graceful error handling with retries
+BOUNDED-CC MIGRATION (Phase 2 — 2026-06-18)
+===========================================
+This client was migrated from the direct firewalled Anthropic SDK
+(`AsyncAnthropic.messages.create`) to the **in-process Claude Agent SDK**
+(`claude_agent_sdk.query`), matching the shipped BFE/TFE/Podcast bounded-CC
+pattern (ratified D-DR1 Option X). The seven content-phase LLM methods now run
+on the Max-subscription OAuth path.
 
-Follows the firewalled API key pattern from Podcast Generator / Deep Research.
+This is a COST-SHIFT, NOT "free": the SDK still reports `total_cost_usd`
+telemetry per call, but that spend is covered by the fixed Max plan — the
+firewalled Anthropic console balance does not move. See:
+  - Scope:        src/rnd/v0.1.8/2026.06.18-presentation-phase2-bounded-cc-scope.md
+  - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md
+  - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
+
+Presentation content generation is PURE TEXT/CODE SYNTHESIS, so the bounded-CC
+shape is: tools=[], no web search, no can_use_tool. The Gemini image/video path
+(`gemini_client.py`, NanoBanana/Veo) is NON-Anthropic and UNTOUCHED. The pptx /
+Marp assembly + diagram rendering phases are untouched.
+
+NOTE: `ClaudeAgentOptions` exposes no per-call `temperature`, so the historical
+per-method creativity steer is folded into the system prompt (see
+`_temperature_to_steer`).
+
+D6 = STRICT for Presentation: `call_with_json_output` (and the prompt-module
+parsers) robustly recover the JSON object from chatty output but FAIL LOUD on
+unrecoverable content — structured slide data is consumed downstream by pptx
+rendering, so an empty/malformed result is a real defect, not cosmetic drift.
 """
 
-import os
-import json
-import asyncio
 import logging
 from typing import Optional, Any
-from dataclasses import dataclass, field
-
-try:
-    import anthropic
-    from anthropic import AsyncAnthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:  # pragma: no cover - optional-dep import guard; anthropic is installed in this env, so this fallback is unreachable
-    ANTHROPIC_AVAILABLE = False
-    AsyncAnthropic = None
+from dataclasses import dataclass
 
 from .config import PresentationConfig
+from .prompts.json_recovery import recover_json_object
+
+# Claude Agent SDK — graceful fallback (mirrors the BFE/TFE/Podcast import guard)
+try:
+    from claude_agent_sdk import (
+        ClaudeAgentOptions,
+        AssistantMessage,
+        TextBlock,
+        ResultMessage,
+        query as sdk_query,
+    )
+    SDK_AVAILABLE = True
+except ImportError:  # pragma: no cover - claude-agent-sdk is installed in the canonical test/prod venv; this optional-dependency fallback is unreachable here
+    SDK_AVAILABLE = False
 
 logger = logging.getLogger( __name__ )
 
 
 # =============================================================================
-# API Key Configuration - FIREWALL PATTERN
+# Bounded-CC invocation constants (pure text/code synthesis)
 # =============================================================================
-# NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI
-# Using the same env var could cause billing confusion or conflicts
-#
-# Priority order for key retrieval:
-#   1. Explicit api_key parameter (highest priority)
-#   2. Environment variable ANTHROPIC_API_KEY_FIREWALLED (testing/production)
-#   3. Local file via cu.get_api_key() (development)
-# =============================================================================
+# Content/diagram generation needs NO tools. An empty allow-list disables every
+# built-in tool, so the model can only emit text.
+PRESENTATION_CONTENT_TOOLS = []
 
-ENV_VAR_NAME  = "ANTHROPIC_API_KEY_FIREWALLED"
-KEY_FILE_NAME = "anthropic-api-key-firewalled"
+# With tools=[] nothing is permittable; "plan" keeps the session read-only as
+# belt-and-suspenders should any built-in ever leak through (live-verified in
+# the Podcast migration to NOT trigger planning for no-tool synthesis).
+PRESENTATION_PERMISSION_MODE = "plan"
+
+
+def _temperature_to_steer( temperature: float ) -> str:
+    """
+    Map a legacy per-call temperature into a system-prompt creativity steer.
+
+    `ClaudeAgentOptions` exposes no per-call temperature, so the historical
+    creativity intent — higher temperature meant more creative prose, lower
+    meant more deterministic output (diagram code) — is expressed in the prompt.
+
+    Requires:
+        - temperature is a float
+
+    Ensures:
+        - returns a non-empty steer for high (>= 0.75) or low (<= 0.55)
+          temperatures; "" for mid-range
+    """
+    if temperature >= 0.75:
+        return "Write with creative, natural, varied phrasing."
+    if temperature <= 0.55:
+        return "Write with precise, focused, deterministic output."
+    return ""
 
 
 @dataclass
 class APIResponse:
     """
-    Structured response from an API call.
+    Structured response from a content-phase LLM call.
 
-    Contains the response content, usage data, and model information.
+    Contains the response text, token usage, stop reason, and the SDK-reported
+    cost telemetry (covered by the Max plan — see module docstring).
     """
     content       : str
     model         : str
     input_tokens  : int
     output_tokens : int
     stop_reason   : str
-    raw_response  : Any = None
+    sdk_cost_usd  : float = 0.0
+    raw_response  : Any   = None
 
 
 @dataclass
 class CostEstimate:
     """
-    Simple cost tracking for API calls.
+    Cost tracking for content-phase LLM calls.
 
-    Tracks token usage and estimates cost based on model pricing.
+    Tracks token usage with a token-based price estimate (`estimated_cost_usd`)
+    AND the SDK-reported telemetry (`total_sdk_cost_usd`). Under the bounded-CC
+    path the SDK telemetry is covered by the fixed Max plan, NOT billed per token.
     """
     total_input_tokens  : int   = 0
     total_output_tokens : int   = 0
     total_api_calls     : int   = 0
     estimated_cost_usd  : float = 0.0
+    total_sdk_cost_usd  : float = 0.0
 
     # Pricing per million tokens (as of 2026-04)
     OPUS_INPUT_PRICE    : float = 15.0
@@ -84,7 +132,7 @@ class CostEstimate:
 
     def add_usage( self, model: str, input_tokens: int, output_tokens: int ):
         """
-        Add usage from an API call.
+        Add token usage from an LLM call (token-based price estimate).
 
         Args:
             model: Model name used
@@ -95,7 +143,6 @@ class CostEstimate:
         self.total_output_tokens += output_tokens
         self.total_api_calls += 1
 
-        # Estimate cost based on model
         model_lower = model.lower()
         if "opus" in model_lower:
             cost = ( input_tokens * self.OPUS_INPUT_PRICE / 1_000_000 +
@@ -109,91 +156,84 @@ class CostEstimate:
 
         self.estimated_cost_usd += cost
 
+    def add_sdk_cost( self, cost_usd: float ):
+        """
+        Accumulate the SDK-reported per-call cost telemetry.
+
+        Args:
+            cost_usd: `ResultMessage.total_cost_usd` for one call (telemetry only —
+                      covered by the Max plan, not billed per token)
+        """
+        self.total_sdk_cost_usd += cost_usd
+
     def get_summary( self ) -> str:
-        """Get human-readable cost summary."""
+        """Get human-readable cost summary (with the Max-plan disclaimer)."""
         return (
             f"API Calls: {self.total_api_calls} | "
             f"Tokens: {self.total_input_tokens:,} in, {self.total_output_tokens:,} out | "
-            f"Est. Cost: ${self.estimated_cost_usd:.4f}"
+            f"Est. Cost: ${self.estimated_cost_usd:.4f} | "
+            f"SDK telemetry: ${self.total_sdk_cost_usd:.4f} (covered by Max plan — not billed per-token)"
         )
 
 
 class PresentationAPIClient:
     """
-    Async Anthropic API client for presentation content generation.
+    Bounded-CC content-generation client (in-process Claude Agent SDK).
 
     Requires:
-        - anthropic SDK is installed
-        - One of the following API key sources:
-          1. api_key parameter (explicit)
-          2. ANTHROPIC_API_KEY_FIREWALLED environment variable
-          3. src/conf/keys/anthropic-api-key-firewalled file
+        - claude_agent_sdk is installed (SDK_AVAILABLE == True)
 
     Ensures:
-        - Async execution for non-blocking calls
-        - Integrated cost tracking
-        - JSON output support for structured responses
+        - Async, non-blocking content-phase LLM calls via `sdk_query`
+        - Max-plan OAuth billing (no API key — see module docstring)
+        - Integrated token + SDK-cost tracking
+        - STRICT JSON output support for structured responses
+
+    No API key is required: `sdk_query` authenticates via the Claude Code /
+    Claude Agent SDK Max-subscription OAuth path. The former firewalled-key
+    machinery was removed in the bounded-CC migration. The Gemini path is
+    separate and unaffected.
     """
 
     def __init__(
         self,
         config: Optional[ PresentationConfig ] = None,
-        api_key: Optional[ str ] = None,
         debug: bool = False,
         verbose: bool = False
     ):
         """
-        Initialize the API client.
+        Initialize the content-generation client.
+
+        Requires:
+            - claude_agent_sdk is installed
+
+        Ensures:
+            - Raises ImportError if the SDK is unavailable
+            - cost tracking is initialized
 
         Args:
             config: Presentation configuration (uses defaults if None)
-            api_key: Anthropic API key (uses env var/file if None)
             debug: Enable debug output
             verbose: Enable verbose output
+
+        Raises:
+            ImportError: if claude_agent_sdk is not installed
         """
-        if not ANTHROPIC_AVAILABLE:
+        if not SDK_AVAILABLE:
             raise ImportError(
-                "anthropic SDK not installed. "
-                "Install with: pip install anthropic"
+                "claude_agent_sdk not installed. "
+                "Install with: pip install claude-agent-sdk"
             )
 
         self.config  = config or PresentationConfig()
         self.debug   = debug
         self.verbose = verbose
 
-        # Get API key using firewalled pattern
-        self.api_key    = api_key
-        self.key_source = "parameter"
-
-        if not self.api_key:
-            self.api_key = os.environ.get( ENV_VAR_NAME )
-            self.key_source = "environment"
-
-        if not self.api_key:
-            try:
-                import cosa.utils.util as cu
-                self.api_key = cu.get_api_key( KEY_FILE_NAME )
-                self.key_source = "local file"
-            except Exception as e:
-                if self.debug:
-                    print( f"[PresentationAPIClient] Could not load local key file: {e}" )
-
-        if not self.api_key:
-            raise ValueError(
-                f"Anthropic API key not found. Either:\n"
-                f"  1. Pass api_key parameter\n"
-                f"  2. Set {ENV_VAR_NAME} environment variable\n"
-                f"  3. Create src/conf/keys/{KEY_FILE_NAME} file"
-            )
-
-        # Initialize async client
-        self._client = AsyncAnthropic( api_key=self.api_key )
-
-        # Initialize cost tracking
+        # Cost tracking
         self.cost_estimate = CostEstimate()
 
         if self.debug:
-            print( f"[PresentationAPIClient] API key source: {self.key_source}" )
+            print( f"[PresentationAPIClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
             print( f"[PresentationAPIClient] Content model: {self.config.content_model}" )
 
     # =========================================================================
@@ -207,25 +247,11 @@ class PresentationAPIClient:
         max_tokens: int = 4096,
         temperature: float = 0.7
     ) -> APIResponse:
-        """
-        Call Claude for narrative analysis.
-
-        Args:
-            system_prompt: System prompt for analysis
-            user_message: Source content to analyze
-            max_tokens: Maximum response tokens
-            temperature: Sampling temperature
-
-        Returns:
-            APIResponse: Structured response with analysis
-        """
+        """Call Claude for narrative analysis."""
         return await self._call_api(
-            model         = self.config.content_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "narrative_analysis",
+            model=self.config.content_model, system_prompt=system_prompt,
+            user_message=user_message, max_tokens=max_tokens,
+            temperature=temperature, call_type="narrative_analysis",
         )
 
     async def call_for_outline(
@@ -235,25 +261,11 @@ class PresentationAPIClient:
         max_tokens: int = 4096,
         temperature: float = 0.7
     ) -> APIResponse:
-        """
-        Call Claude for slide outline generation.
-
-        Args:
-            system_prompt: System prompt for outline
-            user_message: Narrative sections to outline
-            max_tokens: Maximum response tokens
-            temperature: Sampling temperature
-
-        Returns:
-            APIResponse: Structured response with outline
-        """
+        """Call Claude for slide outline generation."""
         return await self._call_api(
-            model         = self.config.content_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "outline_generation",
+            model=self.config.content_model, system_prompt=system_prompt,
+            user_message=user_message, max_tokens=max_tokens,
+            temperature=temperature, call_type="outline_generation",
         )
 
     async def call_for_elaboration(
@@ -263,25 +275,11 @@ class PresentationAPIClient:
         max_tokens: int = 8192,
         temperature: float = 0.7
     ) -> APIResponse:
-        """
-        Call Claude for full slide content elaboration.
-
-        Args:
-            system_prompt: System prompt for elaboration
-            user_message: Outline + source for elaboration
-            max_tokens: Maximum response tokens (higher for full content)
-            temperature: Sampling temperature
-
-        Returns:
-            APIResponse: Structured response with elaborated slides
-        """
+        """Call Claude for full slide content elaboration."""
         return await self._call_api(
-            model         = self.config.content_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "elaboration",
+            model=self.config.content_model, system_prompt=system_prompt,
+            user_message=user_message, max_tokens=max_tokens,
+            temperature=temperature, call_type="elaboration",
         )
 
     async def call_for_mermaid(
@@ -291,30 +289,11 @@ class PresentationAPIClient:
         max_tokens: int = 2048,
         temperature: float = 0.3
     ) -> APIResponse:
-        """
-        Generate Mermaid diagram code via Claude API.
-
-        Lower temperature and smaller max_tokens than content generation
-        for more deterministic, concise code output.
-
-        Requires:
-            - system_prompt is a non-empty string
-            - user_message is a non-empty string
-
-        Ensures:
-            - Returns APIResponse with Mermaid code in content
-            - Cost tracked in cost_estimate
-
-        Returns:
-            APIResponse with generated Mermaid content
-        """
+        """Generate Mermaid diagram code (text output, not JSON)."""
         return await self._call_api(
-            model         = self.config.content_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "mermaid",
+            model=self.config.content_model, system_prompt=system_prompt,
+            user_message=user_message, max_tokens=max_tokens,
+            temperature=temperature, call_type="mermaid",
         )
 
     async def call_for_matplotlib(
@@ -324,30 +303,11 @@ class PresentationAPIClient:
         max_tokens: int = 4096,
         temperature: float = 0.2
     ) -> APIResponse:
-        """
-        Generate Matplotlib Python code via Claude API.
-
-        Higher max_tokens than Mermaid (code is more verbose) and lower
-        temperature for more deterministic code generation.
-
-        Requires:
-            - system_prompt is a non-empty string
-            - user_message is a non-empty string
-
-        Ensures:
-            - Returns APIResponse with Python code in content
-            - Cost tracked in cost_estimate
-
-        Returns:
-            APIResponse with generated Python code
-        """
+        """Generate Matplotlib Python code (text output, not JSON)."""
         return await self._call_api(
-            model         = self.config.content_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "matplotlib",
+            model=self.config.content_model, system_prompt=system_prompt,
+            user_message=user_message, max_tokens=max_tokens,
+            temperature=temperature, call_type="matplotlib",
         )
 
     async def call_for_d2(
@@ -357,30 +317,11 @@ class PresentationAPIClient:
         max_tokens: int = 2048,
         temperature: float = 0.3
     ) -> APIResponse:
-        """
-        Generate D2 diagram code via Claude API.
-
-        Lower temperature and smaller max_tokens than content generation
-        for more deterministic, concise code output.
-
-        Requires:
-            - system_prompt is a non-empty string
-            - user_message is a non-empty string
-
-        Ensures:
-            - Returns APIResponse with D2 code in content
-            - Cost tracked in cost_estimate
-
-        Returns:
-            APIResponse with generated D2 content
-        """
+        """Generate D2 diagram code (text output, not JSON)."""
         return await self._call_api(
-            model         = self.config.content_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = temperature,
-            call_type     = "d2",
+            model=self.config.content_model, system_prompt=system_prompt,
+            user_message=user_message, max_tokens=max_tokens,
+            temperature=temperature, call_type="d2",
         )
 
     async def call_with_json_output(
@@ -390,47 +331,37 @@ class PresentationAPIClient:
         max_tokens: int = 4096
     ) -> dict:
         """
-        Call API expecting JSON output.
+        Call the model expecting JSON output (D6-STRICT).
 
         Ensures:
-            - Parses response as JSON
-            - Handles markdown code block wrapping
-
-        Raises:
-            - ValueError if response is not valid JSON
+            - Robustly recovers a JSON object from chatty output (fence-strip +
+              embedded-object extraction)
+            - FAILS LOUD (raises ValueError) if no JSON object can be recovered —
+              never substitutes a default (structured output is consumed downstream)
 
         Args:
             system_prompt: System prompt (should request JSON output)
             user_message: User message
-            max_tokens: Maximum tokens
+            max_tokens: Retained for signature parity (unused on the bounded path)
 
         Returns:
             dict: Parsed JSON response
+
+        Raises:
+            ValueError: if no valid JSON object can be recovered
         """
         response = await self._call_api(
-            model         = self.config.content_model,
-            system_prompt = system_prompt,
-            user_message  = user_message,
-            max_tokens    = max_tokens,
-            temperature   = 0.5,  # Lower temp for structured output
-            call_type     = "json_output",
+            model=self.config.content_model, system_prompt=system_prompt,
+            user_message=user_message, max_tokens=max_tokens,
+            temperature=0.5, call_type="json_output",
         )
 
-        # Parse JSON from response, handling markdown code blocks
-        content = response.content.strip()
-        if content.startswith( "```json" ):
-            content = content[ 7: ]
-        if content.startswith( "```" ):
-            content = content[ 3: ]
-        if content.endswith( "```" ):
-            content = content[ :-3 ]
-
-        try:
-            return json.loads( content.strip() )
-        except json.JSONDecodeError as e:
-            logger.error( f"Failed to parse JSON response: {e}" )
+        parsed = recover_json_object( response.content )
+        if parsed is None:
+            logger.error( "Failed to recover JSON object from response" )
             logger.debug( f"Raw content: {response.content}" )
-            raise ValueError( f"Response was not valid JSON: {e}" )
+            raise ValueError( "Response did not contain a recoverable JSON object" )
+        return parsed
 
     # =========================================================================
     # Internal Methods
@@ -446,113 +377,79 @@ class PresentationAPIClient:
         temperature: float = 0.7
     ) -> APIResponse:
         """
-        Internal method to call the Anthropic API.
+        Internal bounded-CC call via in-process `sdk_query`.
+
+        Requires:
+            - SDK_AVAILABLE is True
+
+        Ensures:
+            - Builds tools=[] / read-only options (pure synthesis)
+            - Folds temperature into the system-prompt creativity steer
+            - Concatenates all assistant TextBlocks into the response content
+            - Records token usage + SDK cost telemetry
 
         Args:
             model: Model to use
             system_prompt: System prompt
             user_message: User message
             call_type: Type of call for logging
-            max_tokens: Maximum tokens
-            temperature: Sampling temperature
+            max_tokens: Retained for signature parity (unused on the bounded path)
+            temperature: Folded into the creativity steer
 
         Returns:
             APIResponse: Structured response
         """
-        messages = [
-            { "role": "user", "content": user_message }
-        ]
+        steer            = _temperature_to_steer( temperature )
+        effective_system = system_prompt or ""
+        if steer:
+            effective_system = ( effective_system + "\n\n" + steer ).strip()
 
-        kwargs = {
-            "model"       : model,
-            "max_tokens"  : max_tokens,
-            "messages"    : messages,
-            "temperature" : temperature,
-        }
-
-        if system_prompt:
-            kwargs[ "system" ] = system_prompt
-
-        if self.debug:
-            print( f"[PresentationAPIClient] Calling {model} for {call_type}" )
-
-        # Make API call with retry
-        response = await self._call_with_retry( kwargs )
-
-        # Extract content
-        content = ""
-        for block in response.content:
-            if hasattr( block, "text" ):
-                content += block.text
-
-        # Record usage
-        self.cost_estimate.add_usage(
-            model         = model,
-            input_tokens  = response.usage.input_tokens,
-            output_tokens = response.usage.output_tokens,
+        options = ClaudeAgentOptions(
+            model           = model,
+            system_prompt   = effective_system or None,
+            tools           = PRESENTATION_CONTENT_TOOLS,
+            permission_mode = PRESENTATION_PERMISSION_MODE,
+            max_turns       = self.config.content_max_turns,
         )
 
         if self.debug:
-            print( f"[PresentationAPIClient] Response: {response.usage.input_tokens} in, {response.usage.output_tokens} out" )
+            print( f"[PresentationAPIClient] sdk_query {model} for {call_type} (max_turns={self.config.content_max_turns})" )
+
+        collected     = []
+        input_tokens  = 0
+        output_tokens = 0
+        sdk_cost_usd  = 0.0
+        stop_reason   = "end_turn"
+
+        async for message in sdk_query( prompt=user_message, options=options ):
+            if isinstance( message, AssistantMessage ):
+                for block in message.content:
+                    if isinstance( block, TextBlock ):
+                        collected.append( block.text )
+            elif isinstance( message, TextBlock ):
+                collected.append( message.text )
+            elif isinstance( message, ResultMessage ):
+                usage         = message.usage or {}
+                input_tokens  = usage.get( "input_tokens", 0 )
+                output_tokens = usage.get( "output_tokens", 0 )
+                sdk_cost_usd  = message.total_cost_usd or 0.0
+                stop_reason   = message.stop_reason or "end_turn"
+
+        content = "".join( collected ).strip()
+
+        self.cost_estimate.add_usage(
+            model=model, input_tokens=input_tokens, output_tokens=output_tokens,
+        )
+        self.cost_estimate.add_sdk_cost( sdk_cost_usd )
+
+        if self.debug:
+            print( f"[PresentationAPIClient] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f}" )
 
         return APIResponse(
-            content       = content,
-            model         = model,
-            input_tokens  = response.usage.input_tokens,
-            output_tokens = response.usage.output_tokens,
-            stop_reason   = response.stop_reason,
-            raw_response  = response,
+            content=content, model=model, input_tokens=input_tokens,
+            output_tokens=output_tokens, stop_reason=stop_reason,
+            sdk_cost_usd=sdk_cost_usd, raw_response=None,
         )
-
-    async def _call_with_retry(
-        self,
-        kwargs: dict,
-        max_retries: int = 3,
-        initial_delay: float = 1.0
-    ) -> Any:
-        """
-        Call API with exponential backoff retry.
-
-        Args:
-            kwargs: API call parameters
-            max_retries: Maximum retry attempts
-            initial_delay: Initial delay in seconds
-
-        Returns:
-            API response object
-        """
-        last_error = None
-        delay = initial_delay
-
-        for attempt in range( max_retries + 1 ):
-            try:
-                return await self._client.messages.create( **kwargs )
-
-            except anthropic.RateLimitError as e:
-                last_error = e
-                if attempt < max_retries:
-                    logger.warning( f"Rate limited, retrying in {delay:.0f}s (attempt {attempt + 1})" )
-                    await asyncio.sleep( delay )
-                    delay *= 2
-
-            except anthropic.APIStatusError as e:
-                if e.status_code >= 500:
-                    last_error = e
-                    if attempt < max_retries:
-                        logger.warning( f"Server error {e.status_code}, retrying in {delay:.0f}s" )
-                        await asyncio.sleep( delay )
-                        delay *= 2
-                else:
-                    raise
-
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries:
-                    logger.warning( f"API call failed: {e}, retrying in {delay:.0f}s" )
-                    await asyncio.sleep( delay )
-                    delay *= 2
-
-        raise last_error
 
     # =========================================================================
     # Utility Methods
@@ -563,9 +460,13 @@ class PresentationAPIClient:
         return self.cost_estimate.get_summary()
 
     async def close( self ):
-        """Close the API client and release resources."""
-        if hasattr( self._client, "close" ):
-            await self._client.close()
+        """
+        Release client resources.
+
+        No-op under the bounded-CC path: `sdk_query` is stateless (no persistent
+        client/connection to close). Retained for API compatibility.
+        """
+        return None
 
 
 # =============================================================================
@@ -573,71 +474,57 @@ class PresentationAPIClient:
 # =============================================================================
 
 def quick_smoke_test():
-    """Quick smoke test for PresentationAPIClient."""
+    """Quick smoke test for PresentationAPIClient (bounded-CC path)."""
     import cosa.utils.util as cu
 
-    cu.print_banner( "PresentationAPIClient Smoke Test", prepend_nl=True )
+    cu.print_banner( "PresentationAPIClient Smoke Test (bounded-CC)", prepend_nl=True )
 
     try:
-        # Test 1: Check import
-        print( "Testing anthropic import..." )
-        if not ANTHROPIC_AVAILABLE:
-            print( "⚠ anthropic SDK not installed - skipping API tests" )
-            print( "  Install with: pip install anthropic" )
+        print( "Testing claude_agent_sdk import..." )
+        if not SDK_AVAILABLE:
+            print( "⚠ claude_agent_sdk not installed - skipping bounded-CC tests" )
             return
-        print( "✓ anthropic SDK available" )
+        print( "✓ claude_agent_sdk available" )
 
-        # Test 2: Check API key presence
-        print( "Testing API key detection (firewalled pattern)..." )
-        print( f"  Checking env var: {ENV_VAR_NAME}" )
-        print( f"  Checking local file: src/conf/keys/{KEY_FILE_NAME}" )
-
-        api_key = os.environ.get( ENV_VAR_NAME )
-        key_source = "environment"
-
-        if not api_key:
-            try:
-                api_key = cu.get_api_key( KEY_FILE_NAME )
-                key_source = "local file"
-            except Exception:
-                pass
-
-        if not api_key:
-            print( f"⚠ API key not found - skipping live API tests" )
-            print( f"  For testing: export {ENV_VAR_NAME}=your-key" )
-            print( f"  For development: create src/conf/keys/{KEY_FILE_NAME}" )
-            return
-
-        print( f"✓ API key found via {key_source}" )
-
-        # Test 3: Instantiation
         print( "Testing instantiation..." )
         client = PresentationAPIClient( debug=True )
         assert client.config.content_model is not None
         print( f"✓ Client instantiated (model={client.config.content_model})" )
 
-        # Test 4: APIResponse dataclass
         print( "Testing APIResponse dataclass..." )
         response = APIResponse(
-            content       = "Test content",
-            model         = "claude-opus-4",
-            input_tokens  = 100,
-            output_tokens = 50,
-            stop_reason   = "end_turn",
+            content="Test content", model="claude-opus-4-6",
+            input_tokens=100, output_tokens=50, stop_reason="end_turn",
         )
         assert response.content == "Test content"
+        assert response.sdk_cost_usd == 0.0
         print( "✓ APIResponse dataclass works" )
 
-        # Test 5: CostEstimate tracking
-        print( "Testing CostEstimate..." )
+        print( "Testing CostEstimate (+ SDK telemetry)..." )
         cost = CostEstimate()
-        cost.add_usage( "claude-opus-4", 1000, 500 )
-        cost.add_usage( "claude-sonnet-4", 2000, 1000 )
+        cost.add_usage( "claude-opus-4-6", 1000, 500 )
+        cost.add_usage( "claude-haiku-4-5", 2000, 1000 )
+        cost.add_sdk_cost( 0.49 )
         assert cost.total_api_calls == 2
-        assert cost.total_input_tokens == 3000
         summary = cost.get_summary()
         assert "API Calls: 2" in summary
+        assert "Max plan" in summary
         print( f"✓ Cost tracking works: {summary}" )
+
+        print( "Testing live bounded-CC call (Max-plan OAuth — covered cost)..." )
+
+        async def test_live_call():
+            return await client.call_for_analysis(
+                system_prompt="You are a helpful assistant. Respond briefly.",
+                user_message="Say 'Hello, presentation test!' and nothing else.",
+                max_tokens=50,
+            )
+
+        import asyncio
+        response = asyncio.run( test_live_call() )
+        print( f"✓ Live bounded-CC call succeeded" )
+        print( f"  Response: {response.content[ :100 ]}" )
+        print( f"  {client.get_cost_summary()}" )
 
         print( "\nAll PresentationAPIClient smoke tests passed" )
 

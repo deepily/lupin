@@ -64,15 +64,22 @@ class TestNarrativeParser:
         assert out[ 1 ][ "arc_position" ] == "argument"   # bogus → default
         assert out[ 1 ][ "proposed_slide_count" ] == 1    # non-int → default
 
-    def test_parse_bare_fence_strip( self ):
-        raw = "```\n" + json.dumps( { "sections": [] } ) + "\n```"
-        assert narrative.parse_analysis_response( raw ) == []
+    def test_parse_empty_or_nondict_raises( self ):
+        # D6-STRICT: empty sections (not sections arc) AND a bare non-dict JSON
+        # value (else-ternary arc) are real defects → fail-loud.
+        with pytest.raises( ValueError, match="no usable sections" ):
+            narrative.parse_analysis_response( "```\n" + json.dumps( { "sections": [] } ) + "\n```" )
+        with pytest.raises( ValueError, match="no usable sections" ):
+            narrative.parse_analysis_response( json.dumps( [ 1, 2, 3 ] ) )   # non-dict
 
-    def test_parse_invalid_json_returns_empty( self ):
-        assert narrative.parse_analysis_response( "not json at all {" ) == []
+    def test_parse_unrecoverable_raises( self ):
+        # D6-STRICT: no recoverable JSON object → raise (was: return []).
+        with pytest.raises( ValueError, match="recoverable JSON object" ):
+            narrative.parse_analysis_response( "not json at all" )
 
-    def test_parse_sections_not_list( self ):
-        assert narrative.parse_analysis_response( json.dumps( { "sections": "nope" } ) ) == []
+    def test_parse_sections_not_list_raises( self ):
+        with pytest.raises( ValueError, match="no usable sections" ):
+            narrative.parse_analysis_response( json.dumps( { "sections": "nope" } ) )
 
     def test_extract_metadata_ok( self ):
         raw = "```json\n" + json.dumps( { "total_proposed_slides": 7, "narrative_assessment": "good" } ) + "\n```"
@@ -143,16 +150,20 @@ class TestOutlineParser:
         out = outline.parse_outline_response( raw )
         assert out[ 0 ][ "number" ] == 1        # fallback to len+1
 
-    def test_parse_bare_fence( self ):
-        # bare ``` fence (not ```json) → exercises the elif strip branch
-        raw = "```\n" + json.dumps( { "outline": [] } ) + "\n```"
-        assert outline.parse_outline_response( raw ) == []
+    def test_parse_empty_or_nondict_raises( self ):
+        # D6-STRICT: empty outline + bare non-dict JSON → fail-loud.
+        with pytest.raises( ValueError, match="no usable entries" ):
+            outline.parse_outline_response( "```\n" + json.dumps( { "outline": [] } ) + "\n```" )
+        with pytest.raises( ValueError, match="no usable entries" ):
+            outline.parse_outline_response( json.dumps( [ 1, 2 ] ) )   # non-dict
 
-    def test_parse_invalid_json( self ):
-        assert outline.parse_outline_response( "garbage{" ) == []
+    def test_parse_unrecoverable_raises( self ):
+        with pytest.raises( ValueError, match="recoverable JSON object" ):
+            outline.parse_outline_response( "garbage no json" )
 
-    def test_parse_outline_not_list( self ):
-        assert outline.parse_outline_response( json.dumps( { "outline": 5 } ) ) == []
+    def test_parse_outline_not_list_raises( self ):
+        with pytest.raises( ValueError, match="no usable entries" ):
+            outline.parse_outline_response( json.dumps( { "outline": 5 } ) )
 
     def test_extract_metadata_json_fence( self ):
         raw = "```json\n" + json.dumps( { "total_slides": 10, "narrative_coherence_note": "n" } ) + "\n```"
@@ -242,15 +253,20 @@ class TestElaborationParser:
         out = elaboration.parse_elaboration_response( raw )
         assert out[ 0 ][ "presenter_notes" ][ "talking_points" ] == []
 
-    def test_parse_bare_fence( self ):
-        raw = "```\n" + json.dumps( { "slides": [] } ) + "\n```"
-        assert elaboration.parse_elaboration_response( raw ) == []
+    def test_parse_empty_or_nondict_raises( self ):
+        # D6-STRICT: empty slides + bare non-dict JSON → fail-loud.
+        with pytest.raises( ValueError, match="no usable slides" ):
+            elaboration.parse_elaboration_response( "```\n" + json.dumps( { "slides": [] } ) + "\n```" )
+        with pytest.raises( ValueError, match="no usable slides" ):
+            elaboration.parse_elaboration_response( json.dumps( [ 1 ] ) )   # non-dict
 
-    def test_parse_invalid_json( self ):
-        assert elaboration.parse_elaboration_response( "{bad" ) == []
+    def test_parse_unrecoverable_raises( self ):
+        with pytest.raises( ValueError, match="recoverable JSON object" ):
+            elaboration.parse_elaboration_response( "totally not json" )
 
-    def test_parse_slides_not_list( self ):
-        assert elaboration.parse_elaboration_response( json.dumps( { "slides": 3 } ) ) == []
+    def test_parse_slides_not_list_raises( self ):
+        with pytest.raises( ValueError, match="no usable slides" ):
+            elaboration.parse_elaboration_response( json.dumps( { "slides": 3 } ) )
 
 
 if __name__ == "__main__":

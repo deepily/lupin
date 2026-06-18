@@ -173,8 +173,9 @@ When migrating an existing direct-SDK agent to bounded CC, follow this order:
 - **BFE** (Bug Fix Expediter) — `src/cosa/agents/bug_fix_expediter/`. Autonomous bug-fix workflow.
 - **TFE** (Test Fix Expediter) — `src/cosa/agents/test_fix_expediter/`. Autonomous test-fix workflow.
 - **Podcast script generation** (`src/cosa/agents/podcast_generator/`) — migrated 2026-06-18 (bounded-CC Phase 1). The four script-phase LLM methods in `PodcastAPIClient` (`call_for_analysis`/`call_for_script`/`call_for_revision`/`call_with_json_output`) swapped from `AsyncAnthropic.messages.create` to in-process `claude_agent_sdk.query` (D-DR1 Option X) with `tools=[]` (pure text synthesis), `permission_mode="plan"`, and `max_turns=podcast script max turns` (INI, default 5). Parsers made D6-LENIENT (recover JSON from chatty completions). The audio (TTS/ElevenLabs) phase is unchanged. Scope: `src/rnd/v0.1.8/2026.06.18-podcast-phase1-bounded-cc-scope.md`.
+- **Presentation content generation** (`src/cosa/agents/presentation_generator/`) — migrated 2026-06-18 (bounded-CC Phase 2). All **seven** content-phase methods in `PresentationAPIClient` (`call_for_analysis`/`call_for_outline`/`call_for_elaboration`/`call_for_mermaid`/`call_for_matplotlib`/`call_for_d2`/`call_with_json_output`) swapped to in-process `sdk_query` (`tools=[]`, `permission_mode="plan"`, `max_turns=presentation generator content max turns`, default 5). Parsers (`parse_analysis_response`/`parse_outline_response`/`parse_elaboration_response` + `call_with_json_output`) made **D6-STRICT** (recover JSON from chatty output, fail-loud on missing/empty/non-list — slide data feeds pptx rendering). The **Gemini image/video path (`gemini_client.py`, NanoBanana/Veo) is non-Anthropic and was left untouched**; pptx/Marp assembly + diagram rendering unchanged. Scope: `src/rnd/v0.1.8/2026.06.18-presentation-phase2-bounded-cc-scope.md`.
 
-The first three ride the CJ Flow agentic pool with `task_type=BOUNDED` (BFE/TFE) or in-process `sdk_query` (Podcast); all have been validated without consuming firewalled-key budget. Use them as code-shape references when migrating new agents.
+All four ride the CJ Flow agentic pool with `task_type=BOUNDED` (BFE/TFE) or in-process `sdk_query` (Podcast/Presentation); all have been validated without consuming firewalled-key budget. Use them as code-shape references when migrating new agents.
 
 ### Candidates (tracked in `TODO.md`)
 
@@ -182,7 +183,7 @@ The first three ride the CJ Flow agentic pool with `task_type=BOUNDED` (BFE/TFE)
 |---|---|---|
 | **Deep Research** (`src/cosa/agents/deep_research/`) | Path B — uses firewalled key for multi-turn research + synthesis | Largest current firewalled-account line-item. WebSearch + WebFetch are core to its work, both available in CC tool surface. Good fit. **Phase 3** (ratified D1=A ordering). |
 | ~~**Podcast script generation**~~ | ✅ **MIGRATED 2026-06-18** (Phase 1) | See "Precedent — already migrated" above. |
-| **Presentation generation** (`src/cosa/agents/presentation_generator/`) | Path B — direct SDK for content phase | Same shape as podcast — text synthesis with structured output. pptx-assembly phase stays as-is. **Phase 2** (ratified D1=A ordering). |
+| ~~**Presentation generation**~~ | ✅ **MIGRATED 2026-06-18** (Phase 2) | See "Precedent — already migrated" above. |
 
 ### NOT candidates
 

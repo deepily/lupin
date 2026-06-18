@@ -13,6 +13,8 @@ import json
 import logging
 from typing import List, Optional
 
+from .json_recovery import recover_json_object
+
 logger = logging.getLogger( __name__ )
 
 
@@ -225,31 +227,21 @@ def parse_analysis_response( response_content: str ) -> List[ dict ]:
     Returns:
         List of section dicts, or empty list on error
     """
-    content = response_content.strip()
-
-    # Strip markdown code block wrapper
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    elif content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-
-    content = content.strip()
-
-    try:
-        parsed = json.loads( content )
-    except json.JSONDecodeError as e:
-        logger.error( f"Failed to parse narrative analysis JSON: {e}" )
+    # D6-STRICT: robustly recover the JSON object from chatty bounded-CC output,
+    # then fail-loud on unrecoverable / missing / empty structured content
+    # (slide data is consumed downstream by pptx rendering — an empty deck is a
+    # real defect, not cosmetic drift).
+    parsed = recover_json_object( response_content )
+    if parsed is None:
+        logger.error( "Failed to recover narrative analysis JSON" )
         logger.debug( f"Raw content (first 500 chars): {response_content[ :500 ]}" )
-        return []
+        raise ValueError( "Narrative analysis response did not contain a recoverable JSON object" )
 
-    # Extract sections list
-    sections = parsed.get( "sections", [] )
-
-    if not isinstance( sections, list ):
-        logger.error( f"Expected 'sections' to be a list, got {type( sections )}" )
-        return []
+    # Extract sections list (STRICT: missing / empty / non-list is a real defect)
+    sections = parsed.get( "sections", [] ) if isinstance( parsed, dict ) else []
+    if not isinstance( sections, list ) or not sections:
+        logger.error( f"Narrative analysis 'sections' missing/empty/not-a-list: {type( sections )}" )
+        raise ValueError( "Narrative analysis returned no usable sections" )
 
     # Validate each section has required keys
     validated = []

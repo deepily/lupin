@@ -14,6 +14,7 @@ import logging
 from typing import List, Optional
 
 from .narrative import AUDIENCE_COMPLEXITY_GUIDELINES
+from .json_recovery import recover_json_object
 
 logger = logging.getLogger( __name__ )
 
@@ -238,31 +239,19 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
     Returns:
         List of slide dicts, or empty list on error
     """
-    content = response_content.strip()
-
-    # Strip markdown code block wrapper
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    elif content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-
-    content = content.strip()
-
-    try:
-        parsed = json.loads( content )
-    except json.JSONDecodeError as e:
-        logger.error( f"Failed to parse elaboration JSON: {e}" )
+    # D6-STRICT: recover the JSON object from chatty bounded-CC output, then
+    # fail-loud on unrecoverable / missing / empty structured content.
+    parsed = recover_json_object( response_content )
+    if parsed is None:
+        logger.error( "Failed to recover elaboration JSON" )
         logger.debug( f"Raw content (first 500 chars): {response_content[ :500 ]}" )
-        return []
+        raise ValueError( "Elaboration response did not contain a recoverable JSON object" )
 
-    # Extract slides list
-    slides = parsed.get( "slides", [] )
-
-    if not isinstance( slides, list ):
-        logger.error( f"Expected 'slides' to be a list, got {type( slides )}" )
-        return []
+    # Extract slides list (STRICT: missing / empty / non-list is a real defect)
+    slides = parsed.get( "slides", [] ) if isinstance( parsed, dict ) else []
+    if not isinstance( slides, list ) or not slides:
+        logger.error( f"Elaboration 'slides' missing/empty/not-a-list: {type( slides )}" )
+        raise ValueError( "Elaboration returned no usable slides" )
 
     # Validate each slide
     validated = []

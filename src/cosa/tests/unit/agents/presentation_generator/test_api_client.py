@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
 """
-Unit tests for cosa.agents.presentation_generator.api_client
+Unit tests for cosa.agents.presentation_generator.api_client (BOUNDED-CC path).
 
-PresentationAPIClient (Anthropic SDK wrapper). Boundaries mocked: AsyncAnthropic
-(no real client), self._client.messages.create (AsyncMock), asyncio.sleep,
-cu.get_api_key. No real Claude calls / network / retries-with-delay.
+The content-phase client was migrated from the direct firewalled Anthropic SDK
+to the in-process Claude Agent SDK (`claude_agent_sdk.query`). These tests mock
+`sdk_query` at the module boundary — a fake async generator yields fake
+AssistantMessage / TextBlock / ResultMessage objects (the SDK message types are
+patched into the module so isinstance checks pass). NO real SDK subprocess,
+network call, OAuth, or spend occurs.
+
+D6=STRICT: call_with_json_output recovers JSON from chatty output but RAISES on
+unrecoverable content (never silent-default).
+
+quick_smoke_test() and __main__ are coverage-excluded.
 """
 
-import os
-import types as pytypes
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, patch
 
-import anthropic
 import pytest
 
-from cosa.agents.presentation_generator import api_client as acmod
+import cosa.agents.presentation_generator.api_client as ac
 from cosa.agents.presentation_generator.api_client import (
-    PresentationAPIClient,
     APIResponse,
     CostEstimate,
-    ENV_VAR_NAME,
+    PresentationAPIClient,
+    SDK_AVAILABLE,
+    _temperature_to_steer,
 )
 
 
@@ -28,276 +34,255 @@ def _run( coro ):
     return asyncio.run( coro )
 
 
-def _client( api_key="K", debug=False ):
-    with patch.object( acmod, "AsyncAnthropic" ):
-        return PresentationAPIClient( api_key=api_key, debug=debug )
+# ----------------------------------------------------------------------------
+# Fake SDK message types + a fake sdk_query async generator
+# ----------------------------------------------------------------------------
+class _FakeTextBlock:
+    def __init__( self, text ):
+        self.text = text
 
 
-def _usage( inp=100, out=50 ):
-    u = MagicMock()
-    u.input_tokens = inp
-    u.output_tokens = out
-    return u
+class _FakeAssistantMessage:
+    def __init__( self, content ):
+        self.content = content
 
 
-# ===========================================================================
-# CostEstimate
-# ===========================================================================
+class _FakeResultMessage:
+    def __init__( self, usage=None, total_cost_usd=None, stop_reason=None ):
+        self.usage          = usage
+        self.total_cost_usd = total_cost_usd
+        self.stop_reason    = stop_reason
+
+
+def _patch_sdk_types():
+    return patch.multiple(
+        ac,
+        AssistantMessage = _FakeAssistantMessage,
+        TextBlock        = _FakeTextBlock,
+        ResultMessage    = _FakeResultMessage,
+    )
+
+
+def _fake_sdk_query( messages, capture ):
+    async def _gen( prompt, options ):
+        capture[ "prompt" ]  = prompt
+        capture[ "options" ] = options
+        for m in messages:
+            yield m
+    return _gen
+
+
+def _make_client( **kw ):
+    return PresentationAPIClient( **kw )
+
+
+# ----------------------------------------------------------------------------
+# _temperature_to_steer
+# ----------------------------------------------------------------------------
+class TestTemperatureSteer:
+    def test_high_temperature_creative( self ):
+        assert "creative" in _temperature_to_steer( 0.8 ).lower()
+
+    def test_low_temperature_precise( self ):
+        assert "precise" in _temperature_to_steer( 0.2 ).lower()
+        assert "precise" in _temperature_to_steer( 0.5 ).lower()
+
+    def test_mid_temperature_none( self ):
+        assert _temperature_to_steer( 0.7 ) == ""
+
+
+# ----------------------------------------------------------------------------
+# CostEstimate + APIResponse
+# ----------------------------------------------------------------------------
 class TestCostEstimate:
     def test_opus_pricing( self ):
-        c = CostEstimate()
-        c.add_usage( "claude-opus-4-6", 1_000_000, 1_000_000 )
-        assert c.total_api_calls == 1
-        assert c.estimated_cost_usd == pytest.approx( 15.0 + 75.0 )
+        ce = CostEstimate()
+        ce.add_usage( "claude-opus-4-6", 1_000_000, 1_000_000 )
+        assert ce.estimated_cost_usd == pytest.approx( 90.0 )
 
     def test_haiku_pricing( self ):
-        c = CostEstimate()
-        c.add_usage( "claude-haiku-4-5", 1_000_000, 0 )
-        assert c.estimated_cost_usd == pytest.approx( 0.80 )
+        ce = CostEstimate()
+        ce.add_usage( "claude-haiku-4-5", 1_000_000, 1_000_000 )
+        assert ce.estimated_cost_usd == pytest.approx( 4.80 )   # 0.80 + 4.0
 
-    def test_sonnet_default_pricing( self ):
-        c = CostEstimate()
-        c.add_usage( "claude-sonnet-4-6", 1_000_000, 0 )
-        assert c.estimated_cost_usd == pytest.approx( 3.0 )
+    def test_sonnet_pricing( self ):
+        ce = CostEstimate()
+        ce.add_usage( "claude-sonnet-4-6", 1_000_000, 1_000_000 )
+        assert ce.estimated_cost_usd == pytest.approx( 18.0 )
 
-    def test_summary( self ):
-        c = CostEstimate()
-        c.add_usage( "claude-opus-4-6", 100, 50 )
-        s = c.get_summary()
+    def test_add_sdk_cost( self ):
+        ce = CostEstimate()
+        ce.add_sdk_cost( 0.21 )
+        ce.add_sdk_cost( 0.28 )
+        assert ce.total_sdk_cost_usd == pytest.approx( 0.49 )
+
+    def test_summary_disclaimer( self ):
+        ce = CostEstimate()
+        ce.add_usage( "claude-opus-4-6", 1000, 500 )
+        ce.add_sdk_cost( 0.49 )
+        s = ce.get_summary()
         assert "API Calls: 1" in s
+        assert "1,000 in" in s
+        assert "covered by Max plan" in s
 
 
-# ===========================================================================
-# APIResponse
-# ===========================================================================
 class TestAPIResponse:
-    def test_dataclass( self ):
+    def test_defaults( self ):
         r = APIResponse( content="c", model="m", input_tokens=1, output_tokens=2, stop_reason="end_turn" )
-        assert r.content == "c"
         assert r.raw_response is None
+        assert r.sdk_cost_usd == 0.0
 
 
-# ===========================================================================
-# __init__ / key resolution
-# ===========================================================================
+# ----------------------------------------------------------------------------
+# __init__
+# ----------------------------------------------------------------------------
 class TestInit:
-    def test_anthropic_unavailable_raises( self ):
-        with patch.object( acmod, "ANTHROPIC_AVAILABLE", False ):
-            with pytest.raises( ImportError, match="anthropic SDK not installed" ):
-                PresentationAPIClient( api_key="K" )
-
-    def test_param_key_debug( self, capsys ):
-        with patch.object( acmod, "AsyncAnthropic" ):
-            c = PresentationAPIClient( api_key="PARAM", debug=True )
-        assert c.key_source == "parameter"
-        assert "API key source: parameter" in capsys.readouterr().out
-
-    def test_env_key( self ):
-        with patch.object( acmod, "AsyncAnthropic" ), \
-             patch.dict( os.environ, { ENV_VAR_NAME: "ENVKEY" } ):
-            c = PresentationAPIClient()
-        assert c.key_source == "environment"
-        assert c.api_key == "ENVKEY"
-
-    def test_file_key( self ):
-        with patch.object( acmod, "AsyncAnthropic" ), \
-             patch.dict( os.environ, {}, clear=False ), \
-             patch( "cosa.utils.util.get_api_key", return_value="FILEKEY" ):
-            os.environ.pop( ENV_VAR_NAME, None )
-            c = PresentationAPIClient()
-        assert c.key_source == "local file"
-        assert c.api_key == "FILEKEY"
-
-    def test_no_key_raises( self ):
-        with patch.object( acmod, "AsyncAnthropic" ), \
-             patch( "cosa.utils.util.get_api_key", return_value=None ):
-            os.environ.pop( ENV_VAR_NAME, None )
-            with pytest.raises( ValueError, match="Anthropic API key not found" ):
+    def test_import_error_when_sdk_unavailable( self ):
+        with patch.object( ac, "SDK_AVAILABLE", False ):
+            with pytest.raises( ImportError, match="claude_agent_sdk not installed" ):
                 PresentationAPIClient()
 
-    def test_file_key_load_exception_debug( self, capsys ):
-        with patch.object( acmod, "AsyncAnthropic" ), \
-             patch( "cosa.utils.util.get_api_key", side_effect=RuntimeError( "no file" ) ):
-            os.environ.pop( ENV_VAR_NAME, None )
-            with pytest.raises( ValueError ):
-                PresentationAPIClient( debug=True )
-        assert "Could not load local key file" in capsys.readouterr().out
+    def test_default_config_quiet( self, capsys ):
+        c = PresentationAPIClient()
+        assert c.config is not None
+        assert c.cost_estimate.total_api_calls == 0
+        assert capsys.readouterr().out == ""
 
-    def test_file_key_load_exception_no_debug_silent( self, capsys ):
-        with patch.object( acmod, "AsyncAnthropic" ), \
-             patch( "cosa.utils.util.get_api_key", side_effect=RuntimeError( "no file" ) ):
-            os.environ.pop( ENV_VAR_NAME, None )
-            with pytest.raises( ValueError ):
-                PresentationAPIClient( debug=False )
-        assert "Could not load local key file" not in capsys.readouterr().out
+    def test_provided_config_and_debug( self, capsys ):
+        from cosa.agents.presentation_generator.config import PresentationConfig
+        cfg = PresentationConfig()
+        c = PresentationAPIClient( config=cfg, debug=True )
+        assert c.config is cfg
+        out = capsys.readouterr().out
+        assert "Bounded-CC mode" in out
+        assert "Content model:" in out
 
 
-# ===========================================================================
-# public call_for_* delegate to _call_api
-# ===========================================================================
-class TestPublicCalls:
-    @pytest.mark.parametrize( "method,call_type", [
-        ( "call_for_analysis", "narrative_analysis" ),
-        ( "call_for_outline", "outline_generation" ),
-        ( "call_for_elaboration", "elaboration" ),
-        ( "call_for_mermaid", "mermaid" ),
-        ( "call_for_matplotlib", "matplotlib" ),
-        ( "call_for_d2", "d2" ),
+# ----------------------------------------------------------------------------
+# call_for_* delegation + call_with_json_output (STRICT)
+# ----------------------------------------------------------------------------
+class TestCallWrappers:
+    @pytest.mark.parametrize( "method,call_type,temp", [
+        ( "call_for_analysis",    "narrative_analysis",  0.7 ),
+        ( "call_for_outline",     "outline_generation",  0.7 ),
+        ( "call_for_elaboration", "elaboration",         0.7 ),
+        ( "call_for_mermaid",     "mermaid",             0.3 ),
+        ( "call_for_matplotlib",  "matplotlib",          0.2 ),
+        ( "call_for_d2",          "d2",                  0.3 ),
     ] )
-    def test_delegates_with_call_type( self, method, call_type ):
-        c = _client()
-        with patch.object( c, "_call_api", new=AsyncMock( return_value="RESP" ) ) as m:
-            out = _run( getattr( c, method )( "sys", "user" ) )
+    def test_call_wrappers_delegate( self, method, call_type, temp ):
+        c = _make_client()
+        c._call_api = AsyncMock( return_value="RESP" )
+        out = _run( getattr( c, method )( "sys", "msg" ) )
         assert out == "RESP"
-        assert m.await_args.kwargs[ "call_type" ] == call_type
+        kwargs = c._call_api.await_args.kwargs
+        assert kwargs[ "call_type" ]   == call_type
+        assert kwargs[ "temperature" ] == temp
 
-
-# ===========================================================================
-# call_with_json_output
-# ===========================================================================
-class TestJsonOutput:
-    def test_parse_json_fence( self ):
-        c = _client()
-        resp = APIResponse( content='```json\n{"a": 1}\n```', model="m", input_tokens=1, output_tokens=1, stop_reason="end" )
-        with patch.object( c, "_call_api", new=AsyncMock( return_value=resp ) ):
-            out = _run( c.call_with_json_output( "sys", "user" ) )
+    def test_json_output_strict_success( self ):
+        c = _make_client()
+        c._call_api = AsyncMock( return_value=APIResponse(
+            content='Here: {"a": 1}', model="m", input_tokens=1, output_tokens=1, stop_reason="end_turn"
+        ) )
+        out = _run( c.call_with_json_output( "sys", "msg" ) )
         assert out == { "a": 1 }
+        assert c._call_api.await_args.kwargs[ "temperature" ] == 0.5
 
-    def test_parse_bare_fence( self ):
-        c = _client()
-        resp = APIResponse( content='```\n{"b": 2}\n```', model="m", input_tokens=1, output_tokens=1, stop_reason="end" )
-        with patch.object( c, "_call_api", new=AsyncMock( return_value=resp ) ):
-            assert _run( c.call_with_json_output( "sys", "user" ) ) == { "b": 2 }
-
-    def test_invalid_json_raises( self ):
-        c = _client()
-        resp = APIResponse( content="not json {", model="m", input_tokens=1, output_tokens=1, stop_reason="end" )
-        with patch.object( c, "_call_api", new=AsyncMock( return_value=resp ) ):
-            with pytest.raises( ValueError, match="not valid JSON" ):
-                _run( c.call_with_json_output( "sys", "user" ) )
+    def test_json_output_strict_raises_on_unrecoverable( self ):
+        c = _make_client()
+        c._call_api = AsyncMock( return_value=APIResponse(
+            content="no json at all", model="m", input_tokens=1, output_tokens=1, stop_reason="end_turn"
+        ) )
+        with pytest.raises( ValueError, match="recoverable JSON" ):
+            _run( c.call_with_json_output( "sys", "msg" ) )
 
 
-# ===========================================================================
-# _call_api
-# ===========================================================================
+# ----------------------------------------------------------------------------
+# _call_api — the bounded-CC sdk_query loop
+# ----------------------------------------------------------------------------
 class TestCallApi:
-    def _response( self ):
-        text_block    = pytypes.SimpleNamespace( text="Hello " )
-        notext_block  = object()   # no .text attr → hasattr False
-        text_block2   = pytypes.SimpleNamespace( text="World" )
-        resp = MagicMock()
-        resp.content = [ text_block, notext_block, text_block2 ]
-        resp.usage = _usage( 200, 80 )
-        resp.stop_reason = "end_turn"
-        return resp
-
-    def test_assembles_content_and_tracks_cost_debug( self, capsys ):
-        c = _client( debug=True )
-        with patch.object( c, "_call_with_retry", new=AsyncMock( return_value=self._response() ) ):
-            out = _run( c._call_api( model="claude-opus-4-6", system_prompt="sys",
-                                     user_message="u", call_type="t" ) )
-        assert out.content == "Hello World"   # non-text block skipped
-        assert out.input_tokens == 200
+    def test_full_extraction_with_steer_and_debug( self, capsys ):
+        c = _make_client( debug=True )
+        capture  = {}
+        messages = [
+            _FakeAssistantMessage( [ _FakeTextBlock( "Hello " ), object(), _FakeTextBlock( "world" ) ] ),
+            _FakeResultMessage( usage={ "input_tokens": 100, "output_tokens": 50 },
+                                total_cost_usd=0.21, stop_reason="end_turn" ),
+        ]
+        with _patch_sdk_types(), patch.object( ac, "sdk_query", _fake_sdk_query( messages, capture ) ):
+            out = _run( c._call_api( model="claude-opus-4-6", system_prompt="SYS",
+                                     user_message="hi", call_type="elaboration", temperature=0.8 ) )
+        assert out.content       == "Hello world"
+        assert out.input_tokens  == 100
+        assert out.output_tokens == 50
+        assert out.sdk_cost_usd  == pytest.approx( 0.21 )
+        assert out.stop_reason   == "end_turn"
+        assert capture[ "options" ].system_prompt.startswith( "SYS" )
+        assert "creative" in capture[ "options" ].system_prompt.lower()
+        assert capture[ "options" ].tools == []
+        assert capture[ "options" ].permission_mode == "plan"
+        assert capture[ "options" ].max_turns == c.config.content_max_turns
         assert c.cost_estimate.total_api_calls == 1
+        assert c.cost_estimate.total_sdk_cost_usd == pytest.approx( 0.21 )
         printed = capsys.readouterr().out
-        assert "Calling claude-opus-4-6 for t" in printed
-        assert "Response: 200 in, 80 out" in printed
+        assert "sdk_query claude-opus-4-6 for elaboration" in printed
+        assert "Response: 100 in, 50 out" in printed
 
-    def test_no_system_prompt_omits_system( self ):
-        c = _client()
-        captured = {}
-        async def fake_retry( kwargs ):
-            captured.update( kwargs )
-            return self._response()
-        with patch.object( c, "_call_with_retry", new=fake_retry ):
-            _run( c._call_api( model="m", system_prompt="", user_message="u" ) )
-        assert "system" not in captured
+    def test_mid_temp_keeps_system_prompt( self ):
+        c = _make_client()
+        capture  = {}
+        with _patch_sdk_types(), patch.object( ac, "sdk_query",
+                _fake_sdk_query( [ _FakeAssistantMessage( [ _FakeTextBlock( "x" ) ] ) ], capture ) ):
+            _run( c._call_api( model="m", system_prompt="SYS", user_message="hi", temperature=0.7 ) )
+        assert capture[ "options" ].system_prompt == "SYS"
 
+    def test_empty_system_mid_temp_none( self ):
+        c = _make_client()
+        capture  = {}
+        with _patch_sdk_types(), patch.object( ac, "sdk_query",
+                _fake_sdk_query( [ _FakeAssistantMessage( [ _FakeTextBlock( "x" ) ] ) ], capture ) ):
+            _run( c._call_api( model="m", system_prompt="", user_message="hi", temperature=0.7 ) )
+        assert capture[ "options" ].system_prompt is None
 
-# ===========================================================================
-# _call_with_retry
-# ===========================================================================
-class TestRetry:
-    def _rate_error( self ):
-        return anthropic.RateLimitError.__new__( anthropic.RateLimitError )
+    def test_empty_system_with_steer_becomes_steer( self ):
+        c = _make_client()
+        capture  = {}
+        with _patch_sdk_types(), patch.object( ac, "sdk_query",
+                _fake_sdk_query( [ _FakeAssistantMessage( [ _FakeTextBlock( "x" ) ] ) ], capture ) ):
+            _run( c._call_api( model="m", system_prompt="", user_message="hi", temperature=0.8 ) )
+        assert "creative" in capture[ "options" ].system_prompt.lower()
 
-    def _status_error( self, code ):
-        e = anthropic.APIStatusError.__new__( anthropic.APIStatusError )
-        e.status_code = code
-        return e
-
-    def test_success_first_try( self ):
-        c = _client()
-        c._client.messages.create = AsyncMock( return_value="OK" )
-        assert _run( c._call_with_retry( { "x": 1 } ) ) == "OK"
-
-    def test_rate_limit_then_success( self ):
-        c = _client()
-        c._client.messages.create = AsyncMock( side_effect=[ self._rate_error(), "OK" ] )
-        with patch.object( acmod.asyncio, "sleep", new=AsyncMock() ):
-            assert _run( c._call_with_retry( { "x": 1 } ) ) == "OK"
-
-    def test_server_error_then_success( self ):
-        c = _client()
-        c._client.messages.create = AsyncMock( side_effect=[ self._status_error( 503 ), "OK" ] )
-        with patch.object( acmod.asyncio, "sleep", new=AsyncMock() ):
-            assert _run( c._call_with_retry( { "x": 1 } ) ) == "OK"
-
-    def test_client_error_4xx_raises_immediately( self ):
-        c = _client()
-        err = self._status_error( 400 )
-        c._client.messages.create = AsyncMock( side_effect=err )
-        with pytest.raises( anthropic.APIStatusError ):
-            _run( c._call_with_retry( { "x": 1 } ) )
-
-    def test_rate_limit_exhausts_raises( self ):
-        c = _client()
-        c._client.messages.create = AsyncMock( side_effect=self._rate_error() )
-        with patch.object( acmod.asyncio, "sleep", new=AsyncMock() ):
-            with pytest.raises( anthropic.RateLimitError ):
-                _run( c._call_with_retry( { "x": 1 }, max_retries=2 ) )
-
-    def test_server_error_exhausts_raises( self ):
-        c = _client()
-        c._client.messages.create = AsyncMock( side_effect=self._status_error( 503 ) )
-        with patch.object( acmod.asyncio, "sleep", new=AsyncMock() ):
-            with pytest.raises( anthropic.APIStatusError ):
-                _run( c._call_with_retry( { "x": 1 }, max_retries=2 ) )
-
-    def test_generic_error_then_success( self ):
-        c = _client()
-        c._client.messages.create = AsyncMock( side_effect=[ ValueError( "x" ), "OK" ] )
-        with patch.object( acmod.asyncio, "sleep", new=AsyncMock() ):
-            assert _run( c._call_with_retry( { "x": 1 } ) ) == "OK"
-
-    def test_exhausts_retries_raises_last( self ):
-        c = _client()
-        c._client.messages.create = AsyncMock( side_effect=ValueError( "always" ) )
-        with patch.object( acmod.asyncio, "sleep", new=AsyncMock() ):
-            with pytest.raises( ValueError, match="always" ):
-                _run( c._call_with_retry( { "x": 1 }, max_retries=2 ) )
+    def test_bare_textblock_resultmessage_defaults_unknown_msg( self, capsys ):
+        c = _make_client()
+        capture  = {}
+        messages = [
+            _FakeTextBlock( "bare-text" ),
+            object(),
+            _FakeResultMessage(),
+        ]
+        with _patch_sdk_types(), patch.object( ac, "sdk_query", _fake_sdk_query( messages, capture ) ):
+            out = _run( c._call_api( model="m", system_prompt="SYS", user_message="hi", temperature=0.7 ) )
+        assert out.content       == "bare-text"
+        assert out.input_tokens  == 0
+        assert out.output_tokens == 0
+        assert out.sdk_cost_usd  == 0.0
+        assert out.stop_reason   == "end_turn"
+        assert capsys.readouterr().out == ""
 
 
-# ===========================================================================
-# utility
-# ===========================================================================
-class TestUtility:
+# ----------------------------------------------------------------------------
+# get_cost_summary + close
+# ----------------------------------------------------------------------------
+class TestSummaryAndClose:
     def test_get_cost_summary( self ):
-        c = _client()
-        assert "API Calls:" in c.get_cost_summary()
+        c = _make_client()
+        c.cost_estimate.add_usage( "claude-opus-4-6", 100, 50 )
+        assert "API Calls: 1" in c.get_cost_summary()
 
-    def test_close_calls_client_close( self ):
-        c = _client()
-        c._client.close = AsyncMock()
-        _run( c.close() )
-        c._client.close.assert_awaited_once()
-
-    def test_close_no_close_method( self ):
-        c = _client()
-        # _client is a MagicMock → hasattr close True; force a plain object w/o close
-        c._client = object()
-        _run( c.close() )   # should not raise
+    def test_close_is_noop( self ):
+        c = _make_client()
+        assert _run( c.close() ) is None
 
 
-if __name__ == "__main__":
-    pytest.main( [ __file__, "-v" ] )
+def test_sdk_available_in_env():
+    assert SDK_AVAILABLE is True

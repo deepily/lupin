@@ -14,6 +14,7 @@ import logging
 from typing import List, Optional
 
 from .narrative import AUDIENCE_COMPLEXITY_GUIDELINES
+from .json_recovery import recover_json_object
 
 logger = logging.getLogger( __name__ )
 
@@ -267,31 +268,19 @@ def parse_outline_response( response_content: str ) -> List[ dict ]:
     Returns:
         List of outline dicts, or empty list on error
     """
-    content = response_content.strip()
-
-    # Strip markdown code block wrapper
-    if content.startswith( "```json" ):
-        content = content[ 7: ]
-    elif content.startswith( "```" ):
-        content = content[ 3: ]
-    if content.endswith( "```" ):
-        content = content[ :-3 ]
-
-    content = content.strip()
-
-    try:
-        parsed = json.loads( content )
-    except json.JSONDecodeError as e:
-        logger.error( f"Failed to parse outline JSON: {e}" )
+    # D6-STRICT: recover the JSON object from chatty bounded-CC output, then
+    # fail-loud on unrecoverable / missing / empty structured content.
+    parsed = recover_json_object( response_content )
+    if parsed is None:
+        logger.error( "Failed to recover outline JSON" )
         logger.debug( f"Raw content (first 500 chars): {response_content[ :500 ]}" )
-        return []
+        raise ValueError( "Outline response did not contain a recoverable JSON object" )
 
-    # Extract outline list
-    outline = parsed.get( "outline", [] )
-
-    if not isinstance( outline, list ):
-        logger.error( f"Expected 'outline' to be a list, got {type( outline )}" )
-        return []
+    # Extract outline list (STRICT: missing / empty / non-list is a real defect)
+    outline = parsed.get( "outline", [] ) if isinstance( parsed, dict ) else []
+    if not isinstance( outline, list ) or not outline:
+        logger.error( f"Outline 'outline' missing/empty/not-a-list: {type( outline )}" )
+        raise ValueError( "Outline generation returned no usable entries" )
 
     # Validate each entry
     validated = []
