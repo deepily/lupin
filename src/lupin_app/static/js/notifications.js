@@ -5672,6 +5672,20 @@ class NotificationsUI {
             return;
         }
 
+        // Manager-lineage badge — live-path parity with the full-load (senders-visible)
+        // hydration (Tiffany 2026-06-17). The server now stamps top-level
+        // `manager_persona` on EVERY CC-sender emit (notification_fifo_queue.py
+        // _stamp_manager_persona), not only on voice_persona_assigned. So whichever
+        // live event paints the worker's icon — even a plain notification arriving
+        // AFTER a voice_persona_assigned that raced to a null manager at the worker's
+        // spawn instant — carries the lineage and self-heals the badge with no refresh.
+        // Purely ADDITIVE: positive set + patch only; deletion stays owned by the
+        // explicit voice_persona_assigned / voice_persona_released cases below.
+        if ( notification.sender_id && notification.manager_persona ) {
+            this.managerPersonaMap.set( notification.sender_id, notification.manager_persona );
+            this._setManagerBadgeOnStripIcon( notification.sender_id, notification.manager_persona );
+        }
+
         // Custom-typed state-update notifications (not user-facing messages).
         // Routed through the canonical notification subsystem rather than as
         // ad-hoc top-level WS events. Each case handles its own state update

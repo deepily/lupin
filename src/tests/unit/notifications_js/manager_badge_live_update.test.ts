@@ -60,6 +60,13 @@ function makeUI(): LiveUI {
   ui.ccFocusState = { enabled: false, focused_sender_id: null };
   ui.ccHideInactiveStrip = false;
   ui.conversationModes = {};
+  // Plain-notification render-path short-circuit: a seeded dedup entry lets a
+  // real plain-typed envelope flow through handleNotificationUpdate (so the new
+  // top-level-manager_persona reconcile runs for real) and then return at the
+  // duplicate guard, BEFORE the deep createSenderCard render path — keeping the
+  // test focused on the reconcile under test.
+  ui.notificationState = { notifications: [] };
+  ui.commonsTrafficVisibilityEnabled = false;
   ui._setPersonaBadgeOnCard = (): void => {};
   ui._applyHideInactiveStripFilter = (): void => {};
   document.body.replaceChildren();
@@ -130,4 +137,65 @@ test( "live event with manager_persona=null leaves the worker badge-less (root /
   assert.ok( icon, "icon still painted" );
   assert.equal( icon.querySelector( ".cc-strip-manager-badge" ), null,
     "no badge when the server could not resolve the manager at emit time — this is the race surface" );
+} );
+
+// ── The FIX (Tiffany 2026-06-17): self-heal via the top-level manager_persona ──
+// The server now stamps top-level `manager_persona` on EVERY CC-sender emit
+// (notification_fifo_queue.py _stamp_manager_persona), and handleNotificationUpdate
+// reconciles it BEFORE the switch — so any later live event re-carries the lineage
+// and the badge appears with no page refresh. These reproduce Rick's symptom (badge
+// missing after a raced spawn) and prove the self-heal.
+
+test( "FIX: raced-null persona event leaves no badge, then a later plain notification with top-level manager_persona self-heals it live (no refresh)", async () => {
+  const ui = makeUI();
+  // 1) voice_persona_assigned races to a null manager at the worker's spawn instant.
+  await ui.handleNotificationUpdate( {
+    notification: {
+      type: "voice_persona_assigned",
+      sender_id: NEWBIE,
+      voice_persona: PERSONA,
+      payload: { session_id: "newbie01", manager_persona: null },
+    },
+  } );
+  assert.equal(
+    document.getElementById( ui._stripIconIdFor( NEWBIE ) )!.querySelector( ".cc-strip-manager-badge" ),
+    null, "reproduces the bug: no badge after the raced-null persona event" );
+
+  // 2) The worker's NEXT plain notification now carries top-level manager_persona
+  //    (server self-heal stamp; bridge settled → resolver succeeds) → badge live-patches.
+  ( ui.notificationState as { notifications: unknown[] } ).notifications.push( { id_hash: "dup1" } );
+  await ui.handleNotificationUpdate( {
+    notification: {
+      id_hash: "dup1",            // dedup short-circuit AFTER the reconcile (see makeUI)
+      type: "task",
+      sender_id: NEWBIE,
+      manager_persona: MGR,       // top-level — the new server stamp
+      message: "worker progress ping",
+    },
+  } );
+  const badge = document.getElementById( ui._stripIconIdFor( NEWBIE ) )!
+    .querySelector( ".cc-strip-manager-badge" ) as HTMLElement;
+  assert.ok( badge, "badge self-healed onto the existing icon via the plain notification — NO refresh" );
+  assert.equal( badge.textContent, "M", "badge shows the manager's initial" );
+  assert.ok( ( ui.managerPersonaMap as Map<string, unknown> ).has( NEWBIE ),
+    "managerPersonaMap populated by the plain notification's top-level stamp" );
+} );
+
+test( "FIX: plain notification with top-level manager_persona populates the map ahead of the icon, so a later-created icon shows the badge", async () => {
+  const ui = makeUI();
+  ( ui.notificationState as { notifications: unknown[] } ).notifications.push( { id_hash: "dup2" } );
+  // Plain notification arrives BEFORE any icon exists → reconcile sets the map;
+  // _setManagerBadgeOnStripIcon no-ops (no icon yet).
+  await ui.handleNotificationUpdate( {
+    notification: { id_hash: "dup2", type: "task", sender_id: NEWBIE, manager_persona: MGR, message: "hi" },
+  } );
+  assert.equal( document.getElementById( ui._stripIconIdFor( NEWBIE ) ), null, "no icon yet" );
+  assert.ok( ( ui.managerPersonaMap as Map<string, unknown> ).has( NEWBIE ), "map populated ahead of the icon" );
+
+  // Icon created later (e.g. by the persona event) reads the map → badge applied at creation.
+  ui._addStripIcon( NEWBIE, "LUPIN", PERSONA, "newbie01" );
+  const badge = document.getElementById( ui._stripIconIdFor( NEWBIE ) )!
+    .querySelector( ".cc-strip-manager-badge" ) as HTMLElement;
+  assert.ok( badge, "badge applied at icon creation, sourced from the pre-populated map" );
+  assert.equal( badge.textContent, "M" );
 } );

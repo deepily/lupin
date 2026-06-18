@@ -482,6 +482,11 @@ class NotificationFifoQueue( FifoQueue ):
             "notification" : notification.to_dict()
         }
 
+        # Manager-lineage badge — live-path parity with the full-load
+        # (senders-visible) hydration (Tiffany 2026-06-17, fixes the spawn-time
+        # race root-caused in a16a7281). See _stamp_manager_persona docstring.
+        self._stamp_manager_persona( event_data[ "notification" ], notification.sender_id )
+
         if notification.user_id:
             # Phase E migration (2026-04-27): targeted user + cc-listener
             # cross-user delivery now goes through the canonical dispatch
@@ -514,6 +519,48 @@ class NotificationFifoQueue( FifoQueue ):
                     event   = "notification_queue_update",
                     data    = event_data,
                 )
+
+    def _stamp_manager_persona( self, notification_dict: Dict[str, Any], sender_id: Optional[str] ) -> None:
+        """
+        Stamp the spawning-manager persona badge onto an outbound LIVE notification
+        envelope for a CC worker sender, mirroring the senders-visible (full-load)
+        hydration so the focus-bar manager-ownership badge appears on a freshly-spawned
+        worker WITHOUT a page refresh.
+
+        Background (Rick 2026-06-08 badge; Tiffany 2026-06-17 live-update race fix,
+        root-caused in a16a7281): the full-load path stamps `manager_persona` on every
+        sender via `_manager_persona_for_sender_id`, so a force-refreshed page always
+        shows the badge. The live path previously carried `manager_persona` ONLY inside
+        the `voice_persona_assigned` event's `payload`; if that single event raced to a
+        null resolve at the worker's spawn instant (the worker's `spawned_by` not yet
+        visible to the in-container server through the bind-mount), no later live event
+        re-carried the lineage and the badge waited for a manual refresh. Stamping it on
+        EVERY CC-sender emit makes the live path self-heal: the worker's next notification
+        re-resolves (bridge now settled) and the client patches the badge live.
+
+        Requires:
+            - notification_dict is the to_dict() envelope about to be broadcast
+            - sender_id may be None or a non-CC id (guarded)
+
+        Ensures:
+            - adds top-level "manager_persona" (badge dict, or None for a root session)
+              for CC senders (sender_id containing '#'); leaves the dict untouched for
+              non-CC senders so the per-emit bridge read is skipped
+            - NEVER raises — best-effort, runs inside the WS emit path
+
+        Raises:
+            - None
+        """
+        if not sender_id or "#" not in sender_id:
+            return
+        try:
+            # Deferred import: the notifications router imports THIS module at load
+            # time, so a module-level import here would be circular. At first emit
+            # (runtime) the router is already loaded, so this just hits the cache.
+            from cosa.rest.routers.notifications import _manager_persona_for_sender_id
+            notification_dict[ "manager_persona" ] = _manager_persona_for_sender_id( sender_id )
+        except Exception as e:
+            print( f"[NOTIFY-QUEUE] ⚠️ manager_persona stamp failed for {sender_id}: {type( e ).__name__}: {e}" )
 
     def _maybe_send_fcm_wake( self, notification: NotificationItem ) -> None:
         """
