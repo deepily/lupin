@@ -223,6 +223,29 @@
         </div>
     </aside>
     </div><!-- /.content-shell -->
-    <script type="module" src="/static/dist/multiplexer/boot.js?v=20260617b"></script>
+    <!-- Runtime manifest-driven cache-bust (replaces the hand-bumped ?v= that
+         drifted): read the build manifest to resolve the content-hashed bundle
+         filename (boot.<hash>.js), then import it. The hash changes whenever the
+         bundle content changes, so the browser fetches a fresh bundle with no
+         manual cache-bust to maintain. manifest.json is fetched no-store so the
+         resolver always sees the latest hash. On any manifest failure we fall
+         back to the stable boot.js so a build/serve hiccup never blanks the page
+         (the stable filename is always emitted alongside the hashed copy by
+         src/scripts/build-multiplexer.sh). -->
+    <script type="module">
+        const DIST_BASE    = "/static/dist/multiplexer/";
+        const MANIFEST_URL = DIST_BASE + "manifest.json";
+        try {
+            const resp = await fetch( MANIFEST_URL, { cache: "no-store" } );
+            if ( !resp.ok ) throw new Error( `manifest HTTP ${ resp.status }` );
+            const manifest = await resp.json();
+            const bundle   = manifest[ "boot.js" ];
+            if ( !bundle ) throw new Error( "manifest missing 'boot.js' key" );
+            await import( DIST_BASE + bundle );
+        } catch ( err ) {
+            console.error( "[multiplexer] manifest-driven boot failed; falling back to stable boot.js:", err );
+            await import( DIST_BASE + "boot.js" );
+        }
+    </script>
 </body>
 </html>
