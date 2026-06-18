@@ -189,6 +189,34 @@ class TestDoAllAsyncException:
                     for c in _silence_voice_io[ "notify" ].await_args_list )
 
 
+class TestDoAllAsyncEmptyResultGuards:
+    """D6-STRICT: a non-stopped empty phase result FAILS the job loudly (not a
+    silent empty deck). Guards are ordered AFTER the per-phase stop-check, so a
+    user-requested stop (covered in TestDoAllAsyncStopCheckpoints) still cancels
+    cleanly even when the phase returns []."""
+
+    def test_empty_narrative_fails_loud( self, _silence_voice_io ):
+        agent = _agent(); _wire_doall( agent )
+        agent._analyze_async = AsyncMock( return_value=[] )
+        with pytest.raises( ValueError, match="Phase 2" ):
+            _run( agent.do_all_async() )
+        assert agent.state == OrchestratorState.FAILED
+
+    def test_empty_outline_fails_loud( self, _silence_voice_io ):
+        agent = _agent(); _wire_doall( agent )
+        agent._outline_async = AsyncMock( return_value=[] )
+        with pytest.raises( ValueError, match="Phase 3" ):
+            _run( agent.do_all_async() )
+        assert agent.state == OrchestratorState.FAILED
+
+    def test_empty_elaboration_fails_loud( self, _silence_voice_io ):
+        agent = _agent(); _wire_doall( agent )
+        agent._elaborate_async = AsyncMock( return_value=[] )
+        with pytest.raises( ValueError, match="Phase 4" ):
+            _run( agent.do_all_async() )
+        assert agent.state == OrchestratorState.FAILED
+
+
 # ===========================================================================
 # render_from_yaml_async
 # ===========================================================================

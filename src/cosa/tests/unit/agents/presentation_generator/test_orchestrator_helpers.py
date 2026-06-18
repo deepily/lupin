@@ -487,14 +487,33 @@ class TestAnalyzeAsync:
         assert sections[ 1 ].arc_position == ArcPosition.ARGUMENT  # ValueError → fallback
         assert agent.metrics[ "api_calls" ] == 1
 
-    def test_real_no_sections_returns_empty( self, _silence_voice_io ):
+    def test_real_no_sections_raises_fail_loud( self, _silence_voice_io ):
+        # D6-STRICT: an empty parse result is a degenerate deck — fail loud, do
+        # NOT return []. (Defensive backstop branch: parser mocked to return [].)
         agent = _agent()
         agent._api_client = _mock_api_client()
         with patch( f"{_NARR}.get_narrative_analysis_prompt", return_value="P" ), \
              patch( f"{_NARR}.parse_analysis_response", return_value=[] ):
-            assert _run( agent._analyze_async( "src" ) ) == []
+            with pytest.raises( ValueError, match="no usable sections" ):
+                _run( agent._analyze_async( "src" ) )
+        # the urgent fail-loud notify fired
+        assert any( c.kwargs.get( "priority" ) == "urgent"
+                    for c in _silence_voice_io[ "notify" ].await_args_list )
+
+    def test_real_parse_failure_propagates( self, capsys, _silence_voice_io ):
+        # The reviewer's scenario: a stub client returns refusal/garbage text; the
+        # real D6-STRICT parser RAISES → _analyze_async must PROPAGATE (not return []).
+        agent = _agent( debug=True )
+        agent._api_client = _mock_api_client()
+        agent._api_client.call_for_analysis.return_value.content = "I cannot help with that request."
+        with patch( f"{_NARR}.get_narrative_analysis_prompt", return_value="P" ):
+            with pytest.raises( ValueError, match="recoverable JSON object" ):
+                _run( agent._analyze_async( "src" ) )
+        assert "Traceback" in capsys.readouterr().err
 
     def test_real_exception_returns_empty_debug_traceback( self, capsys, _silence_voice_io ):
+        # A NON-parse API/runtime error still degrades to [] (do_all_async's
+        # empty-guard then fails the job loudly downstream).
         agent = _agent( debug=True )
         agent._api_client = _mock_api_client()
         agent._api_client.call_for_analysis = AsyncMock( side_effect=RuntimeError( "api down" ) )
@@ -546,6 +565,28 @@ class TestOutlineAsync:
              patch( f"{_OUT}.parse_outline_response", return_value=dicts ):
             outlines = _run( agent._outline_async( [ _section() ] ) )
         assert len( outlines ) == 1
+
+    def test_real_parse_failure_propagates( self, _silence_voice_io ):
+        # D6-STRICT: parser raises (refusal/garbage) → _outline_async PROPAGATES.
+        # (debug=False → exercises the non-debug arm of the fail-loud handler.)
+        agent = _agent()
+        agent._api_client = _mock_api_client()
+        agent._api_client.call_for_outline.return_value.content = "Sorry, no."
+        with patch( f"{_OUT}.get_outline_prompt", return_value="P" ):
+            with pytest.raises( ValueError, match="recoverable JSON object" ):
+                _run( agent._outline_async( [ _section() ] ) )
+        assert any( c.kwargs.get( "priority" ) == "urgent"
+                    for c in _silence_voice_io[ "notify" ].await_args_list )
+
+    def test_real_parse_failure_propagates_debug_traceback( self, capsys, _silence_voice_io ):
+        # debug=True → exercises the traceback arm of the fail-loud handler.
+        agent = _agent( debug=True )
+        agent._api_client = _mock_api_client()
+        agent._api_client.call_for_outline.return_value.content = "no json here"
+        with patch( f"{_OUT}.get_outline_prompt", return_value="P" ):
+            with pytest.raises( ValueError, match="recoverable JSON object" ):
+                _run( agent._outline_async( [ _section() ] ) )
+        assert "Traceback" in capsys.readouterr().err
 
     def test_real_exception_returns_empty( self, capsys, _silence_voice_io ):
         agent = _agent( debug=True )
@@ -603,6 +644,62 @@ class TestElaborateAsync:
             slides = _run( agent._elaborate_async( [ _outline() ] ) )
         agent._elaborate_chunked.assert_awaited_once()
         assert len( slides ) == 1
+
+    def test_real_parse_failure_complete_response_propagates( self, capsys, _silence_voice_io ):
+        # D6-STRICT: a COMPLETE response (stop_reason == end_turn) that fails to
+        # parse is a real defect → propagate, no chunked fallback, no empty deck.
+        # (debug=True → exercises the traceback arm of the fail-loud handler.)
+        agent = _agent( debug=True )
+        client = _mock_api_client()                       # stop_reason defaults to "end_turn"
+        client.call_for_elaboration.return_value.content = "I won't do that."
+        agent._api_client = client
+        agent._elaborate_chunked = AsyncMock()            # must NOT be called
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ):
+            with pytest.raises( ValueError, match="recoverable JSON object" ):
+                _run( agent._elaborate_async( [ _outline() ] ) )
+        agent._elaborate_chunked.assert_not_awaited()
+        assert "Traceback" in capsys.readouterr().err
+        assert any( c.kwargs.get( "priority" ) == "urgent"
+                    for c in _silence_voice_io[ "notify" ].await_args_list )
+
+    def test_real_truncated_parse_raise_triggers_chunked( self, _silence_voice_io ):
+        # A TRUNCATED response whose real parse RAISES → recover via chunked
+        # fallback (the failure is a length artifact, not garbage).
+        agent = _agent()
+        client = _mock_api_client()
+        client.call_for_elaboration.return_value.content     = "truncated junk {"
+        client.call_for_elaboration.return_value.stop_reason = "max_tokens"
+        agent._api_client = client
+        chunk_dicts = [ { "number": 1, "arc_position": "opening", "type": "title", "title": "T", "visual_type": "text_only" } ]
+        agent._elaborate_chunked = AsyncMock( return_value=chunk_dicts )
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ):
+            slides = _run( agent._elaborate_async( [ _outline() ] ) )
+        agent._elaborate_chunked.assert_awaited_once()
+        assert len( slides ) == 1
+
+    def test_real_parse_empty_complete_response_raises( self, _silence_voice_io ):
+        # Defensive backstop: parser returns [] (mocked) on a COMPLETE response
+        # (not truncated) → fail loud via the non-truncated empty branch.
+        agent = _agent()
+        agent._api_client = _mock_api_client()            # stop_reason "end_turn"
+        agent._elaborate_chunked = AsyncMock()            # must NOT be called
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ), \
+             patch( f"{_ELAB}.parse_elaboration_response", return_value=[] ):
+            with pytest.raises( ValueError, match="no usable slides" ):
+                _run( agent._elaborate_async( [ _outline() ] ) )
+        agent._elaborate_chunked.assert_not_awaited()
+
+    def test_real_chunked_fallback_empty_raises( self, _silence_voice_io ):
+        # Truncated → chunked fallback ALSO yields nothing → fail loud (no empty deck).
+        agent = _agent()
+        client = _mock_api_client()
+        client.call_for_elaboration.return_value.content     = "truncated junk {"
+        client.call_for_elaboration.return_value.stop_reason = "max_tokens"
+        agent._api_client = client
+        agent._elaborate_chunked = AsyncMock( return_value=[] )
+        with patch( f"{_ELAB}.get_elaboration_prompt", return_value="P" ):
+            with pytest.raises( ValueError, match="after truncation fallback" ):
+                _run( agent._elaborate_async( [ _outline() ] ) )
 
     def test_real_exception_returns_empty( self, capsys, _silence_voice_io ):
         agent = _agent( debug=True )
@@ -947,9 +1044,10 @@ def _ans( key, value ):
 
 
 class TestGate1NarrativeReview:
-    def test_empty_sections_auto_approve( self, capsys, _silence_voice_io ):
+    def test_empty_sections_refuses_to_proceed( self, capsys, _silence_voice_io ):
+        # D6-STRICT: empty sections → do NOT auto-approve (was return True).
         agent = _agent( debug=True )
-        assert _run( agent._gate_1_narrative_review( [] ) ) is True
+        assert _run( agent._gate_1_narrative_review( [] ) ) is False
 
     def test_dry_run_auto_approve( self, _silence_voice_io ):
         agent = _agent( dry_run=True )
@@ -995,8 +1093,9 @@ class TestGate1NarrativeReview:
 
 
 class TestGate2OutlineReview:
-    def test_empty_outline_auto_approve( self, _silence_voice_io ):
-        assert _run( _agent( debug=True )._gate_2_outline_review( [] ) ) is True
+    def test_empty_outline_refuses_to_proceed( self, _silence_voice_io ):
+        # D6-STRICT: empty outline → do NOT auto-approve (was return True).
+        assert _run( _agent( debug=True )._gate_2_outline_review( [] ) ) is False
 
     def test_dry_run_auto_approve( self, _silence_voice_io ):
         assert _run( _agent( dry_run=True )._gate_2_outline_review( [ _outline() ] ) ) is True
@@ -1046,8 +1145,9 @@ class TestGate3ContentReview:
         return [ _slide( visual_type="diagram", title="A", bullets=[ "b" ] ),
                  _slide( number=2, type="key_point", visual_type="text_only", title="B" ) ]
 
-    def test_empty_slides_auto_approve( self, _silence_voice_io ):
-        assert _run( _agent( debug=True )._gate_3_content_review( [] ) ) is True
+    def test_empty_slides_refuses_to_proceed( self, _silence_voice_io ):
+        # D6-STRICT: empty slides → do NOT auto-approve (was return True).
+        assert _run( _agent( debug=True )._gate_3_content_review( [] ) ) is False
 
     def test_dry_run_auto_approve( self, _silence_voice_io ):
         assert _run( _agent( dry_run=True )._gate_3_content_review( self._slides_with_visual() ) ) is True

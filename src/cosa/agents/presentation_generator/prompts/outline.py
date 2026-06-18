@@ -258,15 +258,19 @@ def parse_outline_response( response_content: str ) -> List[ dict ]:
         - response_content is a non-empty string
 
     Ensures:
-        - Returns list of outline dicts with keys: number, arc_position, type,
-          title, visual_type, source_hint
-        - Returns empty list on parse failure
+        - Returns a non-empty list of outline dicts with keys: number,
+          arc_position, type, title, visual_type, source_hint
+
+    Raises:
+        - ValueError (D6-STRICT fail-loud) when the response has no recoverable
+          JSON object, the "outline" value is missing / not a list / empty, or
+          every entry is a non-dict (zero usable entries).
 
     Args:
         response_content: Raw response from Claude API
 
     Returns:
-        List of outline dicts, or empty list on error
+        List of outline dicts (always non-empty on return)
     """
     # D6-STRICT: recover the JSON object from chatty bounded-CC output, then
     # fail-loud on unrecoverable / missing / empty structured content.
@@ -319,6 +323,12 @@ def parse_outline_response( response_content: str ) -> List[ dict ]:
             validated_entry[ "number" ] = len( validated ) + 1
 
         validated.append( validated_entry )
+
+    # D6-STRICT: a non-empty list whose entries are ALL non-dicts (e.g.
+    # {"outline": [1, 2]}) yields zero usable entries — a real defect.
+    if not validated:
+        logger.error( "Outline 'outline' contained no usable dict entries" )
+        raise ValueError( "Outline generation returned no usable entries" )
 
     return validated
 
@@ -411,11 +421,14 @@ def quick_smoke_test():
         assert len( outline ) == 3
         print( "  ✓ Markdown-wrapped JSON parsed correctly" )
 
-        # Test 5: Malformed input
+        # Test 5: Malformed input (D6-STRICT: now raises, was return [])
         print( "Testing malformed input..." )
-        outline = parse_outline_response( "not json" )
-        assert outline == []
-        print( "  ✓ Malformed input returns empty list" )
+        try:
+            parse_outline_response( "not json" )
+            assert False, "expected ValueError on unrecoverable input"
+        except ValueError:
+            pass
+        print( "  ✓ Malformed input raises ValueError (fail-loud)" )
 
         # Test 6: Invalid arc position defaults
         print( "Testing invalid arc_position fallback..." )

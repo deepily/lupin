@@ -229,15 +229,19 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
         - response_content is a non-empty string
 
     Ensures:
-        - Returns list of slide dicts matching SlideModel fields
-        - Returns empty list on parse failure
+        - Returns a non-empty list of slide dicts matching SlideModel fields
         - Ensures presenter_notes has all required subfields
+
+    Raises:
+        - ValueError (D6-STRICT fail-loud) when the response has no recoverable
+          JSON object, the "slides" value is missing / not a list / empty, or
+          every entry is a non-dict (zero usable slides).
 
     Args:
         response_content: Raw response from Claude API
 
     Returns:
-        List of slide dicts, or empty list on error
+        List of slide dicts (always non-empty on return)
     """
     # D6-STRICT: recover the JSON object from chatty bounded-CC output, then
     # fail-loud on unrecoverable / missing / empty structured content.
@@ -306,6 +310,12 @@ def parse_elaboration_response( response_content: str ) -> List[ dict ]:
             validated_slide[ "number" ] = len( validated ) + 1
 
         validated.append( validated_slide )
+
+    # D6-STRICT: a non-empty list whose entries are ALL non-dicts (e.g.
+    # {"slides": [1, 2]}) yields zero usable slides — a real defect.
+    if not validated:
+        logger.error( "Elaboration 'slides' contained no usable dict entries" )
+        raise ValueError( "Elaboration returned no usable slides" )
 
     return validated
 
@@ -390,11 +400,14 @@ def quick_smoke_test():
         assert len( slides[ 1 ][ "content_bullets" ] ) == 3
         print( "  ✓ Valid JSON parsed correctly" )
 
-        # Test 4: Malformed input
+        # Test 4: Malformed input (D6-STRICT: now raises, was return [])
         print( "Testing malformed input..." )
-        slides = parse_elaboration_response( "not json" )
-        assert slides == []
-        print( "  ✓ Malformed input returns empty list" )
+        try:
+            parse_elaboration_response( "not json" )
+            assert False, "expected ValueError on unrecoverable input"
+        except ValueError:
+            pass
+        print( "  ✓ Malformed input raises ValueError (fail-loud)" )
 
         # Test 5: Missing presenter_notes gets defaults
         print( "Testing missing presenter_notes defaults..." )

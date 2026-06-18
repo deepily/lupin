@@ -217,15 +217,20 @@ def parse_analysis_response( response_content: str ) -> List[ dict ]:
         - response_content is a non-empty string
 
     Ensures:
-        - Returns list of section dicts with keys: heading, content_summary,
-          arc_position, proposed_slide_count, key_points
-        - Returns empty list on parse failure
+        - Returns a non-empty list of section dicts with keys: heading,
+          content_summary, arc_position, proposed_slide_count, key_points
+
+    Raises:
+        - ValueError (D6-STRICT fail-loud) when the response has no recoverable
+          JSON object, the "sections" value is missing / not a list / empty, or
+          every entry is a non-dict (zero usable sections). Slide data feeds pptx
+          rendering downstream, so an empty/degenerate result is a real defect.
 
     Args:
         response_content: Raw response from Claude API
 
     Returns:
-        List of section dicts, or empty list on error
+        List of section dicts (always non-empty on return)
     """
     # D6-STRICT: robustly recover the JSON object from chatty bounded-CC output,
     # then fail-loud on unrecoverable / missing / empty structured content
@@ -269,6 +274,12 @@ def parse_analysis_response( response_content: str ) -> List[ dict ]:
             validated_section[ "proposed_slide_count" ] = 1
 
         validated.append( validated_section )
+
+    # D6-STRICT: a non-empty list whose entries are ALL non-dicts (e.g.
+    # {"sections": [1, 2, 3]}) yields zero usable sections — a real defect.
+    if not validated:
+        logger.error( "Narrative analysis 'sections' contained no usable dict entries" )
+        raise ValueError( "Narrative analysis returned no usable sections" )
 
     return validated
 
@@ -362,11 +373,14 @@ def quick_smoke_test():
         assert len( sections ) == 2
         print( "  ✓ Markdown-wrapped JSON parsed correctly" )
 
-        # Test 4: Parse malformed response
+        # Test 4: Parse malformed response (D6-STRICT: now raises, was return [])
         print( "Testing parse_analysis_response with malformed input..." )
-        sections = parse_analysis_response( "not json at all" )
-        assert sections == []
-        print( "  ✓ Malformed input returns empty list" )
+        try:
+            parse_analysis_response( "not json at all" )
+            assert False, "expected ValueError on unrecoverable input"
+        except ValueError:
+            pass
+        print( "  ✓ Malformed input raises ValueError (fail-loud)" )
 
         # Test 5: Invalid arc position defaults to argument
         print( "Testing invalid arc position fallback..." )

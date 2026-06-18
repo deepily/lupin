@@ -852,8 +852,12 @@ class TestInitialStateRevisionCounters:
 # Phase 4: Orchestrator Gate Auto-Approve Tests
 # =============================================================================
 
-class TestGateAutoApproveEmpty:
-    """Tests that gates auto-approve when given empty input."""
+class TestGateRefusesEmpty:
+    """D6-STRICT: content gates REFUSE to proceed (return False) on empty input —
+    they no longer auto-approve. (An empty narrative/outline/slide-set is a
+    degenerate deck; do_all_async's empty-result guards fail the main path
+    loudly before these gates are reached, and these guards cover the recursive
+    re-analysis path.)"""
 
     @pytest.fixture
     def orchestrator( self, tmp_path ):
@@ -868,14 +872,14 @@ class TestGateAutoApproveEmpty:
         )
 
     @pytest.mark.asyncio
-    async def test_gate_2_auto_approves_empty_outline( self, orchestrator ):
+    async def test_gate_2_refuses_empty_outline( self, orchestrator ):
         result = await orchestrator._gate_2_outline_review( [] )
-        assert result is True
+        assert result is False
 
     @pytest.mark.asyncio
-    async def test_gate_3_auto_approves_empty_slides( self, orchestrator ):
+    async def test_gate_3_refuses_empty_slides( self, orchestrator ):
         result = await orchestrator._gate_3_content_review( [] )
-        assert result is True
+        assert result is False
 
 
 # =============================================================================

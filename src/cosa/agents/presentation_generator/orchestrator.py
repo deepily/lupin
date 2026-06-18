@@ -216,6 +216,12 @@ class PresentationOrchestratorAgent:
             self._presentation_state[ "narrative_sections" ] = narrative_sections
             if self._check_stop(): await self._handle_stop(); return None
 
+            # D6-STRICT fail-loud guard: a non-stopped empty result is a degenerate
+            # deck — fail the job loudly rather than silently building nothing.
+            # (Ordered AFTER the stop-check so a user-requested stop still cancels.)
+            if not narrative_sections:
+                raise ValueError( "Phase 2 (narrative analysis) produced no sections — failing the job (D6-STRICT)" )
+
             # Gate 1: Narrative arc review (stub — auto-approve)
             gate1_approved = await self._gate_1_narrative_review( narrative_sections )
             if not gate1_approved: await self._handle_stop(); return None
@@ -227,6 +233,10 @@ class PresentationOrchestratorAgent:
             self._presentation_state[ "slide_outline" ] = slide_outline
             if self._check_stop(): await self._handle_stop(); return None
 
+            # D6-STRICT fail-loud guard (see Phase 2 note).
+            if not slide_outline:
+                raise ValueError( "Phase 3 (slide outline) produced no entries — failing the job (D6-STRICT)" )
+
             # Gate 2: Slide titles + visual types review (stub — auto-approve)
             gate2_approved = await self._gate_2_outline_review( slide_outline )
             if not gate2_approved: await self._handle_stop(); return None
@@ -237,6 +247,10 @@ class PresentationOrchestratorAgent:
             elaborated_slides = await self._elaborate_async( slide_outline )
             self._presentation_state[ "elaborated_slides" ] = elaborated_slides
             if self._check_stop(): await self._handle_stop(); return None
+
+            # D6-STRICT fail-loud guard (see Phase 2 note).
+            if not elaborated_slides:
+                raise ValueError( "Phase 4 (slide elaboration) produced no slides — failing the job (D6-STRICT)" )
 
             # Gate 3: Full content review (stub — auto-approve)
             gate3_approved = await self._gate_3_content_review( elaborated_slides )
@@ -572,9 +586,15 @@ class PresentationOrchestratorAgent:
             - self._presentation_state has raw_sections from Phase 1
 
         Ensures:
-            - Returns list of NarrativeSection models on success
-            - Returns empty list on API or parse failure
+            - Returns a non-empty list of NarrativeSection models on success
             - Increments metrics["api_calls"]
+
+        Raises:
+            - ValueError on parse failure / empty result (D6-STRICT fail-loud) —
+              propagates to do_all_async, which marks the job FAILED
+            - Returns empty list ONLY on a non-parse API/runtime error (e.g. the
+              API call itself raised); do_all_async's empty-result guard then
+              fails the job loudly
 
         Returns:
             List[NarrativeSection]: Classified document sections
@@ -626,13 +646,19 @@ class PresentationOrchestratorAgent:
             )
             self.metrics[ "api_calls" ] += 1
 
-            # Parse response into section dicts
+            # Parse response into section dicts.
+            # D6-STRICT: parse_analysis_response RAISES ValueError on unrecoverable /
+            # missing / empty / all-non-dict output. That ValueError must propagate
+            # (see the dedicated `except ValueError` below) so a malformed LLM result
+            # FAILS the job loudly rather than degrading to a degenerate empty deck.
             section_dicts = parse_analysis_response( response.content )
 
             if not section_dicts:
-                logger.warning( "Narrative analysis returned no sections" )
-                await voice_io.notify( "Warning: Narrative analysis returned no sections", priority="medium" )
-                return []
+                # Defensive backstop: the strict parser does not return an empty list
+                # (it raises first), but a future/mocked parser could. Fail loud —
+                # zero structured content is a real defect, not a silent no-op.
+                logger.error( "Narrative analysis produced no sections — failing the job (D6-STRICT)" )
+                raise ValueError( "Narrative analysis produced no usable sections" )
 
             # Convert dicts to NarrativeSection models
             narrative_sections = []
@@ -667,6 +693,17 @@ class PresentationOrchestratorAgent:
 
             return narrative_sections
 
+        except ValueError as e:
+            # D6-STRICT fail-loud: a parse/empty failure is a real defect (slide data
+            # feeds pptx rendering). Do NOT swallow into an empty deck — notify and
+            # re-raise so do_all_async marks the job FAILED.
+            logger.error( f"Narrative analysis parse failure (fail-loud): {e}" )
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+            await voice_io.notify( f"Narrative analysis failed: {str( e )[ :80 ]}", priority="urgent" )
+            raise
+
         except Exception as e:
             logger.error( f"Narrative analysis failed: {e}" )
             if self.debug:
@@ -686,9 +723,13 @@ class PresentationOrchestratorAgent:
             - narrative_sections is a non-empty list of NarrativeSection models
 
         Ensures:
-            - Returns list of SlideOutline models on success
-            - Returns empty list on API or parse failure
+            - Returns a non-empty list of SlideOutline models on success
             - Increments metrics["api_calls"]
+
+        Raises:
+            - ValueError on parse failure / empty result (D6-STRICT fail-loud) —
+              propagates to do_all_async, which marks the job FAILED
+            - Returns empty list ONLY on a non-parse API/runtime error
 
         Returns:
             List[SlideOutline]: Slide outline entries
@@ -791,6 +832,16 @@ class PresentationOrchestratorAgent:
 
             return outlines
 
+        except ValueError as e:
+            # D6-STRICT fail-loud: a parse/empty failure is a real defect — notify
+            # and re-raise so do_all_async marks the job FAILED (no empty deck).
+            logger.error( f"Outline generation parse failure (fail-loud): {e}" )
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+            await voice_io.notify( f"Outline generation failed: {str( e )[ :80 ]}", priority="urgent" )
+            raise
+
         except Exception as e:
             logger.error( f"Outline generation failed: {e}" )
             if self.debug:
@@ -812,9 +863,16 @@ class PresentationOrchestratorAgent:
             - self._presentation_state has source_content from Phase 1
 
         Ensures:
-            - Returns list of SlideModel instances on success
-            - Returns empty list on API or parse failure
+            - Returns a non-empty list of SlideModel instances on success
+            - On a TRUNCATED response (stop_reason != "end_turn") that fails to
+              parse, attempts the chunked fallback before failing
             - Increments metrics["api_calls"]
+
+        Raises:
+            - ValueError on a parse failure of a COMPLETE response, or when the
+              chunked fallback still yields nothing (D6-STRICT fail-loud) —
+              propagates to do_all_async, which marks the job FAILED
+            - Returns empty list ONLY on a non-parse API/runtime error
 
         Returns:
             List[SlideModel]: Fully elaborated slides
@@ -875,13 +933,33 @@ class PresentationOrchestratorAgent:
             if hasattr( response, "tokens_used" ):
                 self.metrics[ "tokens_used" ] += response.tokens_used
 
-            # Check for truncation — chunked fallback if needed
-            slide_dicts = parse_elaboration_response( response.content )
+            # Parse — with a truncation-aware chunked fallback.
+            # D6-STRICT: parse_elaboration_response RAISES on unrecoverable / empty
+            # output (it never returns []). We distinguish two cases:
+            #   - TRUNCATED response (stop_reason != "end_turn"): the failure is a
+            #     length artifact, not garbage — recover via the chunked fallback.
+            #   - COMPLETE response that still fails to parse: a real defect — let
+            #     the ValueError propagate (caught by `except ValueError` below).
+            is_truncated = hasattr( response, "stop_reason" ) and response.stop_reason != "end_turn"
+            try:
+                slide_dicts = parse_elaboration_response( response.content )
+            except ValueError:
+                if not is_truncated:
+                    raise   # complete-but-unparseable → fail loud
+                slide_dicts = []
 
-            if not slide_dicts and hasattr( response, "stop_reason" ) and response.stop_reason != "end_turn":
-                logger.warning( "Elaboration response truncated, attempting chunked fallback" )
-                await voice_io.notify( "Response truncated — retrying in batches...", priority="low" )
-                slide_dicts = await self._elaborate_chunked( slide_outline, source_content, human_feedback )
+            if not slide_dicts:
+                if is_truncated:
+                    logger.warning( "Elaboration response truncated/unparseable, attempting chunked fallback" )
+                    await voice_io.notify( "Response truncated — retrying in batches...", priority="low" )
+                    slide_dicts = await self._elaborate_chunked( slide_outline, source_content, human_feedback )
+                else:
+                    # Complete response yielded zero usable slides → real defect.
+                    raise ValueError( "Elaboration produced no usable slides" )
+
+            if not slide_dicts:
+                # Chunked fallback also produced nothing → fail loud (no empty deck).
+                raise ValueError( "Elaboration produced no slides after truncation fallback" )
 
             # Convert to SlideModel instances
             slides = []
@@ -920,6 +998,16 @@ class PresentationOrchestratorAgent:
             )
 
             return slides
+
+        except ValueError as e:
+            # D6-STRICT fail-loud: a parse/empty failure is a real defect — notify
+            # and re-raise so do_all_async marks the job FAILED (no empty deck).
+            logger.error( f"Elaboration parse failure (fail-loud): {e}" )
+            if self.debug:
+                import traceback
+                traceback.print_exc()
+            await voice_io.notify( f"Elaboration failed: {str( e )[ :80 ]}", priority="urgent" )
+            raise
 
         except Exception as e:
             logger.error( f"Elaboration failed: {e}" )
@@ -1516,8 +1604,12 @@ class PresentationOrchestratorAgent:
             bool: True to proceed, False to stop
         """
         if not sections:
-            if self.debug: print( "[Orchestrator] Gate 1: No sections to review, auto-approve" )
-            return True
+            # D6-STRICT: empty sections is NOT something to auto-approve — there is
+            # no narrative arc to proceed with. Do NOT proceed (the do_all_async
+            # empty-guard fails the main path loudly before this gate is reached;
+            # this also covers the recursive re-analysis path).
+            if self.debug: print( "[Orchestrator] Gate 1: No sections to review — refusing to proceed" )
+            return False
 
         if self.dry_run:
             if self.debug: print( "[Orchestrator] Gate 1: DRY RUN — auto-approve" )
@@ -1627,8 +1719,9 @@ class PresentationOrchestratorAgent:
             bool: True to proceed, False to stop
         """
         if not outline:
-            if self.debug: print( "[Orchestrator] Gate 2: No outline to review, auto-approve" )
-            return True
+            # D6-STRICT: empty outline → nothing to proceed with; do NOT auto-approve.
+            if self.debug: print( "[Orchestrator] Gate 2: No outline to review — refusing to proceed" )
+            return False
 
         if self.dry_run:
             if self.debug: print( "[Orchestrator] Gate 2: DRY RUN — auto-approve" )
@@ -1740,8 +1833,9 @@ class PresentationOrchestratorAgent:
             bool: True to proceed, False to stop
         """
         if not slides:
-            if self.debug: print( "[Orchestrator] Gate 3: No slides to review, auto-approve" )
-            return True
+            # D6-STRICT: empty slides → nothing to proceed with; do NOT auto-approve.
+            if self.debug: print( "[Orchestrator] Gate 3: No slides to review — refusing to proceed" )
+            return False
 
         if self.dry_run:
             if self.debug: print( "[Orchestrator] Gate 3: DRY RUN — auto-approve" )
@@ -1967,10 +2061,11 @@ def quick_smoke_test():
             sections = await agent._analyze_async( content )
             assert sections == []
 
-            # Verify gates auto-approve
-            assert await agent._gate_1_narrative_review( [] ) is True
-            assert await agent._gate_2_outline_review( [] ) is True
-            assert await agent._gate_3_content_review( [] ) is True
+            # D6-STRICT: content gates 1-3 REFUSE to proceed on empty input
+            # (no auto-approve); the render gate (4) still auto-approves on None.
+            assert await agent._gate_1_narrative_review( [] ) is False
+            assert await agent._gate_2_outline_review( [] ) is False
+            assert await agent._gate_3_content_review( [] ) is False
             assert await agent._gate_4_render_review( None ) is True
 
             return True

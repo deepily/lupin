@@ -81,6 +81,12 @@ class TestNarrativeParser:
         with pytest.raises( ValueError, match="no usable sections" ):
             narrative.parse_analysis_response( json.dumps( { "sections": "nope" } ) )
 
+    def test_parse_all_nondict_entries_raises( self ):
+        # D6-STRICT edge: a NON-EMPTY list whose entries are ALL non-dicts yields
+        # zero usable sections after per-entry skip → fail-loud (was: return []).
+        with pytest.raises( ValueError, match="no usable sections" ):
+            narrative.parse_analysis_response( json.dumps( { "sections": [ 1, 2, 3 ] } ) )
+
     def test_extract_metadata_ok( self ):
         raw = "```json\n" + json.dumps( { "total_proposed_slides": 7, "narrative_assessment": "good" } ) + "\n```"
         md = narrative.extract_narrative_metadata( raw )
@@ -164,6 +170,11 @@ class TestOutlineParser:
     def test_parse_outline_not_list_raises( self ):
         with pytest.raises( ValueError, match="no usable entries" ):
             outline.parse_outline_response( json.dumps( { "outline": 5 } ) )
+
+    def test_parse_all_nondict_entries_raises( self ):
+        # D6-STRICT edge: all-non-dict entries → zero usable entries → fail-loud.
+        with pytest.raises( ValueError, match="no usable entries" ):
+            outline.parse_outline_response( json.dumps( { "outline": [ 1, 2 ] } ) )
 
     def test_extract_metadata_json_fence( self ):
         raw = "```json\n" + json.dumps( { "total_slides": 10, "narrative_coherence_note": "n" } ) + "\n```"
@@ -267,6 +278,11 @@ class TestElaborationParser:
     def test_parse_slides_not_list_raises( self ):
         with pytest.raises( ValueError, match="no usable slides" ):
             elaboration.parse_elaboration_response( json.dumps( { "slides": 3 } ) )
+
+    def test_parse_all_nondict_entries_raises( self ):
+        # D6-STRICT edge: all-non-dict entries → zero usable slides → fail-loud.
+        with pytest.raises( ValueError, match="no usable slides" ):
+            elaboration.parse_elaboration_response( json.dumps( { "slides": [ 1, 2 ] } ) )
 
 
 if __name__ == "__main__":
