@@ -300,15 +300,15 @@ test("auth getToken() failure → socket stops; CSM enters backoff (attempts inc
   MockWebSocket.instances[0]!.fireOpen();
   await new Promise((r) => setTimeout(r, 10));
 
-  // wsChannel.stop() got called from onSocketOpen catch path; that called
-  // close() on the mock → fired onclose (from the mock). CSM saw socket_close
-  // from `connected` (we already sent socket_open). With default graceMs=100
-  // and the auth fetch taking <100ms, this is treated as a fluke → reconnecting.
-  // Either way, the transport reacted to the auth failure.
-  const sawCloseOrReconnect = transitions.some(
-    (e) => e.payload.state === "reconnecting" || e.payload.state === "backoff",
-  );
-  assert.ok(sawCloseOrReconnect, `expected reconnect/backoff after auth failure; saw ${transitions.map((e) => e.payload.state).join(",")}`);
+  // RECONNECT-PARITY FIX (4450995d): onSocketOpen no longer sends socket_open
+  // on TCP open, so the CSM is in `connecting` when the auth getToken() failure
+  // path stops the channel → socket_close fires from `connecting` → `backoff`
+  // with an attempt increment (NO grace-fluke fast-path, which only applies
+  // from `connected`). Auth failures therefore accumulate budget, exactly the
+  // behavior the fix restores.
+  const sawBackoff = transitions.some((e) => e.payload.state === "backoff");
+  assert.ok(sawBackoff, `expected backoff after auth failure; saw ${transitions.map((e) => e.payload.state).join(",")}`);
+  assert.equal(t.state, "backoff");
 });
 
 test("stop() releases everything; subsequent start() throws", () => {
@@ -389,6 +389,8 @@ test("non-string event types from server are ignored (defensive)", async () => {
   t.start("wise_penguin");
   MockWebSocket.instances[0]!.fireOpen();
   await new Promise((r) => setTimeout(r, 10));
+  // auth_success drives the CSM to `connected` (post-fix: connected == authed).
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ type: "auth_success", data: {} }));
 
   // No crash on missing/numeric type.
   MockWebSocket.instances[0]!.receive(JSON.stringify({ data: "no type" }));
@@ -452,6 +454,8 @@ test("onMessage drops non-object/null envelopes silently (defensive)", async () 
   t.start("wise_penguin");
   MockWebSocket.instances[0]!.fireOpen();
   await new Promise((r) => setTimeout(r, 10));
+  // auth_success drives the CSM to `connected` (post-fix: connected == authed).
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ type: "auth_success", data: {} }));
 
   // Wire-level: WSChannel only forwards parsed objects to onMessage, but the
   // BaseTransportImpl onMessage is itself defensive against null / non-object
@@ -507,6 +511,61 @@ test("backoff timer eventually fires reconnecting (mock.timers)", async () => {
   } finally {
     mock.timers.reset();
   }
+});
+
+// --- reconnect-parity fix (audit 4450995d) ----------------------------------
+
+test("reconnect-parity: stays `connecting` on TCP open; `connected` only after auth_success", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager : makeMockAuth(), bus, baseUrl : "", WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+  // THE FIX: raw TCP open must NOT reach `connected` (that would reset the
+  // reconnect budget before auth — the unbounded-loop bug).
+  assert.equal(t.state, "connecting");
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ type: "auth_success", data: {} }));
+  assert.equal(t.state, "connected");
+});
+
+test("reconnect-parity: permanent-auth close (4001) after auth → failed carrying reason/code", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const transitions: LupinEvent<ConnectionStateChangePayload>[] = [];
+  bus.on<ConnectionStateChangePayload>("connection_state_change", (e) => transitions.push(e));
+  const t = createQueueTransport({
+    authManager : makeMockAuth(), bus, baseUrl : "", WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ type: "auth_success", data: {} }));  // → connected
+  MockWebSocket.instances[0]!.fireClose(4001, "token expired");
+
+  assert.equal(t.state, "failed");
+  const failed = transitions.find((e) => e.payload.state === "failed");
+  assert.equal(failed?.payload.reason, "auth-permanent");
+  assert.equal(failed?.payload.code, 4001);
+  // Terminal — NO reconnect socket opened.
+  assert.equal(MockWebSocket.instances.length, 1);
+});
+
+test("reconnect-parity: permanent-auth close during auth phase (4002) → failed", async () => {
+  const Ctor = freshMockCtor();
+  const bus  = createEventBusForTesting();
+  const t = createQueueTransport({
+    authManager : makeMockAuth(), bus, baseUrl : "", WebSocketCtor : Ctor,
+  });
+  t.start("wise_penguin");
+  MockWebSocket.instances[0]!.fireOpen();
+  await new Promise((r) => setTimeout(r, 10));
+  // Still `connecting` (no auth_success yet). A permanent close goes straight
+  // to `failed` without spending reconnect budget.
+  MockWebSocket.instances[0]!.fireClose(4002, "session displaced");
+  assert.equal(t.state, "failed");
 });
 
 // Defuse a noisy unused-import warning during type-cast; harmless to runtime.

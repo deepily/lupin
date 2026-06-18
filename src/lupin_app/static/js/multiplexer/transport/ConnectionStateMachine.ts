@@ -74,6 +74,11 @@ interface ConnectionContext {
   attempts       : number;
   connectedAtMs  : number;
   graceMs        : number;
+  // Set when entering `failed` via a permanent-auth close (4001/4002/4003);
+  // surfaced on the `connection_state_change` payload so the consumer can
+  // route the failure. Undefined for the budget-exhausted `failed` path.
+  failureReason? : string;
+  failureCode?   : number;
 }
 
 interface ConnectionInput {
@@ -89,7 +94,10 @@ export type ConnectionEvent =
   | { type: "network_offline" }
   | { type: "backoff_expire" }       // wrapper fires after backoff timer
   | { type: "max_attempts_reached" } // wrapper escalates → failed
+  | { type: "permanent_failure"; reason: string; code: number } // 4001/4002/4003 → immediate failed
   | { type: "restart" };             // user-initiated restart from failed
+
+type PermanentFailureEvent = Extract<ConnectionEvent, { type: "permanent_failure" }>;
 
 const connectionMachine = setup({
   types : {
@@ -112,6 +120,13 @@ const connectionMachine = setup({
     resetAttempts : assign({
       attempts : () => 0,
     }),
+    // Stash the permanent-auth reason/code so the subscribe() emit can surface
+    // them on the `failed` transition. The action is wired ONLY to
+    // `permanent_failure` transitions, so `event` is always that variant here.
+    recordFailure : assign({
+      failureReason : ({ event }) => (event as PermanentFailureEvent).reason,
+      failureCode   : ({ event }) => (event as PermanentFailureEvent).code,
+    }),
   },
 }).createMachine({
   id      : "connection",
@@ -126,9 +141,10 @@ const connectionMachine = setup({
       // page_hidden / page_visible / network_online stay (matrix); only
       // network_offline and socket events transition.
       on : {
-        socket_open     : { target: "connected",  actions: "recordConnectedAt" },
-        socket_close    : { target: "backoff",    actions: "incrementAttempts" },
-        network_offline : { target: "offline" },
+        socket_open       : { target: "connected",  actions: "recordConnectedAt" },
+        socket_close      : { target: "backoff",    actions: "incrementAttempts" },
+        network_offline   : { target: "offline" },
+        permanent_failure : { target: "failed",     actions: "recordFailure" },
       },
     },
     connected : {
@@ -139,14 +155,16 @@ const connectionMachine = setup({
           { guard: "isFluke", target: "reconnecting" },
           { target: "backoff", actions: "incrementAttempts" },
         ],
-        network_offline : { target: "offline" },
+        network_offline   : { target: "offline" },
+        permanent_failure : { target: "failed", actions: "recordFailure" },
       },
     },
     reconnecting : {
       on : {
-        socket_open     : { target: "connected",  actions: "recordConnectedAt" },
-        socket_close    : { target: "backoff",    actions: "incrementAttempts" },
-        network_offline : { target: "offline" },
+        socket_open       : { target: "connected",  actions: "recordConnectedAt" },
+        socket_close      : { target: "backoff",    actions: "incrementAttempts" },
+        network_offline   : { target: "offline" },
+        permanent_failure : { target: "failed",     actions: "recordFailure" },
       },
     },
     backoff : {
@@ -158,6 +176,7 @@ const connectionMachine = setup({
         network_online       : { target: "reconnecting" },
         network_offline      : { target: "offline" },
         max_attempts_reached : { target: "failed" },
+        permanent_failure    : { target: "failed", actions: "recordFailure" },
       },
     },
     offline : {
@@ -223,10 +242,18 @@ export class ConnectionStateMachineImpl implements ConnectionStateMachine {
       this.prevState = next;
       const attempts = snapshot.context.attempts;
 
-      // Emit connection_state_change for every transition.
+      // Emit connection_state_change for every transition. On a permanent-auth
+      // `failed` transition the context carries reason/code (set by
+      // recordFailure) — surface them so the consumer can route the failure.
+      const { failureReason, failureCode } = snapshot.context;
       this.bus.emit<ConnectionStateChangePayload>({
         type    : "connection_state_change",
-        payload : { state: next, prev, attempts, transport: this.transportName },
+        payload : {
+          state: next, prev, attempts, transport: this.transportName,
+          ...(failureReason !== undefined
+            ? { reason: failureReason, code: failureCode }
+            : {}),
+        },
         source  : CSM_EVENT_SOURCE,
         ts      : Date.now(),
       });

@@ -33,6 +33,14 @@ import { createWSChannel, type WSChannel } from "./ws-channel";
 
 const DEFAULT_MAX_ATTEMPTS = 20;
 
+// Permanent-auth WebSocket close codes (parity with legacy ws-channel.js
+// PERMANENT_CLOSE_CODES, frozen in the WS reconnect-circuit-breaker design
+// Q11). A close with one of these is a terminal auth rejection — the CSM goes
+// straight to `failed` carrying the code, instead of consuming reconnect
+// budget. The consumer routes 4001 → token-refresh, 4002 → session-displaced,
+// 4003 → permission-denied.
+const PERMANENT_CLOSE_CODES = new Set<number>([ 4001, 4002, 4003 ]);
+
 export interface Transport {
   start(sessionId: string): void;
   stop(): void;
@@ -200,7 +208,7 @@ export abstract class BaseTransportImpl implements Transport {
       url             : this.buildUrl(this.sessionId),
       onOpen          : () => this.onSocketOpen(),
       onMessage       : (env) => this.onMessage(env),
-      onClose         : () => this.onSocketClose(),
+      onClose         : (e) => this.onSocketClose(e),
       generationToken : 0,
     };
     if (this.WSCtor) opts.WebSocketCtor = this.WSCtor;
@@ -211,8 +219,16 @@ export abstract class BaseTransportImpl implements Transport {
     this.wsChannel.start();
   }
 
+  // RECONNECT-PARITY FIX (audit 4450995d): we do NOT tell the CSM `socket_open`
+  // on the raw TCP open. The CSM's `connected` entry runs `resetAttempts`, so
+  // resetting on TCP-open would zero the reconnect budget BEFORE auth — a server
+  // that completes the WS handshake but then rejects auth would loop forever
+  // (the terminal `failed`/circuit-open is unreachable). Instead `socket_open`
+  // is sent on `auth_success` (see onMessage), matching legacy ws-channel.js
+  // (counter resets only on auth_success). Until then the CSM stays in
+  // `connecting`/`reconnecting`, where a close → `backoff` (increment), so
+  // auth failures accumulate and eventually trip `max_attempts_reached`.
   protected async onSocketOpen(): Promise<void> {
-    if (this.csm) this.csm.send({ type: "socket_open" });
     /* c8 ignore next */ // defensive: onSocketOpen fires from the WSChannel `onOpen` callback, which is wired in openSocket() AFTER sessionId is non-null. The null-sessionId arm is unreachable from the wiring contract.
     if (this.sessionId === null) return;
     try {
@@ -227,13 +243,11 @@ export abstract class BaseTransportImpl implements Transport {
         this.wsChannel.send(req);
       }
     } catch {
-      // Auth failed (token fetch, refresh failure, etc.). Stop the channel
-      // AND notify the CSM so it transitions out of `connected` (otherwise
-      // the wrapper sits in a limbo where CSM thinks we're connected but
-      // wsChannel is dead). The CSM's grace window typically routes this
-      // to `reconnecting` for an immediate retry; if the auth failure is
-      // persistent, attempts will accumulate and eventually trip
-      // max_attempts_reached → failed.
+      // Auth failed (token fetch, refresh failure, etc.). Stop the channel AND
+      // notify the CSM. The CSM is still in `connecting`/`reconnecting` (we have
+      // NOT sent socket_open — that waits for auth_success), so socket_close →
+      // `backoff` with an attempt increment. Persistent auth failures thus
+      // accumulate attempts and eventually trip max_attempts_reached → failed.
       if (this.wsChannel) this.wsChannel.stop();
       if (this.csm) this.csm.send({ type: "socket_close" });
     }
@@ -248,6 +262,10 @@ export abstract class BaseTransportImpl implements Transport {
 
     if (eventType === "auth_success" && !this.authReady) {
       this.authReady = true;
+      // RECONNECT-PARITY FIX (audit 4450995d): drive the CSM to `connected`
+      // (which resets the reconnect budget) ONLY now — on application-level
+      // auth success — never on the raw TCP open. See onSocketOpen.
+      if (this.csm) this.csm.send({ type: "socket_open" });
       this.bus.emit<TransportReadyPayload>({
         type    : "transport_ready",
         payload : { transport: this.transportName },
@@ -279,9 +297,20 @@ export abstract class BaseTransportImpl implements Transport {
     });
   }
 
-  protected onSocketClose(): void {
+  // RECONNECT-PARITY FIX (audit 4450995d) part 2: a permanent-auth close
+  // (4001/4002/4003) drives the CSM straight to `failed` carrying reason/code
+  // — no reconnect budget consumed — so the consumer can route token-refresh /
+  // session-displaced / permission-denied. Any other close is a normal
+  // socket_close (→ reconnecting / backoff).
+  protected onSocketClose(e: CloseEvent): void {
     this.authReady = false;
-    if (this.csm) this.csm.send({ type: "socket_close" });
+    /* c8 ignore next */ // post-stop callbacks: stop() unsubscribes + nulls csm; a straggler onClose firing after teardown finds csm=null and returns (same defensive pattern as onStateChange).
+    if (!this.csm) return;
+    if (PERMANENT_CLOSE_CODES.has(e.code)) {
+      this.csm.send({ type: "permanent_failure", reason: "auth-permanent", code: e.code });
+    } else {
+      this.csm.send({ type: "socket_close" });
+    }
   }
 
   protected onStateChange(state: ConnectionState): void {
