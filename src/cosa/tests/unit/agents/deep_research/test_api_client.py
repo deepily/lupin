@@ -1,443 +1,502 @@
+#!/usr/bin/env python3
 """
-Unit tests for cosa.agents.deep_research.api_client.
+Unit tests for cosa.agents.deep_research.api_client (BOUNDED-CC path).
 
-NEW FILE 2026-05-31 by Extra 2 🪨 (CoSA coverage campaign, deep_research SDK/network
-tier). This is the FIREWALLED Anthropic SDK boundary. COST-SAFETY INVARIANT: every
-test mocks `AsyncAnthropic` (and its `.messages.create`) at the boundary so ZERO real
-API calls fire, and the firewalled key is NEVER read — clients are built with an
-explicit `api_key="test-key"` param, or env tests patch os.environ with `clear=True`
-so the real ANTHROPIC_API_KEY_FIREWALLED can never resolve.
+FULL REWRITE 2026-06-18 (Phase 3 bounded-CC migration, Arnold 🪨 on Tiberius 👑's
+SWE crew). The research client was migrated from the direct firewalled Anthropic
+SDK (`AsyncAnthropic.messages.create` + ApiResourceManager web-search gating) to
+the in-process Claude Agent SDK (`claude_agent_sdk.query`), matching the shipped
+BFE/TFE + Podcast + Presentation bounded-CC pattern (ratified D-DR1 Option X).
 
-Boundary mocks: AsyncAnthropic, WebSearchRateLimiter, ApiResourceManager.get_arm,
-ConfigurationManager, cu.get_api_key, voice_io.notify, asyncio.sleep. Retry-loop
-exceptions are injected by patching the module's `anthropic` reference with fake
-RateLimitError / APIStatusError classes.
+These tests mock `sdk_query` at the module boundary — a fake async generator
+yields fake AssistantMessage / TextBlock / ResultMessage objects (the SDK message
+types are patched into the module so isinstance checks pass). NO real SDK
+subprocess, network call, OAuth, or spend occurs.
 
-Must run via run-sdk-cov.sh (api_client imports the SDK chain).
+D6=STRICT: extract_json_object recovers JSON from chatty output but RAISES on
+unrecoverable content (never silent-default).
+
+Web-search migration: the lead agent runs tools=[] (pure reasoning); research
+subagents run tools=[WebSearch, WebFetch] (native web_search_20250305 → CC
+WebSearch/WebFetch). The legacy ARM acquire/record_call dance is dropped — these
+tests assert the bounded options shape, not the retired ARM path.
+
+quick_smoke_test() and __main__ are coverage-excluded (pyproject exclude_also).
+
+Must run via run-sdk-cov.sh (api_client imports the claude_agent_sdk chain).
 """
 
-import json
-import unittest
-from contextlib import contextmanager, ExitStack
-from types import SimpleNamespace
-from unittest.mock import patch, MagicMock, AsyncMock
+import asyncio
+from contextlib import contextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 import cosa.agents.deep_research.api_client as ac
+from cosa.agents.deep_research.api_client import (
+    APIResponse,
+    ResearchAPIClient,
+    SDK_AVAILABLE,
+    LEAD_TOOLS,
+    SUBAGENT_TOOLS,
+    RESEARCH_PERMISSION_MODE,
+    extract_json_object,
+    _temperature_to_steer,
+)
 from cosa.agents.deep_research.config import ResearchConfig
 from cosa.agents.deep_research.cost_tracker import BudgetExceededError
 
 
-# ---------------------------------------------------------------------------
-# Fake retry-loop exception types (patched onto ac.anthropic in retry tests)
-# ---------------------------------------------------------------------------
-class FakeRateLimitError( Exception ):
-    pass
+def _run( coro ):
+    return asyncio.run( coro )
 
 
-class FakeAPIStatusError( Exception ):
-    def __init__( self, status_code ):
-        super().__init__( f"status {status_code}" )
-        self.status_code = status_code
+# ----------------------------------------------------------------------------
+# Fake SDK message types + a fake sdk_query async generator
+# ----------------------------------------------------------------------------
+class _FakeTextBlock:
+    def __init__( self, text ):
+        self.text = text
 
 
-@contextmanager
-def make_client(
-    api_key="test-key", config=None, cost_tracker=None, debug=False, verbose=False,
-    cfgmgr_raises=False, env=None,
-):
-    """Build a ResearchAPIClient with ALL SDK/config boundaries mocked."""
-    with ExitStack() as stack:
-        mock_async_cls = stack.enter_context( patch.object( ac, "AsyncAnthropic" ) )
-        mock_client = MagicMock()
-        mock_client.messages.create = AsyncMock()
-        mock_client.close           = AsyncMock()
-        mock_async_cls.return_value = mock_client
-
-        mock_rl_cls = stack.enter_context( patch.object( ac, "WebSearchRateLimiter" ) )
-        mock_rl = MagicMock()
-        mock_rl.wait_if_needed = AsyncMock( return_value=0.0 )
-        mock_rl.record_usage   = MagicMock()
-        mock_rl_cls.return_value = mock_rl
-
-        if cfgmgr_raises:
-            stack.enter_context( patch(
-                "cosa.config.configuration_manager.ConfigurationManager",
-                side_effect=RuntimeError( "no cfg" ),
-            ) )
-        else:
-            mock_cfg = MagicMock()
-            mock_cfg.get.side_effect = lambda key, default, return_type: default
-            stack.enter_context( patch(
-                "cosa.config.configuration_manager.ConfigurationManager",
-                return_value=mock_cfg,
-            ) )
-
-        if env is not None:
-            stack.enter_context( patch.dict( ac.os.environ, env, clear=True ) )
-
-        client = ac.ResearchAPIClient(
-            api_key=api_key, config=config, cost_tracker=cost_tracker,
-            debug=debug, verbose=verbose,
-        )
-        yield client, mock_client, mock_rl
+class _FakeAssistantMessage:
+    def __init__( self, content ):
+        self.content = content
 
 
-def make_response( blocks, in_tok=10, out_tok=5, stop="end_turn" ):
-    return SimpleNamespace(
-        content     = blocks,
-        usage       = SimpleNamespace( input_tokens=in_tok, output_tokens=out_tok ),
-        stop_reason = stop,
+class _FakeResultMessage:
+    def __init__( self, usage=None, total_cost_usd=None, stop_reason=None ):
+        self.usage          = usage
+        self.total_cost_usd = total_cost_usd
+        self.stop_reason    = stop_reason
+
+
+def _patch_sdk_types():
+    return patch.multiple(
+        ac,
+        AssistantMessage = _FakeAssistantMessage,
+        TextBlock        = _FakeTextBlock,
+        ResultMessage    = _FakeResultMessage,
     )
 
 
-class TestAnthropicImportGuard( unittest.TestCase ):
-    """Cover the `except ImportError` arm of the optional-dependency guard (30-32)."""
-
-    def test_import_failure_sets_unavailable( self ):
-        import importlib, sys
-        try:
-            with patch.dict( sys.modules, { "anthropic": None } ):
-                importlib.reload( ac )
-                self.assertFalse( ac.ANTHROPIC_AVAILABLE )
-                self.assertIsNone( ac.AsyncAnthropic )
-        finally:
-            # Restore genuine module state for every later test in the process.
-            importlib.reload( ac )
-        self.assertTrue( ac.ANTHROPIC_AVAILABLE )
+def _fake_sdk_query( messages, capture ):
+    async def _gen( prompt, options ):
+        capture[ "prompt" ]  = prompt
+        capture[ "options" ] = options
+        for m in messages:
+            yield m
+    return _gen
 
 
-class TestInit( unittest.TestCase ):
+@contextmanager
+def _make_client( config=None, cost_tracker=None, debug=False, verbose=False,
+                  cfgmgr_raises=False ):
+    """Build a ResearchAPIClient with the rate-limiter + ConfigurationManager mocked.
 
-    def test_raises_when_sdk_unavailable( self ):
-        with patch.object( ac, "ANTHROPIC_AVAILABLE", False ):
-            with self.assertRaises( ImportError ):
-                ac.ResearchAPIClient( api_key="k" )
+    The WebSearchRateLimiter is retained on the bounded path for CLI time-estimate
+    UX only (NOT in the LLM call path); we patch it so no real limiter is built.
+    """
+    with patch.object( ac, "WebSearchRateLimiter" ) as mock_rl_cls:
+        mock_rl = MagicMock()
+        mock_rl_cls.return_value = mock_rl
 
-    def test_explicit_api_key_param_wins( self ):
-        with make_client( api_key="param-key" ) as ( client, _c, _rl ):
-            self.assertEqual( client.api_key, "param-key" )
-            self.assertEqual( client.key_source, "parameter" )
+        if cfgmgr_raises:
+            cm = patch(
+                "cosa.config.configuration_manager.ConfigurationManager",
+                side_effect=RuntimeError( "no cfg" ),
+            )
+        else:
+            mock_cfg = MagicMock()
+            mock_cfg.get.side_effect = lambda key, default, return_type: default
+            cm = patch(
+                "cosa.config.configuration_manager.ConfigurationManager",
+                return_value=mock_cfg,
+            )
 
-    def test_env_var_key_source( self ):
-        with make_client( api_key=None, env={ ac.ENV_VAR_NAME: "env-key" } ) as ( client, _c, _rl ):
-            self.assertEqual( client.api_key, "env-key" )
-            self.assertEqual( client.key_source, "environment" )
+        with cm:
+            client = ResearchAPIClient(
+                config=config, cost_tracker=cost_tracker, debug=debug, verbose=verbose,
+            )
+        yield client, mock_rl
 
-    def test_local_file_key_source( self ):
-        with patch( "cosa.utils.util.get_api_key", return_value="file-key" ):
-            with make_client( api_key=None, env={ } ) as ( client, _c, _rl ):
-                self.assertEqual( client.api_key, "file-key" )
-                self.assertEqual( client.key_source, "local file" )
 
-    def test_missing_key_raises_value_error_with_debug( self ):
-        # env cleared + local-file load raises → debug print (153-154) → ValueError.
-        with patch( "cosa.utils.util.get_api_key", side_effect=Exception( "no file" ) ):
-            with self.assertRaises( ValueError ):
-                with make_client( api_key=None, env={ }, debug=True ):
-                    pass
+# ----------------------------------------------------------------------------
+# Module constants + SDK availability
+# ----------------------------------------------------------------------------
+class TestModuleConstants:
+    def test_sdk_available_in_env( self ):
+        assert SDK_AVAILABLE is True
 
-    def test_missing_key_raises_value_error_no_debug( self ):
-        # debug=False covers the 153 false arm of the local-file-load except.
-        with patch( "cosa.utils.util.get_api_key", side_effect=Exception( "no file" ) ):
-            with self.assertRaises( ValueError ):
-                with make_client( api_key=None, env={ }, debug=False ):
-                    pass
+    def test_anthropic_available_mirrors_sdk( self ):
+        # Historical export-compat alias now tracks SDK availability.
+        assert ac.ANTHROPIC_AVAILABLE == SDK_AVAILABLE
 
-    def test_explicit_config_object_used( self ):
-        cfg = ResearchConfig()
-        with make_client( config=cfg ) as ( client, _c, _rl ):
-            self.assertIs( client.config, cfg )
+    def test_tool_surfaces( self ):
+        assert LEAD_TOOLS == []
+        assert SUBAGENT_TOOLS == [ "WebSearch", "WebFetch" ]
+        assert RESEARCH_PERMISSION_MODE == "plan"
+
+    def test_historical_key_constants_retained( self ):
+        assert ac.ENV_VAR_NAME  == "ANTHROPIC_API_KEY_FIREWALLED"
+        assert ac.KEY_FILE_NAME == "anthropic-api-key-firewalled"
+
+
+# ----------------------------------------------------------------------------
+# _temperature_to_steer (3 branches)
+# ----------------------------------------------------------------------------
+class TestTemperatureSteer:
+    def test_high_temperature_creative( self ):
+        assert "creative" in _temperature_to_steer( 0.9 ).lower()
+        assert "creative" in _temperature_to_steer( 1.0 ).lower()
+
+    def test_low_temperature_precise( self ):
+        assert "precise" in _temperature_to_steer( 0.2 ).lower()
+        assert "precise" in _temperature_to_steer( 0.5 ).lower()
+
+    def test_mid_temperature_none( self ):
+        assert _temperature_to_steer( 0.7 ) == ""
+
+
+# ----------------------------------------------------------------------------
+# extract_json_object (D6-STRICT — recover then fail-loud)
+# ----------------------------------------------------------------------------
+class TestExtractJsonObject:
+    def test_plain_json( self ):
+        assert extract_json_object( '{"a": 1}' ) == { "a": 1 }
+
+    def test_json_fenced( self ):
+        assert extract_json_object( '```json\n{"a": 2}\n```' ) == { "a": 2 }
+
+    def test_bare_fenced( self ):
+        assert extract_json_object( '```\n{"a": 3}\n```' ) == { "a": 3 }
+
+    def test_prose_wrapped_recovers_via_brace_scan( self ):
+        assert extract_json_object( 'Here you go:\n{"a": 4}\nThanks!' ) == { "a": 4 }
+
+    def test_nested_braces_balance( self ):
+        assert extract_json_object( 'x {"a": {"b": 5}} y' ) == { "a": { "b": 5 } }
+
+    def test_none_raises( self ):
+        with pytest.raises( ValueError, match="empty/blank" ):
+            extract_json_object( None )
+
+    def test_blank_raises( self ):
+        with pytest.raises( ValueError, match="empty/blank" ):
+            extract_json_object( "   " )
+
+    def test_no_brace_raises( self ):
+        # start == -1 path → no balanced span → final raise.
+        with pytest.raises( ValueError, match="recoverable JSON" ):
+            extract_json_object( "no json here at all" )
+
+    def test_balanced_but_invalid_json_breaks_then_raises( self ):
+        # A balanced { ... } span that is NOT valid JSON → json.loads fails →
+        # break out of the scan → final raise. Covers the break arm.
+        with pytest.raises( ValueError, match="recoverable JSON" ):
+            extract_json_object( "prefix { not: valid } suffix" )
+
+    def test_unclosed_brace_scan_falls_through_then_raises( self ):
+        # An opening { that never balances → the scan loop completes without a
+        # break/return → falls through to the final raise (177->190 branch).
+        with pytest.raises( ValueError, match="recoverable JSON" ):
+            extract_json_object( "prefix { unclosed forever" )
+
+
+# ----------------------------------------------------------------------------
+# APIResponse dataclass
+# ----------------------------------------------------------------------------
+class TestAPIResponse:
+    def test_defaults( self ):
+        r = APIResponse(
+            content="c", model="m", input_tokens=1, output_tokens=2, stop_reason="end_turn",
+        )
+        assert r.sdk_cost_usd   == 0.0
+        assert r.tool_use       == []
+        assert r.search_results == []
+        assert r.raw_response is None
+
+
+# ----------------------------------------------------------------------------
+# __init__
+# ----------------------------------------------------------------------------
+class TestInit:
+    def test_import_error_when_sdk_unavailable( self ):
+        with patch.object( ac, "SDK_AVAILABLE", False ):
+            with pytest.raises( ImportError, match="claude_agent_sdk not installed" ):
+                ResearchAPIClient()
 
     def test_default_config_created_when_none( self ):
-        with make_client( config=None ) as ( client, _c, _rl ):
-            self.assertIsInstance( client.config, ResearchConfig )
+        with _make_client( config=None ) as ( client, _rl ):
+            assert isinstance( client.config, ResearchConfig )
 
-    def test_config_manager_unavailable_uses_defaults_with_debug( self ):
-        # cfgmgr raises → except fallback (182-188) with debug print.
-        with make_client( cfgmgr_raises=True, debug=True ) as ( client, _c, _rl ):
-            self.assertIsNotNone( client._rate_limiter )
+    def test_provided_config_used( self ):
+        cfg = ResearchConfig()
+        with _make_client( config=cfg ) as ( client, _rl ):
+            assert client.config is cfg
 
-    def test_config_manager_unavailable_uses_defaults_no_debug( self ):
-        # cfgmgr raises + debug=False covers the 184->186 `if self.debug` false arm.
-        with make_client( cfgmgr_raises=True, debug=False ) as ( client, _c, _rl ):
-            self.assertIsNotNone( client._rate_limiter )
+    def test_cfgmgr_success_quiet( self, capsys ):
+        with _make_client( debug=False ) as ( client, _rl ):
+            assert client._rate_limiter is not None
+        assert capsys.readouterr().out == ""
 
-    def test_debug_success_path_prints( self ):
-        # debug=True success path covers the 198-201 init prints.
-        with make_client( debug=True ) as ( client, _c, _rl ):
-            self.assertEqual( client.key_source, "parameter" )
+    def test_cfgmgr_success_debug_prints( self, capsys ):
+        with _make_client( debug=True ) as ( client, _rl ):
+            assert client._rate_limiter is not None
+        out = capsys.readouterr().out
+        assert "Bounded-CC mode" in out
+        assert "Models:" in out
+
+    def test_cfgmgr_unavailable_fallback_debug( self, capsys ):
+        # ConfigurationManager raises → except fallback (defaults) + debug print arm.
+        with _make_client( cfgmgr_raises=True, debug=True ) as ( client, _rl ):
+            assert client._rate_limiter is not None
+        assert "ConfigurationManager unavailable" in capsys.readouterr().out
+
+    def test_cfgmgr_unavailable_fallback_no_debug( self, capsys ):
+        # except fallback + debug=False false arm (no fallback print).
+        with _make_client( cfgmgr_raises=True, debug=False ) as ( client, _rl ):
+            assert client._rate_limiter is not None
+        assert "ConfigurationManager unavailable" not in capsys.readouterr().out
 
 
-class TestRateLimitNotify( unittest.IsolatedAsyncioTestCase ):
-
-    async def test_notify_via_voice_io( self ):
-        with make_client() as ( client, _c, _rl ):
+# ----------------------------------------------------------------------------
+# _rate_limit_notify
+# ----------------------------------------------------------------------------
+class TestRateLimitNotify:
+    def test_notify_via_voice_io( self ):
+        with _make_client() as ( client, _rl ):
             with patch(
                 "cosa.agents.deep_research.voice_io.notify", new=AsyncMock(),
             ) as mock_notify:
-                await client._rate_limit_notify( "delaying", "high" )
+                _run( client._rate_limit_notify( "delaying", "high" ) )
             mock_notify.assert_awaited_once_with( "delaying", priority="high" )
 
-    async def test_notify_falls_back_on_error_with_debug( self ):
-        with make_client( debug=True ) as ( client, _c, _rl ):
+    def test_notify_falls_back_on_error_with_debug( self, capsys ):
+        with _make_client( debug=True ) as ( client, _rl ):
             with patch(
                 "cosa.agents.deep_research.voice_io.notify",
                 new=AsyncMock( side_effect=RuntimeError( "no voice" ) ),
             ):
-                # except arm (216-219) with debug print — must not raise.
-                await client._rate_limit_notify( "delaying", "low" )
+                _run( client._rate_limit_notify( "delaying", "low" ) )   # must not raise
+        assert "Rate limit notification" in capsys.readouterr().out
 
-    async def test_notify_falls_back_on_error_no_debug( self ):
-        with make_client( debug=False ) as ( client, _c, _rl ):
+    def test_notify_falls_back_on_error_no_debug( self, capsys ):
+        with _make_client( debug=False ) as ( client, _rl ):
             with patch(
                 "cosa.agents.deep_research.voice_io.notify",
                 new=AsyncMock( side_effect=RuntimeError( "no voice" ) ),
             ):
-                await client._rate_limit_notify( "delaying", "low" )
+                _run( client._rate_limit_notify( "delaying", "low" ) )   # must not raise
+        assert capsys.readouterr().out == ""
 
 
-class TestGetRateLimiter( unittest.TestCase ):
+# ----------------------------------------------------------------------------
+# get_rate_limiter
+# ----------------------------------------------------------------------------
+class TestGetRateLimiter:
     def test_returns_rate_limiter_instance( self ):
-        with make_client() as ( client, _c, mock_rl ):
-            self.assertIs( client.get_rate_limiter(), client._rate_limiter )
+        with _make_client() as ( client, _rl ):
+            assert client.get_rate_limiter() is client._rate_limiter
 
 
-class TestCallLeadAgent( unittest.IsolatedAsyncioTestCase ):
-    async def test_delegates_to_call_api_with_lead_model( self ):
-        with make_client() as ( client, _c, _rl ):
-            client._call_api = AsyncMock( return_value="sentinel" )
-            result = await client.call_lead_agent(
+# ----------------------------------------------------------------------------
+# call_lead_agent / call_subagent / call_with_json_output delegation
+# ----------------------------------------------------------------------------
+class TestCallWrappers:
+    def test_call_lead_agent_delegates_lead_tools( self ):
+        with _make_client() as ( client, _rl ):
+            client._call_sdk = AsyncMock( return_value="sentinel" )
+            out = _run( client.call_lead_agent(
                 system_prompt="sys", user_message="msg",
                 use_extended_thinking=True, max_tokens=123, temperature=0.5,
-            )
-        self.assertEqual( result, "sentinel" )
-        kwargs = client._call_api.call_args.kwargs
-        self.assertEqual( kwargs[ "model" ], client.config.lead_model )
-        self.assertFalse( kwargs[ "use_web_search" ] )
-        self.assertTrue( kwargs[ "use_extended_thinking" ] )
+            ) )
+        assert out == "sentinel"
+        kwargs = client._call_sdk.await_args.kwargs
+        assert kwargs[ "model" ]                 == client.config.lead_model
+        assert kwargs[ "tools" ]                 == LEAD_TOOLS
+        assert kwargs[ "use_extended_thinking" ] is True
+        assert kwargs[ "temperature" ]           == 0.5
+
+    def test_call_subagent_web_search_uses_subagent_tools( self ):
+        with _make_client() as ( client, _rl ):
+            client._call_sdk = AsyncMock( return_value="r" )
+            _run( client.call_subagent(
+                "sys", "q", subquery_index=0, use_web_search=True,
+            ) )
+        kwargs = client._call_sdk.await_args.kwargs
+        assert kwargs[ "model" ]                 == client.config.subagent_model
+        assert kwargs[ "tools" ]                 == SUBAGENT_TOOLS
+        assert kwargs[ "subquery_index" ]        == 0
+        assert kwargs[ "use_extended_thinking" ] is False
+
+    def test_call_subagent_no_web_search_uses_lead_tools( self ):
+        with _make_client() as ( client, _rl ):
+            client._call_sdk = AsyncMock( return_value="r" )
+            _run( client.call_subagent(
+                "sys", "q", subquery_index=2, use_web_search=False,
+            ) )
+        assert client._call_sdk.await_args.kwargs[ "tools" ] == LEAD_TOOLS
+
+    def test_call_with_json_output_success( self ):
+        with _make_client() as ( client, _rl ):
+            client._call_sdk = AsyncMock( return_value=APIResponse(
+                content='Sure: {"a": 1}', model="m", input_tokens=1,
+                output_tokens=1, stop_reason="end_turn",
+            ) )
+            out = _run( client.call_with_json_output( "sys", "msg" ) )
+        assert out == { "a": 1 }
+        assert client._call_sdk.await_args.kwargs[ "tools" ] == LEAD_TOOLS
+
+    def test_call_with_json_output_default_model_is_lead( self ):
+        with _make_client() as ( client, _rl ):
+            client._call_sdk = AsyncMock( return_value=APIResponse(
+                content='{"a": 9}', model="m", input_tokens=1,
+                output_tokens=1, stop_reason="end_turn",
+            ) )
+            _run( client.call_with_json_output( "sys", "msg" ) )
+        assert client._call_sdk.await_args.kwargs[ "model" ] == client.config.lead_model
+
+    def test_call_with_json_output_explicit_model( self ):
+        with _make_client() as ( client, _rl ):
+            client._call_sdk = AsyncMock( return_value=APIResponse(
+                content='{"a": 9}', model="m", input_tokens=1,
+                output_tokens=1, stop_reason="end_turn",
+            ) )
+            _run( client.call_with_json_output( "sys", "msg", model="explicit-m" ) )
+        assert client._call_sdk.await_args.kwargs[ "model" ] == "explicit-m"
+
+    def test_call_with_json_output_raises_on_unrecoverable( self ):
+        # Covers the except ValueError → logger.error/debug → re-raise arm.
+        with _make_client() as ( client, _rl ):
+            client._call_sdk = AsyncMock( return_value=APIResponse(
+                content="no json at all", model="m", input_tokens=1,
+                output_tokens=1, stop_reason="end_turn",
+            ) )
+            with pytest.raises( ValueError, match="recoverable JSON" ):
+                _run( client.call_with_json_output( "sys", "msg" ) )
 
 
-class TestCallSubagent( unittest.IsolatedAsyncioTestCase ):
-
-    async def test_web_search_via_arm( self ):
-        with make_client() as ( client, _c, _rl ):
-            client._call_api = AsyncMock( return_value=SimpleNamespace( input_tokens=77 ) )
-            mock_arm = MagicMock()
-            mock_arm.acquire     = AsyncMock()
-            mock_arm.record_call = MagicMock()
-            with patch( "cosa.utils.api_resource_manager.get_arm", return_value=mock_arm ):
-                resp = await client.call_subagent( "sys", "q", subquery_index=0, use_web_search=True )
-            mock_arm.acquire.assert_awaited_once_with( provider="anthropic_web_search" )
-            mock_arm.record_call.assert_called_once_with(
-                provider="anthropic_web_search", tokens=77,
-            )
-            self.assertEqual( resp.input_tokens, 77 )
-
-    async def test_web_search_arm_uninit_fallback_with_delay_print( self ):
-        # get_arm raises RuntimeError → local limiter fallback; debug + delay>0 print.
-        with make_client( debug=True ) as ( client, _c, mock_rl ):
-            client._call_api = AsyncMock( return_value=SimpleNamespace( input_tokens=42 ) )
-            mock_rl.wait_if_needed = AsyncMock( return_value=2.5 )
-            with patch( "cosa.utils.api_resource_manager.get_arm", side_effect=RuntimeError ):
-                await client.call_subagent( "sys", "q", subquery_index=1, use_web_search=True )
-            mock_rl.wait_if_needed.assert_awaited_once()
-            mock_rl.record_usage.assert_called_once_with( tokens=42, call_type="web_search" )
-
-    async def test_web_search_arm_uninit_fallback_no_print( self ):
-        # debug=False + delay 0.0 covers the 306 `if self.debug and delay > 0` false arm.
-        with make_client( debug=False ) as ( client, _c, mock_rl ):
-            client._call_api = AsyncMock( return_value=SimpleNamespace( input_tokens=1 ) )
-            mock_rl.wait_if_needed = AsyncMock( return_value=0.0 )
-            with patch( "cosa.utils.api_resource_manager.get_arm", side_effect=RuntimeError ):
-                await client.call_subagent( "sys", "q", subquery_index=2, use_web_search=True )
-            mock_rl.record_usage.assert_called_once()
-
-    async def test_no_web_search_skips_rate_limiting( self ):
-        with make_client() as ( client, _c, mock_rl ):
-            client._call_api = AsyncMock( return_value=SimpleNamespace( input_tokens=5 ) )
-            with patch( "cosa.utils.api_resource_manager.get_arm" ) as mock_get_arm:
-                await client.call_subagent( "sys", "q", subquery_index=3, use_web_search=False )
-            mock_get_arm.assert_not_called()
-            mock_rl.record_usage.assert_not_called()
-
-
-class TestCallWithJsonOutput( unittest.IsolatedAsyncioTestCase ):
-
-    @contextmanager
-    def _client_returning( self, content ):
-        with make_client() as ( client, _c, _rl ):
-            client._call_api = AsyncMock(
-                return_value=SimpleNamespace( content=content )
-            )
-            yield client
-
-    async def test_plain_json( self ):
-        with self._client_returning( '{"a": 1}' ) as client:
-            result = await client.call_with_json_output( "sys", "msg" )
-        self.assertEqual( result, { "a": 1 } )
-
-    async def test_json_fenced( self ):
-        with self._client_returning( '```json\n{"a": 2}\n```' ) as client:
-            result = await client.call_with_json_output( "sys", "msg" )
-        self.assertEqual( result, { "a": 2 } )
-
-    async def test_bare_fenced( self ):
-        with self._client_returning( '```\n{"a": 3}\n```' ) as client:
-            result = await client.call_with_json_output( "sys", "msg", model="m" )
-        self.assertEqual( result, { "a": 3 } )
-
-    async def test_malformed_raises_value_error( self ):
-        with self._client_returning( 'not json {' ) as client:
-            with self.assertRaises( ValueError ):
-                await client.call_with_json_output( "sys", "msg" )
-
-
-class TestCallApi( unittest.IsolatedAsyncioTestCase ):
-
-    async def test_full_block_extraction_with_web_search_and_cost( self ):
-        # Covers system_prompt-present, temperature-added, web-search-tool, debug
-        # prints, every block-loop arm (text / tool_use / web_search w&w/o content /
-        # neither-type fall-through), and cost recording.
-        blocks = [
-            SimpleNamespace( text="Hello " ),
-            SimpleNamespace( text="World" ),
-            SimpleNamespace( type="tool_use" ),
-            SimpleNamespace( type="web_search_tool_result", content=[ { "r": 1 } ] ),
-            SimpleNamespace( type="web_search_tool_result" ),   # no .content → 478 false
-            SimpleNamespace( type="other_block" ),              # 474/476 false fall-through
-            SimpleNamespace(),                                  # no text, no type → fall-through
-        ]
+# ----------------------------------------------------------------------------
+# _call_sdk — the bounded-CC sdk_query loop
+# ----------------------------------------------------------------------------
+class TestCallSdk:
+    def test_full_extraction_with_steer_cost_and_debug( self, capsys ):
         cost_tracker = MagicMock()
-        with make_client( cost_tracker=cost_tracker, debug=True ) as ( client, _c, _rl ):
-            client._call_with_retry = AsyncMock( return_value=make_response( blocks ) )
-            resp = await client._call_api(
-                model="m", system_prompt="sys", user_message="u",
-                call_type="research", use_web_search=True, use_extended_thinking=False,
-            )
-        self.assertEqual( resp.content, "Hello World" )
-        self.assertEqual( len( resp.tool_use ), 1 )
-        self.assertEqual( resp.search_results, [ { "r": 1 } ] )
-        self.assertEqual( resp.input_tokens, 10 )
+        with _make_client( cost_tracker=cost_tracker, debug=True ) as ( client, _rl ):
+            capture  = {}
+            messages = [
+                _FakeAssistantMessage( [ _FakeTextBlock( "Hello " ), object(), _FakeTextBlock( "world" ) ] ),
+                _FakeResultMessage( usage={ "input_tokens": 100, "output_tokens": 50 },
+                                    total_cost_usd=0.21, stop_reason="end_turn" ),
+            ]
+            with _patch_sdk_types(), patch.object( ac, "sdk_query", _fake_sdk_query( messages, capture ) ):
+                out = _run( client._call_sdk(
+                    model="claude-opus-4-6", system_prompt="SYS", user_message="hi",
+                    call_type="research", tools=SUBAGENT_TOOLS, subquery_index=3, temperature=1.0,
+                ) )
+        assert out.content       == "Hello world"
+        assert out.input_tokens  == 100
+        assert out.output_tokens == 50
+        assert out.sdk_cost_usd  == pytest.approx( 0.21 )
+        assert out.stop_reason   == "end_turn"
+        assert out.model         == "claude-opus-4-6"
+        assert capture[ "prompt" ] == "hi"
+        opts = capture[ "options" ]
+        assert opts.system_prompt.startswith( "SYS" )
+        assert "creative" in opts.system_prompt.lower()
+        assert opts.tools           == SUBAGENT_TOOLS
+        assert opts.permission_mode == "plan"
+        assert opts.max_turns       == client.config.max_research_turns
         cost_tracker.record_from_response.assert_called_once()
-        sent_kwargs = client._call_with_retry.call_args[ 0 ][ 0 ]
-        self.assertIn( "tools", sent_kwargs )
-        self.assertIn( "temperature", sent_kwargs )
+        printed = capsys.readouterr().out
+        assert "sdk_query claude-opus-4-6 for research" in printed
+        assert "Response: 100 in, 50 out" in printed
 
-    async def test_extended_thinking_omits_temperature_and_no_cost_tracker( self ):
-        # system_prompt empty (438 false), extended thinking (442 false / 450 true),
-        # no web search, cost_tracker None (skip), debug thinking print.
-        with make_client( cost_tracker=None, debug=True ) as ( client, _c, _rl ):
-            client._call_with_retry = AsyncMock(
-                return_value=make_response( [ SimpleNamespace( text="x" ) ] )
-            )
-            await client._call_api(
-                model="m", system_prompt="", user_message="u",
-                use_web_search=False, use_extended_thinking=True,
-            )
-        sent_kwargs = client._call_with_retry.call_args[ 0 ][ 0 ]
-        self.assertIn( "thinking", sent_kwargs )
-        self.assertNotIn( "temperature", sent_kwargs )
-        self.assertNotIn( "system", sent_kwargs )
-        self.assertNotIn( "tools", sent_kwargs )
+    def test_mid_temp_keeps_system_prompt_default_tools( self ):
+        with _make_client() as ( client, _rl ):
+            capture = {}
+            with _patch_sdk_types(), patch.object(
+                ac, "sdk_query",
+                _fake_sdk_query( [ _FakeAssistantMessage( [ _FakeTextBlock( "x" ) ] ) ], capture ),
+            ):
+                _run( client._call_sdk( model="m", system_prompt="SYS", user_message="hi", temperature=0.7 ) )
+        opts = capture[ "options" ]
+        assert opts.system_prompt == "SYS"
+        # tools defaults to LEAD_TOOLS when not supplied.
+        assert opts.tools == LEAD_TOOLS
 
-    async def test_no_debug_path( self ):
-        # debug=False covers the 456/498 false arms.
-        with make_client( debug=False ) as ( client, _c, _rl ):
-            client._call_with_retry = AsyncMock(
-                return_value=make_response( [ SimpleNamespace( text="y" ) ] )
-            )
-            resp = await client._call_api( model="m", system_prompt="s", user_message="u" )
-        self.assertEqual( resp.content, "y" )
+    def test_empty_system_mid_temp_becomes_none( self ):
+        with _make_client() as ( client, _rl ):
+            capture = {}
+            with _patch_sdk_types(), patch.object(
+                ac, "sdk_query",
+                _fake_sdk_query( [ _FakeAssistantMessage( [ _FakeTextBlock( "x" ) ] ) ], capture ),
+            ):
+                _run( client._call_sdk( model="m", system_prompt="", user_message="hi", temperature=0.7 ) )
+        assert capture[ "options" ].system_prompt is None
 
-    async def test_budget_exceeded_propagates( self ):
+    def test_empty_system_with_steer_becomes_steer( self ):
+        with _make_client() as ( client, _rl ):
+            capture = {}
+            with _patch_sdk_types(), patch.object(
+                ac, "sdk_query",
+                _fake_sdk_query( [ _FakeAssistantMessage( [ _FakeTextBlock( "x" ) ] ) ], capture ),
+            ):
+                _run( client._call_sdk( model="m", system_prompt="", user_message="hi", temperature=1.0 ) )
+        assert "creative" in capture[ "options" ].system_prompt.lower()
+
+    def test_extended_thinking_adds_max_thinking_tokens( self ):
+        with _make_client() as ( client, _rl ):
+            capture = {}
+            with _patch_sdk_types(), patch.object(
+                ac, "sdk_query",
+                _fake_sdk_query( [ _FakeAssistantMessage( [ _FakeTextBlock( "x" ) ] ) ], capture ),
+            ):
+                _run( client._call_sdk(
+                    model="m", system_prompt="s", user_message="hi",
+                    use_extended_thinking=True, temperature=0.7,
+                ) )
+        assert capture[ "options" ].max_thinking_tokens == client.config.extended_thinking_budget
+
+    def test_bare_textblock_and_resultmessage_defaults_and_unknown_msg( self, capsys ):
+        # bare TextBlock appended; unknown object skipped; ResultMessage with all
+        # None falls back to 0 / 0.0 / "end_turn". cost_tracker None → record skipped.
+        with _make_client( cost_tracker=None, debug=False ) as ( client, _rl ):
+            capture  = {}
+            messages = [
+                _FakeTextBlock( "bare-text" ),
+                object(),
+                _FakeResultMessage(),
+            ]
+            with _patch_sdk_types(), patch.object( ac, "sdk_query", _fake_sdk_query( messages, capture ) ):
+                out = _run( client._call_sdk( model="m", system_prompt="SYS", user_message="hi", temperature=0.7 ) )
+        assert out.content       == "bare-text"
+        assert out.input_tokens  == 0
+        assert out.output_tokens == 0
+        assert out.sdk_cost_usd  == 0.0
+        assert out.stop_reason   == "end_turn"
+        assert capsys.readouterr().out == ""
+
+    def test_budget_exceeded_propagates( self ):
         cost_tracker = MagicMock()
         cost_tracker.record_from_response.side_effect = BudgetExceededError( "over" )
-        with make_client( cost_tracker=cost_tracker ) as ( client, _c, _rl ):
-            client._call_with_retry = AsyncMock(
-                return_value=make_response( [ SimpleNamespace( text="z" ) ] )
-            )
-            with self.assertRaises( BudgetExceededError ):
-                await client._call_api( model="m", system_prompt="s", user_message="u" )
+        with _make_client( cost_tracker=cost_tracker ) as ( client, _rl ):
+            messages = [ _FakeAssistantMessage( [ _FakeTextBlock( "z" ) ] ) ]
+            with _patch_sdk_types(), patch.object( ac, "sdk_query", _fake_sdk_query( messages, {} ) ):
+                with pytest.raises( BudgetExceededError ):
+                    _run( client._call_sdk( model="m", system_prompt="s", user_message="hi" ) )
 
 
-class TestCallWithRetry( unittest.IsolatedAsyncioTestCase ):
-
-    @contextmanager
-    def _retry_env( self, create_side_effect ):
-        fake_anthropic = SimpleNamespace(
-            RateLimitError=FakeRateLimitError, APIStatusError=FakeAPIStatusError,
-        )
-        with make_client() as ( client, mock_client, _rl ):
-            mock_client.messages.create = AsyncMock( side_effect=create_side_effect )
-            with patch.object( ac, "anthropic", fake_anthropic ), \
-                 patch.object( ac.asyncio, "sleep", new=AsyncMock() ) as mock_sleep:
-                yield client, mock_client, mock_sleep
-
-    async def test_success_first_attempt( self ):
-        good = make_response( [ SimpleNamespace( text="ok" ) ] )
-        with self._retry_env( [ good ] ) as ( client, _c, mock_sleep ):
-            result = await client._call_with_retry( { "model": "m" } )
-        self.assertIs( result, good )
-        mock_sleep.assert_not_awaited()
-
-    async def test_web_search_config_branch( self ):
-        good = make_response( [ SimpleNamespace( text="ok" ) ] )
-        with self._retry_env( [ good ] ) as ( client, _c, _s ):
-            result = await client._call_with_retry( { "model": "m" }, use_web_search=True )
-        self.assertIs( result, good )
-
-    async def test_rate_limit_exhausts_and_raises( self ):
-        err = FakeRateLimitError( "rl" )
-        with self._retry_env( err ) as ( client, _c, mock_sleep ):
-            with self.assertRaises( FakeRateLimitError ):
-                await client._call_with_retry( { "model": "m" }, max_retries=3 )
-        # 3 sleeps (attempts 0,1,2); attempt 3 is the `attempt < max_retries` false arm.
-        self.assertEqual( mock_sleep.await_count, 3 )
-
-    async def test_server_error_5xx_exhausts_and_raises( self ):
-        err = FakeAPIStatusError( 503 )
-        with self._retry_env( err ) as ( client, _c, mock_sleep ):
-            with self.assertRaises( FakeAPIStatusError ):
-                await client._call_with_retry( { "model": "m" }, max_retries=2 )
-        self.assertEqual( mock_sleep.await_count, 2 )
-
-    async def test_client_error_4xx_raises_immediately( self ):
-        err = FakeAPIStatusError( 404 )
-        with self._retry_env( err ) as ( client, _c, mock_sleep ):
-            with self.assertRaises( FakeAPIStatusError ):
-                await client._call_with_retry( { "model": "m" } )
-        mock_sleep.assert_not_awaited()
-
-    async def test_generic_exception_exhausts_and_raises( self ):
-        err = ValueError( "boom" )
-        with self._retry_env( err ) as ( client, _c, mock_sleep ):
-            with self.assertRaises( ValueError ):
-                await client._call_with_retry( { "model": "m" }, max_retries=1 )
-        self.assertEqual( mock_sleep.await_count, 1 )
-
-
-class TestClose( unittest.IsolatedAsyncioTestCase ):
-
-    async def test_close_awaits_client_close( self ):
-        with make_client() as ( client, mock_client, _rl ):
-            await client.close()
-            mock_client.close.assert_awaited_once()
-
-    async def test_close_noop_when_no_close_method( self ):
-        with make_client() as ( client, _c, _rl ):
-            client._client = SimpleNamespace()   # no .close attribute
-            await client.close()                  # hasattr false → no-op, must not raise
-
-
-class TestAPIResponseDataclass( unittest.TestCase ):
-    def test_defaults( self ):
-        r = ac.APIResponse(
-            content="c", model="m", input_tokens=1, output_tokens=2, stop_reason="end_turn",
-        )
-        self.assertEqual( r.tool_use, [ ] )
-        self.assertEqual( r.search_results, [ ] )
-        self.assertIsNone( r.raw_response )
+# ----------------------------------------------------------------------------
+# close
+# ----------------------------------------------------------------------------
+class TestClose:
+    def test_close_is_noop( self ):
+        with _make_client() as ( client, _rl ):
+            assert _run( client.close() ) is None
 
 
 if __name__ == "__main__":
-    unittest.main()
+    import sys
+    sys.exit( pytest.main( [ __file__, "-v" ] ) )

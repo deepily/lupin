@@ -157,27 +157,18 @@ class TestParseArgs( unittest.TestCase ):
 # check_prerequisites
 # ===========================================================================
 class TestCheckPrerequisites( unittest.TestCase ):
+    """Bounded-CC (Phase 3): the only prerequisite is an importable Claude Agent
+    SDK. The pre-migration firewalled-key gate is retired (OAuth via sdk_query)."""
 
     def test_sdk_unavailable( self ):
         with patch.object( cli, "ANTHROPIC_AVAILABLE", False ):
             self.assertFalse( cli.check_prerequisites() )
 
-    def test_env_key_present( self ):
+    def test_sdk_available_needs_no_key( self ):
+        # No firewalled key present anywhere → still True on the bounded path.
         with patch.object( cli, "ANTHROPIC_AVAILABLE", True ), \
-             patch.dict( cli.os.environ, { cli.ENV_VAR_NAME: "envkey" }, clear=True ):
+             patch.dict( cli.os.environ, { }, clear=True ):
             self.assertTrue( cli.check_prerequisites() )
-
-    def test_local_file_key( self ):
-        with patch.object( cli, "ANTHROPIC_AVAILABLE", True ), \
-             patch.dict( cli.os.environ, { }, clear=True ), \
-             patch( "cosa.utils.util.get_api_key", return_value="filekey" ):
-            self.assertTrue( cli.check_prerequisites() )
-
-    def test_no_key_returns_false( self ):
-        with patch.object( cli, "ANTHROPIC_AVAILABLE", True ), \
-             patch.dict( cli.os.environ, { }, clear=True ), \
-             patch( "cosa.utils.util.get_api_key", side_effect=Exception( "no file" ) ):
-            self.assertFalse( cli.check_prerequisites() )
 
 
 # ===========================================================================

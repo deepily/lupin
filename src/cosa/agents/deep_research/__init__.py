@@ -2,7 +2,22 @@
 COSA Deep Research Agent Package.
 
 A voice-driven deep research agent integrating COSA voice I/O,
-async orchestration, and Claude API for multi-agent research.
+async orchestration, and Claude for multi-agent research.
+
+BOUNDED-CC MIGRATION (Phase 3 — 2026-06-18)
+===========================================
+The LLM-driven research loop was migrated from the direct firewalled Anthropic
+SDK (`AsyncAnthropic.messages.create` + ApiResourceManager web-search gating) to
+the in-process Claude Agent SDK (`claude_agent_sdk.query`), matching the shipped
+BFE/TFE + Podcast + Presentation bounded-CC pattern (ratified D-DR1 Option X).
+Every research call now runs on the Max-subscription OAuth path — a COST-SHIFT,
+not "free": SDK `total_cost_usd` telemetry is still reported (D8) but is covered
+by the fixed Max plan; the firewalled Anthropic console balance does not move.
+Native `web_search_20250305` → CC WebSearch/WebFetch (lead agent tools=[],
+research subagents tools=[WebSearch, WebFetch]). D6=STRICT parsing — fail-loud on
+unrecoverable JSON, never silent-default. See:
+  - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md (D1–D9 + §2 DR scope)
+  - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
 
 Phase 1 (Complete): Foundation
 - config.py: ResearchConfig dataclass
@@ -11,7 +26,7 @@ Phase 1 (Complete): Foundation
 - cosa_interface.py: Async wrappers for cosa.cli notification functions
 
 Phase 2 (Complete): API Client and Prompts
-- api_client.py: Direct Anthropic API wrapper with web search
+- api_client.py: Bounded-CC in-process sdk_query client with CC WebSearch/WebFetch
 - cost_tracker.py: Per-request cost tracking and budget limits
 - prompts/: Clarification, planning, subagent, synthesis prompts
 - cli.py: Command-line interface for testing
@@ -23,23 +38,16 @@ Phase 3 (Future): LangGraph Integration
 Phase 4 (Future): Queue Integration
 - Async queue consumer evolution for non-blocking job execution
 
-API Key Configuration (Firewalled Pattern):
-    IMPORTANT: NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI.
-
-    For development (local key file):
-        # Create/use: src/conf/keys/anthropic-api-key-firewalled
-        # The API client will automatically find and use this file
-
-    For testing/production (environment variable):
-        export ANTHROPIC_API_KEY_FIREWALLED=your-api-key
-        python -m cosa.agents.deep_research.cli --query "..."
+HISTORICAL — pre-migration firewalled-key pattern (NO LONGER A LIVE CODE PATH):
+    Before the Phase-3 bounded-CC migration the client read a firewalled key
+    (env ANTHROPIC_API_KEY_FIREWALLED or local file). The bounded path
+    authenticates via Claude Code / Max-subscription OAuth inside sdk_query and
+    reads NO key. ENV_VAR_NAME / KEY_FILE_NAME are retained only for export
+    compatibility — they drive no behavior. (And: NEVER use ANTHROPIC_API_KEY —
+    that name is reserved for the Claude Code CLI's own OAuth resolution.)
 
 Usage:
-    # CLI Usage (development - uses local key file)
-    python -m cosa.agents.deep_research.cli --query "Your research question"
-
-    # CLI Usage (testing/production - uses env var)
-    export ANTHROPIC_API_KEY_FIREWALLED=your-key
+    # CLI Usage (bounded-CC — OAuth via the Claude Code session, no API key)
     python -m cosa.agents.deep_research.cli --query "Your research question"
 
     # Programmatic Usage
@@ -48,8 +56,6 @@ Usage:
         ResearchConfig,
         ResearchAPIClient,
         CostTracker,
-        ENV_VAR_NAME,      # "ANTHROPIC_API_KEY_FIREWALLED"
-        KEY_FILE_NAME,     # "anthropic-api-key-firewalled"
     )
 
     config = ResearchConfig( max_subagents_complex=5 )
@@ -207,4 +213,4 @@ __all__ = [
     "SAMPLE_SUBQUERIES_8",
 ]
 
-__version__ = "0.2.2"  # Updated for Progressive Narrowing Harness
+__version__ = "0.3.0"  # Phase 3 bounded-CC migration (AsyncAnthropic → in-process sdk_query)

@@ -1,107 +1,234 @@
 #!/usr/bin/env python3
 """
-Direct Anthropic API Client for COSA Deep Research Agent.
+Bounded-CC research client for the COSA Deep Research Agent.
 
-Provides async wrapper for Claude API with:
-- Model selection (Opus for lead, Sonnet for subagents)
-- Web search tool integration
-- Extended thinking support
-- Structured JSON output
-- Per-request cost tracking
+BOUNDED-CC MIGRATION (Phase 3 — 2026-06-18)
+===========================================
+This client was migrated from the direct firewalled Anthropic SDK
+(`AsyncAnthropic.messages.create`) to the **in-process Claude Agent SDK**
+(`claude_agent_sdk.query`), matching the shipped BFE/TFE + Podcast bounded-CC
+pattern (ratified D-DR1 Option X). Every LLM-driven research call now runs on
+the Max-subscription OAuth path.
 
-Design Principles:
-- Async-first for parallel subagent execution
-- Integrated cost tracking via CostTracker
-- Configurable model selection per call type
-- Graceful error handling with retries
+This is a COST-SHIFT, NOT "free": the SDK still reports `total_cost_usd`
+telemetry per call, but that spend is covered by the fixed Max plan — the
+firewalled Anthropic console balance does not move (D8). See:
+  - Scope:        src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md (§2)
+  - Ratification: src/rnd/v0.1.8/2026.06.18-bounded-cc-d1d9-ratification-package.md (D1–D9)
+  - Cost model:   src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md
+
+Web search migration (the DR-specific complexity vs Podcast)
+------------------------------------------------------------
+The native Anthropic `web_search_20250305` server tool is replaced by Claude
+Code's built-in **WebSearch + WebFetch** tools (bounded-CC tool surface). The
+downstream contract is preserved BY CONSTRUCTION: the orchestrator and parsers
+consume ONLY `APIResponse.content` (the model's text) — they never read the
+API's `web_search_tool_result` blocks. The subagent is prompted to write its
+sources/citations INTO its text findings (parsed by `parse_subagent_response`),
+so swapping the search mechanism leaves the consumed contract identical.
+
+ApiResourceManager retirement on the bounded path
+-------------------------------------------------
+The legacy `get_arm().acquire/record_call( "anthropic_web_search" )` rate-limit
+dance governed Anthropic's 30,000-tokens/minute web-search cap. On the bounded
+path web search rides CC's WebSearch (Max-plan rolling-window governs instead),
+so that cap no longer applies and the ARM acquire/record_call is dropped from
+the call path. The ARM singleton itself is untouched (no other caller of the
+`anthropic_web_search` provider exists; pool-status reporting is unaffected).
+
+NOTE: `ClaudeAgentOptions` exposes no per-call `temperature`, so the historical
+per-call sampling temperature is folded into the system prompt as a creativity
+steer (see `_temperature_to_steer`). Extended thinking maps 1:1 onto the SDK's
+`max_thinking_tokens` option.
 """
 
-import os
 import json
-import asyncio
 import logging
-from typing import Optional, Any, Literal
+from typing import Optional, Any
 from dataclasses import dataclass, field
-
-try:
-    import anthropic
-    from anthropic import AsyncAnthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
-    AsyncAnthropic = None
 
 from .config import ResearchConfig
 from .cost_tracker import CostTracker, BudgetExceededError
 from .rate_limiter import WebSearchRateLimiter
 
+# Claude Agent SDK — graceful fallback (mirrors the BFE/TFE/Podcast import guard)
+try:
+    from claude_agent_sdk import (
+        ClaudeAgentOptions,
+        AssistantMessage,
+        TextBlock,
+        ResultMessage,
+        query as sdk_query,
+    )
+    SDK_AVAILABLE = True
+except ImportError:  # pragma: no cover - claude-agent-sdk is installed in the canonical test/prod venv; this optional-dependency fallback is unreachable here
+    SDK_AVAILABLE = False
+
+# Historical export-compat alias. Before the bounded-CC migration this flag
+# gated the `anthropic` SDK import; the firewalled Anthropic path is retired,
+# so it now mirrors SDK availability for any legacy importer.
+ANTHROPIC_AVAILABLE = SDK_AVAILABLE
+
 logger = logging.getLogger( __name__ )
 
 
 # =============================================================================
-# API Key Configuration - FIREWALL PATTERN
-# =============================================================================
-# NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI
-# Using the same env var could cause billing confusion or conflicts
+# Historical firewalled-key constants (retained for export compatibility).
 #
-# Priority order for key retrieval:
-#   1. Explicit api_key parameter (highest priority)
-#   2. Environment variable ANTHROPIC_API_KEY_FIREWALLED (testing/production)
-#   3. Local file via cu.get_api_key() (development)
+# The bounded-CC client authenticates via Max-plan OAuth inside `sdk_query`
+# and reads NO API key. These names are kept only because `__init__.py` still
+# re-exports them; they no longer drive any code path.
 # =============================================================================
-
-# Environment variable name for testing/production deployments
-ENV_VAR_NAME = "ANTHROPIC_API_KEY_FIREWALLED"
-
-# Local file name for development (in src/conf/keys/)
-KEY_FILE_NAME = "anthropic-api-key-firewalled"
+ENV_VAR_NAME  = "ANTHROPIC_API_KEY_FIREWALLED"   # historical — unused on the bounded path
+KEY_FILE_NAME = "anthropic-api-key-firewalled"   # historical — unused on the bounded path
 
 
-# Web search tool definition for Anthropic API
-WEB_SEARCH_TOOL = {
-    "type" : "web_search_20250305",
-    "name" : "web_search",
-    # Configuration options can be added here
-}
+# =============================================================================
+# Bounded-CC tool surfaces + permission mode
+# =============================================================================
+# Lead agent does planning / synthesis only — pure text reasoning, no search.
+LEAD_TOOLS = []
+
+# Research subagents need live web access. The native Anthropic web_search tool
+# maps onto CC's built-in WebSearch (issue queries) + WebFetch (read a page).
+SUBAGENT_TOOLS = [ "WebSearch", "WebFetch" ]
+
+# Research is strictly read-only (no file writes). "plan" keeps the session
+# read-only while still permitting read-only built-ins like WebSearch/WebFetch
+# (verified by the BFE Lead agent, which runs Read/Glob/Grep/Bash under "plan").
+RESEARCH_PERMISSION_MODE = "plan"
+
+
+def _temperature_to_steer( temperature: float ) -> str:
+    """
+    Translate a legacy sampling temperature into a system-prompt steer.
+
+    `ClaudeAgentOptions` exposes no per-call temperature, so the historical
+    per-call value is folded into the system prompt as a qualitative creativity
+    instruction.
+
+    Requires:
+        - temperature is a float
+
+    Ensures:
+        - returns a non-empty steer string for clearly-creative (>= 0.9) or
+          clearly-precise (<= 0.5) temperatures
+        - returns "" for mid-range temperatures (no steer needed)
+
+    Args:
+        temperature: The legacy sampling temperature (typically 0.0–1.0)
+
+    Returns:
+        str: A creativity-steer sentence, or "" when no steer is warranted
+    """
+    if temperature >= 0.9:
+        return "Be expansive and creative in your reasoning; explore multiple angles."
+    if temperature <= 0.5:
+        return "Be precise, literal, and deterministic; avoid speculation."
+    return ""
+
+
+def extract_json_object( text: str ) -> dict:
+    """
+    Robustly recover a single JSON object from a (possibly chatty) completion.
+
+    D6-STRICT (Deep Research): bounded-CC `sdk_query` may wrap JSON in markdown
+    fences or surround it with prose. This recovers the object robustly but
+    FAILS LOUD — it never silently returns a default. A missing/blank/parse-failed
+    object is a real failure for downstream structured consumers.
+
+    Recovery order:
+        1. Strip ```json / ``` fences, then `json.loads` the remainder.
+        2. Fall back to the first balanced { ... } span and `json.loads` it.
+
+    Requires:
+        - text is a string
+
+    Ensures:
+        - returns a dict parsed from the first recoverable JSON object
+
+    Raises:
+        - ValueError if text is blank or no valid JSON object can be recovered
+    """
+    if text is None or not text.strip():
+        raise ValueError( "Cannot extract JSON from empty/blank response" )
+
+    content = text.strip()
+
+    # Strip a leading ```json / ``` fence and any trailing ```
+    if content.startswith( "```json" ):
+        content = content[ 7: ]
+    elif content.startswith( "```" ):
+        content = content[ 3: ]
+    if content.endswith( "```" ):
+        content = content[ :-3 ]
+    content = content.strip()
+
+    # Attempt 1: the (de-fenced) body is itself JSON
+    try:
+        return json.loads( content )
+    except json.JSONDecodeError:
+        pass
+
+    # Attempt 2: scan for the first balanced { ... } span and parse that
+    start = content.find( "{" )
+    if start != -1:
+        depth = 0
+        for idx in range( start, len( content ) ):
+            char = content[ idx ]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = content[ start : idx + 1 ]
+                    try:
+                        return json.loads( candidate )
+                    except json.JSONDecodeError:
+                        break
+
+    raise ValueError( "Response did not contain a recoverable JSON object" )
 
 
 @dataclass
 class APIResponse:
     """
-    Structured response from an API call.
+    Structured response from a bounded-CC research call.
 
-    Contains the response content, usage data, and any tool results.
+    Contains the response text, token usage, stop reason, and the SDK-reported
+    `sdk_cost_usd` (D8 telemetry — covered by the Max plan, not billed per-token).
+
+    `tool_use` / `search_results` are retained for shape compatibility with the
+    pre-migration dataclass; they are NOT consumed downstream (the orchestrator
+    reads only `content`) and stay empty on the bounded path.
     """
     content        : str
     model          : str
     input_tokens   : int
     output_tokens  : int
     stop_reason    : str
-    tool_use       : list = field( default_factory=list )
-    search_results : list = field( default_factory=list )
-    raw_response   : Any = None
+    sdk_cost_usd   : float = 0.0
+    tool_use       : list  = field( default_factory=list )
+    search_results : list  = field( default_factory=list )
+    raw_response   : Any   = None
 
 
 class ResearchAPIClient:
     """
-    Async Anthropic API client for deep research.
+    In-process bounded-CC research client (Claude Agent SDK / Max-plan OAuth).
 
     Requires:
-        - anthropic SDK is installed
-        - One of the following API key sources:
-          1. api_key parameter (explicit)
-          2. ANTHROPIC_API_KEY_FIREWALLED environment variable (testing/production)
-          3. src/conf/keys/anthropic-api-key-firewalled file (development)
-
-    Note:
-        NEVER uses ANTHROPIC_API_KEY - that is reserved for Claude Code CLI.
-        Uses the firewalled pattern to prevent billing confusion.
+        - claude_agent_sdk is installed (SDK_AVAILABLE is True)
 
     Ensures:
         - Async execution for parallel subagent support
-        - Integrated cost tracking
-        - Web search tool access
+        - Integrated token-estimate cost tracking (CostTracker) + SDK cost telemetry
+        - Web access for subagents via CC WebSearch/WebFetch
         - Model-appropriate routing (Opus for lead, Sonnet for subagents)
+
+    No API key is required: `sdk_query` authenticates via the Claude Code /
+    Max-subscription OAuth session, NOT a firewalled API key. This is the
+    zero-per-token bounded path.
     """
 
     def __init__(
@@ -113,19 +240,30 @@ class ResearchAPIClient:
         verbose: bool = False
     ):
         """
-        Initialize the API client.
+        Initialize the bounded-CC research client.
+
+        Requires:
+            - claude_agent_sdk is installed
+
+        Ensures:
+            - Builds a rate limiter (retained for CLI time-estimate UX only;
+              no longer in the LLM call path under bounded CC)
 
         Args:
             config: Research configuration (uses defaults if None)
             cost_tracker: Cost tracker for usage recording (optional)
-            api_key: Anthropic API key (uses env var if None)
+            api_key: Retained for signature compatibility — IGNORED on the
+                bounded path (OAuth via sdk_query; no key is read)
             debug: Enable debug output
             verbose: Enable verbose output
+
+        Raises:
+            ImportError: if claude_agent_sdk is not installed
         """
-        if not ANTHROPIC_AVAILABLE:
+        if not SDK_AVAILABLE:
             raise ImportError(
-                "anthropic SDK not installed. "
-                "Install with: pip install anthropic"
+                "claude_agent_sdk not installed. "
+                "Install with: pip install claude-agent-sdk"
             )
 
         self.config       = config or ResearchConfig()
@@ -133,39 +271,9 @@ class ResearchAPIClient:
         self.debug        = debug
         self.verbose      = verbose
 
-        # Get API key using firewalled pattern
-        # Priority: 1) Explicit parameter, 2) Env var (prod), 3) Local file (dev)
-        self.api_key    = api_key
-        self.key_source = "parameter"
-
-        if not self.api_key:
-            # Try environment variable (testing/production)
-            self.api_key = os.environ.get( ENV_VAR_NAME )
-            self.key_source = "environment"
-
-        if not self.api_key:
-            # Fall back to local file (development)
-            try:
-                import cosa.utils.util as cu
-                self.api_key = cu.get_api_key( KEY_FILE_NAME )
-                self.key_source = "local file"
-            except Exception as e:
-                if self.debug:
-                    print( f"[ResearchAPIClient] Could not load local key file: {e}" )
-
-        if not self.api_key:
-            raise ValueError(
-                f"Anthropic API key not found. Either:\n"
-                f"  1. Pass api_key parameter\n"
-                f"  2. Set {ENV_VAR_NAME} environment variable (testing/production)\n"
-                f"  3. Create src/conf/keys/{KEY_FILE_NAME} file (development)"
-            )
-
-        # Initialize async client
-        self._client = AsyncAnthropic( api_key=self.api_key )
-
-        # Initialize rate limiter for web search calls
-        # Get configuration from ConfigurationManager
+        # Rate limiter retained for CLI progress/time-estimate UX (estimate_total_time).
+        # NOT in the LLM call path under bounded CC — web search rides CC WebSearch,
+        # governed by the Max-plan rolling window, not Anthropic's 30k-tokens/min cap.
         try:
             from cosa.config.configuration_manager import ConfigurationManager
             config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
@@ -196,13 +304,12 @@ class ResearchAPIClient:
         )
 
         if self.debug:
-            print( f"[ResearchAPIClient] API key source: {self.key_source}" )
-            print( f"[ResearchAPIClient] Initialized with models: lead={self.config.lead_model}, subagent={self.config.subagent_model}" )
-            print( f"[ResearchAPIClient] Rate limiter: {tokens_per_minute:,} tokens/min, {window_seconds}s window" )
+            print( f"[ResearchAPIClient] Bounded-CC mode (in-process sdk_query, Max-plan OAuth)" )
+            print( f"[ResearchAPIClient] Models: lead={self.config.lead_model}, subagent={self.config.subagent_model}" )
 
     async def _rate_limit_notify( self, message: str, priority: str ) -> None:
         """
-        Callback for rate limiter to notify user about delays.
+        Callback for the rate limiter to notify the user about delays.
 
         Uses voice_io if available, otherwise prints to console.
 
@@ -213,7 +320,7 @@ class ResearchAPIClient:
         try:
             from . import voice_io
             await voice_io.notify( message, priority=priority )
-        except Exception as e:
+        except Exception:
             # Fall back to console if voice_io unavailable
             if self.debug:
                 print( f"[ResearchAPIClient] Rate limit notification: {message}" )
@@ -234,28 +341,28 @@ class ResearchAPIClient:
         """
         Call the lead agent (uses Opus model).
 
-        Lead agent handles planning, synthesis, and coordination tasks.
+        Lead agent handles planning, synthesis, and coordination tasks — pure
+        text reasoning, no web search (tools=[]).
 
         Args:
             system_prompt: System prompt for the agent
             user_message: User message/query
             call_type: Type of call for cost tracking
-            use_extended_thinking: Enable extended thinking
-            max_tokens: Maximum tokens in response
-            temperature: Sampling temperature
+            use_extended_thinking: Enable extended thinking (→ max_thinking_tokens)
+            max_tokens: Retained for signature parity (unused on the bounded path)
+            temperature: Folded into the system-prompt creativity steer
 
         Returns:
             APIResponse: Structured response with content and usage
         """
-        return await self._call_api(
-            model             = self.config.lead_model,
-            system_prompt     = system_prompt,
-            user_message      = user_message,
-            call_type         = call_type,
-            use_web_search    = False,  # Lead agent typically doesn't search
+        return await self._call_sdk(
+            model                 = self.config.lead_model,
+            system_prompt         = system_prompt,
+            user_message          = user_message,
+            call_type             = call_type,
+            tools                 = LEAD_TOOLS,
             use_extended_thinking = use_extended_thinking,
-            max_tokens        = max_tokens,
-            temperature       = temperature,
+            temperature           = temperature,
         )
 
     async def call_subagent(
@@ -271,71 +378,35 @@ class ResearchAPIClient:
         """
         Call a research subagent (uses Sonnet model).
 
-        Subagents handle focused research tasks with web search.
-        Includes rate limiting for web search calls to stay within
-        Anthropic's 30,000 tokens/minute limit.
+        Subagents handle focused research with live web access via CC's
+        WebSearch + WebFetch tools. (On the bounded path there is no Anthropic
+        30k-tokens/min web-search cap — the Max-plan rolling window governs — so
+        the legacy ApiResourceManager acquire/record_call dance is dropped.)
 
         Args:
             system_prompt: System prompt for the subagent
             user_message: The subquery to research
             subquery_index: Index of this subquery (for tracking)
             call_type: Type of call for cost tracking
-            use_web_search: Enable web search tool
-            max_tokens: Maximum tokens in response
-            temperature: Sampling temperature
+            use_web_search: Enable web search tools (WebSearch/WebFetch)
+            max_tokens: Retained for signature parity (unused on the bounded path)
+            temperature: Folded into the system-prompt creativity steer
 
         Returns:
-            APIResponse: Structured response with content and search results
+            APIResponse: Structured response with content
         """
-        # Rate limit check BEFORE making web search calls.
-        # Phase 3 (v0.1.7 CJ Flow async multi-lane): route through ApiResourceManager
-        # singleton rather than the api_client's own _rate_limiter instance. ARM
-        # wraps WebSearchRateLimiter internally — runtime behaviour is identical,
-        # but provider state is observable via /api/queue/pool-status and any
-        # future per-provider contention logic applies uniformly across callers.
-        # Falls back to the local _rate_limiter if ARM is not initialised (e.g.,
-        # unit tests or pre-startup contexts) — matches legacy behaviour exactly.
-        if use_web_search:
-            try:
-                from cosa.utils.api_resource_manager import get_arm
-                await get_arm().acquire( provider="anthropic_web_search" )
-            except RuntimeError:
-                # ARM not initialised (unit tests / pre-startup) — fall back to
-                # local limiter for unchanged behaviour.
-                delay = await self._rate_limiter.wait_if_needed()
-                if self.debug and delay > 0:
-                    print( f"[ResearchAPIClient] (ARM uninit, local) Rate limiter applied {delay:.1f}s delay before subquery {subquery_index}" )
+        tools = SUBAGENT_TOOLS if use_web_search else LEAD_TOOLS
 
-        # Make the API call
-        response = await self._call_api(
-            model             = self.config.subagent_model,
-            system_prompt     = system_prompt,
-            user_message      = user_message,
-            call_type         = call_type,
-            subquery_index    = subquery_index,
-            use_web_search    = use_web_search,
+        return await self._call_sdk(
+            model                 = self.config.subagent_model,
+            system_prompt         = system_prompt,
+            user_message          = user_message,
+            call_type             = call_type,
+            tools                 = tools,
+            subquery_index        = subquery_index,
             use_extended_thinking = False,  # Subagents don't use extended thinking
-            max_tokens        = max_tokens,
-            temperature       = temperature,
+            temperature           = temperature,
         )
-
-        # Record actual token usage for rate limiter (input tokens include search results).
-        # Phase 3: route through ApiResourceManager to match the acquire() path.
-        # Fall back to local limiter if ARM is not initialised.
-        if use_web_search:
-            try:
-                from cosa.utils.api_resource_manager import get_arm
-                get_arm().record_call(
-                    provider = "anthropic_web_search",
-                    tokens   = response.input_tokens,
-                )
-            except RuntimeError:
-                self._rate_limiter.record_usage(
-                    tokens    = response.input_tokens,
-                    call_type = "web_search"
-                )
-
-        return response
 
     async def call_with_json_output(
         self,
@@ -346,148 +417,128 @@ class ResearchAPIClient:
         max_tokens: int = 4096
     ) -> dict:
         """
-        Call API expecting JSON output.
+        Call the model expecting a JSON object (D6-STRICT, fail-loud).
 
         Ensures:
-            - Parses response as JSON
-            - Raises ValueError if response is not valid JSON
+            - Robustly recovers a JSON object from chatty/fenced output
+            - Raises ValueError on blank output or unrecoverable JSON
+              (never silently returns a default)
 
         Args:
             system_prompt: System prompt (should request JSON output)
             user_message: User message
             model: Model to use (defaults to lead model)
             call_type: Type of call for cost tracking
-            max_tokens: Maximum tokens
+            max_tokens: Retained for signature parity (unused on the bounded path)
 
         Returns:
             dict: Parsed JSON response
+
+        Raises:
+            ValueError: if the response is blank or not valid JSON
         """
-        response = await self._call_api(
+        response = await self._call_sdk(
             model         = model or self.config.lead_model,
             system_prompt = system_prompt,
             user_message  = user_message,
             call_type     = call_type,
-            max_tokens    = max_tokens,
+            tools         = LEAD_TOOLS,
         )
 
-        # Try to parse JSON from response
-        content = response.content.strip()
-
-        # Handle markdown code blocks
-        if content.startswith( "```json" ):
-            content = content[ 7: ]
-        if content.startswith( "```" ):
-            content = content[ 3: ]
-        if content.endswith( "```" ):
-            content = content[ :-3 ]
-
         try:
-            return json.loads( content.strip() )
-        except json.JSONDecodeError as e:
+            return extract_json_object( response.content )
+        except ValueError as e:
             logger.error( f"Failed to parse JSON response: {e}" )
-            logger.debug( f"Raw content: {response.content}" )
-            raise ValueError( f"Response was not valid JSON: {e}" )
+            logger.debug( f"Raw content: {response.content!r}" )
+            raise
 
-    async def _call_api(
+    async def _call_sdk(
         self,
         model: str,
         system_prompt: str,
         user_message: str,
         call_type: str = "unknown",
+        tools: Optional[ list ] = None,
         subquery_index: Optional[ int ] = None,
-        use_web_search: bool = False,
         use_extended_thinking: bool = False,
-        max_tokens: int = 4096,
         temperature: float = 1.0
     ) -> APIResponse:
         """
-        Internal method to call the Anthropic API.
+        Internal bounded-CC call via in-process `sdk_query`.
 
-        Handles:
-        - Tool configuration (web search)
-        - Extended thinking setup
-        - Cost tracking
-        - Error handling with retries
+        Requires:
+            - SDK_AVAILABLE is True
+
+        Ensures:
+            - Builds ClaudeAgentOptions (model, system_prompt, tools, read-only
+              permission, max_turns, optional extended-thinking budget)
+            - Folds temperature into the system-prompt creativity steer
+            - Concatenates all assistant TextBlocks into the response content
+            - Records token usage (CostTracker estimate) + SDK cost telemetry (D8)
 
         Args:
             model: Model to use
             system_prompt: System prompt
             user_message: User message
             call_type: Type of call for cost tracking
+            tools: Bounded-CC tool allow-list (LEAD_TOOLS or SUBAGENT_TOOLS)
             subquery_index: Subquery index for parallel tracking
-            use_web_search: Enable web search tool
-            use_extended_thinking: Enable extended thinking
-            max_tokens: Maximum tokens
-            temperature: Sampling temperature
+            use_extended_thinking: Enable extended thinking (→ max_thinking_tokens)
+            temperature: Folded into the creativity steer
 
         Returns:
             APIResponse: Structured response
         """
-        # Build request parameters
-        messages = [
-            { "role": "user", "content": user_message }
-        ]
+        steer            = _temperature_to_steer( temperature )
+        effective_system = system_prompt or ""
+        if steer:
+            effective_system = ( effective_system + "\n\n" + steer ).strip()
 
-        kwargs = {
-            "model"      : model,
-            "max_tokens" : max_tokens,
-            "messages"   : messages,
+        option_kwargs = {
+            "model"           : model,
+            "system_prompt"   : effective_system or None,
+            "tools"           : tools if tools is not None else LEAD_TOOLS,
+            "permission_mode" : RESEARCH_PERMISSION_MODE,
+            "max_turns"       : self.config.max_research_turns,
         }
-
-        # Add system prompt
-        if system_prompt:
-            kwargs[ "system" ] = system_prompt
-
-        # Add temperature (not used with extended thinking)
-        if not use_extended_thinking:
-            kwargs[ "temperature" ] = temperature
-
-        # Add web search tool
-        if use_web_search:
-            kwargs[ "tools" ] = [ WEB_SEARCH_TOOL ]
-
-        # Add extended thinking
         if use_extended_thinking:
-            kwargs[ "thinking" ] = {
-                "type"         : "enabled",
-                "budget_tokens": self.config.extended_thinking_budget,
-            }
+            option_kwargs[ "max_thinking_tokens" ] = self.config.extended_thinking_budget
+
+        options = ClaudeAgentOptions( **option_kwargs )
 
         if self.debug:
-            print( f"[ResearchAPIClient] Calling {model} for {call_type}" )
-            if use_web_search:
-                print( f"[ResearchAPIClient] Web search enabled" )
-            if use_extended_thinking:
-                print( f"[ResearchAPIClient] Extended thinking enabled (budget: {self.config.extended_thinking_budget})" )
+            print( f"[ResearchAPIClient] sdk_query {model} for {call_type} (tools={option_kwargs['tools']}, max_turns={self.config.max_research_turns})" )
 
-        # Make the API call with retry (longer delays for web search due to rate limits)
-        response = await self._call_with_retry( kwargs, use_web_search=use_web_search )
+        collected      = []
+        input_tokens   = 0
+        output_tokens  = 0
+        sdk_cost_usd   = 0.0
+        stop_reason    = "end_turn"
 
-        # Extract content and usage
-        content = ""
-        tool_use = []
-        search_results = []
+        async for message in sdk_query( prompt=user_message, options=options ):
+            if isinstance( message, AssistantMessage ):
+                for block in message.content:
+                    if isinstance( block, TextBlock ):
+                        collected.append( block.text )
+            elif isinstance( message, TextBlock ):
+                collected.append( message.text )
+            elif isinstance( message, ResultMessage ):
+                usage         = message.usage or {}
+                input_tokens  = usage.get( "input_tokens", 0 )
+                output_tokens = usage.get( "output_tokens", 0 )
+                sdk_cost_usd  = message.total_cost_usd or 0.0
+                stop_reason   = message.stop_reason or "end_turn"
 
-        for block in response.content:
-            if hasattr( block, "text" ):
-                content += block.text
-            elif hasattr( block, "type" ) and block.type == "tool_use":
-                tool_use.append( block )
-            elif hasattr( block, "type" ) and block.type == "web_search_tool_result":
-                # Extract search results
-                if hasattr( block, "content" ):
-                    search_results.extend( block.content )
+        content = "".join( collected ).strip()
 
-        # Record usage
+        # Record token-estimate usage via CostTracker (existing cost surface).
         if self.cost_tracker:
             try:
                 self.cost_tracker.record_from_response(
                     model          = model,
                     response_usage = {
-                        "input_tokens"                : response.usage.input_tokens,
-                        "output_tokens"               : response.usage.output_tokens,
-                        "cache_creation_input_tokens" : getattr( response.usage, "cache_creation_input_tokens", 0 ),
-                        "cache_read_input_tokens"     : getattr( response.usage, "cache_read_input_tokens", 0 ),
+                        "input_tokens"  : input_tokens,
+                        "output_tokens" : output_tokens,
                     },
                     call_type      = call_type,
                     subquery_index = subquery_index,
@@ -496,204 +547,100 @@ class ResearchAPIClient:
                 raise  # Let budget errors propagate
 
         if self.debug:
-            print( f"[ResearchAPIClient] Response: {response.usage.input_tokens} in, {response.usage.output_tokens} out" )
+            print( f"[ResearchAPIClient] Response: {input_tokens} in, {output_tokens} out, sdk_cost_usd=${sdk_cost_usd:.4f} (Max-plan telemetry)" )
 
         return APIResponse(
-            content        = content,
-            model          = model,
-            input_tokens   = response.usage.input_tokens,
-            output_tokens  = response.usage.output_tokens,
-            stop_reason    = response.stop_reason,
-            tool_use       = tool_use,
-            search_results = search_results,
-            raw_response   = response,
+            content       = content,
+            model         = model,
+            input_tokens  = input_tokens,
+            output_tokens = output_tokens,
+            stop_reason   = stop_reason,
+            sdk_cost_usd  = sdk_cost_usd,
+            raw_response  = None,
         )
 
-    async def _call_with_retry(
-        self,
-        kwargs: dict,
-        max_retries: int = 3,
-        initial_delay: float = 1.0,
-        use_web_search: bool = False
-    ) -> Any:
-        """
-        Call API with exponential backoff retry.
-
-        Handles:
-        - Rate limiting (429)
-        - Server errors (5xx)
-        - Network timeouts
-
-        For web search calls, uses longer delays due to Anthropic's strict
-        rate limits (30,000 tokens/minute, but each search returns ~80,000+ tokens).
-
-        Args:
-            kwargs: API call parameters
-            max_retries: Maximum retry attempts
-            initial_delay: Initial delay in seconds
-            use_web_search: If True, use longer delays for rate-limited web searches
-
-        Returns:
-            API response object
-        """
-        # Web search calls need much longer delays due to rate limits
-        # Each search can return 80,000+ tokens but limit is 30,000/minute
-        # With 8 retries and capped backoff:
-        #   30s + 60s + 120s + 240s + 300s×4 = ~25 min max total wait
-        # Most rate limits clear within 60-120s, so usually resolves by retry 2-3
-        max_delay = 300.0  # Default cap for non-web-search
-
-        if use_web_search:
-            max_retries = 8
-            initial_delay = 30.0   # Start with 30s wait for web search rate limits
-            max_delay = 300.0      # Cap at 5 minutes per retry
-
-        last_error = None
-        delay = initial_delay
-
-        for attempt in range( max_retries + 1 ):
-            try:
-                return await self._client.messages.create( **kwargs )
-
-            except anthropic.RateLimitError as e:
-                last_error = e
-                if attempt < max_retries:
-                    logger.warning( f"Rate limited, retrying in {delay:.0f}s (attempt {attempt + 1}/{max_retries})" )
-                    await asyncio.sleep( delay )
-                    delay = min( delay * 2, max_delay )  # Exponential backoff with cap
-
-            except anthropic.APIStatusError as e:
-                if e.status_code >= 500:
-                    last_error = e
-                    if attempt < max_retries:
-                        logger.warning( f"Server error {e.status_code}, retrying in {delay:.0f}s" )
-                        await asyncio.sleep( delay )
-                        delay = min( delay * 2, max_delay )
-                else:
-                    raise  # Client errors (4xx) should not be retried
-
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries:
-                    logger.warning( f"API call failed: {e}, retrying in {delay:.0f}s" )
-                    await asyncio.sleep( delay )
-                    delay = min( delay * 2, max_delay )
-
-        raise last_error
-
     async def close( self ):
-        """Close the API client and release resources."""
-        if hasattr( self._client, "close" ):
-            await self._client.close()
+        """
+        Release client resources.
+
+        No-op under the bounded-CC path: `sdk_query` is stateless (no persistent
+        client/connection to close). Retained for API compatibility.
+        """
+        return None
 
 
 def quick_smoke_test():
-    """Quick smoke test for ResearchAPIClient."""
+    """Quick smoke test for ResearchAPIClient (bounded-CC path)."""
+    import asyncio
     import cosa.utils.util as cu
 
-    cu.print_banner( "ResearchAPIClient Smoke Test", prepend_nl=True )
+    cu.print_banner( "ResearchAPIClient Smoke Test (bounded-CC)", prepend_nl=True )
 
     try:
-        # Test 1: Check import
-        print( "Testing anthropic import..." )
-        if not ANTHROPIC_AVAILABLE:
-            print( "⚠ anthropic SDK not installed - skipping API tests" )
-            print( "  Install with: pip install anthropic" )
+        # Test 1: SDK availability
+        print( "Testing claude_agent_sdk import..." )
+        if not SDK_AVAILABLE:
+            print( "⚠ claude_agent_sdk not installed - skipping bounded-CC tests" )
+            print( "  Install with: pip install claude-agent-sdk" )
             return
-        print( "✓ anthropic SDK available" )
+        print( "✓ claude_agent_sdk available" )
 
-        # Test 2: Check API key presence (using firewalled pattern)
-        print( "Testing API key detection (firewalled pattern)..." )
-        print( f"  Checking env var: {ENV_VAR_NAME}" )
-        print( f"  Checking local file: src/conf/keys/{KEY_FILE_NAME}" )
-
-        # Try environment variable first
-        api_key = os.environ.get( ENV_VAR_NAME )
-        key_source = "environment"
-
-        if not api_key:
-            # Try local file
+        # Test 2: JSON extraction helper (D6-STRICT)
+        print( "Testing extract_json_object (D6-STRICT)..." )
+        assert extract_json_object( '{"a": 1}' ) == { "a": 1 }
+        assert extract_json_object( '```json\n{"a": 2}\n```' ) == { "a": 2 }
+        assert extract_json_object( 'Here you go:\n{"a": 3}\nThanks!' ) == { "a": 3 }
+        for bad in [ "", "   ", "no json here" ]:
             try:
-                import cosa.utils.util as cu
-                api_key = cu.get_api_key( KEY_FILE_NAME )
-                key_source = "local file"
-            except Exception:
+                extract_json_object( bad )
+                print( f"✗ Should have raised ValueError for {bad!r}" )
+            except ValueError:
                 pass
+        print( "✓ extract_json_object recovers + fails loud correctly" )
 
-        if not api_key:
-            print( f"⚠ API key not found - skipping live API tests" )
-            print( f"  For testing/production: export {ENV_VAR_NAME}=your-key" )
-            print( f"  For development: create src/conf/keys/{KEY_FILE_NAME}" )
+        # Test 3: temperature steer
+        print( "Testing _temperature_to_steer..." )
+        assert _temperature_to_steer( 1.0 ) != ""
+        assert _temperature_to_steer( 0.3 ) != ""
+        assert _temperature_to_steer( 0.7 ) == ""
+        print( "✓ _temperature_to_steer works" )
 
-            # Test instantiation without key should fail with clear message
-            try:
-                # Temporarily ensure env var is not set for this test
-                old_env = os.environ.pop( ENV_VAR_NAME, None )
-                client = ResearchAPIClient( debug=True )
-                print( "✗ Should have raised ValueError for missing API key" )
-                if old_env:
-                    os.environ[ ENV_VAR_NAME ] = old_env
-            except ValueError as e:
-                print( f"✓ Correctly raised ValueError with instructions" )
-                if old_env:
-                    os.environ[ ENV_VAR_NAME ] = old_env
-
-            return
-
-        print( f"✓ API key found via {key_source} (starts with: {api_key[:10]}...)" )
-
-        # Test 3: Instantiation with key
+        # Test 4: Instantiation
         print( "Testing instantiation..." )
         cost_tracker = CostTracker( session_id="smoke-test", debug=True )
-        client = ResearchAPIClient(
-            cost_tracker = cost_tracker,
-            debug        = True
-        )
+        client = ResearchAPIClient( cost_tracker=cost_tracker, debug=True )
         assert client.config.lead_model is not None
         assert client.config.subagent_model is not None
         print( f"✓ Client instantiated (lead={client.config.lead_model})" )
 
-        # Test 4: APIResponse dataclass
+        # Test 5: APIResponse dataclass
         print( "Testing APIResponse dataclass..." )
         response = APIResponse(
-            content      = "Test content",
-            model        = "claude-sonnet-4-5",
-            input_tokens = 100,
-            output_tokens= 50,
-            stop_reason  = "end_turn",
+            content       = "Test content",
+            model         = "claude-sonnet-4-6",
+            input_tokens  = 100,
+            output_tokens = 50,
+            stop_reason   = "end_turn",
         )
         assert response.content == "Test content"
-        assert response.input_tokens == 100
+        assert response.sdk_cost_usd == 0.0
         print( "✓ APIResponse dataclass works" )
 
-        # Test 5: WEB_SEARCH_TOOL definition
-        print( "Testing WEB_SEARCH_TOOL definition..." )
-        assert WEB_SEARCH_TOOL[ "type" ] == "web_search_20250305"
-        assert WEB_SEARCH_TOOL[ "name" ] == "web_search"
-        print( "✓ WEB_SEARCH_TOOL defined correctly" )
-
-        # Test 6: Live API call (if key is valid)
-        print( "\nTesting live API call..." )
-        print( "  (This will use API credits)" )
+        # Test 6: Live bounded-CC call (lead agent, no tools)
+        print( "\nTesting live bounded-CC call (Max-plan OAuth)..." )
 
         async def test_live_call():
-            response = await client.call_lead_agent(
+            return await client.call_lead_agent(
                 system_prompt = "You are a helpful assistant. Respond briefly.",
                 user_message  = "Say 'Hello, smoke test!' and nothing else.",
                 call_type     = "smoke_test",
-                max_tokens    = 50,
             )
-            return response
 
-        import asyncio
-        response = asyncio.run( test_live_call() )
-        print( f"✓ Live API call succeeded" )
-        print( f"  Response: {response.content[:100]}" )
-        print( f"  Tokens: {response.input_tokens} in, {response.output_tokens} out" )
-
-        # Show cost summary
-        print( "\nCost Summary:" )
-        print( cost_tracker.get_cost_report() )
+        live = asyncio.run( test_live_call() )
+        print( f"✓ Live bounded-CC call succeeded" )
+        print( f"  Response: {live.content[:100]}" )
+        print( f"  Tokens: {live.input_tokens} in, {live.output_tokens} out" )
+        print( f"  SDK cost telemetry: ${live.sdk_cost_usd:.4f} (covered by Max plan — not billed)" )
 
         print( "\n✓ ResearchAPIClient smoke test completed successfully" )
 

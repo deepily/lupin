@@ -41,6 +41,11 @@ class ResearchConfig:
     max_tool_calls_per_subagent : int = 15
     max_clarification_rounds    : int = 2
 
+    # Bounded-CC (D-DR2): the in-process sdk_query path REQUIRES an explicit
+    # per-call turn cap. 20 is generous headroom for a search subagent's
+    # WebSearch/WebFetch iterations; the lead agent (tools=[]) uses ~1 turn.
+    max_research_turns          : int = 20
+
     # === Token Budgets ===
     extended_thinking_budget : int = 10000
     subagent_context_limit   : int = 100000
@@ -126,6 +131,7 @@ class ResearchConfig:
             "max_research_iterations"    : "deep research max research iterations",
             "max_tool_calls_per_subagent": "deep research max tool calls per subagent",
             "max_clarification_rounds"   : "deep research max clarification rounds",
+            "max_research_turns"         : "deep research max research turns",
             "extended_thinking_budget"   : "deep research extended thinking budget",
             "subagent_context_limit"     : "deep research subagent context limit",
             "max_findings_tokens"        : "deep research max findings tokens",
