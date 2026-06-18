@@ -10795,6 +10795,14 @@ class NotificationsUI {
         const strip          = document.getElementById( "cc-session-strip" );
         if ( !iconsContainer || !strip ) return;
 
+        // Late-hydration focus restore (Tiffany 2026-06-17): if this arriving
+        // session is the one the user had focused before a reload (persisted in
+        // localStorage) but the in-memory focus state was reverted at restore
+        // time, re-apply focus now. Runs BEFORE the idempotent early-return so it
+        // also fires when the icon already exists but focus was reverted (the
+        // icon-present-card-absent ordering). No-op once focus is active.
+        this._maybeReapplyPersistedFocus( senderId );
+
         const iconId = this._stripIconIdFor( senderId );
         if ( document.getElementById( iconId ) ) return;  // idempotent
 
@@ -11313,6 +11321,46 @@ class NotificationsUI {
             icon.removeAttribute( "data-unread-count" );
         }
         delete this.ccStripUnreadCounts[ senderId ];
+    }
+
+    /**
+     * Re-apply persisted focus when the focused session's icon/card finally
+     * hydrates (Tiffany 2026-06-17). Fixes "the focus-bar loses its selection
+     * on every page refresh — the user must reselect focus each reload."
+     *
+     * The selection IS persisted (`_saveCcFocusState`), but `_restoreCcUiAfterLoad`
+     * reverts the IN-MEMORY focus to default (via `_exitFocusMode( false )`) when the
+     * focused sender has no card at restore time — KEEPING only the localStorage
+     * intent. The late-arrival re-apply in `_addStripIcon` then only consulted the
+     * (now-false) in-memory `ccFocusState`, so when the focused session arrived later
+     * via async WS, nothing re-read the persisted intent and the selection was lost.
+     * (Focused sessions are frequently the late-arriving ones — an active worker that
+     * first reports via WS — so the symptom hit nearly every reload.)
+     *
+     * This re-reads localStorage and re-enters focus mode the moment the persisted
+     * focused session appears. Idempotent: no-ops once focus is already active, for a
+     * non-focused session, or when no focus is persisted.
+     *
+     * Requires:
+     *   - senderId is the session whose icon/card just hydrated
+     * Ensures:
+     *   - re-enters focus mode iff localStorage holds enabled focus for senderId AND
+     *     in-memory focus is currently disabled; otherwise no-op
+     *   - NEVER throws (corrupt localStorage is caught)
+     */
+    _maybeReapplyPersistedFocus( senderId ) {
+        if ( !senderId || this.ccFocusState.enabled ) return;
+        let persisted = null;
+        try {
+            persisted = JSON.parse( localStorage.getItem( this.CC_FOCUS_STATE_KEY ) );
+        } catch ( e ) {
+            this.error( "Failed to parse persisted focus state:", e );
+            return;
+        }
+        if ( persisted && persisted.enabled && persisted.focused_sender_id === senderId ) {
+            this.log( `[FOCUS-RESTORE] persisted focus session ${senderId} hydrated late — re-applying focus` );
+            this._enterFocusMode( senderId );  // no flash on restore
+        }
     }
 
     /**
