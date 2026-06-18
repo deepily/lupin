@@ -1,0 +1,9 @@
+{
+  "//"              : "Standalone TS config for the nav-bar bundle. ADDITIVE — does not touch the mux tsconfig.json. Inherits the strict compilerOptions from the base config and only re-scopes rootDir/outDir/include to the nav module tree.",
+  "extends"         : "./tsconfig.json",
+  "compilerOptions" : {
+    "rootDir" : "src/lupin_app/static/js/nav",
+    "outDir"  : "src/lupin_app/static/dist/nav"
+  },
+  "include" : [ "src/lupin_app/static/js/nav/**/*.ts" ]
+}
