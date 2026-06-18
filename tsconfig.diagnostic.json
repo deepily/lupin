@@ -1,0 +1,9 @@
+{
+  "//"              : "Standalone TS config for the websocket-diagnostic bundle. ADDITIVE — does not touch the mux tsconfig.json. Inherits the strict compilerOptions from the base config and only re-scopes rootDir/outDir/include to the diagnostic module tree. Mirrors tsconfig.nav.json.",
+  "extends"         : "./tsconfig.json",
+  "compilerOptions" : {
+    "rootDir" : "src/lupin_app/static/js/diagnostic",
+    "outDir"  : "src/lupin_app/static/dist/diagnostic"
+  },
+  "include" : [ "src/lupin_app/static/js/diagnostic/**/*.ts" ]
+}

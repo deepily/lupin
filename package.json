@@ -8,8 +8,11 @@
     "build:watch": "bash src/scripts/build-multiplexer.sh --watch",
     "build:nav": "bash src/scripts/build-nav.sh",
     "build:nav:watch": "bash src/scripts/build-nav.sh --watch",
+    "build:diagnostic": "bash src/scripts/build-diagnostic.sh",
+    "build:diagnostic:watch": "bash src/scripts/build-diagnostic.sh --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:nav": "tsc --noEmit -p tsconfig.nav.json",
+    "typecheck:diagnostic": "tsc --noEmit -p tsconfig.diagnostic.json",
     "lint": "eslint src/lupin_app/static/js/multiplexer/",
     "test": "tsx --test \"src/tests/**/*.test.ts\""
   },
