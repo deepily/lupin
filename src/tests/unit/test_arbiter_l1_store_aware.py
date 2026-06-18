@@ -366,3 +366,51 @@ class TestPollOnceWiring:
         summary = job._poll_once()
         assert summary[ "managers_down" ] == 0                       # suppressed — not a down
         assert any( "AWAITING-RICK" in m for m in notify )           # advisory fired instead
+
+
+# ── reusable suppression primitives (lane 4, 2026-06-17) ─────────────────────
+#    The single named home for the store-owed "do-not-escalate?" decision, so Mr
+#    Radio's engagement-#7 follow-through watcher reuses it (no re-inlining, no
+#    poke-path contention). owed_class_suppresses = pure predicate;
+#    session_is_not_owed = single-session seam (one store read + the predicate).
+
+from cosa.agents.heartbeat_arbiter.arbiter_job import owed_class_suppresses, NOT_OWED_CLASSES
+
+
+class TestOwedClassSuppresses:
+    def test_blocked_and_done_suppress( self ):
+        assert owed_class_suppresses( CLASS_BLOCKED_ON_USER ) is True
+        assert owed_class_suppresses( CLASS_DONE ) is True
+
+    def test_active_and_unknown_do_not_suppress( self ):
+        assert owed_class_suppresses( CLASS_ACTIVE ) is False
+        assert owed_class_suppresses( CLASS_UNKNOWN ) is False       # fail-SAFE
+
+    def test_garbage_value_does_not_suppress( self ):
+        assert owed_class_suppresses( "wat" ) is False
+        assert owed_class_suppresses( None ) is False
+
+    def test_constant_membership( self ):
+        assert NOT_OWED_CLASSES == ( CLASS_BLOCKED_ON_USER, CLASS_DONE )
+
+
+class TestSessionIsNotOwed:
+    def test_blocked_on_user_is_not_owed( self ):
+        job = _job( owed_work_fn=lambda ps: { "Mgr": [ _ricks_court() ] } )
+        assert job.session_is_not_owed( "Mgr" ) is True
+
+    def test_done_is_not_owed( self ):
+        job = _job( owed_work_fn=lambda ps: { "Mgr": [ ] } )         # zero owed → DONE
+        assert job.session_is_not_owed( "Mgr" ) is True
+
+    def test_active_is_owed( self ):
+        job = _job( owed_work_fn=lambda ps: { "Mgr": [ _normal() ] } )
+        assert job.session_is_not_owed( "Mgr" ) is False
+
+    def test_unwired_seam_fails_safe_to_owed( self ):
+        job = _job( owed_work_fn=None )                              # UNKNOWN → not suppressed
+        assert job.session_is_not_owed( "Mgr" ) is False
+
+    def test_absent_persona_fails_safe_to_owed( self ):
+        job = _job( owed_work_fn=lambda ps: { } )                    # reader returned nothing → UNKNOWN
+        assert job.session_is_not_owed( "Ghost" ) is False

@@ -248,7 +248,7 @@ def test_orphan_worker_routes_rick_and_managers():
                 resolve_manager_fn=lambda sid, declared_manager=None: {
                     "manager_persona": None, "source": "unresolved" } )
     fleet_view = { "s1": { "session_id": "s1", "persona": "Orphan", "stuck": True,
-                           "state": "stuck", "holding_on": "none" } }
+                           "state": "stuck", "holding_on": "none", "alive": True } }
     graph = { "edges": { }, "cycles": [ ] }
     fired = job._tap_managers( fleet_view, graph, roster=[ ], now=NOW,
                                active_managers=[ "M1", "M2" ] )
@@ -264,7 +264,7 @@ def test_manager_tap_routes_owning_manager_only():
                 resolve_manager_fn=lambda sid, declared_manager=None: {
                     "manager_persona": "MgrX", "source": "lineage" } )
     fleet_view = { "s1": { "session_id": "s1", "persona": "Worker", "stuck": True,
-                           "state": "stuck", "holding_on": "none" } }
+                           "state": "stuck", "holding_on": "none", "alive": True } }
     graph = { "edges": { }, "cycles": [ ] }
     fired = job._tap_managers( fleet_view, graph, roster=[ ], now=NOW, active_managers=[ "M1" ] )
     assert fired == 1 and gw.sent and gw.sent[ -1 ][ 0 ] == "MgrX"
