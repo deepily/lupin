@@ -22,7 +22,10 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 # revision identifiers, used by Alembic.
 revision: str = 'f0a1b2c3d4e5'
-down_revision: Union[str, Sequence[str], None] = 'e9f0a1b2c3d4'
+# Rebased onto the TRUE baseline (000000000000) — was 'e9f0a1b2c3d4', the former
+# stamp target; the pre-baseline span 210acf4d54dd..e9f0a1b2c3d4 is now absorbed
+# into the baseline (see 000000000000_true_baseline_schema.py).
+down_revision: Union[str, Sequence[str], None] = '000000000000'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
