@@ -29,6 +29,43 @@ _PROJECT_ALIASES = {
 }
 
 
+def canonicalize_project_name( name: Optional[ str ] ) -> Optional[ str ]:
+    """
+    Canonicalize an ALREADY-resolved project name through the shared
+    `_PROJECT_ALIASES` map (e.g. "planning-is-prompting" -> "plan").
+
+    The SINGLE name-in -> name-out core of project canonicalization, for
+    callers that already HOLD a project-name string and must NOT re-run cwd /
+    bridge detection — specifically the task-store write seam (task_create_impl)
+    and read seam (task_query_impl). `detect_project()` and
+    `resolve_project_name()` apply this SAME `_PROJECT_ALIASES` map after
+    resolving a name from cwd/bridge; this function is the bare alias step they
+    share, exposed so the store seams alias IDENTICALLY (read == write). Reuses
+    the one `_PROJECT_ALIASES` table — never a duplicated copy (bug c6751cf8:
+    the oracle aliased on READ but the MCP write path stored the raw repo name,
+    so aliased repos like planning-is-prompting false-idled while owing work).
+
+    Requires:
+        - name is a str or None
+
+    Ensures:
+        - returns the canonical short name when `name` is a known alias key
+        - returns `name` unchanged when it is not an alias key (this includes
+          an already-canonical name like "plan" or any non-aliased repo)
+        - returns None when `name` is None (a no-op for optional query filters)
+        - never raises
+
+    Args:
+        name: An already-resolved project name (or None)
+
+    Returns:
+        Optional[str]: The canonical project name (or None)
+    """
+    if name is None:
+        return None
+    return _PROJECT_ALIASES.get( name, name )
+
+
 def _worktree_owner_basename( candidate: Path ) -> Optional[ str ]:
     """
     Resolve the MAIN repo basename when `candidate` is a git worktree.

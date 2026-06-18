@@ -187,6 +187,32 @@ class TestTaskCreateImpl:
         assert sent[ "correlation_key" ]     == "corr-456"
         assert sent[ "authority" ]           == "manager_relay"
 
+    def test_aliased_project_canonicalized_on_write( self, capture_request ):
+        # Bug c6751cf8: the MCP write path stored the raw repo name while the
+        # owed-work oracle queried the alias -> false-idle. The write seam now
+        # canonicalizes, so an aliased repo's row is STORED under "plan".
+        calls = capture_request( FakeResponse( 201, json_body={ } ) )
+        task_create_impl(
+            BASE_URL, API_KEY,
+            created_by = "clayton 95cf676c",
+            item_class = "task",
+            title      = "Owe work in the PIP repo",
+            project    = "planning-is-prompting",
+        )
+        assert calls[ "json" ][ "project" ] == "plan"
+
+    def test_non_aliased_project_passes_through_on_write( self, capture_request ):
+        # A repo with no alias entry is stored verbatim (canonicalize is a no-op).
+        calls = capture_request( FakeResponse( 201, json_body={ } ) )
+        task_create_impl(
+            BASE_URL, API_KEY,
+            created_by = "clayton 95cf676c",
+            item_class = "task",
+            title      = "Owe work in lupin",
+            project    = "lupin",
+        )
+        assert calls[ "json" ][ "project" ] == "lupin"
+
 
 class TestTaskTransitionImpl:
 
@@ -356,3 +382,40 @@ class TestTaskQueryImpl:
         calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
         task_query_impl( BASE_URL, API_KEY, owner_persona="sam", status="queued", terse=True )
         assert calls[ "params" ] == { "owner_persona": "sam", "status": "queued", "terse": "true" }
+
+    def test_aliased_project_canonicalized_on_query( self, capture_request ):
+        # Mirror of the write seam: an agent querying by the RAW repo name still
+        # matches the canonically-stored rows (read == write, bug c6751cf8).
+        calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, project="planning-is-prompting" )
+        assert calls[ "params" ] == { "project": "plan" }
+
+
+class TestProjectAliasRoundTrip:
+    """
+    The bug-c6751cf8 regression: an aliased-repo session writes via task_create
+    and the owed-work read query finds it because BOTH seams canonicalize through
+    the ONE shared alias map. The oracle (stop.py) resolves the same alias via
+    resolve_project_name(); here we pin that the write seam and the agent-facing
+    read seam land on the SAME stored project key, so write == read.
+    """
+
+    def test_write_then_read_land_on_same_project_key( self, capture_request ):
+        # WRITE: an aliased-repo session creates an item.
+        write_calls = capture_request( FakeResponse( 201, json_body={ } ) )
+        task_create_impl(
+            BASE_URL, API_KEY,
+            created_by = "clayton 95cf676c",
+            item_class = "task",
+            title      = "Owe work in the PIP repo",
+            project    = "planning-is-prompting",
+        )
+        stored_project = write_calls[ "json" ][ "project" ]
+
+        # READ: the same aliased repo name queried back.
+        read_calls = capture_request( FakeResponse( 200, json_body={ "tasks": [ ], "count": 0 } ) )
+        task_query_impl( BASE_URL, API_KEY, project="planning-is-prompting" )
+        queried_project = read_calls[ "params" ][ "project" ]
+
+        # The crux: the key written is the key queried -> no false-idle.
+        assert stored_project == queried_project == "plan"
