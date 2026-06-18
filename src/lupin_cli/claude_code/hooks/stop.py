@@ -57,7 +57,7 @@ from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
 #    stop_hook_active loop guard; voice always wins. Leaf modules are pure +
 #    100%-covered; this file holds only the thin adapter. See:
 #    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold, resolve_hold_base_dir
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_resilient
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
     get_poke_count, increment_poke_count,
 )
@@ -1365,11 +1365,12 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
     if not settings[ "enabled" ]:
         return None, False
 
-    # c121037b facet 3: resolve the hold from the session's OWN cwd (threaded
-    # from the Stop payload), not the hardwired LUPIN_ROOT — so a non-lupin
-    # session's hold is visible to its own hook read. cwd None (older callers /
-    # missing key) falls back to cu.get_project_root() inside resolve_hold_base_dir.
-    hold       = read_hold( session_id, base_dir=resolve_hold_base_dir( cwd ) )
+    # Resolve the hold resiliently across BOTH the session's OWN cwd (facet 3,
+    # threaded from the Stop payload) AND the project root where write_hold
+    # defaults (base_dir=None → cu.get_project_root). Bug 1789f197: a worker whose
+    # cwd is a git worktree wrote its hold under LUPIN_ROOT but the cwd-only read
+    # missed it → relentless false re-pokes despite a fresh honored hold.
+    hold       = read_hold_resilient( session_id, cwd=cwd )
     poke_count = get_poke_count( session_id )
     # v2: REAL work-owed verdict from the session's own Task* state, replayed
     # from its transcript (§0.3). owned_by_me TRUE by construction; :7999-free;

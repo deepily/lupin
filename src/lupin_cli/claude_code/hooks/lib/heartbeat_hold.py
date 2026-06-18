@@ -252,6 +252,47 @@ def read_hold( session_id, base_dir=None ):
     return data
 
 
+def read_hold_resilient( session_id, cwd=None ):
+    """
+    Read this session's hold, searching EVERY directory it could plausibly live
+    in, so a written honored hold is found regardless of the reading session's cwd.
+
+    Why this exists (bug 1789f197): `write_hold` defaults `base_dir=None` →
+    `cu.get_project_root()` (LUPIN_ROOT), but the Stop hook historically resolved
+    the read directory from the session's own `cwd` (resolve_hold_base_dir, facet
+    3). When a session's cwd is NOT the project root — e.g. a worker operating
+    from a git worktree — the hold was WRITTEN under the project root but READ
+    under the worktree → never found → the session was re-poked forever despite a
+    fresh, honored hold. Searching both candidate roots closes that gap while
+    preserving the per-session (cwd-first) preference facet 3 introduced.
+
+    Requires:
+        - session_id is a string
+        - cwd is the Stop-hook payload's cwd (path-like / string / None)
+
+    Ensures:
+        - Returns the first hold found across the ordered, de-duplicated candidate
+          dirs [ resolve_hold_base_dir( cwd ), project-root ] — cwd first so a
+          genuine per-session hold wins, then the project-root where write_hold
+          defaults (the two collapse to one when cwd IS the project root)
+        - Returns None when no candidate dir holds a readable hold
+        - Never raises (delegates to read_hold, which swallows all errors)
+    """
+    candidates = []
+    seen       = set()
+    for base in ( resolve_hold_base_dir( cwd ), _resolve_base_dir( None ) ):
+        key = str( base )
+        if key in seen:
+            continue
+        seen.add( key )
+        candidates.append( base )
+    for base in candidates:
+        hold = read_hold( session_id, base_dir=base )
+        if hold is not None:
+            return hold
+    return None
+
+
 def clear_hold( session_id, base_dir=None ):
     """
     Delete this session's hold artifact (idempotent).

@@ -118,7 +118,7 @@ class TestRunHeartbeat:
 
     # ── gate / fail-safe ──
 
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": False, "poke_cap": 3 } )
     def test_disabled_returns_none_no_reads( self, mock_load, mock_read ):
@@ -128,7 +128,7 @@ class TestRunHeartbeat:
         self.mock_events.emit_outcome.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             side_effect=ValueError( "bad poke_cap" ) )
     def test_malformed_config_fails_safe( self, mock_load, mock_read, mock_log ):
@@ -141,7 +141,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_v2_fm19_catch_no_hold_owed_task_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -162,7 +162,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_v1_preserved_stale_declared_hold_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -181,7 +181,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_fresh_hold_honored( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -191,7 +191,7 @@ class TestRunHeartbeat:
         self.mock_notify.assert_not_called()    # §4 breadcrumb rides ONLY the poke
 
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_not_owed_empty_taskset_emits_idle( self, mock_load, mock_read, mock_count ):
@@ -206,7 +206,7 @@ class TestRunHeartbeat:
         assert idle_calls[ 0 ].kwargs[ "work_owed" ] is False
 
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_not_owed_nonempty_taskset_no_idle( self, mock_load, mock_read, mock_count ):
@@ -218,7 +218,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=3 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_cap_reached_notifies_no_increment( self, mock_load, mock_read, mock_count,
@@ -233,7 +233,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=1 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_emit_persona_and_awaiting_from_hold( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -249,7 +249,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_emit_failure_never_breaks_poke( self, mock_load, mock_read, mock_count, mock_incr, mock_log ):
@@ -264,7 +264,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_manager_with_alive_worker_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -277,7 +277,7 @@ class TestRunHeartbeat:
         assert kwargs[ "work_owed" ] is True
 
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_manager_all_workers_reaped_idles( self, mock_load, mock_read, mock_count ):
@@ -287,7 +287,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True, "owed_source_from_store": False } )
     def test_worker_with_open_inbound_dm_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -303,7 +303,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
     def test_worker_open_inbound_default_off_no_poke( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -318,7 +318,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
     def test_oracle_log_carries_live_signal_counts( self, mock_load, mock_read, mock_count, mock_log ):
@@ -334,7 +334,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
     def test_poke_pairs_block_with_single_tmux_inject( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -349,7 +349,7 @@ class TestRunHeartbeat:
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold" )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
     def test_no_poke_does_not_inject( self, mock_load, mock_read, mock_count, mock_incr ):
@@ -361,7 +361,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop._notify_cap_reached" )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=3 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
     def test_cap_reached_does_not_inject( self, mock_load, mock_read, mock_count, mock_incr, mock_cap ):
@@ -374,7 +374,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.decide_heartbeat" )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
     def test_poke_empty_reason_skips_inject( self, mock_load, mock_read, mock_count, mock_incr, mock_decide ):
@@ -911,7 +911,7 @@ class TestMainSpeakerphonePokeMatrix:
              patch( "lupin_cli.claude_code.hooks.stop._has_pending_voice", return_value=False ), \
              patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
                     return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } ), \
-             patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
              patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" ), \
              patch( "lupin_cli.claude_code.hooks.stop.replay_task_state",
@@ -1266,7 +1266,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
     def test_flag_on_store_owed_pokes( self, mock_load, mock_read, mock_count, mock_incr, mock_store ):
         """flag ON + store reports owed rows → poke, even with an EMPTY transcript
@@ -1282,7 +1282,7 @@ class TestRunHeartbeatStoreSource:
 
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
     def test_flag_on_store_zero_idles( self, mock_load, mock_read, mock_count, mock_store ):
         """flag ON + store reports zero owed → not owed; empty transcript → idle beacon.
@@ -1298,7 +1298,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
     def test_flag_on_store_unreachable_no_local_signals_no_poke( self, mock_load, mock_read, mock_count,
                                                                  mock_incr, mock_store, mock_log ):
@@ -1326,7 +1326,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
     def test_O1_store_unreachable_with_delegation_STILL_pokes( self, mock_load, mock_read, mock_count,
                                                                mock_incr, mock_store, mock_log ):
@@ -1349,7 +1349,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True,
                            "owed_source_from_store": True } )
@@ -1368,7 +1368,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store" )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False,
                            "owed_source_from_store": False } )
@@ -1384,7 +1384,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=_STORE_ON )
     def test_j2_delegations_still_feed_oracle_under_store_source( self, mock_load, mock_read,
                                                                   mock_count, mock_incr, mock_store ):
@@ -1398,7 +1398,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
-    @patch( "lupin_cli.claude_code.hooks.stop.read_hold", return_value=None )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True,
                            "owed_source_from_store": True } )
