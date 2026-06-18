@@ -6,7 +6,10 @@
   "scripts": {
     "build": "bash src/scripts/build-multiplexer.sh",
     "build:watch": "bash src/scripts/build-multiplexer.sh --watch",
+    "build:nav": "bash src/scripts/build-nav.sh",
+    "build:nav:watch": "bash src/scripts/build-nav.sh --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:nav": "tsc --noEmit -p tsconfig.nav.json",
     "lint": "eslint src/lupin_app/static/js/multiplexer/",
     "test": "tsx --test \"src/tests/**/*.test.ts\""
   },
