@@ -41,6 +41,15 @@ const DEFAULT_MAX_ATTEMPTS = 20;
 // 4003 → permission-denied.
 const PERMANENT_CLOSE_CODES = new Set<number>([ 4001, 4002, 4003 ]);
 
+// Auth-handshake watchdog (parity with legacy ws-channel.js HANDSHAKE_TIMEOUT_MS;
+// audit 391781cd). After the reconnect-parity fix the CSM advances to `connected`
+// ONLY on auth_success, so a server that completes the WS handshake (TCP open) but
+// then never returns auth_success and never closes would park the CSM in
+// `connecting` forever — no socket_close / backoff / failed / reconnect. This bound
+// force-closes a still-unauthenticated socket so the hung handshake composes with
+// the reconnect budget (→ socket_close → backoff → eventually max_attempts → failed).
+const HANDSHAKE_TIMEOUT_MS = 10000;
+
 export interface Transport {
   start(sessionId: string): void;
   stop(): void;
@@ -94,6 +103,7 @@ export abstract class BaseTransportImpl implements Transport {
   protected sessionId       : string | null = null;
   protected wsChannel       : WSChannel | null = null;
   protected backoffTimer    : ReturnType<typeof setTimeout> | null = null;
+  protected handshakeTimer  : ReturnType<typeof setTimeout> | null = null;
   protected authReady       : boolean = false;
   protected lifecycleUnsubs : Array<() => void> = [];
   protected csmUnsub        : (() => void) | null = null;
@@ -146,6 +156,7 @@ export abstract class BaseTransportImpl implements Transport {
   stop(): void {
     this.stopped = true;
     this.cancelBackoffTimer();
+    this.cancelHandshakeTimer();
     for (const unsub of this.lifecycleUnsubs) unsub();
     this.lifecycleUnsubs = [];
     if (this.csmUnsub) {
@@ -217,6 +228,9 @@ export abstract class BaseTransportImpl implements Transport {
     }
     this.wsChannel = createWSChannel(opts);
     this.wsChannel.start();
+    // Bound the connect+auth window: if auth_success never arrives (and the
+    // socket never closes), force-close at HANDSHAKE_TIMEOUT_MS (audit 391781cd).
+    this.armHandshakeTimer();
   }
 
   // RECONNECT-PARITY FIX (audit 4450995d): we do NOT tell the CSM `socket_open`
@@ -262,6 +276,8 @@ export abstract class BaseTransportImpl implements Transport {
 
     if (eventType === "auth_success" && !this.authReady) {
       this.authReady = true;
+      // Auth completed inside the handshake window — disarm the watchdog.
+      this.cancelHandshakeTimer();
       // RECONNECT-PARITY FIX (audit 4450995d): drive the CSM to `connected`
       // (which resets the reconnect budget) ONLY now — on application-level
       // auth success — never on the raw TCP open. See onSocketOpen.
@@ -304,6 +320,8 @@ export abstract class BaseTransportImpl implements Transport {
   // socket_close (→ reconnecting / backoff).
   protected onSocketClose(e: CloseEvent): void {
     this.authReady = false;
+    // The connect+auth window is over (the socket closed) — disarm the watchdog.
+    this.cancelHandshakeTimer();
     /* c8 ignore next */ // post-stop callbacks: stop() unsubscribes + nulls csm; a straggler onClose firing after teardown finds csm=null and returns (same defensive pattern as onStateChange).
     if (!this.csm) return;
     if (PERMANENT_CLOSE_CODES.has(e.code)) {
@@ -339,6 +357,7 @@ export abstract class BaseTransportImpl implements Transport {
       this.openSocket();
     } else if (state === "offline" || state === "failed") {
       this.cancelBackoffTimer();
+      this.cancelHandshakeTimer();
       if (this.wsChannel) {
         this.wsChannel.stop();
         this.wsChannel = null;
@@ -367,6 +386,33 @@ export abstract class BaseTransportImpl implements Transport {
     }
   }
   /* c8 ignore stop */
+
+  // Auth-handshake watchdog (audit 391781cd) — parity with legacy ws-channel.js.
+  // The expiry LOGIC is split out into onHandshakeTimeout() so it is exercised by
+  // a direct unit call; only the thin setTimeout wrapper carries the mock.timers
+  // attribution quirk (same as scheduleBackoff above).
+  protected armHandshakeTimer(): void {
+    this.cancelHandshakeTimer();
+    /* c8 ignore next */ // setTimeout callback attribution quirk (tsx + node:test mock.timers) — see scheduleBackoff; the firing path is covered by the mock.timers test + onHandshakeTimeout() is covered directly.
+    this.handshakeTimer = setTimeout(() => this.onHandshakeTimeout(), HANDSHAKE_TIMEOUT_MS);
+  }
+
+  protected onHandshakeTimeout(): void {
+    this.handshakeTimer = null;
+    // Auth never completed within the window → force-close. wsChannel.stop() nulls
+    // handlers (no onClose double-fire), then notify the CSM directly — identical
+    // to the onSocketOpen auth-fail path. socket_close → backoff (increment) → a
+    // persistently-hanging server eventually trips max_attempts_reached → failed.
+    if (this.wsChannel) this.wsChannel.stop();
+    if (this.csm) this.csm.send({ type: "socket_close" });
+  }
+
+  protected cancelHandshakeTimer(): void {
+    if (this.handshakeTimer !== null) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
