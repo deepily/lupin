@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
-if _src_path not in sys.path:
+if _src_path not in sys.path:   # pragma: no cover - bootstrap import-guard; src is always on sys.path under pytest
     sys.path.insert( 0, _src_path )
 
 import urllib.request
@@ -44,9 +44,10 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+from lupin_cli.claude_code.hooks.lib.listener_processes import find_live_listener_pids, listener_spawn_lock
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.notification_utils import is_known_project
-from cosa.rest.voice_persona_helpers import pick_preferred_persona_from_env
+from cosa.rest.voice_persona_helpers import resolve_session_start_persona_chain, pick_declared_managers_from_env
 
 
 def _find_tmux_session( cc_pid ):
@@ -148,6 +149,32 @@ def _resolve_cc_pid( hook_ppid ):
         return hook_ppid
 
 
+def _record_listener_pid( session_data, session_file, listener_pid ):
+    """
+    Record the listener PID in the session bridge file for SessionEnd cleanup.
+
+    Requires:
+        - listener_pid is a positive int
+
+    Ensures:
+        - Writes listener_pid into session_data and persists to session_file
+        - No-op when session_data is None or session_file is falsy
+        - Never raises exceptions (best-effort)
+
+    Args:
+        session_data: Session bridge data dict (updated in-place), or None
+        session_file: Path to session bridge JSON file, or None
+        listener_pid: PID to record
+    """
+    if session_data is not None and session_file:
+        session_data[ "listener_pid" ] = listener_pid
+        try:
+            with open( session_file, "w" ) as f:
+                json.dump( session_data, f, indent=2 )
+        except OSError:
+            pass  # Best-effort
+
+
 def _spawn_listener( session_id, session_data, session_file, accepted_ids=None ):
     """
     Spawn the CC Notification Listener as a background subprocess.
@@ -155,11 +182,22 @@ def _spawn_listener( session_id, session_data, session_file, accepted_ids=None )
     The listener connects via WebSocket and buffers user_initiated_message
     notifications targeted at this CC session.
 
+    Singleton guard (F1, 2026-06-11): the documented `--continue` double-fire
+    runs two concurrent SessionStart hooks; without a guard BOTH spawned a
+    listener, the bridge remembered only the last PID, and the orphaned
+    duplicate raced tmux injections — the broadcast-miss root cause. The
+    check-then-spawn section is serialized under a per-session-hash flock so
+    the second hook sees the first hook's live listener and reuses it.
+    See: src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §4
+
     Requires:
         - session_id is a non-empty string
         - LUPIN_ROOT environment variable is set (for PYTHONPATH)
 
     Ensures:
+        - At most ONE live listener exists per session hash (flock-serialized
+          pgrep guard; an existing live listener is recorded + returned
+          instead of spawning a duplicate)
         - Spawns listener subprocess in background (detached from hook lifecycle)
         - Records listener PID in session bridge file for SessionEnd cleanup
         - Always writes log file to ~/.claude/sessions/cc-listener-{hash}.log
@@ -183,6 +221,43 @@ def _spawn_listener( session_id, session_data, session_file, accepted_ids=None )
     if os.environ.get( "LUPIN_CC_HOOK_LISTENER_ENABLED", "true" ).strip().lower() == "false":
         return None
 
+    short_id = session_id[:8]
+
+    with listener_spawn_lock( short_id ):
+        existing = find_live_listener_pids( short_id )
+        if existing:
+            # A live listener already serves this session hash (the other
+            # double-fire hook won the race, or a resume found the prior
+            # listener still running). Record it so SessionEnd can reap it.
+            _record_listener_pid( session_data, session_file, existing[ 0 ] )
+            return existing[ 0 ]
+
+        return _spawn_listener_locked( session_id, session_data, session_file, accepted_ids )
+
+
+def _spawn_listener_locked( session_id, session_data, session_file, accepted_ids ):
+    """
+    Spawn the listener subprocess — F1 critical section, caller holds the
+    per-session-hash spawn lock.
+
+    Requires:
+        - session_id is a non-empty string
+        - caller holds listener_spawn_lock( session_id[:8] )
+
+    Ensures:
+        - Same spawn/record/liveness contract as _spawn_listener
+        - Returns listener PID on success, None on failure
+        - Never raises exceptions
+
+    Args:
+        session_id: Full CC session ID (stable_session_id after Phase 2)
+        session_data: Session bridge data dict (updated in-place with listener_pid)
+        session_file: Path to session bridge JSON file
+        accepted_ids: Comma-separated 8-char hashes for listener filtering
+
+    Returns:
+        int or None: Listener subprocess PID, or None on failure
+    """
     short_id = session_id[:8]
 
     cmd = [
@@ -260,13 +335,7 @@ def _spawn_listener( session_id, session_data, session_file, accepted_ids=None )
             return None
 
         # Record listener PID in session bridge file for SessionEnd cleanup
-        if session_data is not None and session_file:
-            session_data[ "listener_pid" ] = listener_pid
-            try:
-                with open( session_file, "w" ) as f:
-                    json.dump( session_data, f, indent=2 )
-            except OSError:
-                pass  # Best-effort
+        _record_listener_pid( session_data, session_file, listener_pid )
 
         return listener_pid
 
@@ -508,8 +577,9 @@ def _check_cosa_voice_status():
 
 def _allocate_voice_persona_via_http(
     server_url, project, stable_session_id,
-    previous_persona_name  = None,
-    preferred_persona_name = None
+    previous_persona_name = None,
+    persona_chain         = None,
+    declared_managers     = None
 ):
     """
     Allocate a voice persona for the given session by calling the cosa-voice
@@ -537,12 +607,19 @@ def _allocate_voice_persona_via_http(
         - When previous_persona_name is non-empty, threads it as a
           query-string param so the server pushes a "Voice re-assigned"
           announcement after the assigned broadcast
-        - When preferred_persona_name is non-empty, threads it as a
-          query-string param so the server uses soft-preference semantics
-          (try preferred, fall back to random on miss, push a
-          voice_persona_conflict notification). Used by the env-var
-          default-persona path; mutually exclusive with the strict
-          requested_persona_name swap endpoint.
+        - When persona_chain is non-empty, threads it as a query-string
+          param so the server walks the chain strictly (first FREE element
+          wins, `*` = "then take anything free", exhaustion without `*` =
+          409 + conflict notify — the fail-soft except path below turns
+          that 409 into a None return, leaving the session persona-less).
+          Mutually exclusive with the strict requested_persona_name swap
+          endpoint.
+        - When declared_managers is a non-empty list, threads it as a CSV
+          `declared_managers` query-string param on EVERY allocate call —
+          with AND without a chain — so the server reserves those names out
+          of the random and chain-`*` draws (reserve-from-random, Rick
+          2026-06-11). Named chain elements and strict requests still claim
+          them.
 
     Args:
         server_url: Lupin server URL
@@ -551,9 +628,12 @@ def _allocate_voice_persona_via_http(
         previous_persona_name: Optional display_name of the outgoing persona
             (when /clear preservation failed); causes the server to push a
             "Voice re-assigned: X → Y" notification on successful allocation
-        preferred_persona_name: Optional persona name from the user's shell
-            env var (`COSA_VOICE_PREFERRED_PERSONA__<PROJECT>`) — soft
-            preference with graceful fallback + conflict notify on miss
+        persona_chain: Optional ordered persona-chain expression — from the
+            spawn-injected `COSA_VOICE_PERSONA_CHAIN` env var or the user's
+            per-repo `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` shell default
+        declared_managers: Optional list of declared-manager persona names
+            (the `COSA_VOICE_MANAGERS__<PROJECT>` roster) reserved out of
+            the server's random + chain-`*` draws
 
     Returns:
         dict or None: The persona dict, or None on failure
@@ -579,13 +659,15 @@ def _allocate_voice_persona_via_http(
             return None
 
         # Step 2: POST /allocate (optionally with previous_persona_name +
-        # preferred_persona_name as query params)
+        # persona_chain as query params)
         alloc_url    = f"{server_url}/api/cosa-voice/voice-persona/{stable_session_id}/allocate"
         query_params = []
         if previous_persona_name:
             query_params.append( f"previous_persona_name={urllib.parse.quote( previous_persona_name )}" )
-        if preferred_persona_name:
-            query_params.append( f"preferred_persona_name={urllib.parse.quote( preferred_persona_name )}" )
+        if persona_chain:
+            query_params.append( f"persona_chain={urllib.parse.quote( persona_chain )}" )
+        if declared_managers:
+            query_params.append( f"declared_managers={urllib.parse.quote( ','.join( declared_managers ) )}" )
         if query_params:
             alloc_url = f"{alloc_url}?{'&'.join( query_params )}"
 
@@ -684,6 +766,31 @@ def _release_voice_persona_via_http( server_url, project, stable_session_id ):
         return False
 
 
+def _resolve_window_tokens():
+    """
+    Context-window size (in tokens) to PIN into the bridge at spawn.
+
+    The out-of-band context-pressure assessor needs each worker's true window as
+    the denominator and MUST NOT infer it from observed occupancy (a 1M worker at
+    138k and a 200k worker at 138k look identical from the transcript — and the
+    200k one is on fire). So we pin it here, as a property of the worker, read
+    from LUPIN_CC_WINDOW_TOKENS (set per-worker by the spawn path for [1m]-beta
+    workers) and falling back to the 1M fleet default.
+
+    See: src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.08-context-pressure-revised-plan.md §4
+
+    Ensures:
+        - returns a positive int (never raises — defensive: this runs inside the
+          live SessionStart hook on every registration)
+        - bad/absent env value → 1_000_000
+    """
+    try:
+        val = int( os.environ.get( "LUPIN_CC_WINDOW_TOKENS", "" ) )
+        return val if val > 0 else 1_000_000
+    except ( ValueError, TypeError ):
+        return 1_000_000
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -774,9 +881,10 @@ def main():
             "session_ids"       : existing_ids,
             "transcript_path"   : transcript_path,
             "cwd"               : cwd,
-            "ppid"              : cc_pid,
+            "cc_pid"            : cc_pid,
             "hook_ppid"         : hook_ppid,
             "tmux_session"      : tmux_session,
+            "window_size"       : _resolve_window_tokens(),
         }
 
         # Manager-spawned headless reviewer tagging (2026-05-28). When this
@@ -949,29 +1057,36 @@ def main():
             project = detect_project()
         except Exception:
             project = "lupin"
-        # Per-repo default persona from user's shell env var
-        # `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` — when set, the server
-        # uses soft-preference semantics (try named persona, fall back to
-        # random + conflict notify on miss). When unset, the server falls
-        # back to its existing random-allocation behavior.
-        # See: planning-is-prompting/src/rnd/2026.05.19-cosa-voice-preferred-persona-env-var.md
-        preferred = pick_preferred_persona_from_env( project )
+        # Persona-chain precedence (strict ordered-fallback, Rick 2026-06-11):
+        # spawn-injected COSA_VOICE_PERSONA_CHAIN > headless-no-default >
+        # per-repo COSA_VOICE_PREFERRED_PERSONA__<PROJECT> > None (random).
+        # Full precedence contract lives in the pure helper.
+        # See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
+        chain = resolve_session_start_persona_chain( project, os.environ )
+        # Reserve-from-random (Rick, 2026-06-11): thread the project's
+        # declared-manager roster (COSA_VOICE_MANAGERS__<PROJECT>, sourced
+        # from fleet-roster.env and tmux-forwarded by start-cc-with-tmux.sh)
+        # to the allocate endpoint on EVERY call — chain or plain random —
+        # so neither draw can squat a declared manager's name.
+        # See: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
+        declared_managers = pick_declared_managers_from_env( project, os.environ )
         # ── TEMPORARY DEBUG (2026-05-19, Tiberius session 4e724860) ─────────
         # Investigating why LookML hook never successfully allocates a persona
         # despite the backend chain working when called manually via curl.
         # Remove once root cause identified.
         _env_key   = f"COSA_VOICE_PREFERRED_PERSONA__{project.upper().replace( '-', '_' )}"
         _env_raw   = os.environ.get( _env_key, "<UNSET>" )
-        print( f"[LOOKML-DEBUG] phase4.5 entry — project={project!r} env_key={_env_key!r} env_raw={_env_raw!r} preferred={preferred!r}",
+        print( f"[LOOKML-DEBUG] phase4.5 entry — project={project!r} env_key={_env_key!r} env_raw={_env_raw!r} spawned_chain_env={os.environ.get( 'COSA_VOICE_PERSONA_CHAIN', '<UNSET>' )!r} chain={chain!r}",
                file=sys.stderr )
         try:
             voice_persona_server_url = os.getenv( "LUPIN_APP_SERVER_URL", "http://localhost:7999" )
-            print( f"[LOOKML-DEBUG] calling _allocate_voice_persona_via_http — server={voice_persona_server_url!r} sid={stable_session_id!r} preferred={preferred!r}",
+            print( f"[LOOKML-DEBUG] calling _allocate_voice_persona_via_http — server={voice_persona_server_url!r} sid={stable_session_id!r} chain={chain!r}",
                    file=sys.stderr )
             allocated = _allocate_voice_persona_via_http(
                 voice_persona_server_url, project, stable_session_id,
-                previous_persona_name  = previous_persona_name,
-                preferred_persona_name = preferred
+                previous_persona_name = previous_persona_name,
+                persona_chain         = chain,
+                declared_managers     = declared_managers
             )
             print( f"[LOOKML-DEBUG] _allocate_voice_persona_via_http returned — allocated={allocated!r}",
                    file=sys.stderr )

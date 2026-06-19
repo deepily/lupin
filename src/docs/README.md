@@ -18,6 +18,7 @@
 | [proxy-admin-guide.md](proxy-admin-guide.md) | Trust Dashboard and ratification guide | `routers/decision_proxy.py` |
 | [lupin-mpa-frontend-architecture.md](lupin-mpa-frontend-architecture.md) | Multi-page app frontend design | `src/lib/clients/` |
 | [cost-model-bounded-cc-vs-firewalled-sdk.md](cost-model-bounded-cc-vs-firewalled-sdk.md) | LLM-cost decision framework: bounded ClaudeCodeJob (Max-covered) vs direct Anthropic SDK (firewalled, metered); migration playbook + off-peak scheduling rule | `CLAUDE.md` § "COST MODEL"; `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` |
+| [fleet-liveness-and-task-store-architecture.md](fleet-liveness-and-task-store-architecture.md) | **Top-to-bottom** fleet liveness + unified task-store: one store / three readers (Stop-hook self-poke · arbiter :8001 · UI card), the heartbeat seam + `owed_source_from_store` cutover flag + fail-safe, arbiter detectors (staleness/tap-ACK/whole-fleet-stall), manager/worker lifecycle, migration drain | `src/lupin_cli/claude_code/hooks/`, `src/cosa/agents/heartbeat_arbiter/`, `src/cosa/rest/routers/tasks.py` |
 
 ## Agentic Jobs & Recovery
 
@@ -31,6 +32,7 @@ These three features share a common foundation in `src/cosa/agents/shared/`.
 | [agents/test-fix-expediter-guide.md](agents/test-fix-expediter-guide.md) | Test-failure auto-recovery agent (TFE) — Phase 0 clustering, `TestSuiteCompletionWatchdog`, 16 INI keys | `src/cosa/agents/test_fix_expediter/` |
 | [agents/test-suite-scheduling-guide.md](agents/test-suite-scheduling-guide.md) | `TestSuiteJob` + `/schedule-tests` skill — suite types, monopolize mode, remediation snapshot schema v1.0 | `src/cosa/agents/test_suite/` |
 | [agents/shared-fix-primitives-reference.md](agents/shared-fix-primitives-reference.md) | `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` — how to add a new expediter agent | `src/cosa/agents/shared/` |
+| [agents/heartbeat-arbiter-routing-guide.md](agents/heartbeat-arbiter-routing-guide.md) | Heartbeat-arbiter routing & recipients — the 13-case→6-tier model, active-manager resolver + phantom guard, two delivery mechanisms, and the health-loop (Loop A → Rick-only) | `src/cosa/agents/heartbeat_arbiter/`, `src/lupin_arbiter_app/` |
 
 ## Operations & Configuration
 
@@ -69,3 +71,4 @@ Deep-dive documentation for the JWT authentication system (relocated from `docs/
 | agents/test-fix-expediter-guide.md | `src/cosa/agents/test_fix_expediter/` (197 tests) | 2026-04-10 |
 | agents/test-suite-scheduling-guide.md | `src/cosa/agents/test_suite/job.py` + `/schedule-tests` skill | 2026-04-10 |
 | agents/shared-fix-primitives-reference.md | `src/cosa/agents/shared/` (3 modules, extracted Session 1cfcdf73) | 2026-04-10 |
+| agents/heartbeat-arbiter-routing-guide.md | `arbiter_routing.py` / `arbiter_job.py` / `manager_resolver.py` / `lupin_arbiter_app/{fleet_arbiter_loop,app,arbiter_live_notify,health_watcher}.py` | 2026-06-09 |

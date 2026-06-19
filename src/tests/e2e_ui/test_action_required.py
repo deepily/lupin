@@ -29,7 +29,7 @@ class TestActionRequiredLayout:
         Ensures:
             - Action section wrapper element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-action-section" ).count() > 0
@@ -44,7 +44,7 @@ class TestActionRequiredLayout:
         Ensures:
             - Active slot element exists for displaying current notification
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-action-active-slot" ).count() > 0
@@ -59,7 +59,7 @@ class TestActionRequiredLayout:
         Ensures:
             - Pending queue element exists for queued notifications
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-action-pending-queue" ).count() > 0
@@ -74,7 +74,7 @@ class TestActionRequiredLayout:
         Ensures:
             - No active notification displayed (slot exists but is empty or hidden)
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         slot = logged_in_page.get_by_test_id( "notifications-action-active-slot" )
@@ -95,7 +95,7 @@ class TestActionRequiredLayout:
         Ensures:
             - No pending notifications queued
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         queue = logged_in_page.get_by_test_id( "notifications-action-pending-queue" )

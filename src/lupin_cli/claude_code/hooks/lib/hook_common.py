@@ -170,15 +170,20 @@ def emit_json( data ):
 
 def get_timestamp():
     """
-    Get current UTC timestamp in human-readable format.
+    Get current US/Eastern timestamp in human-readable format.
+
+    Uses the project's canonical US/Eastern timezone (matching the FastAPI
+    server + `cosa.utils.util`), NOT host-local/UTC: the hook runs on the host
+    which is often UTC, so we convert explicitly — otherwise hook-event times
+    read 4-5h ahead of the EST the rest of the system reports. (2026-06-05)
 
     Ensures:
-        - Returns formatted string with date, time, and milliseconds
+        - Returns formatted string with date, time, and milliseconds in EST/EDT
 
     Returns:
-        str: Formatted timestamp (e.g., "2026.03.12 @ 17:15 56,123ms")
+        str: Formatted timestamp (e.g., "2026.06.05 @ 21:15 56,123ms")
     """
-    now = datetime.now( timezone.utc )
+    now = cu.get_current_datetime_raw( tz_name="US/Eastern" )
     return now.strftime( "%Y.%m.%d @ %H:%M %S" ) + f",{now.microsecond // 1000:03d}ms"
 
 
@@ -389,32 +394,107 @@ def drain_and_acknowledge( session_id ):
 
 # ── Voice Context Injection Helpers ───────────────────────────────────────────
 
+# Marker that prefixes every human-voice context line. Its PRESENCE in an
+# assembled context string is the signal that a human spoke — used by
+# enrich_voice_context() to decide whether to append the TTS-acknowledge rider.
+# Peer-DM (ai_to_ai) blocks deliberately carry NO such marker (they are
+# self-contained <system-reminder> blocks), so a pure-DM context skips the rider.
+VOICE_LINE_PREFIX = "[Voice]: "
+
+
+def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None ):
+    """
+    Build the peer-DM <system-reminder> block — the SINGLE source of peer-DM
+    framing for BOTH delivery paths: the listener's idle tmux-wake
+    (cc_notification_listener._handle_peer_dm) and the active buffer-drain
+    (format_voice_context's ai_to_ai branch). One framing, one name (no drift
+    between the two paths).
+
+    Per §6a of
+    src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md:
+    a peer DM is NOT human voice. The block carries the sender's persona + icon +
+    message_id + thread_id and a dm_send reply affordance — and deliberately NO
+    speakerphone voice rider / "user spoke" / notify-to-speak instruction. Peers
+    reply via dm_send, never TTS.
+
+    Requires:
+        - body is the message text (any string; caller strips/validates emptiness)
+        - persona, icon, msg_id, thread_id are strings or None
+
+    Ensures:
+        - Returns a complete "<system-reminder>...</system-reminder>" block
+        - Missing persona falls back to "a peer session"; missing icon/ids → ""
+        - Output is identical regardless of which delivery path calls it
+
+    Args:
+        body: The inline DM body
+        persona: Sender's voice persona name
+        icon: Sender's persona icon
+        msg_id: Originating notification id (for reply_to threading)
+        thread_id: Conversation thread id (for thread_id threading)
+
+    Returns:
+        str: The peer-DM system-reminder block
+    """
+    persona      = persona or "a peer session"
+    icon         = icon or ""
+    msg_id       = msg_id or ""
+    thread_id    = thread_id or ""
+    sender_label = f"{persona} {icon}".strip()
+    reply_affordance = (
+        f'↳ Reply via dm_send( recipient="{persona}", body="<your reply>", '
+        f'reply_to="{msg_id}", thread_id="{thread_id}" )'
+    )
+    reminder_body = (
+        f"PEER DM from {sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
+        f"{body}\n\n"
+        f"{reply_affordance}"
+    )
+    return f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+
+
 def format_voice_context( messages ):
     """
-    Format drained voice messages into a [Voice] context string for CC injection.
+    Format drained buffer messages into a context string for CC injection.
+
+    Branches on each message's `direction` (notification-native AI↔AI messaging,
+    Phase 3 §6a): a `human_to_ai`/voice message becomes a "[Voice]: ..." line; an
+    `ai_to_ai` peer DM becomes a self-contained peer-DM <system-reminder> block
+    (built by build_peer_dm_reminder) — NO "[Voice]:" prefix and NO voice rider.
 
     Requires:
         - messages is a list of dicts (from drain_voice_buffer)
 
     Ensures:
         - Returns empty string if messages is empty or all messages are blank
-        - Each non-empty message gets a "[Voice]: " prefix
-        - Messages are joined with newlines
-        - Whitespace is stripped from each message
+        - Each non-empty voice message gets a "[Voice]: " prefix
+        - Each non-empty ai_to_ai message becomes a peer-DM reminder block
+        - Lines/blocks are joined with newlines
+        - Whitespace is stripped from each message body
 
     Args:
         messages: List of buffered message dicts from voice buffer drain
 
     Returns:
-        str: Newline-joined "[Voice]: ..." context string, or ""
+        str: Newline-joined context (voice lines and/or peer-DM blocks), or ""
     """
     if not messages:
         return ""
     lines = []
     for msg in messages:
         text = msg.get( "message", msg.get( "text", "" ) ).strip()
-        if text:
-            lines.append( f"[Voice]: {text}" )
+        if not text:
+            continue
+        if msg.get( "direction" ) == "ai_to_ai":
+            lines.append( build_peer_dm_reminder(
+                text,
+                persona   = msg.get( "sender_persona" ),
+                icon      = msg.get( "sender_icon" ),
+                msg_id    = msg.get( "notification_id" ) or msg.get( "id" ),
+                thread_id = msg.get( "thread_id" ),
+            ) )
+        else:
+            lines.append( f"{VOICE_LINE_PREFIX}{text}" )
     return "\n".join( lines )
 
 
@@ -448,7 +528,41 @@ def build_additional_context( context_text, hook_event_name ):
     }
 
 
-def enrich_voice_context( voice_ctx ):
+def _context_has_human_voice( messages ):
+    """
+    Structural §6a test: does the drained buffer carry at least one human-voice
+    message (direction != "ai_to_ai") with a non-blank body?
+
+    Mirrors format_voice_context's branch + blank-skip EXACTLY so the "is there
+    a [Voice]: line in the rendered context?" question is answered from the
+    message DIRECTION (structure), never by sniffing the assembled string for a
+    "[Voice]: " substring — a peer-DM body that literally contains "[Voice]: "
+    must NOT be misread as human voice (F2, Cheech 2026-06-15).
+
+    Requires:
+        - messages is a list of buffer dicts, or None
+
+    Ensures:
+        - Returns True iff some msg has direction != "ai_to_ai" AND a non-blank
+          message/text body (the same predicate that yields a [Voice]: line)
+        - Returns False for None/empty/all-ai_to_ai/all-blank
+
+    Args:
+        messages: The drained buffer list (same list passed to format_voice_context)
+
+    Returns:
+        bool: Whether a human-voice line is present in the rendered context
+    """
+    for msg in ( messages or [] ):
+        if msg.get( "direction" ) == "ai_to_ai":
+            continue
+        text = msg.get( "message", msg.get( "text", "" ) ).strip()
+        if text:
+            return True
+    return False
+
+
+def enrich_voice_context( voice_ctx, messages=None ):
     """
     Append notification reminder suffix to voice context string.
 
@@ -456,21 +570,39 @@ def enrich_voice_context( voice_ctx ):
     always gets the cosa-voice acknowledgment instruction alongside
     voice content.
 
+    The §6a decision — whether to append the human-voice TTS-acknowledge rider —
+    is made STRUCTURALLY from `messages` (the drained buffer list), NOT by
+    sniffing `voice_ctx` for a "[Voice]: " substring. The old substring check
+    leaked the rider onto a pure peer-DM context whenever a DM body happened to
+    contain the literal "[Voice]: " marker (F2, Cheech 2026-06-15). Callers pass
+    the same `messages` list they handed to format_voice_context.
+
     Requires:
         - voice_ctx is a string (may be empty)
+        - messages is the drained buffer list (or None — treated as "no human
+          voice", the §6a-safe default: never wrongly attach the human rider)
 
     Ensures:
         - Returns empty string if voice_ctx is empty/falsy (passthrough)
-        - Returns voice_ctx + notification reminder when non-empty
+        - Returns voice_ctx UNCHANGED when no drained message is human voice
+          (a pure peer-DM context, §6a): a peer DM must NOT be answered via TTS
+          notify(), so the voice-acknowledge rider is suppressed — the peer-DM
+          block already carries its own dm_send reply affordance.
+        - Returns voice_ctx + notification reminder when human voice IS present
+          (mixed voice+DM keeps the rider, since the voice line still needs it)
 
     Args:
         voice_ctx: Formatted voice context string from format_voice_context()
+        messages:  The drained buffer list (direction-bearing); None → no rider
 
     Returns:
-        str: Enriched voice context with reminder, or ""
+        str: Enriched voice context with reminder, or voice_ctx unchanged, or ""
     """
     if not voice_ctx:
         return ""
+    if not _context_has_human_voice( messages ):
+        # Pure peer-DM context (or no human voice) — no TTS-ack rider (§6a).
+        return voice_ctx
     return (
         f"{voice_ctx}\n\n"
         "IMPORTANT: You MUST acknowledge the user's voice message by sending "
@@ -481,7 +613,7 @@ def enrich_voice_context( voice_ctx ):
     )
 
 
-def build_voice_deny_response( voice_ctx ):
+def build_voice_deny_response( voice_ctx, messages=None ):
     """
     Build PreToolUse deny response when voice buffer has content.
 
@@ -490,17 +622,21 @@ def build_voice_deny_response( voice_ctx ):
 
     Requires:
         - voice_ctx is a non-empty string containing formatted voice messages
+        - messages is the drained buffer list (threaded to enrich_voice_context
+          for the structural §6a rider decision), or None
 
     Ensures:
         - Returns dict with hookSpecificOutput containing:
           - hookEventName: "PreToolUse"
           - permissionDecision: "deny"
           - permissionDecisionReason: instruction to address voice message first
-          - additionalContext: voice content + notification reminder
+          - additionalContext: voice content + notification reminder (rider added
+            only when `messages` carries human voice, §6a)
         - Structure is ready for emit_json()
 
     Args:
         voice_ctx: Formatted voice context string from format_voice_context()
+        messages:  The drained buffer list (direction-bearing); None → no rider
 
     Returns:
         dict: Hook output that denies the tool call and injects voice context
@@ -514,7 +650,7 @@ def build_voice_deny_response( voice_ctx ):
                 "over this tool call. You must address the user's message before "
                 "continuing. You may re-run this tool afterward if still needed."
             ),
-            "additionalContext"        : enrich_voice_context( voice_ctx )
+            "additionalContext"        : enrich_voice_context( voice_ctx, messages )
         }
     }
 
@@ -574,19 +710,24 @@ def build_stop_block_with_system_message( reason, system_message ):
     }
 
 
-def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY ):
+def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY, wrap=True ):
     """
-    Inject qualifier text into Claude Code's tmux input via detached background process.
+    Inject text into Claude Code's tmux input via a detached background process.
 
     After a stop block, CC enters "waiting for user input" state. This spawns a
     background process that sleeps briefly, then uses tmux send-keys to inject the
-    qualifier text as first-class user input. Uses bash positional args ($1, $2, $3)
-    to safely pass text without shell escaping.
+    text as first-class user input. Uses bash positional args ($1, $2, $3) to
+    safely pass text without shell escaping.
 
     Requires:
         - session_id is a non-empty string
-        - text is a non-empty string (the qualifier to inject)
+        - text is a non-empty string (the content to inject)
         - delay is a positive float (seconds before injection)
+        - wrap is a bool — True (default) applies the speakerphone voice rider
+          (the original idle-qualifier use, where the text is the human's reply).
+          False injects the text VERBATIM — for callers that have already built a
+          complete <system-reminder> block (e.g. a peer-DM reminder, §6a), which
+          must NOT receive the human-voice rider.
 
     Ensures:
         - Resolves tmux session name from session_id via find_session_by_id()
@@ -597,8 +738,9 @@ def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY ):
 
     Args:
         session_id: Claude Code session ID (full or truncated)
-        text: Qualifier text to inject into CC's input
+        text: Text to inject into CC's input
         delay: Seconds to wait before tmux injection (default: TMUX_INJECTION_DELAY)
+        wrap: Apply the speakerphone voice rider (default True); False = verbatim
     """
     try:
         from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
@@ -624,16 +766,18 @@ def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY ):
         # Phase 5b — speakerphone rider: wrap qualifier text with the per-turn
         # rider. The qualifier comes from the user's reply to the idle-aware
         # Stop hook's "Anything else?" prompt and is injected back into
-        # Claude's input — clear inbound path.
+        # Claude's input — clear inbound path. Skipped for wrap=False callers
+        # (e.g. peer-DM reminders), which carry no human-voice contract.
         # See: src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md
-        try:
-            text = speakerphone_wrap(
-                text,
-                source     = "hook-idle-prompt",
-                session_id = session_id
-            )
-        except Exception:
-            pass  # Non-fatal — fall through with raw text
+        if wrap:
+            try:
+                text = speakerphone_wrap(
+                    text,
+                    source     = "hook-idle-prompt",
+                    session_id = session_id
+                )
+            except Exception:
+                pass  # Non-fatal — fall through with raw text
 
         subprocess.Popen(
             [ "bash", "-c",
@@ -650,6 +794,61 @@ def inject_qualifier_via_tmux( session_id, text, delay=TMUX_INJECTION_DELAY ):
 
     except Exception:
         pass  # Hook must never block Claude Code
+
+
+def deliver_pending_peer_dms( session_id ):
+    """
+    Drain the voice buffer and tmux-deliver any pending peer DMs (direction=
+    ai_to_ai) with NO voice rider, per §6 of
+    src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md.
+
+    Used by the two hook paths where the main format_voice_context drain does NOT
+    run, so a buffered DM would otherwise be discarded/lost:
+      - Stop hook, speakerphone branch (early-returns before the main drain;
+        every manager runs speakerphone, so this is the manager DM-delivery path).
+      - Notification hook at idle_prompt (formerly drain-and-discard).
+
+    Each ai_to_ai entry is framed by the shared build_peer_dm_reminder and
+    injected via inject_qualifier_via_tmux( wrap=False ) to wake the pane. Non-DM
+    (voice) entries are NOT delivered here — they are returned for the caller's
+    normal voice handling (in practice the buffer holds only DMs, since the voice
+    path injects directly without buffering).
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Drains the buffer exactly once (atomic drain_voice_buffer)
+        - tmux-injects each non-empty ai_to_ai entry, no voice rider
+        - Returns the list of non-DM (voice) messages drained but not delivered
+        - Never raises (drain + inject are each self-isolating)
+
+    Returns:
+        list[dict]: the non-DM (voice) messages drained but not delivered here
+    """
+    voice_messages = []
+    try:
+        messages = drain_voice_buffer( session_id )
+    except Exception:
+        return voice_messages
+
+    for msg in messages:
+        if msg.get( "direction" ) != "ai_to_ai":
+            voice_messages.append( msg )
+            continue
+        body = msg.get( "message", msg.get( "text", "" ) ).strip()
+        if not body:
+            continue
+        reminder = build_peer_dm_reminder(
+            body,
+            persona   = msg.get( "sender_persona" ),
+            icon      = msg.get( "sender_icon" ),
+            msg_id    = msg.get( "notification_id" ) or msg.get( "id" ),
+            thread_id = msg.get( "thread_id" ),
+        )
+        inject_qualifier_via_tmux( session_id, reminder, wrap=False )
+
+    return voice_messages
 
 
 def is_mcp_voice_tool( tool_name ):
@@ -1041,22 +1240,37 @@ def _brevity_rules():
     The TTS brevity-rules block migrated from CLAUDE.md per Phase 5 of the
     speakerphone refactor. Fires only when speakerphone_on=True (live TTS).
 
+    Per ratified PIP S110 (Rick-approved, 2026-06-15): the spoken target is
+    SENTENCE-based (max 3), NOT word/char COUNTING — LLMs count sentences
+    reliably but not words/chars. The named char cap is the server REJECT
+    BOUNDARY, not a target; it is single-sourced via cu.get_spoken_char_cap()
+    (lupin-app.ini key "cosa voice spoken char cap") — the SAME source the
+    caller-side enforcement guard reads — so the rider's number and the
+    enforcement check can never drift.
+
     Ensures:
         - Returns a non-empty paragraph describing how the closing `notify()`
           spoken-text should differ from the terminal reply
+        - Interpolates the live spoken-char reject boundary
 
     Returns:
         str: Brevity guidance text
     """
+    cap = cu.get_spoken_char_cap()
     return (
-        "Brevity for TTS: re-craft the spoken `message` for speech, do NOT pipe "
-        "terminal markdown through `notify()`. Strip headings, bullets, fenced "
-        "code blocks, inline backticks, file:line refs, JSON, hashes, and URLs "
-        "from the spoken text — those are TTS-hostile. Routine closings about "
-        "60 words; substantive turns 80-120 words. Speak the verdict, not the "
-        "inventory. Acknowledge receipt at turn-start in one sentence BEFORE "
-        "tool calls. Rich detail goes in the `abstract` parameter (rendered to "
-        "the UI card); the two channels are complementary, not duplicates."
+        "Brevity for TTS: re-craft the spoken `message` for speech — don't pipe "
+        "terminal markdown through `notify()`. Strip headings, bullets, code "
+        "fences, inline backticks, file:line refs, JSON, hashes, URLs (all "
+        "TTS-hostile). Max 3 sentences: s1 = headline/verdict, s2-3 = at most "
+        "two takeaways. All rich detail goes in `abstract` (UI card; not "
+        "length-limited). Speak the verdict, not the inventory. HARD LIMIT: the "
+        f"server REJECTS a spoken payload over ~{cap} chars — the ENTIRE "
+        "notify/ask fails (perceived silence + burned retries); if you're near "
+        "it, cut to a headline, don't trim word-by-word. For ask_*/converse: the "
+        "spoken question is ONE short line (the question only) — pros/cons + "
+        "your recommended option go in the option descriptions + `abstract`, "
+        "never in the spoken text. Acknowledge receipt in one sentence before "
+        "tool calls."
     )
 
 

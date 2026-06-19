@@ -9,7 +9,7 @@ Created: 2025-10-17
 
 import pytest
 from fastapi.testclient import TestClient
-from fastapi_app.main import app
+from lupin_app.main import app
 from cosa.rest.auth import get_current_user, get_current_user_id
 from cosa.rest.jwt_service import create_access_token
 from cosa.config.configuration_manager import ConfigurationManager

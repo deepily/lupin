@@ -5,8 +5,9 @@ import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createSenderCardRecorderRenderer } from "../../../../fastapi_app/static/js/multiplexer/render/SenderCardRecorderRenderer";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createSenderCardRecorderRenderer } from "../../../../lupin_app/static/js/multiplexer/render/SenderCardRecorderRenderer";
+import { recordingManager } from "../../../../lupin_app/static/js/multiplexer/audio/recordingManager";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -206,6 +207,86 @@ test("Re-record click (a .record-button in ready_to_send state) re-invokes the r
     `expected re-record to traverse pipeline; got state=${state} error=${errorEl !== null}`);
 });
 
+// Coverage backfill (inherited gap) — a .cc-voice-input footer WITHOUT a
+// data-session-hash attribute. Exercises the `getAttribute(...) ?? ""` nullish
+// arms in BOTH paintVoiceInput (at mount) AND handleRecordClick (on click).
+test("footer missing data-session-hash: paint + record-click both fall back to empty sessionHash", () => {
+  const bus  = createEventBusForTesting();
+  const root = document.createElement("div");
+  root.id = "sender-cards-container";
+  const card = document.createElement("div");
+  card.className = "sender-card";
+  const voiceInput = document.createElement("div");
+  voiceInput.className = "cc-voice-input";
+  // Deliberately NO data-session-hash (and no data-sender-id) — the defensive
+  // `?? ""` fallbacks must hold.
+  card.appendChild(voiceInput);
+  root.appendChild(card);
+  document.body.appendChild(root);
+
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root); // paintVoiceInput runs on the attr-less footer → `?? ""` arm
+  // Idle paint still produced a Record button despite the missing hash.
+  const button = voiceInput.querySelector(".record-button") as HTMLButtonElement;
+  assert.notEqual(button, null);
+  button.click(); // handleRecordClick → sessionHash "" → early return (ignored)
+  // No recording started; state stays idle.
+  assert.equal(voiceInput.getAttribute("data-recorder-state"), "idle");
+});
+
+// Coverage backfill (inherited gap) — drive the recorder into ready_to_send so
+// the paintVoiceInput else-arm (textarea + Re-record + Send) actually renders.
+// recordingManager is a singleton; stub startRecording to fire onComplete
+// synchronously (the real mic→transcription round-trip is the smoke tier).
+test("ready_to_send paint: onComplete transitions to ready_to_send and renders textarea + Send", () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+
+  const original = recordingManager.startRecording.bind(recordingManager);
+  ( recordingManager as unknown as { startRecording: (o: { onComplete?: (t: string, b: Blob) => void }) => Promise<void> } )
+    .startRecording = async (opts) => { opts.onComplete?.("hello world", new Blob()); };
+  try {
+    const button = root.querySelector(".record-button") as HTMLButtonElement;
+    button.click(); // → handleRecordClick → startRecording(stub) → onComplete → ready_to_send paint
+  } finally {
+    ( recordingManager as unknown as { startRecording: typeof original } ).startRecording = original;
+  }
+
+  const voiceInput = root.querySelector(".cc-voice-input") as HTMLElement;
+  assert.equal(voiceInput.getAttribute("data-recorder-state"), "ready_to_send");
+  const textarea = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  assert.notEqual(textarea, null);
+  assert.equal(textarea.value, "hello world");
+  assert.notEqual(voiceInput.querySelector(".send-button"), null);
+  assert.equal(voiceInput.querySelector(".record-button")!.textContent, "Re-record");
+});
+
+// Covers the `entry.transcription ?? ""` null-arm in the ready_to_send paint:
+// onComplete invoked WITHOUT a transcription → textarea falls back to empty.
+test("ready_to_send paint with undefined transcription falls back to an empty textarea value", () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+
+  const original = recordingManager.startRecording.bind(recordingManager);
+  ( recordingManager as unknown as { startRecording: (o: { onComplete?: (t: string, b: Blob) => void }) => Promise<void> } )
+    .startRecording = async (opts) => { opts.onComplete?.(undefined as unknown as string, new Blob()); };
+  try {
+    (root.querySelector(".record-button") as HTMLButtonElement).click();
+  } finally {
+    ( recordingManager as unknown as { startRecording: typeof original } ).startRecording = original;
+  }
+
+  const voiceInput = root.querySelector(".cc-voice-input") as HTMLElement;
+  assert.equal(voiceInput.getAttribute("data-recorder-state"), "ready_to_send");
+  const textarea = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  assert.notEqual(textarea, null);
+  assert.equal(textarea.value, "", "undefined transcription falls back to empty string");
+});
+
 // AC-C4 #12 — Permission-denied error surface
 test("permission-denied error path renders the error message in the .cc-voice-input footer", async () => {
   const bus  = createEventBusForTesting();
@@ -225,4 +306,131 @@ test("permission-denied error path renders the error message in the .cc-voice-in
   const state = voiceInput.getAttribute("data-recorder-state");
   assert.ok(errorEl !== null || state === "idle",
     "expected either an error element or state reverted to idle after permission failure");
+});
+
+// ---------------------------------------------------------------------------
+// WP6 (F5 insert-at-caret port) — re-record stash + caret splice + caret
+// restore. Drives the renderer through a REAL first record (stubbed
+// recordingManager), user edits + caret placement, then a Re-record whose
+// new transcription must splice at the caret instead of clobbering.
+// ---------------------------------------------------------------------------
+
+type StartRecordingStub = ( o: { onComplete?: ( t: string, b: Blob ) => void } ) => Promise<void>;
+
+function stubNextTranscription( text: string ): () => void {
+  const original = recordingManager.startRecording.bind(recordingManager);
+  ( recordingManager as unknown as { startRecording: StartRecordingStub } )
+    .startRecording = async (opts) => { opts.onComplete?.(text, new Blob()); };
+  return () => {
+    ( recordingManager as unknown as { startRecording: typeof original } ).startRecording = original;
+  };
+}
+
+function mountReadyToSend( transcription: string ): { root: HTMLElement; voiceInput: HTMLElement; textarea: HTMLTextAreaElement } {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#wp6" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+  const restore = stubNextTranscription(transcription);
+  try {
+    ( root.querySelector(".record-button") as HTMLButtonElement ).click();
+  } finally {
+    restore();
+  }
+  const voiceInput = root.querySelector(".cc-voice-input") as HTMLElement;
+  const textarea   = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  return { root, voiceInput, textarea };
+}
+
+test("WP6: re-record splices new transcription at the caret, preserving user edits", () => {
+  const { voiceInput, textarea } = mountReadyToSend("first take");
+  assert.equal(textarea.value, "first take");
+
+  // User edits, then parks the caret after "edited " (index 7).
+  textarea.value = "edited first take";
+  textarea.focus();
+  textarea.setSelectionRange(7, 7);
+
+  const restore = stubNextTranscription("NEW ");
+  try {
+    ( voiceInput.querySelector(".record-button") as HTMLButtonElement ).click();
+  } finally {
+    restore();
+  }
+
+  const after = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  assert.equal(after.value, "edited NEW first take",
+    "re-record must caret-splice, never clobber the user's edits");
+  assert.equal(after.selectionStart, 7 + "NEW ".length, "caret lands after the inserted text");
+});
+
+test("WP6: re-record replaces ONLY a highlighted range", () => {
+  const { voiceInput, textarea } = mountReadyToSend("Hello cruel world");
+  // Select "cruel" [6, 11).
+  textarea.focus();
+  textarea.setSelectionRange(6, 11);
+
+  const restore = stubNextTranscription("brave");
+  try {
+    ( voiceInput.querySelector(".record-button") as HTMLButtonElement ).click();
+  } finally {
+    restore();
+  }
+
+  const after = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  assert.equal(after.value, "Hello brave world");
+  assert.equal(after.selectionStart, 6 + "brave".length);
+});
+
+test("WP6: first record stays plain-fill (no stash, no caret restore)", () => {
+  const { textarea } = mountReadyToSend("plain first transcription");
+  assert.equal(textarea.value, "plain first transcription",
+    "first record path must be byte-identical to pre-WP6 behavior");
+});
+
+test("WP6: error during re-record drops the stash (next first-record is plain)", async () => {
+  const { voiceInput } = mountReadyToSend("first take");
+
+  // Re-record whose pipeline errors → state reverts to idle, stash dropped.
+  const original = recordingManager.startRecording.bind(recordingManager);
+  ( recordingManager as unknown as { startRecording: ( o: { onError?: ( e: Error ) => void } ) => Promise<void> } )
+    .startRecording = async (opts) => { opts.onError?.(new Error("mic gone")); };
+  try {
+    ( voiceInput.querySelector(".record-button") as HTMLButtonElement ).click();
+  } finally {
+    ( recordingManager as unknown as { startRecording: typeof original } ).startRecording = original;
+  }
+  assert.equal(voiceInput.getAttribute("data-recorder-state"), "idle");
+
+  // A fresh record after the error must take the plain-fill path.
+  const restore = stubNextTranscription("clean slate");
+  try {
+    ( voiceInput.querySelector(".record-button") as HTMLButtonElement ).click();
+  } finally {
+    restore();
+  }
+  const after = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  assert.equal(after.value, "clean slate", "stash must not leak across an errored re-record");
+});
+
+test("WP6: re-record completing with undefined transcription preserves user text untouched", () => {
+  const { voiceInput, textarea } = mountReadyToSend("first take");
+  textarea.value = "user edited text";
+  textarea.focus();
+  textarea.setSelectionRange(4, 4);
+
+  // Transcription arrives undefined (the `?? ""` arm) → splice of "" at the
+  // caret leaves the stashed user text byte-identical.
+  const original = recordingManager.startRecording.bind(recordingManager);
+  ( recordingManager as unknown as { startRecording: StartRecordingStub } )
+    .startRecording = async (opts) => { opts.onComplete?.(undefined as unknown as string, new Blob()); };
+  try {
+    ( voiceInput.querySelector(".record-button") as HTMLButtonElement ).click();
+  } finally {
+    ( recordingManager as unknown as { startRecording: typeof original } ).startRecording = original;
+  }
+
+  const after = voiceInput.querySelector(".cc-voice-input-textarea") as HTMLTextAreaElement;
+  assert.equal(after.value, "user edited text");
+  assert.equal(after.selectionStart, 4, "caret stays at the splice point");
 });

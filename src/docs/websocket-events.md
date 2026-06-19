@@ -272,7 +272,7 @@ Wrapped in the canonical `notification_queue_update` envelope with `notification
 
 Client handling:
 - Legacy UI: `notifications.js::handleConversationModeChanged()` (line ~5552) — client-side maps `payload.on → conversation_mode_active` for the legacy in-memory state model; the legacy handler kept its original method name for callsite stability.
-- Multiplexer UI: `src/fastapi_app/static/js/multiplexer/stores/SenderStore.ts` — `STATE_UPDATE_TYPES` Set includes BOTH `"speakerphone_changed"` (current wire) AND `"conversation_mode_changed"` (post-rename target, in case the type is ever re-renamed back). Reducer reads `payload.active ?? payload.on` to accept either field name. **Forward-compat bridge** — implementer can rename either direction without breaking the client. See `2026-05-19 Run 3 cascade Section D` for the Path III bridge ratification rationale.
+- Multiplexer UI: `src/lupin_app/static/js/multiplexer/stores/SenderStore.ts` — `STATE_UPDATE_TYPES` Set includes BOTH `"speakerphone_changed"` (current wire) AND `"conversation_mode_changed"` (post-rename target, in case the type is ever re-renamed back). Reducer reads `payload.active ?? payload.on` to accept either field name. **Forward-compat bridge** — implementer can rename either direction without breaking the client. See `2026-05-19 Run 3 cascade Section D` for the Path III bridge ratification rationale.
 
 **INI subscription**: included in `lupin-app.ini` `websocket available events` (line 741). Subscribed by both legacy and multiplexer clients via the WS auth handshake.
 
@@ -341,12 +341,14 @@ First message a client must send after connecting to `/ws/queue/{session_id}`.
 {
   "type": "auth_request",
   "token": "Bearer <jwt_token>",
-  "subscribed_events": ["job_state_transition", "notification_queue_update"]
+  "subscribed_events": ["job_state_transition", "notification_queue_update"],
+  "client_type": "mobile"
 }
 ```
 
 - `subscribed_events` is optional; defaults to `["*"]` (all events)
 - `token` can include or omit the `Bearer ` prefix (stripped server-side)
+- `client_type` is optional (F-S6-1, queue WS only): the mobile app sends `"mobile"`; anything else — including absent (existing web clients send nothing) — is recorded as `"web"`. Drives the FCM `ws_wake` trigger: a wake push fires only when the user has NO live session marked `"mobile"`, so a desktop browser never suppresses the phone's wake. The audio WS never records this marker.
 
 ### `auth_success` (Server → Client)
 
@@ -478,7 +480,7 @@ The deprecated name is NOT in the `valid_types` whitelist; pushing it returns HT
 
 The server uses RFC 6455 application close codes (4000–4999) to signal
 auth-failure outcomes that the browser-side state machine
-(`src/fastapi_app/static/js/ws-channel.js`) treats as PERMANENT — the
+(`src/lupin_app/static/js/ws-channel.js`) treats as PERMANENT — the
 channel goes straight to `OPEN_CIRCUIT` and does NOT auto-retry.
 
 Codes were introduced in Phase 5 of the WS reconnect circuit-breaker

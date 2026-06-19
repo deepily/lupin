@@ -7,16 +7,16 @@ import assert from "node:assert/strict";
 import {
   createEventBusForTesting,
   type EventBus,
-} from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+} from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createBroadcastWrapper,
   BROADCAST_WHITELIST,
   type BroadcastChannelLike,
-} from "../../../fastapi_app/static/js/multiplexer/shared/broadcast";
+} from "../../../lupin_app/static/js/multiplexer/shared/broadcast";
 import type {
   LupinEvent,
   LupinEventType,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // In-process BroadcastChannel mock. All instances created with the same
 // `name` see each other's messages (mimicking the cross-tab semantic) but

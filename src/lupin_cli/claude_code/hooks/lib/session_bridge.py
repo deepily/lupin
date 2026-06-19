@@ -38,7 +38,9 @@ import json
 import os
 import re
 import signal as signal_mod
+import sys
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Optional, Tuple
@@ -54,6 +56,50 @@ _fallback_session_id: str = uuid.uuid4().hex[:8]
 SOURCE_PPID         = "ppid"
 SOURCE_GRANDPARENT  = "grandparent"
 SOURCE_CWD_FALLBACK = "cwd_fallback"
+
+
+def canonical_persona_key( name ) -> str:
+    """
+    Canonical persona key for cross-seam task-store matching.
+
+    THE single normalizer both the owed-work READ seam (stop hook
+    `_owed_count_from_store`) and the task-store WRITE seam must agree on, so a
+    persona's `owner_persona` rows are ALWAYS found regardless of which surface
+    spelled the name. The store holds names in the form the voice pool defines —
+    accent-stripped + punctuation-stripped + lowercased, INTERNAL SPACES KEPT
+    (e.g. display "María" → "maria", "Mr. Radio" → "mr radio"). This mirrors that
+    transform and is IDEMPOTENT, so it is safe whether the caller passes the
+    display form ("María") or the already-normalized pool form ("maria").
+
+    Drift history (the bug this kills): the READ seam previously used a bare
+    `.lower()`, so a persona whose name carried an accent/period ("María",
+    "Mr. Radio") queried "maría"/"mr. radio" and matched ZERO of the store's
+    "maria"/"mr radio" rows → false "nothing owed". Note this is DISTINCT from
+    `follow_through_escalation_watcher._norm_persona`, which strips spaces too
+    ("mr radio" → "mrradio") and would NOT match the store — do not substitute it.
+
+    Requires:
+        - name is a string or None
+
+    Ensures:
+        - None / non-string / empty / whitespace-only → "" (unmatchable sentinel)
+        - otherwise: NFKD-decomposed, combining marks dropped, lowercased,
+          reduced to [a-z0-9 ] (punctuation/emoji removed, single spaces kept),
+          internal runs of whitespace collapsed to one space, ends trimmed
+        - IDEMPOTENT: canonical_persona_key( canonical_persona_key( x ) ) == canonical_persona_key( x )
+
+    Args:
+        name: A persona name in display or already-normalized form
+
+    Returns:
+        str: the canonical store key
+    """
+    if not name or not isinstance( name, str ):
+        return ""
+    decomposed = unicodedata.normalize( "NFKD", name )
+    ascii_only = "".join( c for c in decomposed if not unicodedata.combining( c ) )
+    stripped   = re.sub( r"[^a-z0-9 ]", "", ascii_only.lower() )
+    return re.sub( r"\s+", " ", stripped ).strip()
 
 
 def _is_pid_alive( pid: int ) -> bool:
@@ -433,6 +479,50 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
         return None
 
 
+def resolve_project_name( environ=None ) -> str:
+    """
+    Resolve the current session's project name — the ONE project-name
+    resolver shared by every hook consumer (the task-store write gate's
+    manager-figure predicate, the per-repo persona-chain env-key lookup,
+    and hook credential resolution). One name at every layer; the former
+    `manager_figure.derive_project_name` and `hook_credentials.
+    _derive_project_name` duplicates were converged here (bug 9bf1dc4a).
+
+    Resolution order:
+        1. The bridge file's SessionStart cwd → nearest `.git` ancestor
+           (via `_resolve_project_from_bridge_cwd`, alias-normalized). This
+           is the CORRECT source: it is anchored to where `claude` was
+           actually launched, so a NON-lupin session resolves to its OWN
+           project instead of always collapsing to the `LUPIN_ROOT`
+           basename. The old `LUPIN_ROOT`-basename rule returned "lupin"
+           for EVERY session regardless of where it ran — bug 9bf1dc4a:
+           the persona-chain lookup and credential section both keyed off
+           the wrong project for any non-lupin session.
+        2. Fallback ONLY when no bridge resolves (no bridge file, no `cwd`
+           field, no `.git` ancestor): the `LUPIN_ROOT` basename, then the
+           live cwd basename — the legacy rule, kept as a degraded last
+           resort so callers always get a non-empty name.
+
+    Requires:
+        - environ is a Mapping or None (None → os.environ)
+
+    Ensures:
+        - Returns a lowercase, non-empty project name string
+        - Prefers the bridge-cwd-anchored project; only falls back to
+          LUPIN_ROOT/cwd when the bridge cannot resolve one
+        - Never raises
+    """
+    project = _resolve_project_from_bridge_cwd()
+    if project:
+        return project
+    if environ is None:
+        environ = os.environ
+    lupin_root = environ.get( "LUPIN_ROOT", "" )
+    if lupin_root:
+        return Path( lupin_root ).name.lower()
+    return Path.cwd().name.lower()
+
+
 def build_sender_id_for_cc( session_id: Optional[str] = None ) -> Optional[str]:
     """
     Build a Claude Code sender_id for notification routing.
@@ -648,6 +738,241 @@ def find_session_path_by_id( session_id ):
             continue
 
     return None
+
+
+def _pid_confirmed_dead( pid ):
+    """
+    True ONLY when `pid` is DEFINITIVELY gone (ProcessLookupError on kill -0).
+
+    The bias-to-alive companion to _is_pid_alive: where _is_pid_alive answers
+    "is this signalable by us" (EPERM ⇒ dead), this answers the stricter
+    "is this process CONFIRMED gone". A non-int, an EPERM (exists-but-not-ours),
+    or any other OSError returns False — we never confirm death on ambiguity.
+    Used by the fleet-status force-offline path, where a false-dead is the costly
+    error (it would hide a live session).
+
+    Requires:
+        - pid is an int or anything (non-int ⇒ not-confirmed-dead)
+
+    Ensures:
+        - True iff os.kill( pid, 0 ) raises ProcessLookupError
+        - False for non-int, alive pid, EPERM, or any other OSError
+        - pure (stdlib only); never raises
+    """
+    if not isinstance( pid, int ):
+        return False
+    try:
+        os.kill( pid, 0 )
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def find_dead_sessions( candidate_ids ):
+    """
+    Return the subset of `candidate_ids` whose worker process is CONFIRMED dead.
+
+    Unlike find_session_path_by_id / find_active_voice_persona_sessions (which
+    SKIP dead-PID bridges, so they can never surface a dead session), this scans
+    bridges UNFILTERED and positively confirms death via kill -0. Built for the
+    fleet-status "offline" override (drop a /exit'd session in ~1 poll, not ~1h).
+
+    A candidate is dead iff its bridge file is found AND it carries ≥1 known pid
+    (filename pid, listener_pid, cc_pid) and EVERY known pid is _pid_confirmed_dead.
+
+    BIAS-TO-ALIVE (never over-report death):
+        - host-PID-trust gated — returns empty inside a container (host pids are
+          invisible there, so kill -0 would read the whole fleet as dead)
+        - a candidate with no readable/matching bridge is NOT dead (absence ≠ death)
+        - a bridge with no known int pid is NOT dead (no evidence)
+        - EPERM / ambiguous kill -0 counts as alive (see _pid_confirmed_dead)
+
+    Requires:
+        - candidate_ids is an iterable of session-id strings (full uuid or 8-char prefix)
+
+    Ensures:
+        - returns a set[str], a subset of the truthy candidate_ids
+        - never raises (a bad bridge file is skipped)
+    """
+    if not _can_trust_host_pids() or not SESSION_DIR.exists():
+        return set()
+    candidates = { c for c in ( candidate_ids or () ) if c }
+    if not candidates:
+        return set()
+
+    dead = set()
+    for path in SESSION_DIR.glob( "cc-*.json" ):
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+        try:
+            with open( path ) as f:
+                data = json.load( f )
+        except ( json.JSONDecodeError, OSError ):
+            continue
+
+        all_ids = list( data.get( "session_ids", [] ) )
+        for field in ( "session_id", "stable_session_id" ):
+            val = data.get( field, "" )
+            if val and val not in all_ids:
+                all_ids.append( val )
+
+        matched = None
+        for known_id in all_ids:
+            for cand in candidates:
+                if known_id == cand or known_id[ :8 ] == cand[ :8 ]:
+                    matched = cand
+                    break
+            if matched:
+                break
+        if matched is None:
+            continue
+
+        pids = [ p for p in ( _extract_pid_from_filename( path.name ),
+                              data.get( "listener_pid" ),
+                              data.get( "cc_pid" ) ) if isinstance( p, int ) ]
+        if pids and all( _pid_confirmed_dead( p ) for p in pids ):
+            dead.add( matched )
+
+    return dead
+
+
+# ── v2.1 liveness-stamp observability (arbiter design 03 §10.6 rider) ──────────
+# A swallowed bridge-touch failure must be DIAGNOSABLE, never silently dropped —
+# a dropped stamp would read as false-idle in the arbiter, the exact dishonesty
+# the C4 state/liveness split exists to prevent. Two cheap, hot-path-safe
+# signals (both fire ONLY on the failure path, never on success):
+#   • a monotonic in-memory counter — persists in long-lived processes (the
+#     cosa-voice MCP server middleware, the arbiter) for a debug surface to read;
+#   • a ONE-SHOT-per-process stderr line — the diagnosable signal for the
+#     SHORT-LIVED PostToolUse hook (a fresh process per tool call, so the counter
+#     resets each run; the one-shot stderr surfaces a persistent fleet-wide break
+#     as one line per failing invocation without per-call spam within a process).
+_bridge_touch_failure_count  = 0
+_bridge_touch_failure_logged = False
+
+
+def get_bridge_touch_failure_count() -> int:
+    """
+    Ensures:
+        - returns the count of swallowed touch_bridge_mtime() failures since
+          process start (observability rider) — meaningful in long-lived
+          processes; resets per-process for the ephemeral hook. Never raises.
+    """
+    return _bridge_touch_failure_count
+
+
+def _record_bridge_touch_failure() -> None:
+    """
+    Record a swallowed liveness-stamp failure (counter + one-shot stderr).
+
+    Ensures:
+        - increments the in-memory failure counter (always)
+        - writes a single stderr diagnostic on the FIRST failure of this process
+          only (bounded — no per-call spam); subsequent failures count silently
+        - NEVER raises (it runs inside touch_bridge_mtime's except — it must not
+          re-break the no-throw guarantee, so the stderr write is itself guarded)
+    """
+    global _bridge_touch_failure_count, _bridge_touch_failure_logged
+    _bridge_touch_failure_count += 1
+    if not _bridge_touch_failure_logged:
+        _bridge_touch_failure_logged = True
+        try:
+            sys.stderr.write(
+                "[session_bridge] touch_bridge_mtime liveness stamp dropped "
+                "(bridge unreachable); further failures counted, not logged\n"
+            )
+        except Exception:
+            pass
+
+
+def touch_bridge_mtime() -> bool:
+    """
+    Bump THIS session's bridge-file mtime to "now" — the v2.1 direct-state
+    liveness stamp (arbiter design `03` §10.1).
+
+    This is the **one host-side liveness clock** (§10.6 redline C4): the same
+    `~/.claude/sessions/cc-*.json` whose mtime the idle-waiter re-arm, the Stop
+    hook, and the cosa-voice server already bump. Adding the tool-use hook as a
+    fourth writer (§10.1) makes a heads-down worker refresh liveness on every
+    tool call. Because the file is written host-side (never through `:7999`),
+    the clock survives a server wedge.
+
+    **REDLINE C1 (load-bearing, §10.6):** this is a BARE metadata-only
+    `os.utime( path, None )` — it touches mtime/atime ONLY. It performs NO
+    content write (a one-byte write would corrupt the bridge JSON — hard gate),
+    NO transcript read, NO server POST, and NO heavy logic. It is called from
+    the PostToolUse hook which fires on every tool call, so anything heavier
+    would degrade every tool call fleet-wide. Path resolution reuses
+    `_find_session_file()` — a single `cc-{ppid}.json` `.exists()` stat in the
+    common (PPID-hit) case.
+
+    Requires:
+        - nothing (resolves the current process's own bridge file)
+
+    Ensures:
+        - bumps the resolved bridge file's mtime to the current time via
+          os.utime( path, None ) — metadata-only, no content write
+        - returns True if a bridge file was found and successfully touched
+        - returns False if no bridge file resolves or the touch fails
+        - NEVER raises (a hook must never break a tool call)
+
+    Fail-safe by design: the catch is broad (`Exception`), not just `OSError`.
+    This runs on the PostToolUse path — every tool call × every fleet session —
+    so design §10.6 mandates it be a no-op on *any* error. The realistic live
+    failures are all OSError subtypes (missing `~/.claude/sessions`, a
+    permission flip, an FS race where the bridge is unlinked/rotated mid-touch,
+    or `os.getcwd()` failing in `_find_session_file`'s cwd-fallback when the cwd
+    was deleted); the broad catch additionally guarantees that no unforeseen
+    error class can ever propagate out of a tool call.
+    """
+    try:
+        result = _find_session_file()
+        if not result:
+            return False
+        path, _source = result
+        os.utime( path, None )
+        return True
+    except Exception:
+        _record_bridge_touch_failure()
+        return False
+
+
+def get_bridge_mtime( session_id ) -> Optional[ float ]:
+    """
+    Read the bridge-file mtime (epoch seconds) for a session by id — the
+    arbiter's direct liveness reader (arbiter design `03` §10.1/§10.2).
+
+    The consumer-side counterpart to `touch_bridge_mtime()`: the arbiter maps
+    each tracked session_id to its bridge file and reads the mtime so the fleet
+    render can show liveness as an honest age (`bridge 4s ago`), never an
+    inferred boolean (§10.2 — state and liveness stay orthogonal columns).
+
+    Resolves the bridge path via `find_session_path_by_id()` (full-uuid or
+    8-char-prefix match; container-PID-aware). Heavier than
+    `touch_bridge_mtime()` (it globs/reads the session dir), but the arbiter
+    calls it ~once per session per ~60s poll — well outside the hot hook path
+    C1 protects.
+
+    Requires:
+        - session_id is a string (full UUID or 8-char prefix); empty/None
+          yields None
+
+    Ensures:
+        - returns the bridge file's mtime in epoch seconds if the session
+          resolves to a live bridge file
+        - returns None if no bridge file matches or the stat fails
+        - NEVER raises (broad catch — the arbiter poll must survive any single
+          session's bridge-read failure under live FS conditions)
+    """
+    try:
+        path = find_session_path_by_id( session_id )
+        if path is None:
+            return None
+        return path.stat().st_mtime
+    except Exception:
+        return None
 
 
 BRIDGE_FORMAT_VERSION = 2
@@ -1368,13 +1693,30 @@ def prune_dead_persona_bridges():
     return pruned
 
 
-def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
+def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True ):
     """
-    Scan all bridge files for sessions whose voice_persona is non-null.
+    Scan all bridge files for live CC sessions, with an optional persona filter.
 
-    Used by the voice-persona HTTP endpoints to compute pool occupancy:
-    `/allocate` excludes occupied persona names so each session gets a
-    unique voice; `/pool` returns a snapshot for diagnostics.
+    This is the general session-discovery scanner. The same liveness filters
+    always apply; `require_persona` chooses whether persona-less sessions are
+    included:
+
+    - `require_persona=True` (default) — only bridges with a non-null
+      `voice_persona` dict are returned. This is the pool-occupancy semantics
+      the voice-persona HTTP endpoints rely on (`/allocate` excludes occupied
+      persona names; `/pool` snapshots). `find_active_voice_persona_sessions`
+      delegates here with this flag.
+
+    - `require_persona=False` — persona-LESS ("null persona") live sessions are
+      ALSO returned, their persona element projected to `{}` (empty dict) so
+      every existing consumer that does `isinstance( p, dict )` / `p.get(...)`
+      stays safe with zero changes. This is the source the inter-session DM
+      recipient-resolution path uses: a worker that booted when the persona
+      pool was exhausted (or whose allocation raced/failed) has a null persona
+      and is otherwise a BLACK HOLE for inbound DMs — its manager cannot reach
+      it back by session_id because it was filtered out of the candidate list
+      entirely (bug d57dbfea). Including it restores the reachability invariant:
+      any live session addressable by its exact session_id must be reachable.
 
     Two staleness filters apply, in order:
 
@@ -1391,20 +1733,22 @@ def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
        heartbeat updates bridge mtime periodically, so an actively-used
        session keeps its mtime fresh within this window.
 
-    A dead-PID OR stale-mtime bridge with a non-null voice_persona is
-    treated as "free" — its slot is implicitly reclaimed by being
-    filtered out here.
+    A dead-PID OR stale-mtime bridge is treated as "free" — its slot is
+    implicitly reclaimed by being filtered out here.
 
     See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+         src/rnd/v0.1.8/2026.06.17-unified-task-store-followups-plan.md (L4 / d57dbfea)
 
     Requires:
         - stale_threshold_seconds is a positive integer (default 12 hours)
 
     Ensures:
-        - Returns a list of (Path, session_id, persona) tuples for every
-          bridge with a non-null voice_persona dict whose liveness checks pass
+        - When require_persona is True: returns a (Path, session_id, persona)
+          tuple for every live bridge with a non-null voice_persona dict;
+          persona is the dict as stored in the bridge.
+        - When require_persona is False: ALSO returns live persona-less
+          bridges, with persona projected to `{}`.
         - session_id is the canonical id (stable_session_id preferred)
-        - persona is the dict as stored in the bridge
         - Never raises exceptions
         - Skips bridge files that fail to parse or open
         - Skips bridge files whose stat() fails
@@ -1439,20 +1783,40 @@ def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
             with open( path ) as f:
                 data = json.load( f )
 
-            persona = data.get( "voice_persona" )
-            if not isinstance( persona, dict ) or not persona:
+            persona     = data.get( "voice_persona" )
+            has_persona = isinstance( persona, dict ) and bool( persona )
+            if require_persona and not has_persona:
                 continue
 
             sid = data.get( "stable_session_id" ) or data.get( "session_id" )
             if not sid:
                 continue
 
-            results.append( ( path, sid, persona ) )
+            results.append( ( path, sid, persona if has_persona else {} ) )
 
         except ( json.JSONDecodeError, OSError ):
             continue
 
     return results
+
+
+def find_active_voice_persona_sessions( stale_threshold_seconds: int = 43200 ):
+    """
+    Scan all bridge files for sessions whose voice_persona is non-null.
+
+    Thin delegate over `find_active_sessions( require_persona=True )` — the
+    persona-required projection that the voice-persona HTTP endpoints use to
+    compute pool occupancy (`/allocate` excludes occupied persona names so each
+    session gets a unique voice; `/pool` returns a diagnostics snapshot). The
+    liveness filters and return shape are documented on `find_active_sessions`.
+
+    See: src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md
+
+    Returns:
+        list[ tuple[ Path, str, dict ] ]: (bridge_path, session_id, persona)
+        for every live bridge with a non-null voice_persona dict.
+    """
+    return find_active_sessions( stale_threshold_seconds=stale_threshold_seconds, require_persona=True )
 
 
 def find_session_by_tmux( tmux_session ):

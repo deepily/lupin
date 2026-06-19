@@ -29,7 +29,7 @@ class TestQueueSectionsLayout:
         Ensures:
             - TODO queue element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-todo" ).count() > 0
@@ -44,7 +44,7 @@ class TestQueueSectionsLayout:
         Ensures:
             - Running queue element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-running" ).count() > 0
@@ -59,7 +59,7 @@ class TestQueueSectionsLayout:
         Ensures:
             - Done queue element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-done" ).count() > 0
@@ -74,7 +74,7 @@ class TestQueueSectionsLayout:
         Ensures:
             - Dead queue element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-dead" ).count() > 0
@@ -97,7 +97,7 @@ class TestQueueExpandCollapse:
         Ensures:
             - TODO expand button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-todo-expand-btn" ).count() > 0
@@ -112,7 +112,7 @@ class TestQueueExpandCollapse:
         Ensures:
             - Running expand button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-running-expand-btn" ).count() > 0
@@ -127,7 +127,7 @@ class TestQueueExpandCollapse:
         Ensures:
             - Done expand button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-done-expand-btn" ).count() > 0
@@ -142,7 +142,7 @@ class TestQueueExpandCollapse:
         Ensures:
             - Dead expand button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-queue-dead-expand-btn" ).count() > 0
@@ -157,7 +157,7 @@ class TestQueueExpandCollapse:
         Ensures:
             - Button click doesn't cause page error
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         btn = logged_in_page.get_by_test_id( "notifications-queue-todo-expand-btn" )
@@ -183,7 +183,7 @@ class TestQueueFilters:
         Ensures:
             - Own jobs filter button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-filter-own-btn" ).count() > 0
@@ -198,7 +198,7 @@ class TestQueueFilters:
         Ensures:
             - All users filter button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-filter-all-btn" ).count() > 0
@@ -213,7 +213,7 @@ class TestQueueFilters:
         Ensures:
             - Both filter buttons are clickable
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         own_btn = logged_in_page.get_by_test_id( "notifications-filter-own-btn" )

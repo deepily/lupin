@@ -29,6 +29,39 @@
 # and Tier 3 (digest-pinned base image, GCS-FUSE for HF models) intentionally
 # remain on the existing single-stage / curl|bash / baked-models layout below.
 # ============================================================================
+
+# ============================================================================
+# STAGE 0 — multiplexer bundle builder (Node + esbuild → dist/)
+#
+# Produces src/lupin_app/static/dist/multiplexer/{boot.js, boot.<hash>.js,
+# boot.js.map, manifest.json} from the checked-in TypeScript sources.
+#
+# WHY a dedicated stage: dist/ is .gitignore'd AND .dockerignore'd (line 77),
+# so the build context NEVER carries a prebuilt bundle. Without this stage the
+# final image ships no boot.js and the multiplexer 404s on boot in prod. This
+# stage regenerates the bundle deterministically (same esbuild driver the dev
+# loop uses, src/scripts/build-multiplexer.sh) and the runtime stage COPYs the
+# fresh dist/ across the stage boundary.
+#
+# Build context needs (all present, none .dockerignore'd): package.json,
+# package-lock.json, src/scripts/build-multiplexer.sh, and the TS sources under
+# src/lupin_app/static/js/multiplexer/. npm ci installs both deps (xstate) and
+# devDeps (esbuild) — NODE_ENV is left unset so devDeps are included.
+# ============================================================================
+FROM node:22-bookworm-slim AS multiplexer-builder
+WORKDIR /build
+
+# Manifest + lockfile first so the npm-ci layer caches across source-only edits.
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# TS sources + the esbuild driver (build-multiplexer.sh resolves PROJECT_ROOT
+# from its own location: src/scripts/../.. == /build).
+COPY src/scripts/build-multiplexer.sh ./src/scripts/build-multiplexer.sh
+COPY src/lupin_app/static/js/multiplexer ./src/lupin_app/static/js/multiplexer
+RUN npm run build
+
+# ============================================================================
 FROM nvidia/cuda:12.4.1-base-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -232,16 +265,17 @@ RUN python /tmp/patch-pytest-playwright-visual-snapshot.py
 RUN curl -fsSL https://d2lang.com/install.sh | sh
 
 # ----------------------------------------------------------------------------
-# Claude Code CLI (Tier 2 will switch to signed apt repo)
-# Installer respects $HOME — writes to /home/rruiz/.local/bin (rruiz-owned).
+# Claude Code CLI — symlinked from the claude-agent-sdk bundled binary
+# (pinned via uv.lock). One hash-pinned binary serves both the SDK runtime
+# and interactive `claude`; no drift, no extra fetch.
 # ----------------------------------------------------------------------------
-RUN curl -fsSL https://claude.ai/install.sh | bash
+RUN ln -sf "$(python -c 'import claude_agent_sdk as m, pathlib as p; print(p.Path(m.__file__).parent / "_bundled" / "claude")')" /home/rruiz/.local/bin/claude
 
 # ----------------------------------------------------------------------------
 # Runtime configuration
 # ----------------------------------------------------------------------------
 ENV LUPIN_ROOT=/var/lupin
-ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
+ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/var/lupin/src/conf/lupin-app.ini splainer_path=/var/lupin/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Development"
 
 # ----------------------------------------------------------------------------
 # Application source code (most-volatile layers last for cache reuse).
@@ -249,7 +283,13 @@ ENV LUPIN_CONFIG_MGR_CLI_ARGS="config_path=/src/conf/lupin-app.ini splainer_path
 # at write time — no later chown layer needed.
 # ----------------------------------------------------------------------------
 COPY --chown=rruiz:rruiz src/cosa         /var/lupin/src/cosa
-COPY --chown=rruiz:rruiz src/fastapi_app  /var/lupin/src/fastapi_app
+COPY --chown=rruiz:rruiz src/lupin_app  /var/lupin/src/lupin_app
+# Multiplexer production bundle — layered on top of src/lupin_app from the
+# Stage-0 builder. dist/ is .dockerignore'd so the COPY src/lupin_app above
+# carries NO dist; this cross-stage COPY supplies the freshly-built bundle.
+COPY --chown=rruiz:rruiz --from=multiplexer-builder \
+     /build/src/lupin_app/static/dist/multiplexer \
+     /var/lupin/src/lupin_app/static/dist/multiplexer
 COPY --chown=rruiz:rruiz src/lib          /var/lupin/src/lib
 COPY --chown=rruiz:rruiz src/lupin_cli    /var/lupin/src/lupin_cli
 COPY --chown=rruiz:rruiz src/lupin_mcp    /var/lupin/src/lupin_mcp
@@ -264,7 +304,9 @@ COPY --chown=rruiz:rruiz src/conf/*.map   /var/lupin/src/conf/
 COPY --chown=rruiz:rruiz src/conf/*.json  /var/lupin/src/conf/
 COPY --chown=rruiz:rruiz src/conf/*.js    /var/lupin/src/conf/
 COPY --chown=rruiz:rruiz src/conf/auth    /var/lupin/src/conf/auth
-COPY --chown=rruiz:rruiz src/conf/keys    /var/lupin/src/conf/keys
+# NOTE: src/conf/keys is intentionally NOT copied (Phase-1 secret hygiene, D8).
+# Keys arrive at runtime via Secret Manager (see cloud-run-setup-secrets.sh).
+# The directory is also excluded from the build context in .dockerignore.
 COPY --chown=rruiz:rruiz src/conf/mcp     /var/lupin/src/conf/mcp
 COPY --chown=rruiz:rruiz src/conf/prompts /var/lupin/src/conf/prompts
 COPY --chown=rruiz:rruiz src/conf/tools   /var/lupin/src/conf/tools

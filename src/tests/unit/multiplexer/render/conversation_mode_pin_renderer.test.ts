@@ -13,9 +13,9 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createConversationModePinRenderer } from "../../../../fastapi_app/static/js/multiplexer/render/ConversationModePinRenderer";
-import type { SenderRecord, StoreSendersChangedPayload } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createConversationModePinRenderer } from "../../../../lupin_app/static/js/multiplexer/render/ConversationModePinRenderer";
+import type { SenderRecord, StoreSendersChangedPayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

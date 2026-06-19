@@ -44,10 +44,10 @@ BASE_URL = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 # Resolve project root from this file's location (src/tests/smoke/<file>.py → ../../..).
 PROJECT_ROOT = Path( __file__ ).resolve().parents[ 3 ]
 
-DIST_DIR     = PROJECT_ROOT / "src/fastapi_app/static/dist/multiplexer"
+DIST_DIR     = PROJECT_ROOT / "src/lupin_app/static/dist/multiplexer"
 BUILD_SCRIPT = PROJECT_ROOT / "src/scripts/build-multiplexer.sh"
 TSCONFIG     = PROJECT_ROOT / "tsconfig.json"
-MULTIPLEXER_DIR = PROJECT_ROOT / "src/fastapi_app/static/js/multiplexer"
+MULTIPLEXER_DIR = PROJECT_ROOT / "src/lupin_app/static/js/multiplexer"
 
 
 # ---------------------------------------------------------------------------

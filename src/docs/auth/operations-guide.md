@@ -35,7 +35,7 @@
 - [ ] **Database Initialized**
   ```bash
   # Run FastAPI server once to initialize database
-  python -m fastapi_app.main
+  python -m lupin_app.main
   # Check auth.db created
   ls -lh /path/to/auth.db
   ```
@@ -138,7 +138,7 @@ Environment="LUPIN_CONFIG_MGR_CLI_ARGS=--block-name=Lupin: Production"
 Environment="JWT_SECRET_KEY=your-secret-key-from-env"
 Environment="SMTP_USERNAME=your-smtp-user"
 Environment="SMTP_PASSWORD=your-smtp-password"
-ExecStart=/opt/lupin/venv/bin/python -m uvicorn fastapi_app.main:app --host 0.0.0.0 --port 7999 --workers 4
+ExecStart=/opt/lupin/venv/bin/python -m uvicorn lupin_app.main:app --host 0.0.0.0 --port 7999 --workers 4
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -638,13 +638,13 @@ print(f"Cleaned {email_count} expired email tokens")
 **Uvicorn Workers**:
 ```bash
 # Number of worker processes (recommendation: 2-4 * CPU cores)
-uvicorn fastapi_app.main:app --workers 4 --host 0.0.0.0 --port 7999
+uvicorn lupin_app.main:app --workers 4 --host 0.0.0.0 --port 7999
 ```
 
 **Worker Configuration**:
 ```ini
 # systemd service
-ExecStart=/opt/lupin/venv/bin/uvicorn fastapi_app.main:app \
+ExecStart=/opt/lupin/venv/bin/uvicorn lupin_app.main:app \
     --workers 4 \
     --worker-class uvicorn.workers.UvicornWorker \
     --host 0.0.0.0 \

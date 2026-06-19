@@ -8,18 +8,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   backoffDelayMs,
   createConnectionStateMachine,
-} from "../../../fastapi_app/static/js/multiplexer/transport/ConnectionStateMachine";
+} from "../../../lupin_app/static/js/multiplexer/transport/ConnectionStateMachine";
 import type {
   ConnectionLifecyclePayload,
   ConnectionReconnectingPayload,
   ConnectionState,
   ConnectionStateChangePayload,
   LupinEvent,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 function makeHarness(graceMs?: number) {
   const bus = createEventBusForTesting();
@@ -260,4 +260,41 @@ test("matrix: failed + page_visible / network_online stay failed (must restart)"
   assert.equal(h.csm.state, "failed");
   h.csm.send({ type: "network_online" });
   assert.equal(h.csm.state, "failed");
+});
+
+// --- permanent_failure (reconnect-parity fix 4450995d) ----------------------
+
+test("connecting + permanent_failure → failed; payload carries reason/code", () => {
+  const h = makeHarness();
+  h.csm.send({ type: "permanent_failure", reason: "auth-permanent", code: 4001 });
+  assert.equal(h.csm.state, "failed");
+  // The failed transition surfaces reason/code so the consumer can route.
+  const failedEvt = h.stateChanges.find((e) => e.payload.state === "failed");
+  assert.ok(failedEvt, "emitted a failed transition");
+  assert.equal(failedEvt?.payload.reason, "auth-permanent");
+  assert.equal(failedEvt?.payload.code, 4001);
+});
+
+test("connected + permanent_failure → failed (mid-session displaced)", () => {
+  const h = makeHarness();
+  h.csm.send({ type: "socket_open" });   // → connected
+  h.csm.send({ type: "permanent_failure", reason: "auth-permanent", code: 4002 });
+  assert.equal(h.csm.state, "failed");
+  const failedEvt = h.stateChanges.find((e) => e.payload.state === "failed");
+  assert.equal(failedEvt?.payload.code, 4002);
+});
+
+test("backoff + permanent_failure → failed", () => {
+  const h = makeHarness();
+  h.csm.send({ type: "socket_close" });  // connecting → backoff
+  h.csm.send({ type: "permanent_failure", reason: "auth-permanent", code: 4003 });
+  assert.equal(h.csm.state, "failed");
+});
+
+test("non-failed transitions carry NO reason/code", () => {
+  const h = makeHarness();
+  h.csm.send({ type: "socket_open" });   // → connected (no reason/code)
+  const connectedEvt = h.stateChanges.find((e) => e.payload.state === "connected");
+  assert.equal(connectedEvt?.payload.reason, undefined);
+  assert.equal(connectedEvt?.payload.code, undefined);
 });

@@ -39,7 +39,7 @@ BASE_URL="${LUPIN_TEST_BASE_URL:-http://localhost:$PORT}"
 PROJECT_ROOT="${LUPIN_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/lupin}"
 
 # Use venv python on host, fall back to system python in Docker container
-VENV_PYTHON="$PROJECT_ROOT/src/cosa/.venv/bin/python3"
+VENV_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
 if ! "$VENV_PYTHON" --version > /dev/null 2>&1; then VENV_PYTHON="python3"; fi
 
 # --- Background execution support ---

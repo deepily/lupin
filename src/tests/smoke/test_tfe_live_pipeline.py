@@ -17,7 +17,7 @@ The "live" nature of this test is:
     Phase 5 + Phase 6 stubs exercised)
   - Mocked Claude Agent SDK (`sdk_query`) so no API calls
   - Mocked GitOps so no real git state change
-  - Mocked fastapi_app.main.jobs_todo_queue so Phase 6 resubmit stays in-memory
+  - Mocked lupin_app.main.jobs_todo_queue so Phase 6 resubmit stays in-memory
 
 For the full live E2E path that actually invokes the SDK + GitOps, see the
 bash driver at `src/tests/e2e/run-tfe-live-e2e.sh` (to be authored in step 18).

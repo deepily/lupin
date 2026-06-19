@@ -5,17 +5,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createAudioStore } from "../../../fastapi_app/static/js/multiplexer/stores/AudioStore";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createAudioStore } from "../../../lupin_app/static/js/multiplexer/stores/AudioStore";
 import type {
   AudioContextLike,
   AudioBufferLike,
-} from "../../../fastapi_app/static/js/multiplexer/audio/pcm-decoder";
+} from "../../../lupin_app/static/js/multiplexer/audio/pcm-decoder";
 import type {
   LupinEvent,
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Stub Audio types — full real Web Audio is not needed in Node.

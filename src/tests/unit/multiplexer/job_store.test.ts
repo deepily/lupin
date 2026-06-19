@@ -5,15 +5,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createJobStore,
   type JobHistoryApiClient,
-} from "../../../fastapi_app/static/js/multiplexer/stores/JobStore";
+} from "../../../lupin_app/static/js/multiplexer/stores/JobStore";
 import type {
   LupinEvent,
   StoreJobsChangedPayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -262,6 +262,24 @@ test("hydrateHistory is idempotent — second call is a no-op", async () => {
   assert.equal(callCount, 1, "API called only once");
   const hydrated = events.filter(e => e.payload.changeKind === "hydrated");
   assert.equal(hydrated.length, 1, "hydrated event emitted only once");
+});
+
+test("hydrateHistory calls the canonical /api/job-history?limit=100 endpoint (NOT /api/queue/...)", async () => {
+  // Regression guard for the migration 404 bug: the queues router mounts
+  // job-history under the `/api` prefix (matches the legacy client). A call to
+  // `/api/queue/job-history` 404s and is silently swallowed by the renderer's
+  // .catch(), so nothing else here would surface a wrong URL. Assert it explicitly.
+  const { store } = setup();
+  const calledPaths: string[] = [];
+  const api: JobHistoryApiClient = {
+    get: async (path: string) => {
+      calledPaths.push(path);
+      return { jobs: [] };
+    },
+  };
+  await store.hydrateHistory(api);
+  assert.deepEqual(calledPaths, ["/api/job-history?limit=100"]);
+  assert.ok(!calledPaths[0].startsWith("/api/queue/"), "must NOT use the /api/queue/ per-item prefix");
 });
 
 // ===========================================================================

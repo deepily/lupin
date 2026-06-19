@@ -31,6 +31,20 @@ def _make_similar_embedding( base_embedding, noise_level=0.05, seed=99 ):
     return vec.tolist()
 
 
+def _make_unnormalized_embedding( seed=42, dim=768, scale=3.0 ):
+    """Deterministic NON-unit-norm embedding ( ||vec|| == scale ).
+
+    Exercises the dot-metric over-100% path: with a scale-3 vector the self
+    dot-product is ~9, so _distance = 1 - 9 = -8 and ( 1 - distance ) * 100 = 900
+    BEFORE clamping. This is the shape of vector that produced the '22123%'
+    confidence bug.
+    """
+    rng = np.random.RandomState( seed )
+    vec = rng.randn( dim ).astype( np.float32 )
+    vec = ( vec / np.linalg.norm( vec ) ) * scale
+    return vec.tolist()
+
+
 class TestProxyDecisionEmbeddings:
     """Tests for the ProxyDecisionEmbeddings LanceDB store."""
 
@@ -115,6 +129,46 @@ class TestProxyDecisionEmbeddings:
             # First result should be more similar than second
             assert results[ 0 ][ 0 ] >= results[ 1 ][ 0 ]
 
+    def test_similarity_pct_clamped_to_0_100_for_non_unit_vectors( self ):
+        """
+        Regression ('22123%' confidence bug): the dot metric only yields a value in
+        [-1, 1] for UNIT-normalized vectors. With a non-unit vector the self
+        dot-product exceeds 1, so ( 1 - _distance ) * 100 blows past 100 — and that
+        unclamped percentage propagated to confidence ( similarity_pct / 100 → 2.2,
+        ×100 in the UI → 22123% ). find_similar MUST clamp similarity_pct to [0, 100].
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_clamp", debug=True )
+
+            big = _make_unnormalized_embedding( seed=5, scale=3.0 )  # ||big|| = 3 → self-dot ≈ 9
+            store.add_decision(
+                id="clamp-001", question="non-unit vector", category="testing",
+                decision_value="approved", ratification_state="ratified",
+                question_embedding=big, created_at="2026-02-24T10:00:00Z",
+            )
+
+            results = store.find_similar( big, threshold=0.0 )
+
+            assert len( results ) >= 1
+            for similarity, _ in results:
+                assert 0.0 <= similarity <= 100.0, f"similarity_pct escaped [0,100]: {similarity}"
+
+    def test_exists_true_for_present_false_for_absent( self ):
+        """exists(id) gates the idempotent hint-vote upsert (insert vs update path)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_exists", debug=True )
+
+            assert store.exists( "missing-id" ) is False     # absent before any insert
+
+            store.add_decision(
+                id="exists-001", question="present?", category="testing",
+                decision_value="approved", ratification_state="approved",
+                question_embedding=_make_embedding( seed=3 ), created_at="2026-02-24T10:00:00Z",
+            )
+
+            assert store.exists( "exists-001" ) is True       # present after insert
+            assert store.exists( "still-missing" ) is False   # other ids stay absent
+
     def test_empty_table_returns_empty_list( self ):
         """Searching an empty table returns an empty list."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -186,6 +240,26 @@ class TestProxyDecisionEmbeddings:
             question_embedding=_make_embedding( seed=6 ),
             created_at="2026-02-24T10:00:00Z",
         )
+
+    def test_exists_failure_returns_false( self ):
+        """exists() on a bad store (no table) fails soft to False (never raises)."""
+        store = ProxyDecisionEmbeddings(
+            db_path="/nonexistent/path/that/should/not/exist",
+            table_name="test_exists_err",
+            debug=True,
+        )
+        assert store.exists( "anything" ) is False
+
+    def test_exists_handles_search_exception( self ):
+        """If the underlying search raises (table present), exists() swallows it → False."""
+        from unittest.mock import MagicMock
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = ProxyDecisionEmbeddings( db_path=tmpdir, table_name="test_exists_exc", debug=True )
+            store._ensure_table = MagicMock( return_value=True )
+            broken = MagicMock()
+            broken.search.side_effect = RuntimeError( "boom" )
+            store._table = broken
+            assert store.exists( "x" ) is False
 
     def test_find_similar_failure_returns_empty( self ):
         """find_similar with bad store returns empty list."""

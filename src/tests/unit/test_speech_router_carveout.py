@@ -122,12 +122,12 @@ def test_save_upload_to_temp_writes_content( tmp_path, monkeypatch ):
 def test_get_whisper_pipeline_returns_pipeline_when_present( monkeypatch ):
     from cosa.rest.routers import speech as speech_module
 
-    # Build a fake fastapi_app.main module exposing a whisper_pipeline attr
-    fake_main = types.ModuleType( "fastapi_app.main" )
+    # Build a fake lupin_app.main module exposing a whisper_pipeline attr
+    fake_main = types.ModuleType( "lupin_app.main" )
     fake_main.whisper_pipeline = "fake-pipeline-handle"
 
-    monkeypatch.setitem( sys.modules, "fastapi_app", types.ModuleType( "fastapi_app" ) )
-    monkeypatch.setitem( sys.modules, "fastapi_app.main", fake_main )
+    monkeypatch.setitem( sys.modules, "lupin_app", types.ModuleType( "lupin_app" ) )
+    monkeypatch.setitem( sys.modules, "lupin_app.main", fake_main )
 
     result = speech_module.get_whisper_pipeline()
     assert result == "fake-pipeline-handle"
@@ -137,11 +137,11 @@ def test_get_whisper_pipeline_returns_none_when_attr_missing( monkeypatch ):
     """Remote mode: main module has no whisper_pipeline → None per post-carveout contract."""
     from cosa.rest.routers import speech as speech_module
 
-    fake_main = types.ModuleType( "fastapi_app.main" )
+    fake_main = types.ModuleType( "lupin_app.main" )
     # No whisper_pipeline attr set
 
-    monkeypatch.setitem( sys.modules, "fastapi_app", types.ModuleType( "fastapi_app" ) )
-    monkeypatch.setitem( sys.modules, "fastapi_app.main", fake_main )
+    monkeypatch.setitem( sys.modules, "lupin_app", types.ModuleType( "lupin_app" ) )
+    monkeypatch.setitem( sys.modules, "lupin_app.main", fake_main )
 
     result = speech_module.get_whisper_pipeline()
     assert result is None
@@ -167,12 +167,12 @@ def test_get_speech_provider_returns_provider_instance(
     )
 
     # Fake main module with debug + verbose attrs
-    fake_main = types.ModuleType( "fastapi_app.main" )
+    fake_main = types.ModuleType( "lupin_app.main" )
     fake_main.app_debug   = True
     fake_main.app_verbose = False
 
-    monkeypatch.setitem( sys.modules, "fastapi_app", types.ModuleType( "fastapi_app" ) )
-    monkeypatch.setitem( sys.modules, "fastapi_app.main", fake_main )
+    monkeypatch.setitem( sys.modules, "lupin_app", types.ModuleType( "lupin_app" ) )
+    monkeypatch.setitem( sys.modules, "lupin_app.main", fake_main )
 
     provider = speech_module.get_speech_provider()
     assert isinstance( provider, SpeechToTextProvider )
@@ -195,10 +195,10 @@ def test_get_speech_provider_defaults_when_main_missing_attrs(
     )
 
     # Fake main module WITHOUT debug/verbose attrs
-    fake_main = types.ModuleType( "fastapi_app.main" )
+    fake_main = types.ModuleType( "lupin_app.main" )
 
-    monkeypatch.setitem( sys.modules, "fastapi_app", types.ModuleType( "fastapi_app" ) )
-    monkeypatch.setitem( sys.modules, "fastapi_app.main", fake_main )
+    monkeypatch.setitem( sys.modules, "lupin_app", types.ModuleType( "lupin_app" ) )
+    monkeypatch.setitem( sys.modules, "lupin_app.main", fake_main )
 
     provider = speech_module.get_speech_provider()
     assert isinstance( provider, SpeechToTextProvider )

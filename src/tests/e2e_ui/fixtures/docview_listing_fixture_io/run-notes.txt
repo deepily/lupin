@@ -1,0 +1,2 @@
+Frozen fixture .txt entry for the doc-viewer io-style listing visual snapshot.
+A plain-text entry exercises the non-markdown row chrome. Do not modify.

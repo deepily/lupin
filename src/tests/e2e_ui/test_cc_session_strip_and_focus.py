@@ -37,7 +37,7 @@ def notifications_page_with_strip( logged_in_page ):
         - networkidle reached
         - cc-session-strip element exists in DOM (may be hidden until first CC card)
     """
-    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     logged_in_page.wait_for_load_state( "networkidle" )
 
     # Strip element should always be present in markup, even when hidden.
@@ -274,6 +274,67 @@ class TestFocusMode:
         )
         assert visible_cards == 2
 
+    def test_focused_card_messages_get_height_boost( self, notifications_page_with_strip ):
+        """
+        Focus-mode height boost (2026-05-30, Speedy 🌿): the focused card's
+        per-date message lists (.date-accordion-messages — the real scrollable
+        region built by createSenderCard → createDateAccordion) DOUBLE
+        (250px → 500px) while focus mode is ON, and revert to 250px when focus
+        mode is OFF. Driven purely by the
+        body:has(#cc-strip-toggle[data-focus-active="true"]) :has() rule in
+        notifications.css — no JS attribute on the card itself.
+        """
+        page     = notifications_page_with_strip
+        sender_a = "claude.code@lupin.deepily.ai#cccc5555"
+        sender_b = "claude.code@lupin.deepily.ai#dddd6666"
+
+        card_a = _inject_cc_sender_card( page, sender_a )
+        _inject_cc_sender_card( page, sender_b )
+
+        # The scrollable region only exists once a date accordion is present.
+        # Seed one in each card so .date-accordion-messages is in the DOM
+        # regardless of which card focus mode lands on.
+        for sid in ( sender_a, sender_b ):
+            page.evaluate(
+                "( sid ) => window.notificationsUI.createDateAccordion( sid, '2026-05-30' )",
+                sid
+            )
+        page.wait_for_timeout( 50 )
+
+        def _messages_max_height( card_id ):
+            return page.evaluate(
+                """( cardId ) => {
+                    const card = document.getElementById( cardId );
+                    const msgs = card.querySelector( '.date-accordion-messages' );
+                    return msgs ? getComputedStyle( msgs ).maxHeight : null;
+                }""",
+                card_id
+            )
+
+        # Before focus mode: default 250px.
+        assert _messages_max_height( card_a ) == "250px", \
+            "Outside focus mode the card keeps the 250px default"
+
+        _click_strip_toggle( page )  # enter focus
+
+        # The single visible (focused) card now gets the +50% boost.
+        focused_id = page.evaluate(
+            """() => {
+                const card = Array.from(
+                    document.querySelectorAll( '#notifications-list .sender-card' )
+                ).find( c => !c.hasAttribute( 'data-focus-hidden' ) );
+                return card ? card.id : null;
+            }"""
+        )
+        assert focused_id is not None, "Exactly one focused card must be visible"
+        assert _messages_max_height( focused_id ) == "500px", \
+            "Focused card message lists must double to 500px (250px × 2) in focus mode"
+
+        _click_strip_toggle( page )  # exit focus
+
+        assert _messages_max_height( card_a ) == "250px", \
+            "Exiting focus mode reverts the card to the 250px default"
+
     def test_clicking_different_strip_icon_switches_focus( self, notifications_page_with_strip ):
         page     = notifications_page_with_strip
         sender_a = "claude.code@lupin.deepily.ai#aaaa5555"
@@ -388,8 +449,33 @@ class TestPersistence:
         page.reload()
         page.wait_for_load_state( "networkidle" )
 
-        # Toggle should still be ON (state restored).
+        # The DURABLE persistence layer is localStorage — the focus INTENT must
+        # survive the reload regardless of whether any card is hydrated yet.
+        stored_after = page.evaluate(
+            "() => localStorage.getItem( 'notifications_cc_focus_state' )"
+        )
+        assert stored_after is not None and "true" in stored_after.lower(), \
+            f"Focus intent must persist in localStorage across reload; got {stored_after!r}"
+
+        # NEGATIVE CONTROL (gives this test teeth — it is NOT tautological): the
+        # pill's VISUAL restore is deliberately gated on the focused sender's card
+        # being present. _restoreCcUiAfterLoad (notifications.js:9933) reverts the
+        # pill to OFF when the focused card is absent, PRESERVING the localStorage
+        # intent (the 2026-04-30 design + icon-churn-race fix). Immediately after
+        # reload the client-only card is gone, so the pill MUST be OFF. If the
+        # no-card revert ever regressed (pill wrongly ON without a card), this fails.
         toggle = page.locator( "#cc-strip-toggle" )
+        assert toggle.get_attribute( "data-focus-active" ) == "false", \
+            "no-card revert must leave the pill OFF right after reload (intent preserved in localStorage, not the visual)"
+
+        # POSITIVE PATH (against the REAL restore logic, not a mock): in production
+        # the focused sender's real notifications hydrate its card on reload; this
+        # synthetic test re-injects the card to mirror that hydration, then re-runs
+        # the genuine post-load restore. If _restoreCcUiAfterLoad's with-card restore
+        # regressed (pill stays OFF despite a present focused card), this fails.
+        _inject_cc_sender_card( page, sender_a )
+        page.evaluate( "() => window.notificationsUI._restoreCcUiAfterLoad()" )
+        page.wait_for_timeout( 50 )
         assert toggle.get_attribute( "data-focus-active" ) == "true"
 
 
@@ -417,13 +503,13 @@ class TestConvModeOrthogonality:
 
         sanitized = sender_a.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
         icon = page.locator( f"#cc-strip-icon-{sanitized}" )
-        assert icon.get_attribute( "data-conv-mode" ) == "true"
+        assert icon.get_attribute( "data-conv-mode" ) == "speakerphone"
 
     def test_conv_mode_off_via_ws_clears_strip_icon_overlay( self, notifications_page_with_strip ):
         """
         Regression for the stranded-mic-icon bug (Session a6b318ea, 2026-05-01).
 
-        The conversation_mode_changed WS payload carries the full session UUID,
+        The speakerphone_changed WS payload carries the full session UUID,
         but strip-icon data-session-id is the 8-char prefix. The WS-router used
         to call _setStripIconConvMode with the un-normalized full UUID, so the
         querySelector missed and the OFF transition never cleared the mic
@@ -433,6 +519,20 @@ class TestConvModeOrthogonality:
         This test simulates the full WS path (handleNotificationUpdate switch
         case) for ON then OFF, using the full UUID in the payload, and asserts
         the icon overlay matches the expected state after each transition.
+
+        NOTE (2026-06-10 triage): the live WS event is `speakerphone_changed`
+        with `payload.on` (the 2026.05.11 speakerphone refactor — see the
+        handleNotificationUpdate case that maps payload.on → conversation_mode_active);
+        the retired `conversation_mode_changed`/`payload.active` shape has no switch
+        case, so the prior wording drove a DEAD path. Updated to the real contract.
+
+        NOTE (2026-06-10 review, Tiffany): the strip icon is BORN
+        data-conv-mode="speakerphone" (notifications.js ~10058-10062 default; the
+        fixture does not seed conversationModes for this session), so an ON-first
+        assertion is a FALSE POSITIVE — it passes even with the handler neutered.
+        Fix: drive OFF first (a genuine speakerphone→quiet transition — the
+        stranded-icon clear this test guards), THEN ON (a genuine quiet→speakerphone
+        flip). Now NEITHER assertion can pass off the born state.
         """
         page         = notifications_page_with_strip
         sender_a     = "claude.code@lupin.deepily.ai#offtest1"
@@ -440,35 +540,20 @@ class TestConvModeOrthogonality:
         full_uuid    = "offtest1-aaaa-bbbb-cccc-deadbeef0001"  # matches 8-char prefix
 
         _inject_cc_sender_card( page, sender_a, session_hash=session_hash )
-
-        # Drive the WS-router path with full UUID (server-canonical shape).
-        # handleNotificationUpdate expects { notification: {...} } envelope.
-        page.evaluate(
-            """( fullUuid ) => {
-                window.notificationsUI.handleNotificationUpdate( {
-                    notification: {
-                        type    : "conversation_mode_changed",
-                        payload : { session_id: fullUuid, active: true }
-                    }
-                } );
-            }""",
-            full_uuid
-        )
-        page.wait_for_timeout( 50 )
-
         sanitized = sender_a.replace( "@", "-" ).replace( ".", "-" ).replace( "#", "-" )
         icon = page.locator( f"#cc-strip-icon-{sanitized}" )
-        assert icon.get_attribute( "data-conv-mode" ) == "true", \
-            "ON transition must set data-conv-mode despite full-UUID payload"
 
-        # OFF transition — same full UUID, active=false. This is the path that
-        # used to silently miss before the fix.
+        # OFF FIRST — the icon is born "speakerphone", so on=false is a GENUINE
+        # speakerphone→quiet transition (the stranded-icon clear this test guards).
+        # Drive the WS-router path with the full UUID (server-canonical shape);
+        # handleNotificationUpdate expects a { notification: {...} } envelope. This
+        # is the path that used to silently miss (full-UUID vs 8-char-prefix selector).
         page.evaluate(
             """( fullUuid ) => {
                 window.notificationsUI.handleNotificationUpdate( {
                     notification: {
-                        type    : "conversation_mode_changed",
-                        payload : { session_id: fullUuid, active: false }
+                        type    : "speakerphone_changed",
+                        payload : { session_id: fullUuid, on: false }
                     }
                 } );
             }""",
@@ -476,8 +561,26 @@ class TestConvModeOrthogonality:
         )
         page.wait_for_timeout( 50 )
 
-        assert icon.get_attribute( "data-conv-mode" ) is None, \
-            "OFF transition must remove data-conv-mode — mic icon must not strand"
+        assert icon.get_attribute( "data-conv-mode" ) == "quiet", \
+            "OFF transition must set data-conv-mode='quiet' (3-state badge since 2026-05-14) — mic icon must not strand"
+
+        # ON — same full UUID, on=true. Now a GENUINE quiet→speakerphone flip (not
+        # the born state), so this cannot false-positive if the handler is neutered.
+        page.evaluate(
+            """( fullUuid ) => {
+                window.notificationsUI.handleNotificationUpdate( {
+                    notification: {
+                        type    : "speakerphone_changed",
+                        payload : { session_id: fullUuid, on: true }
+                    }
+                } );
+            }""",
+            full_uuid
+        )
+        page.wait_for_timeout( 50 )
+
+        assert icon.get_attribute( "data-conv-mode" ) == "speakerphone", \
+            "ON transition must set data-conv-mode='speakerphone' despite full-UUID payload"
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +887,10 @@ class TestPersonalessBubbleGradient:
             """( args ) => {
                 const ui = window.notificationsUI;
                 const today = new Date().toISOString().slice( 0, 10 );
+                // The real render path calls ensureDateAccordionExists (notifications.js:18112)
+                // BEFORE addMessageToDateAccordion, which early-returns (:12095-12101) if the
+                // date-messages container is absent. Mirror that precondition here.
+                ui.ensureDateAccordionExists( args.senderId, today );
                 for ( let i = 0; i < args.count; i++ ) {
                     ui.addMessageToDateAccordion( args.senderId, today, {
                         id        : `msg-${args.senderId}-${i}`,
@@ -918,9 +1025,11 @@ class TestStripOrdering:
         assert ids == ordered, \
             f"Initial-load strip ordering should match API order; got {ids!r}, expected {ordered!r}"
 
-    def test_runtime_addition_lands_leftmost( self, notifications_page_with_strip ):
-        """Runtime path (insertAtTop=true): a fresh icon prepends to the
-        existing strip, regardless of when its sender was first seen."""
+    def test_runtime_addition_lands_rightmost( self, notifications_page_with_strip ):
+        """Runtime path: a fresh icon APPENDS to the existing strip (newest
+        rightmost), so the chronological order (oldest leftmost) holds without
+        a re-sort. Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        (source comment notifications.js:460-463: "Runtime adds just append")."""
         page = notifications_page_with_strip
         # Seed two icons via the runtime path (default behavior).
         first  = "claude.code@lupin.deepily.ai#aaaaaaa1"
@@ -928,9 +1037,159 @@ class TestStripOrdering:
         _inject_cc_sender_card( page, first  )
         _inject_cc_sender_card( page, second )
 
-        # Most recently injected at runtime should be leftmost.
+        # Oldest injection stays leftmost; the newer one appends to the right.
         leftmost = page.evaluate(
             "() => document.querySelector( '#cc-strip-icons .cc-strip-icon' )?.getAttribute( 'data-sender-id' )"
         )
-        assert leftmost == second, \
-            f"Runtime injection should land leftmost; got {leftmost!r}, expected {second!r}"
+        assert leftmost == first, \
+            f"Runtime injection should append rightmost (oldest stays leftmost); got {leftmost!r}, expected {first!r}"
+
+
+# ---------------------------------------------------------------------------
+# Multiplexer WP10 (Lane B / Krishna) — focus-mode 80vh height contract
+# ---------------------------------------------------------------------------
+#
+# Distinct from the legacy /app/notifications 250→500px boost tested above:
+# the MULTIPLEXER strip (session-strip.css) overrides the focused card's
+# `.date-accordion-messages` from the 60vh baseline (notifications-list.css)
+# to **80vh** while focus mode is ON, via the strip selector
+#   #cc-session-strip:has( #cc-strip-toggle[data-focus-active="true"] ) ~
+#     #notifications-pane .sender-card:not([data-focus-hidden]) .date-accordion-messages
+# (NOT the retired FocusTray #focus-mode-toggle — removed in c87f066).
+#
+# Harness (Clayton review fix, 4bac3ce → this revision): the strip only
+# populates from STRIP_STATE_TYPES (SessionStripStore.ts:45) — a plain
+# `notification_queue_update` of type 'task' does NOT add a strip icon. So per
+# sender we inject the message (builds the card + its .date-accordion-messages)
+# AND a `voice_persona_assigned` carrying a non-released voice_persona (adds the
+# strip icon), mirroring test_multiplexer_phase6c_section_a_visual.py. Focus is
+# entered by clicking the KNOWN sender's strip icon — selected by
+# `.cc-strip-icon[data-sender-id=...]` (the multiplexer icon has NO `id` attr;
+# it carries data-sender-id per sessionStripIcon.ts:94, so Clayton's
+# id-form `#cc-strip-icon-...` is the legacy shape) — NOT the generic
+# `#cc-strip-toggle`, which focuses sorted[0] and would measure an ambient
+# (hydrated-server) card. We then assert the measured card's identity.
+#
+# Runtime proof rides the :8000 batch / fresh review (this lane is collect-only).
+
+_MUX_SENDER_A = "wp10-height-a"
+_MUX_SENDER_B = "wp10-height-b"
+
+_MUX_INJECT_TWO_SENDERS_JS = """
+() => {
+    const hook = window.__multiplexerTestHook;
+    if ( !hook || !hook.eventBus ) throw new Error( "multiplexer test hook missing" );
+    const bus = hook.eventBus;
+    const seeds = [
+        { id: 'wp10-height-a', ts: '2026-06-10T15:00:00.000Z', msg: 'sender A', name: 'Cheech',  color: '#FFCC80', icon: '🌿' },
+        { id: 'wp10-height-b', ts: '2026-06-10T16:00:00.000Z', msg: 'sender B', name: 'Tiberius', color: '#3F51B5', icon: '🌑' },
+    ];
+    for ( const s of seeds ) {
+        // (1) A real message — builds the sender card + its .date-accordion-messages.
+        bus.emit({
+            type    : 'notification_queue_update',
+            payload : { notification: {
+                id_hash   : 'n-' + s.id,
+                message   : s.msg,
+                sender_id : s.id,
+                timestamp : s.ts,
+                type      : 'task',
+            } },
+            source : 'wp10-height',
+            ts     : 1781449200000,
+        });
+        // (2) voice_persona_assigned — the ONLY event that adds a strip icon.
+        bus.emit({
+            type    : 'notification_queue_update',
+            payload : { notification: {
+                type          : 'voice_persona_assigned',
+                sender_id     : s.id,
+                timestamp     : s.ts,
+                voice_persona : {
+                    name        : s.name,
+                    voice_id    : 'vid_' + s.id,
+                    icon        : s.icon,
+                    color       : s.color,
+                    borrowed    : false,
+                    assigned_at : s.ts,
+                },
+            } },
+            source : 'wp10-height',
+            ts     : 1781449260000,
+        });
+    }
+    return true;
+}
+"""
+
+
+class TestMultiplexerFocusHeight80vh:
+    """WP10 (multiplexer): focus mode boosts the FOCUSED card's message list to 80vh."""
+
+    def test_focused_card_messages_grow_to_80vh_in_focus_mode( self, logged_in_page ):
+        page = logged_in_page
+        page.goto( f"{BASE_URL}/app/multiplexer" )
+        page.wait_for_load_state( "networkidle" )
+        page.wait_for_function(
+            "() => window.__multiplexerTestHook !== undefined && window.__multiplexerTestHook.eventBus !== undefined",
+            timeout=15000,
+        )
+
+        page.evaluate( _MUX_INJECT_TWO_SENDERS_JS )
+        # Strip reveals (icon added via voice_persona_assigned); the known
+        # sender's card + its scrollable per-date region must exist to measure.
+        page.wait_for_selector( "#cc-session-strip:not([hidden])", timeout=3000 )
+        page.wait_for_selector( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]', timeout=3000 )
+        card_a = f'#notifications-pane .sender-card[data-sender-id="{_MUX_SENDER_A}"]'
+        page.wait_for_selector( f"{card_a} .date-accordion-messages", timeout=3000 )
+
+        def _card_a_max_height():
+            return page.evaluate(
+                """( sel ) => {
+                    const card = document.querySelector( sel );
+                    if ( !card ) return null;
+                    const msgs = card.querySelector( '.date-accordion-messages' );
+                    return msgs ? getComputedStyle( msgs ).maxHeight : null;
+                }""",
+                card_a,
+            )
+
+        def _expected_vh_px( fraction ):
+            return page.evaluate( "( f ) => Math.round( window.innerHeight * f )", fraction )
+
+        def _px( value ):
+            return float( value.replace( "px", "" ) )
+
+        # Baseline (focus OFF): 60vh default from notifications-list.css.
+        before = _card_a_max_height()
+        assert before is not None, "sender A's .date-accordion-messages must exist to measure"
+        assert abs( _px( before ) - _expected_vh_px( 0.60 ) ) <= 2, \
+            f"outside focus mode the multiplexer card keeps the 60vh baseline; got {before}"
+
+        # Enter focus on the KNOWN sender by clicking ITS strip icon (not the
+        # generic toggle — that would focus sorted[0], an ambient card).
+        page.locator( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]' ).click()
+        page.wait_for_selector( '#cc-strip-toggle[data-focus-active="true"]', timeout=2000 )
+
+        # The single visible (not focus-hidden) card must be the one we injected.
+        focused_sender = page.evaluate(
+            """() => {
+                const card = Array.from(
+                    document.querySelectorAll( '#notifications-pane .sender-card' )
+                ).find( c => !c.hasAttribute( 'data-focus-hidden' ) );
+                return card ? card.getAttribute( 'data-sender-id' ) : null;
+            }"""
+        )
+        assert focused_sender == _MUX_SENDER_A, \
+            f"focus must land on the injected sender, not an ambient card; got {focused_sender!r}"
+
+        boosted = _card_a_max_height()
+        assert abs( _px( boosted ) - _expected_vh_px( 0.80 ) ) <= 2, \
+            f"focused card message list must grow to 80vh in focus mode; got {boosted}"
+
+        # Exit focus (click the focused icon again) → revert to the 60vh baseline.
+        page.locator( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]' ).click()
+        page.wait_for_selector( '#cc-strip-toggle[data-focus-active="false"]', timeout=2000 )
+        after = _card_a_max_height()
+        assert abs( _px( after ) - _expected_vh_px( 0.60 ) ) <= 2, \
+            f"exiting focus mode reverts to the 60vh baseline; got {after}"

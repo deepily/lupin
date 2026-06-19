@@ -1,0 +1,27 @@
+# .gitleaksignore — specific KNOWN + REMEDIATED finding fingerprints to skip.
+# Format: <commit>:<file>:<rule>:<startline>  (gitleaks auto-loads this file)
+#
+# Historical OpenAI API key committed in an ephemera notebook (commit e4ee364f,
+# 2025-06-28). Remediation (2026-06-10, GCP-M2):
+#   - The key was ROTATED on the OpenAI account (Rick) → the historical copy is DEAD.
+#   - The working-tree copy was SCRUBBED to a placeholder (held edit).
+#   - It NEVER entered any image: src/ephemera is .dockerignore'd AND omitted from
+#     the Dockerfile COPY list.
+# A git HISTORY purge (git-filter-repo) of the dead key is a BACKLOGGED Rick-decision
+# (plan §10) — NOT actioned here. These two fingerprints are the immutable
+# historical-commit occurrences; ignoring them is tracking a remediated secret,
+# not suppressing a live one (every real-secret rule stays enforced via .gitleaks.toml).
+e4ee364fcadaaa4bf0adab5f8b889539da58325f:src/ephemera/notebooks/utterance-embeddings.ipynb:openai-api-key:20
+e4ee364fcadaaa4bf0adab5f8b889539da58325f:src/ephemera/notebooks/utterance-embeddings.ipynb:openai-api-key:56
+#
+# The SCRUB PLACEHOLDER itself matches the generic-api-key rule — the rule keys
+# on the `…API_KEY=<10+ chars>` shape, so BOTH `sk-ROTATED-2026-06-10-PLACEHOLDER`
+# (committed in M2 batch 64e10375) AND the de-sk-prefixed retry (committed in
+# 483abf9f) flag. A remediation artifact, not a secret (the literal ends in
+# -PLACEHOLDER). Durable fix (2026-06-11): inline `gitleaks:allow` markers on the
+# two notebook lines stop the per-commit fingerprint treadmill going forward;
+# the four fingerprints below cover the immutable marker-less historical blobs.
+64e10375a2ff73bcc88103934302c14b6ec29eba:src/ephemera/notebooks/utterance-embeddings.ipynb:generic-api-key:20
+64e10375a2ff73bcc88103934302c14b6ec29eba:src/ephemera/notebooks/utterance-embeddings.ipynb:generic-api-key:56
+483abf9f7f5dd8a4fa424a957fca1b7541283578:src/ephemera/notebooks/utterance-embeddings.ipynb:generic-api-key:20
+483abf9f7f5dd8a4fa424a957fca1b7541283578:src/ephemera/notebooks/utterance-embeddings.ipynb:generic-api-key:56

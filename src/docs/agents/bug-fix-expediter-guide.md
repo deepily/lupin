@@ -543,7 +543,7 @@ Use this table to find the implementation of any concept mentioned above:
 | Fix prompts | `src/cosa/agents/bug_fix_expediter/prompts/fix.py` | `CODER_SYSTEM_PROMPT`, `TESTER_SYSTEM_PROMPT`, prompt builders, `register_fix_prompts("bfe", ...)` |
 | Git operations | `src/cosa/agents/bug_fix_expediter/git_ops.py` | `GitOps` async wrapper around git + gh CLI |
 | Dead-queue watchdog | `src/cosa/rest/dead_queue_watchdog.py` | `DeadQueueWatchdog`, `init_watchdog`, `RepairAttemptTracker` |
-| Unified watchdog facade | `src/cosa/rest/watchdogs.py` | `init_watchdogs(config_mgr, todo_queue, debug, verbose)` — single entry point for both BFE and TFE watchdog singletons; called from `src/fastapi_app/main.py` at startup |
+| Unified watchdog facade | `src/cosa/rest/watchdogs.py` | `init_watchdogs(config_mgr, todo_queue, debug, verbose)` — single entry point for both BFE and TFE watchdog singletons; called from `src/lupin_app/main.py` at startup |
 | Shared primitives | `src/cosa/agents/shared/` | `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` |
 
 ### R&D archive

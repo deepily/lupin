@@ -158,7 +158,7 @@ class TestPhase6DispatchAffected:
                 return_value=fake_job,
             ) as mock_factory,
             patch(
-                "fastapi_app.main.jobs_todo_queue",
+                "lupin_app.main.jobs_todo_queue",
                 mock_queue,
                 create=True,
             ),
@@ -202,7 +202,7 @@ class TestPhase6DispatchAffected:
                 return_value=fake_job,
             ) as mock_factory,
             patch(
-                "fastapi_app.main.jobs_todo_queue",
+                "lupin_app.main.jobs_todo_queue",
                 MagicMock(),
                 create=True,
             ),
@@ -229,7 +229,7 @@ class TestPhase6DispatchAffected:
                 return_value=fake_job,
             ) as mock_factory,
             patch(
-                "fastapi_app.main.jobs_todo_queue",
+                "lupin_app.main.jobs_todo_queue",
                 MagicMock(),
                 create=True,
             ),
@@ -289,7 +289,7 @@ class TestPhase6FailureModes:
                 return_value=fake_job,
             ),
             patch(
-                "fastapi_app.main.jobs_todo_queue",
+                "lupin_app.main.jobs_todo_queue",
                 broken_queue,
                 create=True,
             ),
@@ -317,7 +317,7 @@ class TestPhase6RecursionGuard:
                 return_value=fake_job,
             ),
             patch(
-                "fastapi_app.main.jobs_todo_queue",
+                "lupin_app.main.jobs_todo_queue",
                 MagicMock(),
                 create=True,
             ),

@@ -1,5 +1,11 @@
 // Phase 2 unit tests — AuthManager.
 // Run via `npx tsx --test src/tests/unit/multiplexer/auth_manager.test.ts`.
+//
+// WP0/WP1 migration: AuthManager now hydrates from the canonical cross-client
+// `lupin_access_token` / `lupin_refresh_token` keys (raw JWT strings) and
+// derives expiry from the access-token `exp` claim. Test fixtures therefore
+// seed via `storage.setTokens(<accessJwt>, <refresh>)` and build access tokens
+// with `accessJwt(expiresAtMs)` so the decoded `exp` matches the desired expiry.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -7,20 +13,19 @@ import assert from "node:assert/strict";
 import {
   createAuthManager,
   ChainMutexLockManager,
-} from "../../../fastapi_app/static/js/multiplexer/auth/AuthManager";
+} from "../../../lupin_app/static/js/multiplexer/auth/AuthManager";
 import {
   createEventBusForTesting,
-} from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+} from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createStorageServiceForTesting,
-} from "../../../fastapi_app/static/js/multiplexer/shared/StorageService";
+} from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import type {
   AuthStateChangePayload,
   LupinEvent,
   RefreshFailedPayload,
   RefreshStartedPayload,
-  Token,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 interface FetchCall {
   url      : string;
@@ -97,10 +102,21 @@ function freshAuthToken(overrides: Partial<TokensBody> = {}): TokensBody {
   };
 }
 
-function makeHarness(opts?: { initialToken?: Token }) {
+// Build a JWT-shaped access token whose `exp` claim encodes `expiresAtMs`. The
+// `exp` is in seconds (may be fractional for sub-second test timing).
+function accessJwt(expiresAtMs: number, email = "user@lupin.ai"): string {
+  const seg = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${seg({ alg: "HS256", typ: "JWT" })}.${seg({ sub: "u1", email, exp: expiresAtMs / 1000 })}.sig`;
+}
+
+function makeHarness(opts?: { accessExpMs?: number; email?: string; refreshToken?: string }) {
   const bus = createEventBusForTesting();
   const storage = createStorageServiceForTesting(bus);
-  if (opts?.initialToken) storage.setJSON("auth_token", opts.initialToken, 1);
+  let accessToken: string | null = null;
+  if (opts?.accessExpMs !== undefined) {
+    accessToken = accessJwt(opts.accessExpMs, opts.email);
+    storage.setTokens(accessToken, opts.refreshToken ?? "rrr");
+  }
   const fetch = mockFetch();
   const auth = createAuthManager({
     refreshUrl       : "/auth/refresh",
@@ -110,38 +126,27 @@ function makeHarness(opts?: { initialToken?: Token }) {
     locks            : new ChainMutexLockManager(),
     fetcher          : fetch.fetcher,
   });
-  return { bus, storage, fetch, auth };
+  return { bus, storage, fetch, auth, accessToken };
 }
 
 test("getToken returns the cached token immediately if still valid (no fetch)", async () => {
-  const validToken: Token = {
-    accessToken  : "valid",
-    refreshToken : "rrr",
-    expiresAt    : Date.now() + 3_600_000,
-  };
-  const h = makeHarness({ initialToken: validToken });
+  const h = makeHarness({ accessExpMs: Date.now() + 3_600_000 });
   const got = await h.auth.getToken();
-  assert.equal(got.accessToken, "valid");
+  assert.equal(got.accessToken, h.accessToken);
   assert.equal(h.fetch.calls.length, 0, "no refresh round-trip on the hot path");
   assert.equal(h.auth.state, "ready");
 });
 
 test("getToken triggers a refresh when no token is cached", async () => {
   const h = makeHarness();
-  // Without an initial token, getToken should still kick off a refresh — but
-  // the AuthManager has no refresh token to send. Expect failure.
+  // Without any stored token, getToken should kick off a refresh — but the
+  // AuthManager has no refresh token to send. Expect failure.
   await assert.rejects(h.auth.getToken(), /no refresh token/);
   assert.equal(h.auth.state, "expired");
 });
 
 test("getToken refreshes when the cached token is past expiry buffer", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "stale",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() - 1_000, // already expired
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 }); // already expired
 
   const tokenPromise = h.auth.getToken();
   // Wait for fetch to be invoked.
@@ -156,13 +161,7 @@ test("getToken refreshes when the cached token is past expiry buffer", async () 
 });
 
 test("AC#5: 5 concurrent getToken calls produce exactly ONE fetch", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "stale",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() - 1_000,
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 });
 
   const promises = [
     h.auth.getToken(),
@@ -185,13 +184,7 @@ test("AC#5: 5 concurrent getToken calls produce exactly ONE fetch", async () => 
 });
 
 test("invalidate() transitions state to expired and forces refresh on next getToken", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "valid",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() + 3_600_000,
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() + 3_600_000 });
 
   const stateChanges: LupinEvent<AuthStateChangePayload>[] = [];
   h.bus.on<AuthStateChangePayload>("auth_state_change", (e) => stateChanges.push(e));
@@ -218,13 +211,7 @@ test("invalidate() transitions state to expired and forces refresh on next getTo
 });
 
 test("refresh failure: getToken rejects and emits refresh_failed with willRetry=false", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "stale",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() - 1_000,
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 });
 
   const failed: LupinEvent<RefreshFailedPayload>[] = [];
   h.bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
@@ -241,13 +228,7 @@ test("refresh failure: getToken rejects and emits refresh_failed with willRetry=
 });
 
 test("refresh timeout surfaces as AbortError (mapped to error: 'timeout')", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "stale",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() - 1_000,
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 });
 
   const failed: LupinEvent<RefreshFailedPayload>[] = [];
   h.bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
@@ -265,13 +246,7 @@ test("refresh timeout surfaces as AbortError (mapped to error: 'timeout')", asyn
 });
 
 test("refresh_started emission carries reason='expired' on stale-token path", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "stale",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() - 1_000,
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 });
 
   const started: LupinEvent<RefreshStartedPayload>[] = [];
   h.bus.on<RefreshStartedPayload>("refresh_started", (e) => started.push(e));
@@ -286,13 +261,7 @@ test("refresh_started emission carries reason='expired' on stale-token path", as
 });
 
 test("refresh_started emission carries reason='invalidated' after explicit invalidate()", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "valid",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() + 3_600_000,
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() + 3_600_000 });
 
   // Warm up the hot path — sets state to ready.
   await h.auth.getToken();
@@ -311,13 +280,7 @@ test("refresh_started emission carries reason='invalidated' after explicit inval
 });
 
 test("subsequent concurrent caller arriving AFTER fetch starts does not trigger another fetch", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "stale",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() - 1_000,
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 });
 
   const first = h.auth.getToken();
   await new Promise((res) => setTimeout(res, 5));
@@ -335,13 +298,7 @@ test("subsequent concurrent caller arriving AFTER fetch starts does not trigger 
 });
 
 test("refresh endpoint returning 5xx raises a refresh failure (HTTP-status path)", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "stale",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() - 1_000,
-    },
-  });
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 });
 
   const failed: LupinEvent<RefreshFailedPayload>[] = [];
   h.bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
@@ -362,15 +319,11 @@ test("refresh endpoint returning 5xx raises a refresh failure (HTTP-status path)
 
 test("ChainMutexLockManager: cleanup branch deletes the tail entry when no caller is queued behind us", async () => {
   // Exercises the `if (this.tails.get(name) === chained) this.tails.delete(name)`
-  // cleanup branch on line 65. Sequential request → second request finds an
-  // empty Map (entry was deleted), confirming the truthy arm of the comparison
-  // fires when no follow-up caller queued during our work.
+  // cleanup branch. Sequential request → second request finds an empty Map
+  // (entry was deleted), confirming the truthy arm of the comparison fires when
+  // no follow-up caller queued during our work.
   const locks = new ChainMutexLockManager();
   await locks.request("L", async () => "first");
-  // Internal Map should be empty after the single request completes — exposed
-  // indirectly by triggering a second request and verifying it starts fresh.
-  // Use bracket access to peek into the private `tails` Map for the assertion;
-  // c8 sees both arms of the cleanup `if` exercised.
   const peek = ( locks as unknown as { tails: Map<string, unknown> } ).tails;
   assert.equal( peek.size, 0, "cleanup branch deleted the tail entry" );
   const result = await locks.request( "L", async () => "second" );
@@ -397,24 +350,17 @@ test("ChainMutexLockManager: cleanup branch leaves the entry when a follow-up ca
   releaseA();
   const aResult = await aPromise;
   assert.equal( aResult, "a" );
-  // After A finishes, the Map still has B's chained promise.
   const peekDuringB = ( locks as unknown as { tails: Map<string, unknown> } ).tails;
-  // B may already have started or completed; if B is done its own cleanup ran.
-  // The relevant assertion is that A did not crash and B succeeds.
   void peekDuringB;
   const bResult = await bPromise;
   assert.equal( bResult, "b" );
 });
 
 test("refresh failure: fetcher throws a non-Error (string) — coerced via String(err)", async () => {
-  // True execution of the `: String(err)` arm on AuthManager.ts:249.
+  // True execution of the `: String(err)` arm in refreshUnderLock's catch.
   const bus = createEventBusForTesting();
   const storage = createStorageServiceForTesting( bus );
-  storage.setJSON( "auth_token", {
-    accessToken  : "stale",
-    refreshToken : "rrr",
-    expiresAt    : Date.now() - 1_000,
-  }, 1 );
+  storage.setTokens( accessJwt( Date.now() - 1_000 ), "rrr" );
   const stringThrowingFetcher: typeof fetch = async () => {
     /* eslint-disable-next-line @typescript-eslint/no-throw-literal */
     throw "raw-string-error" as unknown as Error;
@@ -437,22 +383,16 @@ test("refresh failure: fetcher throws a non-Error (string) — coerced via Strin
   assert.equal( auth.state, "expired" );
 });
 
-test("callRefreshEndpoint: refreshToken sourced from in-memory context.token when storage payload omits it", async () => {
-  // Targets AuthManager.ts:278 — `stored?.refreshToken ?? context.token?.refreshToken`.
-  // Strategy: hydrate via storage with a token that's barely-valid under
+test("callRefreshEndpoint: refreshToken falls back to in-memory context.token when storage is cleared", async () => {
+  // Targets the `storage.getRefreshToken() ?? context.token?.refreshToken`
+  // fallback. Strategy: hydrate via storage with a token barely-valid under
   // expiryBufferMs=0 so the constructor transitions to "ready" with an
-  // in-memory copy. Wait briefly so the token natural-expires while still
-  // sitting in context. Then overwrite storage with a payload that omits
-  // refreshToken, forcing the `??` fallback to in-memory context.token.refreshToken.
-  // (invalidate() can't be used here — it clears context.token via the
-  // clearToken action, which would defeat the test.)
+  // in-memory copy; wait for natural expiry; then clear the storage tokens so
+  // getRefreshToken() returns null, forcing the `??` fallback to in-memory.
+  // (invalidate() can't be used — clearToken would wipe context.token.)
   const bus = createEventBusForTesting();
   const storage = createStorageServiceForTesting( bus );
-  storage.setJSON( "auth_token", {
-    accessToken  : "in-memory-access",
-    refreshToken : "rrr-from-memory",
-    expiresAt    : Date.now() + 50, // valid for 50ms with expiryBufferMs=0
-  }, 1 );
+  storage.setTokens( accessJwt( Date.now() + 50 ), "rrr-from-memory" ); // valid ~50ms
   const fetch = mockFetch();
   const auth = createAuthManager({
     refreshUrl       : "/auth/refresh",
@@ -469,13 +409,9 @@ test("callRefreshEndpoint: refreshToken sourced from in-memory context.token whe
   // Wait for natural expiry without invalidating.
   await new Promise( ( res ) => setTimeout( res, 100 ) );
 
-  // Overwrite storage with a payload missing refreshToken — `stored?.refreshToken`
-  // becomes undefined, which is nullish under `??`, triggering the fallback.
-  storage.setJSON( "auth_token", {
-    accessToken : "in-memory-access",
-    expiresAt   : Date.now() - 1_000,
-    // refreshToken intentionally omitted
-  } as unknown as Token, 1 );
+  // Clear storage tokens — getRefreshToken() becomes null, triggering the
+  // fallback to the in-memory context.token.refreshToken.
+  storage.clearTokens();
 
   const p = auth.getToken();
   await new Promise( ( res ) => setTimeout( res, 5 ) );
@@ -490,14 +426,8 @@ test("callRefreshEndpoint: refreshToken sourced from in-memory context.token whe
   await p;
 });
 
-test("fresh token from refresh is persisted to storage", async () => {
-  const h = makeHarness({
-    initialToken : {
-      accessToken  : "stale",
-      refreshToken : "rrr",
-      expiresAt    : Date.now() - 1_000,
-    },
-  });
+test("fresh token from refresh is persisted to the canonical token keys", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 });
 
   const promise = h.auth.getToken();
   await new Promise((res) => setTimeout(res, 5));
@@ -506,7 +436,49 @@ test("fresh token from refresh is persisted to storage", async () => {
   });
   await promise;
 
-  const stored = h.storage.getJSON<Token>("auth_token", 1);
-  assert.equal(stored?.accessToken, "persisted");
-  assert.equal(stored?.refreshToken, "new-r");
+  assert.equal(h.storage.getAccessToken(), "persisted");
+  assert.equal(h.storage.getRefreshToken(), "new-r");
+});
+
+// ---------------------------------------------------------------------------
+// getCurrentUserEmail (WP1) — decode the access-token `email` claim.
+// ---------------------------------------------------------------------------
+
+test("getCurrentUserEmail returns the email from the in-memory (hydrated) token", () => {
+  const h = makeHarness({ accessExpMs: Date.now() + 3_600_000, email: "rick@lupin.ai" });
+  assert.equal(h.auth.state, "ready"); // hydrated → in-memory branch
+  assert.equal(h.auth.getCurrentUserEmail(), "rick@lupin.ai");
+});
+
+test("getCurrentUserEmail falls back to the stored token before hydration (expired token)", () => {
+  // Expired token does NOT hydrate (state idle, context.token null), so the
+  // email must come from storage.getAccessToken() — the fallback branch. The
+  // email claim is stable regardless of expiry.
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, email: "stored@lupin.ai" });
+  assert.notEqual(h.auth.state, "ready");
+  assert.equal(h.auth.getCurrentUserEmail(), "stored@lupin.ai");
+});
+
+test("getCurrentUserEmail returns null when no token is present", () => {
+  const h = makeHarness();
+  assert.equal(h.auth.getCurrentUserEmail(), null);
+});
+
+test("hydration is skipped when the stored access token has no decodable expiry", () => {
+  // Both canonical keys are present, but the access token is not a decodable
+  // JWT — jwtExpiryMs returns null, so readStoredToken returns null and the
+  // constructor does NOT hydrate to "ready".
+  const bus = createEventBusForTesting();
+  const storage = createStorageServiceForTesting(bus);
+  storage.setTokens("not-a-jwt", "rrr");
+  const fetch = mockFetch();
+  const auth = createAuthManager({
+    refreshUrl       : "/auth/refresh",
+    defaultTimeoutMs : 5000,
+    storage,
+    bus,
+    locks            : new ChainMutexLockManager(),
+    fetcher          : fetch.fetcher,
+  });
+  assert.notEqual(auth.state, "ready");
 });

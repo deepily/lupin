@@ -7,9 +7,9 @@ import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createPersonaModalRenderer } from "../../../../fastapi_app/static/js/multiplexer/render/PersonaModalRenderer";
-import type { SenderRecord, VoicePersona, StoreSendersChangedPayload } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createPersonaModalRenderer } from "../../../../lupin_app/static/js/multiplexer/render/PersonaModalRenderer";
+import type { SenderRecord, VoicePersona, StoreSendersChangedPayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -323,4 +323,37 @@ test("forceRenderForTesting before mount is a safe no-op (no crash)", () => {
   const store = makeStore([ makeSender({ sender_id: "a", voice_persona: makePersona() }) ]);
   const r = createPersonaModalRenderer({ eventBus: bus, stores: { senders: store } });
   assert.doesNotThrow(() => r.forceRenderForTesting());
+});
+
+// ===========================================================================
+// 14 : cold-load hydration (2026-06-11) — "hydrated" whole-snapshot change
+// ===========================================================================
+
+test("hydrated change (no sender_id) reconciles ALL popovers from store.list()", () => {
+  const bus   = createEventBusForTesting();
+  const store = makeStore([ makeSender({ sender_id: "stale", voice_persona: makePersona() }) ]);
+  const { root, portal } = makeRootWithPortal();
+  const r = createPersonaModalRenderer({ eventBus: bus, stores: { senders: store } });
+  r.mount(root);
+  assert.equal(portal.children.length, 1);
+
+  // Snapshot lands: store now holds two persona'd senders + one persona-less;
+  // the stale one is gone. A single "hydrated" change with NO sender_id must
+  // reconcile everything.
+  store.setList([
+    makeSender({ sender_id: "a", voice_persona: makePersona({ name: "Rachel" }) }),
+    makeSender({ sender_id: "b", voice_persona: makePersona({ name: "Tiberius" }) }),
+    makeSender({ sender_id: "personaless" }),
+  ]);
+  bus.emit<StoreSendersChangedPayload>({
+    type    : "store_senders_changed",
+    payload : { changeKind: "hydrated" },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(portal.children.length, 2);
+  assert.notEqual(portal.querySelector("#persona-popover-a"), null);
+  assert.notEqual(portal.querySelector("#persona-popover-b"), null);
+  assert.equal(portal.querySelector("#persona-popover-stale"), null, "stale popover removed");
+  assert.equal(portal.querySelector("#persona-popover-personaless"), null, "persona-less sender gets no popover");
 });

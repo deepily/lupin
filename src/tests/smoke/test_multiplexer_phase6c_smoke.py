@@ -327,6 +327,11 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] focusTrayRenderer:mounted",
                 "[multiplexer] personaModalRenderer:mounted",
                 "[multiplexer] senderCardRecorderRenderer:mounted",
+                # Lane E full-parity quartet (2026-06-10) — appended at the
+                # NEW-LANE MOUNT SLOT after the Phase 6c mounts, in this order.
+                "[multiplexer] ttsPreviewSliderRenderer:mounted",
+                "[multiplexer] missedBadgeRenderer:mounted",
+                "[multiplexer] fleetStatusRenderer:mounted",
             ]
             assert mount_lines == expected, (
                 f"boot handshake mismatch:\nexpected={expected}\ngot     ={mount_lines}"
@@ -648,8 +653,8 @@ def test_ac_b15_grep_gate_d_css_has_zero_keyframes_focus_flash():
     as SSOT. Mechanical grep guards against the contract regressing during
     future Phase 6c refactors."""
     import subprocess
-    d_css = "src/fastapi_app/static/css/multiplexer/conversation-mode-pin.css"
-    b_css = "src/fastapi_app/static/css/multiplexer/focus-tray.css"
+    d_css = "src/lupin_app/static/css/multiplexer/conversation-mode-pin.css"
+    b_css = "src/lupin_app/static/css/multiplexer/focus-tray.css"
 
     # D-CSS: zero occurrences of "@keyframes focus-flash".
     d_result = subprocess.run(

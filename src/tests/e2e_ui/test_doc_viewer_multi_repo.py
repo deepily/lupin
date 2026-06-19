@@ -1,9 +1,11 @@
 """
 E2E UI tests for the multi-repo doc viewer's external-scope handling.
 
-Validates that `/app/docs?path=...&scope=<external>` browses files in
+Validates that `/app/docs?path=<external>/<rel>` browses files in
 externally-mounted repos (claude-plans, lupin, planning-is-prompting, etc.)
-beyond the legacy `docs` / `io` built-ins.
+beyond the legacy `docs` / `io` built-ins. Post-2026-05-15 unified path-prefix
+format; the `?scope=` query param is retired (note: an external scope's root
+listing needs a trailing slash, e.g. `?path=claude-plans/`).
 
 Auth note: /api/docs/file is JWT-gated; an unauthenticated visit must
 redirect to `/app/login?next=<original-url>`.
@@ -24,8 +26,8 @@ class TestExternalScopeRendering:
     """Each registered external scope renders a clickable listing."""
 
     def test_claude_plans_root_lists_plans( self, logged_in_page ):
-        """Browse ?scope=claude-plans → directory listing with multiple plan files."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=&scope=claude-plans" )
+        """Browse ?path=claude-plans/ → directory listing with multiple plan files."""
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=claude-plans/" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         listing = logged_in_page.locator( ".doc-dir-listing" )
@@ -37,22 +39,23 @@ class TestExternalScopeRendering:
         assert entries.count() >= 1, "claude-plans listing was empty"
 
     def test_lupin_scope_lists_src_subtree( self, logged_in_page ):
-        """Browse ?scope=lupin&path=src/rnd → listing renders inside lupin scope."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=src/rnd&scope=lupin" )
+        """Browse ?path=lupin/src/rnd → listing renders inside the lupin scope (unified path-prefix format)."""
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd" )
         logged_in_page.wait_for_load_state( "networkidle" )
         assert logged_in_page.locator( ".doc-dir-listing" ).count() == 1
         assert logged_in_page.locator( ".doc-dir-entry" ).count() >= 1
 
     def test_external_scope_entry_href_carries_scope( self, logged_in_page ):
-        """Each entry's href preserves &scope=<external> so navigation stays in-scope."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=&scope=claude-plans" )
+        """Each entry's href carries the project path-prefix so navigation stays in-scope."""
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=claude-plans/" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         first_entry = logged_in_page.locator( ".doc-dir-entry a" ).first
         href = first_entry.get_attribute( "href" )
         assert href is not None, "first entry has no href"
-        # Either an in-viewer link (for .md files) or a same-scope dir navigation
-        assert "scope=claude-plans" in href, f"href lost scope: {href!r}"
+        # Post-unification: hrefs are project-prefixed path-only (no retired ?scope=).
+        # Either an in-viewer .md link or a same-scope dir navigation — both carry path=claude-plans.
+        assert "path=claude-plans" in href, f"entry href should carry the claude-plans path-prefix; got {href!r}"
 
 
 class TestExternalScopeFileRendering:
@@ -61,11 +64,11 @@ class TestExternalScopeFileRendering:
     def test_external_markdown_file_renders( self, logged_in_page ):
         """An .md file in claude-plans renders as markdown content."""
         # Navigate to listing first to find a real file (avoids hardcoding a filename)
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=&scope=claude-plans" )
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=claude-plans/" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         md_entry = logged_in_page.locator(
-            '.doc-dir-entry a[href*="scope=claude-plans"]'
+            '.doc-dir-entry a[href*="path=claude-plans"]'
         ).first
         if md_entry.count() == 0:
             import pytest
@@ -83,8 +86,7 @@ class TestExternalScopeFileRendering:
         """A .py file in the lupin scope renders as plain <pre> (Phase 2.5 deferred syntax highlighting)."""
         logged_in_page.goto(
             f"{BASE_URL}/app/docs"
-            f"?path=src/cosa/rest/routers/_scope_registry.py"
-            f"&scope=lupin"
+            f"?path=lupin/src/cosa/rest/routers/_scope_registry.py"
         )
         logged_in_page.wait_for_load_state( "networkidle" )
 
@@ -105,7 +107,7 @@ class TestAuthGateRedirect:
         page.goto( f"{BASE_URL}/app/login" )
         page.evaluate( 'localStorage.removeItem( "lupin_access_token" )' )
 
-        target = f"{BASE_URL}/app/docs?path=&scope=claude-plans"
+        target = f"{BASE_URL}/app/docs?path=claude-plans/"
         page.goto( target )
         page.wait_for_load_state( "networkidle" )
 
@@ -117,14 +119,26 @@ class TestAuthGateRedirect:
 
 
 class TestExternalScopeVisual:
-    """Visual regression for the new external-scope listing chrome."""
+    """Visual regression for the directory-listing chrome.
 
-    def test_visual_claude_plans_listing( self, logged_in_page, assert_snapshot ):
-        """Snapshot the claude-plans listing for visual regression."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=&scope=claude-plans" )
+    ts-127620e1 fix: snapshots a FROZEN fixture directory (deterministic by
+    construction) instead of the live `claude-plans/` repo, whose growing file
+    count changed the listing height between baseline capture and run
+    (unstable-baseline-by-construction → ValueError: Image sizes do not match).
+    The listing renderer is scope-agnostic, so the frozen fixture exercises the
+    same chrome; scope-specific behavior for external repos stays covered by the
+    non-snapshot tests in TestExternalScopeRendering above.
+    """
+
+    # Frozen fixture served via the lupin scope (its .docview.yml whitelists src/).
+    _FIXTURE_PATH = "lupin/src/tests/e2e_ui/fixtures/docview_listing_fixture_external"
+
+    def test_visual_external_scope_listing( self, logged_in_page, assert_snapshot ):
+        """Snapshot the directory-listing chrome via a frozen fixture dir."""
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path={self._FIXTURE_PATH}" )
         logged_in_page.wait_for_load_state( "networkidle" )
         listing_container = logged_in_page.locator( ".doc-viewer-container" )
         assert_snapshot(
             listing_container,
-            name = "doc_viewer_multi_repo_claude_plans_listing.png",
+            name = "doc_viewer_external_scope_listing_frozen.png",
         )

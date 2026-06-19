@@ -29,7 +29,7 @@ class TestQAInterfaceLayout:
         Ensures:
             - Mode select element exists and is visible
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
@@ -45,7 +45,7 @@ class TestQAInterfaceLayout:
         Ensures:
             - Mode select has multiple options (Math, Calendar, etc.)
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )
@@ -63,7 +63,7 @@ class TestQAInterfaceLayout:
         Ensures:
             - Question input element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         qa_input = logged_in_page.get_by_test_id( "notifications-qa-input" )
@@ -79,7 +79,7 @@ class TestQAInterfaceLayout:
         Ensures:
             - STT button exists in DOM
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         stt_btn = logged_in_page.get_by_test_id( "notifications-qa-stt-btn" )
@@ -95,7 +95,7 @@ class TestQAInterfaceLayout:
         Ensures:
             - TTS mode select element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         tts_mode = logged_in_page.get_by_test_id( "notifications-qa-tts-mode-select" )
@@ -111,7 +111,7 @@ class TestQAInterfaceLayout:
         Ensures:
             - Submit button exists and is visible
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         submit_btn = logged_in_page.get_by_test_id( "notifications-qa-submit-btn" )
@@ -127,7 +127,7 @@ class TestQAInterfaceLayout:
         Ensures:
             - Metrics element exists in DOM
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         metrics = logged_in_page.get_by_test_id( "notifications-qa-metrics" )
@@ -151,7 +151,7 @@ class TestQAInputInteraction:
         Ensures:
             - Text can be entered into the input field
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         qa_input = logged_in_page.get_by_test_id( "notifications-qa-input" )
@@ -169,7 +169,7 @@ class TestQAInputInteraction:
         Ensures:
             - Mode selector value changes after selection
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )

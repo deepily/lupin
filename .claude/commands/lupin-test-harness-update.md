@@ -78,7 +78,7 @@ component_types = {
         "test_location": "src/cosa/tests/unit/agents/",
         "smoke_location": "inline quick_smoke_test()"
     },
-    "fastapi_app/": {
+    "lupin_app/": {
         "type": "lupin_integration",
         "requires_unit_tests": False,
         "requires_smoke_tests": True,

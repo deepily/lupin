@@ -1,9 +1,11 @@
 """
 E2E UI tests for the doc viewer's directory listing extension.
 
-Validates that `/app/docs?path=<directory>&scope=<docs|io>` renders a
-clickable directory listing (per
-src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md).
+Validates that `/app/docs?path=<project>/<directory>` renders a clickable
+directory listing (per src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md).
+URL format is the post-2026-05-15 unified path-prefix scheme: `?path=lupin/<rel>`
+for Lupin docs, `?path=io` for the io built-in scope. The legacy `?scope=` query
+param is retired (see § Doc Viewer Scope in CLAUDE.md).
 
 Auth note (updated 2026-05-12): the doc viewer's `/api/docs/file` and
 `/api/io/file` endpoints now require JWT auth per multi-repo-doc-viewer.md
@@ -26,11 +28,11 @@ from .conftest import BASE_URL
 
 
 class TestDocViewerDirectoryListing:
-    """Browser-rendered directory listing tests for scope=docs and scope=io."""
+    """Browser-rendered directory listing tests for the lupin docs subtree and the io built-in scope."""
 
     def test_docs_scope_directory_renders_listing( self, logged_in_page ):
         """Navigating to a whitelisted R&D directory renders the directory listing."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=src/rnd/v0.1.7&scope=docs" )
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/v0.1.7" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         # The .doc-dir-listing UL is the canonical directory-mode marker
@@ -50,24 +52,26 @@ class TestDocViewerDirectoryListing:
 
     def test_docs_scope_entry_links_back_to_doc_viewer( self, logged_in_page ):
         """Each entry's <a href> points back into the doc viewer at the deeper path."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=src/rnd/v0.1.7&scope=docs" )
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/v0.1.7" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         first_entry_link = logged_in_page.locator( ".doc-dir-entry a" ).first
         href = first_entry_link.get_attribute( "href" )
         assert href, "first entry has no href"
         assert href.startswith( "/app/docs?path=" )
-        assert "scope=docs" in href
+        # Post-unification (2026-05-15): hrefs are project-prefixed path-only —
+        # no retired ?scope= param. Entry stays inside the lupin scope.
+        assert "path=lupin" in href, f"entry href should carry the lupin path-prefix; got {href!r}"
 
     def test_docs_scope_bare_prefix_root_renders( self, logged_in_page ):
         """Q2: bare `src/rnd` (no trailing slash) renders a listing."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=src/rnd&scope=docs" )
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd" )
         logged_in_page.wait_for_load_state( "networkidle" )
         assert logged_in_page.locator( ".doc-dir-listing" ).count() == 1
 
     def test_io_scope_directory_renders_listing( self, logged_in_page ):
-        """Navigating to an io subdirectory renders a listing with scope=io URLs."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=&scope=io" )
+        """Navigating to the io root renders a listing with io path-prefix URLs."""
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=io" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         listing = logged_in_page.locator( ".doc-dir-listing" )
@@ -77,8 +81,8 @@ class TestDocViewerDirectoryListing:
         assert logged_in_page.locator( ".doc-dir-entry" ).count() > 0
 
     def test_io_scope_mp3_entry_links_to_audio_player( self, logged_in_page ):
-        """Q1: mp3 entries in scope=io route to /app/audio (NOT /api/io/file?download)."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=&scope=io" )
+        """Q1: mp3 entries in the io scope route to /app/audio (NOT /api/io/file?download)."""
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=io" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         # Find any anchor href that points at the audio player — proves an mp3 routed correctly
@@ -94,8 +98,7 @@ class TestDocViewerDirectoryListing:
         """File-mode (existing behavior) still works — no Content-Type regression."""
         logged_in_page.goto(
             f"{BASE_URL}/app/docs"
-            f"?path=src/rnd/v0.1.7/2026.04.24-cosa-voice-nested-repo-detection-fix.md"
-            f"&scope=docs"
+            f"?path=lupin/src/rnd/v0.1.7/2026.04.24-cosa-voice-nested-repo-detection-fix.md"
         )
         logged_in_page.wait_for_load_state( "networkidle" )
 
@@ -108,17 +111,28 @@ class TestDocViewerDirectoryVisual:
     """Visual regression snapshots for the directory-listing UI."""
 
     def test_visual_docs_scope_listing( self, logged_in_page, assert_snapshot ):
-        """Visual regression for scope=docs directory listing."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=src/rnd/v0.1.7&scope=docs" )
+        """Visual regression for the lupin docs directory listing."""
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/v0.1.7" )
         logged_in_page.wait_for_load_state( "networkidle" )
         # Snapshot the listing container (not the whole page — keeps snapshot
         # stable across nav bar / header chrome changes)
         listing_container = logged_in_page.locator( ".doc-viewer-container" )
         assert_snapshot( listing_container, name="doc_viewer_directory_listing_docs.png" )
 
-    def test_visual_io_scope_listing( self, logged_in_page, assert_snapshot ):
-        """Visual regression for scope=io directory listing."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=&scope=io" )
+    # Frozen fixture served via the lupin scope (its .docview.yml whitelists src/).
+    _FIXTURE_PATH = "lupin/src/tests/e2e_ui/fixtures/docview_listing_fixture_io"
+
+    def test_visual_directory_listing_frozen_fixture( self, logged_in_page, assert_snapshot ):
+        """Visual regression for the directory-listing chrome via a FROZEN fixture.
+
+        ts-127620e1 fix: replaces the former `?path=io` snapshot, which was
+        unstable-by-construction — the io scope grows every run (the harness writes
+        its own results into io/), so the listing height changed between baseline
+        capture and run (ValueError: Image sizes do not match). The renderer is
+        scope-agnostic; the frozen fixture exercises the same chrome. Functional
+        coverage of the real io scope stays in TestDocViewerDirectoryListing above.
+        """
+        logged_in_page.goto( f"{BASE_URL}/app/docs?path={self._FIXTURE_PATH}" )
         logged_in_page.wait_for_load_state( "networkidle" )
         listing_container = logged_in_page.locator( ".doc-viewer-container" )
-        assert_snapshot( listing_container, name="doc_viewer_directory_listing_io.png" )
+        assert_snapshot( listing_container, name="doc_viewer_directory_listing_frozen.png" )

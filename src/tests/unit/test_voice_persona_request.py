@@ -16,6 +16,14 @@ Feature shape per Rachel's 2026-05-19 R1 design (commons DM `3139380d`):
     - Name not in pool → 422 with available list in body.detail
     - Name occupied by another session → 409 with holding info + available in body.detail
     - No request param → existing random-allocate behavior preserved
+
+Also covers the STRICT ordered-fallback `persona_chain` query param (2026-06-11
+replacement for the retired soft-preference `preferred_persona_name`):
+
+    POST /api/cosa-voice/voice-persona/{sid}/allocate?persona_chain=<name,...[,*]>
+
+    See TestPersonaChainQueryParam and
+    src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
 """
 import os
 import sys
@@ -35,7 +43,7 @@ from cosa.rest.voice_persona_helpers import (
     _find_persona_in_pool,
     pick_requested_persona,
     allocate_requested_persona_for_session,
-    pick_preferred_persona_from_env
+    pick_persona_chain_from_env
 )
 
 
@@ -676,66 +684,82 @@ class TestNotificationPushFailureTolerance:
         assert body[ "broadcast_delivered" ]     is False
 
 
-# ── pick_preferred_persona_from_env (pure helper) ────────────────────────────
+# ── pick_persona_chain_from_env (pure helper) ────────────────────────────────
 
-class TestPickPreferredPersonaFromEnv:
+class TestPickPersonaChainFromEnv:
     """
     Tests for the env-var lookup helper. Pure function — no I/O, no MCP, no
-    HTTP — just reads `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` from
-    os.environ with project-name normalization.
+    HTTP — just reads `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>` (now a chain
+    expression) from os.environ with project-name normalization, or from an
+    explicit `environ=` mapping when supplied.
 
-    See: planning-is-prompting/src/rnd/2026.05.19-cosa-voice-preferred-persona-env-var.md
+    See: src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md
     """
 
     def test_env_var_unset_returns_none( self, monkeypatch ):
         # Ensure the var is absent
         monkeypatch.delenv( "COSA_VOICE_PREFERRED_PERSONA__LUPIN", raising=False )
-        assert pick_preferred_persona_from_env( "lupin" ) is None
+        assert pick_persona_chain_from_env( "lupin" ) is None
 
     def test_project_normalization_hyphen( self, monkeypatch ):
         # project="cosa-voice" must resolve to ...__COSA_VOICE (hyphens → underscores)
         monkeypatch.setenv( "COSA_VOICE_PREFERRED_PERSONA__COSA_VOICE", "Rio" )
-        assert pick_preferred_persona_from_env( "cosa-voice" ) == "Rio"
+        assert pick_persona_chain_from_env( "cosa-voice" ) == "Rio"
 
     def test_project_normalization_uppercase( self, monkeypatch ):
         # Project name is case-insensitive — both "plan" and "PLAN" hit the same var
         monkeypatch.setenv( "COSA_VOICE_PREFERRED_PERSONA__PLAN", "María" )
-        assert pick_preferred_persona_from_env( "plan" ) == "María"
-        assert pick_preferred_persona_from_env( "PLAN" ) == "María"
-        assert pick_preferred_persona_from_env( "Plan" ) == "María"
+        assert pick_persona_chain_from_env( "plan" ) == "María"
+        assert pick_persona_chain_from_env( "PLAN" ) == "María"
+        assert pick_persona_chain_from_env( "Plan" ) == "María"
 
     def test_empty_project_string( self, monkeypatch ):
         # Empty / None / whitespace-only project returns None silently — no env read
         monkeypatch.setenv( "COSA_VOICE_PREFERRED_PERSONA__", "Tiberius" )  # legal env var, but project="" → no lookup
-        assert pick_preferred_persona_from_env( ""    ) is None
-        assert pick_preferred_persona_from_env( None  ) is None
-        assert pick_preferred_persona_from_env( "   " ) is None
+        assert pick_persona_chain_from_env( ""    ) is None
+        assert pick_persona_chain_from_env( None  ) is None
+        assert pick_persona_chain_from_env( "   " ) is None
+
+    def test_chain_expression_returned_verbatim( self, monkeypatch ):
+        # Chain syntax is NOT parsed here — returned verbatim for the allocator
+        monkeypatch.setenv( "COSA_VOICE_PREFERRED_PERSONA__LUPIN", "Mr. Radio,Tiberius,*" )
+        assert pick_persona_chain_from_env( "lupin" ) == "Mr. Radio,Tiberius,*"
+
+    def test_explicit_environ_mapping_wins_over_os_environ( self, monkeypatch ):
+        # environ= param bypasses os.environ entirely (testability seam)
+        monkeypatch.setenv( "COSA_VOICE_PREFERRED_PERSONA__LUPIN", "FromOsEnviron" )
+        environ = { "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "Rio,Krishna,*" }
+        assert pick_persona_chain_from_env( "lupin", environ=environ ) == "Rio,Krishna,*"
+        assert pick_persona_chain_from_env( "lupin", environ={} )      is None
 
 
-# ── Router: `preferred_persona_name` query param (soft preference) ───────────
+# ── Router: `persona_chain` query param (STRICT ordered fallback) ────────────
 
-class TestPreferredPersonaNameQueryParam:
+class TestPersonaChainQueryParam:
     """
-    Tests for the env-var-driven soft-preference branch of /allocate. Unlike
-    `requested_persona_name` (strict 422/409), `preferred_persona_name` has
-    graceful-fallback semantics: on not_in_pool or occupied, server allocates
-    a random persona AND pushes a `voice_persona_conflict` notification.
+    Tests for the chain branch of /allocate — the 2026-06-11 replacement for
+    the retired soft-preference `preferred_persona_name` param. STRICT
+    ordered-fallback semantics: each named element is tried in order, the
+    first FREE one wins; `*` means "then take anything free"; exhaustion
+    without `*` is a LOUD 409 + `voice_persona_conflict` notification (NO
+    silent random fallback). The old single-name behavior "María with soft
+    fallback" is now expressed as the chain "María,*".
 
-    These tests cover the three branches:
-      - happy path (preferred persona available)
-      - occupied (preferred held by another live session → fallback + notify)
-      - not_in_pool (preferred name is garbage → fallback + notify)
+    Branches covered end-to-end through the real helpers (only the bridge
+    boundary is mocked):
+      - first element free → allocated, silent, chain_conflict None
+      - first held + `*` → wildcard fallback + conflict notify (holder short-id)
+      - first held + later NAMED element free → silent (expressed intent)
+      - exhausted (no `*`) → 409 + conflict notify (kind=chain_exhausted)
+      - empty chain (",,,") → 422 with message + chain echo
+      - mutual exclusivity with requested_persona_name → 422
+      - chain does NOT override an existing allocation
+      - empty pool → 500 (pool_error)
     """
 
-    def test_env_var_set_persona_available( self, test_app ):
-        """Preferred persona is free → allocates it, no conflict notify."""
-        from cosa.rest.routers.voice_persona import get_notification_queue, get_config_manager
-        from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
-
-        queue = MagicMock()
-        test_app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "svc"
-        test_app.dependency_overrides[ get_notification_queue ] = lambda: queue
-        test_app.dependency_overrides[ get_config_manager     ] = lambda: _make_mock_config_mgr()
+    def test_chain_first_element_free_allocates_silently( self, test_app ):
+        """First chain element free → allocated; no conflict notify; chain_conflict None."""
+        mock_queue = _setup_overrides( test_app )
 
         with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
              patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=None ), \
@@ -744,29 +768,23 @@ class TestPreferredPersonaNameQueryParam:
 
             client = TestClient( test_app )
             resp   = client.post(
-                "/api/cosa-voice/voice-persona/sid-mine/allocate?preferred_persona_name=Tiberius"
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=Tiberius,*"
             )
 
         assert resp.status_code == 200
         body = resp.json()
         assert body[ "voice_persona" ][ "name" ] == "Tiberius"
-        assert body[ "preference_conflict" ]     is None
-        # voice_persona_assigned push happens, but NO voice_persona_conflict push
-        push_types = [ call.kwargs.get( "type" ) for call in queue.push_notification.call_args_list ]
+        assert body[ "newly_allocated" ]         is True
+        assert body[ "chain_conflict" ]          is None
+        assert "preference_conflict" not in body    # retired response key is GONE
+        push_types = [ call.kwargs.get( "type" ) for call in mock_queue.push_notification.call_args_list ]
         assert "voice_persona_assigned" in push_types
         assert "voice_persona_conflict" not in push_types
 
-    def test_env_var_set_persona_held( self, test_app ):
-        """Preferred persona held by another session → fallback + conflict notify."""
-        from cosa.rest.routers.voice_persona import get_notification_queue, get_config_manager
-        from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+    def test_chain_held_then_wildcard_fallback_notifies( self, test_app ):
+        """First element held + `*` → wildcard allocates another; conflict notify carries holder short-id."""
+        mock_queue = _setup_overrides( test_app )
 
-        queue = MagicMock()
-        test_app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "svc"
-        test_app.dependency_overrides[ get_notification_queue ] = lambda: queue
-        test_app.dependency_overrides[ get_config_manager     ] = lambda: _make_mock_config_mgr()
-
-        # Tiberius is held by sid-other; the requesting session should get a different persona
         held_persona = { "name": "Tiberius", "voice_id": "v_tiberius", "icon": "🌑", "color": "#3F51B5", "profile": "" }
         with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
              patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=None ), \
@@ -776,53 +794,150 @@ class TestPreferredPersonaNameQueryParam:
 
             client = TestClient( test_app )
             resp   = client.post(
-                "/api/cosa-voice/voice-persona/sid-mine/allocate?preferred_persona_name=Tiberius"
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=Tiberius,*"
             )
 
         assert resp.status_code == 200
         body = resp.json()
-        # Should have allocated something OTHER than Tiberius
+        # Wildcard allocated something OTHER than Tiberius
         assert body[ "voice_persona" ][ "name" ] != "Tiberius"
-        # Conflict payload echoes the requested name + holding session id
-        assert body[ "preference_conflict" ][ "kind" ]                 == "occupied"
-        assert body[ "preference_conflict" ][ "requested" ]            == "Tiberius"
-        assert body[ "preference_conflict" ][ "holding_session_id" ]   == "sid-other-12345678"
-        assert body[ "preference_conflict" ][ "holding_persona_name" ] == "Tiberius"
-        # Both `voice_persona_assigned` AND `voice_persona_conflict` get pushed
-        push_types = [ call.kwargs.get( "type" ) for call in queue.push_notification.call_args_list ]
+        # chain_conflict reports the named miss with holder info
+        assert body[ "chain_conflict" ][ "kind" ]  == "wildcard_fallback"
+        assert body[ "chain_conflict" ][ "chain" ] == "Tiberius,*"
+        outcome = body[ "chain_conflict" ][ "outcomes" ][ 0 ]
+        assert outcome[ "name" ]               == "Tiberius"
+        assert outcome[ "status" ]             == "occupied"
+        assert outcome[ "holding_session_id" ] == "sid-other-12345678"
+        # Both pushes fire; the conflict message names the holder's SHORT id
+        push_calls = mock_queue.push_notification.call_args_list
+        push_types = [ c.kwargs.get( "type" ) for c in push_calls ]
         assert "voice_persona_assigned" in push_types
         assert "voice_persona_conflict" in push_types
+        conflict_msg = next(
+            c.kwargs[ "message" ] for c in push_calls
+            if c.kwargs.get( "type" ) == "voice_persona_conflict"
+        )
+        assert "sid-othe" in conflict_msg    # holding_session_id[:8]
 
-    def test_env_var_set_invalid_name( self, test_app ):
-        """Preferred persona not in pool → fallback + conflict notify (kind=not_in_pool)."""
-        from cosa.rest.routers.voice_persona import get_notification_queue, get_config_manager
-        from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+    def test_chain_success_on_second_name_is_silent( self, test_app ):
+        """First held, second NAMED element free → allocated silently (expressed intent)."""
+        mock_queue = _setup_overrides( test_app )
 
-        queue = MagicMock()
-        test_app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "svc"
-        test_app.dependency_overrides[ get_notification_queue ] = lambda: queue
-        test_app.dependency_overrides[ get_config_manager     ] = lambda: _make_mock_config_mgr()
-
+        held_persona = { "name": "Tiberius", "voice_id": "v_tiberius", "icon": "🌑", "color": "#3F51B5", "profile": "" }
         with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
              patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=None ), \
              patch( "cosa.rest.routers.voice_persona.set_voice_persona", return_value=True ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions",
+                    return_value=[ ( "/tmp/cc-2.json", "sid-other-12345678", held_persona ) ] ):
+
+            client = TestClient( test_app )
+            resp   = client.post(
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=Tiberius,Rio"
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[ "voice_persona" ][ "name" ] == "Rio"
+        assert body[ "chain_conflict" ]          is None
+        push_types = [ call.kwargs.get( "type" ) for call in mock_queue.push_notification.call_args_list ]
+        assert "voice_persona_conflict" not in push_types
+
+    def test_chain_exhausted_409_with_conflict_notification( self, test_app ):
+        """Every named element missed, no `*` → 409 + conflict notify; session stays persona-less."""
+        mock_queue = _setup_overrides( test_app )
+
+        held_persona = { "name": "Tiberius", "voice_id": "v_tiberius", "icon": "🌑", "color": "#3F51B5", "profile": "" }
+        with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
+             patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=None ), \
+             patch( "cosa.rest.routers.voice_persona.set_voice_persona", return_value=True ) as mock_set, \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions",
+                    return_value=[ ( "/tmp/cc-2.json", "sid-other-12345678", held_persona ) ] ):
+
+            client = TestClient( test_app )
+            resp   = client.post(
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=Tiberius,Frobozz"
+            )
+
+        assert resp.status_code == 409
+        detail = resp.json()[ "detail" ]
+        assert "message" in detail
+        assert detail[ "chain" ] == "Tiberius,Frobozz"
+        assert [ o[ "status" ] for o in detail[ "outcomes" ] ] == [ "occupied", "not_in_pool" ]
+        assert "Tiberius" not in detail[ "available" ]
+        # NO bridge write — the session keeps no persona (Sam TTS fallback)
+        mock_set.assert_not_called()
+        # Conflict notification pushed BEFORE the 409
+        conflict_calls = [ c for c in mock_queue.push_notification.call_args_list
+                           if c.kwargs.get( "type" ) == "voice_persona_conflict" ]
+        assert len( conflict_calls ) == 1
+        kw = conflict_calls[ 0 ].kwargs
+        assert kw[ "payload" ][ "kind" ] == "chain_exhausted"
+        assert kw[ "voice_persona" ]     is None
+        assert "sid-othe" in kw[ "message" ]
+
+    def test_chain_empty_expression_422( self, test_app ):
+        """A chain parsing to zero elements (',,,') → 422 with message + chain echo."""
+        _setup_overrides( test_app )
+
+        with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
+             patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions", return_value=[] ):
 
             client = TestClient( test_app )
             resp   = client.post(
-                "/api/cosa-voice/voice-persona/sid-mine/allocate?preferred_persona_name=Frobozz"
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=,,,"
+            )
+
+        assert resp.status_code == 422
+        detail = resp.json()[ "detail" ]
+        assert "message" in detail
+        assert detail[ "chain" ] == ",,,"
+
+    def test_chain_mutually_exclusive_with_requested_422( self, test_app ):
+        """Supplying BOTH requested_persona_name and persona_chain → 422."""
+        _setup_overrides( test_app )
+
+        with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ):
+            client = TestClient( test_app )
+            resp   = client.post(
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?requested_persona_name=Rachel&persona_chain=Rio,*"
+            )
+
+        assert resp.status_code == 422
+        assert "mutually exclusive" in resp.json()[ "detail" ]
+
+    def test_chain_does_not_override_existing_allocation( self, test_app ):
+        """Existing persona + chain → idempotent return of the EXISTING persona."""
+        _setup_overrides( test_app )
+
+        existing = { "name": "Rachel", "voice_id": "v_rachel", "icon": "🕊️", "color": "#4CAF50",
+                     "profile": "calm", "borrowed": False }
+
+        with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
+             patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=existing ):
+
+            client = TestClient( test_app )
+            resp   = client.post(
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=Tiberius,*"
             )
 
         assert resp.status_code == 200
         body = resp.json()
-        # Got SOME persona (random fallback)
-        assert body[ "voice_persona" ][ "name" ] in [ p[ "name" ] for p in POOL_6 ]
-        # Conflict payload labels the miss
-        assert body[ "preference_conflict" ][ "kind" ]      == "not_in_pool"
-        assert body[ "preference_conflict" ][ "requested" ] == "Frobozz"
-        # Available list is non-empty (pool free)
-        assert len( body[ "preference_conflict" ][ "available" ] ) == 6
-        # Both pushes fire
-        push_types = [ call.kwargs.get( "type" ) for call in queue.push_notification.call_args_list ]
-        assert "voice_persona_assigned" in push_types
-        assert "voice_persona_conflict" in push_types
+        assert body[ "newly_allocated" ] is False
+        assert body[ "voice_persona" ]   == existing
+
+    def test_chain_empty_pool_returns_500( self, test_app ):
+        """Pool empty/misconfigured → pool_error → 500."""
+        empty_cfg = _make_mock_config_mgr( pool=[] )
+        _setup_overrides( test_app, config_mgr=empty_cfg )
+
+        with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
+             patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_active_voice_persona_sessions", return_value=[] ):
+
+            client = TestClient( test_app )
+            resp   = client.post(
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?persona_chain=Rio,*"
+            )
+
+        assert resp.status_code == 500

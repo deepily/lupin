@@ -5,8 +5,8 @@ import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { renderNotificationItem } from "../../../../fastapi_app/static/js/multiplexer/render/templates/notificationItem";
-import type { Notification } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import { renderNotificationItem } from "../../../../lupin_app/static/js/multiplexer/render/templates/notificationItem";
+import type { Notification } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -49,6 +49,24 @@ test("notificationItem: was_expired=true adds .expired-response class + EXPIRED 
   const badge = el.querySelector(".expired-badge");
   assert.notEqual(badge, null);
   assert.equal(badge!.textContent, "EXPIRED");
+});
+
+// CSS-parity 2026-06-17: every message is an inbound notification → `.incoming`
+// chat-bubble variant must be applied (the Notification model has no direction
+// field, so there is no `.outgoing` case). Covers both the plain and the
+// expired class-string branches.
+test("notificationItem: applies .incoming on the plain message", () => {
+  const el = renderNotificationItem(makeNotification(), { appTimezone: "UTC" });
+  assert.ok(el.classList.contains("sender-message"));
+  assert.ok(el.classList.contains("incoming"));
+  assert.equal(el.classList.contains("outgoing"), false);
+});
+
+test("notificationItem: applies .incoming alongside .expired-response", () => {
+  const el = renderNotificationItem(makeNotification({ was_expired: true }), { appTimezone: "UTC" });
+  assert.ok(el.classList.contains("sender-message"));
+  assert.ok(el.classList.contains("incoming"));
+  assert.ok(el.classList.contains("expired-response"));
 });
 
 test("notificationItem: time_display backend override beats formatHM", () => {

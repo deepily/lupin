@@ -47,7 +47,7 @@ def seeded_repair_chain_page( logged_in_page ):
     user_email = "e2e_test@example.com"
     records    = seed_repair_chain( user_id, user_email )
 
-    logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+    logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     logged_in_page.wait_for_load_state( "networkidle" )
 
     return logged_in_page, records

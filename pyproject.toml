@@ -36,7 +36,7 @@ dependencies = [
   "openai>=1.50,<2",
   "google-generativeai>=0.8,<1",
   "groq>=0.11,<1",
-  "claude-agent-sdk==0.1.56",
+  "claude-agent-sdk==0.2.88",
   "fastmcp==2.14.2",
 
   # --- Data / search / memory ---
@@ -62,6 +62,11 @@ dependencies = [
   "sqlalchemy==2.0.40",
   "psycopg2-binary==2.9.11",
   "alembic==1.18.1",
+
+  # --- Push (S6 FCM silent-relay wake channel) ---
+  "firebase-admin>=6.5,<7",               # REAL FCM admin SDK (named app "lupin-fcm-wake");
+                                          # import stays lazy/optional — FcmWakeService degrades
+                                          # to DISABLED when module or credentials are absent (OSQ-7)
 
   # --- Auth (some pins are pre-3.13-wheel-era; bump if uv lock fails) ---
   "PyJWT==2.10.1",
@@ -96,6 +101,11 @@ dependencies = [
   "pandas>=2.2,<3",
   "pyperclip>=1.9,<2",
   "tabulate>=0.9,<1",
+  "openapi-to-md==0.1.0b2",               # provides `openapi-to-markdown` + `api2md` console
+                                          # scripts used by src/scripts/generate-api-docs.sh.
+                                          # Was only ever in the old miniconda venv; exact-pinned
+                                          # (beta — no stable release) so uv resolves it without a
+                                          # global --prerelease flag.
 
   # --- Build helpers (kept in main env; flash-attn build needs ninja+packaging) ---
   "wheel",
@@ -145,3 +155,41 @@ torchaudio  = { index = "pytorch-cu124" }
 # torch in /opt/venv. uv ensures torch (and the other build deps) install
 # before flash-attn so the unisolated build sees them.
 no-build-isolation-package = ["flash-attn"]
+
+# ============================================================================
+# Coverage — Tier-0 denominator for the CoSA 100%-coverage campaign
+#
+# Ratified by Rick via interactive walk-through (D2, 2026-05-30). Establishes
+# the blessed denominator that reproduces the 45.3% line / 34.8% branch unit
+# baseline (raw `--cov=cosa` reads 26.9% only because it counts test files +
+# inline scaffolding + GPU-only training code as production source).
+#
+# Authority: src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/00-campaign-plan.md (D2)
+#            src/rnd/v0.1.8/2026.05.30-cosa-100pct-coverage-baseline.md §7
+#
+# Scaffolding NOTE: the `exclude_also` blocks below are a temporary measure.
+# `quick_smoke_test()` / `__main__` blocks carry real assertions; the campaign
+# harvests them into real pytest, then deletes the block. Retire each regex
+# once all such blocks are migrated (D2 harvest -> migrate -> delete pipeline).
+# ============================================================================
+[tool.coverage.run]
+branch = true
+source = [ "cosa" ]
+omit   = [
+    "*/cosa/tests/*",               # CoSA's own test suites — test code, not a coverage denominator
+    "*/cosa/agents/*/tests/*",      # per-agent test suites (podcast_generator, io_models)
+    # NOTE: a broad "*/test_*.py" was REMOVED 2026-05-31 — it was redundant (real test
+    # files already omitted by the two tests-dir globs above) and was HIDING three real
+    # prod modules from the 100% mandate: swe_team/test_runner.py, rest/routers/test_suite.py,
+    # rest/test_suite_completion_watchdog.py. Those are production code that runs/manages
+    # test suites — they must be measured, not omitted by an over-broad filename glob.
+    "*/cosa/agents/*/__main__.py",  # CLI entrypoints — glue, run only via `python -m`
+    "*/cosa/training/*",            # GPU + user-run-only; untestable in CI per never-grab-GPU mandate
+]
+
+[tool.coverage.report]
+# exclude_also APPENDS to defaults (keeps `# pragma: no cover` working)
+exclude_also = [
+    "def quick_smoke_test",         # house-style inline smoke block; never runs under pytest
+    "if __name__ == .__main__.:",   # inline main guards inside regular modules
+]

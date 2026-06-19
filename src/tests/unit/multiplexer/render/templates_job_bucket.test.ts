@@ -6,8 +6,8 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { renderJobBucket } from "../../../../fastapi_app/static/js/multiplexer/render/templates/jobBucket";
-import type { Job, JobBucket } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+import { renderJobBucket } from "../../../../lupin_app/static/js/multiplexer/render/templates/jobBucket";
+import type { Job, JobBucket } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

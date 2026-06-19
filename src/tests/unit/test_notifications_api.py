@@ -488,8 +488,8 @@ class TestSubmitNotificationResponse:
         with patch( 'cosa.rest.routers.notifications.get_db', return_value=db_context_manager ):
             # Patch NotificationRepository
             with patch( 'cosa.rest.routers.notifications.NotificationRepository' ) as MockRepo:
-                # Patch fastapi_app.main.config_mgr by patching the import in the module
-                with patch( 'fastapi_app.main.config_mgr', mock_config_mgr ):
+                # Patch lupin_app.main.config_mgr by patching the import in the module
+                with patch( 'lupin_app.main.config_mgr', mock_config_mgr ):
                     mock_repo_instance = MagicMock()
                     mock_repo_instance.get_by_id.return_value = mock_notification
                     mock_repo_instance.update_response.return_value = mock_notification

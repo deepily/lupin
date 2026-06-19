@@ -19,6 +19,12 @@ demonstrated patterns. If the past responses show a consistent pattern,
 reflect that pattern. If they vary, choose the most likely response given
 the current question's specific context.
 
+Some cases carry a user_verdict attribute: "approved" means the user
+explicitly confirmed that response was right — weight it heavily.
+"rejected" means the user explicitly rejected that response — do NOT
+reproduce or paraphrase a rejected response as your prediction; predict
+something the user would prefer instead.
+
 Keep your predicted answer concise and natural — match the user's typical
 response style and length from the past cases.
 

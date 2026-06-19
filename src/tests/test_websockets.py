@@ -263,7 +263,7 @@ if __name__ == "__main__":
             sys.exit(1)
     except Exception:
         print("❌ FastAPI server is not running!")
-        print("Run: cd src && python -m uvicorn fastapi_app.main:app --port 7999")
+        print("Run: cd src && python -m uvicorn lupin_app.main:app --port 7999")
         sys.exit(1)
     
     asyncio.run(main())

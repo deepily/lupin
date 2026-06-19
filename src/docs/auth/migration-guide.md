@@ -89,7 +89,7 @@
 - [ ] **Initialize Auth Database**
   ```bash
   # Run server once to create auth.db
-  python -m fastapi_app.main
+  python -m lupin_app.main
   # Verify auth.db created
   ls -lh /var/lib/lupin/auth.db
   ```
@@ -493,7 +493,7 @@ python scripts/migrate_mock_users.py --generate-passwords
 ```bash
 # Start server in JWT mode on different port
 LUPIN_CONFIG_MGR_CLI_ARGS="--block-name=Lupin: Testing" \
-    uvicorn fastapi_app.main:app --port 8000
+    uvicorn lupin_app.main:app --port 8000
 
 # Test registration
 curl -X POST http://localhost:8000/auth/register \

@@ -46,7 +46,7 @@ This skill activates when the user says any of:
 |--------------|------------|--------------|
 | `.py` (any path on `PYTHONPATH`, including `src/cosa/`) | **None** — auto-reload picks it up | `docker restart lupin-rest-test` (or `/refresh-test` slash command) |
 | `.ini` (`lupin-app.ini`, `lupin-app-splainer.ini`) | `docker restart lupin-rest-dev` | `docker restart lupin-rest-test` |
-| Frontend static (`.js`, `.html`, `.css` under `src/fastapi_app/static/`) | Browser hard-refresh (Ctrl+Shift+R) | Browser hard-refresh |
+| Frontend static (`.js`, `.html`, `.css` under `src/lupin_app/static/`) | Browser hard-refresh (Ctrl+Shift+R) | Browser hard-refresh |
 | `docker-compose.yml` (mounts, env, ports) | `docker compose down && docker compose up -d` | same |
 | `Dockerfile` | `docker compose build <svc> && docker compose up -d <svc>` | same |
 | `requirements.txt` / `pyproject.toml` | `docker compose build <svc> && docker compose up -d <svc>` | same |

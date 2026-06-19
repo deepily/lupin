@@ -1,0 +1,175 @@
+# ============================================================================
+# Lupin — GCP Milestone-1 TEST deployment (mount model), Cloud-SQL-backed.
+#
+# Runs ON the VM `lupin-host-test`. NOT for local use (needs GCP ADC via the
+# VM's attached vm_sa + the real Cloud SQL instance + an L4 GPU).
+#
+# Design of record: src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.03-m1-vm-bringup-plan.md
+#   - Decision 3  (mount model): bind-mount the on-VM checkout's ./src; image = deps/runtime.
+#   - Decision 3b (keys): provider keys delivered out-of-band to ./src/conf/keys (manual interim).
+#   - Cloud SQL: app builds a UNIX-SOCKET URL `…@/<db>?host=/cloudsql/<CONN>`
+#                (src/cosa/rest/db/database.py:90) → REQUIRES the Cloud SQL Auth Proxy.
+#
+# Required env on the VM (e.g. a git-ignored cloud-test.env, or `--env-file`):
+#   CLOUD_SQL_CONNECTION_NAME=hello-world-foo-423219:us-central1:lupin-pg16-test
+#   DB_PASSWORD=<from Secret Manager `lupin-db-password` at deploy>
+#   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
+# Optional (defaults shown):
+#   DB_USER=lupin_app  DB_NAME=lupin_db_test  LUPIN_MODEL_SERVER_TAG=0.1.0
+#
+# Auth: the proxy authenticates via the VM's attached vm_sa through the GCE
+# metadata server (Application Default Credentials) — NO key file. Needs
+# roles/cloudsql.client on vm_sa (Phase B IAM repoint).
+# ============================================================================
+
+services:
+  # --- Socket-volume init (one-shot) -----------------------------------------
+  # The proxy image runs as nonroot uid 65532 and cannot mkdir inside a fresh
+  # (root-owned) named volume — first bring-up crash-loops with "Unable to mount
+  # socket: permission denied" (hit live 2026-06-11). Chown the volume to the
+  # proxy's uid before the proxy starts; 0777 so lupin-rest (uid 1001) can
+  # connect to the socket.
+  cloudsql-socket-init:
+    image: busybox:1.36
+    container_name: lupin-cloudsql-socket-init
+    command: ["sh", "-c", "chown 65532:65532 /cloudsql && chmod 0777 /cloudsql"]
+    restart: "no"
+    volumes:
+      - cloudsql-socket:/cloudsql
+
+  # --- Cloud SQL Auth Proxy (sidecar) ---------------------------------------
+  # Opens a unix socket at /cloudsql/<CONN>/.s.PGSQL.5432 on a shared volume the
+  # app reads. Private-IP instance → the proxy dials it over the peered VPC.
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+    container_name: lupin-cloudsql-proxy
+    restart: unless-stopped
+    depends_on:
+      cloudsql-socket-init:
+        condition: service_completed_successfully
+    command:
+      - "--unix-socket=/cloudsql"
+      - "--private-ip"
+      - "--health-check"                    # serves /startup,/readiness,/liveness on localhost:9090
+      - "${CLOUD_SQL_CONNECTION_NAME:?set CLOUD_SQL_CONNECTION_NAME}"
+    volumes:
+      - cloudsql-socket:/cloudsql
+    healthcheck:
+      # The image is DISTROLESS — no /bin/sh, so any CMD-SHELL test fails with
+      # "exec: /bin/sh: no such file or directory" and lupin-rest's
+      # service_healthy gate deadlocks (hit live 2026-06-12). Probe via the
+      # proxy binary's own `wait` subcommand, which polls the --health-check
+      # /startup endpoint on localhost:9090.
+      test: ["CMD", "/cloud-sql-proxy", "wait", "--max=5s"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - lupin-cloud-network
+
+  # --- Lupin REST API (cloud-backed, mount model) ---------------------------
+  lupin-rest:
+    image: ${LUPIN_IMAGE:-lupin:1.1.0}
+    container_name: lupin-rest-cloud-test
+    restart: unless-stopped
+    user: "1001:1001"                       # matches the image's rruiz UID/GID (Dockerfile:37-38)
+    ports:
+      - "7999:7999"
+    # host.docker.internal → host gateway so the in-container :7999 reverse-proxy
+    # (GET /api/arbiter/fleet-state) can PULL /state from the HOST-side arbiter on
+    # :8001 (Option B, host systemd --user; mirrors the local dev/test services).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./src:/var/lupin/src                # mount model — code from the on-VM checkout (Decision 3)
+      - ./io:/var/lupin/io
+      - ./src/conf/keys:/var/lupin/src/conf/keys:ro   # provider keys, out-of-band (Decision 3b)
+      - cloudsql-socket:/cloudsql           # shared Auth-Proxy socket → matches database.py host=/cloudsql/<CONN>
+      - claude-creds:/home/rruiz/.claude    # persistent CC OAuth login (manual `claude /login`); survives container recreate + auto-refreshes the token (M2 Phase F — avoids the static setup-token expiry race)
+    environment:
+      LUPIN_ROOT: /var/lupin
+      LUPIN_ENV: testing
+      # The ONLY cloud-backing trigger — is_cloud_backed() gates solely on this
+      # (database.py:32-51); never inferred from LUPIN_ENV.
+      LUPIN_CLOUD_BACKED: "true"
+      CLOUD_SQL_CONNECTION_NAME: ${CLOUD_SQL_CONNECTION_NAME:?set CLOUD_SQL_CONNECTION_NAME}
+      DB_USER: ${DB_USER:-lupin_app}
+      DB_NAME: ${DB_NAME:-lupin_db_test}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD (from Secret Manager lupin-db-password)}
+      LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS"
+      LUPIN_API_URL: http://localhost:7999
+      LUPIN_MODEL_SERVER_URL: http://lupin-model-server:7998
+      LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
+      # Claude Code OAuth (M1 Phase F): the Agent SDK inside this container reads
+      # CLAUDE_CODE_OAUTH_TOKEN for bounded-CC jobs (Max-subscription, zero per-token
+      # cost). Seeded from Rick's `claude setup-token` via cloud-test.env. Empty
+      # default keeps the stack bootable before the token is seeded (bounded-CC
+      # jobs simply fail-loud until it's present — they are not on the boot path).
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    depends_on:
+      cloud-sql-proxy:
+        condition: service_healthy
+    networks:
+      - lupin-cloud-network
+
+  # --- Lupin Model Server (GPU, frozen) -------------------------------------
+  # Whisper + 2 encoders on the L4, pinned to cuda:0 (hard rule: always GPU 0).
+  # OPEN DEPLOY ITEM: on a single-L4 VM, the rest container ALSO loads models
+  # in-process (pre-Phase-4 carve-out) → potential double-load / GPU contention.
+  # Resolve at deploy by flipping `speech to text provider = model-server` in
+  # the Testing-GCS block so the rest app defers to this server. Tracked in the
+  # plan's open items.
+  lupin-model-server:
+    image: lupin-model-server:${LUPIN_MODEL_SERVER_TAG:-0.1.0}
+    container_name: lupin-model-server-cloud-test
+    restart: unless-stopped
+    user: "1001:1001"
+    ports:
+      - "7998:7998"
+    volumes:
+      - ./src/conf/warmup:/var/lupin/src/conf/warmup:ro
+      - ./src/conf/keys:/var/lupin/src/conf/keys:ro
+    environment:
+      LUPIN_MODEL_SERVER_DEVICE: cuda:0
+      LUPIN_MODEL_SERVER_PORT: "7998"
+      LUPIN_MODEL_SERVER_WHISPER_ID: distil-whisper/distil-large-v3
+      LUPIN_MODEL_SERVER_CODE_EMBED: nomic-ai/CodeRankEmbed
+      LUPIN_MODEL_SERVER_PROSE_EMBED: nomic-ai/nomic-embed-text-v1.5
+      LUPIN_MODEL_SERVER_WARMUP_MP3: /var/lupin/src/conf/warmup/whisper-warmup-85s.mp3
+      LUPIN_MODEL_SERVER_API_KEY_NAME: notification-api-claude-code-dev
+      CUDA_VISIBLE_DEVICES: "0"             # hard rule: Lupin models always cuda:0
+      PYTHONUNBUFFERED: "1"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          memory: 8G
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:7998/health', timeout=3).getcode() == 200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - lupin-cloud-network
+
+volumes:
+  cloudsql-socket:                          # shared Auth-Proxy ↔ app unix-socket dir
+  claude-creds:                             # CC OAuth login store for lupin-rest (/home/rruiz/.claude) — manual `claude /login`, persistent + auto-refresh
+
+networks:
+  lupin-cloud-network:
+    driver: bridge

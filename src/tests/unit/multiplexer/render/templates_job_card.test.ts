@@ -13,8 +13,8 @@ import {
   populateJobMetaIfNeeded,
   _getMaxMetaBytesForTesting,
   _formatBytesForTesting,
-} from "../../../../fastapi_app/static/js/multiplexer/render/templates/jobCard";
-import type { Job, JobStatus } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../../lupin_app/static/js/multiplexer/render/templates/jobCard";
+import type { Job, JobStatus } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

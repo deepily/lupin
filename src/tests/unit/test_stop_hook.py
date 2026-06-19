@@ -283,6 +283,11 @@ class TestVoiceDrain:
 
         mock_drain.assert_called_once_with( "fallback1" )
 
+    @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
+            return_value={ "enabled": False, "backoff_minutes": [ ] } )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False )
+    @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._should_ask_anything_else", return_value=True )
     @patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else", return_value={} )
@@ -293,7 +298,8 @@ class TestVoiceDrain:
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_drain_before_ask( self, mock_read, mock_log, mock_session,
-                                mock_drain, mock_emit, mock_reset, mock_ask, mock_gate, mock_resolve ):
+                                mock_drain, mock_emit, mock_reset, mock_ask, mock_gate, mock_resolve,
+                                mock_behavior, mock_sp, mock_hb, mock_idle_settings ):
         """Drain is called before _ask_anything_else when no voice input and gate passes."""
         mock_read.return_value = {
             "stop_hook_active" : False,
@@ -362,6 +368,11 @@ class TestVoiceBlocking:
         assert emitted[ "decision" ] == "block"
         assert "[Voice]: focus on linting first" in emitted[ "reason" ]
 
+    @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
+            return_value={ "enabled": False, "backoff_minutes": [ ] } )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=False )
+    @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
     @patch( "lupin_cli.claude_code.hooks.stop.resolve_stable_session_id", side_effect=lambda x: x )
     @patch( "lupin_cli.claude_code.hooks.stop._should_ask_anything_else", return_value=True )
     @patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else", return_value={} )
@@ -372,8 +383,9 @@ class TestVoiceBlocking:
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_no_voice_calls_ask_anything_else( self, mock_read, mock_log, mock_session,
-                                                mock_drain, mock_emit, mock_reset, mock_ask, mock_gate, mock_resolve ):
-        """No voice input + gate passes → calls _ask_anything_else and emits its result."""
+                                                mock_drain, mock_emit, mock_reset, mock_ask, mock_gate, mock_resolve,
+                                                mock_behavior, mock_sp, mock_hb, mock_idle_settings ):
+        """No voice input + idle behavior 'ask' → calls _ask_anything_else and emits its result."""
         mock_read.return_value = {
             "stop_hook_active" : False,
             "session_id"       : "abc12345"
@@ -425,12 +437,16 @@ class TestConversationModeGate:
         monkeypatch.setattr( target, value )
 
     """
-    When the session is in conversation mode the hook must be a silent no-op:
-    no voice-buffer drain, no notify_user_sync prompt, no TTS, no block. The
-    user is holding a continuous voice dialogue at a distance and any of those
-    side effects interrupts the flow.
+    When the session is in conversation mode the hook suppresses ONLY the
+    interactive surfaces — the voice-buffer drain/inject path and the blocking
+    "Anything else?" prompt (the user is holding a continuous voice dialogue at
+    a distance). §3 split (2026-06-09): the heartbeat self-poke + breadcrumb
+    are NOT suppressed — the poke's work-owed oracle is the gate.
     """
 
+    @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="none" )
+    @patch( "lupin_cli.claude_code.hooks.stop._has_pending_voice", return_value=False )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
     @patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" )
     @patch( "lupin_cli.claude_code.hooks.stop.send_tts" )
     @patch( "lupin_cli.claude_code.hooks.stop.notify_user_sync" )
@@ -441,16 +457,19 @@ class TestConversationModeGate:
     @patch( "lupin_cli.claude_code.hooks.stop.get_speakerphone", return_value=True )
     @patch( "lupin_cli.claude_code.hooks.stop.log_payload" )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
-    def test_speakerphone_on_skips_everything( self, mock_read, mock_log, mock_conv,
+    def test_speakerphone_suppresses_only_interactive_paths( self, mock_read, mock_log, mock_conv,
                                                   mock_session, mock_resolve, mock_drain,
                                                   mock_emit, mock_notify, mock_send_tts,
-                                                  mock_try_auto_narrate ):
-        """speakerphone_on=True → emit {}, run auto-narrate safety net,
-        NO drain, NO notify, NO direct TTS via the prompt paths.
+                                                  mock_try_auto_narrate, mock_hb,
+                                                  mock_voice_peek, mock_behavior ):
+        """speakerphone_on=True → emit {}, run auto-narrate safety net AND the
+        heartbeat (§3 split, 2026-06-09 — the heartbeat is NO LONGER skipped),
+        but NO drain, NO blocking notify, NO direct TTS via the prompt paths.
 
         `_try_auto_narrate` (Phase 4 Layer 3) is patched as a no-op here so the
         send_tts assertion specifically covers the prompt-path code; auto-narrate
-        has its own tests at TestAutoNarrate*. See:
+        has its own tests at TestAutoNarrate*. The heartbeat poke matrix lives
+        in test_stop_hook_heartbeat.py::TestMainSpeakerphonePokeMatrix. See:
         src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
         """
         mock_read.return_value = {
@@ -467,13 +486,21 @@ class TestConversationModeGate:
         mock_emit.assert_called_once_with( {} )
         # The auto-narrate safety net DOES run (this is intentional in conv mode)
         mock_try_auto_narrate.assert_called_once_with( "abc12345", mock_read.return_value )
-        # The prompt-path side effects MUST NOT fire
+        # §3 regression flip: the heartbeat DOES run for speakerphone sessions
+        # (this exact assertion was impossible pre-split — the :990 early-exit
+        # bailed before the poke; see the 2026.06.09 brief §2)
+        mock_hb.assert_called_once_with( "abc12345", None, None )
+        # The interactive side effects MUST NOT fire
         mock_drain.assert_not_called()
         mock_notify.assert_not_called()
         # send_tts was patched separately from _try_auto_narrate, so this asserts
         # nothing in main()'s prompt path bypassed the gate to call TTS.
         mock_send_tts.assert_not_called()
 
+    @patch( "lupin_cli.claude_code.hooks.stop.load_idle_settings",
+            return_value={ "enabled": False, "backoff_minutes": [ ] } )
+    @patch( "lupin_cli.claude_code.hooks.stop._run_heartbeat", return_value=( None, False ) )
+    @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
     @patch( "lupin_cli.claude_code.hooks.stop.drain_and_acknowledge", return_value=[] )
     @patch( "lupin_cli.claude_code.hooks.stop.reset_stop_block_count" )
     @patch( "lupin_cli.claude_code.hooks.stop._ask_anything_else", return_value={} )
@@ -485,8 +512,9 @@ class TestConversationModeGate:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hook_input" )
     def test_notification_mode_runs_normal_flow( self, mock_read, mock_log, mock_conv,
                                                   mock_session, mock_resolve, mock_emit,
-                                                  mock_ask, mock_reset, mock_drain ):
-        """speakerphone_on=False → falls through to standard flow (drain runs)."""
+                                                  mock_ask, mock_reset, mock_drain,
+                                                  mock_behavior, mock_hb, mock_idle_settings ):
+        """speakerphone_on=False + idle behavior 'ask' → falls through to the ask path."""
         mock_read.return_value = {
             "stop_hook_active" : False,
             "session_id"       : "abc12345"
@@ -569,15 +597,28 @@ class TestNotifyUserSync:
     """Tests for the notify_user_sync 'Anything else?' branch."""
 
     @pytest.fixture( autouse=True )
-    def _disable_idle_detection( self, monkeypatch ):
+    def _force_immediate_ask_path( self, monkeypatch ):
         """
-        These tests exercise the legacy immediate-ask path. After the
-        2026-04-29 idle-aware Stop hook landing, that path only fires when
-        ~/.claude/settings.json idle_detection.enabled is False. Force-disable
-        for the whole class so the tests keep exercising the immediate-ask
-        flow they were written against.
-        See: src/rnd/v0.1.7/2026.04.29-idle-aware-stop-hook/01-design.md
+        These tests exercise the legacy immediate-ask ("Anything else?") path.
+        Reaching it now requires THREE conditions, all forced here for the class:
+          1. The Thread A enum = "ask" — `_stop_hook_idle_behavior()` → "ask"
+             (default is "idle_announce": v2.1 direct-state visibility owns
+             liveness, so a no-poke Stop announces idle + allows the stop rather
+             than asking). See 2026.06.06-heartbeat-poke-scaffold-vs-v2.1.
+          2. The heartbeat does NOT poke — `_run_heartbeat()` → None (so Branch C
+             falls through to the idle-behavior gate).
+          3. idle_detection.enabled is False — so the "ask" path takes the
+             immediate-ask branch (not the deferred waiter). After the 2026-04-29
+             idle-aware landing, the ask only fires when this is False.
         """
+        monkeypatch.setattr(
+            "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior",
+            lambda: "ask"
+        )
+        monkeypatch.setattr(
+            "lupin_cli.claude_code.hooks.stop._run_heartbeat",
+            lambda *a, **k: ( None, False )
+        )
         monkeypatch.setattr(
             "lupin_cli.claude_code.hooks.stop.load_idle_settings",
             lambda: { "enabled": False, "backoff_minutes": [ ] }

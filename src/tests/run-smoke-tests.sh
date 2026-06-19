@@ -27,7 +27,13 @@ export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH}"
 export LUPIN_ROOT="$PROJECT_ROOT"
 
 # Use venv pytest on host, fall back to system pytest in Docker container
-VENV_PYTEST="$PROJECT_ROOT/src/cosa/.venv/bin/pytest"
+VENV_PYTEST="$PROJECT_ROOT/.venv/bin/pytest"
 if [ -x "$VENV_PYTEST" ] && "$VENV_PYTEST" --version > /dev/null 2>&1; then PYTEST="$VENV_PYTEST"; else PYTEST="python3 -m pytest"; fi
 
-exec $PYTEST src/tests/smoke/ "$@"
+# test_proxy_integration.py is a DESTRUCTIVE :8000-venue suite (mutates DB state,
+# ~180s/scenario) that only lives in this folder — the folder is not a venue
+# marker (CLAUDE.md § TESTING VENUES). It runs via its own scheduled invocation
+# (python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy),
+# never as part of the pytest-discoverable smoke leg. Observed riding along on
+# ts-b51e63c9 (2026-06-12), blowing the smoke leg to 3806.9s.
+exec $PYTEST src/tests/smoke/ --ignore=src/tests/smoke/test_proxy_integration.py "$@"

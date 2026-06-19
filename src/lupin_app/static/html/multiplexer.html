@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Multiplexer</title>
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <!-- Page-frame chrome (.container/body/h1) — CSS-parity restore 2026-06-17.
+         Verbatim-adapted from notifications.css:6-115; see
+         src/rnd/v0.1.8/2026.06.17-multiplexer-css-parity-audit.md. Linked
+         BEFORE the component sheets so component rules can override if needed. -->
+    <link rel="stylesheet" href="/static/css/multiplexer/page-frame.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/action-required.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/tts-chrome.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/conversation-mode-pin.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/focus-tray.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/persona-modal.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/session-strip.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/reading-pane.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/commons-activity.css">
+    <!-- Lane E full-parity quartet (WP12/13/14/15) -->
+    <link rel="stylesheet" href="/static/css/multiplexer/tts-preview-slider.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/missed-badge.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/prediction-vote.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/fleet-status.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/task-list.css">
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/purify.min.js"></script>
+</head>
+<body>
+    <!-- WP4 master-detail two-pane shell (multiplexer parity, 2026-06-10 —
+         ports notifications.js master-detail; ReadingPaneRenderer mounts on
+         .content-shell). In vertical mode (default) .content-shell + .left-column
+         are no-op block pass-throughs — the page looks single-column. In
+         horizontal mode (body[data-layout-mode="horizontal"]) + .pane-open, the
+         shell becomes a flex-row split: left column ~2/3, Reading Pane ~1/3.
+         Toggled via #layout-mode-toggle. -->
+    <div class="content-shell">
+    <div class="left-column">
+        <!-- Layout-mode toggle — floats over the top-center of the left column
+             in horizontal mode (positioned via --toolbar-center-x). -->
+        <div class="reading-pane-toolbar" id="reading-pane-toolbar">
+            <button class="layout-mode-btn"
+                    id="layout-mode-toggle"
+                    data-testid="multiplexer-layout-mode-toggle"
+                    type="button"
+                    title="Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.">⇆</button>
+        </div>
+    <main class="container">
+        <h1>Multiplexer</h1>
+
+        <!-- WP2 (parity bridge) CC-session strip mount point. Inert until
+             SessionStripRenderer is wired in boot.ts (deferred thin step
+             against Lane A's mount-slot convention); the renderer lifts the
+             data-phase6-pending markers, drives #cc-session-strip visibility,
+             and keyed-merges icons into #cc-strip-icons. -->
+        <div id="cc-session-strip" class="cc-session-strip"
+             data-testid="multiplexer-cc-session-strip"
+             data-phase6-pending="true" hidden>
+            <div id="cc-strip-icons"
+                 data-testid="multiplexer-cc-strip-icons"></div>
+            <button id="cc-strip-toggle" type="button" class="cc-strip-toggle"
+                    data-testid="multiplexer-cc-strip-focus-toggle"
+                    data-phase6-pending="true" data-focus-active="false">👁 Focus</button>
+            <button id="cc-hide-inactive-toggle" type="button" class="cc-strip-toggle"
+                    data-testid="multiplexer-cc-hide-inactive-toggle"
+                    data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
+        </div>
+
+        <!-- Lane E WP15 mount point: "N missed while away" badge + Reset.
+             MissedBadgeRenderer paints into this when undelivered_count > 0;
+             empty (badge hidden) otherwise. -->
+        <div id="missed-badge-mount" data-testid="multiplexer-missed-badge-mount"></div>
+
+        <!-- Lane E WP13 mount point: TTS preview-fraction slider control.
+             TtsPreviewSliderRenderer owns this subtree. -->
+        <div id="tts-preview-slider-mount" data-testid="multiplexer-tts-preview-slider-mount"></div>
+
+        <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
+        <section id="notifications-pane" class="notifications-pane"
+                 data-testid="multiplexer-notifications-pane">
+            <!-- WP2 retire (2026-06-10): the #focus-mode-toggle (FocusTrayRenderer)
+                 was removed — the CC-session strip's focus toggle (#cc-strip-toggle,
+                 above) supersedes it. -->
+            <!-- D-L: action-required widgets render here, ABOVE sender cards -->
+            <div id="action-required-section"
+                 data-testid="multiplexer-action-required-section"></div>
+            <!-- D-L: sender cards render here, BELOW action-required widgets -->
+            <div id="sender-cards-container"
+                 data-testid="multiplexer-sender-cards"></div>
+        </section>
+
+        <!-- Phase 6a jobs-pane (lit up 2026-05-06; data-phase6-pending lifted on mount) -->
+        <section id="jobs-pane"
+                 data-testid="multiplexer-jobs-pane">
+            <header class="jobs-pane-header">
+                <h2>Jobs</h2>
+                <button class="jobs-pane-history-load"
+                        data-testid="multiplexer-jobs-load-history">Load history</button>
+            </header>
+            <div id="jobs-buckets-container"
+                 data-testid="multiplexer-jobs-buckets"></div>
+        </section>
+
+        <!-- Lane D (WP3 + WP11): commons "Recent Activity" panel. Mount root for
+             CommonsActivityRenderer; boot wiring lands as Lane D's final step
+             once Lane A relays the boot.ts mount-slot convention. -->
+        <section id="commons-activity-pane"
+                 data-testid="multiplexer-commons-activity-pane">
+            <div id="commons-activity-header"
+                 data-testid="multiplexer-commons-activity-header"
+                 role="button" tabindex="0">
+                <h5>🛰️ Recent Activity</h5>
+                <div class="commons-activity-controls">
+                    <select id="commons-activity-window"
+                            data-testid="multiplexer-commons-activity-window"
+                            aria-label="Activity time window">
+                        <option value="today">Today</option>
+                        <option value="1">Last hour</option>
+                        <option value="6">Last 6h</option>
+                        <option value="24">Last 24h</option>
+                        <option value="all">All</option>
+                    </select>
+                    <select id="commons-activity-filter-direction"
+                            class="commons-activity-filter-select"
+                            aria-label="Filter by direction">
+                        <option value="">Any direction</option>
+                        <option value="sender">From persona</option>
+                        <option value="recipient">To persona</option>
+                    </select>
+                    <select id="commons-activity-filter-kind"
+                            class="commons-activity-filter-select"
+                            aria-label="Filter by kind">
+                        <option value="all">All kinds</option>
+                        <option value="heartbeats">Heartbeats</option>
+                        <option value="personas">Persona DMs</option>
+                        <option value="broadcasts">Broadcasts</option>
+                    </select>
+                    <select id="commons-activity-filter-persona"
+                            class="commons-activity-filter-select"
+                            aria-label="Filter by persona"></select>
+                    <button id="commons-activity-refresh" type="button"
+                            data-testid="multiplexer-commons-activity-refresh"
+                            aria-label="Refresh activity">⟳</button>
+                </div>
+            </div>
+            <div id="commons-activity-body"
+                 data-testid="multiplexer-commons-activity-body">
+                <div id="commons-activity-entries"
+                     data-testid="multiplexer-commons-activity-entries"></div>
+                <div id="commons-activity-empty" hidden></div>
+            </div>
+        </section>
+
+        <!-- Phase 6b mount point (Q-L pre-add — TTS chrome lands in 6b) -->
+        <section id="tts-pane" hidden
+                 data-testid="multiplexer-tts-pane"
+                 data-phase6-pending="true"></section>
+
+        <!-- WP2 retire (2026-06-10): #focus-tray (FocusTrayRenderer) removed —
+             the CC-session strip supersedes the interim focus tray. The mount
+             slot is intentionally NOT re-added here: the shipped bundle contains
+             zero references to #focus-tray (FocusTrayRenderer is unwired). -->
+
+        <!-- Lane E WP12 mount point: read-only Fleet-Status table (below
+             Notifications, per F12). FleetStatusRenderer builds its own chrome
+             (title · count · ⟳ refresh · updated stamp · container) here and
+             auto-polls /api/arbiter/fleet-state every 60s. -->
+        <section id="fleet-status-pane"
+                 data-testid="multiplexer-fleet-status-pane"></section>
+
+        <!-- Step 4 mount point (store-canonical task mgmt): read-only Task-List
+             card (below Fleet-Status). TaskListRenderer builds its own chrome
+             (title · count · ⟳ refresh · updated stamp · container) here and
+             auto-polls /api/tasks every 60s. -->
+        <section id="task-list-pane"
+                 data-testid="multiplexer-task-list-pane"></section>
+
+        <!-- Phase 6c Node A mount point (Step A5): persona-modal portal.
+             PersonaModalRenderer appends one <div popover> per sender with a
+             voice persona; each popover's id matches the popovertarget on
+             the corresponding .sender-persona-badge button in the sender
+             card header. -->
+        <div id="persona-modal-portal" data-testid="multiplexer-persona-modal-portal"></div>
+    </main>
+    </div><!-- /.left-column -->
+
+    <!-- Draggable splitter between left column and Reading Pane. Hidden by CSS
+         when the pane is closed; ReadingPaneRenderer wires mousedown + persists
+         the ratio. -->
+    <div class="content-pane-splitter"
+         id="content-pane-splitter"
+         data-testid="multiplexer-content-pane-splitter"
+         role="separator"
+         aria-orientation="vertical"
+         title="Drag to resize"></div>
+
+    <!-- Reading Pane (WP4). Hidden until populated. In horizontal mode + open,
+         becomes a sticky-top scrollable surface holding rendered abstract
+         markdown OR an iframe at /app/docs?path=... for doc-viewer links. -->
+    <aside class="content-pane" id="content-pane" hidden>
+        <div class="content-pane-header">
+            <button class="content-pane-back"
+                    id="content-pane-back"
+                    data-testid="multiplexer-content-pane-back"
+                    type="button"
+                    title="Back to previous content"
+                    disabled>←</button>
+            <span class="content-pane-title" id="content-pane-title"></span>
+            <button class="content-pane-bustout"
+                    id="content-pane-bustout"
+                    data-testid="multiplexer-content-pane-bustout"
+                    type="button"
+                    title="Open in new tab">⤢</button>
+            <button class="content-pane-close"
+                    id="content-pane-close"
+                    data-testid="multiplexer-content-pane-close"
+                    type="button"
+                    title="Close pane">×</button>
+        </div>
+        <div class="content-pane-body" id="content-pane-body"
+             data-testid="multiplexer-content-pane-body">
+            <!-- Dynamic: rendered markdown for abstracts, or an iframe for doc-links -->
+        </div>
+    </aside>
+    </div><!-- /.content-shell -->
+    <!-- Runtime manifest-driven cache-bust (replaces the hand-bumped ?v= that
+         drifted): read the build manifest to resolve the content-hashed bundle
+         filename (boot.<hash>.js), then import it. The hash changes whenever the
+         bundle content changes, so the browser fetches a fresh bundle with no
+         manual cache-bust to maintain. manifest.json is fetched no-store so the
+         resolver always sees the latest hash. On any manifest failure we fall
+         back to the stable boot.js so a build/serve hiccup never blanks the page
+         (the stable filename is always emitted alongside the hashed copy by
+         src/scripts/build-multiplexer.sh). -->
+    <script type="module">
+        const DIST_BASE    = "/static/dist/multiplexer/";
+        const MANIFEST_URL = DIST_BASE + "manifest.json";
+        try {
+            const resp = await fetch( MANIFEST_URL, { cache: "no-store" } );
+            if ( !resp.ok ) throw new Error( `manifest HTTP ${ resp.status }` );
+            const manifest = await resp.json();
+            const bundle   = manifest[ "boot.js" ];
+            if ( !bundle ) throw new Error( "manifest missing 'boot.js' key" );
+            await import( DIST_BASE + bundle );
+        } catch ( err ) {
+            console.error( "[multiplexer] manifest-driven boot failed; falling back to stable boot.js:", err );
+            await import( DIST_BASE + "boot.js" );
+        }
+    </script>
+</body>
+</html>

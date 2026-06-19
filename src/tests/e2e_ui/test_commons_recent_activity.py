@@ -216,7 +216,7 @@ class TestRecentActivityEntryRender:
         bodies = notifications_page.evaluate(
             """() => Array.from(
                 document.querySelectorAll( '.commons-activity-entry-body' )
-            ).map( e => e.textContent )"""
+            ).map( e => e.textContent.trim() )"""
         )
         assert bodies == [ "newer", "older" ], \
             f"Expected newest-at-top ordering ['newer', 'older'], got {bodies!r}"

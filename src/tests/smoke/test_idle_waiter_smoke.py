@@ -56,7 +56,7 @@ def isolated_bridge( tmp_path, monkeypatch ):
     bridge_path.write_text( json.dumps( {
         "session_id"        : "smoketestid",
         "stable_session_id" : "smoketestid",
-        "ppid"              : live_pid,
+        "cc_pid"            : live_pid,
         "idle_detection"    : {
             "last_interaction_at" : "2026-04-29T10:00:00-04:00",
             "backoff_index"       : 0,
@@ -91,7 +91,7 @@ def test_waiter_lifecycle_state_transitions( isolated_bridge ):
     cmd = [
         sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
         "--session-id"   , "smoketestid",
-        "--ppid"         , str( os.getpid() ),
+        "--cc-pid"       , str( os.getpid() ),
         "--backoff-index", "0",
     ]
 
@@ -128,10 +128,10 @@ def test_waiter_lifecycle_state_transitions( isolated_bridge ):
 
 
 @pytest.mark.timeout( 30 )
-def test_waiter_exits_silently_on_dead_ppid( isolated_bridge ):
+def test_waiter_exits_silently_on_dead_cc_pid( isolated_bridge ):
     """
-    Spawn waiter pointing at a PPID that's definitely dead (PID 1 won't be us;
-    we use a fake high-numbered PID instead). Waiter should detect dead PPID
+    Spawn waiter pointing at a CC-PID that's definitely dead (PID 1 won't be us;
+    we use a fake high-numbered PID instead). Waiter should detect the dead CC-PID
     during its first sleep chunk and exit fast.
     """
     bridge_path = isolated_bridge
@@ -140,24 +140,24 @@ def test_waiter_exits_silently_on_dead_ppid( isolated_bridge ):
 
     env = os.environ.copy()
     env[ "PYTHONPATH" ]                       = src_path + ":" + env.get( "PYTHONPATH", "" )
-    env[ "LUPIN_IDLE_WAITER_TEST_SLEEP_SECS" ] = "2"   # short sleep so dead-PPID branch fires in ~2s
+    env[ "LUPIN_IDLE_WAITER_TEST_SLEEP_SECS" ] = "2"   # short sleep so dead-CC-PID branch fires in ~2s
     env[ "LUPIN_API_URL" ]                    = BASE_URL
     env[ "HOME" ]                             = str( bridge_path.parents[ 2 ] )
 
     # Use a likely-dead high PID
-    fake_dead_ppid = 999999
+    fake_dead_cc_pid = 999999
 
     cmd = [
         sys.executable, "-m", "lupin_cli.claude_code.hooks.lib.idle_waiter",
         "--session-id"   , "smoketestid",
-        "--ppid"         , str( fake_dead_ppid ),
+        "--cc-pid"       , str( fake_dead_cc_pid ),
         "--backoff-index", "0",
     ]
 
     proc = subprocess.Popen( cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env )
 
     # The waiter does sleep(2) in one chunk, then checks _is_pid_alive — finds
-    # the fake_dead_ppid is dead, exits. Should complete in ~2-3s.
+    # the fake_dead_cc_pid is dead, exits. Should complete in ~2-3s.
     try:
         out, err = proc.communicate( timeout=15 )
     except subprocess.TimeoutExpired:

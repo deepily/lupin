@@ -15,6 +15,7 @@ import pytest
 from lupin_mcp.broadcast_handler import (
     _build_reminder,
     _contains_reminder_framing,
+    _directive_mentions,
     _parse_body,
     _post_ack,
     handle_broadcast,
@@ -422,3 +423,308 @@ def test_handle_broadcast_summary_short_body_not_truncated( store, maria_persona
     summary = result[ "ack_entry" ][ "metadata" ][ "body_summary" ]
     assert summary == "short"
     assert "..." not in summary
+
+
+# ---------- broadcast-suppression regression (2026-06-02) ----------
+#
+# Pre-fix, _parse_body read the FIRST colon ANYWHERE on an "@"-leading line as a
+# directive terminator and took the whole pre-colon span as a single recipient.
+# A prose line opening with @-mentions but whose colon fell mid-sentence
+# (Rick's AFK directive) matched nobody → the whole broadcast was silently SKIPPED
+# for every addressed manager. The fix: a directive is ONLY a leading pure run of
+# @-mention tokens terminated by a colon; everything else DEFAULTS to inject-to-all
+# (fail toward delivery), and a directive matches if ANY of its mentions is local.
+
+
+# --- _directive_mentions branch coverage ---
+
+def test_directive_mentions_not_at_prefix():
+    """Line not starting with '@' → not a directive (None → default delivery)."""
+    assert _directive_mentions( "plain line" ) is None
+
+
+def test_directive_mentions_no_colon():
+    """'@'-leading line with no colon → None (covers the missing-colon branch)."""
+    assert _directive_mentions( "@maria hello there" ) is None
+
+
+def test_directive_mentions_empty_segment_double_at():
+    """'@@x:' yields an empty mention segment → None (malformed)."""
+    assert _directive_mentions( "@@maria: x" ) is None
+
+
+def test_directive_mentions_empty_segment_leading_space():
+    """'@ @x:' yields an empty (whitespace-only) first segment → None."""
+    assert _directive_mentions( "@ @maria: x" ) is None
+
+
+def test_directive_mentions_token_too_long_is_prose():
+    """A pre-colon token longer than the cap is prose, not a persona → None."""
+    long_token = "a" * ( 41 )
+    assert _directive_mentions( f"@{long_token}: x" ) is None
+
+
+def test_directive_mentions_sentence_punctuation_is_prose():
+    """A short token carrying sentence punctuation (comma) is prose → None."""
+    assert _directive_mentions( "@ok, sounds good: x" ) is None
+
+
+def test_directive_mentions_single_token():
+    """Strict single '@Persona:' → one mention token."""
+    assert _directive_mentions( "@Krishna: go" ) == [ "Krishna" ]
+
+
+def test_directive_mentions_multi_token():
+    """Multi-addressee '@a @b @c:' → each token, order-preserving."""
+    assert _directive_mentions( "@a @b @c: go" ) == [ "a", "b", "c" ]
+
+
+def test_directive_mentions_multiword_token_preserved():
+    """Split-on-'@' preserves a multi-word persona name's internal space."""
+    assert _directive_mentions( "@Mr. Radio: hi" ) == [ "Mr. Radio" ]
+
+
+# --- Tiberius's 6 mandated scenarios (handle_broadcast level) ---
+
+_RICK_AFK_BROADCAST = (
+    "@maria @Tiberius I'm going to bed, given that you disqualified so many "
+    "potential test sites, I'm going to give you a new directive: continue "
+    "implementing tests until we have 100% coverage across all tiers\n"
+    "@Rachel @Cheech @Krishna: keep up the good work and don't stop until it's done!"
+)
+
+
+def test_regression_rick_afk_broadcast_reaches_addressed_managers(
+    store, maria_persona, tiberius_persona, inject_fn, captured_injections
+):
+    """#1 — Rick's exact 2-line broadcast: maria AND Tiberius must RECEIVE line 1
+    (the directive). Pre-fix both silently skipped."""
+    notif = { "payload": { "broadcast_id": "bid-rick", "body": _RICK_AFK_BROADCAST } }
+    for persona in ( maria_persona, tiberius_persona ):
+        captured_injections.clear()
+        result = handle_broadcast(
+            notification      = notif,
+            local_persona     = persona,
+            inject_fn         = inject_fn,
+            store             = store,
+            sender_session_id = f"sess-{persona[ 'name' ]}",
+        )
+        assert result[ "status" ] == "completed", f"{persona[ 'name' ]} must receive, not skip"
+        assert len( captured_injections ) == 1
+        assert "a new directive" in captured_injections[ 0 ]
+
+
+def test_regression_multi_addressee_directive_matches_each(
+    store, maria_persona, tiberius_persona, inject_fn, captured_injections
+):
+    """#2 — '@Maria @Tiberius: msg' injects for BOTH (pre-fix collapsed to one bogus ref)."""
+    notif = { "payload": { "broadcast_id": "bid-multi", "body": "@Maria @Tiberius: sync up" } }
+    for persona in ( maria_persona, tiberius_persona ):
+        captured_injections.clear()
+        r = handle_broadcast(
+            notification      = notif,
+            local_persona     = persona,
+            inject_fn         = inject_fn,
+            store             = store,
+            sender_session_id = "s",
+        )
+        assert r[ "status" ] == "completed"
+        assert "sync up" in captured_injections[ 0 ]
+
+
+def test_regression_strict_single_directive_contract_preserved(
+    store, maria_persona, tiberius_persona, inject_fn, captured_injections
+):
+    """#3 — '@Maria: msg' injects for Maria, skips for Tiberius (existing contract intact)."""
+    notif = { "payload": { "broadcast_id": "bid-strict", "body": "@Maria: just you" } }
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s",
+    )
+    assert r[ "status" ] == "completed"
+    assert "just you" in captured_injections[ 0 ]
+    captured_injections.clear()
+    r = handle_broadcast(
+        notification=notif, local_persona=tiberius_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s",
+    )
+    assert r[ "status" ] == "skipped"
+    assert captured_injections == [ ]
+
+
+def test_regression_unaddressed_directive_still_skips(
+    store, maria_persona, inject_fn, captured_injections
+):
+    """#4 — a lone '@Tiberius: msg' (no default line) still skips for Maria —
+    fail-toward-delivery must NOT over-inject targeted directives."""
+    notif = { "payload": { "broadcast_id": "bid-other", "body": "@Tiberius: only for the boss" } }
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s",
+    )
+    assert r[ "status" ] == "skipped"
+    assert captured_injections == [ ]
+
+
+def test_regression_mid_sentence_at_with_colon_defaults(
+    store, maria_persona, inject_fn, captured_injections
+):
+    """#5 — prose with an inline '@' (an email) + a later colon must DEFAULT-inject,
+    NOT be read as a directive (false-positive guard)."""
+    notif = { "payload": { "broadcast_id": "bid-email", "body": "ping me at ops@example.com: thanks all" } }
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s",
+    )
+    assert r[ "status" ] == "completed"
+    assert "ops@example.com" in captured_injections[ 0 ]
+
+
+def test_regression_multiword_persona_directive_injects(
+    store, inject_fn, captured_injections
+):
+    """#6 — '@Mr. Radio: msg' injects to the multi-word persona (split-on-'@' keeps the space)."""
+    notif = { "payload": { "broadcast_id": "bid-mw", "body": "@Mr. Radio: standup" } }
+    r = handle_broadcast(
+        notification      = notif,
+        local_persona     = { "name": "Mr. Radio", "icon": "📻", "color": "#888" },
+        inject_fn         = inject_fn,
+        store             = store,
+        sender_session_id = "s",
+    )
+    assert r[ "status" ] == "completed"
+    assert "standup" in captured_injections[ 0 ]
+
+
+# ---------- roster-aware directive discrimination (2026-06-11 hardening) ----------
+#
+# Krishna's nit: the directive discriminator was heuristic — a short prose line
+# like "@here goes: x" parsed as a directive to a NONEXISTENT persona, so a
+# broadcast whose sole line it was got silently SKIPPED. With a persona roster
+# supplied, a clean "@token: msg" run only counts as a directive when at least
+# one mention resembles a registered persona (local persona implicitly included);
+# otherwise it is prose → default line (fail toward delivery).
+# `persona_roster=None` preserves the roster-blind legacy contract.
+
+_ROSTER = [ "Maria", "Tiberius", "Mr. Radio" ]
+
+
+def test_parse_body_roster_bogus_sole_directive_is_delivered():
+    """'@here goes: x' resembles nobody on the roster → prose → default line."""
+    default, matched, non_match = _parse_body( "@here goes: x", "Maria", _ROSTER )
+    assert default   == [ "@here goes: x" ]
+    assert matched   == [ ]
+    assert non_match == 0
+
+
+def test_parse_body_no_roster_bogus_directive_still_skips():
+    """Legacy contract (roster=None): the same bogus run still counts as a
+    non-matching directive — roster-blind callers keep today's behavior."""
+    default, matched, non_match = _parse_body( "@here goes: x", "Maria" )
+    assert default   == [ ]
+    assert matched   == [ ]
+    assert non_match == 1
+
+
+def test_parse_body_roster_genuine_other_directive_still_skipped():
+    """A real roster persona's directive stays TARGETED — no over-delivery."""
+    default, matched, non_match = _parse_body( "@Tiberius: only the boss", "Maria", _ROSTER )
+    assert default   == [ ]
+    assert matched   == [ ]
+    assert non_match == 1
+
+
+def test_parse_body_roster_local_directive_matched():
+    """Directive to the local persona passes the roster gate and matches."""
+    default, matched, non_match = _parse_body( "@Maria: just you", "Maria", _ROSTER )
+    assert default   == [ ]
+    assert matched   == [ "@Maria: just you" ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_local_implicitly_included():
+    """Local persona absent from the supplied roster is still a known persona —
+    a directive to self must never be misread as prose."""
+    default, matched, non_match = _parse_body( "@Maria: just you", "Maria", [ "Tiberius" ] )
+    assert default   == [ ]
+    assert matched   == [ "@Maria: just you" ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_no_local_persona():
+    """Roster supplied but no local persona: roster gate still discriminates;
+    a genuine directive to another persona is counted, not delivered."""
+    default, matched, non_match = _parse_body( "@Tiberius: x\n@bogus thing: y", None, _ROSTER )
+    assert default   == [ "@bogus thing: y" ]
+    assert matched   == [ ]
+    assert non_match == 1
+
+
+def test_parse_body_empty_roster_treats_directives_as_prose():
+    """An EMPTY roster means 'the roster is known and empty' — every clean
+    @-run resembles nobody → prose → delivered (bias toward delivery)."""
+    default, matched, non_match = _parse_body( "@Tiberius: x", None, [ ] )
+    assert default   == [ "@Tiberius: x" ]
+    assert matched   == [ ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_mixed_bogus_and_real_mention_stays_directive():
+    """One real roster mention gates the whole run in as a directive."""
+    default, matched, non_match = _parse_body( "@bogus @Maria: sync", "Maria", _ROSTER )
+    assert default   == [ ]
+    assert matched   == [ "@bogus @Maria: sync" ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_gate_is_punctuation_tolerant():
+    """'@MR RADIO:' resembles roster entry 'Mr. Radio' (normalize-on-match)."""
+    default, matched, non_match = _parse_body( "@MR RADIO: standup", "Mr. Radio", _ROSTER )
+    assert default   == [ ]
+    assert matched   == [ "@MR RADIO: standup" ]
+    assert non_match == 0
+
+
+def test_parse_body_roster_all_alias_checked_before_roster_gate():
+    """'@all:' is default scope even with a roster supplied (alias check first)."""
+    default, matched, non_match = _parse_body( "@all: heads up", "Maria", _ROSTER )
+    assert default   == [ "@all: heads up" ]
+    assert matched   == [ ]
+    assert non_match == 0
+
+
+def test_handle_broadcast_roster_rescues_bogus_sole_directive(
+    store, maria_persona, inject_fn, captured_injections
+):
+    """End-to-end: the sole bogus line '@here goes: x' is SKIPPED roster-blind
+    but DELIVERED roster-aware — the exact failure mode this hardening closes."""
+    notif = { "payload": { "broadcast_id": "bid-roster", "body": "@here goes: x" } }
+
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s",
+    )
+    assert r[ "status" ] == "skipped"
+    assert captured_injections == [ ]
+
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s", persona_roster=_ROSTER,
+    )
+    assert r[ "status" ] == "completed"
+    assert "@here goes: x" in captured_injections[ 0 ]
+
+
+def test_directive_to_offline_persona_delivers_as_prose( store, maria_persona, inject_fn, captured_injections ):
+    """DELIBERATE semantics (review NOTE-2): 'Cheech' is a real persona whose
+    bridge went stale, so he is NOT on the live roster — his directive fans out
+    to everyone as prose (legacy silently ignored it). Chosen under
+    bias-toward-delivery: a live peer can relay; silence helps nobody."""
+    live_roster = [ "Maria", "Tiberius" ]   # Cheech offline → absent
+    notif = { "payload": { "broadcast_id": "bid-offline", "body": "@Cheech: do X" } }
+    r = handle_broadcast(
+        notification=notif, local_persona=maria_persona, inject_fn=inject_fn,
+        store=store, sender_session_id="s", persona_roster=live_roster,
+    )
+    assert r[ "status" ] == "completed"
+    assert "@Cheech: do X" in captured_injections[ 0 ]

@@ -65,7 +65,20 @@ CLAUDE_ARGS=( "${POSITIONALS[@]:1}" )  # everything after the session name → c
 
 # ── venv + PYTHONPATH provision (see header) ──────────────────────────────────
 LUPIN_ROOT="${LUPIN_ROOT:?LUPIN_ROOT must be set}"
-VENV_ACTIVATE="$LUPIN_ROOT/src/cosa/.venv/bin/activate"
+VENV_ACTIVATE="$LUPIN_ROOT/.venv/bin/activate"
+
+# ── Single-source fleet roster (Rick, 2026-06-11) ─────────────────────────────
+# COSA_VOICE_MANAGERS__<PROJECT> is defined ONCE, in the repo's fleet-roster
+# env file (the arbiter systemd drop-in reads the SAME file via
+# EnvironmentFile=). set -a auto-exports the sourced keys so the forward loop
+# below can ship them across the tmux boundary. A missing file degrades to an
+# empty roster — same tolerate-missing contract as the drop-in's
+# `EnvironmentFile=-` prefix.
+# Design: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
+FLEET_ROSTER_ENV="$LUPIN_ROOT/src/conf/fleet-roster.env"
+if [[ -f "$FLEET_ROSTER_ENV" ]]; then
+    set -a; source "$FLEET_ROSTER_ENV"; set +a
+fi
 
 # Build the inner command run inside the tmux pane. Activating the venv (if
 # present) and exporting PYTHONPATH are prefixed so `claude` + its hooks inherit
@@ -86,22 +99,17 @@ if [[ -f "$VENV_ACTIVATE" ]]; then
 fi
 INNER+="$CLAUDE_CMD"
 
-# ── Dry-run: print what would happen and exit (no tmux side effects) ──────────
-if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "DRY-RUN headless=$HEADLESS session='$SESSION_NAME'"
-    echo "tmux new-session -d -s '$SESSION_NAME' <persona-env> \"$INNER\""
-    exit 0
-fi
-
-# Per-project preferred personas. Forwarded into the tmux session via -e so the
+# Per-project persona CHAINS. Forwarded into the tmux session via -e so the
 # SessionStart hook (register_session.py) sees them regardless of the tmux
 # server's frozen env or whether ~/.bashrc was sourced. The hook reads only the
 # key matching detect_project(), so unused keys are inert.
+# Chain syntax (2026-06-11, Rick): ordered comma-separated names; `*` means
+# "then take anything free"; no `*` = strict, loud fail on exhaustion.
 PERSONA_ENV_FLAGS=(
-    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Tiberius"
+    -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN=Mr. Radio,Tiberius,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN_MOBILE=Tiffany"
-    -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María"
-    -e "COSA_VOICE_PREFERRED_PERSONA__LOOKML=Sam"
+    -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María,*"
+    -e "COSA_VOICE_PREFERRED_PERSONA__LOOKML=Sam,*"
 )
 
 # Forward manager-spawn lineage env (set by session_spawner on the spawning
@@ -109,11 +117,37 @@ PERSONA_ENV_FLAGS=(
 # env for a new session, so without this the child's SessionStart hook never
 # sees COSA_VOICE_SPAWNED_BY/HEADLESS/ROLE and can't self-tag / start
 # speakerphone-off. (Caught by the live spawn E2E 2026-05-28.)
-for _v in COSA_VOICE_SPAWNED_BY COSA_VOICE_HEADLESS COSA_VOICE_ROLE; do
+# COSA_VOICE_PERSONA_CHAIN carries a manager's spawn persona_preference;
+# it must cross the tmux boundary here or the spawner's injection is lost
+# (the original transport bug, one layer down — 2026-06-11).
+for _v in COSA_VOICE_SPAWNED_BY COSA_VOICE_HEADLESS COSA_VOICE_ROLE COSA_VOICE_PERSONA_CHAIN; do
     if [[ -n "${!_v:-}" ]]; then
         PERSONA_ENV_FLAGS+=( -e "$_v=${!_v}" )
     fi
 done
+
+# Forward the declared-manager roster (sourced from fleet-roster.env above)
+# across the same tmux boundary. Generic glob so a future
+# COSA_VOICE_MANAGERS__<OTHER_PROJECT> roster line needs zero script edits.
+# The SessionStart hook reads only the key matching detect_project() and
+# threads it to the allocate endpoint as `declared_managers` (reserve-from-
+# random: declared names skip random + chain-`*` allocation).
+for _v in $( compgen -A variable | grep '^COSA_VOICE_MANAGERS__' || true ); do
+    if [[ -n "${!_v:-}" ]]; then
+        PERSONA_ENV_FLAGS+=( -e "$_v=${!_v}" )
+    fi
+done
+
+# ── Dry-run: print what would happen and exit (no tmux side effects) ──────────
+# Sits AFTER the env-flag assembly (moved 2026-06-11) so the PERSONA-ENV line
+# shows the REAL forwarded flags — the fleet-roster unit test asserts the
+# sourced COSA_VOICE_MANAGERS__* roster survives to the tmux boundary.
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "DRY-RUN headless=$HEADLESS session='$SESSION_NAME'"
+    printf 'PERSONA-ENV:'; printf ' %q' "${PERSONA_ENV_FLAGS[@]}"; printf '\n'
+    echo "tmux new-session -d -s '$SESSION_NAME' <persona-env> \"$INNER\""
+    exit 0
+fi
 
 # Check if session already exists
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then

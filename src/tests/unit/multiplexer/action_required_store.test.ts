@@ -6,15 +6,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createActionRequiredStore,
   type ActionRequiredApiClient,
-} from "../../../fastapi_app/static/js/multiplexer/stores/ActionRequiredStore";
+} from "../../../lupin_app/static/js/multiplexer/stores/ActionRequiredStore";
 import type {
   LupinEvent,
   StoreActionRequiredChangedPayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Manual timer harness (separate from NotificationStore's setTimeout one —

@@ -3,7 +3,7 @@ Smoke tests for the doc-viewer path-prefix routing regression fix.
 
 Tier: smoke (:7999, AI-discretionary per CLAUDE.md TESTING VENUES).
 Companion bug fix: 2026-05-16 — frontend SPA dispatcher in
-src/fastapi_app/static/html/document-viewer.html still defaulted scope
+src/lupin_app/static/html/document-viewer.html still defaulted scope
 to 'io' and routed all unprefixed paths to /api/io/file, causing 404
 on every /app/docs?path=lupin/... URL the doc-link mandate produces.
 Also fixes the latent /api/docs/health NameError on the retired

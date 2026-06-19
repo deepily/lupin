@@ -1,6 +1,470 @@
 # Lupin Project History
 
-> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-16 to 05-18](history/2026-05-16-to-18-history.md). History health: ✅ **HEALTHY at 11,531 tokens (46.1% of 25k)** — archived 2026-05-28 by Rio ⚡ (session a507b1a5), 9,087 tokens moved to archive.
+> **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
+
+### 2026.06.16 - Session f33b0f62 (Mr. Radio 🦉) | cosa-voice notification-native CUTOVER + reap-tombstone roster-eviction fix + task-store operationalize
+
+**Accomplishments**:
+- **Drove the cosa-voice notification-native CUTOVER**: a fresh-critical reviewer returned GREEN on the Phase-4 legacy commons-DM comment-out (`5ce5dba5`) → courtesy queue-check (todo/run = 0) → bounced `:7999` + Rick restarted the MCP servers. Verified post-cutover route table: `/api/notify-peer` live, `/api/commons/register-question` gone, broadcasts + presence still live, `commons_send_to` deregistered from the tool surface. Fleet now on `dm_send` end-to-end.
+- **Managed the reap-tombstone roster-eviction fix** (Clayton 😎 root-cause + serialized plan → Tiffany 💍 build → Clayton fresh-critical reproduce-not-trust review): a reaped session lingered in the arbiter Fleet-Status roster as "stale 32m" instead of evicting (Rick-reported). Fix = authoritative `EVENT_KIND_REAPED` tombstone emitted by `dismiss_sessions` on the event rail the arbiter already polls + off-axis `reaped` bucket → `verdict=offline` → existing `prune_offline_rows` evicts in ~1 poll. Held `08ca99a4`, 4 additive edits, 100% L/B/F on all 4 changed modules, 504 tests / 0 regressions, reviewer GREEN. Distinguishes reaped-dead (evict now) from idle-alive (stale tag OK).
+- **Operationalized the task-store** (Krishna 🦚): live E2E-verified all 4 MCP task tools GREEN (probe `c5ba4603`); automated wrapper-layer suite `TestTaskStoreWrapperE2E` (`ab40b62b`, green on :8000 `ts-49c3cb37`) + adoption-gaps inventory (`5b5e5c08`) held; 30/30 edge matrix + 4 receipts handed to María for the conventions doc.
+- **Identified a cutover regression I own**: the Phase-4 comment-out broke **12 integration tests** (`commons_ask_async_push` ×7 + `dm_integration_live` ×5) — they exercise the intentionally-retired legacy commons-DM path. Deferred to next session per Rick's session-end broadcast; classification brief (retired-path skip/update vs real break) captured in Krishna's memento.
+
+**Held + PUSHED this session** (per Rick's session-end broadcast — push + backup authorized for Mr. Radio): `ab40b62b`, `08ca99a4`, `5b5e5c08` (+ Tiberius's held `69893db0`). README v0.1.8 rollup row left UNcommitted for María's global rollup. New memory: `feedback_arbiter_bounce_manager_authority` (bouncing :8001 after a green review is the manager's own authority). Crew (Clayton/Krishna/Tiffany) reaped with mementos. **Pending next session:** the 12 integration failures · `/api/notify-peer` → `dm_send`-aligned rename · commons polling-tool audit · full-removal of the commented legacy commons-DM path.
+
+### 2026.06.15 - Session 895f0a7b (Tiberius 👑) | GCP-M2 cloud bring-up VALIDATED (keys→/login→Phase-G) + reproducible auto-migrate
+
+**Accomplishments**:
+- **GCP-M2 cloud-test stack VALIDATED end-to-end** (collaborative with Rick over IAP; agent ran all verification — user never tested): guided provider-keys SCP (hit + documented the **1001-owned-dest** gotcha → `/tmp` staging + `sudo cp`/`chown`), `docker restart` model-server → **healthy** (3 models on cuda:0, 0 errors), and proved the Claude **`/login` OAuth** (`claude -p` → `CLOUD OAUTH OK`). Phase G scorecard green: REST/health · model-server · GPU L4 · **Cloud-SQL round-trip (17 tables)**. D1 confirmed (`CLAUDE_CODE_OAUTH_TOKEN` empty in running container).
+- **Authored 2 deployment runbooks** in `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`: `2026.06.15-vm-connectivity-and-claude-login-runbook.md` + the comprehensive **`2026.06.15-new-deployer-runbook-gcp-cloud-test.md`** (6 live gotchas). Added the **IAP-tunnel browser access + −1000 port convention** (dev 7999 → cloud-test localhost 6999).
+- **Discovered + fixed a real model↔migration DRIFT bug**: `User.is_protected` (model) had no migration → user-seeding failed on any migration-bootstrapped DB. Wrote migration `d4e5f6a7b8c9`; a fleet crew then made it **idempotent (inspector-guarded)** after reproducing a boot-crash (dev DB has the column via `schema.sql` baseline but stamped one revision behind → blind `add_column` = `DuplicateColumn`).
+- **Spawned 3 visible fleet crews** (per Rick's preference): (1) test-debt fixes — `voice_injection_e2e ×3` + `io-models→io_models` rename (unblocks cosa-suite collection); (2) `dm_send`/`notify_peer` one-name rename **build plan** (`src/rnd/v0.1.8/2026.06.15-dm-send-rename/`); (3) **reproducible auto-migrate** — `env.py` resolves DB URL via the app's `database.py` (one source of truth), programmatic `alembic upgrade head` on startup (`src/cosa/rest/db/auto_migrate.py`, idempotent + fail-loud, no `alembic.ini`-in-container dep), + `src/scripts/check_schema_parity.py` drift checker. 43 tests, 100% cov on new code.
+
+**Held this session (my checkpoint — NOT pushed, NO backup per Rick's broadcast):** the 2 runbooks + `d4e5f6a7b8c9` migration + auto-migrate feature (`env.py`, `auto_migrate.py`, `main.py` lifespan, parity script + tests) + test-debt fixes + dm-send-rename docs. New memories: `feedback_reproducible_no_manual_patch_or_test`, `reference_test_ports_minus_1000`. **Rick gates remaining:** apply migrations on cloud via the new auto-migrate (reproducible, no hand-ALTER), full CJ-Flow bounded-CC job (follow-up), push.
+
+### 2026.06.15 - Session 3ab96a04 (Tiberius 👑) | GCP-M2 GPU-stockout schedule fix + managed task-store 2.1 & TTS-rider landings
+
+**Accomplishments**:
+- **GCP-M2 GPU-stockout root-caused + fixed (gcloud, applied live):** the nightly "pause" was a GCE instance-schedule STOP, not a suspend (schedules can only start/stop; GPU VMs can't be suspended; a STOP releases the L4 → morning `ZONE_RESOURCE_POOL_EXHAUSTED`). Detached the overnight schedule, attached a Friday-23:00-EDT stop → VM **24/7 through the push, off weekends**. VM verified stable 9h+; stack healthy (rest/proxy green, DB 13 tables, L4 models loaded); model-server 503 only on the pending keys SCP. New memory `reference_gcp_vm_stockout_stop_not_suspend`.
+- **Managed task-store Phase-2.1 A–E to completion** (builder Krishna 🦚 + fresh-critical reviewers): all 5 items reviewer-APPROVED, integration `ts-bc232e9f` **323/0/0 green**; held `0ca22758`→`ba215439`→`67401eb9`. F deferred to 2.2.
+- **Delegated the TTS-rider brevity fix** (Rick task; María 🌸 consult): retired word-counts for the ratified **SENTENCE-based** standard (PIP S110), cap single-sourced via `cu.get_spoken_char_cap()` (=500), stale `750` reconciled; **LIVE** + reviewer-APPROVE, committed in `ba0ce800`. Memory `feedback_notify_spoken_under_450_chars` updated to sentence-based.
+- **Committed the GCP `/login` enabler `b524c15d`** (claude-creds volume → persistent `claude /login`, auto-refresh) — reviewer-APPROVE; operational delta: env-var `CLAUDE_CODE_OAUTH_TOKEN` PRECEDES stored creds → keep `cloud-test.env` token empty under /login.
+
+**Held stack (unpushed):** `0ca22758`→`ba215439`→`ba0ce800`→`67401eb9`→`b524c15d`. **Rick's gates:** provider-keys SCP · `claude /login` · D1 env check · push. **Resume:** `io/mementos/tiberius-resume-2026.06.15.md`. New process memory: `feedback_reviewers_read_only_no_destructive_git_shared_tree`.
+
+### 2026.06.15 - Session a38ee857 (Krishna 🦚) | Task-store Phase 2.1 — backlog A–E complete (held), integration-verified
+
+**Accomplishments**:
+- **Flipped `task_store.enabled` on** (`~/.claude/settings.json`) — the harness Task*→store mirror is now LIVE on :7999 (a deliberate no-op since the Phase-2 merge until opted in).
+- **Built the full Phase 2.1 backlog A–E**, each reviewer-APPROVED at 100% lines+branches (fresh-critical reviews coordinated via Tiberius 👑): **A** `task_correlate` MCP tool (transport impl + `@mcp.tool` registration); **B** `PATCH /api/tasks/{id}` item-edit (`extra='forbid'` blocks status/blocked_by/next_chase_ts/receipt_refs/correlation_key at the wire — PATCH never bypasses the transition oracle); **C** `GET /api/tasks/events` cross-item event stream (static route declared before `/tasks/{id}`); **D** explicit legal-transition graph (behavior-preserving; `from_status` guard returns a data error, never a KeyError) + a programmatic mirror-edge regression off the live hook's `STATUS_TRANSITIONS`; **E** `next_chase_ts` chase consumer (`task_chase_consumer.py` — daemon, flag-OFF default, never auto-transitions) + read-only `stall_report` (store-derived I4).
+- **Scheduled + triaged the :8000 integration suite**: first run surfaced 17 failures — root-caused 100% to a missing `notifications.direction` column from a parallel session's (Mr. Radio 🦉) in-flight migration, NOT task-store (task-store integration was 14/14 green). Re-ran after Mr. Radio applied `c3d4e5f6a7b8` → **323 passed / 0 failed / 0 errors** GREEN.
+- **Reconciled the `cosa_voice_mcp.py` 3-way hotspot owner-by-owner** with Mr. Radio's `dm_send` stream: his package committed first (`ba0ce800`), my `task_correlate` registration stacked additively on top (zero `dm_send` leftovers in my delta).
+- **Deferred to Phase 2.2**: Item F (T4 DM auto-create — blocked on the unresolved acked-ledger-scope ruling) + the hook-marker I4 variant (server reading hook-lane flag-once files = fragile cross-lane coupling).
+
+**Files**: four held commits on `wip-v0.1.8` (NOT pushed — Rick's gate): `0ca22758` (A-transport + C + B), `ba215439` (D + E + D-delta guard), `67401eb9` (A registration + shared README row) — interleaved with Mr. Radio's `ba0ce800` (dm_send). New code: `src/cosa/rest/task_chase_consumer.py`; 3 chase INI keys in `lupin-app.ini` `[Lupin: Baseline]` + splainer. Doc of record: `src/rnd/v0.1.8/2026.06.15-task-store-phase2.1/01-build-plan.md`. Resume memento: `io/mementos/krishna-phase2.1-complete-resume-2026.06.15.md`.
+
+---
+
+### 2026.06.13 - Session ccbb1cca (Mr. Radio 🦉) | cosa-voice DM token-bloat — Phase 1 design serialized (body-in-push, ~18× cut) + crash recovery
+
+**Accomplishments**:
+- **Recovered from a mid-answer session crash** with zero context-burn: reconstructed the last exchange from the on-disk transcript (`9351f3c7.jsonl`) + today's resume memento (`mr-radio-dm-token-efficiency-resume-2026.06.13.md`) rather than re-reading code — exactly the token-frugal recovery Rick proposed (paste/transcript beats re-establish).
+- **Root-caused the DM token bloat** (Rick measured cosa-voice DM traffic at ~75% of inference budget; server OFF since 06-12): the peer-DM push ships an **empty body + claim-check** (`commons.py:1034` `message=""`), and doctrine's "ALWAYS re-fetch via `commons_read`" turns retrieving ONE ~181-token message into **~3,712 tokens**.
+- **Designed the Phase-1 fix — DM body-in-push**: carry the full DM body inside the push system-reminder so the recipient processes it directly (~204 tokens, zero `commons_read`) → **~18× reduction, ~175k tokens saved at 50 DMs/heavy session**. Three precise edits (push payload, buffer pass-through, formatter branch) on infrastructure that already exists.
+- **Locked the provenance discriminator** `kind = { "human_to_ai" | "ai_to_ai" }` (`human_to_ai` default → voice path untouched): dropped the redundant `peer_llm_to_llm`, chose symmetric/non-redundant provenance naming, one-name-everywhere per Rick's contract rule. Formatter branches to `[Voice from Rick]` vs `[DM from <persona>]` + reply affordance.
+- **Offline-recipient DB-inbox replay explicitly deferred to Phase 2 (Monday)** — Phase 1 is the temporary stop-the-bleed fix; implementation begins Monday once Rick is off per-token billing.
+- **Session housekeeping**: pruned the `.claude-session.md` manifest (179 stale "active" sections, newest activity Jun 10 — all past the 24h threshold) back to a clean slate.
+
+**Files**: new design doc `src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/01-dm-body-in-push-phase1-design.md` (6 ACs, before/after Mermaid, 5-item edit list) + `src/rnd/README.md` link. Design-only — no code touched; committed + pushed on `wip-v0.1.8` at Rick's explicit go.
+
+---
+
+### 2026.06.12 - Session f557aab9 DAY/PM (Tiberius 👑) | Post-game agenda ruled (8 decisions) + runner-nits & task-store Phase-2/MCP-wrapper LANDED + 3rd freeze (weekly cap) + end-of-session reprioritization
+
+**Accomplishments**:
+- **Post-game agenda walkthrough — 8 decisions ruled** (via /plan-decide, recorded in TODO Decisions Log): D1 quota → **fleet-wide cap of 8 ALL-sessions + stagger** (María = cross-repo coordination point; events+reconciliation `fleet-allocation` topic, store-migratable) · D2 → ratify arbiter suppression whitelist (work-order) · D3 → task-store Phase-2 tonight · D4 → cosa-voice MCP-wrapper authorized · D5 → C2 LANDED-pin · D6 → fleet-panel eyeball-then-rebaseline · D7 → alembic hybrid (recipe now + baseline-migration filed) · D8 → **4 process wins ratified into doctrine** (investigate-first tripwires · fresh-critical-review-always · non-launderable auth · harness-gotchas worker-brief block) → María drafted manager-autonomy v1.1 (§7+§8, PIP `a37d4b0`→`d4818ff`)
+- **Runner-nits lane LANDED** (merge `926c6925`): Clayton 😎 built (unit/e2e timeout budgets + parametrized 1.4x headroom guard, smoke leg excludes destructive proxy test, clean_test_db TRUNCATE += task_items/task_events/fcm_tokens, scheduling-guide re-sync); Tiffany 💍 fresh-critical APPROVE-W-FINDINGS + delta-verify on the fcm_tokens fold
+- **Task-store Phase-2 + MCP wrapper LANDED** (merges `a20aa5b5` + `8f4a36f2`, merge-together window): Phase-2 write-path hooks (Tiffany 💍 — harness Task*→store mirror, completed→review, dropped-requires-reason, **blocked_by {kind:user} oracle invariant structurally pinned**, C12 reason migration `b2c3d4e5f6a7`, correlation_key filter, /correlate adoption, C8 spool, F4 fail-closed gate) + MCP wrapper (Sam 🎙️ — task_create/transition/query in src/lupin_mcp); Clayton 😎 double fresh-critical caught **2 structurally-invisible defects** (wrapper non-dict-JSON fail-open on the GCP branch + Phase-2 claimed-pin hole), both fixed pre-merge; **388/388 post-merge, both dev DBs → `b2c3d4e5f6a7`**; feature flag `task_store.enabled` DEFAULT OFF (merge is a no-op until flipped) — **the shared CC task list is now live-but-dark**
+- **3rd fleet freeze — the WEEKLY Max-plan cap** (resets Jun 15 11am EDT, not a rolling window): both whittle-workers (arbiter-tuning + FM-21) froze at boot; arbiter fired WHOLE-FLEET-STALL → **2nd TRUE positive of the day** (honestly logged, not a false positive); manager also dark ~2h on the Opus model-tier outage. Rick added $250 credits, switched manager to Opus+credits, declined backlog-credit-spend
+- **Rick's end-of-session directive** (broadcast `59f2d129`, reached me only via board-pull — listener-layer miss again): GCP migration **back-burnered until further notice**; delegation offline until reset; next = cleared sessions to tackle the **two priorities — (a) the task list, (b) cosa-voice MCP token efficiency (~75% of inference budget)**
+
+**Files**: 3 held merges on `wip-v0.1.8` (`926c6925` runner-nits, `a20aa5b5` task-store Phase-2, `8f4a36f2` MCP wrapper), never pushed (Rick's gate); both dev DBs migrated `a1b2c3d4e5f6` → `b2c3d4e5f6a7`; TODO Decisions Log + Filed Work Items updated
+
+---
+
+### 2026.06.12 - Session f557aab9 LATE NIGHT (Tiberius 👑, post-/clear successor) | Task-store BUILT+LANDED end-to-end + starvation fix LIVE + S6 FCM landed + 2.5h quota freeze recovered
+
+**Accomplishments**:
+- **Rick's task-store directive executed review→land in one night** (his voice orders 23:30–23:46): cold 3-pass review (Clayton 😎 fresh, APPROVE-W-FINDINGS C1-C15, María 🌸 observer) → v0.4/v0.4.1 fold + FOLD-VERIFIED delta → **Phase-1 BUILT** (Krishna 🦚: TaskItem/TaskEvent + correlation_key, alembic `f0a1b2c3d4e5`, debt-clean `/api/tasks/*`, receipt key-whitelist) → Rachel 🕊️ fresh-critical ×2 rounds zero-discrepancy (her N1 trailing-newline receipt smuggle + N3 row-lock race caught pre-merge) → merged `3be8008e` → both DBs migrated → **integration 11/11 GREEN on :8000 (`ts-e232f0d4`)** + live :7999 probe 200
+- **:7999 async-handlers/HTTP-starvation fix LANDED** (the F2 gate, Rio ⚡): T1-T5 hot handlers off-loop incl. the mark_played smoking gun (2 sync embeddings on-loop per TTS playback — explains the worsening wedge curve); both-directions starvation regression test (pre-fix FAILS 0.79s lag / post-fix 3ms); Arnold 🪨 reviewed; merged `5e5c2b67` + lock follow-up `f99a4af5`, live on :7999
+- **S6 FCM backend landed** (Mr. Radio 🦉 work-order, Clayton 😎): task-zero pool assigned_at fix in 4 min → AC-S6.5 6/6 → build (durable fcm_tokens, mobile WS marker, FcmWakeService w/ OSQ-7 tolerance, amended POST unregister contract via OSQ-6 + Mr. Radio concurrence) → Rachel's R1 HIGH catch (audio-WS shared-sid clobbered the mobile marker = suppression dead in real topology) fixed pre-merge w/ R2 (starvation pattern regrown day-one) + R3 (upsert race) → merged `83990552`, AC-S6.1 integration 6/6 green
+- **2nd fleet-wide Max-plan quota freeze** (01:10–03:45, all 7 sessions): arbiter caught it (manager-stale ×3 + fleet-stall escalation = TRUE positive; later 04:25 alarm = false positive blind to manager shell work — tuning telemetry filed); recovery = rate-limit dialogs cleared no-spend + swallowed DMs re-delivered; **non-launderable-auth doctrine held under live fire** (Krishna's harness refused the shared-DB migration; manager ran it in-band)
+- **Alembic zero-bootstrap gap proven + recipe** (Krishna escalation): empty/unstamped DBs can't `upgrade head` (schema.sql out-of-band origin); test DB recovered via stamp-then-upgrade — routed to the GCP successor (fresh Cloud-SQL hits this)
+- **Tripwire lane closed with receipts, zero unnecessary code** (Krishna-2): T1 403-queues = STALE-MOCKS (intentional RBAC since 2025-10, already test-repaired 06-01) · T2 prediction_engine = already fixed `d722396a`, re-verified 100% · T3 side-find mux-config mock refresh merged `4ff0346f` → `cosa/tests/unit/rest/` 2437/0
+- Fleet ops: 11 workers spawned/reaped with mementos across 7 lanes (incl. the morning GCP successor, dismissed at ritual — blocked on Rick's expired gcloud login, seed memento durable); **all-suite baseline `ts-b51e63c9` collected 06:40: 959 pass / 1 visual-class fail / 2 runner-budget artifacts — NO regressions from the night's merges**
+
+**Files**: 5 held merges on `wip-v0.1.8` (`5e5c2b67` → `3be8008e` → `f99a4af5` → `83990552` → `4ff0346f`), never pushed (Rick's gate); TODO.md entries ticked w/ receipts; dev+test DBs at `a1b2c3d4e5f6`
+
+---
+
+### 2026.06.11 - Session f557aab9 NIGHT (Tiberius 👑) | Double-wedge recovery + card-gap RC→hydration fix shipped + GCP VM up + quota incident
+
+**Accomplishments**:
+- **Boot sweep found 100% of the fleet wedged**: both workers frozen 2.5h/3.5h inside dead in-process MCP/HTTP calls (Enter-immune — NEW mechanism, distinct from FM-18 injection race); recovered via Escape interrupt + re-brief, evidence filed durably in bug-fix-queue.md (recommends staffing the :7999 async-handlers debt, now also María's task-store F2 entry gate)
+- **Card-gap lane closed end-to-end in one night**: Clayton's RC (mux has NO notifications-pane history hydration; 5-leg innocence proof) → Rachel built the fix (incl. the `:727` id-threading server one-liner Rio's review verified surgical) → Rio fresh-critical APPROVE **with a finding that corrected the manager's own ruling** ('today'→48h classic-parity window) → merged `47aa72f3` with live adversarial receipts (FAIL `ts-82ae2446` pre-fix 2-failed → PASS `ts-69419933` post-fix 2-passed) — **Saturday cutover's offline-history asterisk CLEARED**
+- **GCP M2 night (Krishna)**: L4 stockout research (zonal squeeze; retry-overnight evidence-backed) → VM-RUNNING on retry #5 (~4h10m stockout) → data disk formatted/mounted, repo over as ratified git bundle, **Cloud-SQL proxy chain PROVEN**, both images staged (model-server built on-VM), durable compose socket-init fix — only Rick's morning SCP + OAuth remain
+- **Fleet-wide Max-plan session-limit freeze** (22:08, first ever — dual-manager ~10-session evening inside peak hours): all frozen sessions recovered no-spend; arbiter's WHOLE-FLEET-STALL alarms 2-for-2 genuine catches tonight; third María-detect/Tiberius-fire poke resolved Mr Radio's cascade as 3 distinct mechanisms (injection race / quota / context exhaustion)
+- WP6 served-bundle e2e receipt confirmed (full batch `ts-e949714d` 588/0 green); Rick's task-store F1–F4 rulings recorded (cold v0.3 review queued off-peak; Phase-1 post-cutover gated on async-debt staffing)
+- Fleet ops: Clayton + Krishna + Rachel + Rio all reaped with closeout/rotation mementos; worktrees pruned to single clean tree
+
+**Files**: 8 new held commits tonight on `wip-v0.1.8` (docs `13e92f86`, spec merge `7f3ec290`, fix merge `47aa72f3`, + Krishna's 4, + Clayton's 2)
+
+---
+
+### 2026.06.10 - Session 4f7a7ab8 PM (Tiberius 👑) | Merge-train r2 + local 1.1.0 cutover + oracle acked-ledger + e2e near-sweep
+
+**Accomplishments**:
+- Landed 8 reviewed merges to `wip-v0.1.8`: Lane E color delta (`8e9488a9`), SenderCardRecorder c8 gap + un-ignore hygiene (`507ea7ba`/`db9e3e3f`), WP10 80vh + FocusTray-visual retire (`c9449a13`), Mr. Radio's triage stack (`4979c13c`/`619efd5c`/`64381b6c`), 16-fail scaffolding fix (`27f4ec33`) — every one through fresh+critical review (Tiffany 💍 6 verdicts, Clayton 😎 4, Sam 🎙️, Cheech 🌿)
+- **Both servers cut over to validated `lupin:1.1.0`** (Rick's local-today gate): :8000 14:48, :7999 15:00; CLI 2.1.161, SDK 0.2.88, unit 6126, bounded-CC probe 2.15s, WS smoke 50/50 — GCP push unblocked for tomorrow
+- **Work-owed oracle acked-inbound ledger** (Rick-directed): built/reviewed/merged (`8738ff7c`+`8fdea39a`), 122 board qids bulk-marked — self-poke backlog 46→~0; lost-update race ruled acceptable (2 independent analyses)
+- **Final flagless e2e `ts-127620e1`: 560 pass / 3 fail / 1 err / 3 skip** (vs 546/19/30 AM) — zero functional failures, Saturday cutover gate functionally GREEN; 4 visual stragglers triaged = unstable-baselines-by-construction (Rachel 🕊️ building held fixes)
+- Broadcast-miss root-cause report delivered (`964060fa`): duplicate-listener race, 7 silent skip gates, F1–F4 fix plan
+- Repo hygiene complete: orphan purge-tool adopted, manifest + acked-ledgers gitignored, stop-hook brief + gitleaks dotfiles committed, superseded stash verified+dropped; :8001 arbiter restarted on today's code
+- Fleet ops: 7 reaps with mementos (Sam, Krishna, Arnold, Tiffany, Mr. Radio, Clayton, Cheech@56% rotation, Rio@50%+ rotation), 16 worktrees cleaned; dark-window incident (13:58-14:43, 429'd wake pushes) owned → dead-man-timer pattern adopted
+
+**Files**: ~50 held commits on `wip-v0.1.8` (pushed at session-end per Rick)
+
+---
+
+### 2026.06.09 - Session 110ff47d (Rio ⚡) | Fleet-Status: PID-liveness "offline" override (kill-0 fast-death)
+
+**A /exit'd (or killed) session now drops off the Fleet-Status table in ~1 poll (~60s) instead of aging out over ~1h.** Root cause Rick surfaced: the table verdict is purely staleness-based (`compute_liveness` rides the freshest of 4 signal ages, never the process), even though the context-pressure path already detects death via `kill -0` within a minute. Fix (Option A, Rick's call — keep verdict string `"offline"`, no new label): `build_snapshot` gains a `process_dead` data arg (iterable of confirmed-dead sids); a prefix-tolerant `_lookup_dead` forces `verdict="offline"` + an additive `liveness.process_dead=True` regardless of signal age. **Key discovery**: every existing bridge-locator SKIPS dead-PID bridges host-side, so none can surface a dead session — built a NEW unfiltered scanner `session_bridge.find_dead_sessions` + a stricter `_pid_confirmed_dead` (bias-to-alive: confirms death ONLY on ProcessLookupError, EPERM=alive). `arbiter_job._default_dead_session_ids` wraps it degrade-safe at the snapshot call site. **Two guardrails**: host-PID-trust gate (no-op in a container) + bias-to-alive (no bridge / no pid / any-alive / any-error → never dead). Zero frontend change (verdict string unchanged). Files: `session_bridge.py`, `fleet_render.py`, `arbiter_job.py` + 3 test suites. **170 unit tests green (+15); 100% L/B on the changed surface of all three.** Design+as-built: `…/03-pid-liveness-offline-override-design.md`. Backend — **needs an :8001 restart to land** (Rick's gate). HELD, not pushed.
+
+---
+
+### 2026.06.09 - Session 110ff47d (Rio ⚡) | Fleet-Status table: +2 context columns ("% Window" + "Window size")
+
+**Added two columns to the read-only Fleet-Status table (6 → 8 cols), per Rick's request.** A **% Window** column (each session's context consumption) and a **Window** column (window size formatted `1000000 → "1M"`, `200000 → "200K"`). The fleet roster and the context-pressure metrics ship as **separate sections** of the `/api/arbiter/fleet-state` composite, so the values are **joined in the frontend by persona name** (`composite.context_pressure.personas[ session.persona ]`) — no backend change. New pure formatters `_formatWindowSize` / `_formatConsumptionPct`; the `personas` map threaded through `renderFleetStatus → renderFleetStatusTable → _renderFleetRow`; group-header `colspan` 6 → 8. **Degrade-safe**: absent section / missing persona / unmeasured (idle/dead) → `"—"` (a measured `0%` still renders `"0%"`). CSS right-aligns the two numeric columns (`tabular-nums`). **58 JS unit tests green (+11); 100% L/B/F on the changed surface** (c8 over `notifications.js` 8640–8835, zero uncovered). Files: `notifications.js`, `fleet_status_panel.test.ts`, `notifications.css`; doc `src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/02-context-window-columns.md`. Client-side static only — browser refresh picks it up, no bounce. **Selective-staged (mine only — excluded the in-flight stop-hook work). HELD — not pushed.**
+
+---
+
+### 2026.06.09 - Session d9e65cd8 (Tiberius 👑) | Arbiter liveness fix + operator loop (Phase 1, Round 2a, Round 2b) — built, committed, deployed
+
+**Drove the heartbeat-arbiter from blind sensor to a closed operator loop across three engagements** (manager seat: serialize → spawn crew → review → commit, per Rick's "drive to completion, commit as I see fit, push gated"):
+
+- **Phase-1 liveness fix** (`852ab83`): false WHOLE-FLEET-STALL killed — roster rebuilt as a multi-signal UNION (bridge ∪ commons ∪ idle_prompt ∪ stop-event), 4 distinct ages, BOTH-pid (`listener_pid`/`cc_pid`) check, `idle_prompt` 4th signal (Rick's catch). Deployed + verified live.
+- **Round 2a loop rename** (`21189d4`, Decision 6): `loop_a`/`loop_b_fleet` → `health_watcher`/`fleet_arbiter` everywhere (modules/classes/`/state` keys/proxy/logs), ZERO behavior change, deployed.
+- **Round 2b operator loop** — 2b-1 stall calibration + live-push-to-Rick (`06fb0b3`), 2b-2 Part-6 routing + phantom-guarded active-managers resolver (`b4441d7`), 2b-3 bounded auto-poke + reap-RECOMMENDATION (`ba57416`). Redline narrowed (Rick-confirmed) to "never **destructively** actuate" — poke yes (bounded, per-episode anti-storm cap), reap escalates only. **DEPLOYED live on :8001**; live-push pending `LUPIN_ARBITER_NOTIFY_API_KEY`.
+
+**Crew**: Rio/Tiffany/Cheech/Mr. Radio (impl + review) · María 🌸 (observer — independently verified every phase 3-for-3) · Rachel 🕊️ (liveness design). 100% L/B on all new arbiter code; standing redline AST-test. Design docs under `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/`. **Discipline lessons banked** (notify-≤500, milestone-must-land, not-a-gate/commit-as-I-see-fit, blast-radius bar).
+
+---
+
+### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Manager-badge first-render fix (live-patch existing strip icon)
+
+**Fixed: the manager badge was missing on a worker's FIRST render, appearing only after a page refresh** (Rick found it). Root cause: `_addStripIcon` is idempotent (`if (getElementById(iconId)) return`), and a worker's strip icon is often created — by an earlier card/event — BEFORE its `voice_persona_assigned` event (carrying `manager_persona`) arrives, so the later add-icon call no-ops and never adds the badge. A full refresh rebuilds the strip with `managerPersonaMap` already populated, which is why refresh "fixed" it. **Fix:** extracted `_applyManagerBadge(icon, managerPersona)` (idempotent render/clear; falsy → remove) + new `_setManagerBadgeOnStripIcon(senderId, managerPersona)` that **live-patches** the badge onto an already-rendered icon, called in the `voice_persona_assigned` handler right after `managerPersonaMap` updates. +3 unit tests (live-patch onto existing icon · no-op when absent · null clears badge+flag); **6 badge + 27 JS suite green**. Selective-staged (mine only); excluded Tiffany's `stop.py` ppid→cc_pid rename + peer docs. HELD — not pushed.
+
+---
+
+### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Action-required-in-reader-pane + manager-badge hydration fix & polish
+
+**Action Required card → reader pane in horizontal mode (Rick's experiment).** When an action-required notification arrives in horizontal layout, the live `#action-required-content` element is **LIFTED-AND-MOVED** into the reader pane at a forced 50/50 split (its home section hidden); when the queue fully drains it moves back home and the prior pane content **AND the divider position (split ratio)** both restore — or the pane closes to full-width center if nothing was open. Handles layout-switch (both ways), refresh-restore routing, and suppresses abstract/doc opens while the card owns the pane. **Vertical mode unchanged.** Decisions ruled by Rick via guided walkthrough (restore-prior-content · one-at-a-time · hard-force-0.5 · only-in-pane). `_enterActionRequiredPaneMode`/`_exitActionRequiredPaneMode` in `notifications.js`; CSS `.section-content.in-reading-pane`. Design: `src/rnd/v0.1.8/2026.06.08-action-required-in-reader-pane.md`. **6 unit tests** (enter/exit/restore branches) + e2e; **live-confirmed by Rick** ("pretty cool 😎").
+
+**Manager-badge hydration fix (Cheech bug) + visual polish.** Cheech (spawned by Tiberius) wasn't showing his manager badge — diagnosed as the cold-reload gap I'd flagged: `managerPersonaMap` was only populated from LIVE `voice_persona_assigned` events, so EXISTING workers hydrated from the senders-visible endpoint (which carried `voice_persona` but not `manager_persona`) got no badge. **Fix:** new `_manager_persona_for_sender_id` in `notifications.py` stamps `manager_persona` on the senders-visible response; client hydrates `managerPersonaMap` from it. Verified against Cheech's real sender_id → Tiberius 👑. **+5 server tests.** Polish (Rick, live): badge is **letter-only** (dropped emoji); both metadata badges matched to identical **18px** circles — incl. the `box-sizing: border-box` fix (the `* {}` reset doesn't match pseudo-elements, so the speaker `::before` rendered content-box/22px while the manager `<span>` was 18px) + an emoji baseline-centering nudge.
+
+**Selective-staged (mine only, never `-A`). Excluded — Tiffany's in-flight arbiter build** (`stop.py` ppid→cc_pid rename, peer heartbeat docs + `diagrams.md`), `src/rnd/README.md` (co-edit), `.claude-session.md`, `mementos-vs-compaction.md`. Tests: **27 JS unit + 12 server green**; e2e parse + schedulable. HELD — not pushed.
+
+---
+
+### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Focus-bar manager-lineage badge (current JS client + server)
+
+**Built: each spawned worker's focus-bar strip icon now shows a badge of the MANAGER that spawned it** (Rick's tweak — glyph + color + initial, docked top-left, 180° opposite the speaker badge). The lineage was already on the bridge (`spawned_by` = manager session_id, from session_spawner) but grep-confirmed it never reached the client. **Server** (`voice_persona.py`): new `_resolve_manager_persona(worker_session_id)` reads the worker's `spawned_by`, looks up the manager's `voice_persona`, and shapes `{icon,color,name,initial}` into the `voice_persona_assigned` event's `payload.manager_persona` (None for roots/failures). **Client** (`notifications.js`): a `managerPersonaMap` (populated from the event, cleared on release/reap); `_addStripIcon` superimposes a `.cc-strip-manager-badge` when present + sets `data-has-manager`. **CSS** (`notifications.css`): badge at the top-left perimeter (135°) — opposite the bottom-right speaker `::before`, clear of the top-right unread `::after` — plus Rick's breathing room (strip gap 14→18px, bar padding 8/12→10/16px).
+
+**Tested 2 runnable tiers + regression + e2e.** Server resolver unit **7/7** (`test_voice_persona_manager_badge.py` — spawned_by present/absent · bridge missing · manager None/empty · empty-name initial · bad-JSON). JS render unit **3/3** (`manager_badge_strip.test.ts`, happy-dom — badge present / root none / missing-initial fallback). Regression **18/18** (reading-pane/toggle unaffected). E2E written (`test_manager_badge_strip.py`, drives real `handleNotificationUpdate`; schedulable :8000). **Caveat:** cold-page-reload persistence depends on persona-event re-fire on WS reconnect; else `/api/commons/active-sessions` would need `manager_persona` (follow-up).
+
+**Selective-staged (mine only, never `-A`). Excluded — Tiffany's in-flight arbiter-liveness build** (`context_pressure`/`register_session`/`stop.py`/`heartbeat_arbiter` + ~20 tests), `src/rnd/README.md` (co-edit), `.claude-session.md`, peer docs. HELD — not pushed.
+
+---
+
+### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Abstract-icon Reading-Pane toggle (current JS client) + worker→manager badge design
+
+**Built: the abstract icon (📋) in horizontal mode is now a TOGGLE** (Rick's tweak; in the CURRENT JS notification client `notifications.js`, NOT the multiplexer — Rick double-checked). The `.abstract-indicator` click opened the Reading Pane with the abstract; now a second click on the SAME indicator CLEARS the pane. A different indicator switches content; a doc-link entry / closed pane / empty history fall through to open. Implemented via a new pure predicate `_abstractAlreadyShown( abstract )` (pane open AND top-of-history is an abstract with matching payload) gating `_closeContentPane()` in the horizontal-mode branch; vertical-mode tooltip path unchanged.
+
+**Tested two tiers.** Unit: 6 new cases in `reading_pane_scroll_anchor.test.ts` (legacy notifications.js suite) covering every predicate branch — open+match→true; closed / different payload / doc-type / empty history / no shell→false. **18/18 green** (the happy-dom harness loads notifications.js via `vm.runInThisContext`, so a clean run also proves the file parses). E2E: new `src/tests/e2e_ui/test_abstract_indicator_toggle.py` (show→clear · switch-on-different · vertical-no-pane) **scheduled on :8000** — verified-idle → self-authorized bounce + submit, job `ts-d0ac0072`.
+
+**Also serialized (design-only):** `src/rnd/v0.1.8/2026.06.08-worker-manager-focus-bar-badge.md` — Rick's focus-bar badge showing each worker's spawning manager (glyph + color + initial, opposite the speaker icon). Feasibility green: `spawned_by` already on the bridge (`register_session.py:818`) but grep-confirmed it doesn't reach the client → small server-plumbing step + corner badge + spacing. Build paused for Rick's go.
+
+**Selective-staged (mine only, never `-A`). Excluded — Tiffany's in-flight arbiter-liveness build:** `context_pressure.py` + its test (cc_pid kw-arg), `register_session.py` / `stop.py` / `notification.py` (ppid→cc_pid rename + idle_prompt emit), the `heartbeat_arbiter/*` modules, ~20 session-bridge/heartbeat test files. Also excluded `src/rnd/README.md` (co-edit), `.claude-session.md`, peer docs. HELD — not pushed.
+
+---
+
+### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Stop-hook silent idle-announce in speakerphone (order-of-ops bug fix)
+
+**Fixed: speakerphone sessions never emitted an idle announcement.** Rick noticed the legacy idle stop-prompt stopped appearing. Root cause = order-of-operations: `stop.py main()`'s speakerphone branch exits the hook (`sys.exit(0)`) BEFORE the Branch-C idle-behavior gate where `_announce_idle` lives — the early-exit was written for the BLOCKING "Anything else?" ask path and never narrowed when the non-blocking `idle_announce` became default. Fix fires a SILENT idle-announce inside the speakerphone branch: `_announce_idle` posts at LOW priority, which the client (`notifications.js` gates TTS on high/urgent only) renders as a subtle DOM bubble with NO TTS — so no chorus-TTS spam. Gated to `idle_announce` ONLY (Rick: `ask`/`none` stay fully silent); "nothing owed" accepted as a turn-boundary approximation (this branch runs upstream of the work-owed oracle). **KEY FINDING:** no new no-TTS flag needed — `priority=low` IS the no-TTS lever (`suppress_ding` only kills the ding, not speech). 4 new tests (`TestSpeakerphoneIdleAnnounce`), 108 stop-hook tests green, new branch fully covered.
+
+**Selective-staged at the HUNK level — `stop.py` is co-edited with Tiffany's in-flight `ppid`→`cc_pid` rename.** Committed ONLY my idle-announce hunk via `git apply --cached`; the two rename hunks (`stop.py:369/422`) are Tiffany's, left uncommitted for her crew. Also staged: the new test class + this history entry. Excluded: `register_session.py` (Tiffany's rename), `src/rnd/README.md` (co-edit), `.claude-session.md`, peer docs. HELD — not pushed.
+
+---
+
+### 2026.06.08 - Session 6fc52b2e (Rachel 🕊️) | Phase-1 fleet context-pressure leaf (checkpointed) + arbiter liveness design LOCKED (with Tiberius)
+
+**Phase-1 context-pressure assessment leaf — built, calibrated, 100%-covered, checkpointed.** A pure stdlib leaf `src/cosa/agents/heartbeat_arbiter/context_pressure.py` reads a CC worker's transcript JSONL out-of-band and computes context-window occupancy (last assistant turn's `input + cache_creation + cache_read` = the `/context` total), a pressure number (`next_prompt_estimate = last_prompt_size + last_output + pending_input`), and 3-state liveness (ACTIVE/IDLE/DEAD via `kill -0` on listener_pid + bridge mtime). Expert-reviewed (validation brief → local expert → revised plan); all 5 design decisions ruled by Rick. **Calibrated against María's live `/context`** — leaf read ~218.8k vs `/context` 218.3k (~0.2%); the calibration REFUTED the expert's A4 (the `/context` pct is against the RAW 1M window, not effective-minus-reserve) → `reserve = max_response = 0` in the denominator. Window size can't be inferred from occupancy → pinned in the bridge at spawn via `register_session.py::_resolve_window_tokens()` (reads `LUPIN_CC_WINDOW_TOKENS`, 1M fallback, never raises — live SessionStart hook). 7 `arbiter context *` INI keys + splainer (already in HEAD). Tests: 53 unit green, 100% line+branch on the leaf.
+
+**Arbiter liveness gap — diagnosed + 4-signal UNION liveness design LOCKED (with Tiberius).** While scoping a memory-pressure readout off the arbiter, found the standalone :8001 arbiter reports the whole fleet offline: its roster builds from the STALE stop-outcome event tail (frozen 2+ days), blind to live sessions. A decisive live test corrected the first hypothesis (NOT a `get_bridge_mtime` key-mismatch — the real bug is the event-sourced roster). Converged w/ Tiberius on multi-signal UNION liveness (process bridge+PID OR commons-recency OR idle_prompt OR stop-event; `freshest = min` of 4 distinct ages), arbiter-as-authority / leaf-stays-pure, BOTH-pid (`listener_pid` OR `cc_pid`) check, active-probe tier scoped to PID-disagreement + build-last. **Rick's catch:** the native CC `idle_prompt` Notification (cc_pid-emitted "I'm idle and waiting") is the strongest passive liveness signal and was being silently discarded by `notification.py` — added as the 4th union input. Rick LOCKED all three open items via guided walkthrough (fix-arbiter-first / BOTH-pid / probe-last). The Phase-1 leaf is the shared liveness primitive Tiberius's implementer crew imports — this checkpoint satisfies the commit-first prerequisite gate.
+
+**Selective-staged (NEVER `git add -A`) — Phase-1 code + tests + managing-context-memory R&D docs + history. Excluded:** `src/rnd/README.md` (co-edited w/ Tiberius — both added doc links; deferred to avoid committing dangling links to his still-uncommitted docs), `.claude-session.md`, the pre-existing `dead-letters/__init__.py` deletion, Tiberius's 2 heartbeat-hook docs + `diagrams.md`, `mementos-vs-compaction.md` (unowned). HELD — not pushed (awaiting Rick). R&D: `src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.08-context-pressure-revised-plan.md` (+ validation brief, expert response, phase2 design, liveness-gap diagnosis).
+
+---
+
+### 2026.06.08 - Session d9e65cd8 (Tiberius 👑 + Rio ⚡ / Tiffany 💍) | Rename fastapi_app→lupin_app + arbiter_vigilance→lupin_arbiter_app (+ service rebrand) — reviewer-verified, live-gated
+
+**Two directory renames so the Lupin services sit side-by-side in `src/`, landed before the R0 cutover.** `src/fastapi_app/`→`src/lupin_app/` (the FastAPI entry point: ~100 lazy `import lupin_app.main` sites, the uvicorn target + `reload_dirs`, `pages.py` static path, the 2 string-introspection literals, `conftest`, Dockerfile COPY, 48 `*.test.ts`, tsconfig/package.json/.stylelintrc, 18 current docs) and `src/arbiter_vigilance/`→`src/lupin_arbiter_app/` (the standalone `:8001` watcher), with the service self-name rebranded `arbiter-vigilance`→`lupin-arbiter-app` / display "Lupin Arbiter App" everywhere (Rick: "not now, not ever" — case-insensitive, incl. the systemd-unit + run-script file renames). Space-form INI keys `arbiter vigilance *` left per Decision 2 (separate call). Pure rename — zero behavior change.
+
+**Reviewer-verified clean (both phases), then live-gated.** Rio ⚡ implement / Tiffany 💍 independent re-derivation (diff-based attribution — "the bytes cannot cause the symptom"). Phase A 530 tests @ 100% + clean `:8001` boot; Phase B 11-point gate green (zero-residual `grep -i`, import-chain → 171 routes, multiplexer TS 407/407 + `tsc`, py-unit 5758). **`:7999` live smoke FULLY GREEN** (6/6 API incl. the 3 lazy-import endpoints + 50/50 WebSocket — the runtime proof static analysis can't give). **`:8000` e2e+integration red is NOT the rename** — zero import/module errors; root cause = shared-test-user refresh-token collision (`Token already exists`) running e2e→integration back-to-back + 1 pre-existing conv-mode fail. Six pre-existing debt items (D1–D6: test-ordering pollution, TS branch-coverage reconciliation, pytest-skip bug, auth test-isolation) filed separate — none rename-caused.
+
+**Selective-staged (NEVER `git add -A`), pushed per Rick's authorization.** Excluded: the pre-existing staged `dead-letters/__init__.py` deletion, Rachel's untracked context-pressure leaf/test/4 docs, María's `diagrams.md` §6 append, a stray `src/rnd/README.md` line, `.claude-session.md`. R&D: `src/rnd/v0.1.8/2026.06.08-rename-lupin-app-and-lupin-arbiter-app.md`.
+
+**R0 CUTOVER EXECUTED (commit `7577f41`, pushed).** Break-before-make: flag→False, bounced :7999/:8000 (in-process DISABLED log fired on both, never-two preserved), `lupin-arbiter-app.service` enabled + lingered + **active** on :8001 — **consuming the heartbeat-hook exhaust** (service log: `loop_b_render · 20 session(s)` + Loop A health-watch, all 4 containers healthy). **Follow-ups:** (1) **RESOLVED (Option 2, Rick's choice).** The in-container :7999/:8000 proxies couldn't reach :8001 bound `127.0.0.1` (separate network namespace). Fix: bind :8001 `0.0.0.0`, proxy URL → `host.docker.internal:8001`, `extra_hosts: host-gateway` on lupin-rest-dev + lupin-rest-test. Verified — proxy `/api/arbiter/fleet-state` returns the live composite; never-two preserved (DISABLED log on both recreated containers); :8001 sole arbiter. Firewall: :8001 is LAN-only (host behind NAT); optional `ufw` hardening to docker+localhost recommended (Rick's sudo). The dry-run tests (TestClient/monkeypatch) never made the real cross-boundary call → the gap was invisible until live. (2) `/state` `loop_b_fleet` was `None` at cold-start (change-gated snapshot write) — confirm it populates on the next fleet change (low).
+
+---
+
+### 2026.06.07 - Session 1f9f3c4c (Tiberius 👑 + SWE-team crew) | Arbiter-vigilance B1 standalone :8001 build (L1–L4 + R0) + test-debt sweep + broadcast source fix
+
+**Arbiter-vigilance B1 — all 4 lanes built + reviewer-passed, HELD→pushed.** Standalone out-of-band fleet watcher on :8001 (`src/arbiter_vigilance/`): L1 app + `/health`; L2 Loop A health-watch; L3 Loop B + R0 in-process-decommission flag (`arbiter in-process bootstrap enabled`, default True → NO live cutover); L4 `GET /state` composite + `:7999` reverse-proxy `GET /api/arbiter/fleet-state` (R3 pull-only, R4 independence — app.py adds zero cosa.rest/http imports). 100% line+branch+function each lane; arbiter baseline 415 green (+6 L4). Crew: Sam (reaped mid-build for dormancy after L3) → **Mr. Radio 🦉** (L4, productive in ~10 min post-respawn) / **Tiffany 💍** (L1–L4 review, clean passes each) / Tiberius manage.
+
+**Test-debt sweep (clusters 1–7) + broadcast SOURCE fix — Krishna 🦚 L3-cleared, HELD→pushed.** Sweep all test-side (zero source touched). Broadcast fix: `broadcast_handler.py::_parse_body` read the FIRST colon as a directive terminator → a prose @-line with a later colon silently dropped Rick's @-mention broadcasts fleet-wide → fixed to treat a line as a directive ONLY for a pure @-mention-run-then-colon, else inject-to-all (fail toward delivery); 43/43, 100% line+branch, single-site, fails-before/passes-after proven.
+
+**NOT IN PRODUCTION:** tonight = commit + push only. The `:8000` e2e verify did NOT run (now UNBLOCKED — Rick added a `docker restart lupin-rest-test` allow-rule to `.claude/settings.local.json`, clearing the harness gate that denied a peer-authorized bounce); R0 break-before-make cutover NOT done; :8001 service staged-not-enabled. **Process lesson (memory `feedback_worker_handoff_must_be_directed_dm`):** worker→manager handoffs MUST be directed DMs (`commons_send_to`), not blackboard posts — Mr. Radio's done build report sat unseen ~1h because a plain `commons_post` doesn't wake an idle manager. **Two commits, selective-staged (NEVER `git add -A`), pushed per Rick's authorization; backup to DATA02.** R&D: `src/rnd/v0.1.8/2026.06.07-arbiter-vigilance-b1-implementation-log.md`.
+
+---
+
+### 2026.06.06 - Session 060c8d6b (Tiberius 👑 + SWE-team crew) | Heartbeat Arbiter v2.2 closed-loop autonomy (engagement #3) + Thread A f2-fix + broadcast-miss investigation
+
+**Heartbeat Arbiter v2.2 closed-loop autonomy (D1–D4) — committed `0d7adad` (16 files, +1450, HELD).** The arbiter now SENSES + RECOMMENDS + ESCALATES and still NEVER actuates: D1 commons DM-push to the resolved manager (advisory body), D2 push-not-poll cursor-baselined `read()`, D3 genuine-trigger escalation (deadlock / whole-fleet-stall / decision-needed via new reserved topic `fleet-decision-needed` / manager-down), D4 manager-down → escalate + HOLD. New modules `manager_resolver.py` (filename-parse + `_manifest_path` round-trip guard, multi-match→unresolved) and `arbiter_bootstrap.py` (`submit_arbiter_if_absent`, single-instance, degrade-safe). Verb set EXACTLY {who, read, send_to, post} — zero actuation; `_check_fleet_stall` takes no manager-liveness input (can't-be-gated by construction). **SWE-team engagement #3** (Clayton implement / Krishna adversarial review / María steward / Tiberius manage): Krishna's full-suite review caught a re-loop — the new advisory tap broke 3 pre-existing TH-backoff send-count asserts → `_pings()` filter fix → `-k "arbiter or heartbeat"` 356 green, independently re-verified, all 8 conformance anchors hold. **Thread A f2-fix** committed `5aadab1` — `test_f2` base-red under the idle_announce default (monkeypatch `_stop_hook_idle_behavior`→"ask"). Applier-backstop: 107 targeted green. R&D: `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/07-clayton-v2.2-closed-loop-log.md`.
+
+**Broadcast-miss investigation (Rick's ask) — initial diagnosis REFUTED, real cause in the listener layer (not yet solved).** A USER BROADCAST didn't reach this session while direct prompts did. First hypothesis "stale bridge > 600s; Thread A's idle_announce default removed the idle-waiter heartbeat" was **refuted by reading the live config** — the fanout threshold is `commons broadcast liveness threshold seconds = 28800` (8h; `main.py` overrides the misleading `600.0` module default), so a ~77-min idle couldn't trigger it; `owner_user_id` also passes (un-stamped → graceful). **The broadcast-fanout filter is exonerated.** Real direction: broadcasts arrive via the session's `cc_notification_listener` (separate from the harness direct-prompt path) — and **DUPLICATE listeners were found** for the session (PIDs from 09:34 + 16:22, both alive, same log) on a ~14h `claude` process. Leading-but-unconfirmed; queued for a dedicated root-cause. Memory: `reference_broadcast_miss_is_listener_layer`. Lesson logged: verify the LIVE config value, not the module default, before asserting a threshold diagnosis.
+
+**Branch LoC (wip-v0.1.8 vs main, May 29–Jun 6):** +357,142 net / 1,233 files / 235 commits (the 235K May-29 spike = the CoSA mono-repo fold). HELD set (~22 commits ahead) pushed at session-end per Rick's authorization; backup to DATA02.
+
+---
+
+### 2026.06.06 - Session 060c8d6b (Tiberius 👑) | Orphan recovery: heartbeat-arbiter tooling + poke-vs-v2.1 doc (untracked since 06-05)
+
+**Committed three files that fell through untracked when the overnight heartbeat-hook R&D sessions wrapped.** Diagnosis: not part of any held decision — just stranded (the morning's 5 commits covered broadcast-liveness / reap / v2.1-design and held the heartbeat-strip; these standalone tools were never staged). (1) `src/scripts/run-heartbeat-arbiter.py` — the Heartbeat Arbiter consumer runner (`ArbiterConsumerJob`); dry-run by default (`--live` to ping), `--once`/loop, quiet<alive invariants per María's 06-05 ruling. (2) `src/scripts/watch-hook-events.py` — live tailer for `io/claude_code_hooks/logs/hook-events.jsonl` (the watcher Rick uses). Both py_compile-clean, import the committed `arbiter_job`, independent of the in-flight Thread A `stop.py` work. (3) `src/rnd/v0.1.8/2026.06.06-heartbeat-poke-scaffold-vs-v2.1-supersession.md` — push-vs-pull comparison (superseded on-behalf poke-report scaffold vs v2.1 direct-state). **Known follow-up debt:** both scripts resolve project-root via `Path(__file__).parents[2]` (PATH-MANAGEMENT mandate prefers `cu.get_project_root()`) — same family as the FM-21 events-log leak; queued for a source-fix. **Excluded (not orphans):** the held Thread A heartbeat-strip (`stop.py`/`hook_common.py`/`arbiter_gateway.py` — Clayton's in-flight 3-way toggle), co-mingled `src/rnd/README.md`, the applied toolhook patch artifact.
+
+---
+
+### 2026.06.06 - Session 060c8d6b (Tiberius 👑 + SWE-team crew) | Heartbeat Arbiter v2.1 direct-state visibility (Thread B) — SWE-team workflow inaugural run
+
+**Built + shipped Heartbeat Arbiter v2.1 "direct-state visibility" (design-03 §10) as the first real run of the new SWE-Team workflow.** Workers self-report liveness off one host-side bridge-mtime clock kept orthogonal to state (C4); the fleet snapshot pushes to `GET/POST /api/arbiter/fleet-snapshot` (`require_api_key_or_jwt`, C2). Shared primitive `touch_bridge_mtime()`/`get_bridge_mtime()` is **fail-safe total-no-throw with an observable failure counter + one-shot stderr**; stamped per-MCP-call by a FastMCP `on_call_tool` middleware and per-tool by a single metadata-only `os.utime` in the PostToolUse hook (C1/C3; no touch on empty payload → no liveness-lie on no-op turns). **Verification: 100% line+branch+function on all modules; 88 post-apply unit+live tests green** (incl. real-`os.utime` live-hook smoke + live fault-injection).
+
+**SWE-team workflow inaugural run** (designed + 7/7-ratified + built the SAME session): Clayton 😎 implement / Krishna 🦚 adversarial review (APPROVE, independent 72/72 re-run) / Mr-Radio 🦉 integration+live tests / María 🌸 steward+post-game / Tiberius 👑 manage. **Headline:** the adversarial reviewer overturned BOTH the Steward's AND the Manager's `except OSError` lean on a fact both missed — the MCP middleware stamps *before* `call_next`, so a propagating exception is tool-fatal fleet-wide → total-no-throw is structurally required; the broad `except` is the ratified fail-safe (observable, not silent; C4 honest-age neutralizes false-idle). No lean rubber-stamped, including the manager's.
+
+**Commit `7973376` (HELD — not pushed):** 19 files, +2129. Selective staging — v2.1 ONLY; the parked Thread A heartbeat-strip files + co-mingled README EXCLUDED, never `git add -A`. **Owed:** `:8000` auth-matrix run (scheduled), N1 follow-up (expose failure counter via `/api/queue/pool-status`), consolidated README link-commit. R&D: `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/05-clayton-v2.1-implementation-log.md`; post-game `planning-is-prompting/src/rnd/2026.06.06-swe-team-first-run-postgame.md`; workflow `planning-is-prompting/workflow/swe-team-spin-up.md` + `swe-team-roles.md`.
+
+---
+
+### 2026.06.05 - Session e4676369 (Tiberius 👑) | Broadcast-liveness: filter CC-session reachability on bridge mtime, not interaction recency
+
+**Fixed the broadcast "send to all CC sessions" list under-reporting** (showed 2 of 5; dormant-but-alive workers like María dropped off while still pinned in the focus bar). Root cause: `filter_and_project_sessions` keyed reachability on `_bridge_last_activity_epoch` (semantic interaction recency), so a worker idle past threshold vanished from the broadcast list even though its session was alive. **Switched the liveness signal to bridge-file mtime** (`p.stat().st_mtime`) via an injectable `mtime_fn` — host-side hook writers bump the bridge on every tool/MCP call, so mtime is the true server-independent "is this session alive" clock. Threaded `mtime_fn` through `execute_broadcast`, `_resolve_dm_recipient`, `execute_register_question`. New config key `commons broadcast liveness threshold seconds = 28800` (8h, replaces the old active-session key) in `lupin-app.ini` (+ splainer), read in `main.py` `init_commons_state`. Converges with María's v2.1 direct-state design (one host-side clock). **100% line+branch; 655 commons+reap unit tests green.** R&D: `src/rnd/v0.1.8/2026.06.05-broadcast-liveness-mtime-filter.md`. **Files:** commons.py, main.py, lupin-app.ini (+splainer), both test_commons_router trees, test_inter_session_dm.py. **HELD — not pushed.**
+
+---
+
+### 2026.06.05 - Session e4676369 (Tiberius 👑 + Sam 🎙️) | Reap event → focus-bar badge drop + broadcast-card refresh (producer+consumer, live-validated E2E)
+
+**Wired session reaping to live UI cleanup** so a reaped worker's persona badge vanishes from Rick's focus bar and drops from the broadcast send-to list in real time. **Producer (Tiberius):** `dismiss_sessions` now captures the reaped worker's identity BEFORE kill, unlinks its session-bridge file after kill+manifest, and fires an injectable `session_reaped` emit — `_default_emit_reap` POSTs `/api/notify` with `type=session_reaped`, `sender_id`=the reaped worker, `target_user` resolved from `LUPIN_DEV_EMAIL`/`global_notification_recipient`; fully fail-safe (a bad unlink/emit never breaks the reap). Added `session_reaped` to the notifications `valid_types` allowlist. **Consumer (Sam):** SenderStore removal + `_removeStripIcon` + `refreshSessions` on the `session_reaped` event. **Proven LIVE end-to-end** — Rick watched Rio's badge appear, confirmed, then vanish on reap (no simulation). Two real bugs caught mid-prep: stale running-MCP (pivoted to direct-import reap) + a missing `target_user` 422. **Tests:** 11 Python producer (100%) + 24 TS/JS consumer (green, Sam-verified). R&D: `src/rnd/v0.1.8/2026.06.05-reap-event-focus-bar-and-broadcast-refresh.md`. **Files:** session_spawner.py, notifications.py (enum), test_session_spawner_reap.py, FocusTrayRenderer.ts, SenderStore.ts, notifications.js, 3 TS/JS test files. **HELD — not pushed.** Remaining joint item: automated `test_reap_event_focus_bar` on :8000 post-merge.
+
+---
+
+### 2026.06.05 - Session e4676369 (Tiberius 👑 + María 🌸) | Arbiter v2.1 "direct-state visibility" design folded as §10 (review-gated, design-only)
+
+**Folded María's v2.1 Direct-State Visibility design into the arbiter design doc as §10** — workers self-report state via bridge-mtime convergence (one host-side clock) + a state-vs-liveness 2-column model + push to `:7999 GET /api/arbiter/fleet-snapshot` (no standalone arbiter HTTP) + the broadcast-list free win. Independently design-reviewed by Cheech 🌿 → **APPROVE-WITH-CHANGES** (C1 mandate metadata-only `os.utime`, strike the one-byte-write to avoid bridge-JSON corruption; C2 name the push endpoint+cred; C3 single PostToolUse hook; C4 idle-quiet keys on event-file ts, NOT bridge-mtime). **Design-only — NO code yet.** **Files:** `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/03-arbiter-design.md`. **HELD — not pushed.**
+
+---
+
+### 2026.06.05 - Session 426571cd (Tiffany 💍) | Prediction-hook event-loop offload — `/health` timeout fix (FM-7), reviewer-gated, checkpoint HELD
+
+**Root-caused + fixed the intermittent `:7999` `/health` timeouts** (Docker `ExitCode 1`) Rick hit while a blocking voice ask was pending. Cause: the notification path ran the Prediction Engine **synchronously on the FastAPI event loop** — `notify_user` / `submit_notification_response` / `vote_on_prediction_hint` called `predict()` / `record_outcome()` / `record_hint_vote()` **bare** (GPU embedding + LanceDB search + an HTTP-fallback **reentrant self-call** into the same loop), starving the trivial `async health()`. A concrete **FM-7** instance; Tiberius's per-Stop sync-notify heartbeat was a load multiplier on it.
+
+**Fix:** wrapped 6 hot-path sites in `asyncio.to_thread` (matching the FM-7 idiom already at `notifications.py:589`) — predict / record_outcome / record_hint_vote / session-gist + both embeddings GPU endpoints. Reviewer-required add: **one shared class-level `threading.RLock`** in `ProxyDecisionEmbeddings` guarding all 3 LanceDB write sites, incl. the `record_hint_vote` **check-then-act** compound (two concurrent votes could both see `exists()==False` and both-insert).
+
+**Verified:** 100% line+branch on all 4 modified modules; 2 deterministic thread-identity regression guards (**proven** to fail-without-fix via a revert probe); live `:7999` probe `/health` p50=**2ms / 0 timeouts** (was a hard 3s timeout). Reviewed **APPROVE** by Krishna 🦚 (independent re-run of all 4 suites) + Tiberius 👑 backstop. **Selective checkpoint** — staged only my 6 files; **excluded** the foreign `session_reaped` hunk inside `notifications.py` and **skipped** the co-mingled `src/rnd/README.md` line (other sessions' work). **HELD — not pushed.** R&D: `src/rnd/v0.1.8/2026.06.05-prediction-hook-eventloop-offload.md`.
+
+---
+
+### 2026.06.03 - Session 1333e106 (Tiberius 👑) | CoSA coverage marathon → certified 100% tree-wide (11 commits, HELD)
+
+**Ran the CoSA all-tiers coverage grind to completion as manager** (Rick's overnight directive, relayed via María since broadcasts rendered blank). Drove `cosa` to **certified 100% line+branch+function tree-wide**: 412 files, 38,447 stmts / 0 miss, 11,172 branches / 0 partial; full canonical gate **13,300 passed / 0 failed / 2 xfailed** (both xfails proven pre-existing, María git-verified — honest 100%, no masking). **11 test-only commits, all reviewer-gated (Krishna 8/8 batches, 0 hollow), HELD on `wip-v0.1.8` — not pushed.**
+
+**Fleet:** spawned 3 authors + 1 adversarial reviewer (Rachel / Cheech / sam + Krishna) on disjoint lanes; reaped clean at completion (0 orphans, 0 zombies, mementos written). The runbook's gap-estimates were largely **stale** — most of cosa was already covered; real remaining work was crud + agents-root + a handful of branches, not the projected ~12k lines.
+
+**Commits (`d75bb69` → `e70e02e`):** de-poison 15 legacy files (`sys.exit`→`pytest.skip`) · crud_for_dataframes (171) · io_models wired (215 relocated, 0 new) · FM-21 sys.modules pollution fix · prediction_engine (179) · orchestration (61) · cosa.rest (2 error-branch) · LLM-client trio (48) · test_suite/job.py (70) · agents/root tail (25) · last-branch durable companion.
+
+**Discipline:** green-before-commit (never into a flaky/red tree — the io_files flaky was resolved as an **evidenced non-repro**, not masked), no hollow tests, no skip/xfail-to-green, zero prod-logic edits. **2 prod bugs found + tripwire-pinned, NOT fixed (Rick's gate):** `dispatcher.py` uninitialized `self.debug` + `cosa_interface.ask_yes_no` → missing `_dispatcher.ask_yes_no` (Bug #12). Rick allow-listed `mcp__cosa-voice__spawn_sessions` (classifier had blocked the autonomous-spawn framing).
+
+**Docs:** `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/` — 22 (findings), 23 (certified-complete + morning-gate checklist), 90 (io_files non-repro watch-note). **Hygiene flag:** `.claude-session.md` (412KB) + `TODO.md` (273KB) badly bloated — need dedicated size-management.
+
+---
+
+### 2026.06.02 - Session 1333e106 (Tiberius 👑) | CoSA-campaign post-game (coordinated) + TTS spoken-brevity cap (config-driven, runtime-tunable)
+
+**Two threads on `wip-v0.1.8` (checkpoint, not pushed).**
+
+**(1) CoSA-campaign post-game** — coordinated live with María 🌸 into one descending-priority deliverable `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/18-postgame-coordinated-for-rick.md` (went-well / didn't / improvements: **P0** messaging-coordination plane · **P1** completion-discipline · **P2** harvest-discipline + reap-path fix · **P3** TTS-brevity guard). Caught + corrected a would-be-confabulated root cause before it reached Rick: the messaging black-holes are **NOT "MCP saturation"** — disk-verified `claude mcp get cosa-voice` → **stdio per-session**; the real fault is the shared `:7999` + **synchronous** notify/commons handlers. María serializes the framework companion (planning-is-prompting); docs cross-link both directions. (The /tmp Sam default-error Rick heard = my sanctioned `claude mcp get` verify running from `/tmp` — harmless, owned, folded into both docs as a live P0 specimen.)
+
+**(2) TTS spoken-brevity cap** (implements post-game P3) — Rick: "you're killing me with walls of text in TTS." Added a caller-side cap enforced in the cosa-voice **MCP layer only** (notifications REST API untouched): new `override_size_limitation: bool = False` on all 5 spoken tools (notify/converse/ask_yes_no/ask_multiple_choice/ask_open_ended_batch); over-cap **REJECTS** (ValueError → model re-crafts) unless overridden; `abstract` never capped. Cap value `cosa voice spoken char cap = 500` in `lupin-app.ini`, read via ConfigurationManager **mtime-gated → runtime-tunable** (verified live 500→333→500, no restart). **11/11 unit tests green.** R&D: `src/rnd/v0.1.8/2026.06.02-tts-spoken-brevity-cap.md`. Activation needs one MCP restart (per-session stdio subprocess). **Files:** `src/lupin_mcp/cosa_voice_mcp.py`, `src/conf/lupin-app.ini` (+ `-splainer.ini`), `src/tests/unit/lupin_mcp/test_spoken_brevity_cap.py`, 2 R&D docs.
+
+---
+
+### 2026.06.01 - Session b8a9f332 (Tiberius 👑) | CoSA rest/ → genuine 100% coverage (35 commits, HELD) + FM-17 catch
+
+**Ran the CoSA coverage campaign's rest/ completion as manager; 35 test-only commits on `wip-v0.1.8` (HELD — not pushed, per Rick).** Drove `cosa.rest` to **genuine 100%** (lines AND branches), tree-wide gate confirmed: `11053/0 stmts · 2958/0 branch · 2363 passed`, zero modules <100%.
+
+**Arc:** assigned lanes landed 100% first (B6 rest-core, B7 15 modules, heavyweights multimodal_munger 432 + running_fifo_queue 576, commons/speech/decision_proxy, SDK agent packages, claude_code_queue). Then the **tree-wide gate caught FM-17** — "assigned-lane 100% ≠ tree-wide 100%": the campaign had conflated `cosa.agents.X` (done) with the `cosa.rest.routers.X` HTTP wrappers (missed) → cosa.rest was actually **91%** (I briefly over-claimed "rest complete", then self-corrected via the gate). María-ruled staged remainder wave (triage-first + early-valve) closed it: 6 SDK router-wrappers + middleware/api_key_auth + config + podcast_generator router + **websocket_manager** (final module) → 91%→100%.
+
+**Gate discipline:** 3-layer (author measure → manager disk re-measure in the cosa venv → independent reviewer re-verify → surgical-guard commit), zero-trust on all numbers, deep_research AGENT cli/orchestrator pair kept out of every commit. Pragmas all unreachable-only (read-the-contract-source proof; strip-experiment / adversarial-refute verified) OR the steward-ratified AC12 thin-route-handler grandfather (per-endpoint integration-coverage verified). websocket_manager (final) committed manager-verified + self-audited (reviewer push-channel FM-7-degraded; independent post-audit owed).
+
+**Live failure-modes surfaced (→ post-game):** FM-17 (agent-vs-router conflation), FM-18 (notify-on-AFK silent bounce → ~4h progress invisible to Rick), FM-7 (fleet-load → notify/TTS timeout), FM-11 (directed-push register_network_error), FM-19 (manufactured user-gate — parked in-scope mandated work as a "user decision" on difficulty; corrected: **difficulty ≠ defer**). Session-end record + the unharvested-workers explanation: `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/17-session-end-100pct-wrap-and-reap-explanation.md`. Mementos 13–16 + post-game 08/09.
+
+**Session-close (2026-06-01):** **Fleet reaped** — root-caused the "won't-reap zombies" Rick saw: `tmux kill-session` orphans the listener daemons (ppid=1, still running); they **ignore SIGTERM** and **reconnect** to :7999 after a FastAPI restart (state-Z count was always 0 — live orphans, not true zombies). Fixed via **SIGKILL by exact PID**; 13 reaped-session listeners dead, the 3 live ones (Tiberius/María/Krishna) protected. Lesson folded into runbook §8.3. **Messaging root-cause Layer-A confirmed:** cosa-voice MCP is **stdio per-session** (`claude mcp get` → Type: stdio) → no shared-MCP bottleneck; the real bottleneck is the shared :7999 + synchronous notify/commons handlers — corrects the earlier "MCP saturation" framing (→ full post-game with María next session). Then ran the end-of-session ritual (commit + **push at Rick's go** + backup). REMAINING: 2 ratifications (AC12 + speech.py), websocket post-audit, messaging fix-space design, broader cosa ramp.
+
+---
+
+### 2026.06.01 - Session 78c4780f (Krishna 🦚) | TTS preview-fraction slider: 25% → 12.5% increments
+
+**Voice-driven follow-on fix on `wip-v0.1.8` (checkpoint, not pushed).** Changed the TTS preview-fraction slider in the Claude Code Notifications accordion header to step in **12.5% increments** (nine stops: 0 / 12.5 / 25 / 37.5 / 50 / 62.5 / 75 / 87.5 / 100) instead of 25% (five stops). The slider default stays 25% — only granularity changed.
+
+**Three coordinated edits:** (1) `notifications.html` — `step="25"` → `step="12.5"` + expanded the tick `<datalist>` from 5 to 9 options. (2) `notifications.js` — the `input` handler used `parseInt`, which would truncate `12.5` → `12`; switched to `parseFloat`. Also dropped the `Math.round` in the init-seed (it would round 12.5 → 13, off-step) and now reads the browser-snapped slider value back so the label always matches the thumb. (3) new `TestTTSFractionSlider` class in `test_tts_controls.py` (5 cases): step attr, nine ticks, half-step round-trip (regression guard against the parseInt bug), integer-stop no-regression.
+
+**E2E verified on `:8000`:** `-k TestTTSFractionSlider` → **5 passed / 0 failed**; the companion STT suite re-ran **8 passed / 0 failed** (13/13 green, sequential). An earlier 11:23 run reported 0 tests — traced to a *submission* bug (quoted multi-word `-k` shattered by the endpoint's whitespace-split of `pytest_args`, exit=4), not a code defect; fixed via single-token `-k` runs. Lesson added to auto-memory `feedback_test_suite_submit_field_pytest_args`.
+
+---
+
+### 2026.06.01 - Session 78c4780f (Krishna 🦚) | STT recording button: select-all+overwrite → insert-at-caret
+
+**Voice-driven fix on `wip-v0.1.8` (checkpoint, not pushed).** Changed the notifications-client recording button so transcribed text is **inserted at the caret** instead of selecting-all + overwriting the whole field; a highlighted range is still replaced (the one intentional overwrite case), and the caret lands after the inserted text so repeated dictation appends. Extracted the logic into a reusable `_insertTranscriptionText( inputElement, text )` helper on `NotificationsUI` — all 8 STT contexts (qa, cc-prompt, research, podcast, swe, presentation, broadcast, session-rename) funnel through the one `onTranscription` callback, so the fix is universal.
+
+**Runtime bug caught + fixed live:** first cut called the helper as `self._insertTranscriptionText`, but in that callback `self` is the `recordingManager` object literal, not the page controller — `not a function` at runtime. Corrected to `self.ui._insertTranscriptionText` (`recordingManager.ui` is the `NotificationsUI` instance, same `self.ui` already used for logging). Rick confirmed working in the browser.
+
+**Tests** (`src/tests/e2e_ui/test_stt_insert_at_cursor.py`, new — 8 Playwright cases): empty/start/mid/end insert, highlighted-replace, full-select-replace, null-caret append fallback, plus a **wiring-chain guard** (`recordingManager.ui === notificationsUI` + helper resolves) added specifically because the direct-helper tests would NOT have caught the `self` binding bug. Verified `node --check` + `py_compile`; full E2E deferred to a scheduled `:8000` slot. **Files:** `static/js/notifications.js`, new e2e test.
+
+---
+
+### 2026.06.01 - Session 3047b30f (Tiberius 👑) | CoSA coverage Run-2: zombie reap → fleet recovery → 3 agent packages @ 100% + prod bug #11
+
+**Ran the CoSA 100%-coverage Run-2 fleet end-to-end as manager; 10 test-only commits banked on `wip-v0.1.8`, pushed at Rick's session-end go (66 commits total to remote — the whole held campaign).** Opened by reaping **11 zombie `cc_notification_listener` orphans** (sessions whose parent CC/tmux died but whose detached ppid=1 listener kept polling — the PG-6 worker-shutdown bug; raw `tmux kill-session` + the bugged `dismiss_sessions` both leave them). Only the 2 with a live `claude` parent (María, me) were legit.
+
+**Fleet arc:** started solo-sequential (María authoring); Rick course-corrected (3 broadcasts) back to the runbook fleet topology. Spawned a reviewer (seat "Krishna" → voice Mr. Radio 🦉) + 3 authors (Tiffany 💍 / Cheech 🦚 / Rachel 🕊️). Diagnosed an **intermittent spawned-session read fault** — file reads AND tool output occasionally truncate/garble then recover on retry; does NOT corrupt pytest `--cov` numbers — the root of the session's confabulation cluster. Fix in practice: retry-before-report, never fabricate. (Root launch-config cause still open per Rick's debug directive.)
+
+**3 complete agent packages @ genuine 100%** (manager disk-verify → Mr. Radio independent re-measure + line-by-line audit → surgical single-file commits, every batch): **notification_proxy** (12 mod, 801/0/236, 173 tests, `67c0222`), **prediction_engine** (7 mod, 766/0/268, 237 tests, `fb679dd`+`d722396`), **decision_proxy** (18 mod, 830/0/214, 240 tests, B1–B6 `9a02f6e`→`8964e72`). ~650 tests, **zero API spend** (firewalled key never read; LanceDB/vLLM/scipy/embeddings all boundary-mocked).
+
+**Prod bug #11** (silent dead-tier, same family as #10): `prediction_engine.py:990` imported `LlmClientFactory` from `cosa.agents.llm_client` (no such symbol) → ImportError bare-except-swallowed → `_get_llm_client` always None → Tier-2 LLM synthesis of open-ended prediction **dead in prod**. Rachel tripwired (xfail-strict + pin, never pragma'd a bug-blocked line); I fixed the import + completed the de-arm (incl. retiring the now-false tombstone comments per Mr. Radio's catch — a doctrine refinement), reviewer-ratified (`d722396`).
+
+**2 ratified pragmas:** `responder.py:295` no-branch (exhaustive strategy dispatch, committed) + `util_xml_pydantic.py:210` no-cover (multi-root `else` unreachable — empirically proven: xmltodict raises ExpatError on every non-single-root input; held with io_models wave-2). **The zero-trust gate caught 5+ confabulations + a surgical-staging trap — nothing fabricated reached a commit.** All 3 authors honest-stopped after their packages.
+
+**Wave-2 deferred (handoff docs written, idle fleet reaped at stand-down):** io_models remainder (xml_models 79%→100% + watchdog) + rest/ 37 stale-mock repairs (a possible queues-auth regression flagged for tripwire) — `07-rachel-io-models-watchdog-handoff.md` + `07-rest-stale-mock-repair-handoff.md`. io_models partial WIP (green baseline restored + utils + 6/16 xml_models classes, ungated) committed separately as labeled WAVE-2 WIP.
+
+**Run-2 commits (10):** `ce9087e 9a02f6e fb679dd 67c0222 8e72f61 d722396 762e301 2312e5e 50baada 8964e72`.
+
+---
+
+### 2026.05.30 - Session fb0bc8a5 (Speedy 🌿) | Notifications-UI polish: focus-card height, broadcast toggle, master-detail reading pane, persona rename
+
+**A voice-driven UI-polish session on `wip-v0.1.8` — three commits, each verified on `:7999`; not pushed.** Parallel-session-safe throughout (the GCP session 657452e9 + coverage session own `README.md`/`TODO.md`/untracked GCP+coverage docs — deliberately EXCLUDED from every commit; my README doc-links left in the working tree for those sessions to carry).
+
+**Commit `23d3726`** — focus-mode sender-card height (+50%) + the broadcast `commons-activity-entry` "Show more" toggle. Toggle root cause: a one-shot `requestAnimationFrame` overflow check measured 0×0 while the Recent Activity panel was collapsed (`display:none`) — system broadcasts arriving via WebSocket while it was closed never revealed the toggle; fixed with a `ResizeObserver` re-measure. Focus boost first targeted the orphaned `.sender-card-messages` class (no render path produces it) → repointed to the real `.date-accordion-messages` scroll region.
+
+**Commit `585283d`** — voice-persona pool rename Speedy → Cheech ("as in Cheech & Chong"; label-only — voice id/icon/color/profile preserved). Live session stays Speedy (rename affects future allocations, not the running bridge). New auto-memory `reference_hot_config_reload` (Rick's dev env hot-reloads `lupin-app.ini` — no `:7999` bounce needed for INI-only changes).
+
+**Commit `cd6cc99`** — master-detail Reading Pane cluster: (1) layout-mode toolbar centering (was pane-blind `ratio/2`≈33% → 50% when pane closed, re-centers on open/close); (2) reading-pane iframe "localhost refused to connect" diagnosed as global `X-Frame-Options: DENY` blocking same-origin framing → `SAMEORIGIN` for `/app/docs` only, `DENY` elsewhere (verified live via header probe); (3) iframe "postage stamp" = indefinite `.content-pane` height (only `max-height` + `align-self:flex-start`) → definite `calc(100vh-100px)` + `.content-pane-body` `min-height:0` + `:has(iframe)` edge-to-edge padding; (4) new "bust out" header button (⤢) → opens the pane's current content in a new browser tab (doc URL / rendered abstract), then closes the pane + re-centers; (5) focus boost bumped +50% → DOUBLED (250→500px).
+
+**Tests:** new `test_layout_mode_toolbar_centering.py` (centering + iframe-fill + bust-out E2E), `test_doc_viewer_iframe_embedding.py` (X-Frame smoke — **3/3 passed live on `:7999`**), plus updated assertions in `test_cc_session_strip_and_focus.py` + `test_commons_activity_toggle.py`. Full E2E (`:8000`, scheduled) to run before any merge.
+
+**Files:** `src/fastapi_app/main.py`, `static/html/notifications.html`, `static/css/notifications.css`, `static/js/notifications.js`, `src/conf/lupin-app.ini` + `-splainer.ini`, 3 e2e/smoke test files. **R&D docs:** `2026.05.30-notifications-ui-focus-height-and-broadcast-toggle.md` + `2026.05.30-master-detail-reading-pane-fixes.md`. **New auto-memory:** `reference_hot_config_reload`.
+
+---
+
+### 2026.05.30 - Session 657452e9 (Sam 🎙️) | GCP deployment: survey → straw-man plan → Cloud-Run-vs-GCE comparison → decisions locked → prod-wording scrub (checkpoint)
+
+**Drove the GCP-deployment planning arc end-to-end on `wip-v0.1.8`; mid-session checkpoint (not pushed).** Three R&D docs created under `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`: (1) an 11-agent architecture-survey + readiness assessment; (2) a 2,400-line section-by-section **straw-man provisioning & deployment plan** (14-agent author→critic→assemble workflow; three blocking contradictions reconciled — Alembic-not-on-startup, the 2026-06-15 Agent-SDK $200 credit ceiling, the Milestone-1 HTTPS-LB cost line); (3) a fact-checked **Cloud Run-GPU vs GCE g2-standard-8+L4 + Claude-Code-hosting** comparison (verdict: the VM wins on cost, fit, and CC — same L4 silicon, opposite execution model; you can't SSH into Cloud Run).
+
+**Strategic decisions resolved with Rick** (cosa-voice `ask_multiple_choice` walkthrough): single GCE g2-standard-8 + L4 VM · CC OAuth = setup-token in Secret Manager + a refresh mechanism · CC consolidated onto the GPU VM · exclude-keys+rotate+verify-history · reuse sandbox project · Terraform+bash · no staging · on-demand (credit-covered, tracked as real $). **Milestone 1 re-scoped: local-dev → GCP-_test_ migration, NOT production.** Then scrubbed the now-misleading "production" wording across the plan (33 targeted edits via a focused sub-agent; future-prod refs + load-bearing code literals preserved; a new `LUPIN_ENV`-tension OPEN ITEM noted).
+
+**Files** (this checkpoint): `src/rnd/v0.1.8/2026.05.30-gcp-deployment/` (3 new docs) + `history.md` + `TODO.md`. **Deferred:** `src/rnd/README.md` index links (multi-session conflict — committed later). New auto-memory: `feedback_track_gcp_costs_as_real_money`.
+
+---
+
+### 2026.05.30 - Session ac012bd2 (Tiberius 👑) | CoSA 100%-coverage campaign — fully planned, evidence-gathered, staged for off-peak grind
+
+**Planned + staged the CoSA 100%-coverage grandfathering-ramp campaign end-to-end; gathered combined-coverage evidence; authored a cold-start runbook. The overnight fleet grind itself is deferred to the off-peak window. On `wip-v0.1.8`.**
+
+**Decisions ratified (interactive walk-through with Rick via `ask_multiple_choice`):** D1 **HYBRID** methodology (credit REST to the server suites — +1,776 lines / 70% of the integration delta; everything else unit-only; orchestration server-delta was +0, refuting the "integ-likely" guess); D2 denominator (omit test-files + `training/`; harvest→migrate-to-pytest→delete-after-green for `quick_smoke_test`/`__main__`/all legacy tests); D3 **flat** topology (Tiberius manages 3 authors directly; lead-author role); heartbeat = new `heartbeat_poker_job` (old `cascade_heartbeat_scheduler.py` fallback); D5 strict guardrails + adversarial reviewer scored on *valid* hollow-tests-caught; D6 standing **TEST-ONLY** overnight commit authority (zero production-logic edits); D7 per-batch green-gate + periodic combined re-measure; D8 **milestone ramp** (config+library by 06-05; agents/REST ramped); fleet = 3 authors on disjoint module-groups; reviewer gates commits per module-group; D4 tiering = **library (~4.2k, 06-05 milestone) → agents (~8.4k long pole) → REST-remainder + orchestration**.
+
+**Combined-coverage evidence (Tiffany 💍, spawned author — since reaped):** unit-only **45.3% line / 34.8% branch** (corrected denominator; raw 26.9% was inflated by test-files + smoke/`__main__` + `training/`). Combined unit + `:8000` integration + E2E = **52.0% line / 41.7% branch** (lower bound). Per-module integration delta: REST +1,776 (70%), memory +348, agents +319, orchestration +0. The `:8000` instrumentation was authorized by Rick's **DIRECT broadcast** (a peer relay was correctly refused — the `:8000` governance gate working). Infra reverted, working tree clean. Baseline: `src/rnd/v0.1.8/2026.05.30-cosa-100pct-coverage-baseline.md`.
+
+**Heartbeat-poker dry-verify (STATIC only):** `send_to` posts to `dm-<slug>` + fires the `register-question` wake-push (revives idle sessions); `last_post_ts` reads global `who()` (any commons post resets the manager's streak); factory `create_agentic_job("agent router go to heartbeat poker", {recipients, cadence_seconds:300, termination_topic:"coverage-campaign-control", termination_signal_kinds:["stand_down"], workstream_id})` wires the real gateway via `from_environment`; one agentic pool slot. **A LIVE poker tap is still PENDING** (the §7 live-E2E / a scripted stand-in) — run it BEFORE trusting the poker unattended.
+
+**Docs (campaign home `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/`):** `00-campaign-plan.md` (decision-of-record / the *why*), `02-cold-start-runbook.md` (**THE standalone cold-start operator doc** — the *how*; authored by María 🌸 = Workflow Steward), `README.md` index. María authors a reusable cross-repo "heartbeat-poker-supervised overnight fleet grind" workflow AFTER end-to-end validation.
+
+**▶ RESUME POINTER (cold-start):** the campaign is fully staged. Next action = the **off-peak launch (tonight, post-midnight EDT)** via the runbook's **§15 cold-start checklist**: live-verify the poker → land the Tier-0 `[tool.coverage]` config → spawn 3 FRESH authors + 1 reviewer (cold-briefed from the runbook, disjoint Tier-1 module-groups) → run the grind (per-batch reviewer-gate + green-gate, test-only commits). Also: schedule a clean un-instrumented `:8000` E2E to validate 31 E2E failures from the combined run (NOT our regression — a parallel session's uncommitted UI edits to `test_cc_session_strip_and_focus.py` + `test_commons_activity_toggle.py`). Tiffany was reaped (fact-gathering complete); the grind fleet spawns fresh from the runbook.
+
+**Files** (this commit): `src/rnd/v0.1.8/2026.05.30-cosa-coverage-campaign/` (00/02/README), `src/rnd/v0.1.8/2026.05.30-cosa-100pct-coverage-baseline.md`, `TODO.md`, `history.md`. (Out-of-repo, persist across /clear: session memories `feedback_walk_me_through_means_interactive_asks.md`, `feedback_waking_idle_spawned_sessions.md`.) Parallel-session changes deliberately EXCLUDED from staging: `.claude-session.md`, `src/rnd/README.md`, `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`, notifications-UI edits.
+
+---
+
+### 2026.05.30 - Session ac012bd2 (Tiberius 👑) | CLAUDE.md perf-trim under 40k + TODO triage
+
+**Cleared the project `CLAUDE.md` performance warning (40.3k > 40.0k) and triaged the TODO list. On branch `wip-v0.1.8-2026.05.29-preparing-for-gcp-deployment`.**
+
+**`CLAUDE.md` trim — 40,311 → 33,278 chars (−7,033; ~6.7k headroom under 40k), zero doctrine lost.** Three sections, dedupe + de-staling only: (1) `100% COVERAGE MANDATE` — was titled "MULTIPLEXER TYPESCRIPT" and still listed Python/`src/cosa` as *out of scope* (stale since the mandate went Lupin-wide 2026-05-16 and CoSA folded in 2026-05-29); rewrote to current Lupin-wide scope with a pointer to the auto-memory + origin doc. (2) `TESTING` (5.7k→~1.6k) — collapsed verbose per-suite bullets + duplicate command block + stale counts into one suite table + the `--bg` mandate + doc pointers. (3) `PR MERGE REQUIREMENTS` (3.2k→~1.5k) — compressed to the ordered gate sequence + final-gate rationale + failure rule + anti-patterns. `TESTING VENUES` (canonical rubric) + `TEST CREDENTIALS` left untouched; the trimmed sections now reference the rubric instead of restating it. (María 🌸 independently handled the *global* `~/.claude/CLAUDE.md` 40k warning — clean split confirmed via DM, no overlap.)
+
+**TODO triage.** Added a new 🔴 TOP-PRIORITY entry formalizing the **CoSA 100%-coverage grandfathering-ramp gate** (deadline 2026-06-05) — it previously existed only as a ratified decision buried in a DONE block, never as an actionable item. Marked two items done per Rick: the **wip-v0.1.8 push** (verified origin synced at `2240bf6`, 0 ahead/0 behind) and the **LanceDB Phase 0 disk reclaim** (~81GB freed via the 2026-05-29 rebuild; the recurring-compaction *scheduling* half stays tracked under the durable scheduled-job entry).
+
+**Files**: `CLAUDE.md`, `TODO.md`, `history.md`.
+
+---
+
+### 2026.05.29 - Session 5496cbb6 (Krishna 🦚) | CoSA→Lupin mono-repo FOLD landed + post-fold doctrine scrub
+
+**The CoSA framework is now folded into the Lupin mono-repo — the hard prerequisite for the GCP deployment push.** Builds on this session's earlier Phase-A venv relocation (entry further below).
+
+**Mono-repo fold (flatten)** — `0a01da3`. `src/cosa/` (621 files) is now first-class tracked Lupin source, no longer a gitignored nested repo. Mechanics: **MOVED** `src/cosa/.git` aside (NOT deleted) to `/mnt/DATA02/cosa-git-archive-2026.05.29/` — full CoSA history + 42 branches preserved, fully reversible; removed the `src/cosa` `.gitignore` blanket + added a `src/cosa/.venv/` guard; `git add src/cosa`. Imports unchanged (`cosa.*`, PYTHONPATH=src). Validated on the folded tree: **unit 5058/0, WS smoke 50/50**. Decisions (Rick-ratified): flatten · move-aside-not-delete · directly on `wip-v0.1.8` · coverage = cosa **inherits** the 100% gate with an immediate grandfathering ramp (Tiberius owns the Lupin-side impl).
+
+**Post-fold doctrine scrub** — `6bac0bc`. Removed the "src/cosa is a separate repo / submodule / never-manage-CoSA-git" doctrine from `CLAUDE.md` (CoSA dropped from the nested-repos list; Firefox + Mobile kept); SUPERSEDED banner on `src/cosa/CLAUDE.md`; removed the hazardous newline-named junk file `src/cosa/tests/smoke/infrastructure/<|system|>…` (preserved in the `.git` archive). Out-of-repo (user config): deleted the 2 obsolete CoSA-separation memories + flipped the coverage memory to cosa-inherits-the-gate. María updated the PIP-side doctrine (`bbcd865`). **Flagged residual**: the `nested-repo-management` skill (no locatable file — likely plugin-managed; needs CoSA dropped, Firefox/Mobile kept) + 2 minor stale memory bodies.
+
+**Full analysis/plan**: `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md`.
+
+**Files** (this milestone): `.gitignore`, `CLAUDE.md`, `src/cosa/CLAUDE.md`, 621 `src/cosa/*` files (fold), `history.md`, `TODO.md`. (Out-of-repo: memory files.)
+
+---
+
+### 2026.05.29 - Session c9c582b7 (Tiberius 👑) | Scheduled-job missed-window catch-up (durable across bounces)
+
+**Closed the missed-window gap in scheduled-job restoration: a job whose `scheduled_at` passes WHILE the server is down is now caught up on restart instead of dropped as INTERRUPTED.** On the post-fold mono-repo (`wip-v0.1.8`); cosa-side code committed via the fold (`0a01da3`), parent wiring committed here.
+
+**Finding:** the core scheduled-job persistence + restore-on-boot ALREADY EXISTED (`mark_interrupted_jobs` → `get_restorable_jobs` → `main.py` re-enqueue). The only real gap was past-due-during-downtime jobs being marked INTERRUPTED.
+
+**Design (Rick-ratified):** record when the server was last available and compute the EXACT downtime window rather than guess a grace interval. Recording = 60s clock-loop heartbeat + clean-shutdown marker (heartbeat survives hard kills). `mark_interrupted_jobs()` now preserves PENDING jobs whose `scheduled_at` ∈ `[last_available, now]` for an immediate catch-up run; `get_restorable_jobs()` re-enqueues them unchanged; the consumer fires them (`scheduled_at <= now`).
+
+**Verified:** live `:7999` bounce → clean boot, recovery sweep ran, heartbeat stamped `server_lifecycle` at startup. 40/40 unit tests (logic + lifecycle + catch-up branches), 100% coverage on changed lines.
+
+**Files** (parent commit): `src/fastapi_app/main.py` (heartbeat in `clock_loop` + shutdown marker + recovery logging), `src/migrations/versions/e9f0a1b2c3d4_add_server_lifecycle_table.py` (new), `src/tests/unit/test_job_restoration.py` (+24 tests), `src/rnd/v0.1.8/2026.05.29-scheduled-job-bounce-survival.md` (new), `history.md`, `TODO.md`. cosa-side (committed via fold `0a01da3`): `src/cosa/rest/job_persistence.py` (record/get/`_is_within_downtime` + catch-up branch), `src/cosa/rest/postgres_models.py` (`ServerLifecycle`). Migration applied to `lupin_db_dev`.
+
+**Remaining:** full real schedule→bounce-straddle→catch-up E2E (Rick-assigned, in progress).
+
+---
+
+### 2026.05.29 - Session 5496cbb6 (Krishna 🦚) | v0.1.7→main PR + CoSA→Lupin merge analysis + Phase A local-venv relocation
+
+**Three arcs on branch `wip-v0.1.8-2026.05.29-preparing-for-gcp-deployment`: shipped the v0.1.7 PR, researched the CoSA mono-repo merge, and executed the local dev-venv relocation (Phase A).**
+
+**v0.1.7 → main PR.** Ran the branch-PR-and-merge workflow: README "What's New in v0.1.7" headline block + version-history entry + version bump; repaired 9 stale unit tests (git_loc_delta v1.1 API drift + embedding model-server-carveout isolation — both stale-test-vs-correct-source, source untouched); rode Tiberius's pgvector TODO note. Dev gates green (unit 5034/0, WS smoke 50/50). PR #17 squash-merged to main; created this v0.1.8 branch and **kept** the v0.1.7 local branch per Rick.
+
+**CoSA→Lupin mono-repo merge — research + plan (Phase B, GATED, NOT executed).** Two multi-agent research workflows (~1.19M tokens) → verdict: folding CoSA into Lupin is the correct end-state (zero external consumers verified on-disk+SSH, 52 reverse-imports CoSA→host, no packaging/version-pin, lockstep releases), but execute gated/staged via history-preserving `git subtree` **after v0.1.8 ships**, on a dedicated branch, behind an authenticated-operator PR/branch-protection check + pushing the 2 unpushed CoSA branches. Corrected a doctrine premise: `src/cosa` is **NOT a submodule** — it's a gitignored independent nested repo (no `.gitmodules`, no gitlink). Full analysis + weighted pros/cons: `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md`.
+
+**Phase A — local dev-venv relocation (DONE, 3 commits, green).** Replaced the stale miniconda `src/cosa/.venv` (py3.11, 367-pkg cruft) with a clean root `.venv` (py3.13) built from the container's `uv.lock` **minus** three native packages the host can't build and nothing host-side imports (pyaudio, flash-attn, autoawq) + the `en_core_web_sm` model. Rick's directive: mirror the container, no old artifacts. CUDA honored — torch `2.6.0+cu124` runs on driver 535 via Minor Version Compatibility (`cuda_available=True`); the historical doom-loop was a container-only `cuda-compat-12-4` forward-compat shim (already purged). **Production Dockerfile deliberately UNTOUCHED** (zero container blast radius). Repointed **ALL 14 venv refs across 11 scripts** — a full repo sweep that caught 4 `src/tests/run-*.sh` runners the recon had missed — and added reproducible `src/scripts/build-local-venv.sh`. Verified on the new venv: unit **5034 passed / 0 failed**; WebSocket smoke **50/50**.
+
+**Commits (this session, on `wip-v0.1.8`, LOCAL + UNPUSHED):** `bf97e1a` (gitignore guard), `eda7caf` (openapi-to-md dep), `6cdcb7b` (script repoints + builder). Old `src/cosa/.venv` kept as fallback. Push awaits Rick's explicit go.
+
+**Files** (this checkpoint commit): `history.md`, `TODO.md`, `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md` (new). (The Phase A code landed in the 3 commits above.)
+
+---
+
+### 2026.05.29 - Session c9c582b7 (Tiberius 👑) | LanceDB rebuild + ~303GB disk reclaim + pgvector migration analysis
+
+**Disk-reclamation campaign (~303GB freed), a corrupted-table rebuild, and a deferred pgvector analysis. On branch `wip-v0.1.8-2026.05.29-preparing-for-gcp-deployment`.**
+
+**LanceDB `input_and_output_tbl` rebuild (~81GB reclaimed, 82GB → 679MB).** The table's version chain was corrupted (a missing/shifting `_versions/<n>.manifest`), so `optimize()` could not compact its ~100k uncompacted append-log versions. Current data was intact (101,521 rows). Rebuilt via new `src/scripts/rebuild_lancedb_table.py` (staged build/swap/backfill/reclaim): verified full backup → DATA02 → snapshot → drop + create fresh single-fragment table → bounce both servers. **Gotcha captured:** `rename_table` is `NotImplementedError` in LanceDB OSS (failed *closed* — caught atomically); the `drop_table`+`create_table`-into-same-dir fallback stranded a stray V1 manifest → mixed V1/V2 schemes → both REST servers crash-looped ~2 min → recovered by quarantining the stray manifest + restart. Lesson logged in TODO.md as a requirement for the durable-scheduled-job swap step.
+
+**~303GB total reclaimed:** ~81GB lancedb rebuild (DATA01) + ~80GB backup-drive re-sync (DATA02 — re-ran `backup.sh --write`, `--delete` removed the stale 80GB copy) + ~142GB Docker (removed superseded `lupin:0.9.0` 130GB image that baked in the old ~80GB DB before `.dockerignore` excluded it, + 12.4GB build cache; orphaned model-server images + unused volumes pruned). Confirmed live `lupin:1.0.0` does NOT bake the DB (layer audit + `.dockerignore`) → **no image rebuild needed.**
+
+**pgvector migration analysis (deferred).** A multi-agent research workflow produced `src/rnd/v0.1.8/2026.05.29-lancedb-to-postgresql-pgvector-migration-analysis.md`: verdict — the 81GB bloat was a missing-compaction-cron problem, NOT a vector-engine problem; "migrate-to-fix-bloat" was adversarially refuted. Revisit logged in TODO.md.
+
+**Files** (this checkpoint, Lupin-parent): `src/scripts/rebuild_lancedb_table.py` (new), `src/rnd/v0.1.8/2026.05.29-lancedb-to-postgresql-pgvector-migration-analysis.md` (new), `src/rnd/README.md` (index: backfilled v0.1.7, added v0.1.8), `TODO.md` (durable scheduled-job persistence task + swap-lesson), `history.md`. **Operational reclaim (lancedb compaction, Docker prune) is not a committable artifact** — this commit captures the reusable tool + analysis + tracking docs. **Not staged:** Krishna's parallel `src/rnd/v0.1.8/2026.05.29-cosa-lupin-monorepo-merge-analysis-and-plan.md` (his session).
+
+**Commit**: 1fbe9ee
+
+---
 
 ### 2026.05.28 - Session 0da441e6 (Tiberius 🌑) | Extra-N overflow personas + Manager-Spawned Headless Reviewer Sessions
 
@@ -27,533 +491,6 @@
 **Deferred (parallel-session safety / historical records)**: `TestExtraColorsGreenRule` in `test_voice_persona_helpers.py` (file owned by a parallel session), CoSA `voice_persona_helpers.py` docstrings, and ~18 dated R&D docs still reference the retired rule — queued in TODO.md.
 
 **Files Modified**: 4 repo files + 1 new archive (`src/conf/lupin-app.ini`, `lupin-app-splainer.ini`, `history.md`, `history/README.md`).
-
----
-
-### 2026.05.22 - Session 76351966 (Rio ⚡) | Heartbeat-poker CJ Flow ingestion wiring (gap-close)
-
-Follow-on to the heartbeat-poker run (commit `cd37c3f`): closed the gap surfaced + escalated during I6 — `HeartbeatPokerJob` was not dispatchable through CJ Flow because `agentic_job_factory` had no `heartbeat_poker` entry. Tiberius assigned the close per Rick's follow-through directive.
-
-**Factory wiring**: added the `agent router go to heartbeat poker` branch to `agentic_job_factory.create_agentic_job()` — parses `recipients` (dict list → `RecipientSpec` list), `termination_signal_kinds` (list or CSV), and the `_parse_optional_int` defaults; constructs the `HeartbeatPokerJob` + a `LupinCommonsGateway`. Added `LupinCommonsGateway.from_environment()` — the production IO-boundary constructor (real `CommonsStore` + API key + `requests`); `# pragma: no cover` with reason (exercised by the :8000 integration tier, not unit-mockable in isolation).
-
-**Tests**: 11 factory-wiring unit tests (`test_agentic_job_factory_heartbeat.py`, new) + 1 factory-dispatch smoke test. Full local heartbeat suite — 78 tests green; both heartbeat modules hold gate-enforced 100% line+branch coverage. Integration + E2E skip-marks updated — the missing-wiring clause dropped (integration now venue-only; E2E now task-I7-only); both collect clean (5 tests, `--collect-only`).
-
-**Files** — parent-Lupin (this commit): `src/tests/integration/test_heartbeat_poker_integration.py`, `src/tests/e2e/test_heartbeat_poker_e2e.py`, `history.md` (this entry). CoSA submodule (committed separately, own context): `heartbeat_poker_commons_gateway.py`, `agentic_job_factory.py`, `test_agentic_job_factory_heartbeat.py`, `test_heartbeat_poker_smoke.py`.
-
----
-
-### 2026.05.22 - Session 76351966 (Rio ⚡) | Heartbeat-poker abstraction implementation (10-task run) + TTS limiter boundary-scan fix
-
-Two bodies of work this session.
-
-**TTS limiter — boundary-scan rewrite.** The notifications TTS preview-fraction slider truncated by sentence count; a newline-separated technical list (no `.!?` punctuation) defeated the splitter and read ~half the list aloud at the 25% stop. Replaced the sentence-count algorithm in `_computeTTSPreview()` with a character-position forward scan: jump to `ceil(length × fraction)`, then scan forward to the next boundary — a sentence terminal, an em/en-dash, or a **newline** (the key fix: a list item ends at a newline even with no punctuation). New `_truncateAtBoundary()` helper; `_splitIntoSentences()` retired; inline self-test rewritten (8 cases, verified in Node). Hyphen-minus deliberately NOT a boundary. The vestigial `tts preview include semicolons` INI key + splainer entry removed.
-
-**Heartbeat-poker abstraction — full 10-task implementation run (Tiberius-managed).** Implemented the approved `src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md` plan end-to-end: 3 design-tier specs (D1+D4 class spec, D2 Watcher-protocol spec, D3 co-exist/swap/retirement doc); the `HeartbeatPokerJob` `AgenticJobBase` subclass + its three layered exits — clean-signal / dead-man's-switch / hard-cap (I1, I2); a production `LupinCommonsGateway` adapter; the `implementer-watch-protocol.md` Layer-2 doctrine (I3); two new termination-signal kinds in the PIP cascade defaults (I5); the full test pyramid (I6); Manager/Observer protocol `poke_body` compatibility (I9); and the production agentic-pool override (I10). Verified: 66 tests (58 unit + 8 smoke) green, 100% line+branch coverage (`pytest-cov --cov-fail-under=100`) on both heartbeat modules; integration + E2E files written + skip-marked for `:8000`. Swap-validation gates I4a-d/I7/I8 left for the operator-event-driven post-run. One gap surfaced + escalated to Tiberius: `HeartbeatPokerJob` is not yet wired into `agentic_job_factory` CJ Flow ingestion.
-
-**Verification**: TTS — `node --check` + 8/8 inline self-test cases + config-load. Heartbeat — 66 tests green, gate-enforced 100% line+branch on `heartbeat_poker_job.py` + `heartbeat_poker_commons_gateway.py`; INI parse confirmed.
-
-**Files** (parent-Lupin, this commit): `src/fastapi_app/static/js/notifications.js`, `src/fastapi_app/static/html/notifications.html`, `src/conf/lupin-app.ini`, `src/conf/lupin-app-splainer.ini`, `src/rnd/v0.1.7/2026.05.22-tts-limiter-boundary-scan.md` (new), `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` (new), `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d2-watcher-protocol-spec.md` (new), `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d3-coexist-and-swap.md` (new), `src/docs/agents/implementer-watch-protocol.md` (new), `src/tests/integration/test_heartbeat_poker_integration.py` (new), `src/tests/e2e/test_heartbeat_poker_e2e.py` (new), `history.md` (this entry).
-
-**Committed separately** (own repos, own contexts): CoSA submodule — `heartbeat_poker_job.py`, `heartbeat_poker_commons_gateway.py`, `system.py`, `test_heartbeat_poker_job.py`, `test_heartbeat_poker_commons_gateway.py`, `test_heartbeat_poker_smoke.py`. planning-is-prompting repo — `plan-review-cascaded-defaults.md`, `plan-review-cascaded-common.md`.
-
----
-
-### 2026.05.22 - Session 2ce59c03 (Tiberius 🌑) | Voice persona: `request_persona` MCP tool + compaction carry-forward fix
-
-Triggered by a live observation — the Mr. Radio session went through a context compaction and came back re-allocated as Krishna. Rick asked for two fixes, done in his stated order.
-
-**`request_persona` MCP tool** — new `@mcp.tool` (plus `_request_persona` helper + `_persona_error_detail`) in `cosa_voice_mcp.py`, modeled on the speakerphone-toggle tool. Wraps the existing allocate/swap endpoint with the strict `requested_persona_name` query param; maps `200` → ok, `422` → not_in_pool, `409` → occupied, else → error. No degraded bridge-write fallback — allocation stays behind the server's `_voice_persona_lock`. First MCP-surfaced way to request or reclaim a named persona.
-
-**Compaction carry-forward fix** — the `register_session.py` carry-forward gate was keyed on `is_context_clear`, which is True only when the transient session UUID rotates. A compaction can keep the same id, so the persona was dropped, the defense-in-depth block released it, and Phase 4.5 re-rolled (Mr. Radio → Krishna). Dropped `is_context_clear` from the gate: whenever a prior bridge holds a valid `voice_persona` dict it is preserved — across `/clear`, `/compact`, resume, and `--continue`. The fix is live immediately (SessionStart hooks are re-exec'd per event).
-
-**Verification**: 30/30 unit tests (19 new for the tool, 11 register_session incl. 2 new compaction/resume cases); 38/38 sibling MCP tests pass (no regression); 100% branch coverage on all new code; live E2E against `:7999` exercised the `409 occupied` and `200 ok` response paths.
-
-**Files**: `src/lupin_mcp/cosa_voice_mcp.py`, `src/lupin_cli/claude_code/hooks/register_session.py`, `src/tests/unit/test_cosa_voice_mcp_request_persona.py` (new), `src/tests/unit/test_register_session_preservation.py`, `src/tests/smoke/test_mcp_smoke.py`, `src/rnd/v0.1.7/2026.05.22-voice-persona-request-tool-and-compaction-carry-forward.md` (new), `history.md` (this entry).
-
----
-
-### 2026.05.21 - Session 679e8f04 (Mr. Radio 🦉) | Recent Activity filter strip + Focus-bar chronological lock + Master-detail two-pane layout experiment
-
-#### Checkpoint 3 | 2026.05.21 19:10 EDT | Iframe doc-link interception — root-cause fix; master-detail experiment pinned pending cascade review
-
-Post-Checkpoint-2 follow-up. Rick kept hitting "localhost refused to connect" when clicking doc-links **inside** the Reading Pane's iframe. Earlier patches (document-viewer.html render-time URL rewrite, parent-page click interceptor) didn't resolve it because the failure is architectural, not a regex gap:
-
-- **Clicks inside an iframe do NOT bubble to the parent document.** The parent's `document`-level click interceptor is structurally blind to iframe-internal clicks — an iframe is a separate browsing context.
-- The only handler for iframe-internal links was `document-viewer.html`'s own render-time rewrite. That file is **cache-fragile**: the iframe lazy-loads `/app/docs?path=...` AFTER the parent page is interactive, so parent hard-reloads never bust it — the iframe kept serving a stale cached `document-viewer.html` predating the rewrite.
-
-**Fix — parent-owned iframe link interception**: the iframe is same-origin, so the parent can script into it via `iframe.contentDocument`. New `_bindIframeLinkInterception(frame)` attaches a delegated click handler to the iframe's document on every `load`. `/app/docs?path=` links route through `_openContentPane` (Back-history participates); external links open in a new tab; same-origin non-doc relative links navigate natively. Parent code is `?v=`-cache-busted so it is always current — the stale-`document-viewer.html` problem becomes irrelevant. `_normalizeDocLinkHref` broadened to strip `127.0.0.1` / `0.0.0.0` loopback prefixes, not just `localhost`. `document-viewer.html`'s own rewrite retained as harmless defense-in-depth (regex similarly broadened).
-
-**Status**: master-detail experiment **PINNED** per Rick — the iterative tail-chasing is paused pending a fresh cascaded plan-review run (Tiberius managing). Cache buster `v=20260521i`.
-
-**Files**: `src/fastapi_app/static/js/notifications.js` (+`_bindIframeLinkInterception`, broadened `_normalizeDocLinkHref`), `src/fastapi_app/static/html/notifications.html` (cache buster), `src/fastapi_app/static/html/document-viewer.html` (regex broadening).
-
-**Commit**: c1d611e
-
----
-
-#### Checkpoint 2 | 2026.05.21 18:30 EDT | Master-detail two-pane layout experiment — design + 7 iteration cycles + draggable splitter
-
-Second feature of the session, designed + implemented + iterated through Rick's voice feedback over the late afternoon. Switchable two-pane "horizontal" layout: existing `.container` collapses to ~2/3 width inside a new `.left-column`; new `<aside class="content-pane">` Reading Pane occupies the right ~1/3; draggable splitter between; persistent split ratio; section-toolbar floats horizontally over the top-center of the content area.
-
-**Process pattern (re-applied from morning feature)**: pre-impl exploration → item-by-item walkthrough of 6 design choices via `ask_yes_no` / `ask_multiple_choice` → reuse-review pass → Phase 1/2 implementation → iterative tweaks driven by live visual feedback on `:7999`.
-
-**Locked decisions (walkthrough)**: Reading Pane name; iframe for doc-links; Close + Back only (no Forward); mode-toggle button at top of `.section-toolbar` with `⇆` icon; respect-toggle on narrow viewports; never-interrupt-pane on notification arrival.
-
-**Iteration log (visual feedback rounds)**:
-1. Initial skeleton — Rick reported: iframe "localhost refused to connect" + empty pane occupying screen + container stretched + content jammed against scrollbar.
-2. `document-viewer.html` rewrites absolute `http://localhost:port/` URLs to host-relative on render (universal fix — every doc-viewer user benefits); `.pane-open` class on `.content-shell` gates the 2-pane flex split; `scrollbar-gutter: stable` + 18-22px pane padding.
-3. Draggable splitter (`notifications_pane_split_ratio` localStorage, clamps to `[0.30, 0.85]`, default 0.667); 80% max-width on container for breathing room.
-4. Toolbar reposition attempt #1 — kept vertical column, anchored right.
-5. Rick clarified "horizontal row, over the center of content area" — re-flipped to horizontal row.
-6. Centering formula flipped from "over pane" to "over container" (`ratio/2 * 100%` not `(1+ratio)/2 * 100%`).
-7. Toolbar pushed from `top: 136px` → `top: 56px` (just below `.lupin-nav` at 56px); `padding-top: 52px` on `.container` to clear the H1 from under the toolbar.
-
-**Final geometry summary**:
-- `body[data-layout-mode="horizontal"]` attribute gates all horizontal-mode CSS.
-- `.content-shell.pane-open` activates flex-row split (left column flex:ratio, pane flex:1-ratio via inline JS).
-- `.section-toolbar`: `position: fixed`, `flex-direction: row`, `width: max-content`, `top: 56px`, `left: var(--toolbar-center-x)`, `transform: translateX(-50%)`. JS pushes `(ratio/2)*100%` into the CSS variable on init/toggle/drag.
-- `.content-pane`: sticky, `min-width: 360px`, body has `scrollbar-gutter: stable` + generous padding.
-- `.content-pane-splitter`: 6px col-resize divider, hover/dragging visual state, body gets `.splitter-dragging` class during drag.
-
-**Cross-cutting fix**: `document-viewer.html` now rewrites absolute-localhost anchors on render — universal benefit.
-
-**Files**:
-- `src/fastapi_app/static/html/notifications.html` (content-shell wrapper + content-pane skeleton + layout-mode-btn + splitter)
-- `src/fastapi_app/static/css/notifications.css` (mode-gated horizontal layout rules + splitter + toolbar repositioning + pane padding)
-- `src/fastapi_app/static/js/notifications.js` (constructor hydration + 9 new methods including `_initMasterDetailLayout`, `_toggleLayoutMode`, `_openContentPane`/`_closeContentPane`/`_backContentPane`, `_renderContentPaneEntry`, `_initPaneSplitter`, `_applyPaneSplitRatio`, `_updateToolbarPosition` + `.abstract-indicator` mode-branch)
-- `src/fastapi_app/static/html/document-viewer.html` (absolute-localhost link rewriter)
-- `src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md` (NEW design doc with Resolved Design Choices + Reuse Review tables)
-- `history.md` (this entry)
-- `.claude-session.md` (Checkpoint 2 entry)
-
-**Cache busters bumped**: `v=20260521a` → `g` across the 7 iteration cycles.
-
-**Commit**: b599303
-
----
-
-#### Checkpoint 1 | 2026.05.21 14:50 EDT | Part A filter strip + Part B chrono lock + Playwright e2e suite all green
-
-**Two related broadcast/strip enhancements designed, implemented, tested**:
-
-**Part A — Recent Activity Filter Strip** (`#commons-recent-activity-section`):
-- Three inline native `<select>` dropdowns inside the existing `.commons-recent-activity-controls` flex row (no chip sub-row, dual-refresh consolidated to the single existing `↻` button per Rick's redundancy callout)
-- Axes intersect with boolean AND: **Direction** (Sender · Recipient, mutex), **Kind** (All · Heartbeats · Personas · Broadcasts — 4-option per Rick's walkthrough amendment), **Persona** (chip per active session, sourced from `/api/cosa-voice/voice-persona/pool`)
-- "Personas" predicate tightened to `topic.startsWith("dm-") && metadata.kind !== "heartbeat"`; "Broadcasts" unifies `broadcasts` + `broadcast-acks` topics; Direction=Recipient is a silent no-op when Kind=Broadcasts (broadcasts fan out)
-- Filter dropdowns are **client-side instant** over the in-memory raw-entry cache — no server hit on change. The existing `↻` reload button is the only server-hit path (refreshes activity stream + persona dropdown options in one click, sticky-when-valid persona selection)
-- **Filter state persists across page reload** via `notifications_commons_activity_filter` localStorage key (matches existing `notifications_*` convention)
-- Filter-aware empty-state copy ("No activity matches the current filter" when any axis is active)
-
-**Part B — Focus-bar Chronological Lock** (`#cc-session-strip`):
-- `_addStripIcon` now stamps `data-created-at` from `persona.assigned_at` and ALWAYS appends (kills the `insertAtTop=true` prepend branch)
-- `_promoteStripIcon` renamed to `_markStripIconActivity` — unread-badge pulse preserved untouched, `insertBefore` DOM reposition removed
-- New `_sortStripIconsChronological()` helper runs once after `loadConversationHistory()` in the startup chain; subsequent runtime adds just append
-- Backend plumbing verified intact end-to-end: `voice_persona_helpers.py` stamps `assigned_at` on allocation; `_voice_persona_for_sender_id` preserves it through to the senders-visible endpoint and the `voice_persona_assigned` WS event. **No backend changes needed.**
-
-**Persistence layer** (also added beyond the chrono lock):
-- Augmented the global `toggleSection()` helper with a write-through for two tracked accordions: `notifications_broadcast_card_open` + `notifications_recent_activity_open`
-- `applyPersistedAccordions()` runs on `DOMContentLoaded` (before first paint) to avoid flicker on reload
-- Existing focus-mode persistence (`notifications_cc_focus_state`) verified wired — Rick's "not implemented" report appears to be a misperception; the localStorage round-trip is in place with belt-and-suspenders restore via `_restoreCcUiAfterLoad()` after `loadConversationHistory()` completes
-
-**E2E Playwright suite — three rounds to ALL GREEN**:
-- Round 1: 4 pass / 9 fail — controller-global typo in test file (`window.__notifications_controller__` vs canonical `window.notificationsUI`)
-- Round 2: 11 pass / 2 fail — typo fixed; remaining 2 were test-timing bugs (dropdown init-lag after page reload + `wait_for_selector` waiting for `visible` on a correctly-collapsed element)
-- **Round 3: 13 pass / 0 fail / 2 graceful skips** (`TestStripChronologicalOrder` skips gracefully when fewer than 2 CC strip icons hydrate on the test server, which has no live CC sessions)
-
-**Incidents logged + memory updates**:
-- Accidentally bounced `:8000` while my first submitted test was mid-flight (chained `refresh-test-server.sh` as a polling-loop prelude). Job vanished, server self-recovered, re-submitted cleanly with new `scheduled_at`. Lesson: bounce commands NEVER belong inside a polling loop.
-- Saved new feedback memory: `feedback_never_defer_test_fixes_hold_fire_exception.md` — Rick's directive that hold-fire windows do NOT pause completing in-flight test fixes I wrote. "You wrote the code. You make it pass 100% coverage. Full stop!"
-
-**Cross-session coordination**: Three DM exchanges with Tiffany 💍 (lupin-mobile session 1b3f8c46) tracking the design deltas — initial inventory ask, post-walkthrough delta, post-amendment delta. Mobile parity work continues unblocked; the only cross-cutting wire item (`voice_persona.assigned_at` plumbing) is verified intact.
-
-**Files**:
-- `src/fastapi_app/static/html/notifications.html` (3 dropdowns inserted + `toggleSection()` augmented with localStorage write-through + `applyPersistedAccordions()` early-paint restore)
-- `src/fastapi_app/static/css/notifications.css` (flex-wrap + `.commons-activity-filter-select` styling)
-- `src/fastapi_app/static/js/notifications.js` (constructor hydration of 3 new `*_KEY` constants + `_commonsActivityFilter` + `_commonsRawEntries`; filter predicate / re-render / change handlers / persona-pool refresh / augmented reload button; strip chronological-lock surgery)
-- `src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md` (NEW — design doc with item-by-item walkthrough decisions + reuse-review pass + implementation-complete status)
-- `src/tests/e2e_ui/test_commons_activity_filters_and_strip_chrono.py` (NEW — 15-test Playwright suite across 5 classes)
-
-**Commit**: 35581a8
-
----
-
-### 2026.05.20 - Session 173c0b35 (Tiberius 🌑) | Persona resuscitation commit + Run-4 post-game convergence + Heartbeat-Poker design WIP
-
-#### 2026.05.20 PM | End-of-day wrap
-
-**Persona resuscitation work committed** at `c9db97c` — Rachel's three-thread fix bundled: (1) `start-cc-with-tmux.sh` forwards three `COSA_VOICE_PREFERRED_PERSONA__*` env vars into the tmux session via `-e` flags (the actual fix for why Tiberius was randomly allocated); (2) Roscoe → Tiffany persona rename swept across `lupin-app.ini` + splainer + 5 R&D docs + 1 test fixture; (3) four temporary `[LOOKML-DEBUG]` stderr prints in `register_session.py` phase 4.5 (flagged in-source for removal once Sam confirms allocation runs clean). 10 files, +103/-52.
-
-**Run-4 cascade post-game with María 🌸**: 4-DM convergence cycle on `dm-tiberius` (`0cfea56f` → `67ccf3f8` → `830f4833` → `52df46e2` → `569eeba8` → `614b41ab` → `830f4833`). Positions reached:
-- Q1 inverse density-vs-doctrine — HOLD on operationalizing pending Runs 5-6 controlled-slot experiment
-- Q2 forward-asymmetry 38→33→21 monotonic — don't formalize; 4 competing explanations indistinguishable at n=1
-- Q3 "Manager ad-hoc'd what should be codified" diagnostic — STRONG FOLD, codified as Step 9 rubric Q#6
-- Fold-order revised respecting dependency graph: 7 candidates + 1 placeholder
-- Dual-administer gate timing: keep default Runs 5-6, HARDen at Run 7 if +2/3 ratio holds
-- New candidate added: Observer-side probe-as-mitigation channel (per-stage INI keys; M=8 Stage 0, M=4 default, M=2 Stage 2)
-- 4 pre-committed re-evaluation gates locked at design-doc §10.18.12
-
-**PIP-side codification pass shipped** by María at commit `adcd96d` (10 files, +744/-17; committed not pushed per Rick's EOD directive). Bilateral review completed Lupin-side: 8/8 ratification checkpoints verified; 2 non-blocking observations filed as v1.2 polish candidates.
-
-**Lupin TODO.md updated**: closed `[LUPIN-PIP]` v1.1 codification line item with full 7-candidate map; added 2 new entries (`start-cascade-heartbeat.sh --observer` flag + `commons_send_to` recipient pool-key vs display-name routing priority bump).
-
-**Generic Heartbeat Poker abstraction design — WIP**: Rick proposed abstracting the cascade heartbeat shell-script into a Lupin-side `AgenticJobBase` subclass with N recipients + schedulable for off-peak execution. Conversation walked through 3 use cases (Observer / Manager / Watcher-of-implementer), landed two-layer architecture (generic poker + per-recipient doctrine), resolved Q1 (Path A — one minimal class), Q2 (3-layered exits: clean signal + dead-man's-switch escalation + hard cap), and concurrent-poker routing (two independent jobs, recipient routes via `poke_body` JSON metadata). Parked at Q3 (relationship to existing daemon) and doctrine-home open Q.
-
-**Files**:
-- Working tree at close: `TODO.md` (modified) + `src/rnd/v0.1.7/2026.05.20-generic-heartbeat-poker-abstraction-design.md` (NEW, ~260 LOC, WIP design doc)
-- Committed: 10 files at `c9db97c`
-
-**Standing playbook**: commit-only history.md tradition; Rick authorized EOD push at session-end.
-
----
-
-### 2026.05.20 - Session 387b9201 (Tiberius 🌑) | Phase 7a Run 4 cascade-complete — implementer-handoff-ready
-
-#### 2026.05.20 03:30 | Phase 7a Telemetry — Run 4 cascade closed 🟢 + Step 0 + Step 9 doctrine v1 validated
-
-Managed Run 4 of cascaded plan-review workflow for Phase 7a Telemetry. **Cascade-complete 03:30:47 UTC; total wall-clock ~1h 30min** (Step 0 light-review through Step 9 close). Phase 7a implementer-handoff-ready.
-
-**Cast**: Mr Radio 🦉 (Stage 0 Author), Rachel 🕊️ (Stage 1 Usability/Reuse), Krishna 🦚 (Stage 2 Risk/Anti-pattern + Step 9 light-review), Rio ⚡ (Stage 3 Ownership/Convention), María 🌸 (Observer + doctrine consultant), Tiberius 🌑 (Manager).
-
-**Cascade outcomes**:
-- Stage 1: 🟢 closed-clean (1F + 2P + 5 reuse confirms; cap-2 1/2 used)
-- Stage 2: 🟡 closed-with-quibbles → cleanup folded (9 closed + 1 cosmetic + 4 doctrine-sweep quibbles; cap-2 1/2)
-- Stage 3: 🟢 closed-clean (4 closed + 1 withdrawn; cap-2 1/2)
-- Step 9: 🟢 close-clean post-revision (2 friction points + candidate #6 placeholder; cap-1 1/1)
-- Net cap utilization: **8 of 14 possible revision turns = 57%**; 50%+ headroom preserved across every cap surface
-
-**Manager footers (4 ratifications)**:
-- R-3 Path A pin: drop `crash` from ReportingObserver registered types (PII safety; sanitizer-design deferred to v2 OSQ-T-6)
-- Footer 2 Option A pin: block-on-config-fetch over non-blocking + replay
-- Footer 2 sub-revision: Option A + 500ms `Promise.race` bounded timeout + safe-defaults fallback
-- Closure-context references KEEP ruling (multi-surface sweep mandate is about active-claim violations, not historical scrubbing)
-
-**Tier discipline outcome**: T1+T2 silent Manager-unilateral throughout; zero T3 escalations; zero T4 wake-ups; Rick stayed asleep as designed.
-
-**Step 0 doctrine v1 validation**: ✅ STRONG. Pre-cascade recon (R-7a-1..R-7a-6 resolved upstream) eliminated browser-API archaeology from reviewer cycles. 3 reviewers concurred. Q→F→S→D recon shape empirically clean. 1 minor v2 candidate identified (persona-conventions sub-section).
-
-**Step 9 doctrine v1 validation**: ✅ STRONG with empirical bonus. **Dual-administer cold-context test is ADDITIVE, not redundant** — Manager self-test surfaced 3 friction points; Krishna's external test surfaced 2 ADDITIONAL beyond mine. Net 5 cold-context observations. Empirical basis for promoting `light_review_required = true` to a hard requirement after Run 5+6 evidence.
-
-**5 v1.1 doctrine candidates surfaced** (full codification in synthesis doc §5):
-1. Heartbeat-daemon kickoff codification (Tiberius)
-2. 4-tier clarification doctrine T1/T2/T3/T4 (Tiberius)
-3. Heartbeat-tick-vs-peer-DM injection-density mitigation — **new failure-mode #6: signal-density-obscures-needle** (Tiberius + María phantom-detection catch)
-4. Author-side grep-sweep checklist (Krishna)
-5. Multi-surface footer-ratification close protocol with non-adjacent surfaces + synthesis-doc 7th-canonical-surface refinement (Rio + Mr Radio + Krishna refinement)
-6. PLACEHOLDER — Explicit closure-context markers (filed for Run 5 evidence-gathering)
-
-**Cascade-learning-loop forward-asymmetry empirical anchor**: Stage 1→2→3 wall-clock monotonically decreasing (38→33→21 min effective). Worth charting across Runs 1-4 for §10.18.
-
-**Tiffany-rename-pass empirical refinement** (Mr Radio's catch): user-initiated rename operations CAN revert non-adjacent edit regions in one pass. Author-side grep-sweep checklist must enumerate ALL canonical surfaces independently — "the area I just touched" assumption is unsafe.
-
-**Files**:
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/15-phase7a-telemetry-design.md` (cascade-ratified, ~470 LOC)
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/16-phase7a-cascade-synthesis.md` (NEW, ~360 LOC, implementer-handoff doc)
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/14-phase7a-telemetry-pre-cascade-recon.md` (Stage 0 background, untouched in cascade)
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md` (Step 0 inputs, untouched in cascade)
-
-**Standing playbook**: commit-only no-push per [[never-auto-commit-push]]. All work uncommitted in working tree awaiting Rick's morning go-ahead.
-
-**Manager-side phantom-lag observed**: 13-min lag at 02:33-02:46 UTC due to cascade-scheduler heartbeat ticks 11-14 obscuring Krishna's Stage 2 peer-DM. María's observer probe at 02:43:47 cleared. Mitigated for second half of run via proactive `commons_read` every N ticks. v1.1 doctrine candidate #3.
-
----
-
-### 2026.05.20 - Session 32a6e563 (Mr. Radio 🦉) | Phase 7 slicing manifest + Phase 7a pre-cascade recon + Stage 0 design doc
-
-#### Checkpoint 2 | 2026.05.20 02:10 | Phase 7a pre-cascade recon + Stage 0 design doc + manifest amendments — cascade Run 4 inputs ready
-
-Continued Phase 7 planning track in parallel with Roscoe 🤠's Phase 6c implementation (Rick clarified parallel-track at ~01:40 UTC). Per Tiberius 🌑's direction across DMs `9d91b3a5` → `9e011230`:
-
-**Option 1 — 7a Telemetry pre-cascade recon doc** (DM `9d91b3a5` greenlight): authored `14-phase7a-telemetry-pre-cascade-recon.md` (~280 LOC). Empirical anchor #2 for Step 0 doctrine (anchor #1 was the slicing manifest's §Pre-cascade recon framework, ratified 01:20 UTC). Per-item shape Question → Finding → Source → Decision per Tiberius's spec. Resolved 6 recon items:
-- R-7a-1 OTel packages: `@opentelemetry/api` + `sdk-trace-web` + `exporter-trace-otlp-http` (skip `auto-instrumentations-web`; defer `sdk-metrics` to Q-T4 reviewer call)
-- R-7a-2 Long Tasks: Chrome ✅, FF ✅ at floor, Safari ❌ — feature-detect at boot
-- R-7a-3 Telemetry sink: env-driven INI key `multiplexer otel collector endpoint`; default empty (no-op); collector deployment OUT OF SCOPE
-- R-7a-4 ReportingObserver: Chrome ✅, FF + Safari ❌ — feature-detect; Chrome-only signal at zero cost elsewhere
-- R-7a-5 User Timing Level 3: unconditionally; meets Phase 1 floor (Chrome 114+ / FF 125+ / Safari 17+ per Phase 6c design doc line 88)
-- R-7a-6 `observability/` directory stubs: Stage 0 design doc + code-execution phase owns creation; recon does NOT pre-stub
-
-Tabulated 8 decisions for Stage 0 author + 8 open items deferred to cascade Stages 0-3. Tiberius's recon-doc verdict (DM `9e011230`): 🟢 GREENLIT. "High-quality. Question → Finding → Source → Decision shape is exactly what Step 0 doctrine should adopt as canonical recon-section template."
-
-**Option 3 — Step 0 doctrine cross-ref to manifest footer** (DM `9d91b3a5` greenlight, concurrent): added §Doctrine cross-refs section to `13-phase7-slicing-manifest.md` footer linking PIP commit `bbb3e47` (Step 0 codification by Tiberius + María 🌸) + Step 9 (RATIFICATION-CLOSED 2026-05-19, validation-pending-Run-4). Phase 7a's first cascade = first live test of BOTH doctrines simultaneously.
-
-**Option 2 — Stage 0 design doc** (initially HELD; ratified via Rick's cast spin-up): Tiberius reported (DM `9e011230`) that Rick spun up Rachel 🕊️ + Rio ⚡ + Krishna 🦚 explicitly to "assist Mr Radio in the plan creation and cascaded review process" — implicit ratification of author rotation. Authored `15-phase7a-telemetry-design.md` (~480 LOC) mirroring `10-phase6c-persona-focus-recorder-design.md` shape:
-- Single cluster T (Telemetry) with **Q-T1..Q-T7** PROPOSED stances:
-  - Q-T1: 6 canonical User Timing anchors
-  - Q-T2: `createLongTasksObserver()` factory with null-on-Safari
-  - Q-T3: ReportingObserver for `['deprecation', 'intervention', 'crash']`
-  - Q-T4: 3 OTel span types (page-load, key-action, Long Task events); sdk-metrics deferred
-  - Q-T5: perf budgets — boot<1500ms, first-queue-render<200ms, longtask<5/min (TBD-at-code-write per AC10b)
-  - Q-T6: head-based sampling via `TraceIdRatioBasedSampler`; second INI key `multiplexer otel sampling rate`
-  - Q-T7: telemetry init BEFORE renderer mount; `[multiplexer] telemetry:initialized` handshake
-- **14 ACs** with Convention 3 EXECUTOR tags, Convention 4 TBD markers (AC-7a-8b + AC-7a-10b), Convention 5 N/A note (no `:8000` rows in 7a), Persona 2.A point 9 conditional-executability on AC-7a-8b + AC-7a-10b
-- **Step T1-T7** sequential execution sequence per `feedback_pip_plan_review_is_sequential`
-- **5 NEW + 9 EDITED** files enumerated
-- **4 OSQs** with PROPOSED stances
-- **13-point Persona 2.A rubric self-audit** + 17 feedback memories audited; no violations at draft time
-
-Tiberius's Stage 0 first-scan verdict (DM `97c56ec9`): "Quality looks comprehensive at first scan (480 LOC, 7 Q-decisions, 14 ACs, full self-audit)." HOLD Stage 1 dispatch pending Step 0 doctrine §5.3 light-review by María 🌸 (6-criterion rubric). Rick's "Tiberius appears to be pleased" + explicit commit go-ahead resolved the conditional approval gate from his prior directive.
-
-**Manifest amendment housekeeping**: §Per-slice file naming table renumbered from 3-doc-per-slice → 4-doc-per-slice (added recon docs). 7a: 14/15/16/17. 7b: 18/19/20/21. 7c: 22/23/24/25. 7d: 26/27/28/29. Review findings 94-97 unchanged.
-
-**Coordination state**:
-- Stage 1 dispatch to Rachel 🕊️ pending María's light-review verdict (~15-20 min wall-clock)
-- If María 🟢 → Stage 1 fires; if ⚠️ gaps → I do 1 author-revision turn (CAPPED, no Round-2)
-- Cap 2/2 author-revision-turn-cap + 3 discussion-turn-cap per cascade rules
-- Step 9 synthesis-and-handoff doctrine will kick in after cap reached
-- Phase 6c implementation track (Roscoe 🤠) continues independently; my last empirical state remains Node C through Step C2
-
-**Parallel-session safety**: Roscoe 🤠's Phase 6c Node C work in flight (10 modified + 5 new files under `src/fastapi_app/static/js/multiplexer/`); my manifest section in `.claude-session.md` continues to list those as "NEVER staged from this context."
-
-**Files** (this commit):
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/14-phase7a-telemetry-pre-cascade-recon.md` (NEW)
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/15-phase7a-telemetry-design.md` (NEW)
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md` (MOD — file-naming table renumber + §Doctrine cross-refs footer)
-- `TODO.md` (status updates on Phase 7a workstream)
-- `history.md` (this Checkpoint 2 entry)
-- `.claude-session.md` (Checkpoint 2 section + Touched Files update)
-
-**Commit**: 54a1e19
-
----
-
-#### Checkpoint 1 | 2026.05.20 01:35 | Phase 7 slicing manifest authored + ratified — sequencing Option A, pre-cascade recon ON, both op-phases decoupled
-
-Coordinated with Tiberius 🌑 (session `387b9201`) on Phase 7 plan slicing for the multiplexer migration. Authored `13-phase7-slicing-manifest.md` (~280 lines) mirroring the Phase 6 slicing manifest shape + density. Phase 7 = Hardening (production readiness); roadmap §3 carves it into 4 sub-areas, all now sliced.
-
-**Slice boundaries**:
-- 7a Telemetry — User Timing + Long Tasks + ReportingObserver + OTel browser SDK
-- 7b CSP — Content Security Policy report-only → enforce; new `/api/csp-report` endpoint scoped to `/app/multiplexer`
-- 7c Trusted Types — `multiplexer/shared/trustedTypes.ts` policy + `require-trusted-types-for 'script'` CSP directive (HARD dep on 7b)
-- 7d Accessibility — WCAG 2.1 AA + ARIA + keyboard nav + screen-reader pass + `prefers-reduced-motion` for Phase 6c animations
-
-**Tiberius's review** (commons DM `93d42689`): 🟢 GREENLIT. "Draft is excellent." Sanity-check answers: slice boundaries match his mental model; no 5th sub-area missing; sizing right. Five strong-points called out; three minor observations (one folded into §Recommended order Per-slice point 2: 7a→7b sequencing means CSP report-only catches if OTel CDN needs allow-listing passively before enforce).
-
-**Rick's ratifications** (cosa-voice blocking tools, sequential per Tiberius's recommended ordering):
-1. Sequencing: **Option A** — 7a → 7b → 7c → 7d (recommended; telemetry-first per "observability before launch")
-2. Pre-cascade recon: **ON** — 4-8h author-side homework before any design-doc cascade fires
-3. 7b iterative-tightening: **DECOUPLED** as operational close-out phase (not second cascade)
-4. 7d audit-driven cycle: **DECOUPLED** as operational close-out phase (not second cascade) — bundled with #3 in one `ask_multiple_choice` per Tiberius's suggestion
-
-**Coordination state**:
-- Phase 7 implementation gated on Phase 6c close (Roscoe 🤠's Node C in flight)
-- First-slice author assignment TBD (Rick's call when 6c ships); Rachel 🕊️ likely continues as canonical author
-- Mr. Radio returns to Persona 3 (Usability/Reuse Reviewer) for the cascade itself
-- Step 0 doctrine cross-ref pending Tiberius + María 🌸's codification commit on PIP side
-
-**Doctrine note from Tiberius**: my manifest's §Pre-cascade recon section is empirical validation that Step 0 cascade-prep is a real workflow phase — work today shaping doctrine for future cold-cast authors.
-
-**Parallel-session safety**: Roscoe 🤠's Phase 6c Node C work is in flight in the working tree (10 modified + 5 new files under `src/fastapi_app/static/js/multiplexer/`); my manifest section in `.claude-session.md` explicitly lists those as "NEVER staged from this context" per `feedback_verify_staging_before_commit` and `feedback_lupin_only_never_cosa`. Only my one new file + the four tracking files commit.
-
-**Files** (this session, this commit):
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/13-phase7-slicing-manifest.md` (NEW — slicing manifest authored + ratified)
-- `TODO.md` (NEW top entry — Phase 7 ratified + next-move handoff items)
-- `history.md` (this entry)
-- `.claude-session.md` (new session section appended + checkpoint tracking)
-
-**Commit**: ee31ed0
-
----
-
-### 2026.05.19 - Session b4623e3d (Roscoe 🤠) | Phase 6c implementation — Nodes D + B + A + C fully shipped
-
-#### Checkpoint 2 | 2026.05.20 02:10 | Phase 6c COMPLETE — Node C closure + structural bug-fix; 11/11 visual regression GREEN
-
-**Phase 6c implementation is done.** Node C fully shipped (recordingManager port + SenderCardRecorderRenderer + sender-card-recorder.css + boot wiring + 29 unit tests + smoke + Section C visual file + :8000 baseline + regression). All four nodes' visual regressions now pass.
-
-**Final tier roll-up** (D + B + A + C):
-
-| Tier | Result |
-|---|---|
-| Unit cases (Phase 6c new) | 122 PASS (D 37 + B 31 + A 25 + C 29) |
-| Multiplexer unit sweep | all PASS (~670 tests) |
-| c8 coverage | 99.98% lines / 99.68% branches / 100% functions; tail gaps c8-ignored with same-line "smoke-tier" rationale |
-| Phase 6c smoke @ :7999 | 23/23 PASS in ~24s |
-| Visual baselines @ :8000 | 4 captures, all clean (`auto_fix_on_failure: False`) |
-| **Visual regression @ :8000** | **11/11 snapshots match** — D 3/3, B 3/3, A 3/3, C 2/2 |
-
-**Bug found + fixed mid-regression**: `SenderCardRecorderRenderer.paintAllVoiceInputs` only ran once at mount when zero `.cc-voice-input` footers existed yet. Late-arriving sender cards (the only kind in practice — they come from `store_senders_changed` emissions) never got Record buttons painted. First regression run reported "1 of 2 C-snapshots failed" → investigation revealed `wait_for_selector` for `.record-button` was TIMING OUT, not pixel-diffing. Fix: added a `bus.on("store_senders_changed", () => paintAllVoiceInputs())` subscription + matching unsubscriber in unmount(). Local Playwright probe confirmed `.record-button` appears within 3s of notification injection after the fix.
-
-**Re-baseline rationale**: every sender card snapshot's `.cc-voice-input` footer now shows the Record button (whereas pre-fix snapshots had empty footers). Re-baselined all 4 nodes against the fixed bundle. Second 8-job batch confirmed all 4 nodes regression-green.
-
-**Note on commit timing**: parallel-session interaction with Mr. Radio 🦉's Phase 7 planning track on history.md caused the initial commit (`ea3412b`) to land WITHOUT this entry. This Checkpoint 2 paragraph + commit `[pending]` amend brings the history back in sync.
-
-**Outstanding before merge**: per Rick tonight — this checkpoint commit, no backup, no push. Wind-down for the night.
-
-**Commit**: 83c8863 (amended from ea3412b)
-
----
-
-#### Checkpoint 1 | 2026.05.19 23:30 | Phase 6c Nodes D + B + A shipped end-to-end; Node C partial through Step C2
-
-Implementer-pass on Tiberius's Phase 6c execution plan (`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/12-phase6c-execution-plan.md`, 749 LOC). Three of the four cascade nodes (D, B, A) are fully shipped end-to-end across the full test pyramid; Node C's chip-port runway (footer mount + AudioRecorder TS port) is landed and ready for Step C3 (recordingManager) to follow.
-
-**Highlights**:
-- **93 new Phase 6c unit cases** across 8 new test files (D 37 + B 31 + A 25). All multiplexer unit tests still pass.
-- **c8 100% gate GREEN** on every multiplexer-wide pass: 8450 statements / 1787 branches / 642 functions / 8450 lines. Same-line `c8 ignore` comments cite specific defensive paths (polyfill fallbacks, FileReader error path, MediaRecorder error path under happy-dom) per the project's 100% mandate exception clause.
-- **23/23 Phase 6c smoke tests pass on `:7999`** in ~24s end-to-end (5 D + AC-D9 canary + AC-D11 boot handshake + AC-D12 perf gate + 8 B + AC-B15 grep-gate + 6 A).
-- **3 visual regression files** authored (Section D 3 snapshots, Section B 3 snapshots, Section A 3 snapshots).
-- **3 `:8000` baseline submissions** queued via `POST /api/test-suite/submit` with `auto_fix_on_failure: False` per `feedback_baseline_capture_disable_tfe`: D `ts-0acbd8ef`, B `ts-db9d94ab`, A `ts-9fca0827`.
-- **AC-B15 hard-verification grep-gate** holds across the whole session: D-CSS (`conversation-mode-pin.css`) has zero `@keyframes focus-flash` declarations; B-CSS (`focus-tray.css`) owns the SSOT keyframe. Smoke includes a runtime regression check.
-- **Cross-renderer DOM-wipe bug found + fixed during Node B smoke** — NotificationsListRenderer's `replaceWith` re-render wiped `data-focus-hidden` on every store_senders_changed; FocusTrayRenderer now tracks `lastPinnedId` and re-stamps the attribute on every reconcile while focusModeActive=true (works because FocusTrayRenderer subscribes LAST in boot order, firing after the upstream wipe). Flagged to Tiberius as empirical anchor for the Step 9 "cross-renderer DOM-interaction matrix" doctrine candidate now being co-authored with María 🌸.
-
-**Synthesis-doc gaps surfaced + resolved during pre-flight**:
-- **Recon-D2 mic_monopoly wire-field**: server has no such field, no emitter. Escalated to Rick via Tiberius's `ask_multiple_choice`. Path δ defer ratified — mic-monopoly indicator becomes a Phase 6c follow-on (TODO entry filed by Tiberius in commit `3c870fb`). AC-D3 drops to 8 cases, AC-D10 drops to 5; AC-D4 unchanged.
-- **Recon-D2-bis conversation_mode_changed type rename**: server emits `speakerphone_changed` with `payload.on`; smoke tests + plan reference `conversation_mode_changed` with `payload.active`. Path III bridge ratified by Tiberius unilaterally (wire-compat decision, not scope decision) — SenderStore.handleConversationModeUpdate listens for both type strings and reads `payload.active ?? payload.on`. AC-D3 covers both type strings × both field names (14 cases shipped).
-- **Recon-A5 slugify**: new helper at `render/templates/slugify.ts` — single source of truth shared by `senderCard.ts` (Step A1) + `personaModal.ts` (Step A2). Regex `[^a-zA-Z0-9_-]/g → -` for HTML id-safe slugs.
-
-**Outstanding before merge** (next-session todos):
-- Node C Steps C3-C7 (recordingManager port + SenderCardRecorderRenderer + sender-card-recorder.css + boot wiring with AuthManager order + ≥24 unit tests + smoke + visual + `:8000` baseline)
-- AC-D14, AC-B14, AC-A13 regression runs on `:8000` — pending Rick slot-coordination (NOT standing permission for non-baseline runs); will batch as one slot-ask when Rick returns
-
-**Coordination notes**:
-- Tiberius 🌑 (session `387b9201`) shipped 3 handoff docs + mic-monopoly TODO in commit `3c870fb`; my implementation work is the runtime side of that bundle.
-- María 🌸 + Tiberius are co-authoring "Step 9 synthesis-and-handoff doctrine" as a meta-process improvement; the cross-renderer DOM-wipe bug-find from Section B smoke is their empirical anchor for a "cross-renderer DOM-interaction matrix" Step 9 check.
-
-**Files**: 31 (10 new source TS, 3 new CSS, 9 new test files, 7 modified source/HTML, 2 modified tests, 1 stylelintrc, history.md).
-**Commit**: c7df5d5
-
----
-
-### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | websocket-events.md doc fix — `speakerphone_changed` documented + `conversation_mode_changed` deprecation noted
-
-Closed a documentation gap surfaced during Roscoe 🤠's Phase 6c Node D pre-flight investigation. Rick asked "who listens for `conversation_mode_changed`, where does it originate, is it in the INI website-events list?" — answered with the cascade-design-gap context: the event was renamed to `speakerphone_changed` during the Speakerphone solo/chorus refactor (Phase 3 of `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/`, landed 2026-05-13), but `src/docs/websocket-events.md` was never updated.
-
-**Three edits** (all targeted, no scope creep):
-1. **Summary table** (L27): added `speakerphone_changed` row in the Notifications category, mirroring the `commons_activity` row shape (notification_queue_update wrapper).
-2. **Per-event detail section** under Notifications (L252+): full entry covering rename history (2026-05-13 Speakerphone refactor Phase 3), payload shape (`{session_id, on, displaced?, displaced_by?}`), both client handlers (legacy `notifications.js::handleConversationModeChanged()` line 5552 + multiplexer `SenderStore.ts` STATE_UPDATE_TYPES Set), the Path III forward-compat bridge (accepts both wire names), INI subscription cross-ref (`lupin-app.ini:741`), server-side `valid_types` whitelist cross-ref (`notifications.py:359-364`).
-3. **Deprecated Events section** (L466+): added a new "renamed during Speakerphone solo/chorus refactor" table mapping `conversation_mode_changed` → `speakerphone_changed` with the 2026-05-13 rename date. Notes that the deprecated name returns HTTP 400 if pushed.
-
-**Empirical anchor**: Roscoe surfaced this gap during Node D pre-flight (DM `d2419eae`). The cascade design plan referenced the old name; the server only emits the new name. Path III bridge was ratified unilaterally by me (DM `eb826676`) — accept both names client-side as forward-compat. This doc edit captures that bridge contract for future readers.
-
-**Files**:
-- `src/docs/websocket-events.md` (MOD — 3 edits, ~30 LOC added net)
-- `history.md` (this entry)
-
-**Cross-refs**:
-- Origin design: `src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/16-phase7-multiplexer-ui-design.md` §"WebSocket `speakerphone_changed` handler"
-- Phase 3 rename closure: `src/cosa/history/2026-04-25-to-05-13-history.md:89` (CoSA-side `valid_types` rename log)
-- Forward-compat bridge ratification: today's DM `eb826676` to Roscoe + the Phase 6c synthesis doc `11-phase6c-cascade-synthesis.md` §3.D
-- Documentation TOUCHPOINTS in CLAUDE.md: this doc is listed under `routers/websocket.py` + `lupin-app.ini websocket available events` row — both touchpoints honored this edit.
-
----
-
-### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Phase 6c cascade synthesis + execution plan + design-doc amendments + mic-monopoly follow-on TODO
-
-Three-artifact handoff bundle from Run 3 cascade — translating the 43 ratified findings across 4 sections (A/B/C/D) into an implementation contract Roscoe 🤠 can ship from cold. The synthesis doc (476 LOC) is the canonical why-anchor with per-section ratified AC tables, cross-section dependency map, and §10.14 doctrine candidates brief index. The execution plan (749 LOC) is DAG-first per Roscoe's framing preference with per-node deliverables, function signatures, step ordering, test pyramid, and done-defined. The amended parent design doc flips status to CASCADE-RATIFIED with per-cluster markers and inline cascade-closure narratives for Q-C2 (port-verbatim user escalation) and Q-D1 (manager-unilateral by-concurrence). Mic-monopoly indicator deferred via Path δ ratification (Rick) — filed as Phase 6c follow-on in TODO.md with the system-wide-semantic question to resolve before designing.
-
-**Files**:
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/11-phase6c-cascade-synthesis.md` (NEW, 476 lines)
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/12-phase6c-execution-plan.md` (NEW, 749 lines)
-- `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md` (MOD, cascade-amended status + per-cluster markers + Q-C2/Q-D1 cascade-closure notes)
-- `TODO.md` (MOD, mic-monopoly follow-on entry filed under Path δ ratification)
-- `history.md` (entry above)
-
-**Commit**: `3c870fb` (2026-05-19, Rick ratified via María's `ask_yes_no` 22:21 UTC).
-
----
-
-### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Voice persona pool expansion — +2 personas, Sam→pool / Arnold→overflow swap, generalized overflow loader
-
-Pool expansion driven by Rick's voice directive following the 6-persona-experiment validation in Run 3 cascade. Pool grew from 6 to 8 personas; the overflow slot rotated from Sam to Arnold via a config-only mechanism enabled by a small loader generalization. Color iterations + gender + profile corrections per Rick's voice walkthrough at ElevenLabs.
-
-**Pool composition (final)** — `maria, mr radio, Rachel, Tiberius, Rio, Roscoe, Krishna, sam` (8 personas).
-
-**Two new personas added**:
-- **Roscoe** 🤠 — ElevenLabs voice `DXX4Q5Bh1vqK8CciYVPf`, color `#FFD600` (vibrant yellow — Arnold's old hue, now free since Arnold moved to overflow), profile "Upbeat professional female" (gender corrected from initial "male" placeholder per Rick's mid-edit update)
-- **Krishna** 🦚 — ElevenLabs voice `ogSj7jM4rppgY9TgZMqW`, color `#1DE9B6` (Material Teal A400, vibrant aquamarine — documented green-rule exception per Rick's explicit override authority), profile "Reassuring warm male"
-
-**Sam ↔ Arnold role swap**: Sam promoted from the reserved overflow slot into the regular pool; Arnold demoted from pool into the overflow slot. Mechanically required a small loader generalization in `voice_persona_helpers.py:load_overflow_persona_from_config` — previously hardcoded the literal "sam", now reads a new `cc session voice persona overflow name` INI key (default "sam" for backward compat) and looks up that persona's existing pool-style INI keys. Backward-compat branch: when overflow_name resolves to "sam" AND no explicit `cc session voice persona sam voice id` key is present, falls back to sourcing voice_id from `elevenlabs tts default voice id` (the pre-2026-05-19 legacy non-explicit path). All 5 existing `TestLoadOverflowPersonaFromConfig` tests still pass byte-clean via the backward-compat branch.
-
-**Sam's transition**: added explicit `cc session voice persona sam voice id = G7ILShrCNLfmS0A37SXS` (same value as `elevenlabs tts default voice id` — now explicit so the regular pool loader can find him uniformly). Color changed from `#00BCD4` (cyan, formerly grandfathered under the `.persona-badge.overflow` styling exception) to `#5E35B1` (Material Deep Purple 600, green-rule compliant). Profile iterated through "System default voice (overflow)" → "Crisp neutral male" → "British male" (final, per Rick's verification of the actual ElevenLabs voice characteristics).
-
-**Rachel lightened to lilac**: `#7B1FA2` (Material Purple 700) → `#CE93D8` (Material Purple 200, lilac) per Rick's directive once Sam's new deep purple made the prior Rachel-Sam pairing too visually close. Lilac preserves Rachel's purple-family identity while widening visual separation from Sam.
-
-**Test verification**: `test_voice_persona_helpers.py` (52 tests) + `test_voice_persona_request.py` (49 tests) = **101 tests green in 2.5s**, zero regressions across all loader generalization + INI changes.
-
-**Voice persona reference page** at `/static/html/test/voice-persona-reference.html` auto-populates from `GET /api/cosa-voice/voice-persona/pool` — no HTML edit needed; after `/api/init` reload, the page renders 8 tiles including Sam in his new deep purple.
-
-**Files modified** (parent Lupin only — CoSA submodule untouched git-wise per `feedback_lupin_only_never_cosa`):
-- `src/conf/lupin-app.ini` — pool list updated to 8 personas; Roscoe + Krishna full blocks added; Sam block rewritten (voice id explicit, color changed, profile updated, comment rewritten); new `cc session voice persona overflow name = arnold` key; comment block above Arnold's old position explaining the role change
-- `src/conf/lupin-app-splainer.ini` — pool splainer rewritten for 8-persona reality; Roscoe + Krishna entries added; Sam splainer block rewritten (new voice id entry, color rationale updated, profile iteration history); new `overflow name` splainer entry with full backward-compat documentation; Rachel color splainer updated for lilac transition
-
-**CoSA submodule changes on disk (not in parent diff)**:
-- `src/cosa/rest/voice_persona_helpers.py` — `load_overflow_persona_from_config` generalized (~50 LoC); reads new INI key with `sam` default; backward-compat fallback to `elevenlabs tts default voice id` when overflow_name="sam" + no explicit voice id; updated Design-by-Contract docstring
-
-**Cross-refs**: original Sam-overflow design at `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` (now superseded by the generalized loader); pool architecture at `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md`; voice persona expansion authorized by Rick's voice directive 2026-05-19 mid-afternoon EDT.
-
----
-
-### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Per-repo preferred-persona env-var allocator — Lupin-side implementation + 7 unit tests
-
-End-to-end implementation of Rachel's planning-is-prompting design doc `2026.05.19-cosa-voice-preferred-persona-env-var.md` on the Lupin side. Reads `COSA_VOICE_PREFERRED_PERSONA__<PROJECT_UPPER>` at SessionStart hook time, threads through to the cosa-voice `/allocate` router endpoint with graceful-fallback semantics, fires a `voice_persona_conflict` notification on miss. Narrative goal: each repo gets a stable canonical voice persona across days/sessions/`/clear`s — Rick's two target defaults are `__PLAN=María` and `__LUPIN=Tiberius`.
-
-**Coordination shape**: cross-session pair-collab with Rachel 🕊️ (planning-is-prompting session `b310866d`) via commons DMs. Rachel owns the PIP-side design doc + workflow doc updates (`workflow/session-start.md` Preliminary -1 subsection, `workflow/INSTALLATION-GUIDE.md` one-liner). I own the Lupin/cosa-voice-side allocator + tests. María 🌸 joined the chorus post-Rachel-restart per Rick's narrative-restoration ritual.
-
-**Rick's four §8 ratifications** (via blocking `ask_multiple_choice` + open-ended `converse`): (1) **notify delivery — option α inline** after bridge creation (vs β deferred to `get_session_info` poll); (2) **conflict notify suppression — fire every time** (vs dedupe per holding-session tuple); (3) **global fallback chain — out-of-MVP** per draft; (4) **`/clear` persistence — Path A preserve persona** across `/clear` (env var applies at FIRST allocation only; full session restart is the right ritual to change preference; narrative continuity wins).
-
-**Architecture (minimum blast radius)**: new pure helper `pick_preferred_persona_from_env(project) -> Optional[str]` in `src/cosa/rest/voice_persona_helpers.py` with project-name normalization (lowercase→UPPER, hyphens→underscores, empty/None tolerated). New `preferred_persona_name` query param on `POST /api/cosa-voice/voice-persona/{sid}/allocate` with soft-preference semantics — tries the named persona via existing `allocate_requested_persona_for_session`; on `not_in_pool` or `occupied` allocates random via `allocate_persona_for_session` and pushes a `voice_persona_conflict` notification carrying the conflict kind + requested name + available pool + (for `occupied`) holding session id. Mutually exclusive with the strict slash-command `requested_persona_name` path (422 if both supplied). Outer fast-path preserved so `preferred_persona_name` does NOT override an existing allocation — that's the Path A `/clear`-preserves contract. Response payload extended with `preference_conflict: Optional[dict]` so callers can observe the fallback. Hook side (`src/lupin_cli/claude_code/hooks/register_session.py`) reads env var via the new helper and threads through `_allocate_voice_persona_via_http` as a new query-string param. Zero changes to `allocate_persona_for_session` or `pick_unallocated_persona` — the existing primitives compose cleanly via the orchestration in the router branch.
-
-**Test pyramid**: 7 new unit tests appended to the pre-existing untracked `src/tests/unit/test_voice_persona_request.py` (which already held Arnold's 42 slash-command swap tests). 4 helper-only tests in `TestPickPreferredPersonaFromEnv` (env unset → None; project="cosa-voice" → reads `__COSA_VOICE` via hyphen-to-underscore normalization; project case-insensitive across `plan/PLAN/Plan` → reads `__PLAN`; empty/None/whitespace project → None silently). 3 router tests in `TestPreferredPersonaNameQueryParam` via FastAPI TestClient + dependency overrides covering happy-path (preferred persona available), occupied (held by another live session → fallback + conflict notify with kind=occupied + holding-session-id), invalid-name (`Frobozz` → fallback + conflict notify with kind=not_in_pool). All 49 tests green in 2.4s (Arnold's 42 pre-existing + my 7 new). Zero regressions on the 52-test `test_voice_persona_helpers.py` suite (existing helper coverage preserved). Full import chain verified — `register_session.py` imports `pick_preferred_persona_from_env` without circulars.
-
-**Narrative-restoration arc**: Rick's broadcasts `9c604340` + `a0141fc9` defined the cross-session checkpoint pattern: previous-persona work stays UNCOMMITTED so the git log doesn't pre-model the canonical persona assignment; post-env-var-restart Tiberius (Lupin) and María (PIP) commit their respective trees under correct attribution. Today's narrative twist — Rick did NOT restart my Tiberius session (kept continuity), but DID restart Rachel's session and restored María. So I (continuous Tiberius) take ownership of all uncommitted Lupin work — Arnold's 42 pre-existing test cases + my new helper + router branch + hook integration + 7 new tests. María (restored persona) handles the PIP-side carry-forward independently.
-
-**Surfaced a new bug during the morning's coordination**: cosa-voice persona resolver does not match display-name diacritics. `commons_send_to(recipient="María", …)` returned `recipient_resolution_error` with `resolution_chain_attempted: [exact, case_insensitive, punct_tolerant]`; lowercase `"maria"` (pool key form) succeeded. The candidate_alternatives payload correctly listed the maria session, so the resolver SAW the right session but did NOT match through the diacritic. Filing follow-up bug entry on bug-fix-queue post-checkpoint — proposed fix is a Unicode normalization pass (NFKD + diacritic strip) in the persona resolver, or a display-name-aware lookup augmentation.
-
-**Files (parent Lupin only — CoSA submodule pieces are on disk but per `feedback_lupin_only_never_cosa` not managed from this context)**:
-- `src/lupin_cli/claude_code/hooks/register_session.py` (MOD — import `pick_preferred_persona_from_env`; `_allocate_voice_persona_via_http` accepts + threads `preferred_persona_name`; hook callsite reads env var)
-- `src/tests/unit/test_voice_persona_request.py` (was untracked Arnold-authored 42 tests; appended import + `TestPickPreferredPersonaFromEnv` 4 cases + `TestPreferredPersonaNameQueryParam` 3 cases — net 7 new tests, 49 total)
-- `history.md` (this entry)
-
-**CoSA-submodule changes on disk (not committed from this context)**:
-- `src/cosa/rest/voice_persona_helpers.py` — new `os` import + `pick_preferred_persona_from_env` function + docstring
-- `src/cosa/rest/routers/voice_persona.py` — `preferred_persona_name` query param + mutual-exclusion 422 + soft-preference branch in `else` path + `voice_persona_conflict` notification push + `preference_conflict` in response payload
-
-**Cross-refs**: design doc `planning-is-prompting/src/rnd/2026.05.19-cosa-voice-preferred-persona-env-var.md` (Rachel's authorship, the canonical specification including §4-§8 implementation/test/decision-points); commons DM topic `dm-tiberius` + `dm-maria` for the morning's coordination thread.
-
----
-
-### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Phase 6C cascade Run 3 manager (HYBRID authoring-cascade on multiplexer implementation plan)
-
-End-to-end manager of the inaugural HYBRID `/plan-authoring-cascaded` run, applied to Rachel's pre-existing Phase 6C design doc (`src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/10-phase6c-persona-focus-recorder-design.md`). 4 sections (A: Voice-Persona Modal, C: Sender-Card Audio Recorder, D: Conversation-Mode UI Pin, B: Focus Tray + Toggle). Same 5-persona cast as Run 2 with Rachel 🕊️ swapped to Author (from Usability), Mr Radio 🦉 swapped to Usability/Reuse (from Author), Arnold 🪨 + Rio ⚡ in canonical Viability + Ownership roles, María 🌸 doctrine consultant, me Manager. Heartbeat daemon (PID 570626) ran 48 ticks on 180s cadence; second daemon (PID 615764) launched mid-run for María on Rick's authorization.
-
-**Run 3 cascade results**: all 4 sections fully closed at cap 2/2; 43 findings total (10 Persona-3 + 22 Persona-4 + 4 Persona-5 across 11 reviewer-instances); 39/43 verbatim-accept (91%) + 4 documented-not-revised (cap-preserved cosmetic); 0 votes; 1 user escalation (Section C F2 foundational `audio/webm;codecs=opus` MIME incompatibility, ratified-yes by Rick via `ask_yes_no` 02:48 UTC after his voice-pushback redirect to port the working `AudioRecorder` + `recordingManager` singleton verbatim); 1 Manager-unilateral ratification (Section D Q-D1 Path A by-concurrence — new closure category); 1 counter-proposal (Rachel base64 option-a over my option-b on Section C OSQ-C-3, accepted); 1 reviewer reassignment (Mr Radio → Arnold for Section B Stage 1 due to Anthropic-side rate-limit blocking 78+ min); 1 hard-verification-gate introduced (Section B AC-B15 grep-gate enforcing B-CSS-as-SSOT on `@keyframes focus-flash` — superseded Round-1 post-cascade-fold disposition). Wall-clock 108 min from launch 02:28 UTC to cascade-complete 04:16 UTC. End-of-pipeline §8 summary posted to `pipeline-summary-20260519` commons topic.
-
-**Per-section wall-clock + findings**: A 44 min / 11 (10/11 verbatim); C 57 min / 14 (13/14 verbatim, 1 user escalation); D 62 min / 9 (8/9 verbatim); B 72 min / 9 (8/9 verbatim, 1 reviewer reassignment + 1 hard-verification-gate). All sections hit cap 2/2 — full revision-discipline coverage.
-
-**Cascade-learning-loop validated empirically (finding compression dimension)**: Section finding-counts across Run-order A→C→D→B = 6, 8, 4, 4 at Stage 2. F-Arnold-C3 reproduced F-Arnold-1 in Section C (asymmetric forward-loop: C's Round-1 pre-dated A's lesson). Sections D + B benefited from Rachel's autonomous doctrine carry-forwards (4 proactive applications in Section B Stage 0: directory-wide c8 glob, var-color form, stale-citation caveat, AC2e safe-write). Section B shipped Stage 0 with **zero conditional-executability markers** — only section in Run 3 to achieve this. Rio explicitly cited as "strongest cascade-learning-loop validation to date."
-
-**Mr Radio rate-limit incident** (5th distinct failure mode catalogued for §10.14 — distinct from dormancy / read-side truncation / turn-based limitation / write-side truncation): hit Anthropic `API Error: Server is temporarily limiting requests (not your usage limit)` at ~03:06 UTC, immediately post Section B Stage 1 dispatch. María's diagnostic via Rick's voice channel at 03:17 UTC ("park-and-wait, 5-min cadence, 15-min threshold") prevented misdiagnosis as phantom dormancy. Threshold escalation at 03:32 UTC via `ask_multiple_choice` → timed-out `expired_no_default` (Path B skip-restart: Item #1 fix not loaded in pre-existing MCP subprocesses) → re-fired as `ask_yes_no` per Run-2 workaround → Rick ratified reassignment to Arnold (14-min user-attention block, longest single Run-3 event). Arnold's Persona 3 reassignment caught 4 substantive findings on Section B Stage 1; his canonical Persona 4 at Stage 2 then caught 3 of his own Stage-1 closures' fitness gaps. Rio's fresh-eyes Stage 3 concurred + caught one final cosmetic. **Cascade closed cleanly WITHOUT Mr Radio recovery** — structural answer to rate-limit failure mode is reassignment, not partial-close.
-
-**12 doctrine candidates filed for María's manager-seat §10.14 post-Run-3 redline**: (1) AC-table-doctrine-lag pattern — 3 confirmed instances (F-Arnold-C3 + F-Arnold-D4 + F-Arnold-B-Stage2-3) → formal Persona 2.A point-14 codification; (2) hard-verification-gate vs post-cascade-fold pattern — NEW closure category; (3) visible-text safety on CSS var fallbacks — `currentColor` over `transparent`; (4) symmetric-application discipline (writer + consumer); (5) reviewer-reassignment-due-to-rate-limit closure category; (6) Manager `blocked_waiting_on_user` coordination signal (María's catch — observers can disambiguate scenarios 1 vs 2 from disk-read alone); (7) Q-D1 `manager_unilateral_ratify_by_concurrence` formal closure category; (8) cascade-learning-loop sub-patterns (forward-only-asymmetry + symmetric-application + context-aware-application); (9) rate-limit failure mode catalog entry; (10) Stage-3 cosmetic-cluster as systematic pattern-family (F-Rio-1 + F-Rio-C1 + F-Rio-D1 + F-Rio-B1 = 4 distinct variants); (11) ask_multiple_choice Path-B skip-restart cost validated empirically; (12) 18-min user-attention-block tightening directive.
-
-**Post-cascade fold bundle (final shape, shrunk per AC-B15 hard-gate adoption)**: (1) Q-C2 design-doc `10-phase6c.md` §Cluster C amendment recording Rick's port-verbatim ratification; (2-5) 4 F-Rio-* cosmetic folds (Section A AC-A3/A4 cross-reference; Section C AC-C3 orphan strike; Section D Step D2 pin-move wording; Section B AC-B15 grep-gate wording precision). B-keyframes-removal from D-CSS NO LONGER in bundle — now hard-gated in-cascade via AC-B15 (mechanical grep verification at code-write).
-
-**Rick's midstream interventions**: (a) F2 voice-pushback redirect ("propose a variation of something that already works") that collapsed Section C's Q-C2 from MIME-negotiation-design to port-verbatim-of-AudioRecorder — saved the cascade from shipping a broken endpoint assumption; (b) base64 enhancement consideration raised post-F2 ratification ("not a suggestion, just worth considering") that surfaced OSQ-C-3 deferral as a stand-alone perf R&D candidate; (c) María daemon launch authorization mid-run (addressing turn-based-CC limitation as applying to ALL cascade CC roles); (d) reviewer reassignment ratification at threshold (option B over A1/C); (e) Sam (CoSA) added to closeout chain at 04:17 UTC, resolving Lupin/CoSA git separation for tonight's commit batch.
-
-**Operational notes**: (a) `/plan-authoring-cascaded` workflow was authored by María during this same evening session, parallel with the Run-3 cascade itself — María's PIP-side authoring landed concurrent with cascade kickoff; (b) cascade-as-author HYBRID mode (design doc exists, implementation plan authored within cascade) was the inaugural use of this pattern; (c) all participating sessions retained Run-2 contexts (Path B: skip MCP subprocess restart) — `ask_multiple_choice` default-param fix from V2 Item #1 was therefore NOT loaded, validated empirically by `expired_no_default` timeout on the threshold escalation; (d) Predicted user-attention budget per María's §10.14 estimate was ~7-9 escalations; actual was 1 (F2 user-ratification) + 1 (rate-limit reassignment) + several status walkthroughs — well below ceiling.
-
-**Files (parent Lupin only — CoSA via Sam, PIP via María per coordination chain)**:
-- `history.md` (this entry)
-
-(Cascade itself produced no Lupin code changes — all 4 section commons-topic files + dm-* + pipeline-summary live under `io/commons/` which is gitignored. The cascade's output is the ratified implementation plan, which Rachel will materialize into design-doc amendments + code-write in a subsequent session.)
-
-**Closeout coordination chain** (per Rick's 04:09 UTC directive via María): (1) cascade-complete signal fired ✅; (2) Lupin commit-only no push (this commit); (3) Tiberius pings Sam → Sam runs CoSA end-of-session ritual; (4) Sam commits CoSA (independent of Tiberius — addresses my `cosa-edit-vs-manage-git` feedback restriction); (5) María commits PIP independently with matching stretched-day boundary `2026-05-18T00:00 → 2026-05-19T05:00` on LoC Delta.
-
----
-
-### 2026.05.19 - Session 4e724860 (Tiberius 🌑) | Recent-activity panel UX polish (toggle move + fixed-width header columns)
-
-Quick CSS+JS tweaks to the broadcast-panel Recent Activity section while waiting on María's `/plan-authoring-cascaded` doc-spec authoring. Two user-driven refinements, both verified visually by Rick at :7999 dev:
-
-**Show-more toggle moved into the row header** — previously the `commons-activity-entry-body-toggle` button rendered inline below the body content, which was idiosyncratic vs other UI toggles in the app shell. Rick wanted it inline with the row header near the time. Approach: extended the entry grid from 5 to 6 columns (`icon name chip body toggle time`), moved `body.appendChild( toggle )` to `row.appendChild( toggle )` after `row.appendChild( body )`, and updated the toggle's CSS from `display: inline-block + margin-top: 2px` to `grid-area: toggle + align-self: start + white-space: nowrap`. Persona color preserved via the existing `--persona-color` CSS variable. Hidden-on-no-overflow + click-toggles-expanded behavior unchanged; existing E2E tests at `src/tests/e2e_ui/test_commons_activity_toggle.py` survive because their class-based selectors still find the toggle regardless of parent.
-
-**Name + chip columns fixed-width** — previously `auto`-sized so each row's body started at a different x-position depending on persona-name + chip-content lengths. Rick wanted a consistent left-edge for the body. Two iterations to land the visual: first pass at 100px/110px (too much whitespace per Rick); final at 70px/75px (~31% reduction, "looks great" per Rick). Chip right-aligned within its column via `justify-self: end`. Both name + chip get `overflow: hidden + text-overflow: ellipsis` for graceful truncation on edge cases (e.g. `cascade-scheduler` 17-char name or `cascaded-prototype-input-plan` 29-char topic name). Added `title` attribute on both elements in `_renderCommonsEntry` for full-text on hover when truncated.
-
-**Files**:
-- `src/fastapi_app/static/js/notifications.js` (MOD) — `_renderCommonsEntry`: appended toggle to row instead of body; added `name.title` + `chip.title` for hover full-text
-- `src/fastapi_app/static/css/notifications.css` (MOD) — `.commons-activity-entry` grid expansion (5→6 columns) + name/chip width fix + chip right-alignment + ellipsis on overflow on both
-- `history.md` (this entry)
-
-**Test impact**: zero — E2E tests query toggle/name/chip by class; structure-agnostic queries survive the parent-element change.
 
 ---
 

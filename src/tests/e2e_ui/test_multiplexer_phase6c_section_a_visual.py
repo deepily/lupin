@@ -147,8 +147,14 @@ def test_multiplexer_phase6c_section_a_popover_open_visual(
     )
     time.sleep( 0.3 )
 
-    main = page.locator( 'main.container' )
-    assert_snapshot( main, name="multiplexer_phase6c_section_a_popover_open.png" )
+    # ts-127620e1 fix: snapshot the popover element itself, NOT `main.container`.
+    # `main.container` includes the live "My Recent Activity" + "My Fleet Status"
+    # regions, whose height grows with fleet churn between baseline capture and run
+    # (unstable-baseline-by-construction → ValueError: Image sizes do not match).
+    # The popover holds only the deterministic seeded surface this test asserts
+    # (accent strip, name+icon row, voice_id row, no borrowed badge).
+    popover = page.locator( '#persona-popover-phase6c-a-visual' )
+    assert_snapshot( popover, name="multiplexer_phase6c_section_a_popover_open.png" )
     print( "✓ multiplexer_phase6c_section_a_popover_open: snapshot compared" )
 
 
@@ -176,6 +182,9 @@ def test_multiplexer_phase6c_section_a_popover_borrowed_visual(
     )
     time.sleep( 0.3 )
 
-    main = page.locator( 'main.container' )
-    assert_snapshot( main, name="multiplexer_phase6c_section_a_popover_borrowed.png" )
+    # ts-127620e1 fix: snapshot the popover element itself, NOT `main.container`
+    # (same unstable-baseline-by-construction reason as popover_open above). The
+    # borrowed-badge surface lives entirely inside the popover element.
+    popover = page.locator( '#persona-popover-phase6c-a-borrowed' )
+    assert_snapshot( popover, name="multiplexer_phase6c_section_a_popover_borrowed.png" )
     print( "✓ multiplexer_phase6c_section_a_popover_borrowed: snapshot compared" )

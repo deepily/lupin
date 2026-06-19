@@ -56,7 +56,7 @@ if [ -z "$LUPIN_ROOT" ]; then
 fi
 
 MCP_SERVER="$LUPIN_ROOT/src/lupin_mcp/cosa_voice_mcp.py"
-VENV_PYTHON="$LUPIN_ROOT/src/cosa/.venv/bin/python"
+VENV_PYTHON="$LUPIN_ROOT/.venv/bin/python"
 
 if [ -f "$VENV_PYTHON" ] && [ -f "$MCP_SERVER" ]; then
     export PYTHONPATH="$LUPIN_ROOT/src:$PYTHONPATH"

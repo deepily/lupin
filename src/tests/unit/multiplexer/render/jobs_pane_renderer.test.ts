@@ -8,23 +8,23 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createJobStore, type JobHistoryApiClient } from "../../../../fastapi_app/static/js/multiplexer/stores/JobStore";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createJobStore, type JobHistoryApiClient } from "../../../../lupin_app/static/js/multiplexer/stores/JobStore";
 import {
   createJobsPaneRenderer,
   type JobsPaneApiClient,
-} from "../../../../fastapi_app/static/js/multiplexer/render/JobsPaneRenderer";
-import { ApiError } from "../../../../fastapi_app/static/js/multiplexer/api/ApiClient";
+} from "../../../../lupin_app/static/js/multiplexer/render/JobsPaneRenderer";
+import { ApiError } from "../../../../lupin_app/static/js/multiplexer/api/ApiClient";
 import type {
   EventBus,
-} from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+} from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import type {
   Job,
   StoreJobsChangedPayload,
   HydrationFailedPayload,
   LupinEvent,
   JobStateTransitionPayload,
-} from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -211,7 +211,7 @@ test("Test 6: mount() invokes hydrateHistory(api) exactly once (Q-A7 eager hydra
   // Let the floated promise resolve.
   await new Promise(r => setTimeout(r, 10));
   assert.equal(api.calls.length, 1, "hydrateHistory should fire exactly once on mount");
-  assert.match(api.calls[0]!, /^\/api\/queue\/job-history/);
+  assert.match(api.calls[0]!, /^\/api\/job-history/);
 
   renderer.unmount();
   jobs.disposeForTesting();

@@ -10,8 +10,8 @@ import {
   renderTtsChrome,
   type TtsChromeHandlers,
   type TtsChromeOpts,
-} from "../../../../fastapi_app/static/js/multiplexer/render/templates/ttsChrome";
-import type { AudioPlaybackState } from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../../lupin_app/static/js/multiplexer/render/templates/ttsChrome";
+import type { AudioPlaybackState } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -215,7 +215,7 @@ test("data-testid + data-state always set for E2E observability", () => {
 
 test("AC2e: source file contains zero .innerHTML= / rawHTML( / .outerHTML= sinks", () => {
   const src = readFileSync(
-    "src/fastapi_app/static/js/multiplexer/render/templates/ttsChrome.ts",
+    "src/lupin_app/static/js/multiplexer/render/templates/ttsChrome.ts",
     "utf8",
   );
   const stripped = src

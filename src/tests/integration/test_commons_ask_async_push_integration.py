@@ -55,9 +55,19 @@ _EMAIL    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
 _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 
-pytestmark = pytest.mark.skipif(
-    not ( _EMAIL and _PASSWORD ),
-    reason = "Requires LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL + LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD env vars",
+# ── DEPRECATED (revisit-later): superseded by dm_send / notification-native path ──
+# Every test in this file exercises the legacy POST/DELETE /api/commons/register-question
+# routes, which were RETIRED FROM REGISTRATION in the cosa-voice token-reduction Phase 4
+# (commit 5ce5dba5, 2026-06-15): the claim-check DM path is replaced by the
+# notification-native dm_send / POST /api/dm/send flow. The route decorators are
+# commented out in commons.py, so every request below now 404s. Mirrors the file-level
+# skip applied to the direct smoke analog test_ask_async_push_e2e.py; route-absence is
+# asserted at the unit layer in test_commons_ac14_registration.py (deregistration guards).
+# The file is SKIPPED (not deleted) so it is restorable if the routes are re-enabled.
+# Plan: src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/03-phase4-legacy-commons-dm-retirement-proposal.md
+pytestmark = pytest.mark.skip(
+    reason="register-question routes retired (cosa-voice token-reduction Phase 4, 5ce5dba5) — "
+           "superseded by dm_send / /api/dm/send; revisit at full-removal"
 )
 
 

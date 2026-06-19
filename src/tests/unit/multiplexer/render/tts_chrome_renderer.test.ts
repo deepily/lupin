@@ -5,17 +5,17 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createTtsChromeRenderer,
   type TtsChromeRenderer,
   type AudioStoreLike,
-} from "../../../../fastapi_app/static/js/multiplexer/render/TtsChromeRenderer";
+} from "../../../../lupin_app/static/js/multiplexer/render/TtsChromeRenderer";
 import type {
   AudioPlaybackState,
   StoreAudioStateChangePayload,
   StoreAudioChunkDecodedPayload,
-} from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

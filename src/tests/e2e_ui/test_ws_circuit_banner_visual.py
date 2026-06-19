@@ -74,7 +74,7 @@ def test_ws_circuit_banner_visual( request, clean_test_db, assert_snapshot, logg
     page.add_init_script( script=_BANNER_HARNESS_JS )
 
     # Navigate to the notifications page (init script runs, then page loads).
-    page.goto( f"{BASE_URL}/app/notifications" )
+    page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
 
     # Wait for NotificationsUI to construct + the banner wiring to be done.

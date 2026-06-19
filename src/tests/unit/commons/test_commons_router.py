@@ -17,14 +17,10 @@ from pathlib import Path
 
 import pytest
 
-from pydantic import ValidationError
-
 from cosa.rest.commons_ack_watcher import CommonsAckWatcher
-from cosa.rest.commons_question_watcher import CommonsQuestionWatcher
 from cosa.rest.commons_rate_limiter import CommonsBroadcastRateLimiter
 from cosa.rest.routers.commons import (
     BroadcastRequestBody,
-    RegisterQuestionRequest,
     _bridge_last_activity_epoch,
     _dedupe_broadcast_acks_by_recipient,
     _dedupe_broadcasts_by_id,
@@ -36,11 +32,8 @@ from cosa.rest.routers.commons import (
     build_pseudo_sender_id,
     execute_broadcast,
     execute_broadcast_history,
-    execute_register_question,
-    execute_unregister_question,
     filter_and_project_sessions,
     init_commons_state,
-    make_question_inject_fn,
     perform_fanout,
     project_session_response,
     validate_broadcast_body,
@@ -404,12 +397,13 @@ def test_filter_includes_same_user():
         _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria", "icon": "🌸", "color": "#A040A0" } ),
     ]
     loader = lambda p: { "owner_user_id": "alice", "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1
 
@@ -420,12 +414,13 @@ def test_filter_excludes_other_user():
         _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ),
     ]
     loader = lambda p: { "owner_user_id": "bob", "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert out == [ ]
 
@@ -440,12 +435,13 @@ def test_filter_graceful_includes_bridge_without_owner_user_id():
     raw = [ _make_session_tuple( "/bridge/legacy", "sid-legacy", { "name": "Maria" } ) ]
     # Bridge has NO owner_user_id key
     loader = lambda p: { "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1
     assert out[ 0 ][ "session_id" ] == "sid-legacy"
@@ -458,12 +454,13 @@ def test_filter_graceful_includes_bridge_with_null_owner_user_id():
     """
     raw = [ _make_session_tuple( "/bridge/null", "sid-null", { "name": "Maria" } ) ]
     loader = lambda p: { "owner_user_id": None, "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1
 
@@ -491,38 +488,44 @@ def test_filter_uses_owner_user_id_not_legacy_user_id():
         "owner_user_id"       : "alice",           # human owner — the one that matters
         "last_activity_epoch" : 1000.0,
     }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1, "filter must use owner_user_id, not legacy user_id"
     assert out[ 0 ][ "session_id" ] == "sid-A"
 
 
-def test_filter_excludes_session_stale_via_idle_detection_iso():
+def test_filter_includes_dormant_worker_stale_interaction_fresh_mtime():
     """
-    2026-05-13 fix — bridge with stale `idle_detection.last_interaction_at`
-    is excluded by the time-threshold filter (previously a no-op because the
-    filter looked at wrong field names). Per
-    `src/rnd/v0.1.7/2026.05.13-broadcast-stale-bridge-phantom.md`.
+    HEADLINE REGRESSION (2026-06-05): a dormant-but-ALIVE worker — last user
+    interaction hours ago but bridge mtime kept FRESH by the idle-waiter
+    heartbeat — MUST remain reachable by broadcast. The pre-2026-06-05 filter
+    keyed on `last_interaction_at` and wrongly excluded it. Per
+    `src/rnd/v0.1.8/2026.06.05-broadcast-liveness-mtime-filter.md`.
     """
-    raw = [ _make_session_tuple( "/bridge/stale", "sid-stale", { "name": "MrRadio" } ) ]
+    raw = [ _make_session_tuple( "/bridge/dormant", "sid-dormant", { "name": "MrRadio" } ) ]
     from datetime import datetime, timedelta, timezone
-    # Last interaction 2 hours ago — well past the 600s (10min) threshold
-    stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=2 ) ).isoformat()
+    # Last interaction 9.5h ago (Mr. Radio's real value), but bridge mtime is fresh.
+    stale_iso = ( datetime.now( timezone.utc ) - timedelta( hours=9, minutes=30 ) ).isoformat()
     now_epoch = datetime.now( timezone.utc ).timestamp()
     loader = lambda p: { "idle_detection": { "last_interaction_at": stale_iso } }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "anyone",
-        active_session_threshold_seconds = 600,
+        active_session_threshold_seconds = 7200,
         now_epoch                        = now_epoch,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: now_epoch - 60.0,   # bridge written 60s ago = alive
     )
-    assert out == [ ], "stale bridge should have been pruned by the time-threshold filter"
+    assert len( out ) == 1, "dormant-but-alive worker (fresh mtime) must stay reachable"
+    assert out[ 0 ][ "session_id" ] == "sid-dormant"
+    # last_seen_iso still reflects the (stale) last interaction — informational only.
+    assert out[ 0 ][ "last_seen_iso" ] == stale_iso
 
 
 def test_filter_includes_session_recently_interactive_via_idle_detection_iso():
@@ -535,15 +538,16 @@ def test_filter_includes_session_recently_interactive_via_idle_detection_iso():
     recent_iso = ( datetime.now( timezone.utc ) - timedelta( seconds=60 ) ).isoformat()
     now_epoch  = datetime.now( timezone.utc ).timestamp()
     loader = lambda p: { "idle_detection": { "last_interaction_at": recent_iso } }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "anyone",
         active_session_threshold_seconds = 600,
         now_epoch                        = now_epoch,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: now_epoch,   # fresh bridge mtime → alive
     )
     assert len( out ) == 1
-    # Bonus: last_seen_iso projection now populates
+    # last_seen_iso projection still populates from last_interaction_at (display only)
     assert out[ 0 ][ "last_seen_iso" ] == recent_iso
 
 
@@ -561,12 +565,13 @@ def test_filter_strict_when_bridge_has_owner_user_id():
         if str( p ) == "/bridge/A": return { "owner_user_id": "alice", "last_activity_epoch": 1000.0 }
         if str( p ) == "/bridge/B": return { "owner_user_id": "bob",   "last_activity_epoch": 1000.0 }
         return None
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     # Only alice's bridge is included — bob's is rejected because his bridge HAS owner_user_id and it doesn't match
     assert len( out ) == 1
@@ -576,7 +581,7 @@ def test_filter_strict_when_bridge_has_owner_user_id():
 def test_filter_skips_unloadable_bridge():
     """Bridge loader returns None → session skipped."""
     raw = [ _make_session_tuple( "/bridge/A", "sid-A", { } ) ]
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -586,32 +591,85 @@ def test_filter_skips_unloadable_bridge():
     assert out == [ ]
 
 
-def test_filter_excludes_stale_session():
-    """Session past activity threshold is excluded."""
+def test_filter_excludes_dead_session_stale_mtime():
+    """A DEAD session — bridge mtime frozen past the liveness threshold — is excluded."""
     raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
-    loader = lambda p: { "owner_user_id": "alice", "last_activity_epoch": 100.0 }
-    out = filter_and_project_sessions(
-        raw_sessions                     = raw,
-        authenticated_user_id            = "alice",
-        active_session_threshold_seconds = 600,
-        now_epoch                        = 1000.0,   # 900s after last_activity, > 600s threshold
-        bridge_loader                    = loader,
-    )
-    assert out == [ ]
-
-
-def test_filter_includes_session_with_no_activity_timestamp():
-    """If bridge has NO last_activity field, treat as active (don't drop)."""
-    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
-    loader = lambda p: { "user_id": "alice" }   # no last_activity_*
-    out = filter_and_project_sessions(
+    loader = lambda p: { "owner_user_id": "alice" }
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
         now_epoch                        = 1000.0,
         bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 100.0,   # 900s old > 600s threshold = dead
+    )
+    assert out == [ ]
+
+
+def test_filter_includes_session_regardless_of_interaction_fields():
+    """
+    Liveness no longer depends on any interaction timestamp in the bridge —
+    a fresh mtime alone keeps the session reachable.
+    """
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    loader = lambda p: { "user_id": "alice" }   # no interaction/activity fields at all
+    out, _filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = loader,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → passes liveness
     )
     assert len( out ) == 1
+
+
+def test_filter_mtime_fn_oserror_skips_session():
+    """TOCTOU: if mtime_fn raises OSError (bridge vanished mid-scan), skip the session."""
+    raw = [ _make_session_tuple( "/bridge/gone", "sid-gone", { "name": "Maria" } ) ]
+    def boom( p ):
+        raise OSError( "bridge vanished" )
+    out, _filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        mtime_fn                         = boom,
+    )
+    assert out == [ ]
+
+
+def test_filter_default_mtime_fn_uses_real_file_stat( tmp_path ):
+    """
+    Cover the DEFAULT `mtime_fn` (`p.stat().st_mtime`) against a real file:
+    a freshly-written bridge passes liveness; an aged one (os.utime) is excluded.
+    """
+    import os
+    bridge_path = tmp_path / "cc-12345.json"
+    bridge_path.write_text( "{}" )
+    now_epoch = time.time()
+    raw    = [ _make_session_tuple( bridge_path, "sid-real", { "name": "Maria" } ) ]
+    loader = lambda p: { "owner_user_id": "alice" }
+    # Fresh file (just written) → included via the DEFAULT mtime_fn (no injection).
+    out, _filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = now_epoch,
+        bridge_loader                    = loader,
+    )
+    assert len( out ) == 1
+    # Age the file 1 hour into the past → excluded by the same default mtime_fn.
+    os.utime( bridge_path, ( now_epoch - 3600, now_epoch - 3600 ) )
+    out, _filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = now_epoch,
+        bridge_loader                    = loader,
+    )
+    assert out == [ ]
 
 
 def test_filter_excludes_originator_when_requested():
@@ -620,7 +678,7 @@ def test_filter_excludes_originator_when_requested():
         _make_session_tuple( "/bridge/B", "sid-B", { "name": "Tiberius" } ),
     ]
     loader = lambda p: { "user_id": "alice", "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -628,6 +686,7 @@ def test_filter_excludes_originator_when_requested():
         bridge_loader                    = loader,
         originator_session_id            = "sid-A",
         include_originator               = False,
+        mtime_fn                         = lambda p: 1000.0,   # fresh → liveness OK
     )
     assert len( out ) == 1
     assert out[ 0 ][ "session_id" ] == "sid-B"
@@ -639,7 +698,7 @@ def test_filter_includes_originator_by_default():
         _make_session_tuple( "/bridge/B", "sid-B", { "name": "Tiberius" } ),
     ]
     loader = lambda p: { "user_id": "alice", "last_activity_epoch": 1000.0 }
-    out = filter_and_project_sessions(
+    out, _filtered = filter_and_project_sessions(
         raw_sessions                     = raw,
         authenticated_user_id            = "alice",
         active_session_threshold_seconds = 600,
@@ -647,6 +706,7 @@ def test_filter_includes_originator_by_default():
         bridge_loader                    = loader,
         originator_session_id            = "sid-A",
         include_originator               = True,
+        mtime_fn                         = lambda p: 1000.0,   # fresh → liveness OK
     )
     assert len( out ) == 2
 
@@ -912,6 +972,7 @@ def test_execute_broadcast_happy_path_with_recipients( store, rate_limiter, ack_
         bridge_loader                    = _bridge_loader_fixed(),
         build_sender_id                  = lambda sid: f"sender-{sid}",
         now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → alive
     )
     assert result[ "http_status" ] == 200
     assert result[ "recipients" ] == 1
@@ -945,6 +1006,7 @@ def test_execute_broadcast_inflight_pruned_mid_fanout( store, rate_limiter, ack_
         bridge_loader                    = _bridge_loader_fixed(),
         build_sender_id                  = lambda sid: sid,
         now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → alive
     )
     # Fanout still happened; just the entry was gone for the update
     assert result[ "http_status" ] == 200
@@ -986,6 +1048,7 @@ def test_execute_broadcast_with_recipients_require_ack_false_no_inflight_update(
         bridge_loader                    = _bridge_loader_fixed(),
         build_sender_id                  = lambda sid: sid,
         now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → alive
     )
     assert result[ "http_status" ] == 200
     assert result[ "recipients" ] == 1
@@ -1008,6 +1071,7 @@ def test_execute_broadcast_require_ack_false_skips_tracking( store, rate_limiter
         bridge_loader                    = _bridge_loader_fixed(),
         build_sender_id                  = lambda sid: sid,
         now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0,   # fresh bridge mtime → alive
     )
     assert result[ "http_status" ] == 200
     assert result[ "broadcast_id" ] is not None
@@ -1026,263 +1090,6 @@ def test_init_commons_state_sets_singletons( store, rate_limiter, ack_watcher ):
     assert commons_module._commons_rate_limiter             is rate_limiter
     assert commons_module._commons_ack_watcher              is ack_watcher
     assert commons_module._active_session_threshold_seconds == 42.0
-
-
-# ─── Step 6: RegisterQuestionRequest Pydantic validation ────────────────────
-
-
-def test_register_question_request_happy_path():
-    """All required fields populated; defaults applied."""
-    req = RegisterQuestionRequest(
-        topic            = "q-topic",
-        question_id      = "qid-1234",
-        asker_session_id = "abc12345",
-    )
-    assert req.topic            == "q-topic"
-    assert req.question_id      == "qid-1234"
-    assert req.asker_session_id == "abc12345"
-    assert req.ttl_seconds      == 3600
-
-
-def test_register_question_request_rejects_empty_topic():
-    with pytest.raises( ValidationError ):
-        RegisterQuestionRequest( topic="", question_id="q1", asker_session_id="sid" )
-
-
-def test_register_question_request_rejects_topic_with_disallowed_chars():
-    with pytest.raises( ValidationError ):
-        RegisterQuestionRequest( topic="q.topic", question_id="q1", asker_session_id="sid" )
-
-
-def test_register_question_request_rejects_oversize_question_id():
-    with pytest.raises( ValidationError ):
-        RegisterQuestionRequest( topic="t", question_id="a" * 65, asker_session_id="sid" )
-
-
-def test_register_question_request_rejects_ttl_below_min():
-    with pytest.raises( ValidationError ):
-        RegisterQuestionRequest( topic="t", question_id="q1", asker_session_id="sid", ttl_seconds=0 )
-
-
-def test_register_question_request_rejects_ttl_above_max():
-    with pytest.raises( ValidationError ):
-        RegisterQuestionRequest( topic="t", question_id="q1", asker_session_id="sid", ttl_seconds=604801 )
-
-
-def test_register_question_request_rejects_empty_asker_session_id():
-    with pytest.raises( ValidationError ):
-        RegisterQuestionRequest( topic="t", question_id="q1", asker_session_id="" )
-
-
-# ─── Step 6: make_question_inject_fn ────────────────────────────────────────
-
-
-def test_make_question_inject_fn_pushes_notification_with_expected_shape( store, captured_pushes, push_fn ):
-    """The inject_fn closure pushes a notification matching the AC4 framing."""
-    inject = make_question_inject_fn(
-        notification_queue = push_fn,
-        user_id            = "user-A",
-        question_id        = "qid-1",
-        asker_session_id   = "asker-session-12345678",
-        build_sender_id    = lambda sid: f"cc:{sid}",
-    )
-    entry = {
-        "body"              : "answer body here",
-        "persona_name"      : "Tiberius",
-        "persona_icon"      : "🌑",
-        "persona_color"     : "#000",
-        "sender_session_id" : "answerer-session-abc",
-        "ts"                : "2026-05-13T10:00:00+00:00",
-    }
-    inject( entry )
-
-    assert len( captured_pushes ) == 1
-    push = captured_pushes[ 0 ]
-    assert push[ "type" ]              == "user_initiated_message"
-    assert push[ "title" ]             == "action:commons_answer_received"
-    assert push[ "sender_id" ]         == "cc:asker-session-12345678"
-    assert push[ "job_id" ]            == "asker-se"  # first 8 chars
-    assert push[ "user_id" ]           == "user-A"
-    assert push[ "suppress_ding" ]     is True
-    assert push[ "response_requested" ] is False
-    payload = push[ "payload" ]
-    assert payload[ "question_id" ]      == "qid-1"
-    assert payload[ "body" ]             == "answer body here"
-    assert payload[ "persona_name" ]     == "Tiberius"
-    assert payload[ "persona_icon" ]     == "🌑"
-    assert payload[ "answerer_session" ] == "answerer-session-abc"
-    assert payload[ "answer_ts" ]        == "2026-05-13T10:00:00+00:00"
-
-
-# ─── Step 6: execute_register_question ──────────────────────────────────────
-
-
-@pytest.fixture
-def question_watcher( store ):
-    return CommonsQuestionWatcher(
-        store        = store,
-        per_user_max = 3,
-        global_max   = 5,
-    )
-
-
-def _build_req( topic="t", qid="q1", sid="asker-sess", ttl=3600 ):
-    return RegisterQuestionRequest(
-        topic            = topic,
-        question_id      = qid,
-        asker_session_id = sid,
-        ttl_seconds      = ttl,
-    )
-
-
-def test_execute_register_question_happy_path( question_watcher, push_fn ):
-    """201 on success; question becomes in flight."""
-    result = execute_register_question(
-        authenticated_user_id = "user-A",
-        body                  = _build_req( qid="q1" ),
-        question_watcher      = question_watcher,
-        notification_queue    = push_fn,
-        build_sender_id       = lambda s: f"cc:{s}",
-    )
-    assert result[ "http_status" ] == 201
-    assert result[ "question_id" ] == "q1"
-    assert result[ "ttl_seconds" ] == 3600
-    assert question_watcher.is_in_flight( "q1" ) is True
-
-
-def test_execute_register_question_collision_returns_409( question_watcher, push_fn ):
-    """Duplicate question_id → 409."""
-    execute_register_question(
-        authenticated_user_id = "user-A",
-        body                  = _build_req( qid="q1" ),
-        question_watcher      = question_watcher,
-        notification_queue    = push_fn,
-        build_sender_id       = lambda s: f"cc:{s}",
-    )
-    result = execute_register_question(
-        authenticated_user_id = "user-A",
-        body                  = _build_req( qid="q1" ),
-        question_watcher      = question_watcher,
-        notification_queue    = push_fn,
-        build_sender_id       = lambda s: f"cc:{s}",
-    )
-    assert result[ "http_status" ] == 409
-    assert "collision" in result[ "detail" ]
-
-
-def test_execute_register_question_per_user_cap_returns_429( question_watcher, push_fn ):
-    """Per-user cap exceeded → 429."""
-    for i in range( 3 ):
-        execute_register_question(
-            authenticated_user_id = "user-A",
-            body                  = _build_req( qid=f"q{i}" ),
-            question_watcher      = question_watcher,
-            notification_queue    = push_fn,
-            build_sender_id       = lambda s: f"cc:{s}",
-        )
-    result = execute_register_question(
-        authenticated_user_id = "user-A",
-        body                  = _build_req( qid="q-overflow" ),
-        question_watcher      = question_watcher,
-        notification_queue    = push_fn,
-        build_sender_id       = lambda s: f"cc:{s}",
-    )
-    assert result[ "http_status" ] == 429
-    assert "cap reached" in result[ "detail" ]
-
-
-def test_execute_register_question_global_cap_returns_429( store, push_fn ):
-    """Global cap exceeded → 429 (different users)."""
-    w = CommonsQuestionWatcher( store=store, per_user_max=100, global_max=2 )
-    execute_register_question( authenticated_user_id="u1", body=_build_req( qid="q1" ),
-                                question_watcher=w, notification_queue=push_fn,
-                                build_sender_id=lambda s: f"cc:{s}" )
-    execute_register_question( authenticated_user_id="u2", body=_build_req( qid="q2" ),
-                                question_watcher=w, notification_queue=push_fn,
-                                build_sender_id=lambda s: f"cc:{s}" )
-    result = execute_register_question( authenticated_user_id="u3", body=_build_req( qid="q3" ),
-                                         question_watcher=w, notification_queue=push_fn,
-                                         build_sender_id=lambda s: f"cc:{s}" )
-    assert result[ "http_status" ] == 429
-
-
-# ─── Step 6: execute_unregister_question (T5) ───────────────────────────────
-
-
-def test_execute_unregister_question_happy_path( question_watcher, push_fn ):
-    """204 on successful removal."""
-    execute_register_question(
-        authenticated_user_id = "user-A",
-        body                  = _build_req( qid="q1" ),
-        question_watcher      = question_watcher,
-        notification_queue    = push_fn,
-        build_sender_id       = lambda s: f"cc:{s}",
-    )
-    result = execute_unregister_question(
-        authenticated_user_id = "user-A",
-        question_id           = "q1",
-        question_watcher      = question_watcher,
-    )
-    assert result == { "http_status": 204 }
-
-
-def test_execute_unregister_question_unknown_returns_404( question_watcher ):
-    """Unknown question_id → uniform 404."""
-    result = execute_unregister_question(
-        authenticated_user_id = "user-A",
-        question_id           = "ghost",
-        question_watcher      = question_watcher,
-    )
-    assert result[ "http_status" ] == 404
-    assert "not found or not owned" in result[ "detail" ]
-
-
-def test_execute_unregister_question_wrong_owner_returns_404( question_watcher, push_fn ):
-    """T5 — known question, wrong user → SAME uniform 404 (no enumeration)."""
-    execute_register_question(
-        authenticated_user_id = "user-A",
-        body                  = _build_req( qid="q1" ),
-        question_watcher      = question_watcher,
-        notification_queue    = push_fn,
-        build_sender_id       = lambda s: f"cc:{s}",
-    )
-    result = execute_unregister_question(
-        authenticated_user_id = "user-B",
-        question_id           = "q1",
-        question_watcher      = question_watcher,
-    )
-    assert result[ "http_status" ] == 404
-    assert "not found or not owned" in result[ "detail" ]
-    # The record is NOT removed
-    assert question_watcher.is_in_flight( "q1" ) is True
-
-
-# ─── Step 6: init_commons_state accepts question_watcher ────────────────────
-
-
-def test_init_commons_state_accepts_question_watcher( store, rate_limiter, ack_watcher, question_watcher ):
-    """init_commons_state wires the question_watcher singleton too."""
-    import cosa.rest.routers.commons as commons_module
-    init_commons_state(
-        store                            = store,
-        rate_limiter                     = rate_limiter,
-        ack_watcher                      = ack_watcher,
-        active_session_threshold_seconds = 600.0,
-        question_watcher                 = question_watcher,
-    )
-    assert commons_module._commons_question_watcher is question_watcher
-
-
-def test_init_commons_state_question_watcher_optional( store, rate_limiter, ack_watcher ):
-    """Backward-compat: init_commons_state still accepts the Phase 2 4-arg signature."""
-    import cosa.rest.routers.commons as commons_module
-    init_commons_state(
-        store                            = store,
-        rate_limiter                     = rate_limiter,
-        ack_watcher                      = ack_watcher,
-        active_session_threshold_seconds = 600.0,
-    )
-    assert commons_module._commons_question_watcher is None
 
 
 # ─── Phase 2.5/3.5 Step 2 — broadcast-history aggregator (AC1 + AC4-AC6 + AC9) ─
@@ -1915,3 +1722,162 @@ def test_execute_broadcast_history_dedupes_broadcast_fanout_end_to_end():
     assert result[ "entries" ][ 0 ][ "metadata" ][ "broadcast_id" ] == bid
     assert "target_session_id" not in result[ "entries" ][ 0 ][ "metadata" ]
 
+
+
+# ─── F3 fanout receipts (2026-06-11) ─────────────────────────────────────────
+# Every formerly-silent recipient-filter gate now emits a filtered_out entry,
+# and execute_broadcast carries filtered_out in BOTH 200 shapes — so a silent
+# broadcast miss (the 2026-06-06 class) is visible to the sender.
+# Per src/rnd/v0.1.8/2026.06.10-broadcast-miss-duplicate-listener-root-cause.md §3.
+
+
+def test_receipts_bridge_unreadable():
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: None,
+        mtime_fn                         = lambda p: 1000.0,
+    )
+    assert out == [ ]
+    assert filtered == [ { "session_id": "sid-A", "reason": "bridge_unreadable" } ]
+
+
+def test_receipts_owner_mismatch():
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "bob" },
+        mtime_fn                         = lambda p: 1000.0,
+    )
+    assert out == [ ]
+    assert filtered == [ { "session_id": "sid-A", "reason": "owner_mismatch" } ]
+
+
+def test_receipts_stale_bridge_mtime_includes_age_and_threshold():
+    """Gate 3 — THE silent-loss gate from the 06-06 miss. Age must be reported."""
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 2000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        mtime_fn                         = lambda p: 1000.0,   # 1000s old > 600s threshold
+    )
+    assert out == [ ]
+    assert filtered == [ {
+        "session_id"        : "sid-A",
+        "reason"            : "stale_bridge_mtime",
+        "age_seconds"       : 1000.0,
+        "threshold_seconds" : 600,
+    } ]
+
+
+def test_receipts_bridge_vanished_on_stat_failure():
+    def _raising_mtime( p ):
+        raise OSError( "stat: vanished" )
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        mtime_fn                         = _raising_mtime,
+    )
+    assert out == [ ]
+    assert filtered == [ { "session_id": "sid-A", "reason": "bridge_vanished" } ]
+
+
+def test_receipts_originator_excluded():
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        originator_session_id            = "sid-A",
+        include_originator               = False,
+        mtime_fn                         = lambda p: 1000.0,
+    )
+    assert out == [ ]
+    assert filtered == [ { "session_id": "sid-A", "reason": "originator_excluded" } ]
+
+
+def test_receipts_empty_when_all_pass():
+    raw = [ _make_session_tuple( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    out, filtered = filter_and_project_sessions(
+        raw_sessions                     = raw,
+        authenticated_user_id            = "alice",
+        active_session_threshold_seconds = 600,
+        now_epoch                        = 1000.0,
+        bridge_loader                    = lambda p: { "owner_user_id": "alice" },
+        mtime_fn                         = lambda p: 1000.0,
+    )
+    assert len( out ) == 1
+    assert filtered == [ ]
+
+
+def test_execute_broadcast_zero_recipient_response_carries_filtered_out( store, rate_limiter, ack_watcher, push_fn ):
+    """The silent-miss shape: every session filtered out → receipts explain WHY."""
+    raw  = [ ( "/bridge/A", "sid-A", { "name": "Maria" } ) ]
+    body = BroadcastRequestBody( message="anyone there?" )
+    result = execute_broadcast(
+        authenticated_user_id            = "alice",
+        body                             = body,
+        store                            = store,
+        rate_limiter                     = rate_limiter,
+        ack_watcher                      = ack_watcher,
+        notification_queue               = push_fn,
+        active_session_threshold_seconds = 600,
+        raw_sessions_fn                  = _make_raw_sessions_fn( raw ),
+        bridge_loader                    = _bridge_loader_fixed(),
+        build_sender_id                  = lambda sid: sid,
+        now_epoch_fn                     = lambda: 99999.0,
+        mtime_fn                         = lambda p: 1000.0,   # ancient bridge → mtime gate drops it
+    )
+    assert result[ "http_status" ] == 200
+    assert result[ "recipients" ] == 0
+    assert result[ "status" ] == "no-active-sessions"
+    assert result[ "filtered_out" ] == [ {
+        "session_id"        : "sid-A",
+        "reason"            : "stale_bridge_mtime",
+        "age_seconds"       : 98999.0,
+        "threshold_seconds" : 600,
+    } ]
+
+
+def test_execute_broadcast_queued_response_carries_filtered_out( store, rate_limiter, ack_watcher, push_fn, captured_pushes ):
+    """Mixed fanout: one delivered, one mtime-filtered — both visible in the response."""
+    raw = [
+        ( "/bridge/fresh", "sid-fresh", { "name": "Maria" } ),
+        ( "/bridge/stale", "sid-stale", { "name": "Rachel" } ),
+    ]
+    body = BroadcastRequestBody( message="hello all" )
+    result = execute_broadcast(
+        authenticated_user_id            = "alice",
+        body                             = body,
+        store                            = store,
+        rate_limiter                     = rate_limiter,
+        ack_watcher                      = ack_watcher,
+        notification_queue               = push_fn,
+        active_session_threshold_seconds = 600,
+        raw_sessions_fn                  = _make_raw_sessions_fn( raw ),
+        bridge_loader                    = _bridge_loader_fixed(),
+        build_sender_id                  = lambda sid: f"sender-{sid}",
+        now_epoch_fn                     = lambda: 1000.0,
+        mtime_fn                         = lambda p: 1000.0 if "fresh" in str( p ) else 1.0,
+    )
+    assert result[ "http_status" ] == 200
+    assert result[ "recipients" ] == 1
+    assert result[ "status" ] == "queued"
+    assert len( result[ "filtered_out" ] ) == 1
+    assert result[ "filtered_out" ][ 0 ][ "session_id" ] == "sid-stale"
+    assert result[ "filtered_out" ][ 0 ][ "reason" ] == "stale_bridge_mtime"

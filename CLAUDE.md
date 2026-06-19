@@ -83,9 +83,9 @@ The bounded CC pattern is the cost-optimal default for LLM-driven agents that:
 3. Tolerate ~1-3s SDK-subprocess spawn overhead per invocation
 4. Use Anthropic-backed models only
 
-Already migrated: **BFE** (`src/cosa/agents/bug_fix_expediter/`), **TFE** (`src/cosa/agents/test_fix_expediter/`).
+Already migrated: **BFE** (`src/cosa/agents/bug_fix_expediter/`), **TFE** (`src/cosa/agents/test_fix_expediter/`), **Podcast script generation** (`src/cosa/agents/podcast_generator/` — Phase 1, 2026-06-18; in-process `sdk_query`, `tools=[]`, D6-lenient parsers), **Presentation content generation** (`src/cosa/agents/presentation_generator/` — Phase 2, 2026-06-18; 7 methods → `sdk_query`, D6-STRICT parsers, Gemini path untouched), **Deep Research** (`src/cosa/agents/deep_research/` — Phase 3, 2026-06-18; lead agent `tools=[]` + research subagents `tools=[WebSearch, WebFetch]` replacing native `web_search_20250305`, ARM web-search gating dropped, D6-STRICT parsers).
 
-Migration candidates (tracked in TODO.md): **Deep Research**, **podcast script generation**, **presentation content generation**.
+Migration candidates (tracked in TODO.md): the three ratified bounded-CC migrations (Podcast → Presentation → Deep Research) are all complete. Remaining opportunities are deferred per D4/D5 (OpenAI call sites, Runtime Argument Expeditor) — not yet ratified for migration.
 
 **Framing**: this is a **cost-shift, not zero-cost**. The Max 200 plan is a fixed monthly bill. Migrations convert per-token metered spend into already-paid fixed cost. Never describe a migration as "free" — describe it as "covered by existing fixed cost."
 
@@ -137,23 +137,29 @@ Example:
 - Use `ConfigurationManager` to access config values
 
 ## PROJECT STRUCTURE
-- `/src/fastapi_app/`: FastAPI application directory
-  - `/src/fastapi_app/main.py`: Main FastAPI server entry point
+- `/src/lupin_app/`: FastAPI application directory
+  - `/src/lupin_app/main.py`: Main FastAPI server entry point
   - `/src/cosa/rest/routers/`: API endpoint routers
 - `/src/cosa/`: Contains the CoSA (Collection of Small Agents) framework
-  - **IMPORTANT**: `/src/cosa/` is a separate Git repository (git@github.com:deepily/cosa.git)
-  - This directory employs the Git submodule/subtree pattern
-  - CoSA has its own README.md and CLAUDE.md files
-  - When working with CoSA code, be aware that changes may need to be committed to both repositories
-  - **CRITICAL FOR CLAUDE**: Never attempt to manage the git state of the CoSA repository when working
-    within the Lupin project. Do not offer to stage, commit, or push changes to the CoSA
-    repository. Only manage git operations for the parent Lupin repository.
-  - **Note**: See "GIT REPOSITORY MANAGEMENT" section for complete nested repository handling
-- `/src/cosa/agents/`: Agent implementations (math, calendar, etc.)
-- `/src/cosa/app/`: Core application components
+  - **Folded into the Lupin mono-repo (2026-05-29)**: `src/cosa/` is now a regular
+    in-tree directory tracked by the Lupin repository — it is **no longer a separate
+    git repo/submodule**. Manage its files AND its git operations exactly like any
+    other Lupin source (stage/commit/push normally). The former CoSA repo's full
+    history is preserved off-tree at `/mnt/DATA02/cosa-git-archive-2026.05.29/`.
+  - CoSA retains its own README.md and CLAUDE.md (historical; the submodule guidance
+    inside `src/cosa/CLAUDE.md` is superseded by this mono-repo state).
+- `/src/cosa/agents/`: Agent implementations (math, calendar, deep_research, podcast/presentation generators, BFE/TFE, etc.)
+- `/src/cosa/orchestration/`: Claude Code dispatch + CJ Flow task orchestration
+- `/src/cosa/rest/`: FastAPI routers, queues, and DB repositories (queue pipeline, notifications, auth)
+- `/src/cosa/config/`: ConfigurationManager + config cache registry
 - `/src/cosa/memory/`: Data persistence and memory management
+- `/src/cosa/crud_for_dataframes/`: DataFrame-backed CRUD agents and operations
+- `/src/cosa/repo/`: Codebase-analysis tools (branch + directory LoC analyzers)
+- `/src/cosa/training/`: Model-training utilities (PEFT trainer, HF downloader, quantizer)
 - `/src/cosa/tools/`: External integrations and tools
+- `/src/cosa/io/`: Input/output helpers
 - `/src/cosa/utils/`: Shared utility functions
+- `/src/cosa/docs/`, `/src/cosa/history/`, `/src/cosa/rnd/`, `/src/cosa/tests/`: documentation, history, R&D, and tests
 - `/src/lib/clients/`: Client interface implementations
 
 ## DEBUGGING
@@ -196,8 +202,8 @@ Example:
 - **ARCHIVE ACCESS**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
 - **IGNORE SUB-REPO HISTORIES**: Do NOT read these sub-repository history files as they are managed separately:
   - `src/lupin-plugin-firefox/history.md` (Firefox plugin sub-repo)
-  - `src/cosa/history.md` (CoSA framework sub-repo)  
   - `src/lupin-mobile/history.md` (Mobile app sub-repo)
+  - (`src/cosa/history.md` is **no longer** a sub-repo history — CoSA folded into the mono-repo 2026-05-29; it is now a normal in-tree doc.)
 
 ## PROJECT SHORT NAMES
 - This repo's SHORT_PROJECT_PREFIX is [LUPIN]
@@ -225,19 +231,16 @@ Example:
 
 **Nested Repositories** (DO NOT manage from parent context):
 
-1. **CoSA Framework**
-   - **Location**: `/src/cosa/`
-   - **Remote**: git@github.com:deepily/cosa.git
-   - **Pattern**: Git submodule/subtree
-   - **Docs**: Has own README.md and CLAUDE.md
-   - **Management**: Must commit to CoSA repo separately when working in CoSA context
+> **CoSA was folded into the Lupin mono-repo (2026-05-29)** and is **no longer a
+> nested repo** — manage `src/cosa/` as normal in-tree Lupin source. Only the two
+> repos below remain nested/separately-managed.
 
-2. **Firefox Plugin**
+1. **Firefox Plugin**
    - **Location**: `/src/lupin-plugin-firefox/`
    - **Management**: Separate repository, managed independently
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
-3. **Mobile App**
+2. **Mobile App**
    - **Location**: `/src/lupin-mobile/`
    - **Management**: Separate repository, managed independently
    - **History**: Has own history.md (DO NOT read from Lupin context)
@@ -256,7 +259,6 @@ The `/plan-session-end` workflow has been configured with nested repository awar
 **What you'll see**:
 ```
 ⚠️ Detected changes in nested repositories:
-• /src/cosa/ (3 modified files)
 • /src/lupin-mobile/ (1 new file)
 
 These are separate Git repositories and will not be included in this commit.
@@ -278,11 +280,6 @@ find . -name ".git" -type d | grep -v "^./.git$"
 ```
 
 ### Working in Nested Repositories
-
-**When working in CoSA** (`cd src/cosa/`):
-- Read `/src/cosa/CLAUDE.md` for CoSA-specific guidance
-- Use CoSA's own session management
-- Commit to CoSA repository separately
 
 **When working in Firefox Plugin** (`cd src/lupin-plugin-firefox/`):
 - Manage as independent project
@@ -314,7 +311,7 @@ Suites that qualify:
 
 ### :8000 (test) — monopolize mode, scheduled only
 
-Submit via `POST /api/test-suite/submit` with a `scheduled_at` the user has confirmed does not overlap other scheduled runs. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
+Submit via `POST /api/test-suite/submit`. **Self-authorization rule (2026-06-06): a verified-IDLE `:8000` — nothing running, nothing scheduled — is bounce-then-schedule SELF-AUTHORIZED; the user is NOT a gate.** `list-pending` FIRST to decide placement: empty queue → bounce (to clear static-snapshot drift, see §reference) + schedule + run now; something already SCHEDULED (queued, not yet running) → still self-authorized, but set `scheduled_at` AFTER the queued job (never jump an expected-next run); something RUNNING → queue behind it, no bounce. Only **killing a LIVE in-flight job** needs the user's word. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
 
 Eligible if **any**:
 - Mutates persistent state (DB rows, shared files, LLM API spend, enqueues jobs).
@@ -327,7 +324,7 @@ Suites that qualify:
 - `src/scripts/run-e2e-ui-tests.sh` (functional + visual)
 - `src/tests/run-presentation-regression.sh` (all variants)
 
-The user-ask for :8000 is **slot availability**, not budget approval or tester-duty deferral. The AI owns executing the test; the user owns calendar coordination.
+The AI **self-authorizes** :8000 runs on a verified-idle server (logged, no human gate) and owns both scheduling and executing. The ONLY user-gate is **killing a live in-flight job**. Never budget approval, never tester-duty deferral, never an idle-slot ask.
 
 ### The `src/tests/smoke/` caveat
 
@@ -337,213 +334,51 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 :7999 is an optimization for truly fast, truly read-only work. If you cannot prove a test meets all three :7999 criteria, schedule it on :8000.
 
-## 100% COVERAGE MANDATE — MULTIPLEXER TYPESCRIPT
+## 100% COVERAGE MANDATE
 
-**MANDATE** (ratified 2026-05-06 during Phase 6a Pass 1 Fitness ratification): **100% c8 coverage (lines AND branches AND functions, via `c8 --100`) is a hard gate for the Lupin multiplexer TypeScript codebase.**
+**Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
 
-### Scope
+**The rule**: **100% coverage — lines AND branches AND functions** on all Lupin code. Python via `pytest --cov` (`--cov-fail-under=100`); TypeScript via `c8 --100`.
 
-**In scope** — every file under:
-- `src/fastapi_app/static/js/multiplexer/` (render, stores, transport, shared)
-- `src/tests/unit/multiplexer/` (test files themselves are not coverage-measured, but they exist to satisfy the floor on the source files)
-
-**Out of scope** — this mandate does NOT extend to:
-- Python code (`src/cosa/`, `src/fastapi_app/` Python, `src/scripts/`)
-- Non-multiplexer frontend JS/TS (legacy `static/js/` outside `multiplexer/`)
-- Anything in `src/lupin-mobile/`, `src/lupin-plugin-firefox/`, `src/cosa/`
-
-The user explicitly ratified Option A (multiplexer-only) via `ask_multiple_choice` on 2026-05-06. Options B (all-frontend-TS) and C (all-Lupin Python+TS) were rejected at that gate.
-
-### Rule
-
-| | Value |
-|---|---|
-| Coverage tool | `c8` (V8 coverage) |
-| Threshold | `--100` flag (≥100% lines AND ≥100% branches AND ≥100% functions AND ≥100% statements) |
-| Exception mechanism | `c8 ignore next` / `c8 ignore start...stop` BUT requires same-line comment with explicit reason |
-| Acceptable use case for `c8 ignore` | Genuinely-unreachable defensive branches (e.g., TypeScript-narrowed `unreachable!()` paths, type-guard fallbacks for `never` types) |
-| Prohibited use case for `c8 ignore` | "I didn't have time to write the test" — fix the test, not the gate |
-
-### Phase 4 + Phase 5 backfill obligation
-
-The 90% floors used in Phase 4 + Phase 5 ACs are **retroactively bumped to 100%**. Phase 4 + Phase 5 backfill to the 100% bar is a **prerequisite of Phase 6a implementation** — it must land before any Phase 6a code is written. See `TODO.md` entry "Phase 4 + Phase 5 c8 coverage backfill to 100%" for the schedulable task.
-
-### How this mandate appears in plans
-
-Every new plan AC that measures unit-test coverage on multiplexer TS files must read **"100% lines/branches/functions via `c8 --100`"** — never "≥90%", never "≥95%". When applying Pass 1 / Pass 2 fixes to multiplexer design docs, sweep AC6-equivalents and bump 90 → 100.
-
-### Precedence
-
-This mandate takes precedence over the older Phase 4 A1 contract floor (≥90%); the same-line-comment-required rule for `c8 ignore` from A1 is preserved (only the floor moves from 90 → 100).
-
-### Where to look
-
-- **Auto-memory**: `~/.claude/projects/.../memory/feedback_100pct_coverage_multiplexer.md` (durable record of the directive + scope decision)
-- **Origin design doc**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6 row (first plan AC under the new mandate)
-- **Findings doc**: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/94-phase6a-review-findings.md` "Pass 1 Fitness — closed 2026-05-06" subsection
-
----
+- **Exceptions**: `# pragma: no cover` (Python) / `c8 ignore` (TS) ONLY for genuinely-unreachable defensive branches, and ONLY with a same-line comment giving the reason. "No time to test" is never valid — fix the test, not the gate.
+- **In plan ACs**: write "100% lines/branches/functions" — never ≥90%/≥95%.
+- **Excludes**: sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts.
+- **Canonical record**: auto-memory `feedback_100pct_coverage_multiplexer.md` (directive + Lupin-wide expansion). Origin doc: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6.
 
 ## TESTING
 
-Lupin uses a three-tier testing strategy for comprehensive validation. See §TESTING VENUES above for the :7999 / :8000 routing rules referenced per-suite below.
+Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per §TESTING VENUES above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see §TESTING VENUES).
 
-### Test Types
+| Suite | Venue | Command | Notes |
+|---|---|---|---|
+| Unit | :7999 | `pytest src/tests/unit/` | Fast isolated tests, mocked deps |
+| Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks; non-destructive. `src/tests/smoke/` files are heterogeneous — route each by the §TESTING VENUES rubric, not the folder |
+| WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | 50 tests; connection/auth/events |
+| Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 43 tests; **FINAL merge gate**; always `--bg` |
+| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | ~285 functional + visual; ~17min; `-k visual` (visual only), `--update-snapshots` (rebaseline); snapshots version-controlled |
+| Interactive proxy | :8000 (scheduled) | `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` | 12 scenarios; mutates state, ~180s/scenario |
+| Presentation regression | :8000 (scheduled) | `./src/tests/run-presentation-regression.sh --bg` | render→Sonnet→(Opus); real LLM spend; `--include-opus` / `--all` variants |
 
-1. **Unit Tests** (`src/tests/unit/`)
-   - **Venue**: :7999 (AI-discretionary)
-   - Fast, isolated function tests (1-10ms per test)
-   - Test individual functions with mocked dependencies
-   - Coverage: jwt_service (14 tests), password_service, user_service, etc.
-   - Run: `pytest src/tests/unit/`
+**`--bg` mandate**: integration, E2E UI, and presentation regression exceed the 10-min Bash timeout — always launch with `--bg` from Claude Code; monitor the matching `/tmp/*-latest.log`. PID-file overlap guards prevent concurrent runs.
 
-2. **Smoke Tests** (inline `quick_smoke_test()` functions)
-   - **Venue**: :7999 (AI-discretionary) — inline blocks are always non-destructive + fast
-   - Quick module-level sanity checks (10-100ms per module)
-   - Validate modules load and core functions work
-   - Coverage: ~50 tests across all major modules
-   - Run: `python -m cosa.rest.jwt_service` (per module)
-   - **Note**: Files under `src/tests/smoke/` are heterogeneous — route each by §TESTING VENUES rubric (e.g. `test_calculator_live_pipeline.py` → :7999; `test_proxy_integration.py` → :8000).
+**Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
 
-3. **Integration Tests** (`src/tests/integration/`)
-   - **Venue**: :8000 (scheduled via `/api/test-suite/submit` + user slot-check)
-   - End-to-end user flow validation (100-1000ms per test)
-   - Test complete workflows across API, database, and authentication
-   - Coverage: 43 comprehensive tests (auth, admin user management, queue filtering)
-   - **CRITICAL**: Always use `--bg` flag from Claude Code (suite can exceed 10min Bash timeout under load)
-   - Run: `./src/tests/run-integration-tests.sh --bg -v`
-   - Monitor: `tail -20 /tmp/integration-latest.log`
-   - Status: `kill -0 $(cat /tmp/integration-tests.pid) 2>/dev/null && echo running || echo done`
-
-4. **WebSocket Tests** (`src/tests/websocket_smoke/`)
-   - **Venue**: :7999 (AI-discretionary) — non-destructive connection/auth/event validation
-   - WebSocket functionality validation
-   - Coverage: 50 tests
-   - Run: `src/scripts/run-websocket-smoke-tests.sh`
-
-5. **E2E UI Tests** (`src/tests/e2e_ui/`)
-   - **Venue**: :8000 (scheduled via `/api/test-suite/submit` + user slot-check)
-   - Playwright Chromium headless browser tests against live server
-   - Coverage: 285 functional tests + 12 visual regression
-   - **CRITICAL**: Always use `--bg` flag from Claude Code (suite takes ~17min, exceeds 10min Bash timeout)
-   - Run: `./src/scripts/run-e2e-ui-tests.sh --bg -v`
-   - Visual only: `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual`
-   - Update baselines: `./src/scripts/run-e2e-ui-tests.sh --bg --update-snapshots -k visual`
-   - Monitor: `tail -20 /tmp/e2e-ui-latest.log`
-   - Status: `kill -0 $(cat /tmp/e2e-ui-tests.pid) 2>/dev/null && echo running || echo done`
-   - Snapshots: `src/tests/e2e_ui/__snapshots__/` (version-controlled)
-
-6. **Interactive Proxy Tests** (`src/tests/smoke/test_proxy_integration.py`)
-   - **Venue**: :8000 (scheduled via `/api/test-suite/submit` + user slot-check) — mutates state (CRUD deletes, expediter writes), ~180s/scenario
-   - Automated interactive testing with notification proxy auto-answer
-   - Coverage: 12 scenarios across Calculator, CRUD, and Expediter agents
-   - Tests submit-and-poll pipelines with proxy-driven notification responses
-   - Run: `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm`
-   - **Guide**: `src/docs/automated-interactive-testing.md`
-
-7. **Presentation Regression** (`src/tests/run-presentation-regression.sh`)
-   - **Venue**: :8000 (scheduled via `/api/test-suite/submit` + user slot-check) — long-running + real LLM spend
-   - Sequential pyramid: render-only → Sonnet full → (optional) Opus + R2P chain
-   - **CRITICAL**: Always use `--bg` flag or schedule via test-suite endpoint
-   - Default (nightly): `./src/tests/run-presentation-regression.sh --bg` (~$0.46, ~10min)
-   - With Opus: `./src/tests/run-presentation-regression.sh --bg --include-opus` (~$2.89)
-   - Full weekly: `./src/tests/run-presentation-regression.sh --bg --all` (~$10, ~45min)
-   - Schedule: `POST /api/test-suite/submit {"test_types": "presentation", "scheduled_at": "..."}`
-   - Monitor: `tail -20 /tmp/presentation-regression-latest.log`
-   - **Strategy doc**: `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`
-
-### Running Tests
-
-```bash
-# Integration tests (RECOMMENDED - automated)
-./src/tests/run-integration-tests.sh --bg -v         # All (background, recommended)
-./src/tests/run-integration-tests.sh --bg -v -s      # Very verbose (background)
-./src/tests/run-integration-tests.sh test_auth*.py   # Specific pattern (foreground OK for quick runs)
-
-# Unit tests
-pytest src/tests/unit/                               # All unit tests
-pytest -v src/tests/unit/                            # Verbose
-
-# All pytest tests (unit + integration)
-pytest src/tests/                                    # Requires manual server setup
-
-# With coverage report
-pytest --cov=cosa.rest --cov-report=html src/tests/
-```
-
-### Documentation
-
-- **Testing Overview**: `src/tests/README.md` - Complete testing strategy and hierarchy
-- **Integration Tests**: `src/tests/integration/README.md` - Detailed integration test guide
-- **Interactive Proxy Tests**: `src/docs/automated-interactive-testing.md` - Comprehensive proxy testing guide
-- **Smoke Tests**: `src/tests/smoke/README.md` - Quick-start guide for smoke tests
-- **Unit Tests**: Inline documentation in test files
-
-### Test Coverage
-
-- **Total Tests**: ~387+ (14+ unit, ~50 smoke, 43 integration, 50 WebSocket, 265 E2E UI)
-- **Auth System Coverage**: 85-90%
-- **Critical Paths**: Login, registration, token refresh, password change all tested
-
-See `src/tests/README.md` for comprehensive testing documentation.
+**Docs**: `src/tests/README.md` (overview), `src/tests/integration/README.md`, `src/docs/automated-interactive-testing.md` (proxy), `src/tests/smoke/README.md`, `src/tests/AUTH-TESTING-GUIDE.md` (credentials), presentation strategy `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`.
 
 ## PR MERGE REQUIREMENTS
 
-**CRITICAL**: The following tests MUST pass before merging any branch to main.
+**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
 
-### Pre-Merge Test Checklist
+Integration is the final gate because it exercises complete user workflows across API + DB + auth on a real server — catching regressions unit tests miss.
 
-| Test Suite | Venue | Command | Requirement |
-|------------|-------|---------|-------------|
-| Unit Tests | :7999 | `pytest src/tests/unit/` | 100% pass |
-| WebSocket Tests | :7999 | `./src/scripts/run-websocket-smoke-tests.sh` | 100% pass |
-| E2E UI Tests | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | 100% pass |
-| Visual Regression | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v -k visual` | 100% pass |
-| Integration Tests | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 100% pass (FINAL GATE) |
+**On failure**: do NOT merge. Fix the failing tests first, then re-run the full suite. A genuinely-flaky-not-your-code failure gets documented + a separate fix — never a merge bypass.
 
-**Note**: `:8000 (scheduled)` rows are submitted via `POST /api/test-suite/submit` with a user-confirmed `scheduled_at` slot (see §TESTING VENUES). The `--bg` commands shown are the local-foreground fallback, not the primary path from Claude Code.
-
-### Integration Tests are the Final Gate
-
-Integration tests are the **FINAL validation step** before any branch merge to main.
-
-**Why integration tests are critical**:
-- Test complete user workflows end-to-end
-- Validate API, database, and authentication work together
-- Catch regressions that unit tests miss
-- Require a running server (realistic conditions)
-
-### Pre-Merge Workflow
-
-```bash
-# Complete pre-merge validation sequence
-pytest src/tests/unit/ -v && \
-./src/scripts/run-websocket-smoke-tests.sh && \
-./src/scripts/run-e2e-ui-tests.sh --bg -v && \
-./src/tests/run-integration-tests.sh --bg -v
-```
-
-**Note**: E2E UI and integration tests run in background (`--bg`) — monitor via:
-- E2E: `tail -20 /tmp/e2e-ui-latest.log`
-- Integration: `tail -20 /tmp/integration-latest.log`
-
-Wait for E2E completion before launching integration tests (the final gate). Both have PID-file overlap protection to prevent concurrent runs.
-
-### When Tests Fail
-
-- **DO NOT** merge with failing tests
-- **Fix the failing tests first**, then re-run the full suite
-- If a test is legitimately flaky (not your code), document and create a separate fix
-
-### Testing Anti-Patterns
-
-- **NEVER** use `curl` commands for pipeline or integration testing — use automated test scripts
-- **NEVER** manually POST to `/api/push` and poll `/api/get-queue/done` — use `LivePipelineTestBase`
-- **NEVER** create bespoke curl scripts as a substitute for repeatable test automation
-- **NEVER** run :8000-bucket tests (integration, E2E UI, proxy-integration, presentation regression) against :7999. The dev server is not a stand-in for the test server; correctness for these suites depends on server monopoly.
-- **NEVER** side-door inject :8000 tests via curl, direct `/api/push`, in-process server instantiation, or any path other than `POST /api/test-suite/submit` with a user-confirmed `scheduled_at`. Side-door injection collides with in-flight scheduled runs and poisons both.
-- Manual curl is acceptable ONLY for: API reference documentation, deployment health checks, one-off debugging (never committed)
-- When building new agents, create an automated smoke test — see `.claude/skills/agentic-voice-workflow/SKILL.md`
+**Testing anti-patterns** (NEVER):
+- `curl` for pipeline/integration testing, or manual `/api/push` + poll `/api/get-queue/done` — use the automated scripts (`LivePipelineTestBase`), never bespoke curl.
+- Running :8000-bucket suites (integration, E2E UI, proxy-integration, presentation regression) against :7999 — they depend on server monopoly; the dev server is not a stand-in.
+- Side-door injecting :8000 tests via curl / direct `/api/push` / in-process instantiation / anything but `POST /api/test-suite/submit` — collides with in-flight runs and poisons both. (Submission itself is self-authorized on a verified-idle server; the prohibition is on the side-door, not on submitting.)
+- Curl is acceptable ONLY for: API-reference docs, deployment health checks, one-off debugging (never committed).
+- New agent? Add an automated smoke test (see `.claude/skills/agentic-voice-workflow/SKILL.md`).
 
 ## TEST CREDENTIALS
 
@@ -612,6 +447,8 @@ When modifying code in these areas, update the corresponding documentation:
 | `src/cosa/rest/routers/_scope_registry.py` + `docs_files.py` + `io_files.py` + `lupin-app.ini` `external repo *` keys + `docker-compose.yml` bind-mounts | `src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md` (scopes table, mount lines, blocklist patterns). Adding a new external scope requires the four-step checklist in auto-memory `feedback_multi_repo_doc_viewer.md`. |
 
 **Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
+
+**Fleet liveness + unified task-store architecture (top-to-bottom)**: `src/docs/fleet-liveness-and-task-store-architecture.md` — the canonical reference for the one-store/three-readers design (Stop-hook self-poke · `:8001` arbiter · human UI card), the heartbeat seam + `heartbeat.owed_source_from_store` cutover flag + fail-safe, the arbiter detectors (staleness 2700s / tap-ACK 600s / whole-fleet-stall 1800s) + how to bounce it (`systemctl --user restart lupin-arbiter-app.service`), the manager/worker spawn→worktree→review→merge-held→push lifecycle, and the migration drain. Read this before touching the liveness path, the task store, or the arbiter.
 
 **Principle**: FastAPI `/docs` and `/redoc` are the authoritative API reference. Hand-written docs cover architecture, concepts, and operations only.
 

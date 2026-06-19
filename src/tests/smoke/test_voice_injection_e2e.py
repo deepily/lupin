@@ -64,6 +64,8 @@ def test_e2e_voice_injection():
              patch( "sys.stdin", io.StringIO( json.dumps( payload ) ) ), \
              patch( "sys.stdout", captured ), \
              patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block",
+                    return_value="" ), \
              patch( "lupin_cli.claude_code.hooks.user_prompt_submit.resolve_stable_session_id",
                     return_value=session_id ), \
              patch( "lupin_cli.claude_code.hooks.user_prompt_submit.get_claude_session_id",
@@ -108,6 +110,8 @@ def test_e2e_empty_prompt_passthrough():
              patch( "sys.stdin", io.StringIO( json.dumps( payload ) ) ), \
              patch( "sys.stdout", captured ), \
              patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block",
+                    return_value="" ), \
              patch( "lupin_cli.claude_code.hooks.lib.session_bridge.get_claude_session_id",
                     return_value=session_id ):
             try:
@@ -138,7 +142,7 @@ def test_listener_tmux_inject_mocked():
 
     with patch( "subprocess.run" ) as mock_run, \
          patch( "time.sleep" ) as mock_sleep:
-        listener._inject_via_tmux( "run the tests" )
+        listener._inject_via_tmux( "run the tests", wrap=False )
 
     # Verify two subprocess calls: literal text then Enter
     assert mock_run.call_count == 2

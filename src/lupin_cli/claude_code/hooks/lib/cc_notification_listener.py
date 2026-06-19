@@ -45,6 +45,7 @@ from cosa.agents.utils.proxy_agents.base_config import (
     DEFAULT_SERVER_PORT,
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+from lupin_cli.claude_code.hooks.lib.listener_processes import tmux_injection_lock
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -272,11 +273,138 @@ class CCNotificationListener( BaseWebSocketListener ):
                 self._log( f"{self.LOG_PREFIX} Skipping: job_id={job_id} not in {self.accepted_ids}" )
             return
 
+        # Direction-aware routing (notification-native AI↔AI messaging, Phase 3 §6a of
+        # src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md).
+        # A peer DM (direction=ai_to_ai) must NOT receive the human-voice envelope or the
+        # speakerphone rider — it routes to _handle_peer_dm, which injects a peer-DM envelope
+        # plus a dm_send reply affordance verbatim (wrap=False). Everything else — human voice
+        # (human_to_ai) or a legacy notification with no direction — keeps the existing path.
+        if notification.get( "direction" ) == "ai_to_ai":
+            self._deliver_peer_dm( notification )
+            return
+
         # Match — inject directly into tmux prompt (skip buffer for idle injection)
         message_text = notification.get( "message", "" ).strip()
         if message_text:
             self._inject_via_tmux( message_text )
         self._send_gist_response( notification )
+
+    def _deliver_peer_dm( self, notification ):
+        """
+        Idle-aware delivery for an inbound notification-native AI↔AI DM
+        (direction=ai_to_ai), per §6 of
+        src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md.
+
+        Routes by the recipient session's liveness:
+        - ACTIVE → _buffer_message: write to the voice buffer, drained by the
+          next injecting hook (PreToolUse/PostToolUse/Stop) at a clean tool
+          boundary and framed by format_voice_context's ai_to_ai branch. Clean,
+          non-invasive — does NOT type into a live prompt mid-turn.
+        - IDLE → _handle_peer_dm: inject via tmux to WAKE the idle pane (the only
+          path that reaches a pane sitting at an idle prompt).
+
+        Liveness is read from the existing heartbeat_events outcome store; on any
+        read error we fall back to the tmux-wake path (degrades to the always-
+        deliver behavior rather than risk a buffered DM sitting unseen).
+
+        Ensures:
+            - Active recipient → buffered; idle (or unknown-state) recipient → tmux
+            - Never raises (both downstream paths are self-isolating)
+        """
+        if self._recipient_is_idle():
+            self._handle_peer_dm( notification )
+        else:
+            self._buffer_message( notification )
+
+    def _recipient_is_idle( self ):
+        """
+        Is this CC session sitting at an idle prompt right now?
+
+        Reads the most recent heartbeat outcome for this session: a last outcome
+        of EVENT_IDLE ("idle") means the session went idle and is waiting at a
+        prompt. Any other outcome (poked/honored/cap_reached/…) or None (no
+        heartbeat history yet — e.g. a freshly-started session) is treated as
+        ACTIVE, so a peer DM buffers cleanly rather than interrupting.
+
+        Ensures:
+            - Returns True iff last_emitted_outcome(<full stable uuid>) == EVENT_IDLE
+            - Returns True when the full id can't be resolved, or on any
+              read/import error (fail toward tmux-wake so a DM is never silently
+              lost to a buffer that nothing drains)
+        """
+        try:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
+            from lupin_cli.claude_code.hooks.lib.heartbeat_events import (
+                last_emitted_outcome, EVENT_IDLE
+            )
+            # heartbeat events are keyed by the FULL stable UUID — the file is
+            # <full_uuid>.jsonl, read by EXACT match (no prefix glob), and stop.py
+            # writes via resolve_stable_session_id (full UUID). self.session_id_hash
+            # is the 8-char form, so we MUST resolve the full id via the bridge
+            # first; passing the 8-char hash straight through always misses the
+            # file → None → "active" → the idle→tmux-wake branch was DEAD in prod
+            # (F1, Cheech 2026-06-15). Fix at the source (the listener holds the
+            # wrong-form id), not by loosening the store's exact-match contract.
+            data    = find_session_by_id( self.session_id_hash )
+            full_id = ( data.get( "stable_session_id" ) or data.get( "session_id" ) ) if data else None
+            if not full_id:
+                # No live bridge → can't resolve the full id → fail toward tmux-wake.
+                return True
+            return last_emitted_outcome( full_id ) == EVENT_IDLE
+        except Exception as e:
+            self._log( f"{self.LOG_PREFIX} idle-state read failed (assuming idle/tmux-wake): {e}" )
+            return True
+
+    def _handle_peer_dm( self, notification ):
+        """
+        Inject a peer-DM envelope into an IDLE pane via tmux to wake it (the idle
+        branch of _deliver_peer_dm).
+
+        Per §6a of
+        src/rnd/v0.1.8/2026.06.13-cosa-voice-token-reduction/02-notification-native-aixai-design.md:
+        - A peer DM is NOT human voice. It must NOT receive the speakerphone_wrap
+          voice rider ("the user spoke… call notify() to speak your reply aloud…
+          TTS brevity… chorus") — that would hand an AI peer the human-voice
+          contract, framed as if Rick spoke. Peers reply via dm_send, never TTS.
+        - The body rides the push INLINE (notification["message"]) — no
+          commons_read round-trip (the ~18x token win over the retired commons
+          claim-check DM path).
+        - The envelope (sender persona + icon + message_id + thread_id + dm_send
+          reply affordance) is built by the SHARED build_peer_dm_reminder helper,
+          so the idle (tmux) and active (buffer-drain) paths frame identically.
+        - Injects via _inject_via_tmux( text, wrap=False ): the block is complete
+          and must reach the model verbatim, with NO voice wrapping.
+
+        Requires:
+            - notification is a dict carrying at least "message"; sender_persona,
+              sender_icon, id, and thread_id ride the WS dict via
+              NotificationItem.to_dict().
+
+        Ensures:
+            - Injects a peer-framed <system-reminder> into the tmux pane
+            - NEVER applies the speakerphone voice rider (wrap=False)
+            - Skips (logs) when the inline body is empty
+            - Never raises (T7 listener-injection isolation — failure logs + skips)
+        """
+        from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
+
+        body = ( notification.get( "message" ) or "" ).strip()
+        if not body:
+            self._log( f"{self.LOG_PREFIX} peer DM missing body; skipping" )
+            return
+
+        wrapped = build_peer_dm_reminder(
+            body,
+            persona   = notification.get( "sender_persona" ),
+            icon      = notification.get( "sender_icon" ),
+            msg_id    = notification.get( "id" ),
+            thread_id = notification.get( "thread_id" ),
+        )
+        try:
+            self._inject_via_tmux( wrapped, wrap=False )
+        except Exception as e:
+            # T7 listener-injection isolation: failure logs + skips, doesn't crash listener
+            self._log( f"{self.LOG_PREFIX} peer DM inject failed: {e}" )
 
     def _handle_action( self, action, notification ):
         """
@@ -298,10 +426,6 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._inject_exit_conversation_reminder()
         elif action == "broadcast_received":
             self._handle_broadcast_received( notification )
-        elif action == "commons_answer_received":
-            self._handle_commons_answer_received( notification )
-        elif action == "commons_question_received":
-            self._handle_commons_question_received( notification )
         else:
             self._log( f"{self.LOG_PREFIX} Unknown action: {action}" )
 
@@ -320,12 +444,18 @@ class CCNotificationListener( BaseWebSocketListener ):
         - `store`: a fresh `CommonsStore` rooted at `<LUPIN_ROOT>/io/commons`
         - `local_persona`: pulled from `get_session_metadata().voice_persona`
         - `sender_session_id`: the local session id from bridge metadata
+        - `persona_roster`: live persona names from the bridge scan, so the
+          handler's directive discriminator only treats `@token:` runs as
+          persona directives when the token resembles a real persona
         """
         import os
         try:
             from lupin_mcp.broadcast_handler import handle_broadcast
             from lupin_mcp.commons_store import CommonsStore
-            from lupin_cli.claude_code.hooks.lib.session_bridge import get_session_metadata
+            from lupin_cli.claude_code.hooks.lib.session_bridge import (
+                find_active_voice_persona_sessions,
+                get_session_metadata,
+            )
         except ImportError as e:
             self._log( f"{self.LOG_PREFIX} broadcast_handler import failed: {e}" )
             return
@@ -345,101 +475,25 @@ class CCNotificationListener( BaseWebSocketListener ):
             self._log( f"{self.LOG_PREFIX} CommonsStore init failed at {commons_root}: {e}" )
             return
 
+        # Roster for directive discrimination: name + display_name of every live
+        # persona session. An empty scan carries no roster signal (at minimum the
+        # local session exists), so pass None — roster-blind legacy parse — rather
+        # than an empty list, which would flag EVERY directive run as prose.
+        persona_roster = [ ]
+        for _bridge_path, _session_id, persona in find_active_voice_persona_sessions():
+            for name_key in ( "name", "display_name" ):
+                name_value = persona.get( name_key )
+                if isinstance( name_value, str ) and name_value and name_value not in persona_roster:
+                    persona_roster.append( name_value )
+
         handle_broadcast(
             notification      = notification,
             local_persona     = local_persona,
             inject_fn         = lambda text: self._inject_via_tmux( text, wrap=False ),
             store             = store,
             sender_session_id = sender_session_id,
+            persona_roster    = persona_roster or None,
         )
-
-    def _handle_commons_answer_received( self, notification ):
-        """
-        Handle an `action:commons_answer_received` notification from the
-        server-side `CommonsQuestionWatcher` (Phase 3 step 8).
-
-        Per AC4 + Q3 of
-        src/rnd/v0.1.7/2026.05.09-inter-session-commons/04-phase3-push-mode-and-llm-fallback-design.md:
-        - Reads `persona_name` from the STAMPED notification payload (F9-fit
-          immutability — never a live lookup; the answerer's persona at
-          answer-write time is the authoritative attribution).
-        - Builds the `<system-reminder>` body using the Q3 framing:
-              "COMMONS PEER REPLY (question_id X, from @PersonaName):
-                  [body]"
-          PEER ≠ USER (intra-AI principle), REPLY ≠ BROADCAST.
-        - Injects via `_inject_via_tmux(text, wrap=False)` — the body
-          is already a complete <system-reminder> block.
-        """
-        payload      = notification.get( "payload" ) or { }
-        question_id  = payload.get( "question_id" )
-        body         = payload.get( "body", "" )
-        persona_name = payload.get( "persona_name" ) or "unknown"
-
-        if not question_id:
-            self._log( f"{self.LOG_PREFIX} commons_answer_received missing question_id; skipping" )
-            return
-
-        # Q3 framing — persona attribution preserves provenance; question_id
-        # lets the LLM correlate to the original ask_async call.
-        reminder_body = (
-            f"COMMONS PEER REPLY (question_id {question_id}, from @{persona_name}):\n\n"
-            f"{body}"
-        )
-        wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
-        self._inject_via_tmux( wrapped, wrap=False )
-
-    def _handle_commons_question_received( self, notification ):
-        """
-        Handle an `action:commons_question_received` notification — an inter-
-        session directed DM addressed to this CC session.
-
-        Per AC6 + Phase 0 Q5-rev framing of
-        src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md:
-        - Reads payload fields stamped at register-question dispatch time by
-          the endpoint's `_dispatch_commons_question_received` helper (the
-          sender's persona is NOT stamped here today — the listener can read
-          it from the topic entry if needed). For v1, the sender is identified
-          via the asker_session_id field; future enhancement adds the sender's
-          persona to the dispatch payload.
-        - Builds the `<system-reminder>` body using the Q5-rev framing
-          (parallel to Phase 3's COMMONS PEER REPLY):
-              "COMMONS PEER MESSAGE (question_id X, topic Y, from session Z):
-                  <body to be read from the commons topic>"
-          For v1, the body is not in the dispatch payload (the entry sits in
-          the commons topic) — the listener injects the framing with a
-          pointer to the topic + question_id so the recipient AI can call
-          commons_read() to retrieve the actual body and any subsequent
-          context. v1.1 enhancement: include body in dispatch payload to
-          avoid the read round-trip.
-        - Injects via `_inject_via_tmux(text, wrap=False)` — body is a
-          complete <system-reminder> block.
-        """
-        payload          = notification.get( "payload" ) or { }
-        question_id      = payload.get( "question_id" )
-        topic            = payload.get( "topic" )
-        asker_session    = payload.get( "asker_session" ) or "unknown"
-
-        if not question_id:
-            self._log( f"{self.LOG_PREFIX} commons_question_received missing question_id; skipping" )
-            return
-        if not topic:
-            self._log( f"{self.LOG_PREFIX} commons_question_received missing topic; skipping" )
-            return
-
-        reminder_body = (
-            f"COMMONS PEER MESSAGE (question_id {question_id}, topic {topic}, from session {asker_session[:8]}):\n\n"
-            f"A peer CC session has addressed a directed DM to you on topic '{topic}' with question_id '{question_id}'.\n"
-            f"Read the message body via commons_read(topic='{topic}', limit=10) and look for the entry whose "
-            f"metadata.question_id == '{question_id}'. To reply, call commons_post(topic='{topic}', body='<your reply>', "
-            f"metadata={{'in_reply_to': '{question_id}'}}) — the original asker's watcher will push your reply back "
-            f"to their tmux session via Phase 3 commons_answer_received."
-        )
-        wrapped = f"<system-reminder>\n{reminder_body}\n</system-reminder>"
-        try:
-            self._inject_via_tmux( wrapped, wrap=False )
-        except Exception as e:
-            # T7 listener-injection isolation: failure logs + skips, doesn't crash listener
-            self._log( f"{self.LOG_PREFIX} commons_question_received inject failed: {e}" )
 
     def _inject_exit_conversation_reminder( self ):
         """
@@ -559,6 +613,10 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Types message text into the CC prompt
             - Presses Enter after 250ms delay
             - CC receives a non-empty prompt and processes it
+            - The text+Enter pair is atomic against any other lock-honoring
+              injector on the same tmux session (F4 injection mutex — two
+              racing injectors previously interleaved keystrokes into
+              "text A, text B, Enter, Enter", silently corrupting delivery)
             - Never raises exceptions (injection failure is non-fatal)
         """
         tmux_session = self._resolve_tmux_session()
@@ -582,26 +640,33 @@ class CCNotificationListener( BaseWebSocketListener ):
                 # Wrap failure is non-fatal — fall through with raw text
                 self._log( f"{self.LOG_PREFIX} speakerphone_wrap failed (passing through unwrapped): {e}" )
 
-        try:
-            # Step 1: Type the message text (literal mode — no key interpretation)
-            subprocess.run(
-                [ "tmux", "send-keys", "-t", tmux_session, "-l", message_text ],
-                capture_output=True, timeout=2
-            )
+        # F4 injection mutex: serialize the 2-step send-keys sequence per tmux
+        # session so concurrent injections cannot interleave. Fail-open — a
+        # lock failure logs but never blocks injection.
+        with tmux_injection_lock( tmux_session ) as lock_held:
+            if not lock_held:
+                self._log( f"{self.LOG_PREFIX} injection lock unavailable -- injecting unlocked" )
 
-            # Step 2: Brief delay — tmux needs separation between text and Enter
-            time.sleep( 0.25 )
+            try:
+                # Step 1: Type the message text (literal mode — no key interpretation)
+                subprocess.run(
+                    [ "tmux", "send-keys", "-t", tmux_session, "-l", message_text ],
+                    capture_output=True, timeout=2
+                )
 
-            # Step 3: Press Enter separately
-            subprocess.run(
-                [ "tmux", "send-keys", "-t", tmux_session, "Enter" ],
-                capture_output=True, timeout=2
-            )
+                # Step 2: Brief delay — tmux needs separation between text and Enter
+                time.sleep( 0.25 )
 
-            self._log( f"{self.LOG_PREFIX} Injected message via tmux '{tmux_session}'" )
+                # Step 3: Press Enter separately
+                subprocess.run(
+                    [ "tmux", "send-keys", "-t", tmux_session, "Enter" ],
+                    capture_output=True, timeout=2
+                )
 
-        except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ) as e:
-            self._log( f"{self.LOG_PREFIX} tmux injection failed: {e}" )
+                self._log( f"{self.LOG_PREFIX} Injected message via tmux '{tmux_session}'" )
+
+            except ( subprocess.TimeoutExpired, FileNotFoundError, OSError ) as e:
+                self._log( f"{self.LOG_PREFIX} tmux injection failed: {e}" )
 
     def _send_gist_response( self, notification ):
         """
@@ -691,6 +756,15 @@ class CCNotificationListener( BaseWebSocketListener ):
                 "notification_id" : notification.get( "id", "" ),
                 "timestamp"     : notification.get( "timestamp", datetime.now( timezone.utc ).isoformat() ),
                 "buffered_at"   : datetime.now( timezone.utc ).isoformat(),
+                # Direction + DM provenance/threading (notification-native AI↔AI, §6a).
+                # format_voice_context branches on `direction`: an ai_to_ai entry is
+                # drained into a peer-DM envelope (persona/icon/ids) instead of a
+                # "[Voice]:" line. Defaults keep voice entries shaped as before.
+                "direction"      : notification.get( "direction", "human_to_ai" ),
+                "sender_persona" : notification.get( "sender_persona" ),
+                "sender_icon"    : notification.get( "sender_icon" ),
+                "reply_to"       : notification.get( "reply_to" ),
+                "thread_id"      : notification.get( "thread_id" ),
             }
 
             with open( self.buffer_path, "a" ) as f:

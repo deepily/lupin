@@ -29,7 +29,7 @@ class TestClaudeCodeCard:
         Ensures:
             - CC card element present
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-cc-card" ).count() > 0
@@ -44,7 +44,7 @@ class TestClaudeCodeCard:
         Ensures:
             - Project select element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-cc-project-select" ).count() > 0
@@ -59,7 +59,7 @@ class TestClaudeCodeCard:
         Ensures:
             - Prompt textarea exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-cc-prompt-textarea" ).count() > 0
@@ -74,7 +74,7 @@ class TestClaudeCodeCard:
         Ensures:
             - Task type select element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-cc-task-type-select" ).count() > 0
@@ -89,7 +89,7 @@ class TestClaudeCodeCard:
         Ensures:
             - Dry-run checkbox element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-cc-dry-run-checkbox" ).count() > 0
@@ -104,7 +104,7 @@ class TestClaudeCodeCard:
         Ensures:
             - Submit button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-cc-submit-btn" ).count() > 0
@@ -119,7 +119,7 @@ class TestClaudeCodeCard:
         Ensures:
             - STT button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-cc-stt-btn" ).count() > 0
@@ -142,7 +142,7 @@ class TestClaudeCodeCard:
             - INTERACTIVE option exists but is disabled (Q2 FROZEN — visible
               breadcrumb for future return)
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         # Header text
@@ -171,7 +171,7 @@ class TestClaudeCodeCard:
         Ensures:
             - Text can be entered into prompt textarea
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         textarea = logged_in_page.get_by_test_id( "notifications-cc-prompt-textarea" )
@@ -197,7 +197,7 @@ class TestResearchCard:
         Ensures:
             - Topic input element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-research-topic-input" ).count() > 0
@@ -212,7 +212,7 @@ class TestResearchCard:
         Ensures:
             - Budget input element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-research-budget-input" ).count() > 0
@@ -227,7 +227,7 @@ class TestResearchCard:
         Ensures:
             - Podcast checkbox element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-research-podcast-checkbox" ).count() > 0
@@ -242,7 +242,7 @@ class TestResearchCard:
         Ensures:
             - Dry-run checkbox and submit button exist
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-research-dry-run-checkbox" ).count() > 0
@@ -258,7 +258,7 @@ class TestResearchCard:
         Ensures:
             - STT button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-research-stt-btn" ).count() > 0
@@ -273,7 +273,7 @@ class TestResearchCard:
         Ensures:
             - Presentation checkbox element exists alongside podcast checkbox
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-research-presentation-checkbox" ).count() > 0
@@ -288,7 +288,7 @@ class TestResearchCard:
         Ensures:
             - research_to_presentation option exists in mode dropdown
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.locator( "#agent-mode" )
@@ -313,7 +313,7 @@ class TestPodcastCard:
         Ensures:
             - Source input element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-podcast-source-input" ).count() > 0
@@ -328,7 +328,7 @@ class TestPodcastCard:
         Ensures:
             - Dry-run checkbox and submit button exist
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-podcast-dry-run-checkbox" ).count() > 0
@@ -344,7 +344,7 @@ class TestPodcastCard:
         Ensures:
             - STT button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-podcast-stt-btn" ).count() > 0
@@ -367,7 +367,7 @@ class TestSWETeamCard:
         Ensures:
             - Task textarea element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-swe-task-textarea" ).count() > 0
@@ -382,7 +382,7 @@ class TestSWETeamCard:
         Ensures:
             - Budget and timeout input elements exist
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-swe-budget-input" ).count() > 0
@@ -398,7 +398,7 @@ class TestSWETeamCard:
         Ensures:
             - Trust mode select element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-swe-trust-mode-select" ).count() > 0
@@ -413,7 +413,7 @@ class TestSWETeamCard:
         Ensures:
             - Dry-run checkbox and submit button exist
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-swe-dry-run-checkbox" ).count() > 0
@@ -429,7 +429,7 @@ class TestSWETeamCard:
         Ensures:
             - STT button element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-swe-stt-btn" ).count() > 0
@@ -452,7 +452,7 @@ class TestTestSuiteCard:
         Ensures:
             - Test suite card container element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-test-suite-card" ).count() > 0
@@ -467,7 +467,7 @@ class TestTestSuiteCard:
         Ensures:
             - Types select element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-test-suite-types-select" ).count() > 0
@@ -482,7 +482,7 @@ class TestTestSuiteCard:
         Ensures:
             - Pytest args input element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-test-suite-pytest-args-input" ).count() > 0
@@ -497,7 +497,7 @@ class TestTestSuiteCard:
         Ensures:
             - Dry-run checkbox and submit button exist
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-test-suite-dry-run-checkbox" ).count() > 0
@@ -513,7 +513,7 @@ class TestTestSuiteCard:
         Ensures:
             - Schedule checkbox element exists
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         assert logged_in_page.get_by_test_id( "notifications-test-suite-schedule-checkbox" ).count() > 0
@@ -528,7 +528,7 @@ class TestTestSuiteCard:
         Ensures:
             - test_suite option exists in mode dropdown
         """
-        logged_in_page.goto( f"{BASE_URL}/app/notifications" )
+        logged_in_page.goto( f"{BASE_URL}/app/notifications?classic=1" )
         logged_in_page.wait_for_load_state( "networkidle" )
 
         mode_select = logged_in_page.get_by_test_id( "notifications-qa-mode-select" )

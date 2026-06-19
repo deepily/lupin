@@ -58,13 +58,13 @@ TFE — can trigger automated remediation on failure.
 
 | Type | Script path | Default timeout | Typical runtime | Test count |
 |------|-------------|-----------------|-----------------|------------|
-| `unit` | `src/tests/run-unit-tests.sh` | 180s (3 min) | ~2 min | ~3100 tests |
-| `smoke` | `src/tests/run-smoke-tests.sh` | 600s (10 min) | ~2 min | ~50 tests |
+| `unit` | `src/tests/run-unit-tests.sh` | 300s (5 min) | ~3 min | ~6700 tests |
+| `smoke` | `src/tests/run-smoke-tests.sh` | 3600s (60 min) | ~40 min | ~340 tests (excludes destructive `test_proxy_integration.py` — own :8000 venue) |
 | `smoke_direct` | `src/tests/run-smoke-direct.sh` | 1200s (20 min) | ~10-20 min | Phase D live pipeline |
 | `websocket` | `src/scripts/run-websocket-smoke-tests.sh` | 300s (5 min) | ~3 min | ~50 tests |
-| `integration` | `src/tests/run-integration-tests.sh` | 1200s (20 min) | ~5-10 min | ~43 tests |
-| `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 2400s (40 min) | ~17 min | ~328 tests |
-| `all` | `src/tests/run-all-tests.sh` | 3600s (60 min) | ~25-35 min | Full pyramid |
+| `integration` | `src/tests/run-integration-tests.sh` | 2000s (33 min) | ~17 min | ~358 tests (320 passed + 38 skipped on ts-b51e63c9) |
+| `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 3000s (50 min) | ~34 min | ~593 tests |
+| `all` | `src/tests/run-all-tests.sh` | 3600s (60 min) | ~1.5-2 h across legs | Full pyramid (expands into per-leg runs, each with its own budget) |
 | `presentation` | `src/tests/run-presentation-regression.sh` | 1800s (30 min) | ~10-30 min | Presentation regression |
 
 **Source**: `SUITE_SCRIPTS` and `SUITE_TIMEOUTS_SECONDS` dicts at the top of
@@ -207,7 +207,7 @@ authenticated Lupin API.
 to find your job. Or watch the Activity Log in the web UI for real-time updates.
 
 **Full endpoint schema**: available via the interactive Swagger UI at `/docs` on
-the running server. The schema lives in `src/fastapi_app/main.py`'s router
+the running server. The schema lives in `src/lupin_app/main.py`'s router
 registration.
 
 ### Direct invocation via `/api/push`

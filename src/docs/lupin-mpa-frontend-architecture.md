@@ -43,7 +43,7 @@ Lupin's frontend is a **multi-page application** (MPA) served as static HTML fil
 ## Directory Structure
 
 ```
-src/fastapi_app/static/
+src/lupin_app/static/
 ├── css/                                    # Global stylesheets
 │   ├── lupin-base.css                      # Foundation: reset, body, buttons, messages, spinner, utilities
 │   ├── lupin-nav.css                       # Top navigation bar (fixed, responsive)
@@ -257,7 +257,7 @@ Colors used consistently across layers:
 
 ## Auth System (auth.js)
 
-**File**: `src/fastapi_app/static/html/auth/js/auth.js` (459 lines, 16 functions)
+**File**: `src/lupin_app/static/html/auth/js/auth.js` (459 lines, 16 functions)
 
 The authentication utility library. Loaded by every authenticated page. All functions are global (no module system).
 
@@ -342,7 +342,7 @@ sequenceDiagram
 
 ## Navigation (lupin-nav.js)
 
-**File**: `src/fastapi_app/static/js/lupin-nav.js` (206 lines)
+**File**: `src/lupin_app/static/js/lupin-nav.js` (206 lines)
 
 A **self-contained IIFE** that injects a responsive top navigation bar into every page. Zero dependency on `auth.js` — reads localStorage directly.
 

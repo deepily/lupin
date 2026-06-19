@@ -5,12 +5,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
-import { createSenderStore } from "../../../fastapi_app/static/js/multiplexer/stores/SenderStore";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createSenderStore } from "../../../lupin_app/static/js/multiplexer/stores/SenderStore";
 import type {
   LupinEvent,
   StoreSendersChangedPayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -242,4 +242,49 @@ test("voice_persona_assigned with no voice_id / icon / color uses empty-string f
   assert.equal(rec.voice_persona?.voice_id, "", "voice_id fallback");
   assert.equal(rec.voice_persona?.icon, "", "icon fallback");
   assert.equal(rec.voice_persona?.color, "", "color fallback");
+});
+
+// ---------------------------------------------------------------------------
+// session_reaped — reap → focus-bar badge drop (2026-06-05)
+// See: src/rnd/v0.1.8/2026.06.05-reap-event-focus-bar-and-broadcast-refresh.md
+// ---------------------------------------------------------------------------
+
+test("session_reaped on a tracked sender: removes record + emits removed", () => {
+  const { bus, store, events } = setup();
+  // Sender first becomes known via a regular notification.
+  emitNotification(bus, { type: "task", sender_id: "reapme@x", timestamp: "2026-06-05T10:00:00Z" });
+  assert.ok(store.get("reapme@x"), "precondition: sender tracked");
+
+  emitNotification(bus, { type: "session_reaped", sender_id: "reapme@x" });
+
+  assert.equal(store.get("reapme@x"), undefined, "record removed from store");
+  assert.ok(!store.list().some(s => s.sender_id === "reapme@x"), "absent from list()");
+  const removed = events.find(e => e.payload.changeKind === "removed");
+  assert.ok(removed, "emits a removed change");
+  assert.equal(removed!.payload.sender_id, "reapme@x");
+});
+
+test("session_reaped on an untracked sender: no-op, no removed emission", () => {
+  const { bus, store, events } = setup();
+  // Never tracked — a worker that never sent a notification has no badge.
+  emitNotification(bus, { type: "session_reaped", sender_id: "ghost@x" });
+
+  assert.equal(store.get("ghost@x"), undefined, "still absent");
+  assert.ok(
+    !events.some(e => e.payload.changeKind === "removed"),
+    "no spurious removed emission for an untracked sender",
+  );
+});
+
+test("session_reaped removes ONLY the named sender, leaving others intact", () => {
+  const { bus, store } = setup();
+  emitNotification(bus, { type: "task", sender_id: "keep@x", timestamp: "2026-06-05T10:00:00Z" });
+  emitNotification(bus, { type: "task", sender_id: "reap@x", timestamp: "2026-06-05T10:01:00Z" });
+
+  emitNotification(bus, { type: "session_reaped", sender_id: "reap@x" });
+
+  assert.equal(store.get("reap@x"), undefined, "reaped sender gone");
+  const kept = store.get("keep@x");
+  assert.ok(kept, "other sender untouched");
+  assert.equal(kept!.unread_count, 1, "session_reaped does not bump another sender's unread");
 });

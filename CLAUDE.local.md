@@ -25,14 +25,15 @@ the user to try the software — YOU must:
    and not budget approval. Rules:
    - :7999 (dev) — unrestricted. AI runs smoke, regressions, ad-hoc
      probes without asking.
-   - :8000 (test) — all non-unit tests run in monopolize mode, one at
-     a time. NEVER inject via ad-hoc API / curl / CLI (side-door
-     injection collides with in-flight scheduled tests and poisons both
-     runs). Submit ONLY via /api/test-suite/submit with a scheduled_at
-     that does not overlap other scheduled tests. Ask the user first
-     so they can confirm the slot is clean — the user has visibility
-     into the schedule that the AI does not. The ask is slot
-     availability, never budget approval.
+   - :8000 (test) — monopolize mode, one job at a time. A verified-IDLE
+     :8000 (nothing running, nothing scheduled) is bounce-then-schedule
+     SELF-AUTHORIZED (2026-06-06) — the user is NO LONGER a gate.
+     list-pending FIRST: empty queue → bounce + schedule + run now;
+     something already scheduled → place yours AFTER it (never jump an
+     expected-next run); something RUNNING → queue behind, no bounce.
+     Only KILLING a live in-flight job needs the user's word. NEVER inject
+     via ad-hoc API / curl / CLI (side-door collides with scheduled runs
+     and poisons both). Submit ONLY via /api/test-suite/submit.
 
 ## Technology Warnings
 - Flask Is deprecated. DO NOT use, ever!

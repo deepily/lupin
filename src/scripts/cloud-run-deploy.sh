@@ -22,7 +22,7 @@
 #      - roles/storage.objectViewer (read)
 #      - roles/storage.objectCreator (write)
 #   3. Grant permissions (use gcloud storage, NOT gsutil to avoid Python env conflicts):
-#      PROJECT_NUMBER=$(gcloud projects describe hello-world-foo-423219 --format='value(projectNumber)')
+#      PROJECT_NUMBER=$(gcloud projects describe "$LUPIN_GCP_PROJECT_ID" --format='value(projectNumber)')
 #      SERVICE_ACCOUNT="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
 #      gcloud storage buckets add-iam-policy-binding gs://lupin-lancedb-test \
 #        --member="serviceAccount:$SERVICE_ACCOUNT" \
@@ -44,9 +44,9 @@
 
 set -e  # Exit on any error
 
-# Configuration
-PROJECT_ID="hello-world-foo-423219"
-REGION="us-central1"
+# Configuration — PROJECT_ID / REGION / REGISTRY / AR_REPO resolved by the
+# shared resolver, which fails loud if LUPIN_GCP_PROJECT_ID is unset.
+source "$( dirname "$0" )/cloud-run-config.sh"
 SERVICE_NAME="lupin"
 IMAGE_VERSION="${1:-latest}"
 PORT="${2:-8080}"
@@ -61,10 +61,12 @@ case "$ENVIRONMENT" in
     testing)
         CONFIG_BLOCK="Lupin:+Testing-GCS"
         LUPIN_ENV="testing"
+        CLOUD_BACKED="true"   # GCP test env runs on Cloud SQL + GCS
         ;;
     production)
         CONFIG_BLOCK="Lupin:+Production"
         LUPIN_ENV="production"
+        CLOUD_BACKED="true"
         ;;
     *)
         echo "❌ ERROR: Invalid environment '$ENVIRONMENT'"
@@ -74,7 +76,7 @@ case "$ENVIRONMENT" in
 esac
 
 # Build ConfigurationManager CLI args
-CONFIG_MGR_ARGS="config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=$CONFIG_BLOCK"
+CONFIG_MGR_ARGS="config_path=/var/lupin/src/conf/lupin-app.ini splainer_path=/var/lupin/src/conf/lupin-app-splainer.ini config_block_id=$CONFIG_BLOCK"
 
 echo "================================================================"
 echo "  Lupin Cloud Run - Deployment"
@@ -94,12 +96,12 @@ echo ""
 
 # Verify image exists
 echo "[1/3] Verifying Docker image exists..."
-if ! gcloud container images describe gcr.io/$PROJECT_ID/lupin:$IMAGE_VERSION --project=$PROJECT_ID > /dev/null 2>&1; then
-    echo "❌ ERROR: Image gcr.io/$PROJECT_ID/lupin:$IMAGE_VERSION not found"
+if ! gcloud artifacts docker images describe $REGISTRY/$PROJECT_ID/$AR_REPO/lupin:$IMAGE_VERSION > /dev/null 2>&1; then
+    echo "❌ ERROR: Image $REGISTRY/$PROJECT_ID/$AR_REPO/lupin:$IMAGE_VERSION not found"
     echo "Run ./src/scripts/cloud-run-build.sh first"
     exit 1
 fi
-echo "✓ Image found in GCR"
+echo "✓ Image found in Artifact Registry"
 echo ""
 
 # Verify secret exists
@@ -116,11 +118,11 @@ echo ""
 echo "[3/3] Deploying to Cloud Run..."
 echo ""
 echo "Deploying with configuration:"
-echo "  • Image: gcr.io/$PROJECT_ID/lupin:$IMAGE_VERSION"
+echo "  • Image: $REGISTRY/$PROJECT_ID/$AR_REPO/lupin:$IMAGE_VERSION"
 echo "  • Port: $PORT"
 echo "  • Memory: $MEMORY, CPU: $CPU"
 echo "  • Secret mount: /secrets/notification-api-key"
-echo "  • Environment: LUPIN_ROOT=/app, LUPIN_ENV=$LUPIN_ENV"
+echo "  • Environment: LUPIN_ROOT=/var/lupin, LUPIN_ENV=$LUPIN_ENV, LUPIN_CLOUD_BACKED=$CLOUD_BACKED"
 echo "  • Config Block: $CONFIG_BLOCK"
 echo "  • ConfigManager Args: $CONFIG_MGR_ARGS"
 echo ""
@@ -128,7 +130,7 @@ echo ""
 gcloud run deploy $SERVICE_NAME \
     --project=$PROJECT_ID \
     --region=$REGION \
-    --image=gcr.io/$PROJECT_ID/lupin:$IMAGE_VERSION \
+    --image=$REGISTRY/$PROJECT_ID/$AR_REPO/lupin:$IMAGE_VERSION \
     --platform=managed \
     --allow-unauthenticated \
     --port=$PORT \
@@ -138,7 +140,7 @@ gcloud run deploy $SERVICE_NAME \
     --min-instances=1 \
     --max-instances=1 \
     --set-secrets="/secrets/notification-api-key=$SECRET_NAME:latest" \
-    --set-env-vars="LUPIN_ROOT=/app,LUPIN_ENV=$LUPIN_ENV,LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_ARGS"
+    --set-env-vars="LUPIN_ROOT=/var/lupin,LUPIN_ENV=$LUPIN_ENV,LUPIN_CLOUD_BACKED=$CLOUD_BACKED,LUPIN_CONFIG_MGR_CLI_ARGS=$CONFIG_MGR_ARGS"
 
 echo ""
 echo "✓ Deployment complete"

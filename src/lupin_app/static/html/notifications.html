@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Notifications</title>
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=20260530c">
+    <link rel="stylesheet" href="/static/css/lupin-nav.css">
+    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260512a">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260617a">
+</head>
+<body>
+    <!-- Master-detail two-pane shell (2026-05-21 — see
+         src/rnd/v0.1.7/2026.05.21-master-detail-two-pane-layout-experiment.md).
+         In vertical mode (default), .content-shell + .left-column are no-op
+         block-layout pass-throughs — everything looks like the legacy single-column
+         page. In horizontal mode (body[data-layout-mode="horizontal"]),
+         .content-shell becomes flex-row: left column (toolbar + container) holds
+         2/3 width; .content-pane on the right holds 1/3 width for read-only
+         abstracts + iframe-embedded doc views. Toggled via the layout-mode-btn
+         in #section-toolbar. -->
+    <div class="content-shell">
+    <div class="left-column">
+    <!-- Floating Section Visibility Toolbar -->
+    <div class="section-toolbar" id="section-toolbar">
+        <!-- Layout-mode toggle (2026-05-21). First child; semantically distinct
+             from the section-visibility toggles below — uses a different class
+             (`layout-mode-btn`, NOT `toolbar-btn`) and NO `data-section` attr,
+             so the section-visibility click dispatcher doesn't pick it up. -->
+        <button class="layout-mode-btn"
+                id="layout-mode-toggle"
+                data-testid="notifications-layout-mode-toggle"
+                type="button"
+                title="Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.">⇆</button>
+        <button class="toolbar-btn active" data-section="section-qa" data-testid="notifications-toolbar-qa" title="Q&A Interface">❓</button>
+        <button class="toolbar-btn active" data-section="section-job-submit" data-testid="notifications-toolbar-jobs" title="Submit Agentic Jobs">📝</button>
+        <button class="toolbar-btn active" data-section="action-required-section" data-testid="notifications-toolbar-action" title="Action Required">⚠️</button>
+        <button class="toolbar-btn active" data-section="tts-queue-section" data-testid="notifications-toolbar-tts" title="TTS Queue">🔊</button>
+        <button class="toolbar-btn active" data-section="section-notifications" data-testid="notifications-toolbar-notifs" title="Notifications">💬</button>
+        <button class="toolbar-btn active" data-section="section-fleet-status" data-testid="fleet-status-toolbar-btn" title="Fleet Status">🛰️</button>
+        <button class="toolbar-btn active" data-section="section-task-list" data-testid="task-list-toolbar-btn" title="Task List">🗒️</button>
+        <!-- Task-list per-persona accordion controls (2026-06-17). DISTINCT class
+             (task-accordion-btn, NOT toolbar-btn) + NO data-section so the
+             section-visibility click dispatcher ignores them — these are actions
+             (collapse/expand every owner group), not section-visibility toggles. -->
+        <button class="task-accordion-btn" id="task-list-collapse-all" data-testid="task-list-collapse-all-btn" type="button" title="Collapse all task owners">⊟</button>
+        <button class="task-accordion-btn" id="task-list-expand-all" data-testid="task-list-expand-all-btn" type="button" title="Expand all task owners">⊞</button>
+        <button class="toolbar-btn active" data-section="filter-settings-section" data-testid="notifications-toolbar-filters" title="Filter Settings (Admin)">⚙️</button>
+        <button class="toolbar-btn active" data-section="section-queues" data-testid="notifications-toolbar-queues" title="Job Queues">📋</button>
+        <button class="toolbar-btn active" data-section="section-time-saved" data-testid="notifications-toolbar-time" title="Time Saved">⏱️</button>
+        <button class="toolbar-btn active" data-section="section-status" data-testid="notifications-toolbar-status" title="System Status">📊</button>
+        <button class="toolbar-btn active" data-section="section-direct-tts" data-testid="notifications-toolbar-direct-tts" title="Direct TTS Test">🔧</button>
+        <button class="toolbar-btn active" data-section="section-debug" data-testid="notifications-toolbar-debug" title="Debug Info">🐛</button>
+    </div>
+
+    <div class="container">
+        <!-- WS reconnect circuit-breaker banner (Phase 3 of the WS circuit-breaker
+             milestone). Hidden until either WSChannel emits `ws-circuit-open`.
+             aria-live="polite" on the text; role="alert" on the container so
+             screen readers announce on transition without stealing focus. -->
+        <div id="ws-circuit-banner" class="ws-circuit-banner" hidden role="alert" data-testid="ws-circuit-banner">
+            <span class="ws-circuit-banner-text" aria-live="polite" data-reason="default" data-testid="ws-circuit-banner-text">
+                Connection lost — server unreachable after repeated attempts. Check the network, then click Retry now.
+            </span>
+            <span class="ws-circuit-banner-dev-hint" hidden>
+                (Dev tip: if you're using <code>ssh -L</code>, check whether the tunnel is still alive or has hit "Too many open files".)
+            </span>
+            <button type="button" id="ws-circuit-retry-btn" class="ws-circuit-retry-btn" data-testid="ws-circuit-retry-btn">
+                Retry now
+            </button>
+        </div>
+
+        <h2><span id="env-label"></span>Notifications <span id="clock"></span></h2>
+        
+        <!-- Q&A Section -->
+        <div class="collapsible-section" id="section-qa">
+            <div class="section-header" onclick="toggleSection('qa-section')">
+                <h3>Q&A Interface</h3>
+                <button class="toggle-button" id="qa-toggle">▼</button>
+            </div>
+            <div class="section-content" id="qa-section">
+                <!-- Agent Mode Selector -->
+                <div class="mode-selector-container" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 8px 12px; background: #f8f9fa; border-radius: 4px;">
+                    <label for="agent-mode" style="font-size: 13px; font-weight: 500; color: #495057;">Agent Mode:</label>
+                    <select id="agent-mode" data-testid="notifications-qa-mode-select" class="agent-mode-select" style="padding: 6px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; min-width: 150px;">
+                        <option value="system" selected>System (Auto-Route)</option>
+                        <optgroup label="Quick Agents">
+                            <option value="math">Math Agent</option>
+                            <option value="calendar">Calendar</option>
+                            <option value="weather">Weather</option>
+                            <option value="receptionist">Receptionist</option>
+                            <option value="todo">Todo List</option>
+                            <option value="datetime">Date & Time</option>
+                            <option value="calculator">Calculator</option>
+                        </optgroup>
+                        <optgroup label="Agentic Processes">
+                            <option value="deep_research">Deep Research</option>
+                            <option value="podcast">Podcast Generator</option>
+                            <option value="research_to_podcast">Research to Podcast</option>
+                            <option value="claude_code">Claude Code</option>
+                            <option value="swe_team">SWE Team</option>
+                            <option value="presentation">Presentation Generator</option>
+                            <option value="research_to_presentation">Research to Presentation</option>
+                            <option value="test_suite">Test Suite</option>
+                        </optgroup>
+                    </select>
+                    <span id="mode-badge" class="mode-badge" style="display: none; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; background: #0d6efd; color: white; cursor: pointer;" title="Click to return to System mode">
+                        <!-- Mode name will be inserted here -->
+                    </span>
+                    <span id="mode-status" style="font-size: 12px; color: #6c757d; margin-left: auto;">
+                        Auto-routing enabled
+                    </span>
+                </div>
+
+                <div class="form-group" style="display: flex; align-items: center; gap: 12px;">
+                    <button id="qa-stt-button" data-testid="notifications-qa-stt-btn" type="button" class="qa-stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                    <input type="text" id="qa-input" data-testid="notifications-qa-input" placeholder="Type your question here..." style="flex: 1; line-height: 1;" />
+                    <select id="tts-mode" data-testid="notifications-qa-tts-mode-select" style="width: auto; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                        <option value="instant" selected>Instant (11labs Streaming)</option>
+                        <option value="reliable">Reliable (OpenAI Batch)</option>
+                    </select>
+                    <button id="submit-qa" data-testid="notifications-qa-submit-btn" type="button" style="white-space: nowrap;">
+                        Submit Q&A
+                        <span id="submit-loading" class="loading" style="display: none;">
+                            <span class="spinner"></span>
+                        </span>
+                    </button>
+                </div>
+                <div id="qa-metrics" data-testid="notifications-qa-metrics" class="qa-metrics" style="display: none;">
+                    <span class="metric"><span class="metric-label">TTT:</span> <span id="metric-ttt">--</span></span>
+                    <span class="metric"><span class="metric-label">TTFA:</span> <span id="metric-ttfa">--</span></span>
+                    <span class="metric"><span class="metric-label">RTT:</span> <span id="metric-rtt">--</span></span>
+                </div>
+                <div id="response-text">No response yet...</div>
+            </div>
+        </div>
+
+        <!-- Job Submission Section - All Agentic Job Dispatchers -->
+        <div class="collapsible-section" id="section-job-submit">
+            <div class="section-header" onclick="toggleSection('job-submit-section')">
+                <h3>📝 Submit Agentic Jobs</h3>
+                <button class="toggle-button" id="job-submit-toggle">▼</button>
+            </div>
+            <div class="section-content" id="job-submit-section">
+
+                <!-- Claude Code Dispatcher Card -->
+                <div class="job-submit-card" id="claude-code-submit-card" data-testid="notifications-cc-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('claude-code-section')">
+                        <h4>🤖 Submit Claude Code Task</h4>
+                        <button class="toggle-button" id="claude-code-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="claude-code-section">
+                        <div class="form-group" style="display: flex; gap: 12px; margin-bottom: 12px;">
+                            <div style="flex: 0 0 auto;">
+                                <label for="cc-project" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Project:</label>
+                                <select id="cc-project" data-testid="notifications-cc-project-select" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                    <option value="lupin" selected>lupin</option>
+                                    <option value="cosa">cosa</option>
+                                    <option value="plan">plan</option>
+                                </select>
+                            </div>
+                            <div style="flex: 1;">
+                                <label for="cc-prompt" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Task:</label>
+                                <div class="cc-prompt-container">
+                                    <button type="button" id="cc-stt-button" data-testid="notifications-cc-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                    <textarea id="cc-prompt" data-testid="notifications-cc-prompt-textarea" rows="2" placeholder="Enter task prompt..." style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical;"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <label for="cc-task-type" style="font-size: 12px; color: #666;">Task:</label>
+                                <select id="cc-task-type" data-testid="notifications-cc-task-type-select" style="padding: 6px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <option value="BOUNDED" selected>Bounded</option>
+                                    <option value="INTERACTIVE" disabled title="Returns when ClaudeCodeJob.inject/interrupt/end_session ship — see TODO.md 'CC DISPATCH RETIREMENT — Follow-ups'">Interactive (coming back later)</option>
+                                </select>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <input type="checkbox" id="cc-dry-run" data-testid="notifications-cc-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run</span>
+                            </div>
+                            <button id="cc-submit" data-testid="notifications-cc-submit-btn" type="button" style="padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                🚀 Submit
+                                <span id="cc-loading" class="loading" style="display: none;">
+                                    <span class="spinner"></span>
+                                </span>
+                            </button>
+                        </div>
+
+                        <div id="cc-submit-status" data-testid="notifications-cc-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-cc-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="cc-schedule" data-testid="notifications-cc-schedule-checkbox" onchange="document.getElementById('cc-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="cc-scheduled-time" data-testid="notifications-cc-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="cc-monopolize" data-testid="notifications-cc-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Research Submission Card -->
+                <div class="job-submit-card" id="research-submit-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('research-submit-section')">
+                        <h4>🔬 Submit Research Job</h4>
+                        <button class="toggle-button" id="research-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="research-submit-section">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="research-topic" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Topic:</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" id="research-stt-button" data-testid="notifications-research-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="research-topic" data-testid="notifications-research-topic-input" placeholder="Enter your research question..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                        </div>
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px;">
+                            <div>
+                                <label for="research-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
+                                <input type="number" id="research-budget" data-testid="notifications-research-budget-input" value="3.00" min="0.50" max="20.00" step="0.50" style="width: 80px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="research-with-podcast" data-testid="notifications-research-podcast-checkbox" />
+                                <span style="font-size: 13px;">Also generate podcast from research</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="research-with-presentation" data-testid="notifications-research-presentation-checkbox" />
+                                <span style="font-size: 13px;">Also generate presentation from research</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="research-dry-run" data-testid="notifications-research-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-research-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="research-schedule" data-testid="notifications-research-schedule-checkbox" onchange="document.getElementById('research-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="research-scheduled-time" data-testid="notifications-research-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="research-monopolize" data-testid="notifications-research-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button id="submit-research-job" data-testid="notifications-research-submit-btn" type="button" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            🚀 Submit Research Job
+                            <span id="research-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="research-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- Podcast Submission Card -->
+                <div class="job-submit-card" id="podcast-submit-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('podcast-submit-section')">
+                        <h4>🎙️ Generate Podcast from Research</h4>
+                        <button class="toggle-button" id="podcast-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="podcast-submit-section">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="podcast-source" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Research Source:</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" id="podcast-stt-button" data-testid="notifications-podcast-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="podcast-source" data-testid="notifications-podcast-source-input" placeholder="Describe your research or paste file path..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <div style="margin-top: 6px; font-size: 11px; color: #888;">
+                                💡 <strong>Smart input:</strong> Describe research → confirm selection | Paste path → generates immediately
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 12px;">
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                <input type="checkbox" id="podcast-dry-run" data-testid="notifications-podcast-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-podcast-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="podcast-schedule" data-testid="notifications-podcast-schedule-checkbox" onchange="document.getElementById('podcast-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="podcast-scheduled-time" data-testid="notifications-podcast-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="podcast-monopolize" data-testid="notifications-podcast-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button id="submit-podcast-job" data-testid="notifications-podcast-submit-btn" type="button" style="padding: 10px 20px; background: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            🎙️ Generate Podcast
+                            <span id="podcast-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="podcast-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- SWE Team Submission Card -->
+                <div class="job-submit-card" id="swe-team-submit-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('swe-submit-section')">
+                        <h4>🛠️ Submit SWE Team Task</h4>
+                        <button class="toggle-button" id="swe-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="swe-submit-section">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="swe-task" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Engineering Task:</label>
+                            <div style="display: flex; gap: 8px; align-items: flex-start;">
+                                <button type="button" id="swe-stt-button" data-testid="notifications-swe-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <textarea id="swe-task" data-testid="notifications-swe-task-textarea" rows="3" placeholder="Describe the engineering task..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; resize: vertical; font-family: inherit;"></textarea>
+                            </div>
+                        </div>
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                            <div>
+                                <label for="swe-budget" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Budget (USD):</label>
+                                <input type="number" id="swe-budget" data-testid="notifications-swe-budget-input" placeholder="no limit" min="0.50" max="100" step="0.50" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <div>
+                                <label for="swe-timeout" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Timeout (seconds):</label>
+                                <input type="number" id="swe-timeout" data-testid="notifications-swe-timeout-input" placeholder="default" min="60" max="7200" step="60" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="swe-dry-run" data-testid="notifications-swe-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                            <div>
+                                <label for="swe-trust-mode" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Trust Mode:</label>
+                                <select id="swe-trust-mode" data-testid="notifications-swe-trust-mode-select" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <option value="">server default</option>
+                                    <option value="disabled">disabled</option>
+                                    <option value="shadow">shadow</option>
+                                    <option value="suggest" selected>suggest</option>
+                                    <option value="active">active</option>
+                                </select>
+                            </div>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-swe-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="swe-schedule" data-testid="notifications-swe-schedule-checkbox" onchange="document.getElementById('swe-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="swe-scheduled-time" data-testid="notifications-swe-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="swe-monopolize" data-testid="notifications-swe-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button id="submit-swe-job" data-testid="notifications-swe-submit-btn" type="button" style="padding: 10px 20px; background: #fd7e14; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            🛠️ Submit SWE Task
+                            <span id="swe-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="swe-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- Presentation Generator Submission Card -->
+                <div class="job-submit-card" id="presentation-submit-card" data-testid="notifications-presentation-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('presentation-submit-section')">
+                        <h4>📊 Generate Presentation from Document</h4>
+                        <button class="toggle-button" id="presentation-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="presentation-submit-section">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label for="presentation-source" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Source Document:</label>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button type="button" id="presentation-stt-button" data-testid="notifications-presentation-stt-btn" class="stt-button" title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <input type="text" id="presentation-source" data-testid="notifications-presentation-source-input" placeholder="Path to markdown or text document..." style="flex: 1; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <div style="margin-top: 6px; font-size: 11px; color: #888;">
+                                💡 <strong>Smart input:</strong> Paste file path to a markdown, text, or research document
+                            </div>
+                        </div>
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                            <div>
+                                <label for="presentation-audience" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Audience:</label>
+                                <select id="presentation-audience" data-testid="notifications-presentation-audience-select" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <option value="general" selected>General</option>
+                                    <option value="beginner">Beginner</option>
+                                    <option value="expert">Expert</option>
+                                    <option value="academic">Academic</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="presentation-duration" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Duration (minutes):</label>
+                                <input type="number" id="presentation-duration" data-testid="notifications-presentation-duration-input" value="15" min="5" max="60" step="5" style="width: 100px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;" />
+                            </div>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="presentation-dry-run" data-testid="notifications-presentation-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-presentation-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="presentation-schedule" data-testid="notifications-presentation-schedule-checkbox" onchange="document.getElementById('presentation-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="presentation-scheduled-time" data-testid="notifications-presentation-scheduled-time" style="display: none;" />
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;" title="When checked, no other jobs will run concurrently with this job">
+                                    <input type="checkbox" id="presentation-monopolize" data-testid="notifications-presentation-monopolize-checkbox" />
+                                    <span style="font-size: 13px;">🔒 Exclusive mode</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button id="submit-presentation-job" data-testid="notifications-presentation-submit-btn" type="button" style="padding: 10px 20px; background: #20c997; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">
+                            📊 Generate Presentation
+                            <span id="presentation-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="presentation-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- Test Suite Submit Card -->
+                <div class="job-submit-card" id="test-suite-submit-card" data-testid="notifications-test-suite-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('test-suite-submit-section')">
+                        <h4>🧪 Run Test Suite</h4>
+                        <button class="toggle-button" id="test-suite-submit-toggle">▶</button>
+                    </div>
+                    <div class="section-content collapsed" id="test-suite-submit-section">
+                        <div class="form-group" style="display: flex; gap: 16px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;">
+                            <div>
+                                <label for="test-suite-types" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Test Suites:</label>
+                                <select id="test-suite-types" data-testid="notifications-test-suite-types-select" onchange="onTestSuiteTypeChange(this.value)" style="padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;">
+                                    <optgroup label="Aggregate">
+                                        <option value="all">All (unit → smoke → websocket → integration → e2e)</option>
+                                        <option value="integration,e2e" selected>Both (Integration + E2E)</option>
+                                    </optgroup>
+                                    <optgroup label="Individual suites">
+                                        <option value="unit">Unit Tests</option>
+                                        <option value="smoke">Smoke Tests (pytest discovery)</option>
+                                        <option value="smoke_direct">Smoke Direct (python-main-style, needs file path)</option>
+                                        <option value="pytest_direct">Pytest Direct (arbitrary pytest file, needs file path)</option>
+                                        <option value="websocket">WebSocket Tests</option>
+                                        <option value="integration">Integration Only</option>
+                                        <option value="e2e">E2E Only</option>
+                                    </optgroup>
+                                    <optgroup label="Combined">
+                                        <option value="unit,smoke">Fast Tier (Unit + Smoke)</option>
+                                        <option value="unit,smoke,websocket">Non-server-hotswap (Unit + Smoke + WebSocket)</option>
+                                    </optgroup>
+                                    <optgroup label="Agentic Regression">
+                                        <option value="presentation">Presentation Regression (render-only + Sonnet)</option>
+                                    </optgroup>
+                                </select>
+                            </div>
+                            <div id="test-suite-file-path-row" style="display: none;" data-testid="notifications-test-suite-file-path-row">
+                                <label for="test-suite-file-path" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Test File Path <span style="color: #dc3545;">*required for smoke_direct / pytest_direct</span>:</label>
+                                <input type="text" id="test-suite-file-path" data-testid="notifications-test-suite-file-path-input" placeholder="src/tests/integration/test_tfe_resume_e2e.py" style="width: 340px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;" />
+                            </div>
+                            <label id="test-suite-fail-fast-row" style="display: none; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;" data-testid="notifications-test-suite-fail-fast-row">
+                                <input type="checkbox" id="test-suite-fail-fast" data-testid="notifications-test-suite-fail-fast-checkbox" />
+                                <span style="font-size: 13px;">⚡ Fail-fast (abort on first failing suite — default is continue-on-failure)</span>
+                            </label>
+                            <div>
+                                <label for="test-suite-pytest-args" style="display: block; font-size: 12px; margin-bottom: 4px; color: #666;">Extra Pytest Args:</label>
+                                <input type="text" id="test-suite-pytest-args" data-testid="notifications-test-suite-pytest-args-input" placeholder="-v -k test_auth  (or --auto-proxy --cost-cap-usd 2.00 for smoke_direct)" style="width: 340px; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px;" />
+                            </div>
+                            <script>
+                                // Test types that accept a file path as the first positional arg.
+                                // Keep this set in sync with FILE_DRIVEN_TEST_TYPES in notifications.js
+                                // and cosa/agents/test_suite/job.py (single source of truth).
+                                const FILE_DRIVEN_TEST_TYPES_HTML = new Set( [ 'smoke_direct', 'pytest_direct' ] );
+
+                                // Visibility toggle for conditional fields based on suite type selection
+                                function onTestSuiteTypeChange( value ) {
+                                    const filePathRow = document.getElementById( 'test-suite-file-path-row' );
+                                    const failFastRow = document.getElementById( 'test-suite-fail-fast-row' );
+                                    filePathRow.style.display = FILE_DRIVEN_TEST_TYPES_HTML.has( value ) ? 'block' : 'none';
+                                    failFastRow.style.display = ( value === 'all' ) ? 'flex' : 'none';
+                                }
+                            </script>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 18px;">
+                                <input type="checkbox" id="test-suite-dry-run" data-testid="notifications-test-suite-dry-run-checkbox" checked />
+                                <span style="font-size: 13px;">🧪 Dry run (simulate only)</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 6px;" title="Per-run override for the TestSuiteCompletionWatchdog. Initial state mirrors the INI default; toggling here applies only to this submission.">
+                                <input type="checkbox" id="test-suite-auto-fix" data-testid="notifications-test-suite-auto-fix-checkbox" />
+                                <span style="font-size: 13px;">🛠️ Auto-fix on failure (TFE)</span>
+                            </label>
+                        </div>
+                        <!-- Scheduling Options -->
+                        <div class="schedule-section" data-testid="notifications-test-suite-schedule-section">
+                            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    <input type="checkbox" id="test-suite-schedule" data-testid="notifications-test-suite-schedule-checkbox" onchange="document.getElementById('test-suite-scheduled-time').style.display = this.checked ? 'inline-block' : 'none'" />
+                                    <span style="font-size: 13px;">📅 Schedule for later</span>
+                                </label>
+                                <input type="datetime-local" id="test-suite-scheduled-time" data-testid="notifications-test-suite-scheduled-time" style="display: none;" />
+                                <span style="font-size: 12px; color: #888;" title="Test suites always run in exclusive mode (DB hot-swap)">🔒 Exclusive mode (always on)</span>
+                            </div>
+                        </div>
+                        <button id="submit-test-suite-job" data-testid="notifications-test-suite-submit-btn" type="button" style="padding: 10px 20px; background: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; margin-top: 8px;">
+                            🧪 Run Tests
+                            <span id="test-suite-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="test-suite-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                    </div>
+                </div>
+
+                <!-- TFE Resume Submit Card (Session 9056c113 — file-path resume) -->
+                <div class="job-submit-card" id="tfe-resume-submit-card" data-testid="notifications-tfe-resume-card">
+                    <div class="job-submit-header">
+                        <h4>🔄 Resume Stalled TFE Job</h4>
+                    </div>
+                    <div class="job-submit-body">
+                        <p style="font-size: 12px; color: #666; margin-bottom: 6px;">
+                            Paste or describe: a job ID (<code>tfe-*</code>), a plan doc path
+                            (<code>*-plan.md</code>), or a description (<em>"the plan from April 12"</em>,
+                            <em>"most recent stalled"</em>).
+                        </p>
+                        <textarea id="tfe-resume-input"
+                                  data-testid="notifications-tfe-resume-input"
+                                  rows="2"
+                                  placeholder="tfe-7c25082a  OR  io/swe-team/plans/.../c1-plan.md  OR  'the stalled one from today'"
+                                  style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 13px; font-family: monospace;"></textarea>
+                        <button id="submit-tfe-resume-job" data-testid="notifications-tfe-resume-submit-btn" type="button" style="padding: 10px 20px; background: #f0ad4e; color: #000; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; margin-top: 8px;">
+                            ▶ Resume
+                            <span id="tfe-resume-loading" class="loading" style="display: none;">
+                                <span class="spinner"></span>
+                            </span>
+                        </button>
+                        <div id="tfe-resume-submit-status" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+                        <div id="tfe-resume-candidates" style="margin-top: 8px; display: none;"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Action Required Section (Response-Required Notifications) - Phase 2.2 always visible -->
+        <div class="collapsible-section" id="action-required-section" data-testid="notifications-action-section">
+            <div class="section-header" onclick="toggleSection('action-required-content')">
+                <h3>⚠️ Action Required: <span id="action-required-count">0</span></h3>
+                <button class="toggle-button" id="action-required-toggle">▼</button>
+            </div>
+            <div class="section-content" id="action-required-content">
+                <!-- Active notification slot (only ONE notification fully displayed at a time) -->
+                <div id="action-required-active-slot" data-testid="notifications-action-active-slot">
+                    <!-- Full-size active notification renders here -->
+                </div>
+
+                <!-- Pending queue (minimized notifications waiting their turn) -->
+                <div id="action-required-pending-queue" data-testid="notifications-action-pending-queue">
+                    <!-- Minimized notification one-liners render here -->
+                </div>
+
+                <!-- Empty state (shown when both active and queue are empty) -->
+                <div id="action-required-empty" class="action-required-empty-state">
+                    ✓ No pending actions
+                </div>
+            </div>
+        </div>
+
+        <!-- TTS Playback Queue - unified for all notification types -->
+        <div class="collapsible-section" id="tts-queue-section" style="display: none;">
+            <div class="section-header tts-queue-header" onclick="toggleSection('tts-queue-content')">
+                <h3>🔊 Playing: <span id="tts-queue-count">0</span></h3>
+
+                <!-- Keep existing resume button for Focus Mode -->
+                <button id="tts-resume-btn" class="tts-resume-button" style="display: none;"
+                        onclick="event.stopPropagation(); window.notificationsUI.toggleTTSFocusMode()">
+                    ▶️ Resume
+                </button>
+
+                <!-- Pause/Play Controls - RIGHT of title, before toggle arrow -->
+                <div class="tts-playback-controls" onclick="event.stopPropagation();">
+                    <button id="tts-pause-btn" data-testid="notifications-tts-pause-btn" class="tts-control-button disabled"
+                            title="Pause playback"
+                            onclick="window.notificationsUI.pauseTTS()">⏸️</button>
+                    <button id="tts-play-btn" data-testid="notifications-tts-play-btn" class="tts-control-button disabled"
+                            title="Resume playback"
+                            onclick="window.notificationsUI.resumeTTS()">▶️</button>
+                </div>
+
+                <button id="tts-clear-all-btn" data-testid="notifications-tts-clear-btn" class="tts-clear-all-button"
+                        style="display: none;" disabled
+                        title="Clear all pending queue items"
+                        onclick="event.stopPropagation(); window.notificationsUI.clearTTSQueue()">
+                    Clear
+                </button>
+
+                <button class="toggle-button" id="tts-queue-toggle">▼</button>
+            </div>
+            <div class="section-content" id="tts-queue-content">
+                <!-- Currently playing TTS -->
+                <div id="tts-active-slot" data-testid="notifications-tts-active-slot"></div>
+
+                <!-- Pending queue (minimized cards waiting their turn) -->
+                <div id="tts-pending-queue" data-testid="notifications-tts-pending-queue"></div>
+
+                <!-- Empty state (shown when queue is empty) -->
+                <div id="tts-queue-empty" class="tts-queue-empty-state">
+                    🔇 Nothing in the queue
+                </div>
+            </div>
+        </div>
+
+        <!-- Notifications Section -->
+        <div class="collapsible-section" id="section-notifications">
+            <div class="section-header" onclick="toggleSection('notifications-section')">
+                <h3>Claude Code Notifications: <span id="notifications-count">0</span></h3>
+                <span class="filter-mode-badge" id="notifications-filter-badge" style="display: none;"
+                      data-testid="notifications-filter-badge" title="Current filter mode">👤 Mine</span>
+                <!-- TTS preview-fraction slider (relocated 2026-05-14 evening from #cc-session-strip,
+                     then moved left of history dropdown per Rick's tweak). Right-aligned via
+                     margin-left: auto on this container; everything to its right (history dropdown,
+                     Clear All, toggle button) follows in DOM order. event.stopPropagation() prevents
+                     drag from toggling the accordion. See src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md -->
+                <div class="cc-tts-fraction-control"
+                     onclick="event.stopPropagation();"
+                     style="margin-left: auto;"
+                     title="Percentage of high-priority notification text rendered as TTS audio. 0% = silent; 100% = full message.">
+                    <label for="cc-tts-fraction-slider" class="cc-tts-fraction-label">TTS:</label>
+                    <input type="range"
+                           id="cc-tts-fraction-slider"
+                           class="cc-tts-fraction-slider"
+                           min="0" max="100" step="12.5"
+                           value="25"
+                           list="cc-tts-fraction-ticks"
+                           aria-label="TTS preview percentage" />
+                    <span class="cc-tts-fraction-value" id="cc-tts-fraction-value">25%</span>
+                    <datalist id="cc-tts-fraction-ticks">
+                        <option value="0"></option>
+                        <option value="12.5"></option>
+                        <option value="25"></option>
+                        <option value="37.5"></option>
+                        <option value="50"></option>
+                        <option value="62.5"></option>
+                        <option value="75"></option>
+                        <option value="87.5"></option>
+                        <option value="100"></option>
+                    </datalist>
+                </div>
+                <div id="history-dropdown-container" style="margin-left: auto;"></div>
+                <!-- Refresh button commented out - filter dropdown now works correctly
+                <button id="refresh-notifications" type="button"
+                        class="notifications-control-button"
+                        onclick="event.stopPropagation(); window.location.reload();"
+                        title="Refresh page">
+                    ↻
+                </button>
+                -->
+                <button id="clear-all-notifications" type="button"
+                        class="clear-notifications-button notifications-control-button"
+                        style="margin-right: 10px;"
+                        disabled>
+                    🗑️ Clear All
+                </button>
+                <button class="toggle-button" id="notifications-toggle">▼</button>
+            </div>
+            <div class="section-content" id="notifications-section">
+                <!-- Commons Broadcast Panel (Phase 2 — inter-session-commons).
+                     Re-located 2026-05-13 (Maria) — placed between the accordion
+                     header and the focus bar per Rick's direction. Broadcasts are
+                     NOT jobs; the prior submit-a-job stack was a category mismatch.
+                     The 🎤 voice-input mic was added 2026-05-13 because Lupin is
+                     a voice-first app — typing into the textarea was a regression
+                     from the established STT-button pattern used everywhere else.
+                -->
+                <div class="job-submit-card" id="broadcast-submit-card" data-testid="notifications-broadcast-card">
+                    <div class="job-submit-card-header" onclick="toggleSection('broadcast-submit-section')">
+                        <h4>📢 Broadcast to all CC sessions</h4>
+                        <button class="toggle-button" id="broadcast-submit-toggle">▶</button>
+                    </div>
+                    <!-- Broadcast card parent default-expanded per Q9 of
+                         src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+                         — Recent Activity admin-oversight surface is visible on page load. -->
+                    <div class="section-content" id="broadcast-submit-section">
+                        <div id="broadcast-panel-body">
+                            <div id="broadcast-recipients-row">
+                                <span id="broadcast-recipients-label">Sending to:</span>
+                                <button type="button" id="broadcast-recipients-refresh" data-testid="notifications-broadcast-refresh-btn" title="Refresh active session list">↻ refresh</button>
+                            </div>
+                            <!-- Single-row compose layout (2026-05-13 redesign per Rick):
+                                 [🎤] [textarea, half-height] [Send]
+                                 Markdown preview pane removed; the dictate-label removed.
+                                 broadcast-panel.js's `input` listener on the textarea still
+                                 fires for Send-button enablement; preview-DOM ops are no-ops
+                                 because the elements no longer exist. -->
+                            <div id="broadcast-compose-row">
+                                <button type="button"
+                                        id="broadcast-stt-button"
+                                        data-testid="notifications-broadcast-stt-btn"
+                                        class="stt-button cc-session-stt"
+                                        title="Click to record (30s max, ESC to cancel)">🎤</button>
+                                <textarea id="broadcast-textarea"
+                                          data-testid="notifications-broadcast-textarea"
+                                          placeholder="Message body — use @PersonaName: lines for persona-specific directives. Markdown supported."></textarea>
+                                <button id="broadcast-send-button"
+                                        data-testid="notifications-broadcast-send-btn"
+                                        class="response-submit-button cc-session-send"
+                                        type="button"
+                                        disabled>Send</button>
+                            </div>
+                            <!-- 2026-05-13: removed `#broadcast-submit-status` + `#broadcast-aggregate-panel` per Rick.
+                                 Empty containers were rendering as a visual artifact below the compose row.
+                                 broadcast-panel.js `setStatus()` + `renderAggregate()` already null-guard
+                                 against missing DOM — both become silent no-ops. Post-send feedback now arrives
+                                 via the standard notification stream below (`commons_broadcast_ack` cards). -->
+                        </div>
+
+                        <!-- Recent Activity — admin-oversight surface for inter-session commons traffic.
+                             Design: src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md
+                             Gated by INI key `commons traffic visibility enabled` (read via /api/config/client
+                             on page load). When disabled, notifications.js hides the section via display:none.
+                             Default-expanded per Q9; toggle pill hides the body within the session only
+                             (no localStorage persistence — defers the parked focus-bar persistence lesson). -->
+                        <div class="commons-recent-activity" id="commons-recent-activity-section" data-testid="notifications-broadcast-recent-activity">
+                            <div class="commons-recent-activity-header" onclick="toggleSection('commons-recent-activity-body')">
+                                <h5>🕒 Recent Activity</h5>
+                                <div class="commons-recent-activity-controls">
+                                    <!-- Three-axis filter dropdowns (2026-05-21 — see
+                                         src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md).
+                                         Client-side filter over the in-memory entry cache; no server hit on change.
+                                         First option of each select is the "no filter" default. -->
+                                    <select id="commons-recent-activity-filter-direction"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-direction-dropdown"
+                                            title="Filter by direction (sender or recipient)"
+                                            onclick="event.stopPropagation();">
+                                        <option value="">Any direction</option>
+                                        <option value="sender">Sender</option>
+                                        <option value="recipient">Recipient</option>
+                                    </select>
+                                    <select id="commons-recent-activity-filter-kind"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-kind-dropdown"
+                                            title="Filter by message kind"
+                                            onclick="event.stopPropagation();">
+                                        <option value="all">All kinds</option>
+                                        <option value="heartbeats">Heartbeats</option>
+                                        <option value="personas">Personas</option>
+                                        <option value="broadcasts">Broadcasts</option>
+                                    </select>
+                                    <select id="commons-recent-activity-filter-persona"
+                                            class="commons-activity-filter-select"
+                                            data-testid="notifications-commons-persona-dropdown"
+                                            title="Filter by persona (populated from active sessions)"
+                                            onclick="event.stopPropagation();">
+                                        <option value="">Any persona</option>
+                                    </select>
+                                    <select id="commons-recent-activity-window"
+                                            data-testid="notifications-commons-window-dropdown"
+                                            title="Time window for the activity stream"
+                                            onclick="event.stopPropagation();">
+                                        <option value="today">Today</option>
+                                        <option value="24">Last 24 hours</option>
+                                        <option value="48">Last 2 days</option>
+                                        <option value="168">Last week</option>
+                                        <option value="720">Last month</option>
+                                        <option value="all">All time</option>
+                                    </select>
+                                    <button type="button"
+                                            id="commons-recent-activity-refresh"
+                                            data-testid="notifications-commons-refresh-btn"
+                                            title="Reload activity stream + refresh persona list"
+                                            onclick="event.stopPropagation();">↻</button>
+                                    <button class="toggle-button" id="commons-recent-activity-toggle">▼</button>
+                                </div>
+                            </div>
+                            <div class="section-content" id="commons-recent-activity-body">
+                                <div id="commons-recent-activity-entries" data-testid="notifications-commons-entries-list">
+                                    <!-- Entries populated by notifications.js (Step 7); newest at top.
+                                         Each entry: persona icon | name | optional topic chip | HH:MM | body. -->
+                                </div>
+                                <div id="commons-recent-activity-empty" data-testid="notifications-commons-empty">
+                                    <em>No activity in window.</em>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CC Session Selector Strip + Focus Mode (2026-04-30 — see src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md).
+                     Sticky chrome above #notifications-list. One icon per active CC session, leftmost = most recently
+                     updated. Embedded toggle pill enters/exits exclusive focus mode (only the focused session's
+                     card is rendered). Hidden until ≥1 CC sender card exists. -->
+                <div id="cc-session-strip" class="cc-session-strip" hidden>
+                    <div class="cc-strip-icons" id="cc-strip-icons"></div>
+                    <button type="button"
+                            class="cc-strip-toggle"
+                            id="cc-strip-toggle"
+                            data-focus-active="false"
+                            title="Focus mode: hide all sessions except the one you click">
+                        👁 Focus
+                    </button>
+                    <button type="button"
+                            class="cc-strip-toggle"
+                            id="cc-hide-inactive-toggle"
+                            data-hide-inactive="false"
+                            title="Hide icons for sessions whose voice persona has been deallocated (showing all sessions in the last 24 h)">
+                        👁 All
+                    </button>
+                </div>
+
+                <div id="notifications-list">
+                    <!-- Sender cards will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Fleet Status Section (read-only operator view) — design:
+             src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §6.
+             Sits immediately beneath #section-notifications, before #section-queues.
+             Mirrors #section-time-saved structure: collapsible header + section-content.
+             Pure observability — NO mutating controls (D2 read-only). -->
+        <div class="collapsible-section" id="section-fleet-status">
+            <div class="section-header" onclick="toggleSection('fleet-status-section')">
+                <h3>🛰️ Fleet Status: <span id="fleet-status-count">0</span>
+                    <span id="fleet-status-updated" class="fleet-status-updated"
+                          data-testid="fleet-status-updated"
+                          title="Last refreshed (HH:MM:SS, configured timezone)"></span></h3>
+                <button class="refresh-btn" id="fleet-status-refresh"
+                        data-testid="fleet-status-refresh-btn"
+                        onclick="event.stopPropagation(); window.notificationsUI.refreshFleetStatus()"
+                        title="Refresh now">⟳</button>
+                <button class="toggle-button" id="fleet-status-toggle">▼</button>
+            </div>
+            <div class="section-content" id="fleet-status-section">
+                <div id="fleet-status-container" data-testid="fleet-status-container">
+                    <!-- rendered grouped table (read-only) -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Task List Section (read-only consumer of GET /api/tasks) — brief:
+             src/rnd/v0.1.8/2026.06.16-task-list-ui-card-build-brief.md.
+             Ported from the Cheech-approved TS multiplexer card onto the
+             fleet-status section structure. Pure observability — NO mutating controls. -->
+        <div class="collapsible-section" id="section-task-list">
+            <div class="section-header" onclick="toggleSection('task-list-section')">
+                <h3>📋 Task List: <span id="task-list-count">0</span>
+                    <span id="task-list-updated" class="task-list-updated"
+                          data-testid="task-list-updated"
+                          title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
+                <button class="refresh-btn" id="task-list-refresh"
+                        data-testid="task-list-refresh-btn"
+                        onclick="event.stopPropagation(); window.notificationsUI.refreshTaskList()"
+                        title="Refresh now">⟳</button>
+                <button class="toggle-button" id="task-list-toggle">▼</button>
+            </div>
+            <div class="section-content" id="task-list-section">
+                <div id="task-list-container" data-testid="task-list-container">
+                    <!-- rendered owner-grouped table (read-only) -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Queue Filter Settings (Admin Only) -->
+        <div class="collapsible-section" id="filter-settings-section" style="display: none;">
+            <div class="section-header" onclick="toggleSection('filter-section')">
+                <h3>⚙️ Queue Filter Settings</h3>
+                <button class="toggle-button" id="filter-toggle">▼</button>
+            </div>
+            <div class="section-content" id="filter-section">
+                <div class="filter-controls">
+                    <label style="display: block; margin-bottom: 10px;">
+                        <strong>View Mode:</strong>
+                    </label>
+                    <div style="display: flex; gap: 10px;">
+                        <button id="filter-own-jobs" data-testid="notifications-filter-own-btn" class="filter-button active" type="button">
+                            👤 My Jobs Only
+                        </button>
+                        <button id="filter-others-jobs" data-testid="notifications-filter-others-btn" class="filter-button" type="button">
+                            🚫 Not My Jobs
+                        </button>
+                        <button id="filter-all-jobs" data-testid="notifications-filter-all-btn" class="filter-button" type="button">
+                            👥 All Users' Jobs
+                        </button>
+                    </div>
+                    <div id="filter-status" style="margin-top: 15px; padding: 10px; background: #e7f3ff; border-radius: 4px; font-size: 13px;">
+                        Currently viewing: <strong id="filter-mode-display">Your jobs only</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Job Queues Section - Progressive Disclosure -->
+        <div class="collapsible-section" id="section-queues">
+            <div class="section-header" onclick="toggleSection('queues-section')">
+                <h3>Cosa Jobs Flow: Current States</h3>
+                <span class="filter-mode-badge" id="queues-filter-badge" style="display: none;"
+                      data-testid="queues-filter-badge" title="Current filter mode">👤 Mine</span>
+                <button class="toggle-button" id="queues-toggle">▼</button>
+            </div>
+            <div class="section-content" id="queues-section">
+
+                <!-- TODO Queue Category -->
+                <div class="queue-category" id="queue-category-todo" data-testid="notifications-queue-todo">
+                    <div class="queue-header" onclick="window.notificationsUI.toggleQueueCategory('todo')">
+                        <span class="queue-status-indicator status-todo">🟡</span>
+                        <h4>TODO</h4>
+                        <span class="queue-count-badge" id="todo-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="todo-delete-all"
+                                data-testid="notifications-queue-todo-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('todo')"
+                                title="Delete all TODO jobs">🗑️</button>
+                        <button class="queue-expand-btn" id="todo-expand" data-testid="notifications-queue-todo-expand-btn">▶</button>
+                    </div>
+                    <div class="queue-jobs-container collapsed" id="todo-jobs-container" data-testid="notifications-queue-todo-jobs">
+                        <!-- Job cards will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Running Queue Category -->
+                <div class="queue-category" id="queue-category-run" data-testid="notifications-queue-running">
+                    <div class="queue-header" onclick="window.notificationsUI.toggleQueueCategory('run')">
+                        <span class="queue-status-indicator status-running">🔵</span>
+                        <h4>Running</h4>
+                        <span class="queue-count-badge" id="run-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="run-delete-all"
+                                data-testid="notifications-queue-running-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('run')"
+                                title="Cancel and delete all running jobs">🗑️</button>
+                        <button class="queue-expand-btn" id="run-expand" data-testid="notifications-queue-running-expand-btn">▶</button>
+                    </div>
+                    <div class="queue-jobs-container collapsed" id="run-jobs-container">
+                        <!-- Job cards will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Done Queue Category -->
+                <div class="queue-category" id="queue-category-done" data-testid="notifications-queue-done">
+                    <div class="queue-header" onclick="window.notificationsUI.toggleQueueCategory('done')">
+                        <span class="queue-status-indicator status-done">✅</span>
+                        <h4>Done</h4>
+                        <span class="queue-count-badge" id="done-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="done-delete-all"
+                                data-testid="notifications-queue-done-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('done')"
+                                title="Delete all Done jobs">🗑️</button>
+                        <button class="queue-expand-btn" id="done-expand" data-testid="notifications-queue-done-expand-btn">▶</button>
+                    </div>
+                    <div class="queue-jobs-container collapsed" id="done-jobs-container">
+                        <!-- Job cards will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Dead Queue Category -->
+                <div class="queue-category" id="queue-category-dead" data-testid="notifications-queue-dead">
+                    <div class="queue-header" onclick="window.notificationsUI.toggleQueueCategory('dead')">
+                        <span class="queue-status-indicator status-dead">❌</span>
+                        <h4>Dead</h4>
+                        <span class="queue-count-badge" id="dead-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="dead-delete-all"
+                                data-testid="notifications-queue-dead-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('dead')"
+                                title="Delete all Dead jobs">🗑️</button>
+                        <button class="queue-expand-btn" id="dead-expand" data-testid="notifications-queue-dead-expand-btn">▶</button>
+                    </div>
+                    <div class="queue-jobs-container collapsed" id="dead-jobs-container">
+                        <!-- Job cards will be populated here -->
+                    </div>
+                </div>
+
+                <!-- ═══════════════════════════════════════════════════════════
+                     JOB HISTORY (PostgreSQL Persistence)
+
+                     OVERLAY MODEL: The 4 live queues above (TODO/Running/Done/Dead)
+                     show jobs from the CURRENT server session only (in-memory).
+                     This history section queries PostgreSQL for ALL persisted agentic
+                     jobs, EXCLUDING job IDs currently visible in the live Done/Dead
+                     queues to avoid duplicates.
+
+                     A job appears in EITHER the live queue OR history, never both.
+                     When the server restarts, previously-live jobs move to history
+                     automatically (they are no longer in memory).
+                     ═══════════════════════════════════════════════════════════ -->
+                <div class="queue-category history-section" id="queue-category-history" data-testid="notifications-queue-history">
+                    <div class="queue-header history-header" onclick="window.notificationsUI.toggleQueueCategory('history')">
+                        <span class="queue-status-indicator status-history">📋</span>
+                        <h4>Job History</h4>
+                        <select id="history-time-window" class="history-time-select"
+                                onclick="event.stopPropagation()"
+                                onchange="window.notificationsUI.onHistoryTimeWindowChange( this.value )"
+                                data-testid="history-time-window-select">
+                            <option value="1">1 day</option>
+                            <option value="7">7 days</option>
+                            <option value="14">14 days</option>
+                            <option value="30" selected>30 days</option>
+                            <option value="all">All</option>
+                        </select>
+                        <span class="queue-count-badge" id="history-count-badge">0</span>
+                        <button class="queue-delete-all-btn" id="history-delete-all"
+                                data-testid="notifications-queue-history-delete-all-btn"
+                                onclick="event.stopPropagation(); window.notificationsUI.deleteAllQueueJobs('history')"
+                                title="Delete all visible history">🗑️</button>
+                        <button class="queue-expand-btn" id="history-expand" data-testid="notifications-queue-history-expand-btn">▶</button>
+                    </div>
+                    <div class="queue-jobs-container collapsed" id="history-jobs-container" data-testid="notifications-queue-history-jobs">
+                        <!-- History job cards populated from PostgreSQL via /api/job-history -->
+                    </div>
+                    <div class="history-pagination" id="history-pagination" style="display: none;">
+                        <button class="history-load-more-btn" id="history-load-more"
+                                onclick="window.notificationsUI.loadMoreHistory()"
+                                data-testid="history-load-more-btn">Load More</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Time Saved Dashboard -->
+        <div class="collapsible-section" id="section-time-saved">
+            <div class="section-header" onclick="toggleSection('time-saved-section')">
+                <h3>⏱️ Time Saved Dashboard</h3>
+                <button class="refresh-btn" onclick="event.stopPropagation(); window.notificationsUI.refreshTimeSavedStats()">🔄</button>
+                <button class="toggle-button" id="time-saved-toggle">▼</button>
+            </div>
+            <div class="section-content" id="time-saved-section">
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-value" id="time-saved-total" data-testid="notifications-time-total">--</span>
+                        <span class="stat-label">Time Saved (You)</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="time-saved-others" data-testid="notifications-time-others">--</span>
+                        <span class="stat-label">Time Saved for Others</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="solutions-created" data-testid="notifications-solutions-created">--</span>
+                        <span class="stat-label">Solutions Created</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="replays-benefited" data-testid="notifications-replays-benefited">--</span>
+                        <span class="stat-label">Cache Hits (You)</span>
+                    </div>
+                </div>
+                <div class="top-solutions" id="top-solutions-container">
+                    <h4>🏆 Most Helpful Solutions</h4>
+                    <div id="top-solutions-list" data-testid="notifications-top-solutions">Loading...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Section -->
+        <div class="collapsible-section" id="section-status">
+            <div class="section-header" onclick="toggleSection('status-section')">
+                <h3>System Status</h3>
+                <div class="section-header-actions">
+                    <button id="refresh-status-btn" data-testid="notifications-status-refresh-btn" type="button" class="refresh-link"
+                            onclick="event.stopPropagation(); window.notificationsUI.refreshAllStatus()"
+                            title="Refresh all status information">
+                        ↻
+                    </button>
+                    <button class="toggle-button" id="status-toggle">▼</button>
+                </div>
+            </div>
+            <div class="section-content" id="status-section">
+                <div class="status-item">
+                    <strong>Queue WebSocket:</strong>
+                    <span id="queue-ws-status" data-testid="notifications-ws-queue-status" class="status-warning">Disconnected</span>
+                </div>
+                <div class="status-item">
+                    <strong>Audio WebSocket:</strong>
+                    <span id="audio-ws-status" data-testid="notifications-ws-audio-status" class="status-warning">Disconnected</span>
+                </div>
+                <div class="status-item">
+                    <strong>Authentication:</strong>
+                    <span id="auth-status" data-testid="notifications-auth-status" class="status-warning">Not authenticated</span>
+                </div>
+                <div class="status-item">
+                    <strong>Missed:</strong>
+                    <span id="missed-status" data-testid="notifications-missed-status" class="status-warning" style="display:none"></span>
+                    <button id="missed-reset-button" data-testid="notifications-missed-reset-btn" type="button" style="display:none; margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.notificationsUI.resetMissedNotifications()">Reset</button>
+                </div>
+                <div class="status-item">
+                    <strong>User:</strong>
+                    <span id="user-display">Loading...</span>
+                    <button id="logout-button" data-testid="notifications-logout-btn" type="button" style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;" onclick="window.notificationsUI.logout()">Logout</button>
+                </div>
+                <div class="status-item">
+                    <strong>Sessions:</strong>
+                    <div class="session-list">
+                        <div class="session-entry">
+                            <span class="session-label">Queue:</span>
+                            <code id="queue-session">-</code>
+                            <span class="copy-btn" title="Copy Queue session ID" onclick="window.notificationsUI.copyToClipboard( 'queue-session' )">📋</span>
+                        </div>
+                        <div class="session-entry">
+                            <span class="session-label">Audio:</span>
+                            <code id="audio-session">-</code>
+                            <span class="copy-btn" title="Copy Audio session ID" onclick="window.notificationsUI.copyToClipboard( 'audio-session' )">📋</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="status-item">
+                    <strong>Health Monitor:</strong>
+                    <span id="ws-health-status" class="status-info">Initializing...</span>
+                </div>
+                <div class="status-item">
+                    <strong>Config:</strong>
+                    <button id="reinit-config-btn" data-testid="notifications-config-reload-btn" type="button"
+                            style="margin-left: 10px; padding: 4px 12px; font-size: 12px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                            onclick="window.notificationsUI.reinitializeConfig()">
+                        ↻ Reload
+                    </button>
+                    <span id="config-status" style="margin-left: 8px; font-size: 12px;"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Direct TTS Test Section -->
+        <div class="collapsible-section" id="section-direct-tts">
+            <div class="section-header" onclick="toggleSection('direct-tts-section')">
+                <h3>🔧 Direct TTS Test (Bypass Q&A)</h3>
+                <button class="toggle-button" id="direct-tts-toggle">▼</button>
+            </div>
+            <div class="section-content" id="direct-tts-section">
+                <div class="audio-controls" style="display: flex; align-items: center; gap: 12px;">
+                    <input type="text" id="direct-tts-input" data-testid="notifications-direct-tts-input" placeholder="Type text to speak directly..." />
+                    <button id="direct-tts-button" data-testid="notifications-direct-tts-btn" type="button">🔊 Speak Now</button>
+                    <button id="test-instant-tts" data-testid="notifications-test-instant-tts-btn" type="button">Test Instant TTS</button>
+                    <button id="test-reliable-tts" data-testid="notifications-test-reliable-tts-btn" type="button">Test Reliable TTS</button>
+                    <button id="stop-audio" data-testid="notifications-stop-audio-btn" type="button">Stop Audio</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Debug Section -->
+        <div class="collapsible-section" id="section-debug">
+            <div class="section-header" onclick="toggleSection('debug-section')">
+                <h3>Debug Information</h3>
+                <button class="toggle-button" id="debug-toggle">▼</button>
+            </div>
+            <div class="section-content" id="debug-section">
+                <div id="debug-log" class="debug-log-scrollable">
+                    <div class="debug-info">System starting up...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    </div><!-- /.left-column -->
+
+    <!-- Draggable splitter between left column and Reading Pane (2026-05-21 tweak).
+         Hidden by CSS when the pane is closed. Mousedown wires up via
+         _initMasterDetailLayout(). Persists ratio to localStorage. -->
+    <div class="content-pane-splitter"
+         id="content-pane-splitter"
+         data-testid="notifications-content-pane-splitter"
+         role="separator"
+         aria-orientation="vertical"
+         title="Drag to resize"></div>
+
+    <!-- Reading Pane (2026-05-21 master-detail layout). Hidden until populated.
+         In vertical mode, stays hidden (CSS rule on .content-pane[hidden]).
+         In horizontal mode, becomes flex:1 sticky-top scrollable surface.
+         Content body holds either rendered abstract markdown OR an iframe at
+         /app/docs?path=... for doc-viewer links. -->
+    <aside class="content-pane" id="content-pane" hidden>
+        <div class="content-pane-header">
+            <button class="content-pane-back"
+                    id="content-pane-back"
+                    data-testid="notifications-content-pane-back"
+                    type="button"
+                    title="Back to previous content"
+                    disabled>←</button>
+            <span class="content-pane-title" id="content-pane-title"></span>
+            <button class="content-pane-bustout"
+                    id="content-pane-bustout"
+                    data-testid="notifications-content-pane-bustout"
+                    type="button"
+                    title="Open in new tab">⤢</button>
+            <button class="content-pane-close"
+                    id="content-pane-close"
+                    data-testid="notifications-content-pane-close"
+                    type="button"
+                    title="Close pane">×</button>
+        </div>
+        <div class="content-pane-body" id="content-pane-body" data-testid="notifications-content-pane-body">
+            <!-- Dynamic content: rendered markdown for abstracts, or an iframe for doc-links -->
+        </div>
+    </aside>
+    </div><!-- /.content-shell -->
+
+    <!-- Navigation -->
+    <script src="/static/js/lupin-nav.js" defer></script>
+
+    <!-- JavaScript Modules -->
+    <!-- Third-party libraries for markdown rendering -->
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/purify.min.js"></script>
+    <script src="/static/js/tts-audio-cache.js"></script>
+    <script src="/static/js/job-completion-cache.js"></script>
+    <script src="/static/js/audio-recorder.js"></script>
+    <script src="/static/js/notifications.js?v=20260530d"></script>
+    <script src="/static/js/broadcast-panel.js?v=20260512a"></script>
+    <script>
+        // Accordion sections whose open/closed state survives page reloads.
+        // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
+        // Map: sectionId → localStorage key (notifications_* convention).
+        const LUPIN_ACCORDION_PERSIST_KEYS = {
+            'broadcast-submit-section'    : 'notifications_broadcast_card_open',
+            'commons-recent-activity-body': 'notifications_recent_activity_open'
+        };
+
+        function toggleSection(sectionId) {
+            const content = document.getElementById(sectionId);
+            if (!content) return;
+            // Find the toggle button. The original convention is sectionId
+            // ends in -section and the button is the same prefix + -toggle.
+            // Several callers in this file pass ids that DON'T end in
+            // -section (commons-recent-activity-body, action-required-content,
+            // tts-queue-content). For those, the replace returns the input
+            // unchanged, `toggle === content`, and the textContent assignment
+            // below WIPES the content div's children. Fall back to finding
+            // the toggle button inside the previous-sibling header element.
+            let toggle = document.getElementById(sectionId.replace('-section', '-toggle'));
+            if (!toggle || toggle === content) {
+                const header = content.previousElementSibling;
+                if (header) toggle = header.querySelector('.toggle-button');
+            }
+
+            let isOpen;
+            if (content.classList.contains('collapsed')) {
+                content.classList.remove('collapsed');
+                if (toggle) toggle.textContent = '▼';
+                isOpen = true;
+            } else {
+                content.classList.add('collapsed');
+                if (toggle) toggle.textContent = '▶';
+                isOpen = false;
+            }
+
+            // Persist accordion state for tracked sections (no-op for others).
+            const persistKey = LUPIN_ACCORDION_PERSIST_KEYS[sectionId];
+            if (persistKey) {
+                try { localStorage.setItem(persistKey, JSON.stringify(isOpen)); } catch (_) {}
+            }
+        }
+
+        // Restore persisted accordion state before first paint to avoid flicker.
+        // Missing key = use the section's HTML-default state (typically open).
+        function applyPersistedAccordions() {
+            for (const sectionId in LUPIN_ACCORDION_PERSIST_KEYS) {
+                const persistKey = LUPIN_ACCORDION_PERSIST_KEYS[sectionId];
+                const raw = localStorage.getItem(persistKey);
+                if (raw === null) continue;
+                let isOpen;
+                try { isOpen = JSON.parse(raw); } catch (_) { continue; }
+                const content = document.getElementById(sectionId);
+                if (!content) continue;
+                let toggle = document.getElementById(sectionId.replace('-section', '-toggle'));
+                if (!toggle || toggle === content) {
+                    const header = content.previousElementSibling;
+                    if (header) toggle = header.querySelector('.toggle-button');
+                }
+                if (!isOpen) {
+                    content.classList.add('collapsed');
+                    if (toggle) toggle.textContent = '▶';
+                } else {
+                    content.classList.remove('collapsed');
+                    if (toggle) toggle.textContent = '▼';
+                }
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', applyPersistedAccordions);
+        } else {
+            applyPersistedAccordions();
+        }
+    </script>
+</body>
+</html>

@@ -21,7 +21,8 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     find_session_by_id, find_session_by_tmux,
     find_session_path_by_id, get_speakerphone, set_speakerphone,
     find_active_speakerphone_sessions,
-    build_sender_id_for_cc, _resolve_project_from_bridge_cwd
+    build_sender_id_for_cc, _resolve_project_from_bridge_cwd, resolve_project_name,
+    find_dead_sessions, _pid_confirmed_dead,
 )
 from lupin_cli.claude_code.hooks.register_session import main
 
@@ -42,7 +43,7 @@ def _make_session_data( session_id, tmux_session=None, cwd="/tmp" ):
         "session_id"        : session_id,
         "stable_session_id" : session_id,
         "cwd"               : cwd,
-        "ppid"              : os.getpid(),  # Use current PID so liveness check passes
+        "cc_pid"            : os.getpid(),  # Use current PID so liveness check passes
         "hook_ppid"         : 1,
     }
     if tmux_session is not None:
@@ -1093,7 +1094,7 @@ class TestBuildSenderIdForCcBridgeCwdAnchoring:
             project_root = tmp_root / "lupin"
             self._make_repo( sessions_dir, project_root, "lupin" )
             # Bridge cwd is a SUBDIRECTORY (e.g., user launched claude from src/)
-            sub_dir = project_root / "src" / "fastapi_app"
+            sub_dir = project_root / "src" / "lupin_app"
             sub_dir.mkdir( parents=True, exist_ok=True )
 
             sid = "22222222-2222-3333-4444-555566667777"
@@ -1193,6 +1194,189 @@ class TestBuildSenderIdForCcBridgeCwdAnchoring:
                 project = _resolve_project_from_bridge_cwd()
 
             assert project == "plan"
+
+
+# ── Tests: resolve_project_name (the ONE shared project-name resolver) ───────
+
+
+class TestResolveProjectName:
+    """
+    Coverage for the canonical `resolve_project_name` (bug 9bf1dc4a fix): the
+    bridge-cwd-anchored resolver that the manager-figure write gate, the
+    persona-chain env-key lookup, AND hook credential resolution now share.
+    Every branch: bridge resolves → bridge wins; bridge None → LUPIN_ROOT
+    basename; bridge None + no LUPIN_ROOT → live-cwd basename; environ=None →
+    os.environ.
+    """
+
+    _RESOLVER = "lupin_cli.claude_code.hooks.lib.session_bridge._resolve_project_from_bridge_cwd"
+
+    def test_bridge_cwd_wins_for_non_lupin_session( self ):
+        # The bug 9bf1dc4a fix: a non-lupin session resolves to its OWN
+        # project from the bridge, NOT the LUPIN_ROOT basename ("lupin").
+        with patch( self._RESOLVER, return_value="cosa-voice" ):
+            assert resolve_project_name( { "LUPIN_ROOT": "/mnt/x/lupin" } ) == "cosa-voice"
+
+    def test_bridge_alias_plan_wins( self ):
+        # Alias normalization is inherited from the bridge resolver.
+        with patch( self._RESOLVER, return_value="plan" ):
+            assert resolve_project_name( { "LUPIN_ROOT": "/mnt/x/lupin" } ) == "plan"
+
+    def test_falls_back_to_lupin_root_basename_when_no_bridge( self ):
+        with patch( self._RESOLVER, return_value=None ):
+            assert resolve_project_name( { "LUPIN_ROOT": "/mnt/x/LUPIN" } ) == "lupin"
+
+    def test_falls_back_to_cwd_basename_when_no_bridge_no_root( self, monkeypatch ):
+        monkeypatch.setattr( Path, "cwd", classmethod( lambda cls: Path( "/somewhere/My-Repo" ) ) )
+        with patch( self._RESOLVER, return_value=None ):
+            assert resolve_project_name( { } ) == "my-repo"
+
+    def test_environ_none_uses_os_environ( self, monkeypatch ):
+        monkeypatch.setenv( "LUPIN_ROOT", "/mnt/x/lupin" )
+        with patch( self._RESOLVER, return_value=None ):
+            assert resolve_project_name() == "lupin"
+
+
+# ── Tests: _pid_confirmed_dead (bias-to-alive death probe) ───────────────────
+
+
+class TestPidConfirmedDead:
+    """
+    The strict death probe for the fleet-status force-offline path: True ONLY on
+    ProcessLookupError. Non-int, alive, EPERM, and other OSErrors → False
+    (bias-to-alive — a false-dead would wrongly hide a live session).
+    """
+
+    def test_dead_pid_returns_true( self ):
+        assert _pid_confirmed_dead( 99999999 ) is True   # no such process → ESRCH
+
+    def test_alive_pid_returns_false( self ):
+        assert _pid_confirmed_dead( os.getpid() ) is False
+
+    def test_non_int_returns_false( self ):
+        assert _pid_confirmed_dead( None ) is False
+        assert _pid_confirmed_dead( "1234" ) is False
+
+    def test_permission_error_counts_as_alive( self ):
+        """EPERM = exists-but-not-ours → NOT confirmed dead (bias-to-alive)."""
+        with patch( "os.kill", side_effect=PermissionError ):
+            assert _pid_confirmed_dead( 4321 ) is False
+
+    def test_other_oserror_counts_as_alive( self ):
+        with patch( "os.kill", side_effect=OSError ):
+            assert _pid_confirmed_dead( 4321 ) is False
+
+
+# ── Tests: find_dead_sessions (UNFILTERED scan + kill-0) ──────────────────────
+
+
+class TestFindDeadSessions:
+    """
+    The fleet-status "offline" override source: unlike the other finders (which
+    SKIP dead-PID bridges), this scans UNFILTERED and positively confirms death,
+    so it can actually surface a /exit'd session. Host-PID-trust gated + bias-to-
+    alive throughout.
+    """
+
+    def _write( self, sessions_dir, pid, sid, listener_pid=None, cc_pid=None ):
+        data = {
+            "session_id"        : sid,
+            "stable_session_id" : sid,
+            "cwd"               : "/tmp",
+        }
+        if listener_pid is not None: data[ "listener_pid" ] = listener_pid
+        if cc_pid is not None:       data[ "cc_pid" ]       = cc_pid
+        return _write_session_file( sessions_dir, pid, data )
+
+    def test_untrusted_host_pids_returns_empty( self ):
+        """In a container (host pids invisible) the override is a no-op."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "deadbeef-1111-2222-3333-444455556666"
+            self._write( sessions_dir, 99999999, sid, listener_pid=99999998, cc_pid=99999997 )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=False ):
+                assert find_dead_sessions( [ sid ] ) == set()
+
+    def test_missing_session_dir_returns_empty( self ):
+        missing = Path( "/tmp/does-not-exist-fleet-dead-xyz" )
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", missing ), \
+             patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ):
+            assert find_dead_sessions( [ "abc12345" ] ) == set()
+
+    def test_empty_or_none_candidates_returns_empty( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ):
+                assert find_dead_sessions( None ) == set()
+                assert find_dead_sessions( [] ) == set()
+                assert find_dead_sessions( [ "", None ] ) == set()
+
+    def test_confirmed_dead_session_in_set( self ):
+        """All known pids (filename + listener + cc) dead → session is dead."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "deadbeef-1111-2222-3333-444455556666"
+            self._write( sessions_dir, 99999999, sid, listener_pid=99999998, cc_pid=99999997 )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ):
+                assert find_dead_sessions( [ sid ] ) == { sid }
+
+    def test_live_pid_not_in_set( self ):
+        """ANY alive pid keeps the session alive (bias-to-alive: all() must be dead)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "11111111-2222-3333-4444-555566667777"
+            # filename pid dead, but cc_pid is THIS process (alive) → not dead
+            self._write( sessions_dir, 99999999, sid, listener_pid=99999998, cc_pid=os.getpid() )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ):
+                assert find_dead_sessions( [ sid ] ) == set()
+
+    def test_candidate_not_matching_any_bridge_absent( self ):
+        """A candidate with no bridge is NOT dead (absence ≠ death)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            self._write( sessions_dir, 99999999, "deadbeef-1111-2222-3333-444455556666",
+                         listener_pid=99999998, cc_pid=99999997 )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ):
+                assert find_dead_sessions( [ "ffffffff-0000-0000-0000-000000000000" ] ) == set()
+
+    def test_no_known_pids_not_dead( self ):
+        """A bridge with NO resolvable pid is NOT dead (no evidence → bias-to-alive)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "abc12345-1111-2222-3333-444455556666"
+            self._write( sessions_dir, 99999999, sid )   # no listener_pid / cc_pid in JSON
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._extract_pid_from_filename", return_value=None ):
+                assert find_dead_sessions( [ sid ] ) == set()
+
+    def test_prefix_tolerant_match( self ):
+        """An 8-char candidate matches a full-uuid bridge sid."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "deadbeef-1111-2222-3333-444455556666"
+            self._write( sessions_dir, 99999999, sid, listener_pid=99999998, cc_pid=99999997 )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ):
+                assert find_dead_sessions( [ "deadbeef" ] ) == { "deadbeef" }
+
+    def test_skips_buffer_and_listener_and_bad_json( self ):
+        """Non-bridge files (buffer/listener) + unparseable bridges are skipped (no crash)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            # .json-suffixed buffer/listener names DO match the cc-*.json glob, so the
+            # in-name guard (not just the glob) must skip them.
+            ( sessions_dir / "cc-buffer-1.json" ).write_text( "not json" )
+            ( sessions_dir / "cc-listener-1.json" ).write_text( "not json" )
+            ( sessions_dir / "cc-77777777.json" ).write_text( "{ this is not valid json" )
+            with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR", sessions_dir ), \
+                 patch( "lupin_cli.claude_code.hooks.lib.session_bridge._can_trust_host_pids", return_value=True ):
+                assert find_dead_sessions( [ "77777777", "anything" ] ) == set()
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────

@@ -76,7 +76,7 @@ def _render_entry_via_evaluate( page, body_text: str, with_topic: str = "dm-mari
     entry_id = "test-commons-entry-fixture"
     page.evaluate(
         """([entryId, body, topic]) => {
-            const controller = window.__notifications_controller__ || window.notificationsController;
+            const controller = window.notificationsUI;
             if ( !controller || typeof controller._renderCommonsEntry !== 'function' ) {
                 throw new Error( '_renderCommonsEntry not available on controller' );
             }
@@ -161,6 +161,73 @@ class TestCommonsActivityLineClamp:
             }}"""
         )
         assert is_hidden, "Short body must NOT show the Show-more toggle"
+
+
+class TestCommonsActivityToggleRenderedWhileCollapsed:
+    """
+    Regression: the Show-more toggle must still appear when the entry was
+    rendered while the Recent Activity section was collapsed.
+
+    Root cause (fixed 2026-05-30, Speedy 🌿 session fb0bc8a5): a long-body
+    entry rendered while `#commons-recent-activity-body.collapsed`
+    (display:none) measured scrollHeight/clientHeight as 0 in the one-shot
+    requestAnimationFrame, so the toggle stayed permanently hidden and the
+    clamped content was unreadable with no way to expand it. System
+    broadcasts hit this most because they arrive via WebSocket while the
+    panel is closed. The fix defers to a ResizeObserver that re-measures
+    once the content gains a non-zero height (section expanded).
+    """
+
+    def test_toggle_revealed_after_expand( self, notifications_page ):
+        # Collapse the section FIRST so the entry is rendered into a
+        # display:none container (mirrors a broadcast arriving while closed).
+        notifications_page.evaluate(
+            """() => {
+                const body = document.getElementById( 'commons-recent-activity-body' );
+                body.classList.add( 'collapsed' );
+            }"""
+        )
+
+        entry_id = _render_entry_via_evaluate( notifications_page, _LONG_BODY )
+
+        # While collapsed, the measurement cannot run — toggle stays hidden.
+        notifications_page.wait_for_timeout( 100 )
+        hidden_while_collapsed = notifications_page.evaluate(
+            f"""() => {{
+                const row    = document.getElementById('{entry_id}');
+                const toggle = row.querySelector('.commons-activity-entry-body-toggle');
+                return toggle.hidden;
+            }}"""
+        )
+        assert hidden_while_collapsed, (
+            "Toggle must remain hidden while the section is collapsed "
+            "(content has no layout to measure)"
+        )
+
+        # Expand the section — the ResizeObserver should re-measure and reveal
+        # the toggle now that the content has a non-zero clamped height.
+        notifications_page.evaluate(
+            """() => {
+                const body = document.getElementById( 'commons-recent-activity-body' );
+                body.classList.remove( 'collapsed' );
+            }"""
+        )
+        notifications_page.wait_for_function(
+            f"""() => {{
+                const row    = document.getElementById('{entry_id}');
+                if ( !row ) return false;
+                const toggle = row.querySelector('.commons-activity-entry-body-toggle');
+                return toggle && !toggle.hidden;
+            }}""",
+            timeout = 2_000,
+        )
+        toggle_text = notifications_page.evaluate(
+            f"""() => document.getElementById('{entry_id}')
+                .querySelector('.commons-activity-entry-body-toggle').textContent.trim()"""
+        )
+        assert toggle_text.startswith( "Show more" ), (
+            f"Revealed toggle label should be 'Show more …', got {toggle_text!r}"
+        )
 
 
 class TestCommonsActivityToggleBehavior:

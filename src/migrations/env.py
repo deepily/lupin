@@ -11,10 +11,27 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override sqlalchemy.url from environment variable
+# Resolve the SQLAlchemy URL from a SINGLE source of truth.
+#
+# Resolution order (first hit wins):
+#   1. DATABASE_URL env var          — explicit override (CI, ad-hoc, legacy).
+#   2. config.attributes["injected_db_url"] — a URL injected programmatically
+#      by the in-process auto-migrator / tests (e.g. a throwaway test DB).
+#   3. cosa.rest.db.database.get_database_url() — the APP'S OWN builder, so
+#      alembic connects EXACTLY like the running app in every environment
+#      (local dev, testing, cloud Cloud-SQL socket). NO duplicated connection
+#      logic lives here.
+#
+# `config.attributes` is a plain dict (no configparser interpolation), so a URL
+# containing '%' or a '/cloudsql/...' socket path passes through untouched;
+# set_main_option escapes '%' for the configparser layer.
 database_url = os.environ.get( "DATABASE_URL" )
-if database_url:
-    config.set_main_option( "sqlalchemy.url", database_url )
+if not database_url:
+    database_url = config.attributes.get( "injected_db_url" )
+if not database_url:
+    from cosa.rest.db.database import get_database_url
+    database_url = get_database_url()
+config.set_main_option( "sqlalchemy.url", database_url )
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

@@ -6,7 +6,21 @@
 
 `FastAPI` | `Voice I/O` | `PEFT/LoRA` | `LanceDB` | `Claude Agent SDK` | `Bayesian Trust` | `MCP Protocol`
 
-Current version: **v0.1.7** | License: [Apache 2.0](LICENSE)
+Current version: **v0.1.8** | License: [Apache 2.0](LICENSE)
+
+---
+
+## What's New in v0.1.8 — the self-managing fleet, ready for the cloud
+
+v0.1.8 turns the multi-session voice cockpit into a **self-coordinating engineering fleet** and prepares Lupin for GCP deployment:
+
+- **Unified task-store + fleet liveness** — a single durable task store (`task_create` / `task_query` / `task_transition`) is now the one source of truth for owed work across every session, read by three consumers (the Stop-hook self-poke, the `:8001` fleet arbiter, and a human UI card). Sessions declare honored heartbeat *holds* so a parked worker is never falsely re-poked; the store-only cutover retired the legacy transcript mirror. Full design: `src/docs/fleet-liveness-and-task-store-architecture.md`.
+- **Manager / worker fleet lifecycle** — managers spawn worker crews into isolated git worktrees, drive a review queue (fresh-critical, reproduce-don't-trust), merge reviewer-approved work held on the branch, and reap workers at steady state with continuity-preserving mementos and re-spin.
+- **Notification-native AI↔AI messaging** — peer sessions now DM each other over `dm_send` with the body delivered inline (~18× cheaper than the retired commons-DM claim-check path), a major step in the cosa-voice token-reduction endgame.
+- **JS→TS multiplexer migration** — the notifications client is being ported to a typed, esbuild-bundled multiplexer behind a hard 100% c8 gate: the audio cluster (`SequentialAudioManager`, `TtsAudioCache`, `JobCompletionCache`), `lupin-nav`, and `websocket-diagnostic` ported via a reusable standalone-entry pattern; reconnect-parity and an auth-handshake-timeout watchdog brought to legacy parity.
+- **Bounded-CC agent migrations** — Podcast, Presentation, and Deep Research generators migrated from the firewalled Anthropic SDK to in-process bounded Claude Code (`sdk_query`), shifting metered per-token spend onto already-paid Max-plan fixed cost.
+- **Alembic migration integrity** — a true baseline migration (empty-DB `upgrade head` works without a stamp), all-column NULL/NOT-NULL ORM-drift reconciliation, and hermetic create_all→upgrade-head idempotency regression tests guarding the migration merge gate.
+- **GCP cloud-test deployment validated** — model server, OAuth-backed bounded CC, and a 17-table Cloud-SQL round-trip proven end-to-end via IAP tunnel; runbooks under `src/rnd/v0.1.8/2026.05.30-gcp-deployment/`.
 
 ---
 

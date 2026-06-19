@@ -1,0 +1,58 @@
+# Lupin GCP Infrastructure (Terraform)
+
+Declarative provisioning for Milestone 1 (single always-on GCE GPU VM running
+`docker-compose` ~verbatim, with Cloud SQL + GCS + Secret Manager). Build/deploy
+stays in the `src/scripts/cloud-run-*.sh` wrappers; **Terraform owns the
+resources** those wrappers assume already exist.
+
+Plan of record: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.05.30-gcp-deployment-provisioning-plan.md` §6.
+Execution log: `src/rnd/v0.1.8/2026.05.30-gcp-deployment/2026.06.02-phase2-terraform-execution.md`.
+
+## Layout
+
+```
+src/terraform/
+├── modules/
+│   ├── gcs-buckets/        ✅ LanceDB + Deep-Research buckets (reuse-aware)
+│   ├── artifact-registry/  ✅ Docker repo (immutable tags, cleanup policy)
+│   ├── iam/                ⬜ split build-sa / runtime-sa, per-resource least-priv
+│   ├── secret-manager/     ⬜ secret inventory + per-secret accessor bindings
+│   ├── cloud-sql-pg16/     ⬜ private-IP PG16 + PITR
+│   ├── vpc-vpn/            ⬜ VPC + Cloud VPN tunnel to on-prem vLLM
+│   └── gce-gpu-vm/         ⬜ L4 VM + startup-script (driver + compose up)
+└── envs/
+    └── test/               Milestone-1 GCP TEST environment
+```
+
+## Hard rules
+
+- **No hardcoded project ID or region.** Everything threads `var.project_id` /
+  `var.region`. A grep for any hardcoded sandbox project ID across `src/terraform/`
+  must return nothing.
+- **No secrets in `.tf` / `.tfvars`.** Secret *values* are populated into Secret
+  Manager out-of-band; Terraform references them, never stores them.
+- `terraform.tfvars` is git-ignored; copy `terraform.tfvars.example` and fill in.
+
+## Usage
+
+```bash
+cd src/terraform/envs/test
+
+# Validate syntax/providers without a remote state bucket:
+terraform init -backend=false && terraform validate
+
+# Real run (remote state bucket must exist first — see backend.tf):
+gcloud storage buckets create gs://<proj>-tfstate --location=us-central1 --uniform-bucket-level-access
+gcloud storage buckets update gs://<proj>-tfstate --versioning
+terraform init -backend-config="bucket=<proj>-tfstate"
+cp terraform.tfvars.example terraform.tfvars   # then edit
+terraform plan
+```
+
+## Status (2026-06-02)
+
+Foundation + `gcs-buckets` + `artifact-registry` authored and `terraform validate`
+green. The buckets module defaults to **reuse** for the test env (Phase-0 V4 found
+`lupin-lancedb-test` + `lupin-deep-research-test` already present); the registry
+module provisions `lupin-images` fresh (Phase-0 V8 found none). Remaining five
+modules are sequenced in the execution log.

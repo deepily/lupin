@@ -53,6 +53,13 @@ def _run_hook_main( payload, tmp_dir, session_id="abc12345-fake-uuid" ):
     """
     import io
     from lupin_cli.claude_code.hooks import user_prompt_submit
+    from cosa.config.configuration_manager import ConfigurationManager
+
+    # Seed the ConfigurationManager singleton BEFORE capturing stdout — at a
+    # virgin (hermetic) module boundary the hook's CM instantiation would
+    # otherwise print its init banner into the captured stream and corrupt
+    # the JSON parse below.
+    ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
 
     captured = io.StringIO()
 
@@ -197,6 +204,84 @@ class TestUserPromptSubmitHook:
             ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
             assert "IMPORTANT:" in ctx
             assert "mcp__cosa-voice__notify()" in ctx
+
+    def test_no_voice_no_reminder_emits_empty( self ):
+        """else branch: empty buffer AND empty rider → emit {} (no additionalContext)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = { "session_id": "abc12345-fake-uuid" }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block",
+                        return_value="" ):
+                result = _run_hook_main( payload, tmp_dir )
+            assert result == {}
+
+    def test_voice_only_no_reminder_branch( self ):
+        """elif voice_ctx (voice present, reminder EMPTY) → enriched voice ctx alone.
+        The structural §6a decision still attaches the human-voice rider because the
+        drained message is human_to_ai (F2 fix passes `messages` to enrich_voice_context)."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            entries = [ _make_buffer_entry( "do the thing" ) ]
+            _write_buffer( tmp_dir, "abc12345", entries )
+
+            payload = { "session_id": "abc12345-fake-uuid" }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.speakerphone_reminder_block",
+                        return_value="" ):
+                result = _run_hook_main( payload, tmp_dir )
+
+            ctx = result[ "hookSpecificOutput" ][ "additionalContext" ]
+            assert "[Voice]: do the thing" in ctx
+            assert "IMPORTANT:" in ctx          # human-voice rider attached structurally
+
+
+class TestHeartbeatPokeReset:
+    """Genuine user re-engagement reopens the heartbeat self-poke budget."""
+
+    def test_reset_poke_count_called_on_prompt( self ):
+        """UserPromptSubmit resets the per-session heartbeat poke counter."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = { "session_id": "abc12345-fake-uuid" }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
+                _run_hook_main( payload, tmp_dir )
+            mock_reset.assert_called_once_with( "abc12345-fake-uuid" )
+
+    def test_reset_skipped_on_empty_payload( self ):
+        """Empty payload exits before session resolution → no reset attempted."""
+        import io
+        from lupin_cli.claude_code.hooks import user_prompt_submit
+
+        captured = io.StringIO()
+        with patch( "sys.stdin", io.StringIO( "{}" ) ), \
+             patch( "sys.stdout", captured ), \
+             patch( "lupin_cli.claude_code.hooks.lib.hook_common.log_payload" ), \
+             patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
+            try:
+                user_prompt_submit.main()
+            except SystemExit:
+                pass
+
+        mock_reset.assert_not_called()
+
+    # ── c121037b facet 1: the self-poke must NOT reset the cap ──────────────────
+
+    def test_reset_skipped_when_prompt_is_heartbeat_poke( self ):
+        """REGRESSION (c121037b): the heartbeat self-poke is re-submitted as a
+        prompt via tmux; UserPromptSubmit must NOT reset the poke-cap for it
+        (that reset every turn defeated the cap — poke_count stuck at 1 across
+        23 pokes). A prompt opening with POKE_PROMPT_SENTINEL → reset SKIPPED."""
+        from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import POKE_PROMPT_SENTINEL
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            poke    = POKE_PROMPT_SENTINEL + " (1 in-progress TODO item(s) you own) and no fresh hold. Resume."
+            payload = { "session_id": "abc12345-fake-uuid", "prompt": poke }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
+                _run_hook_main( payload, tmp_dir )
+            mock_reset.assert_not_called()
+
+    def test_reset_called_on_genuine_user_prompt( self ):
+        """A real user prompt (not a self-poke) STILL reopens the poke budget."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            payload = { "session_id": "abc12345-fake-uuid", "prompt": "please fix the failing test" }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
+                _run_hook_main( payload, tmp_dir )
+            mock_reset.assert_called_once_with( "abc12345-fake-uuid" )
 
 
 # ── Standalone ───────────────────────────────────────────────────────────────

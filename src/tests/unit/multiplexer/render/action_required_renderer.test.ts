@@ -5,17 +5,17 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-import { createEventBusForTesting } from "../../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createActionRequiredRenderer,
   type ActionRequiredRenderer,
   type ActionRequiredStoreLike,
-} from "../../../../fastapi_app/static/js/multiplexer/render/ActionRequiredRenderer";
+} from "../../../../lupin_app/static/js/multiplexer/render/ActionRequiredRenderer";
 import type {
   ActionRequiredItem,
   ActionRequiredResponse,
   StoreActionRequiredChangedPayload,
-} from "../../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

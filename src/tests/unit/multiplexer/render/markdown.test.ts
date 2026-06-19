@@ -11,7 +11,7 @@ import {
   renderMarkdown,
   renderMarkdownInline,
   DOMPURIFY_CONFIG,
-} from "../../../../fastapi_app/static/js/multiplexer/render/markdown";
+} from "../../../../lupin_app/static/js/multiplexer/render/markdown";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {

@@ -97,7 +97,7 @@ def synthetic_bridge():
         "session_ids"       : [ session_id ],
         "transcript_path"   : "/tmp/synthetic-transcript.jsonl",
         "cwd"               : "/tmp",
-        "ppid"              : test_pid,
+        "cc_pid"            : test_pid,
         "hook_ppid"         : 1,
         "tmux_session"      : None
     }

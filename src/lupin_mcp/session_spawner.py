@@ -113,6 +113,40 @@ def render_task_prompt(
     return rendered
 
 
+# ── Persona-chain transport ───────────────────────────────────────────────────
+
+def persona_chain_csv( persona_preference ) -> Optional[ str ]:
+    """
+    Normalize a spawn persona_preference (str | list | None) into the CSV
+    form carried by the COSA_VOICE_PERSONA_CHAIN child env var.
+
+    Requires:
+        - persona_preference is a str, a list, or None
+
+    Ensures:
+        - Returns the stripped string when persona_preference is a non-empty
+          string (already CSV or a single name — passed through verbatim)
+        - Returns a comma-joined string of stripped non-empty string items
+          when persona_preference is a list (non-string items skipped)
+        - Returns None for None, empty/whitespace input, an empty list, or
+          any other type — callers omit the env var entirely in that case
+        - Never raises
+
+    Examples:
+        "Rio"                      → "Rio"
+        "Rio, Krishna ,*"          → "Rio, Krishna ,*"   (server-side parser strips)
+        [ "Rio", "Krishna", "*" ]  → "Rio,Krishna,*"
+        [] / None / "   " / 42     → None
+    """
+    if isinstance( persona_preference, str ):
+        stripped = persona_preference.strip()
+        return stripped if stripped else None
+    if isinstance( persona_preference, list ):
+        items = [ item.strip() for item in persona_preference if isinstance( item, str ) and item.strip() ]
+        return ",".join( items ) if items else None
+    return None
+
+
 # ── Spawn invocation construction ─────────────────────────────────────────────
 
 def build_spawn_argv(
@@ -237,6 +271,13 @@ def spawn_sessions(
           runner returns non-zero is recorded with status "failed" (others still
           proceed — partial success is reported, not raised)
         - On a NON-dry-run, appends successful spawns to the manager's manifest
+        - When persona_preference is non-empty, injects it into EVERY child's
+          environment as COSA_VOICE_PERSONA_CHAIN (CSV) — the child's
+          SessionStart walks the chain strictly (first FREE element wins,
+          `*` = "then take anything free", exhaustion without `*` = loud
+          fail, never a silent random re-allocation). Each child walks the
+          SAME chain and takes the first unclaimed element; sibling boots
+          serialize via the server's atomic allocate-or-409.
         - Returns { spawned: [ {session_name, requested_role, status, ...} ],
                     manager_session_id, collection_topic, dry_run, requested,
                     persona_preference }
@@ -249,8 +290,9 @@ def spawn_sessions(
         script_path: spawn script path
         role: requested role label (templated into the prompt)
         project: project for the child (sets cwd / CLAUDE.md)
-        persona_preference: echoed into the result (allocation honored host-side
-            by the child's SessionStart; predictable-fail is enforced there)
+        persona_preference: str | list — ordered persona chain transported to
+            the children via COSA_VOICE_PERSONA_CHAIN (see
+            src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md)
         seed_memento: optional prior-context blob for author continuity
         tokens: extra template tokens
         spawn_cap: max children
@@ -300,6 +342,14 @@ def spawn_sessions(
             "COSA_VOICE_HEADLESS"   : "1",
             "COSA_VOICE_ROLE"       : role
         }
+        # Transport the persona chain to the child — THE missing link that
+        # made spawn_sessions(persona_preference=...) a silent no-op for a
+        # month (Rio→Krishna repros, root-caused 2026-06-11). The child's
+        # SessionStart reads COSA_VOICE_PERSONA_CHAIN ahead of the per-repo
+        # COSA_VOICE_PREFERRED_PERSONA__<PROJECT> default.
+        chain_csv = persona_chain_csv( persona_preference )
+        if chain_csv:
+            env[ "COSA_VOICE_PERSONA_CHAIN" ] = chain_csv
         result = runner( argv, env=env )
         ok     = getattr( result, "returncode", 1 ) == 0
 
@@ -330,6 +380,112 @@ def spawn_sessions(
     }
 
 
+def _capture_reap_identity( session_dir: Path, tmux_session: str ) -> Optional[ Dict[ str, Any ] ]:
+    """
+    Capture { bridge_path, persona, sender_id, session_id } for a soon-to-be-
+    reaped tmux session by scanning `session_dir` for the bridge whose
+    `tmux_session` field matches. MUST run BEFORE the bridge is unlinked
+    (sender_id + persona both derive from the bridge). Returns None when no
+    bridge matches or is unreadable. Never raises.
+    """
+    try:
+        candidates = list( session_dir.glob( "cc-*.json" ) )
+    except OSError:
+        return None
+    for path in candidates:
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+        try:
+            data = json.loads( path.read_text() )
+        except ( json.JSONDecodeError, OSError ):
+            continue
+        if data.get( "tmux_session" ) != tmux_session:
+            continue
+        session_id = data.get( "stable_session_id" ) or data.get( "session_id" )
+        sender_id  = None
+        try:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import build_sender_id_for_cc
+            sender_id = build_sender_id_for_cc( session_id ) if session_id else None
+        except Exception:
+            pass
+        return {
+            "bridge_path" : path,
+            "persona"     : data.get( "voice_persona" ),
+            "sender_id"   : sender_id,
+            "session_id"  : session_id,
+        }
+    return None
+
+
+def _default_emit_reap( identity: Dict[ str, Any ], reason: str = "" ) -> None:
+    """
+    Default reap-event emitter (producer of Sam's reap-UI wiring, 2026-06-05):
+    fire-and-forget POST of a `session_reaped` state-update onto the Lupin
+    notification rail, envelope `sender_id` = the REAPED worker's sender_id
+    (→ SenderStore drops its badge; the broadcast card refreshes). Best-effort:
+    a down server / missing sender_id NEVER breaks a reap. Override via
+    `dismiss_sessions(emit_reap_fn=...)` — tests inject a capture instead.
+
+    Contract (locked with Sam): type="session_reaped", sender_id=reaped worker.
+    """
+    sender_id = identity.get( "sender_id" )
+    if not sender_id:
+        return
+    try:
+        import requests
+        from cosa.utils.config_loader import get_api_config, load_api_key
+        env     = os.getenv( "LUPIN_ENV", "local" )
+        cfg     = get_api_config( env )
+        api_key = load_api_key( cfg[ "api_key_file" ] )
+        # /api/notify REQUIRES target_user — the reap event must route to the human
+        # OWNER's UI (focus bar + broadcast card), not the worker. Resolve from the
+        # dev/owner email (LUPIN_DEV_EMAIL), falling back to the configured recipient.
+        target  = os.getenv( "LUPIN_DEV_EMAIL" ) or cfg.get( "global_notification_recipient" )
+        if not target:
+            return                          # can't route → skip (best-effort)
+        persona = identity.get( "persona" ) if isinstance( identity.get( "persona" ), dict ) else { }
+        name    = ( persona or { } ).get( "name" ) or "A worker"
+        requests.post(
+            f"{cfg[ 'api_url' ].rstrip( '/' )}/api/notify",
+            params  = {
+                "message"     : f"{name} reaped",
+                "type"        : "session_reaped",
+                "priority"    : "low",
+                "sender_id"   : sender_id,
+                "target_user" : target,
+            },
+            headers = { "X-API-Key": api_key },
+            timeout = 3,
+        )
+    except Exception:
+        pass  # producer must NEVER break the reap
+
+
+def _default_emit_reaped_tombstone( identity: Dict[ str, Any ] ) -> None:
+    """
+    Default reap-TOMBSTONE emitter (reap-tombstone roster-eviction fix,
+    2026-06-15): append ONE authoritative `kind="reaped"` record onto the fleet
+    heartbeat-event rail the arbiter polls, so the reaped session's roster row is
+    force-offlined in ~1 poll instead of lingering "stale" for ~60 min. The reap
+    deletes the bridge FIRST (destroying the PID the fast kill-0 death path
+    needs), so this marker is the only fast death signal a reaped session can
+    carry. Reads the `session_id` captured pre-unlink by `_capture_reap_identity`
+    and passes the worker's persona NAME for nicer audit lines. Best-effort: a
+    missing session_id, a bad write, or any error NEVER breaks the reap. Override
+    via `dismiss_sessions(emit_reaped_fn=...)` — tests inject a capture instead.
+    """
+    session_id = identity.get( "session_id" )
+    if not session_id:
+        return                              # no id → fall back to the ~60-min age-out
+    persona = identity.get( "persona" )
+    name    = persona.get( "name" ) if isinstance( persona, dict ) else persona
+    try:
+        from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_reaped
+        emit_reaped( session_id, persona=name )
+    except Exception:
+        pass  # producer must NEVER break the reap
+
+
 def dismiss_sessions(
     manager_session_id : str,
     *,
@@ -337,7 +493,9 @@ def dismiss_sessions(
     reason             : str = "",
     write_memento      : bool = True,
     runner             : Callable = default_runner,
-    session_dir        : Path = SESSION_DIR
+    session_dir        : Path = SESSION_DIR,
+    emit_reap_fn       : Optional[ Callable ] = None,
+    emit_reaped_fn     : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -380,6 +538,10 @@ def dismiss_sessions(
     targets   = session_names if session_names is not None else list( known )
     dismissed = []
 
+    # Capture each target's bridge identity (persona + sender_id) BEFORE teardown —
+    # the bridge is unlinked below, and sender_id/persona both derive from it.
+    identities = { name: _capture_reap_identity( session_dir, name ) for name in targets }
+
     for name in targets:
         result = runner( [ "tmux", "kill-session", "-t", name ] )
         ok     = getattr( result, "returncode", 1 ) == 0
@@ -399,12 +561,44 @@ def dismiss_sessions(
         except ( FileNotFoundError, OSError ):
             pass
 
+    # Bridge-delete + reap-event emit (2026-06-05, Rick): per reaped session, delete
+    # its bridge file so the mtime-filtered active-sessions list drops it IMMEDIATELY
+    # (broadcast send-to list + focus bar), then emit the `session_reaped` event.
+    # Ordering: kill + manifest-rewrite (above) → unlink bridge → emit. Producer is
+    # fail-safe — a bad unlink/emit NEVER breaks the reap.
+    emit             = emit_reap_fn    if emit_reap_fn    is not None else _default_emit_reap
+    emit_tombstone   = emit_reaped_fn  if emit_reaped_fn  is not None else _default_emit_reaped_tombstone
+    bridges_deleted  = 0
+    for name in reaped_names:
+        ident = identities.get( name )
+        if not ident:
+            continue
+        bridge_path = ident.get( "bridge_path" )
+        if bridge_path is not None:
+            try:
+                bridge_path.unlink()
+                bridges_deleted += 1
+            except ( FileNotFoundError, OSError ):
+                pass
+        try:
+            emit( ident, reason )
+        except Exception:
+            pass  # producer must NEVER break the reap
+        # Reap tombstone on the heartbeat-event rail (reap-tombstone fix): lets
+        # the arbiter evict the roster row in ~1 poll. Fail-safe — a raising
+        # emitter NEVER breaks the reap (same posture as the bridge unlink).
+        try:
+            emit_tombstone( ident )
+        except Exception:
+            pass  # producer must NEVER break the reap
+
     return {
         "dismissed"          : dismissed,
         "manager_session_id" : manager_session_id,
         "reason"             : reason,
         "write_memento"      : write_memento,
-        "remaining"          : [ r[ "session_name" ] for r in remaining ]
+        "remaining"          : [ r[ "session_name" ] for r in remaining ],
+        "bridges_deleted"    : bridges_deleted
     }
 
 

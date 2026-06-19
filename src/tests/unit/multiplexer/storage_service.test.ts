@@ -7,16 +7,16 @@ import assert from "node:assert/strict";
 import {
   createEventBusForTesting,
   type EventBus,
-} from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+} from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createStorageServiceForTesting,
   InMemoryStorage,
   type StorageBackend,
-} from "../../../fastapi_app/static/js/multiplexer/shared/StorageService";
+} from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import type {
   LupinEvent,
   StorageCorruptPayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 interface Harness {
   bus     : EventBus;
@@ -220,4 +220,43 @@ test("InMemoryStorage.key(): in-range index returns the matching key", () => {
   m.setItem("second", "2");
   assert.equal(m.key(0), "first");
   assert.equal(m.key(1), "second");
+});
+
+// ---------------------------------------------------------------------------
+// Canonical cross-client auth-token accessors (WP0 token-key migration).
+// These read/write the UNPREFIXED `lupin_access_token` / `lupin_refresh_token`
+// keys directly — no `lupin:` prefix, no schema envelope.
+// ---------------------------------------------------------------------------
+
+test("getAccessToken / getRefreshToken return null when no tokens are stored", () => {
+  const h = makeHarness();
+  assert.equal(h.storage.getAccessToken(), null);
+  assert.equal(h.storage.getRefreshToken(), null);
+});
+
+test("setTokens writes both raw tokens under the unprefixed canonical keys", () => {
+  const h = makeHarness();
+  h.storage.setTokens("access-jwt", "refresh-jwt");
+  assert.equal(h.storage.getAccessToken(), "access-jwt");
+  assert.equal(h.storage.getRefreshToken(), "refresh-jwt");
+  // Stored UNPREFIXED (cross-client contract) — not under the `lupin:` namespace.
+  assert.equal(h.backend.getItem("lupin_access_token"), "access-jwt");
+  assert.equal(h.backend.getItem("lupin_refresh_token"), "refresh-jwt");
+  assert.equal(h.backend.getItem("lupin:lupin_access_token"), null);
+});
+
+test("clearTokens removes both canonical token keys", () => {
+  const h = makeHarness();
+  h.storage.setTokens("access-jwt", "refresh-jwt");
+  h.storage.clearTokens();
+  assert.equal(h.storage.getAccessToken(), null);
+  assert.equal(h.storage.getRefreshToken(), null);
+});
+
+test("token keys live outside the lupin: envelope namespace (keys() ignores them)", () => {
+  const h = makeHarness();
+  h.storage.setTokens("a", "r");
+  h.storage.setJSON("envelope-key", { x: 1 }, 1);
+  // keys() only enumerates the lupin:-prefixed namespace.
+  assert.deepEqual(h.storage.keys().sort(), ["envelope-key"]);
 });

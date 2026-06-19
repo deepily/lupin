@@ -6,7 +6,7 @@ Covers the core branching logic with mocked time/REST/process primitives:
   - Cap behavior at last schedule index
   - Reset semantics (last_interaction_at advanced during sleep)
   - Conversation-mode gate at wake-time
-  - Dead-PPID guard (parent CC died during sleep)
+  - Dead-CC-PID guard (the CC process died during sleep)
   - "yes" with/without qualifier
   - "no" with qualifier (tmux-inject + spawn successor)
   - Network/transport error path (no successor, exits silently)
@@ -38,7 +38,7 @@ def fake_bridge( tmp_path, monkeypatch ):
     bridge_path.write_text( json.dumps( {
         "session_id"        : "test-sid",
         "stable_session_id" : "test-sid",
-        "ppid"              : 99999,
+        "cc_pid"            : 99999,
         "idle_detection"    : {
             "last_interaction_at" : "2026-04-29T10:00:00-04:00",
             "backoff_index"       : 0,
@@ -70,8 +70,8 @@ def settings_5_10_20( monkeypatch ):
 
 
 @pytest.fixture
-def alive_ppid( monkeypatch ):
-    """All PPID alive checks return True unless overridden."""
+def alive_cc_pid( monkeypatch ):
+    """All CC-PID alive checks return True unless overridden."""
     monkeypatch.setattr( idle_waiter, "_is_pid_alive", lambda _pid: True )
 
 
@@ -88,7 +88,7 @@ def speakerphone_off( monkeypatch ):
 class TestYesPath:
 
     def test_yes_no_qualifier_exits_no_successor(
-        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_cc_pid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult( answer="yes", qualifier=None, raw_value="yes", error=None )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
@@ -110,13 +110,13 @@ class TestYesPath:
         except ImportError:
             pass
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert spawn_calls == [ ], "should not spawn successor on yes"
         assert injects     == [ ], "should not inject when no qualifier"
 
     def test_yes_with_qualifier_injects_then_exits(
-        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_cc_pid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult( answer="yes", qualifier="run the tests", raw_value="yes", error=None )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
@@ -134,7 +134,7 @@ class TestYesPath:
             lambda sid, q: injects.append( ( sid, q ) )
         )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert spawn_calls == [ ],                                    "no successor on yes"
         assert injects     == [ ( "test-sid", "run the tests" ) ],   "qualifier injected"
@@ -147,20 +147,20 @@ class TestYesPath:
 class TestBackoffProgression:
 
     def test_no_response_spawns_successor_at_next_index(
-        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_cc_pid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult( answer="no", qualifier=None, raw_value="no", error=None )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
 
         captured = { }
-        def _fake_spawn( session_id, ppid, backoff_index, sleep_secs_override=None ):
+        def _fake_spawn( session_id, cc_pid, backoff_index, sleep_secs_override=None ):
             captured[ "session_id" ]    = session_id
-            captured[ "ppid" ]          = ppid
+            captured[ "cc_pid" ]        = cc_pid
             captured[ "backoff_index" ] = backoff_index
             return 12345
         monkeypatch.setattr( idle_waiter, "_spawn_successor", _fake_spawn )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert captured[ "backoff_index" ] == 1, "next index after 0 should be 1"
 
@@ -169,7 +169,7 @@ class TestBackoffProgression:
         assert block[ "backoff_index" ] == 1
 
     def test_timeout_treated_as_no(
-        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_cc_pid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult( answer="timeout", qualifier=None, raw_value="", error=None )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
@@ -177,14 +177,14 @@ class TestBackoffProgression:
         spawned = [ ]
         monkeypatch.setattr(
             idle_waiter, "_spawn_successor",
-            lambda sid, ppid, idx, sleep_secs_override=None: spawned.append( idx ) or 1
+            lambda sid, cc_pid, idx, sleep_secs_override=None: spawned.append( idx ) or 1
         )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=1, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=1, sleep_secs_override=1 )
         assert spawned == [ 2 ]
 
     def test_caps_at_last_schedule_index(
-        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_cc_pid, speakerphone_off, monkeypatch
     ):
         # Schedule has 3 entries (indices 0-2). At index 2, "no" should keep spawning at 2.
         result = AnythingElseResult( answer="no", qualifier=None, raw_value="no", error=None )
@@ -193,14 +193,14 @@ class TestBackoffProgression:
         spawned = [ ]
         monkeypatch.setattr(
             idle_waiter, "_spawn_successor",
-            lambda sid, ppid, idx, sleep_secs_override=None: spawned.append( idx ) or 1
+            lambda sid, cc_pid, idx, sleep_secs_override=None: spawned.append( idx ) or 1
         )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=2, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=2, sleep_secs_override=1 )
         assert spawned == [ 2 ], "cap at last index, not index 3"
 
     def test_no_with_qualifier_injects_and_spawns(
-        self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_cc_pid, speakerphone_off, monkeypatch
     ):
         result = AnythingElseResult(
             answer="no", qualifier="check the logs", raw_value="no [comment: check the logs]", error=None
@@ -210,7 +210,7 @@ class TestBackoffProgression:
         spawned = [ ]
         monkeypatch.setattr(
             idle_waiter, "_spawn_successor",
-            lambda sid, ppid, idx, sleep_secs_override=None: spawned.append( idx ) or 1
+            lambda sid, cc_pid, idx, sleep_secs_override=None: spawned.append( idx ) or 1
         )
 
         injects = [ ]
@@ -220,7 +220,7 @@ class TestBackoffProgression:
             lambda sid, q: injects.append( ( sid, q ) )
         )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert injects == [ ( "test-sid", "check the logs" ) ]
         assert spawned == [ 1 ]
@@ -232,7 +232,7 @@ class TestBackoffProgression:
 
 class TestWakeTimeGates:
 
-    def test_reset_during_sleep_exits_silently( self, fake_bridge, settings_5_10_20, alive_ppid, monkeypatch ):
+    def test_reset_during_sleep_exits_silently( self, fake_bridge, settings_5_10_20, alive_cc_pid, monkeypatch ):
         # Stage: claim slot writes waiter_started_at. After "sleep", we'll bump
         # last_interaction_at to AFTER waiter_started_at — simulating a reset.
         original_set = sb.set_idle_detection_field
@@ -260,35 +260,35 @@ class TestWakeTimeGates:
         )
         monkeypatch.setattr( idle_waiter, "get_speakerphone", lambda _sid: False )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert fired   == [ ], "reset detected → no ask fired"
         assert spawned == [ ], "reset → no successor"
 
     def test_speakerphone_on_exits_silently(
-        self, fake_bridge, settings_5_10_20, alive_ppid, monkeypatch
+        self, fake_bridge, settings_5_10_20, alive_cc_pid, monkeypatch
     ):
         monkeypatch.setattr( idle_waiter, "get_speakerphone", lambda _sid: True )
 
         fired = [ ]
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: fired.append( kw ) or None )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert fired == [ ], "speakerphone on at wake → no ask"
 
-    def test_dead_ppid_exits_silently_during_sleep( self, fake_bridge, settings_5_10_20, speakerphone_off, monkeypatch ):
+    def test_dead_cc_pid_exits_silently_during_sleep( self, fake_bridge, settings_5_10_20, speakerphone_off, monkeypatch ):
         monkeypatch.setattr( idle_waiter, "_is_pid_alive", lambda _p: False )
 
         fired = [ ]
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: fired.append( kw ) or None )
 
-        # sleep_secs_override > chunk so the sleep loop iterates and triggers the PPID check
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=60 )
+        # sleep_secs_override > chunk so the sleep loop iterates and triggers the CC-PID check
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=60 )
 
-        assert fired == [ ], "dead PPID → exit before fire"
+        assert fired == [ ], "dead CC-PID → exit before fire"
 
-    def test_bridge_gone_at_wake_exits_silently( self, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch ):
+    def test_bridge_gone_at_wake_exits_silently( self, settings_5_10_20, alive_cc_pid, speakerphone_off, monkeypatch ):
         # No fake_bridge fixture — find_session_path returns None unconditionally
         monkeypatch.setattr( sb,          "find_session_path_by_id", lambda _sid: None )
         monkeypatch.setattr( idle_waiter, "find_session_path_by_id", lambda _sid: None )
@@ -296,7 +296,7 @@ class TestWakeTimeGates:
         fired = [ ]
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: fired.append( kw ) or None )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert fired == [ ]
 
@@ -307,7 +307,7 @@ class TestWakeTimeGates:
 
 class TestErrorPath:
 
-    def test_error_response_no_successor( self, fake_bridge, settings_5_10_20, alive_ppid, speakerphone_off, monkeypatch ):
+    def test_error_response_no_successor( self, fake_bridge, settings_5_10_20, alive_cc_pid, speakerphone_off, monkeypatch ):
         result = AnythingElseResult( answer="error", qualifier=None, raw_value="", error="server down" )
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: result )
 
@@ -317,7 +317,7 @@ class TestErrorPath:
             lambda *a, **kw: spawned.append( ( a, kw ) ) or 1
         )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert spawned == [ ], "transport error → no retry storm"
 
@@ -338,7 +338,7 @@ class TestSlotManagement:
         fired = [ ]
         monkeypatch.setattr( idle_waiter, "fire_anything_else_ask", lambda **kw: fired.append( kw ) or None )
 
-        idle_waiter.run_waiter( "test-sid", ppid=99999, backoff_index=0, sleep_secs_override=1 )
+        idle_waiter.run_waiter( "test-sid", cc_pid=99999, backoff_index=0, sleep_secs_override=1 )
 
         assert fired == [ ], "lost the slot race → exit silently, no fire"
         # Slot still held by the incumbent

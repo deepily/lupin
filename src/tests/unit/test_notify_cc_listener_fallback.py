@@ -94,6 +94,7 @@ def _run_notify( ws_manager, notification_queue, job_id, **overrides ):
         "authenticated_user_id" : "auth-user-id",
         "message"               : "Hello, anybody home?",
         "type"                  : "user_initiated_message",
+        "direction"             : "ai_to_human",
         "priority"              : "medium",
         "target_user"           : "claude.code@lookml.deepily.ai",
         "response_requested"    : False,
@@ -122,7 +123,7 @@ def _run_notify( ws_manager, notification_queue, job_id, **overrides ):
     #     `from cosa.rest.user_service import get_user_by_email` — patch at SOURCE.
     #   - NotificationRepository / get_db: imported at module level in
     #     notifications.py — patch at the router's module path.
-    #   - fastapi_app.main: lazy-imported inside the function body for the
+    #   - lupin_app.main: lazy-imported inside the function body for the
     #     diagnostic block. Mock via sys.modules so the import succeeds and
     #     app_debug/app_verbose are False (skips the verbose dump).
     with patch( "cosa.rest.user_service.get_user_by_email",
@@ -131,7 +132,7 @@ def _run_notify( ws_manager, notification_queue, job_id, **overrides ):
                 return_value=fake_repo ), \
          patch( "cosa.rest.routers.notifications.get_db",
                 return_value=db_cm ), \
-         patch.dict( "sys.modules", { "fastapi_app.main": MagicMock( app_debug=False, app_verbose=False ) } ):
+         patch.dict( "sys.modules", { "lupin_app.main": MagicMock( app_debug=False, app_verbose=False ) } ):
         return asyncio.run( notify_user( **kwargs ) )
 
 
@@ -298,7 +299,7 @@ class TestLifecycleBroadcastsViaHelper:
 
         End-to-end async-invocation testing is intentionally NOT done here —
         it's blocked by pre-existing module-state pollution where some tests
-        in the full suite leave sys.modules['fastapi_app.main'] in a state
+        in the full suite leave sys.modules['lupin_app.main'] in a state
         that breaks defensive patch.dict isolation. (Same pattern documented
         in 90-phase1-execution-log.md from 2026-04-26 for the timezone test.)
         Real invocation will be exercised at integration-test tier when the

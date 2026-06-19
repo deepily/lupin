@@ -10,12 +10,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createAudioTransport,
-} from "../../../fastapi_app/static/js/multiplexer/transport/AudioTransport";
-import type { AuthManager } from "../../../fastapi_app/static/js/multiplexer/auth/AuthManager";
-import type { LupinEvent, TransportReadyPayload } from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/transport/AudioTransport";
+import type { AuthManager } from "../../../lupin_app/static/js/multiplexer/auth/AuthManager";
+import type { LupinEvent, TransportReadyPayload } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Test infrastructure (mirrors queue_transport.test.ts shim).
@@ -173,6 +173,8 @@ test("Pass 1 finding #14: errors thrown in handler are caught; transport survive
   });
   MockWebSocket.instances[0]!.fireOpen();
   await new Promise((r) => setTimeout(r, 10));
+  // auth_success drives the CSM to `connected` (post-fix: connected == authed).
+  MockWebSocket.instances[0]!.receive(JSON.stringify({ type: "auth_success", data: {} }));
 
   // Send 3 binary frames — handler throws each time but transport keeps going.
   for (let i = 0; i < 3; i++) {

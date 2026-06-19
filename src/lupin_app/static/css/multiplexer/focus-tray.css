@@ -1,0 +1,71 @@
+/* ============================================================================
+   Multiplexer focus-flash + focus-hidden stylesheet.
+
+   HISTORY: this file was Phase 6c Node B's focus-tray stylesheet. The
+   FocusTrayRenderer it styled was RETIRED (WP2 parity bridge, 2026-06-10) —
+   the CC-session strip's icon-click focus supersedes the interim tray
+   (one-mechanism rule, Tiberius ruling). The dead `#focus-mode-toggle` /
+   `#focus-tray` / `.focus-tray-*` rules were removed. The file SURVIVES (kept
+   under this name to preserve the AC-B15 SSOT invariant) for the two rules
+   other components still depend on:
+
+   Owns:
+   - `@keyframes focus-flash` definition (SSOT per AC-B15 hard-gate). The
+     animation REFERENCE lives in conversation-mode-pin.css (D-CSS); D-CSS
+     has ZERO `@keyframes focus-flash` declarations. AC-B15 grep-gate
+     enforces this invariant — the keyframe stays HERE.
+   - `.sender-card[data-focus-hidden="true"]` styling (display:none per the
+     AC-B12 perf gate). The CC-session strip's focus mode is now the sole
+     writer of data-focus-hidden (see SessionStripRenderer).
+
+   Scope-leak protection (matching the Phase 6a/6b/6c CSS file pattern):
+   - NO global selectors (*, html, body, :root) — fail-build rule in
+     .stylelintrc.json override for this file.
+
+   FOLLOW-ON (integration cleanup, flagged to Tiberius): rename this file to
+   reflect its surviving contents + relocate the two rules to their natural
+   owners (keyframe → conversation-mode-pin.css, data-focus-hidden →
+   session-strip.css). Deferred because it touches the AC-B15 grep-gate
+   expectation + the .stylelintrc.json override + the multiplexer.html <link>.
+   ============================================================================ */
+
+
+/* ============================================================================
+   @keyframes focus-flash — SSOT per AC-B15
+
+   D-CSS (`conversation-mode-pin.css`) references this animation via
+   `.sender-card[data-focus-flash="true"] { animation: focus-flash 1.2s ease-out; }`.
+   The runtime resolves the animation name via the global CSS namespace.
+   Animates opacity + transform for a soft attention pulse without changing
+   layout.
+   ============================================================================ */
+
+@keyframes focus-flash {
+    0% {
+        opacity   : 1;
+        transform : scale(1);
+    }
+    50% {
+        opacity   : 0.6;
+        transform : scale(1.015);
+    }
+    100% {
+        opacity   : 1;
+        transform : scale(1);
+    }
+}
+
+
+/* ============================================================================
+   Focus-hidden sender cards — `.sender-card[data-focus-hidden="true"]`
+
+   Per AC-B12 perf gate: prefer `display: none` over `visibility: hidden`.
+   `display: none` removes the element from layout/paint, while `visibility:
+   hidden` still consumes layout space + paint cycles. With 20+ hidden
+   senders the layout savings are meaningful (~10x faster repaint per
+   Phase 6c perf measurements). Written by SessionStripRenderer's focus mode.
+   ============================================================================ */
+
+.sender-card[data-focus-hidden="true"] {
+    display : none;
+}

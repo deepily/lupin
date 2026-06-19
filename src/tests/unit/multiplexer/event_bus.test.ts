@@ -5,12 +5,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createEventBusForTesting } from "../../../fastapi_app/static/js/multiplexer/shared/EventBus";
+import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import type {
   LupinEvent,
   LupinEventType,
   ListenerErrorPayload,
-} from "../../../fastapi_app/static/js/multiplexer/shared/types";
+} from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 function evt<T>(type: LupinEventType, payload: T): LupinEvent<T> {
   return { type, payload, source: "test", ts: 1234 };

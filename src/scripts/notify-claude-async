@@ -23,7 +23,7 @@ if [ ! -d "$LUPIN_ROOT" ]; then
 fi
 
 # Use CoSA venv Python (has requests + pydantic)
-PYTHON="$LUPIN_ROOT/src/cosa/.venv/bin/python3"
+PYTHON="$LUPIN_ROOT/.venv/bin/python3"
 
 if [ ! -x "$PYTHON" ]; then
     echo "ERROR: Python not found: $PYTHON" >&2
