@@ -165,14 +165,28 @@ class TestBuildSnapshot:
         — the EVENT-sourced lowercase punct-stripped form a bridge-less session
         surfaces — read role=worker against declared "Mr. Radio", which ALSO
         config-deaded the F2 manager-staleness tier for him (stale_why_not:
-        [not_manager]). Equivalence now rides the ONE shared normalizer."""
-        view = { "s1": self._live_row( "s1", "mr radio" ) }              # no period — the journal shape
+        [not_manager]). Equivalence now rides the ONE canonical identity root
+        (Phase 2 swap _normalize_for_match -> canonical_persona_key).
+
+        FLIP (accent seam): the second case ("María"/"maria") is the bug-class
+        this plan kills — the OLD _normalize_for_match KEPT accents ("María" ->
+        "maría") and so MISSED a declared "María" against an event-sourced
+        "maria"; canonical_persona_key accent-strips both to "maria" -> match.
+        Reverting to _normalize_for_match makes the accent case fail.
+
+        NOTE (intended keep-spaces tradeoff): the canonical key KEEPS internal
+        spaces, so the realistic spaced journal form "mr radio" matches declared
+        "Mr. Radio", but a contrived SPACELESS "MR.RADIO" -> "mrradio" would NOT
+        (it no longer collapses onto "mr radio"). The space-dropping leniency was
+        deliberately given up for store-key parity; the spaceless variant is not
+        a real persona surface."""
+        view = { "s1": self._live_row( "s1", "mr radio" ) }              # the journal shape (spaced)
         row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
         assert row[ "role" ] == "manager"
-        # and the squashed variant too — display casing untouched either way
-        view = { "s1": self._live_row( "s1", "MR.RADIO" ) }
-        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "Mr. Radio" ] )[ "sessions" ][ 0 ]
-        assert row[ "role" ] == "manager" and row[ "persona" ] == "MR.RADIO"
+        # accent bug-class flip: declared "María" matches event-sourced "maria"
+        view = { "s1": self._live_row( "s1", "maria" ) }
+        row  = fr.build_snapshot( view, { }, NOW, declared_managers=[ "María" ] )[ "sessions" ][ 0 ]
+        assert row[ "role" ] == "manager" and row[ "persona" ] == "maria"
 
     def test_undeclared_persona_stays_worker( self ):
         view = { "s1": self._live_row( "s1", "Rio" ) }

@@ -86,6 +86,17 @@ class TestFindPersonaInPool:
         match = _find_persona_in_pool( POOL_6, "Mr. Radio" )
         assert match is not None and match[ "name" ] == "mr radio"
 
+    def test_match_is_canonical_key_consistent( self ):
+        # Phase 2: the lookup now matches by canonical_persona_key on BOTH the
+        # pool-key and display-name branches, so an accented/punctuated request
+        # resolves to the same pool entry as its bare pool-key form. (The display
+        # branch was already accent-tolerant via the override; this pins that the
+        # canonical route preserves every prior match.)
+        for needle in ( "maria", "María", "MARÍA", "mr radio", "Mr. Radio", "MR. RADIO" ):
+            match = _find_persona_in_pool( POOL_6, needle )
+            assert match is not None, needle
+            assert match[ "name" ] in ( "maria", "mr radio" ), needle
+
     def test_whitespace_stripped( self ):
         match = _find_persona_in_pool( POOL_6, "  arnold  " )
         assert match is not None and match[ "name" ] == "Arnold"
@@ -337,6 +348,32 @@ class TestAllocateRouteRequestedPersona:
             client = TestClient( test_app )
             resp   = client.post(
                 "/api/cosa-voice/voice-persona/sid-mine/allocate?requested_persona_name=Rachel"
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[ "newly_allocated" ] is False
+        assert body[ "swapped" ]         is False
+        assert body[ "voice_persona" ]   == existing
+
+    def test_request_idempotent_display_form_vs_store_form_FLIP( self, test_app ):
+        """FLIP (voice idempotency seam): existing is the store form "mr radio";
+        the request is the display form "Mr. Radio". They are the SAME persona,
+        so the endpoint must be idempotent (newly_allocated=False, no swap). Under
+        the retired bare .lower() the request normalized to "mr. radio" (period
+        kept) != existing "mr radio" -> it would have SWAPPED. canonical_persona_key
+        collapses both to "mr radio" -> idempotent."""
+        _setup_overrides( test_app )
+
+        existing = { "name": "mr radio", "voice_id": "v_mrnpr", "icon": "🦉", "color": "#FFA000",
+                     "profile": "authoritative", "borrowed": False, "display_name": "Mr. Radio" }
+
+        with patch( "cosa.rest.routers.voice_persona.find_session_path_by_id", return_value="/tmp/cc-1.json" ), \
+             patch( "cosa.rest.routers.voice_persona.get_voice_persona", return_value=existing ):
+
+            client = TestClient( test_app )
+            resp   = client.post(
+                "/api/cosa-voice/voice-persona/sid-mine/allocate?requested_persona_name=Mr.%20Radio"
             )
 
         assert resp.status_code == 200

@@ -58,7 +58,7 @@ from lupin_mcp.session_spawner import SESSION_DIR, _read_manifest, _manifest_pat
 # Persona strings drift structurally across signal sources (bridge = display
 # casing; event-sourced fallback = lowercase punct-stripped), so every declared-
 # roster compare in this module is normalize-keyed; display casing untouched.
-from lupin_mcp.commons_persona_matcher import _normalize_for_match
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 SOURCE_LINEAGE    = "lineage"
@@ -200,10 +200,11 @@ def resolve_active_managers(
     list_managers   = list_managers   if list_managers   is not None else list_manager_session_ids
     who_rows        = who_rows        or [ ]
     bridge_sessions = bridge_sessions or { }
-    # F-B: normalize-keyed declared set (the journal-confirmed "mr radio" vs
-    # "Mr. Radio" miss also broke this fanout site).
-    declared_norm   = { _normalize_for_match( str( name ) ) for name in ( declared_managers or [ ] )
-                        if _normalize_for_match( str( name ) ) }
+    # F-B: canonical-keyed declared set (the journal-confirmed "mr radio" vs
+    # "Mr. Radio" miss also broke this fanout site). canonical_persona_key is
+    # the one identity root; symmetric on both compare sides + store-key parity.
+    declared_norm   = { canonical_persona_key( str( name ) ) for name in ( declared_managers or [ ] )
+                        if canonical_persona_key( str( name ) ) }
 
     try:
         manager_ids = list_managers( session_dir )
@@ -226,7 +227,7 @@ def resolve_active_managers(
             continue
         # DECLARED roster: a live-bridge persona in the declared set is a
         # manager regardless of manifest ownership (role-by-declaration).
-        if _is_manager( sid ) or ( persona and _normalize_for_match( persona ) in declared_norm ):
+        if _is_manager( sid ) or ( persona and canonical_persona_key( persona ) in declared_norm ):
             candidates[ sid ] = persona or candidates.get( sid )
 
     # PHANTOM GUARD: keep only sessions with a LIVE bridge (PID-alive), with a persona
