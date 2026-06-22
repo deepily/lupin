@@ -17,15 +17,29 @@
 //   window.__parityModel : the last MuxParityModel mounted (directions etc.)
 
 import { renderSenderCard } from "../render/templates/senderCard";
-import { toMuxModel } from "./parityFixture";
-import type { ParityScenario, MuxParityModel } from "./parityFixture";
+import { toMuxModel, toSendersVisible, toConversationByDate } from "./parityFixture";
+import type {
+  ParityScenario,
+  MuxParityModel,
+  SendersVisibleRow,
+  ConversationByDate,
+} from "./parityFixture";
 
 const APP_TIMEZONE = "UTC";
+
+interface LegacyShapes {
+  sendersVisible    : SendersVisibleRow[];
+  conversationByDate: ConversationByDate;
+}
 
 interface ParityHarnessWindow {
   __parityHarnessReady?: boolean;
   __parityMount?: ( scenario: ParityScenario ) => number;
   __parityModel?: MuxParityModel;
+  // Single-source legacy stub bodies — the golden-capture script reads these
+  // (computed by the SAME TS adapter) to route-stub legacy's senders-visible +
+  // conversation-by-date, so legacy and mux render from one canonical scenario.
+  __parityLegacyShapes?: ( scenario: ParityScenario ) => LegacyShapes;
 }
 
 function mount( scenario: ParityScenario ): number {
@@ -47,7 +61,15 @@ function mount( scenario: ParityScenario ): number {
   return model.senders.length;
 }
 
+function legacyShapes( scenario: ParityScenario ): LegacyShapes {
+  return {
+    sendersVisible    : toSendersVisible( scenario ),
+    conversationByDate: toConversationByDate( scenario ),
+  };
+}
+
 const w = window as unknown as ParityHarnessWindow;
 w.__parityMount = mount;
+w.__parityLegacyShapes = legacyShapes;
 w.__parityHarnessReady = true;
 console.log( "[parity-harness] ready" );

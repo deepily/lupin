@@ -14,6 +14,10 @@ interface HarnessWindow {
   __parityHarnessReady?: boolean;
   __parityMount?: ( s: unknown ) => number;
   __parityModel?: { senders: unknown[]; directions: Record<string, string> };
+  __parityLegacyShapes?: ( s: unknown ) => {
+    sendersVisible: Array<{ sender_id: string }>;
+    conversationByDate: Record<string, Record<string, unknown[]>>;
+  };
 }
 
 let scenario: unknown;
@@ -70,4 +74,18 @@ test( "parityHarness: __parityMount renders one .sender-card per sender + expose
   const again = w.__parityMount!( scenario );
   assert.equal( again, 2 );
   assert.equal( document.querySelectorAll( "#sender-cards-container .sender-card" ).length, 2 );
+} );
+
+test( "parityHarness: __parityLegacyShapes emits the legacy stub bodies (single-source)", async () => {
+  await import( "../../../../lupin_app/static/js/multiplexer/testkit/parityHarness" );
+  const w = window as unknown as HarnessWindow;
+
+  const shapes = w.__parityLegacyShapes!( scenario );
+  // senders-visible: one row per sender (legacy loadConversationHistory consumes this).
+  assert.equal( shapes.sendersVisible.length, 2 );
+  // conversation-by-date: keyed by sender_id → date → rows (drives legacy's
+  // responded-split at notifications.js:14317-14330).
+  const tibConv = shapes.conversationByDate[ "claude.code@lupin.deepily.ai#parity01" ];
+  assert.ok( tibConv );
+  assert.equal( tibConv[ "2026-06-20" ]!.length, 4 );
 } );
