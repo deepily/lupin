@@ -6,11 +6,16 @@
     <title>Multiplexer</title>
     <link rel="stylesheet" href="/static/css/lupin-base.css">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
-    <!-- Page-frame chrome (.container/body/h1) — CSS-parity restore 2026-06-17.
-         Verbatim-adapted from notifications.css:6-115; see
-         src/rnd/v0.1.8/2026.06.17-multiplexer-css-parity-audit.md. Linked
-         BEFORE the component sheets so component rules can override if needed. -->
-    <link rel="stylesheet" href="/static/css/multiplexer/page-frame.css">
+    <!-- SHARED layout-contract surfaces (page-frame + sender cards + date
+         accordions + sender messages + expired/abstract/progress), single-sourced
+         BYTE-FAITHFUL from notifications.css and linked by BOTH /app/notifications
+         and /app/multiplexer (Pillar 1 / D1 Rider A). Supersedes the old
+         page-frame.css + the copied contract rules in notifications-list.css.
+         See src/rnd/v0.1.9/2026.06.19-multiplexer-layout-parity-methodology/. -->
+    <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
+    <!-- Mux-only + mux-mechanism overrides ([data-collapsed] collapse, persona
+         badge button, renamed labels, pane structure). Linked AFTER the shared
+         sheet so the mux overrides win where intended. -->
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
     <link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">
     <link rel="stylesheet" href="/static/css/multiplexer/action-required.css">

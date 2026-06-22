@@ -1,0 +1,541 @@
+/* ============================================================================
+   notifications-surface.css — SHARED contract stylesheet (v0.1.9, WS1).
+
+   Plan:  src/rnd/v0.1.9/2026.06.19-multiplexer-layout-parity-methodology/
+            00-feasibility-report.md  (Premise A — the root cause)
+            01-layout-parity-methodology.md  (Pillar 1 — single-source CSS)
+            02-bridging-work-plan.md  (WS1; Decisions D1 Rider A + D2)
+
+   PURPOSE (Pillar 1 — "use the raw CSS, delete the copy"):
+   This sheet is the SINGLE SOURCE of the layout-contract surfaces that BOTH
+   /app/notifications (legacy monolith) and /app/multiplexer must render
+   identically: page-frame + sender cards + date accordions + sender messages
+   + expired/abstract/progress chrome. Before this sheet, the multiplexer
+   styled those surfaces from `multiplexer/notifications-list.css`, a
+   hand-extracted COPY of `notifications.css` that had DRIFTED (header gradient
+   direction, border alphas, accordion borders, message margins, scrollbar
+   widths, expired-badge palette, progress-group toggle, …). One file, two
+   <link>s ⇒ that drift is now impossible by construction.
+
+   BYTE-FAITHFUL TO THE MONOLITH (D1 Rider A):
+   Every rule below is transcribed VERBATIM (values/tokens) from
+   `static/css/notifications.css` (the 6009-line monolith) — the parity
+   REFERENCE. Source line numbers are cited per block. Formatting is
+   normalised to house style (4-space indent, spaces inside parens/brackets)
+   exactly as the sibling `multiplexer/page-frame.css` already established;
+   the COMPUTED values are identical to the monolith. No rule here is invented
+   or "improved" — drift is corrected only by re-aligning to the monolith.
+
+   LINK ORDER CONTRACT:
+   - notifications.html links this sheet BEFORE `notifications.css` so the
+     monolith still WINS any cascade conflict (RIDER A) — the legacy client is
+     the parity reference and renders byte-identically after the change.
+   - multiplexer.html links this sheet IN PLACE OF `page-frame.css` +
+     `notifications-list.css`; the mux keeps its own mechanism/mux-only rules
+     in `multiplexer/notifications-list.css` (trimmed) and its surface-specific
+     sheets (reading-pane, session-strip, jobs-pane, action-required, …).
+
+   ISOLATION (WS1 scope item 5):
+   The global resets (`*`, `body`, `h1`, `.container`) live here but this sheet
+   is linked ONLY by notifications.html + multiplexer.html, so those generic
+   selectors cannot bleed to any other page — the same isolation `page-frame.css`
+   had, preserved. `body` deliberately carries margin ONLY (no background): the
+   page background is supplied by each page's base sheet (lupin-base.css on the
+   mux; the monolith on legacy, which wins via link order). This folds in
+   page-frame.css's documented isolation decision verbatim.
+
+   SCOPE NOTE — action-required is intentionally EXCLUDED:
+   The legacy monolith renders an INTERACTIVE action-required widget
+   (.action-required-notification/-timer/-progress-bar/…); the multiplexer
+   renders a READ-ONLY widget with a DISJOINT class set
+   (.action-required-widget/-prompt/-countdown/… — owned by
+   `multiplexer/action-required.css`). The classes do not overlap, so there is
+   nothing to single-source byte-faithful in this slice. This is a Category-3
+   FUNCTIONAL divergence: it folds into the shared sheet only once the mux's
+   action-required widget reaches functional parity with legacy (06-10 / WS4
+   lane, oracle-gated). Expect it as a structure-parity MISSING node in the
+   full-page Tier-1 oracle — that is expected, not a regression.
+   ============================================================================ */
+
+/* ============================================================================
+   Page frame — global resets + page card + title.
+   notifications.css:1-4 (* reset), :6-7 (body margin), :102-109 (.container),
+   :111-115 (h1).  Mirrors the ratified `multiplexer/page-frame.css`.
+   ============================================================================ */
+
+* {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    box-sizing: border-box;
+}
+
+/* notifications.css:6-7 — page body margin ONLY (background supplied by each
+   page's base sheet; see ISOLATION note above). */
+body {
+    margin: 20px;
+}
+
+/* notifications.css:102-109 — the page card frame: centered, width-capped,
+   white, padded, rounded, shadowed. THE dominant page-frame rule. */
+.container {
+    max-width: 1000px;
+    margin: 0 auto;
+    background-color: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba( 0, 0, 0, 0.1 );
+}
+
+/* notifications.css:111-115 — centered page title. */
+h1 {
+    color: #333;
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+/* notifications.css:118 — inter-SECTION spacing (D2: legacy `margin` model is
+   the contract; the mux's drift-invented `#sender-cards-container { gap:8px }`
+   is dropped). Only the spacing declaration is the contract here. */
+.collapsible-section {
+    margin-bottom: 30px;
+}
+
+/* ============================================================================
+   Sender card — frame, header, header children.
+   notifications.css:1661-1671 (.sender-card), :1679-1693 (header),
+   :1695-1701 (header:hover), :1713-1718 (stats-group), :1720-1723 (msg-count),
+   :1725-1729 (last-activity), :2058-2062 (active-indicator base),
+   :2721-2730 (new-count).
+   Persona theming consumes `--persona-color` / `--persona-color-rgb`, both set
+   inline by senderCard.ts; the var() fallbacks render personaless cards neutral.
+   ============================================================================ */
+
+.sender-card {
+    margin-bottom: 12px;
+    border: 1px solid rgba( var( --persona-color-rgb, 222, 226, 230 ), 0.55 );
+    border-radius: 8px;
+    background-color: #ffffff;
+    box-shadow:
+        0 0 0 1px rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
+        0 2px 6px  rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
+    overflow: hidden;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+.sender-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 15px;
+    background: linear-gradient(
+        to bottom,
+        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.14 ),
+        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.04 )
+    );
+    border-bottom: 1px solid #e9ecef;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.2s ease;
+}
+
+.sender-card-header:hover {
+    background: linear-gradient(
+        to bottom,
+        rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
+        rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.08 )
+    );
+}
+
+/* :2058-2062 — base geometry of the active-session dot. The active/inactive
+   COLOR is driven by the `.sender-card-active` state class in the monolith;
+   the multiplexer does not emit that state class yet, so it keeps its own
+   indicator color in `notifications-list.css` (active-state seam → WS2/WS4). */
+.sender-active-indicator {
+    font-size: 10px;
+    margin-right: 4px;
+    line-height: 1;
+}
+
+.sender-stats-group {
+    display: flex;
+    align-items: center;
+    margin-left: auto;  /* Pushes entire group to right */
+    gap: 6px;           /* Consistent spacing between stats */
+}
+
+.sender-message-count {
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.sender-last-activity {
+    font-size: 11px;
+    color: #868e96;
+    font-style: italic;
+}
+
+.sender-new-count {
+    display: inline-block;
+    padding: 2px 8px;
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    background-color: #28a745;
+    color: white;
+    border-radius: 10px;
+}
+
+/* ============================================================================
+   Date accordion — container, accordion, header, toggle/count, messages well.
+   notifications.css:2733-2738 (.sender-card-dates), :2741-2747 (.date-accordion),
+   :2749-2751 (:last-child), :2754-2763 (header), :2765-2767 (header:hover),
+   :2769-2774 (.date-toggle), :2782-2786 (.date-count), :2812-2820 (messages),
+   :2822-2824 (.collapsed — the LEGACY collapse mechanism).
+
+   COLLAPSE-MECHANISM SEAM (C2-b → WS2): the monolith collapses via the
+   `.collapsed` class on `.date-accordion-messages` (below). The multiplexer
+   collapses via `[data-collapsed="true"]` on `.date-accordion`; that mux
+   mechanism rule lives in `multiplexer/notifications-list.css` so the mux's
+   accordions keep collapsing. The `.collapsed ∪ [data-collapsed]` union is a
+   WS2 + oracle-gated reconciliation — NOT done here.
+   The label class also differs (legacy `.date-label` vs mux `.date-text`):
+   that rename is a WS2/WS4 seam; the mux keeps `.date-text` in its own sheet.
+   ============================================================================ */
+
+.sender-card-dates {
+    display: flex;
+    flex-direction: column;
+    background-color: #fafafa;
+    padding: 4px 8px;
+}
+
+.date-accordion {
+    margin-bottom: 4px;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    background-color: white;
+    overflow: hidden;
+}
+
+.date-accordion:last-child {
+    margin-bottom: 0;
+}
+
+.date-accordion-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background-color: #f8f9fa;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.date-accordion-header:hover {
+    background-color: #e9ecef;
+}
+
+.date-toggle {
+    font-size: 11px;
+    color: #6c757d;
+    width: 12px;
+    text-align: center;
+}
+
+.date-count {
+    font-size: 11px;
+    color: #6c757d;
+    margin-left: 4px;
+}
+
+.date-accordion-messages {
+    display: flex;
+    flex-direction: column;
+    max-height: 250px;
+    overflow-y: auto;
+    padding: 8px 12px;
+    border-top: 1px solid #e9ecef;
+    background-color: #fafafa;
+}
+
+.date-accordion-messages.collapsed {
+    display: none;
+}
+
+/* ============================================================================
+   Sender message — chat-bubble base + in-accordion (scoped) styling.
+   notifications.css:2506-2516 (base), :2524-2532 (.incoming),
+   :2535-2541 (.outgoing), :2565-2571 (personaless fallback),
+   :2573-2575 (.outgoing .message-time), :2577-2582 (.message-time),
+   :2584-2587 (.message-text), :2592-2615 (code/pre/pre code),
+   :2827-2862 (in-accordion scoped overrides — 30px gutters),
+   :2865-2881 (date-accordion-messages scrollbar).
+
+   Both clients render messages INSIDE `.date-accordion-messages`, so the
+   scoped rules (`.date-accordion-messages .sender-message…`) are the ones that
+   actually apply — they are transcribed verbatim alongside the base rules so
+   the cascade resolves identically in both clients.
+
+   DIRECTION SEAM (C2-d / D3): the mux currently hardcodes `.incoming`
+   (notificationItem.ts); `.outgoing` styling is carried here so it lights up
+   the moment WS2 adds the direction param + responded-split. `.outgoing` rules
+   are inert until then (the mux emits no outgoing nodes yet).
+   ============================================================================ */
+
+.sender-message {
+    position: relative;  /* For pseudo-element positioning */
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.sender-message.incoming {
+    background: linear-gradient(
+        to bottom,
+        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+    );
+    margin-right: 40px;
+    border-bottom-left-radius: 2px;
+}
+
+/* Personaless cards (no inline --persona-color): visible gray gradient so the
+   conversation pane reads with depth instead of near-white wallpaper. */
+.sender-card:not( [ style*="--persona-color" ] ) .sender-message.incoming {
+    background: linear-gradient(
+        to bottom,
+        #e9ecef,
+        #f8f9fa
+    );
+}
+
+.sender-message.outgoing {
+    background-color: #007bff;
+    color: white;
+    margin-left: 40px;
+    flex-direction: row-reverse;
+    border-bottom-right-radius: 2px;
+}
+
+.sender-message.outgoing .message-time {
+    color: rgba( 255, 255, 255, 0.8 );
+}
+
+.message-time {
+    font-size: 10px;
+    color: #868e96;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.message-text {
+    flex: 1;
+    word-break: break-word;
+}
+
+.message-text code {
+    font-size: 90%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: rgba( 0, 0, 0, 0.05 );
+    padding: 0 3px;
+    border-radius: 3px;
+}
+
+.message-text pre {
+    font-size: 90%;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: rgba( 0, 0, 0, 0.05 );
+    padding: 6px 8px;
+    border-radius: 4px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: auto;
+    margin: 0.3em 0;
+}
+
+.message-text pre code {
+    background: none;
+    padding: 0;
+}
+
+/* In-accordion message overrides (the live styling — 30px gutters vs the
+   base 40px). notifications.css:2827-2862. */
+.date-accordion-messages .sender-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.date-accordion-messages .sender-message:last-child {
+    margin-bottom: 0;
+}
+
+.date-accordion-messages .sender-message.incoming {
+    background: linear-gradient(
+        to bottom,
+        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+    );
+    margin-right: 30px;
+    border-bottom-left-radius: 2px;
+}
+
+.date-accordion-messages .sender-message.outgoing {
+    background-color: #007bff;
+    color: white;
+    margin-left: 30px;
+    flex-direction: row-reverse;
+    border-bottom-right-radius: 2px;
+}
+
+.date-accordion-messages .sender-message.outgoing .message-time {
+    color: rgba( 255, 255, 255, 0.8 );
+}
+
+/* Scrollbar styling for date accordion messages (webkit).
+   notifications.css:2865-2881. */
+.date-accordion-messages::-webkit-scrollbar {
+    width: 5px;
+}
+
+.date-accordion-messages::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 3px;
+}
+
+.date-accordion-messages::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+}
+
+.date-accordion-messages::-webkit-scrollbar-thumb:hover {
+    background: #a1a1a1;
+}
+
+/* ============================================================================
+   Expired-response chrome.
+   notifications.css:3417-3421 (outgoing.expired-response),
+   :3423-3425 (its message-time), :3428-3438 (.expired-badge),
+   :3441-3443 (clock glyph before an expired message).
+   ============================================================================ */
+
+.date-accordion-messages .sender-message.outgoing.expired-response {
+    background-color: #868e96;
+    border-left: 3px solid #dc3545;
+    opacity: 0.9;
+}
+
+.date-accordion-messages .sender-message.outgoing.expired-response .message-time {
+    color: rgba( 255, 255, 255, 0.7 );
+}
+
+.expired-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    background-color: #f8d7da;
+    color: #721c24;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.sender-message.expired-response .message-text::before {
+    content: "⏰ ";
+}
+
+/* ============================================================================
+   Abstract indicator (📋 — opens the abstract popover).
+   notifications.css:4492-4499 (.abstract-indicator), :4501-4504 (:hover).
+   ============================================================================ */
+
+.abstract-indicator {
+    cursor: pointer;
+    margin-left: 6px;
+    font-size: 14px;
+    opacity: 0.7;
+    transition: opacity 0.2s, transform 0.2s;
+    vertical-align: middle;
+}
+
+.abstract-indicator:hover {
+    opacity: 1;
+    transform: scale( 1.1 );
+}
+
+/* ============================================================================
+   Progress group — head row, toggle pill, history list.
+   notifications.css:4680-4685 (.progress-group-head), :4688-4702 (.toggle),
+   :4703-4705 (.toggle:hover), :4725-4729 (.history), :4732-4737 (entry),
+   :4739-4742 (entry .activity-timestamp), :4062-4067 (.activity-timestamp base),
+   :4069-4072 (.activity-message).
+   ============================================================================ */
+
+.progress-group-head {
+    display: flex;
+    width: 100%;
+    gap: 8px;
+    align-items: center;
+}
+
+.progress-group-toggle {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    min-width: 28px;
+    height: 18px;
+    padding: 0 5px;
+    margin-left: auto;
+    background: #17a2b8;
+    color: white;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.progress-group-toggle:hover {
+    background: #138496;
+}
+
+.progress-group-history {
+    margin-top: 4px;
+    padding-left: 12px;
+    border-left: 2px solid rgba( 23, 162, 184, 0.3 );
+}
+
+.progress-history-entry {
+    display: flex;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 11px;
+    color: #6c757d;
+}
+
+.progress-history-entry .activity-timestamp {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.activity-timestamp {
+    flex-shrink: 0;
+    color: #6c757d;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+.activity-message {
+    color: #212529;
+    word-break: break-word;
+}
