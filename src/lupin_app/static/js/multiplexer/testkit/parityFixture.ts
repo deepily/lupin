@@ -128,6 +128,7 @@ function muxIncoming( senderId: string, n: ParityScenarioNotification ): Notific
     sender_id       : senderId,
     message         : n.message,
     action_required : false,        // historical conversation view — never a live prompt
+    direction       : "incoming",   // C2-c (Clayton d0aaa767): renderNotificationItem reads notification.direction
   };
   if ( n.abstract !== undefined )    norm.abstract    = n.abstract;
   if ( n.was_expired !== undefined ) norm.was_expired = n.was_expired;
@@ -142,6 +143,7 @@ function muxOutgoing( senderId: string, n: ParityScenarioNotification, value: st
     sender_id       : senderId,
     message         : value,
     action_required : false,
+    direction       : "outgoing",   // C2-c (Clayton d0aaa767): drives .sender-message.outgoing
   };
 }
 

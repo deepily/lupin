@@ -98,17 +98,12 @@ def test_tier1_responded_split_and_badges_present( page ):
     assert by_id[ "parity-expired-1" ][ "expired_badge" ] is True
 
 
-@pytest.mark.xfail(
-    reason="WS2/C2-d pending: notificationItem.ts still hardcodes .incoming. The "
-           "adapter's model is direction-correct; this flips to xpass the moment "
-           "the renderer gains its direction param.",
-    strict=False,
-)
 def test_tier1_outgoing_direction_conformance( page ):
     """
-    Layout-Contract direction referee: the synthetic response row must render as
-    `.sender-message.outgoing` and the prompt as `.incoming`. XFAIL until WS2
-    wires the renderer direction param (the `.outgoing` CSS is already ported).
+    Layout-Contract direction referee: the synthetic response row renders as
+    `.sender-message.outgoing` and the prompt as `.incoming`. PASSES since WS2/C2-d
+    landed (Clayton d0aaa767: renderNotificationItem reads notification.direction;
+    toMuxModel wires it) — was xfail until then.
     """
     skeleton = _mount_and_skeleton( page )
     msgs  = _card( skeleton, TIBERIUS )[ "accordions" ][ 0 ][ "messages" ]

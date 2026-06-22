@@ -123,18 +123,12 @@ def test_mux_matches_golden_message_widgets( page ):
                     )
 
 
-@pytest.mark.xfail(
-    reason="WS2/C2-d pending: legacy renders the responded reply .outgoing; the mux "
-           "still hardcodes .incoming. The oracle reports this precise gap — it flips "
-           "to xpass when WS2 wires the renderer direction param.",
-    strict=False,
-)
 def test_mux_matches_golden_message_direction( page ):
     """
     Cross-client direction conformance — the strongest structural claim. Position
-    0 (the newest row) is the responded reply: legacy `.outgoing`, mux currently
-    `.incoming`. XFAIL until WS2. This single assertion is the oracle's actionable
-    WS2 work-item.
+    0 (the newest row) is the responded reply: `.outgoing` on BOTH legacy and mux.
+    PASSES since WS2/C2-d landed (Clayton d0aaa767 + toMuxModel direction wiring) —
+    was xfail until then; this is the oracle confirming C2-c end-to-end.
     """
     golden = _load_golden()
     mux    = _by_sender( _mux_skeleton( page ) )

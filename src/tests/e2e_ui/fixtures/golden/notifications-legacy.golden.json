@@ -1,7 +1,7 @@
 {
   "captured_from": "legacy notifications.js",
   "scenario": "notifications-parity-scenario.json",
-  "shared_sheet_hash": "7675e20418c2",
+  "shared_sheet_hash": "8908ce6a9fa5",
   "skeleton": {
     "cards": [
       {
@@ -140,7 +140,7 @@
           "dx": 0,
           "dy": 0,
           "w": 916,
-          "h": 339.7
+          "h": 335.2
         }
       },
       {
@@ -246,7 +246,7 @@
           "dx": 12,
           "dy": 100,
           "w": 894,
-          "h": 40
+          "h": 35.5
         }
       },
       {
@@ -283,13 +283,13 @@
           "gap": "normal",
           "order": "0",
           "font-family": "\"Helvetica Neue\", Helvetica, Arial, sans-serif",
-          "font-size": "16px",
-          "font-weight": "400",
-          "line-height": "24px",
+          "font-size": "13px",
+          "font-weight": "500",
+          "line-height": "19.5px",
           "letter-spacing": "normal",
           "white-space": "normal",
           "text-align": "start",
-          "color": "rgb(51, 51, 51)",
+          "color": "rgb(73, 80, 87)",
           "background-color": "rgba(0, 0, 0, 0)",
           "box-shadow": "none",
           "border-radius": "0px",
@@ -298,8 +298,8 @@
         "geom": {
           "dx": 24,
           "dy": 108,
-          "w": 81.8,
-          "h": 24
+          "w": 66.5,
+          "h": 19.5
         }
       },
       {
@@ -350,7 +350,7 @@
         },
         "geom": {
           "dx": 12,
-          "dy": 140,
+          "dy": 135.5,
           "w": 894,
           "h": 193.7
         }
@@ -403,7 +403,7 @@
         },
         "geom": {
           "dx": 54,
-          "dy": 149,
+          "dy": 144.5,
           "w": 840,
           "h": 30.2
         }
@@ -456,7 +456,7 @@
         },
         "geom": {
           "dx": 859,
-          "dy": 155,
+          "dy": 150.5,
           "w": 25,
           "h": 14
         }
@@ -509,7 +509,7 @@
         },
         "geom": {
           "dx": 64,
-          "dy": 155,
+          "dy": 150.5,
           "w": 787,
           "h": 18.2
         }
@@ -562,7 +562,7 @@
         },
         "geom": {
           "dx": 24,
-          "dy": 185.2,
+          "dy": 180.7,
           "w": 840,
           "h": 30.2
         }
@@ -615,7 +615,7 @@
         },
         "geom": {
           "dx": 34,
-          "dy": 191.2,
+          "dy": 186.7,
           "w": 25,
           "h": 14
         }
@@ -668,7 +668,7 @@
         },
         "geom": {
           "dx": 67,
-          "dy": 191.2,
+          "dy": 186.7,
           "w": 787,
           "h": 18.2
         }
@@ -721,7 +721,7 @@
         },
         "geom": {
           "dx": 24,
-          "dy": 221.4,
+          "dy": 216.9,
           "w": 840,
           "h": 30.6
         }
@@ -774,7 +774,7 @@
         },
         "geom": {
           "dx": 34,
-          "dy": 227.4,
+          "dy": 222.9,
           "w": 25,
           "h": 14
         }
@@ -827,7 +827,7 @@
         },
         "geom": {
           "dx": 67,
-          "dy": 227.4,
+          "dy": 222.9,
           "w": 787,
           "h": 18.6
         }
@@ -880,7 +880,7 @@
         },
         "geom": {
           "dx": 24,
-          "dy": 257.9,
+          "dy": 253.4,
           "w": 840,
           "h": 31.6
         }
@@ -933,7 +933,7 @@
         },
         "geom": {
           "dx": 34,
-          "dy": 263.9,
+          "dy": 259.4,
           "w": 25,
           "h": 14
         }
@@ -986,7 +986,7 @@
         },
         "geom": {
           "dx": 67,
-          "dy": 263.9,
+          "dy": 259.4,
           "w": 787,
           "h": 19.6
         }
@@ -1039,7 +1039,7 @@
         },
         "geom": {
           "dx": 24,
-          "dy": 295.5,
+          "dy": 291,
           "w": 840,
           "h": 30.2
         }
@@ -1092,7 +1092,7 @@
         },
         "geom": {
           "dx": 34,
-          "dy": 301.5,
+          "dy": 297,
           "w": 25,
           "h": 14
         }
@@ -1145,7 +1145,7 @@
         },
         "geom": {
           "dx": 67,
-          "dy": 301.5,
+          "dy": 297,
           "w": 787,
           "h": 18.2
         }
@@ -1200,7 +1200,7 @@
           "dx": 0,
           "dy": 0,
           "w": 916,
-          "h": 141.2
+          "h": 136.7
         }
       },
       {
@@ -1306,7 +1306,7 @@
           "dx": 12,
           "dy": 48,
           "w": 894,
-          "h": 40
+          "h": 35.5
         }
       },
       {
@@ -1343,13 +1343,13 @@
           "gap": "normal",
           "order": "0",
           "font-family": "\"Helvetica Neue\", Helvetica, Arial, sans-serif",
-          "font-size": "16px",
-          "font-weight": "400",
-          "line-height": "24px",
+          "font-size": "13px",
+          "font-weight": "500",
+          "line-height": "19.5px",
           "letter-spacing": "normal",
           "white-space": "normal",
           "text-align": "start",
-          "color": "rgb(51, 51, 51)",
+          "color": "rgb(73, 80, 87)",
           "background-color": "rgba(0, 0, 0, 0)",
           "box-shadow": "none",
           "border-radius": "0px",
@@ -1358,8 +1358,8 @@
         "geom": {
           "dx": 24,
           "dy": 56,
-          "w": 81.8,
-          "h": 24
+          "w": 66.5,
+          "h": 19.5
         }
       },
       {
@@ -1410,7 +1410,7 @@
         },
         "geom": {
           "dx": 12,
-          "dy": 88,
+          "dy": 83.5,
           "w": 894,
           "h": 47.2
         }
@@ -1463,7 +1463,7 @@
         },
         "geom": {
           "dx": 24,
-          "dy": 97,
+          "dy": 92.5,
           "w": 840,
           "h": 30.2
         }
@@ -1516,7 +1516,7 @@
         },
         "geom": {
           "dx": 34,
-          "dy": 103,
+          "dy": 98.5,
           "w": 25,
           "h": 14
         }
@@ -1569,7 +1569,7 @@
         },
         "geom": {
           "dx": 67,
-          "dy": 103,
+          "dy": 98.5,
           "w": 787,
           "h": 18.2
         }

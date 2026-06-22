@@ -43,47 +43,32 @@ BASE_URL    = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:7999" )
 HARNESS_URL = f"{BASE_URL}{HARNESS_URL_PATH}"
 GOLDEN_PATH = repo_root() / "src" / "tests" / "e2e_ui" / "fixtures" / "golden" / "notifications-legacy.golden.json"
 
-# The known WS2/C2-d divergence: legacy renders the newest (responded-reply) row
-# of the persona'd card `.outgoing`; the mux still hardcodes `.incoming`. Every
-# node whose key contains this prefix is allowed to differ until WS2 lands.
-WS2_DIVERGENT_PREFIX = "card:claude.code@lupin.deepily.ai#parity01>msg[0]"
+# WS2/C2-d direction CLOSED (Clayton commit d0aaa767 — Notification.direction +
+# renderNotificationItem + load-time responded-split — plus the toMuxModel
+# direction wiring). The mux now renders the responded reply `.outgoing` == legacy,
+# a PROVEN match (was an allowlist exemption; the freshness guard fired on landing
+# and this entry was removed). The two direction conformance tests (Tier 1 +
+# golden-conformance) flipped xfail→pass.
 
 # WS1 border-left CLOSED (Clayton, commit 7d5b4d51 + golden recapture): the
 # `.sender-card[:not](.sender-card-active){ border-left:3px solid var(--persona-color,transparent) }`
 # left-accent rules were ported byte-faithful into notifications-surface.css
 # (notifications.css:2086-2092), so the mux now computes border-left-width 3px =
 # legacy. It is no longer an allowlist exemption — Tier 2 asserts it as a PROVEN
-# match. WS2/C2-d direction is the only remaining known divergence.
+# match. WS2/C2-d direction is closed too (see above).
 
-# Known WS2/WS4 date-label rename seam (documented-deferred in BOTH sheets:
-# notifications-surface.css:275-276 + notifications-list.css:103-106). Legacy JS
-# emits `.date-text` (notifications.js:13614) but legacy CSS still styles the dead
-# `.date-label` (notifications.css:2776 — 13px/500), so legacy's `.date-text`
-# renders UNSTYLED (browser-default 16px/24px/400); the mux styles `.date-text`
-# at 11px/600 in its own sheet. The line-height delta (24px vs 16.5px) is the
-# EXACT ~7.5px intra-card vertical gap (diagnosed REAL, not a harness artifact —
-# golden is the real legacy page + the harness links the same contract sheets;
-# per Tiberius's real-vs-artifact task). Allowlisted (freshness-guarded) until the
-# seam unifies `.date-text` into the shared contract at the designed 13px/500.
-# The ENTIRE `.date-text` node is the seam (legacy unstyled vs mux-styled), so
-# EVERY declared-style prop on it diverges from the same root cause (font-size /
-# line-height / font-weight — the ~7.5px driver — plus color + letter-spacing);
-# all converge when the seam unifies. Hence the allowlist covers the whole node.
+# WS2/WS4 date-label rename seam CLOSED (Clayton commit d8980bc3 + golden
+# recapture): the shared sheet now styles `.date-text { font-size:13px;
+# font-weight:500; color:#495057 }` (byte-faithful to the legacy `.date-label`
+# intent, notifications.css:2776); the mux 11px placeholder + the dead `.date-label`
+# monolith rule were removed. Both clients now compute `.date-text` at 13px/19.5px
+# /500 — the ~7.5px header→first-message gap closed (the persona-less arbiter card
+# is fully parity-green). It was an allowlist exemption; the freshness guard fired
+# on recapture and the entry was removed. Tier 2 now asserts FULL computed-style
+# isomorphism with NO allowlist — every WS1/WS2 seam is a PROVEN match.
 
 # Geometry tolerance (Doc 01 Tier 3).
 GEOM_TOL_PX = 1.0
-
-
-def _is_date_text_seam( key: str ) -> bool:
-    return key.endswith( ">date-text" )
-
-
-def _is_known_style_divergence( key: str, prop: str ) -> bool:
-    if key.startswith( WS2_DIVERGENT_PREFIX ):
-        return True                                  # WS2/C2-d direction
-    if _is_date_text_seam( key ):
-        return True                                  # WS2/WS4 date-label rename seam (whole .date-text node)
-    return False
 
 
 def _golden() -> dict:
@@ -140,18 +125,12 @@ def _card_widths( legacy: dict ) -> dict[ str, float ]:
     return out
 
 
-def _is_ws2( key: str ) -> bool:
-    return key.startswith( WS2_DIVERGENT_PREFIX )
-
-
 def test_tier2_computed_style_isomorphism( page ):
-    """Tier 2 (core proof): every corresponding contract node has EQUAL declarative
-    layout style, except the one documented known-divergence (the WS2 direction
-    node). With WS1 closed, the `.sender-card` border-left is now a PROVEN match
-    (legacy 3px == mux 3px), included in the proven set. A NEW divergence anywhere
-    else fails with the exact node+property+legacy+mux line. A freshness guard
-    asserts the WS2 divergence is still present, so this test fails (prompting
-    allowlist cleanup) the moment WS2 lands."""
+    """Tier 2 (core proof) — FULL computed-style isomorphism, NO allowlist. Every
+    corresponding contract node has EQUAL declarative layout style across the mux
+    component-isolation render and the legacy golden. All prior seams — WS1
+    border-left, WS2/C2-d direction, WS2/WS4 date-text rename — are now PROVEN
+    matches. Any divergence fails with the exact node+property+legacy+mux line."""
     legacy = _legacy_nodes( _golden() )
     mux    = _mux_nodes( page, _card_widths( legacy ) )
 
@@ -159,53 +138,43 @@ def test_tier2_computed_style_isomorphism( page ):
     assert common, "no aligned contract nodes between mux and golden"
 
     unexpected: list[ str ] = []
-    ws2_seen = False
-    date_text_seen = False
     for key in sorted( common ):
         for prop in LAYOUT_STYLE_PROPS:
-            if legacy[ key ][ "styles" ].get( prop ) == mux[ key ][ "styles" ].get( prop ):
-                continue
-            if _is_known_style_divergence( key, prop ):
-                if key.startswith( WS2_DIVERGENT_PREFIX ): ws2_seen = True
-                if _is_date_text_seam( key ):              date_text_seen = True
-                continue
-            unexpected.append(
-                f"  {key}  {prop}: legacy {legacy[key]['styles'].get(prop)!r} · mux {mux[key]['styles'].get(prop)!r}"
-            )
+            if legacy[ key ][ "styles" ].get( prop ) != mux[ key ][ "styles" ].get( prop ):
+                unexpected.append(
+                    f"  {key}  {prop}: legacy {legacy[key]['styles'].get(prop)!r} · mux {mux[key]['styles'].get(prop)!r}"
+                )
 
     assert not unexpected, (
-        "Tier 2 NEW computed-style divergence (not in the WS2 / date-text-seam allowlist):\n" + "\n".join( unexpected )
+        "Tier 2 computed-style divergence:\n" + "\n".join( unexpected )
     )
-    # Freshness guards — when each seam lands, the matching flag flips and forces allowlist cleanup.
-    assert ws2_seen, "WS2 responded-reply style divergence vanished — WS2 may have landed; remove the allowlist entry"
-    assert date_text_seen, "date-text rename-seam divergence vanished — WS2/WS4 may have unified .date-text; remove the allowlist entry"
 
 
 @pytest.mark.xfail(
-    reason="Tier 3 geometry, post-WS1-fix (the ±2px horizontal border diff is now "
-           "GONE — WS1 confirmed). Remaining diffs are BOTH known-divergence "
-           "consequences: (1) the WS2 .outgoing height delta cascading ~60px down "
-           "the persona'd card's sibling rows (flips when WS2 wires the renderer "
-           "direction param); (2) the WS2/WS4 date-label rename seam — `.date-text` "
-           "line-height 24px(legacy, unstyled browser-default) vs 16.5px(mux) = the "
-           "~7.5px vertical delta on BOTH cards (diagnosed REAL, not harness noise; "
-           "closes when .date-text unifies into the shared contract at 13px/500). "
-           "The machinery is correct (precise per-node Δpx report); strict=False so "
-           "it never breaks the suite.",
+    reason="Tier 3 geometry — ALL CSS/style seams are now CLOSED (WS1 border-left, "
+           "WS2/C2-d direction, WS2/WS4 date-text), and the persona-LESS arbiter "
+           "card is FULLY parity-green (0 diffs). The remaining geometry delta is "
+           "confined to the persona'd CC-session card: a ~51.7px vertical gap from "
+           "the accordion down + residual `.message-text` width diffs (msg[2]/[3]). "
+           "This is the next layer the oracle peeled once styling converged — a "
+           "WS4/G4 STRUCTURE-parity gap (the mux does not yet render the CC-session "
+           "sender-card header chrome — project-name/session-id/status/delete/toggle, "
+           "Category-3 / the 06-10 gap-bridge), NOT a CSS divergence and NOT in WS2 "
+           "scope. Per Doc 02 this climbs to green as G4 functional gaps land; "
+           "manager-routed. Remove this xfail when the CC header chrome ships. "
+           "strict=False so it never breaks the suite.",
     strict=False,
 )
 def test_tier3_geometry_isomorphism( page ):
     """Tier 3: intra-card geometry (offset-from-card + size) within ±1px for every
-    corresponding node EXCEPT the known WS2 node. XFAIL until WS1/WS2 close their
-    geometric blast radius (see reason)."""
+    corresponding node. The persona-less arbiter card is fully green; XFAIL tracks
+    the persona'd CC card's residual WS4/G4 structure gap (see reason)."""
     legacy = _legacy_nodes( _golden() )
     mux    = _mux_nodes( page, _card_widths( legacy ) )
 
     common = set( legacy ) & set( mux )
     unexpected: list[ str ] = []
     for key in sorted( common ):
-        if _is_ws2( key ):
-            continue
         lg, mg = legacy[ key ][ "geom" ], mux[ key ][ "geom" ]
         for axis in ( "dx", "dy", "w", "h" ):
             if abs( lg[ axis ] - mg[ axis ] ) > GEOM_TOL_PX:
