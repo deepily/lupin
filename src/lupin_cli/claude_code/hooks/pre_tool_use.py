@@ -59,6 +59,19 @@ def main():
     # Resolve session_id: payload first (future-proof), then session bridge fallback
     session_id = resolve_stable_session_id( payload.get( "session_id", "" ) ) or get_claude_session_id()
 
+    # Subagent governance (manager-autonomy §2.2): a CREW-MANAGER session (one
+    # with a non-empty spawn manifest) may not use the Agent/Task subagent tool —
+    # it must staff via spawn_sessions (in-process subagents are invisible/
+    # ungovernable). DEFAULT-OFF (LUPIN_SUBAGENT_GOVERNANCE) + FAIL-OPEN (the lib
+    # returns None on any error), so this is inert + safe on the hot path.
+    from lupin_cli.claude_code.hooks.lib.subagent_governance import (
+        subagent_deny_reason, build_subagent_deny_response,
+    )
+    gov_reason = subagent_deny_reason( payload.get( "tool_name", "" ), session_id )
+    if gov_reason:
+        emit_json( build_subagent_deny_response( gov_reason ) )
+        sys.exit( 0 )
+
     # Drain voice buffer, acknowledge, and inject as additionalContext
     # No tool TTS — PostToolUse handles announcements
     messages  = drain_and_acknowledge( session_id )
