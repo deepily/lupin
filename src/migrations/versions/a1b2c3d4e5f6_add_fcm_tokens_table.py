@@ -29,25 +29,37 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Create the fcm_tokens registry table."""
+    """Create the fcm_tokens registry table.
 
-    op.create_table(
-        'fcm_tokens',
-        sa.Column( 'id', UUID( as_uuid=True ), primary_key=True ),
-        sa.Column( 'token', sa.String( 512 ), nullable=False ),
-        sa.Column( 'user_id', sa.String( 64 ), nullable=False ),
-        sa.Column( 'user_email', sa.String( 255 ), nullable=False ),
-        sa.Column( 'platform', sa.String( 32 ), nullable=False ),
-        sa.Column( 'created_at', sa.DateTime( timezone=True ), nullable=False, server_default=sa.text( 'NOW()' ) ),
-        sa.Column( 'last_registered_at', sa.DateTime( timezone=True ), nullable=False, server_default=sa.text( 'NOW()' ) )
-    )
-    op.create_index( 'ix_fcm_tokens_token', 'fcm_tokens', [ 'token' ], unique=True )
-    op.create_index( 'ix_fcm_tokens_user_id', 'fcm_tokens', [ 'user_id' ] )
+    IDEMPOTENT (hardened 2026-06-22, same bug-class as the b633d12a hotfix for
+    e5f6a7b8c9d0). A create_all-bootstrapped DB stamped BELOW this revision already
+    holds fcm_tokens, so an unguarded ``create_table`` raises ``DuplicateTable`` on
+    ``upgrade head``. Create it only when absent — a safe no-op on a create_all DB,
+    full build on a truly-empty DB.
+    """
+    existing_tables = set( sa.inspect( op.get_bind() ).get_table_names() )
+
+    if "fcm_tokens" not in existing_tables:
+        op.create_table(
+            'fcm_tokens',
+            sa.Column( 'id', UUID( as_uuid=True ), primary_key=True ),
+            sa.Column( 'token', sa.String( 512 ), nullable=False ),
+            sa.Column( 'user_id', sa.String( 64 ), nullable=False ),
+            sa.Column( 'user_email', sa.String( 255 ), nullable=False ),
+            sa.Column( 'platform', sa.String( 32 ), nullable=False ),
+            sa.Column( 'created_at', sa.DateTime( timezone=True ), nullable=False, server_default=sa.text( 'NOW()' ) ),
+            sa.Column( 'last_registered_at', sa.DateTime( timezone=True ), nullable=False, server_default=sa.text( 'NOW()' ) )
+        )
+        op.create_index( 'ix_fcm_tokens_token', 'fcm_tokens', [ 'token' ], unique=True )
+        op.create_index( 'ix_fcm_tokens_user_id', 'fcm_tokens', [ 'user_id' ] )
 
 
 def downgrade() -> None:
-    """Drop the fcm_tokens registry table."""
+    """Drop the fcm_tokens registry table (idempotent — only when present)."""
 
-    op.drop_index( 'ix_fcm_tokens_user_id', table_name='fcm_tokens' )
-    op.drop_index( 'ix_fcm_tokens_token', table_name='fcm_tokens' )
-    op.drop_table( 'fcm_tokens' )
+    existing_tables = set( sa.inspect( op.get_bind() ).get_table_names() )
+
+    if "fcm_tokens" in existing_tables:
+        op.drop_index( 'ix_fcm_tokens_user_id', table_name='fcm_tokens' )
+        op.drop_index( 'ix_fcm_tokens_token', table_name='fcm_tokens' )
+        op.drop_table( 'fcm_tokens' )

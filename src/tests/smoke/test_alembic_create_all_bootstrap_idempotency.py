@@ -48,6 +48,14 @@ _BOOTSTRAP_STAMP = "d4e5f6a7b8c9"
 _DRIFT_TABLES  = [ "proxy_decisions", "trust_states", "prediction_log", "server_lifecycle" ]
 _NOTIF_COLUMNS = [ "job_id", "progress_group_id", "abstract", "response_options", "is_hidden" ]
 
+# The TRUE baseline stamp — replaying the WHOLE chain from here over a create_all
+# DB exercises the four older migrations hardened 2026-06-22 (task #4b299e07):
+#   f0a1b2c3d4e5 (task_items/task_events), a1b2c3d4e5f6 (fcm_tokens),
+#   b2c3d4e5f6a7 (task_events.reason), c3d4e5f6a7b8 (notifications DM fields).
+_TRUE_BASELINE_STAMP = "000000000000"
+_TASK_STORE_TABLES   = [ "task_items", "task_events", "fcm_tokens" ]
+_DM_NOTIF_COLUMNS    = [ "direction", "sender_persona", "sender_icon", "reply_to", "thread_id" ]
+
 
 def _server_url():
     """
@@ -140,6 +148,14 @@ def _notif_columns( url ):
         eng.dispose()
 
 
+def _task_events_columns( url ):
+    eng = create_engine( url )
+    try:
+        return { c[ "name" ] for c in inspect( eng ).get_columns( "task_events" ) }
+    finally:
+        eng.dispose()
+
+
 def _create_all( url ):
     """Bootstrap the FULL current ORM schema (the create_all path) on the DB."""
     from cosa.rest.postgres_models import Base
@@ -183,6 +199,44 @@ def test_upgrade_head_is_clean_over_create_all_bootstrap_stamped_below_head( thr
     cols = _notif_columns( throwaway_db_url )
     for c in _NOTIF_COLUMNS:
         assert c in cols, f"expected notifications column {c!r} present after upgrade over create_all"
+
+
+def test_upgrade_head_is_clean_over_create_all_bootstrap_stamped_at_true_baseline( throwaway_db_url ):
+    """
+    Broader regression (task #4b299e07): create_all (full schema) + stamp at the
+    TRUE BASELINE 000000000000, then run the real boot path. This replays the
+    ENTIRE migration chain — f0a1b2c3d4e5 (task-store), a1b2c3d4e5f6 (fcm_tokens),
+    b2c3d4e5f6a7 (task_events.reason), c3d4e5f6a7b8 (notif DM fields), d4e5f6a7b8c9,
+    e5f6a7b8c9d0 — over a schema create_all already fully built. Pre-hardening the
+    FIRST of the four older migrations (f0a1b2c3d4e5) raised DuplicateTable on
+    task_items; post-hardening it must reach head cleanly.
+    """
+    _create_all( throwaway_db_url )
+    command.stamp( build_alembic_config( database_url=throwaway_db_url ), _TRUE_BASELINE_STAMP )
+    assert _current_rev( throwaway_db_url ) == _TRUE_BASELINE_STAMP        # case-3 from baseline confirmed
+
+    # TEETH: create_all has ALREADY built every object the replayed chain will try
+    # to create — so the guarded DDL genuinely runs over pre-existing objects.
+    pre_tables = _table_names( throwaway_db_url )
+    for t in _TASK_STORE_TABLES + _DRIFT_TABLES:
+        assert t in pre_tables, f"create_all should pre-build {t!r} (else the regression is vacuous)"
+    assert "reason" in _task_events_columns( throwaway_db_url ), "create_all should pre-build task_events.reason"
+    pre_notif = _notif_columns( throwaway_db_url )
+    for c in _DM_NOTIF_COLUMNS + _NOTIF_COLUMNS:
+        assert c in pre_notif, f"create_all should pre-build notifications.{c} (else the regression is vacuous)"
+
+    # Real production boot entry point — must NOT raise (no DuplicateTable/Column).
+    run_migrations_to_head( database_url=throwaway_db_url )
+
+    assert _current_rev( throwaway_db_url ) == _head_revision()
+    # Every object survives (create_all built them; the guarded migrations left them intact).
+    post_tables = _table_names( throwaway_db_url )
+    for t in _TASK_STORE_TABLES + _DRIFT_TABLES:
+        assert t in post_tables, f"expected table {t!r} present after upgrade over create_all"
+    assert "reason" in _task_events_columns( throwaway_db_url )
+    post_notif = _notif_columns( throwaway_db_url )
+    for c in _DM_NOTIF_COLUMNS + _NOTIF_COLUMNS:
+        assert c in post_notif, f"expected notifications column {c!r} present after upgrade over create_all"
 
 
 def test_second_run_is_a_clean_idempotent_noop( throwaway_db_url ):
