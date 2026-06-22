@@ -50,6 +50,19 @@ def test_linked_shared_hrefs_empty_when_absent():
     assert oracle.linked_shared_hrefs( html ) == []
 
 
+def test_fixture_path_resolves_canonical_scenario():
+    p = oracle.fixture_path()
+    assert str( p ).endswith( "src/tests/e2e_ui/fixtures/notifications-parity-scenario.json" )
+
+
+def test_load_scenario_parses_canonical_fixture():
+    scenario = oracle.load_scenario()
+    assert scenario[ "schema_version" ] == 1
+    assert len( scenario[ "senders" ] ) == 2
+    sender_ids = [ s[ "sender_id" ] for s in scenario[ "senders" ] ]
+    assert "lupin-arbiter-app-8001" in sender_ids
+
+
 def test_content_hash_is_stable_12_char_digest( tmp_path ):
     f = tmp_path / "sheet.css"
     f.write_bytes( b".sender-card { display: flex; }" )

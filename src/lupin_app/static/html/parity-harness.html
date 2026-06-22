@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Layout-Parity Component-Isolation Harness</title>
+
+    <!-- WS3 component-isolation harness (Doc 01 — "Component-isolation vs
+         full-page scope"). Mounts ONE `.sender-card` per scenario sender inside
+         the standard `.container` at a fixed viewport, so Tiers 2/3 compare the
+         mux render against the legacy golden apples-to-apples, with no sibling
+         interference. NOT a user-facing page — served only for the oracle. -->
+
+    <!-- Contract surfaces (single-source shared sheet from WS1) + the
+         mux-specific mechanism rules (e.g. [data-collapsed] collapse). These
+         mirror what /app/multiplexer links for the contract surfaces, so the
+         isolated card styles identically. -->
+    <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
+
+    <!-- renderMarkdownInline reuses the page-loaded marked + DOMPurify globals
+         (Q-E) — same vendor scripts the real clients load. -->
+    <script src="/static/js/vendor/marked.min.js"></script>
+    <script src="/static/js/vendor/purify.min.js"></script>
+
+    <style>
+        /* Fixed viewport width so geometry (Tier 3) is deterministic. Mirrors
+           the legacy/mux `.container` max-width; the golden is captured at the
+           same width. */
+        html, body { margin: 0; padding: 0; }
+        .container { width: 900px; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <div id="sender-cards-container"></div>
+    </main>
+
+    <script type="module" src="/static/dist/multiplexer/parity-harness.js"></script>
+</body>
+</html>
