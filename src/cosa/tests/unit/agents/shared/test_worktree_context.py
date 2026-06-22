@@ -140,44 +140,48 @@ class TestWorktreeContext( unittest.TestCase ):
         self.assertFalse( _run( ctx.__aexit__( None, None, None ) ) )
 
     def test_aexit_cleanup_success( self ):
-        """Test __aexit__ removes the worktree on success."""
-        with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ):
+        """Test __aexit__ delegates cleanup to the shared drain_then_remove (clean exit)."""
+        with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ), \
+             patch( f"{_MOD}.drain_then_remove",
+                    return_value={ "removed": True, "wip_committed": False, "branch": "wt-x", "errors": [ ] } ) as drain:
             ctx = self._make_ctx( enabled=True, debug=True )
             ctx.enabled = True
             ctx._auto_cleanup = True
             ctx.path = "/root/wt"
-            ctx._run_git_in = AsyncMock( return_value=_OK )
             self.assertFalse( _run( ctx.__aexit__( None, None, None ) ) )
-            ctx._run_git_in.assert_awaited()
+            drain.assert_called_once()
+            self.assertEqual( drain.call_args[ 0 ][ 0 ], "/root/wt" )   # worktree path is the positional arg
 
-    def test_aexit_remove_fail_then_prune( self ):
-        """Test a failed remove falls back to prune."""
-        with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ):
+    def test_aexit_dirty_exit_preserves_wip( self ):
+        """Test the abnormal-exit rescue: drain reports a WIP commit; __aexit__ still returns False (unmasked)."""
+        with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ), \
+             patch( f"{_MOD}.drain_then_remove",
+                    return_value={ "removed": True, "wip_committed": True, "branch": "wt-x", "wip_sha": "abc1234", "errors": [ ] } ):
             ctx = self._make_ctx( enabled=True )
             ctx.enabled = True
             ctx._auto_cleanup = True
             ctx.path = "/root/wt"
-            ctx._run_git_in = AsyncMock( side_effect=[ _FAIL, _OK ] )   # remove fail, prune ok
             self.assertFalse( _run( ctx.__aexit__( None, None, None ) ) )
 
-    def test_aexit_remove_and_prune_both_fail( self ):
-        """Test both remove and prune failing are logged but not raised."""
-        with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ):
+    def test_aexit_not_removed_is_logged_not_raised( self ):
+        """Test a non-removal (with errors) is logged as a warning, never raised."""
+        with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ), \
+             patch( f"{_MOD}.drain_then_remove",
+                    return_value={ "removed": False, "wip_committed": False, "branch": None, "errors": [ "boom" ] } ):
             ctx = self._make_ctx( enabled=True )
             ctx.enabled = True
             ctx._auto_cleanup = True
             ctx.path = "/root/wt"
-            ctx._run_git_in = AsyncMock( side_effect=[ _FAIL, _FAIL ] )
             self.assertFalse( _run( ctx.__aexit__( None, None, None ) ) )
 
     def test_aexit_cleanup_exception_swallowed( self ):
-        """Test an unexpected cleanup exception is logged but not raised."""
-        with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ):
+        """Test an unexpected drain exception is logged but not raised (primary exc unmasked)."""
+        with patch( f"{_MOD}.cu.get_project_root", return_value="/root" ), \
+             patch( f"{_MOD}.drain_then_remove", side_effect=Exception( "git blew up" ) ):
             ctx = self._make_ctx( enabled=True )
             ctx.enabled = True
             ctx._auto_cleanup = True
             ctx.path = "/root/wt"
-            ctx._run_git_in = AsyncMock( side_effect=Exception( "git blew up" ) )
             self.assertFalse( _run( ctx.__aexit__( None, None, None ) ) )
 
     # ------------------------------------------------------------------ #

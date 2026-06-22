@@ -431,6 +431,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
         owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
+        worktree_janitor_fn      : Optional[ Callable ] = None,   # §4b janitor: per-poll abandoned-worktree reconcile (None → INERT, no sweep; the :8001 factory wires worktree_reaper.reconcile_worktrees)
         count_dm_as_liveness_fn  : Optional[ Callable ] = None,   # DM-toggle: per-poll INI re-read (None → lambda True; runtime-tunable)
         dm_activity_fn           : Optional[ Callable ] = None,   # DM-toggle: per-poll SENT-DM store read (None → inert; dm_ts None everywhere)
         bridge_discovery_fn      : Optional[ Callable ] = None,
@@ -592,6 +593,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # visibly inert, never a hidden behavior change.
         self._count_dm_as_liveness_fn = count_dm_as_liveness_fn if count_dm_as_liveness_fn is not None else ( lambda: True )
         self._dm_activity_fn          = dm_activity_fn
+        # §4b worktree janitor seam (Worktree Lifecycle Contract): None → INERT
+        # (no reconcile, byte-identical to today). The :8001 factory wires
+        # worktree_reaper.reconcile_worktrees (drain-then-remove of abandoned
+        # sandbox worktrees; preserves WIP + keeps branches; never pushes). A
+        # None seam is visibly inert, never a hidden behavior change.
+        self._worktree_janitor_fn     = worktree_janitor_fn
         # v1.4 integrator seam: bridge discovery → {sid: persona} folded into the
         # build_fleet_view UNION roster (impure IO lives here, not in the leaf).
         self._bridge_discovery_fn = bridge_discovery_fn if bridge_discovery_fn is not None else _default_bridge_discovery
@@ -878,6 +885,18 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # path (build-plan §3b). Doubly inert — no watcher wired OR flag OFF — and
         # swallow-safe (the observer invariant); see _sweep_follow_through.
         ft_escalated  = self._sweep_follow_through()
+        # §4b worktree janitor (Worktree Lifecycle Contract): reconcile abandoned
+        # sandbox worktrees (drain-then-remove; preserves WIP + keeps branches;
+        # never pushes). Doubly inert — None seam → no work — and swallow-safe per
+        # the observer invariant: a reconcile hiccup is demoted, never kills the
+        # poll. Returns the count swept this poll for the summary/journal.
+        worktrees_swept = 0
+        if self._worktree_janitor_fn is not None:
+            try:
+                jr = self._worktree_janitor_fn()
+                worktrees_swept = len( jr.get( "swept", [] ) ) if isinstance( jr, dict ) else 0
+            except Exception:
+                worktrees_swept = 0
 
         self._poll_count += 1
         summary = {
@@ -896,6 +915,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "outreach_acks"       : outreach_acks,
             "reannounces"         : reannounces,
             "ft_escalated"        : ft_escalated,            # eng#7 follow-through one-shot escalations this poll
+            "worktrees_swept"     : worktrees_swept,         # §4b janitor: abandoned sandbox worktrees retired this poll
             "rendered"            : rendered,
         }
         # post-game F1: promote the summary to the journal whenever ANY outreach
@@ -903,7 +923,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if any( summary[ k ] for k in (
                 "pings_fired", "taps_fired", "managers_down", "decisions",
                 "stalled", "pokes_fired", "manager_stale_pokes", "fleet_dark", "cycles",
-                "outreach_acks", "reannounces", "ft_escalated" ) ):
+                "outreach_acks", "reannounces", "ft_escalated", "worktrees_swept" ) ):
             self._log( "arbiter_poll_activity", **summary )
         return summary
 

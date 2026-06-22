@@ -75,6 +75,23 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     ack_window        = int( config_mgr.get( "arbiter manager ack window seconds", default=600, return_type="int" ) )
     stall_window      = int( config_mgr.get( "arbiter fleet stall window seconds", default=1800, return_type="int" ) )
 
+    # §4b worktree janitor (Worktree Lifecycle Contract). DEFAULT-OFF: the flag is
+    # False unless explicitly enabled in lupin-app.ini, so wiring it here is INERT
+    # (worktree_janitor_fn stays None → the arbiter seam is byte-identical) until
+    # an operator flips the flag AND restarts :8001. Activation is therefore a
+    # one-line config change + a restart, never a silent default-on. The janitor
+    # uses the SAME sandbox root the worktrees are created under (worktree_context).
+    janitor_enabled = config_mgr.get( "arbiter worktree janitor enabled", default=False, return_type="boolean" )
+    janitor_age_hrs = int( config_mgr.get( "arbiter worktree janitor age threshold hours", default=6, return_type="int" ) )
+    sandbox_root    = config_mgr.get( "cosa worktree sandbox root", default=".claude/worktrees" ) or ".claude/worktrees"
+    worktree_janitor_fn = None
+    if janitor_enabled:
+        from cosa.agents.shared.worktree_reaper import reconcile_worktrees
+        worktree_janitor_fn = lambda: reconcile_worktrees(
+            sandbox_root        = sandbox_root,
+            age_threshold_hours = janitor_age_hrs,
+        )
+
     gateway = LupinArbiterGateway.from_environment( sender_session_id="heartbeat-arbiter" )
     return ArbiterConsumerJob(
         commons                    = gateway,
@@ -85,6 +102,7 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         tap_min_interval_seconds   = tap_min_interval,
         manager_ack_window_seconds = ack_window,
         fleet_stall_window_seconds = stall_window,
+        worktree_janitor_fn        = worktree_janitor_fn,    # §4b: None unless `arbiter worktree janitor enabled` (default-off → inert)
         user_id                  = "system",
         user_email               = "system@lupin.deepily.ai",
         session_id               = "heartbeat-arbiter",
