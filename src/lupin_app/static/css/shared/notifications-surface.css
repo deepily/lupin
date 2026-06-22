@@ -121,6 +121,25 @@ h1 {
     transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
+/* Left-accent stripe — notifications.css:2086-2092. The `:not(.sender-card-active)`
+   rule matches EVERY card the mux renders (the mux does not emit the
+   `.sender-card-active` state class), so it is the contract base for the 3px
+   left border, NOT page-state-only — both clients carry it. Its higher
+   specificity (0,2,0) overrides the base `.sender-card { border: 1px }` on the
+   left edge only (1px top/right/bottom + 3px left). `--persona-color` is set
+   inline by senderCard.ts for themed cards (visible 3px stripe); personaless
+   cards fall back to `transparent` (3px WIDTH preserved, matching legacy — this
+   is what the Tier-2 oracle measures). The `.sender-card-active` companion is
+   inert on the mux (never emitted) and carried here for byte-faithful contract
+   completeness / future active-state work. */
+.sender-card-active {
+    border-left: 3px solid var( --persona-color, #28a745 );
+}
+
+.sender-card:not( .sender-card-active ) {
+    border-left: 3px solid var( --persona-color, transparent );
+}
+
 .sender-card-header {
     display: flex;
     align-items: center;

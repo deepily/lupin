@@ -154,6 +154,21 @@ def test_mux_keeps_collapse_mechanism():
 # Shared contract sheet stays pure — no mux-only / disjoint rules leak in
 # ---------------------------------------------------------------------------
 
+def test_shared_sheet_carries_left_accent_stripe():
+    """Extraction-completeness guard (Tier-2 oracle finding, 2026-06-22): the
+    monolith's `.sender-card:not(.sender-card-active) { border-left: 3px ... }`
+    (notifications.css:2090-2092) must live in the shared sheet — it matches
+    EVERY card the mux renders, so dropping it makes the mux compute a 1px left
+    border vs legacy's 3px. Locks the rule in so a future re-drop fails loudly."""
+    rules = _strip_css_comments( _read( SHARED_CSS ) )
+    assert ".sender-card:not( .sender-card-active )" in rules, \
+        "shared sheet dropped the .sender-card:not(.sender-card-active) left-accent rule"
+    # the 3px width is the property the Tier-2 oracle measures (border-left-width)
+    stripe_block = rules.split( ".sender-card:not( .sender-card-active )" )[ 1 ].split( "}" )[ 0 ]
+    assert "border-left: 3px solid var( --persona-color, transparent )" in stripe_block, \
+        "left-accent stripe must be byte-faithful 3px solid var( --persona-color, transparent )"
+
+
 @pytest.mark.parametrize( "forbidden", [
     ".action-required-widget",      # disjoint Category-3 surface → action-required.css
     "data-collapsed",               # mux collapse MECHANISM → mux sheet
