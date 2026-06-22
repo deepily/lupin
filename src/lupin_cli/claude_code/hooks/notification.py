@@ -70,7 +70,30 @@ def main():
         tts_msg      = message if message else "Permission prompt"
         tts_priority = "high"
     elif notification_type == "idle_prompt":
-        tts_msg      = message if message else "Claude is waiting for input"
+        # Bug fix (idle-beacon false-idle): consult the SAME work-owed oracle the
+        # Stop hook uses BEFORE announcing idle. The old beacon emitted a bare
+        # "waiting for input" message that read as "nothing owed" even when the
+        # store knew work WAS owed (proven live: a session idle-announced while
+        # owning 5 owed items). Reuse stop._owed_count_from_store — do NOT
+        # reimplement; lazy import keeps the heavy stop module off the hot
+        # permission_prompt path (idle_prompt is a cold, sitting-at-prompt event).
+        from lupin_cli.claude_code.hooks.stop import _owed_count_from_store
+        owed_count, owed_ok = _owed_count_from_store( session_id )
+        idle_msg = message if message else "Claude is waiting for input"
+        if not owed_ok:
+            # owed_unknown (bad / timed-out store read) — FAIL-SAFE: never assert
+            # "nothing owed" on an uncertain read. Emit the neutral idle message,
+            # making no owed claim either way.
+            tts_msg = idle_msg
+        elif owed_count > 0:
+            # Work IS owed — do NOT emit the bare idle beacon; surface the truth
+            # so the fleet (and Rick) never see a false "idle, nothing owed".
+            plural  = "" if owed_count == 1 else "s"
+            tts_msg = f"Idle, but {owed_count} item{plural} owed"
+        else:
+            # owed_count == 0 (determinate) — the ONLY case that may announce a
+            # plain idle with no owed work.
+            tts_msg = idle_msg
         tts_priority = "low"
         # Fleet liveness 4th signal (arbiter liveness fix, Part 7 / Step 1.3):
         # emit a kind-tagged idle_prompt recency event so the arbiter counts
