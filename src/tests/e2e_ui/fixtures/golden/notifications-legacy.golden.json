@@ -1,0 +1,91 @@
+{
+  "captured_from": "legacy notifications.js",
+  "scenario": "notifications-parity-scenario.json",
+  "shared_sheet_hash": "2739d97d0f1c",
+  "skeleton": {
+    "cards": [
+      {
+        "sender_id": "claude.code@lupin.deepily.ai#parity01",
+        "has_header": true,
+        "has_dates": true,
+        "persona_badge": true,
+        "accordions": [
+          {
+            "date_key": null,
+            "has_header": true,
+            "has_text": true,
+            "has_count": true,
+            "has_toggle": true,
+            "messages": [
+              {
+                "id_hash": null,
+                "direction": "outgoing",
+                "has_time": true,
+                "has_text": true,
+                "expired_badge": false,
+                "abstract_indicator": false
+              },
+              {
+                "id_hash": null,
+                "direction": "incoming",
+                "has_time": true,
+                "has_text": true,
+                "expired_badge": false,
+                "abstract_indicator": false
+              },
+              {
+                "id_hash": null,
+                "direction": "incoming",
+                "has_time": true,
+                "has_text": true,
+                "expired_badge": true,
+                "abstract_indicator": false
+              },
+              {
+                "id_hash": null,
+                "direction": "incoming",
+                "has_time": true,
+                "has_text": true,
+                "expired_badge": false,
+                "abstract_indicator": true
+              },
+              {
+                "id_hash": null,
+                "direction": "incoming",
+                "has_time": true,
+                "has_text": true,
+                "expired_badge": false,
+                "abstract_indicator": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "sender_id": "lupin-arbiter-app-8001",
+        "has_header": true,
+        "has_dates": true,
+        "persona_badge": false,
+        "accordions": [
+          {
+            "date_key": null,
+            "has_header": true,
+            "has_text": true,
+            "has_count": true,
+            "has_toggle": true,
+            "messages": [
+              {
+                "id_hash": null,
+                "direction": "incoming",
+                "has_time": true,
+                "has_text": true,
+                "expired_badge": false,
+                "abstract_indicator": false
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from .parity_oracle import (
+from tests.e2e_ui.parity_oracle import (
     SHARED_SHEET_HREF,
     content_hash,
     html_path,
