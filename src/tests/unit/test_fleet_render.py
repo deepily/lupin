@@ -169,10 +169,10 @@ class TestBuildSnapshot:
         (Phase 2 swap _normalize_for_match -> canonical_persona_key).
 
         FLIP (accent seam): the second case ("María"/"maria") is the bug-class
-        this plan kills — the OLD _normalize_for_match KEPT accents ("María" ->
-        "maría") and so MISSED a declared "María" against an event-sourced
-        "maria"; canonical_persona_key accent-strips both to "maria" -> match.
-        Reverting to _normalize_for_match makes the accent case fail.
+        this plan kills — the pre-Phase-1 accent-keeping normalizer KEPT accents
+        ("María" -> "maría") and so MISSED a declared "María" against an
+        event-sourced "maria"; canonical_persona_key accent-strips both to "maria" -> match.
+        Reverting to the pre-Phase-1 accent-keeping normalizer makes the accent case fail.
 
         NOTE (intended keep-spaces tradeoff): the canonical key KEEPS internal
         spaces, so the realistic spaced journal form "mr radio" matches declared

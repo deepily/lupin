@@ -98,9 +98,9 @@ class TestIsManagerFigure:
 
     def test_accent_tolerant_match_FLIP( self, tmp_path ):
         # FLIP (accent seam): bridge persona "maria" vs declared chain "María".
-        # The retired _normalize_for_match KEPT accents ("María" -> "maría") and
-        # so MISSED this — canonical_persona_key accent-strips both to "maria".
-        # Revert to _normalize_for_match and this assertion fails (False).
+        # The pre-Phase-1 accent-keeping normalizer KEPT accents ("María" -> "maría")
+        # and so MISSED this — canonical_persona_key accent-strips both to "maria".
+        # Revert to the pre-Phase-1 accent-keeping normalizer and this assertion fails (False).
         env = { "LUPIN_ROOT": "/mnt/x/lupin", "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "María,Tiberius,*" }
         write, find = bridge_factory( tmp_path )
         write( "s1", { "voice_persona": { "name": "maria" } } )

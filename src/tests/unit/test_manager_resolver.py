@@ -223,9 +223,9 @@ class TestResolveActiveManagersDeclared:
 
     def test_declared_match_is_accent_tolerant_FLIP( self ):
         # FLIP (accent seam): bridge persona "maria" vs declared "María". The
-        # retired _normalize_for_match KEPT accents ("María"->"maría") and MISSED
-        # this; canonical_persona_key strips both to "maria" -> role granted.
-        # Reverting to _normalize_for_match makes this return [] (no match).
+        # pre-Phase-1 accent-keeping normalizer KEPT accents ("María"->"maría")
+        # and MISSED this; canonical_persona_key strips both to "maria" -> role granted.
+        # Reverting to the pre-Phase-1 accent-keeping normalizer makes this return [] (no match).
         managers = MR.resolve_active_managers(
             who_rows=[ ], bridge_sessions={ "mgr-m": "maria" },
             list_managers=lambda sd: set(),
