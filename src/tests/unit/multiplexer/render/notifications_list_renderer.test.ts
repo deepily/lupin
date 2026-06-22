@@ -354,8 +354,9 @@ test("notification with unknown sender_id: stub SenderRecord synthesized + card 
   renderer.mount(root);
   const card = root.querySelector('[data-id-hash="unknown_42"]');
   assert.notEqual(card, null);
-  // Display name falls back to sender_id.
-  assert.equal(card!.querySelector(".sender-display-name")!.textContent, "unknown_42");
+  // Display name falls back to sender_id (WS4/G4: the project-label slot is now
+  // the legacy-verbatim `.sender-project-name`, renamed from `.sender-display-name`).
+  assert.equal(card!.querySelector(".sender-project-name")!.textContent, "unknown_42");
   renderer.unmount();
 });
 

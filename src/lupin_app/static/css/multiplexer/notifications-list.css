@@ -78,17 +78,96 @@
     flex-shrink: 0;
 }
 
-/* RENAME SEAM (→ WS2/WS4): the mux emits `.sender-display-name`; the monolith
-   styles the equivalent label as `.sender-project-name`. Until the names are
-   unified, the mux keeps its own label styling. */
-.sender-display-name {
-    font-weight: 600;
+/* RENAME SEAM CLOSED (WS4/G4, Clayton 2026-06-22): the project-label slot is
+   now emitted as the legacy-verbatim `.sender-project-name` (was the mux-only
+   `.sender-display-name`); content is still `display_name` (Category-4). The
+   overflow/max-width niceties are retained to keep the header a single row.
+   FLAG (WS1-contract question, raised to Rachel/Tiberius): like the other
+   sender-card header chrome rules below, this ideally migrates into the shared
+   contract sheet (notifications-surface.css) — kept mux-side here so the shared
+   sheet stays WS1's to extend, and so this slice does not silently rewrite the
+   contract. */
+.sender-project-name {
+    font-weight: bold;
     font-size: 14px;
-    color: #212529;
+    color: #495057;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 280px;
+}
+
+/* ============================================================================
+   WS4/G4 (Clayton 2026-06-22) — CC-session sender-card HEADER CHROME styling.
+   Byte-faithful port from the legacy monolith (notifications.css:1703-1808) so
+   the mux header renders at the legacy single-row height (~43px) once
+   senderCard.ts emits the chrome — WITHOUT these the unstyled chrome makes the
+   header ~45px and REGRESSES the (previously green) `card>header` geometry.
+   FLAG (WS1-contract): these are contract surfaces that ideally live in the
+   SHARED sheet; kept mux-side pending the WS1 placement call (Rachel/Tiberius).
+   ============================================================================ */
+.sender-status {
+    font-size: 12px;
+}
+
+.sender-session-id {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 11px;
+    color: #868e96;
+    margin-left: 4px;
+}
+
+.sender-session-copy {
+    font-size: 11px;
+    margin-left: 0;
+    margin-right: 2px;
+    cursor: pointer;
+}
+
+.sender-session-name {
+    font-style: italic;
+    font-size: 12px;
+    color: #6c757d;
+    margin-left: 6px;
+    max-width: 225px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    border-bottom: 1px dotted rgba( 108, 117, 125, 0.4 );
+    padding: 0 4px;
+    transition: background-color 0.2s, border-bottom-color 0.2s;
+}
+
+.sender-gist-btn {
+    background: rgba( 108, 117, 125, 0.15 );
+    border: 1px solid rgba( 108, 117, 125, 0.3 );
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 2px 8px;
+    margin-left: 6px;
+    font-size: 0.85em;
+    opacity: 0.8;
+    transition: all 0.2s ease;
+}
+
+.sender-delete-btn {
+    background: none;
+    border: none;
+    font-size: 16px;
+    color: #adb5bd;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    line-height: 1;
+    margin-left: 4px;
+}
+
+.sender-toggle {
+    font-size: 12px;
+    color: #6c757d;
+    margin-left: 8px;
 }
 
 /* C2-a RESOLVED (WS2): the `.sender-persona-badge` (mux button) styling moved
@@ -143,7 +222,7 @@
     .sender-message.incoming  { margin-right: 16px; }
     .sender-message.outgoing  { margin-left:  16px; }
 
-    .sender-display-name { max-width: 160px; }
+    .sender-project-name { max-width: 160px; }
 
     .sender-stats-group  { gap: 4px; }
 }

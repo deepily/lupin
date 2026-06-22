@@ -23,6 +23,10 @@ import type { SenderRecord, Notification } from "../../shared/types";
 
 interface RenderOptions {
   appTimezone?: string;
+  // WS4/G4 (2026-06-22): injectable wall-clock for the activity-recency status
+  // glyph (`.sender-status`). Defaults to Date.now() at the call site; tests
+  // pass a fixed value so `senderStatusGlyph` stays deterministic.
+  now?: number;
 }
 
 /**
@@ -93,10 +97,51 @@ export function renderSenderCard(
     ? `Last: ${formatHM(sender.last_active_ts, opts.appTimezone)}`
     : "";
 
+  // WS4/G4 (2026-06-22) — CC-session sender-card HEADER CHROME (Category-3
+  // structure parity; legacy notifications.js:13523-13542). Legacy emits a
+  // richer header than the mux did: a status dot, the project label, a session
+  // block (id + copy + gist + editable name), a delete button and a collapse
+  // toggle. Re-expressed here in mux idioms: NO inline onclick / globals — the
+  // copy / gist / rename / delete / toggle handlers are wired via delegated
+  // listeners in NotificationsListRenderer. All values come from the typed
+  // SenderRecord (no senderId string-parsing for content).
+  //
+  // RENAME SEAM CLOSED (per notifications-list.css:81-84 "→ WS2/WS4"): the
+  // positional project-label slot was the mux-only `.sender-display-name`; it
+  // is renamed to the legacy-verbatim `.sender-project-name` so structure
+  // matches (content still `display_name` — a Category-4 content choice).
+  const statusGlyph = senderStatusGlyph(sender.last_active_ts, opts.now ?? Date.now());
+
+  // Session block renders only for claude.code sessions (sender_id carries a
+  // `#<sessionHash>`); persona-less external advisories (no `#`) render the
+  // header WITHOUT it, mirroring legacy (parseSenderId → sessionId null).
+  //
+  // FLAG (class-name discrepancy, raised to Rachel/oracle): the brief lists
+  // `.sender-session-id-copy`; legacy emits `.sender-session-copy copy-btn`
+  // (notifications.js:13457). Emitting legacy-verbatim per Q-C ("legacy class
+  // names verbatim"); revisit if the oracle contract expects `-id-copy`.
+  //
+  // `.sender-session-name` is empty until a rename feature lands — SenderRecord
+  // carries no session-name field (mirrors legacy `${sessionName || ''}`).
+  const isCCSession = sender.sender_id.includes("#");
+  let sessionBlock: DocumentFragment | null = null;
+  if (isCCSession) {
+    /* c8 ignore next */ // `?? ""` is a noUncheckedIndexedAccess type-guard; isCCSession guarantees a '#', so split("#")[1] is always a string (possibly "" for a trailing '#') — the ?? branch is unreachable at runtime (same convention as the sessionHash derivation below).
+    const sessionId = sender.sender_id.split("#")[1] ?? "";
+    sessionBlock = html`
+      <span class="sender-session-id">#${sessionId}</span>
+      <span class="sender-session-copy copy-btn" role="button" tabindex="0" title="Copy session ID">📋</span>
+      <button class="sender-gist-btn" type="button" title="Generate smart gist from conversation">✨</button>
+      <span class="sender-session-name" role="button" tabindex="0" title="Click to rename"></span>
+    ` as DocumentFragment;
+  }
+
   const headerFrag = html`
     <div class="sender-card-header" role="button" tabindex="0">
       <span class="sender-active-indicator">●</span>
-      <span class="sender-display-name">${sender.display_name || sender.sender_id}</span>
+      <span class="sender-status">${statusGlyph}</span>
+      <span class="sender-project-name">${sender.display_name || sender.sender_id}</span>
+      ${sessionBlock}
       <span class="sender-stats-group">
         ${personaBadge}
         ${sender.unread_count > 0
@@ -105,6 +150,8 @@ export function renderSenderCard(
         <span class="sender-message-count">(${notifications.length})</span>
         <span class="sender-last-activity">${lastActivityText}</span>
       </span>
+      <button class="sender-delete-btn" type="button" title="Delete all">×</button>
+      <span class="sender-toggle">▼</span>
     </div>
     <div class="sender-card-dates"></div>
   ` as DocumentFragment;
@@ -135,6 +182,26 @@ export function renderSenderCard(
   root.appendChild(voiceInput);
 
   return root;
+}
+
+/**
+ * Activity-recency status glyph for the `.sender-status` header element —
+ * mirrors legacy `getSenderStatusIndicator` (notifications.js:13169-13176).
+ *
+ * Requires:
+ *   - `lastActiveTs` is a ms-epoch timestamp (0 / negative ⇒ "no activity")
+ *   - `now` is a ms-epoch wall-clock (injected so the result is deterministic)
+ * Ensures:
+ *   - returns "🟢" when active within the last hour
+ *   - returns "🟡" when active within the last day
+ *   - returns "⚪" when inactive (>24h) or no activity recorded
+ */
+export function senderStatusGlyph(lastActiveTs: number, now: number): string {
+  if (lastActiveTs <= 0) return "⚪";
+  const hoursSince = (now - lastActiveTs) / 3_600_000;
+  if (hoursSince < 1) return "🟢";
+  if (hoursSince < 24) return "🟡";
+  return "⚪";
 }
 
 interface DateGroup {

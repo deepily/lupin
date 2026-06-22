@@ -5,7 +5,7 @@ import { test, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { renderSenderCard, hexToRgbTriplet } from "../../../../lupin_app/static/js/multiplexer/render/templates/senderCard";
+import { renderSenderCard, hexToRgbTriplet, senderStatusGlyph } from "../../../../lupin_app/static/js/multiplexer/render/templates/senderCard";
 import type { SenderRecord, Notification, VoicePersona } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
@@ -136,15 +136,94 @@ test("senderCard: last_active_ts === 0 renders empty .sender-last-activity", () 
   assert.equal(lastEl!.textContent, "");
 });
 
-test("senderCard: empty display_name falls back to sender_id in header", () => {
+test("senderCard: empty display_name falls back to sender_id in header (.sender-project-name)", () => {
   const card = renderSenderCard(
     makeSender({ display_name: "", sender_id: "sess_99" }),
     [],
     { appTimezone: "UTC" },
   );
-  const nameEl = card.querySelector(".sender-display-name");
+  // WS4/G4 rename-seam closure: the project-label slot is now .sender-project-name
+  // (was the mux-only .sender-display-name); content is still display_name.
+  const nameEl = card.querySelector(".sender-project-name");
   assert.notEqual(nameEl, null);
   assert.equal(nameEl!.textContent, "sess_99");
+  // The old mux-only class must be gone (rename, not add-alongside).
+  assert.equal(card.querySelector(".sender-display-name"), null);
+});
+
+// ---------------------------------------------------------------------------
+// WS4/G4 (Clayton 2026-06-22) — CC-session sender-card HEADER CHROME.
+// senderCard.ts now emits the legacy-parity header chrome (status / project-name
+// / session block / delete / toggle) in mux idioms (NO inline onclick). Oracle
+// proof: this ticks Tier-1 STRUCTURE nodes MISSING→PRESENT without regressing
+// the (green) Tier-3 header geometry. The cc-voice-input residual (the real
+// ~51px Tier-3 gap) is a SEPARATE slice (coordinated with Rachel/oracle).
+// ---------------------------------------------------------------------------
+
+test("senderCard: header emits the always-present chrome (status / project-name / delete / toggle)", () => {
+  const card = renderSenderCard(makeSender(), [], { appTimezone: "UTC" });
+  const header = card.querySelector(".sender-card-header");
+  assert.notEqual(header, null);
+  assert.notEqual(header!.querySelector(".sender-status"), null, ".sender-status present");
+  assert.notEqual(header!.querySelector(".sender-project-name"), null, ".sender-project-name present");
+  assert.notEqual(header!.querySelector(".sender-delete-btn"), null, ".sender-delete-btn present");
+  assert.notEqual(header!.querySelector(".sender-toggle"), null, ".sender-toggle present");
+  // Mux idiom: NO inline onclick anywhere in the emitted chrome.
+  assert.equal(card.querySelector("[onclick]"), null, "no inline onclick (mux idiom)");
+});
+
+test("senderCard: CC session (sender_id with '#') emits the session block", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "claude.code@lupin.deepily.ai#parity01" }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  const id = card.querySelector(".sender-session-id");
+  assert.notEqual(id, null);
+  assert.equal(id!.textContent, "#parity01", "session id derived from sender_id, content from the typed record");
+  assert.notEqual(card.querySelector(".sender-session-copy"), null, ".sender-session-copy present");
+  assert.notEqual(card.querySelector(".sender-gist-btn"), null, ".sender-gist-btn present");
+  assert.notEqual(card.querySelector(".sender-session-name"), null, ".sender-session-name present (empty until rename lands)");
+});
+
+test("senderCard: non-CC sender (no '#') omits the session block (legacy parity)", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "lupin-arbiter-app-8001" }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  assert.equal(card.querySelector(".sender-session-id"), null);
+  assert.equal(card.querySelector(".sender-session-copy"), null);
+  assert.equal(card.querySelector(".sender-gist-btn"), null);
+  assert.equal(card.querySelector(".sender-session-name"), null);
+});
+
+test("senderCard: injected opts.now drives the status glyph deterministically", () => {
+  const ts  = Date.UTC(2026, 4, 5, 14, 0);
+  // now == 30 min after last activity → active (🟢).
+  const card = renderSenderCard(makeSender({ last_active_ts: ts }), [], { appTimezone: "UTC", now: ts + 30 * 60_000 });
+  assert.equal(card.querySelector(".sender-status")!.textContent, "🟢");
+});
+
+// senderStatusGlyph — direct coverage of every recency branch.
+test("senderStatusGlyph: no activity (<=0) → ⚪", () => {
+  assert.equal(senderStatusGlyph(0, 1_000), "⚪");
+  assert.equal(senderStatusGlyph(-5, 1_000), "⚪");
+});
+
+test("senderStatusGlyph: within the last hour → 🟢", () => {
+  const ts = 10_000_000;
+  assert.equal(senderStatusGlyph(ts, ts + 59 * 60_000), "🟢");
+});
+
+test("senderStatusGlyph: within the last day → 🟡", () => {
+  const ts = 10_000_000;
+  assert.equal(senderStatusGlyph(ts, ts + 5 * 3_600_000), "🟡");
+});
+
+test("senderStatusGlyph: older than a day → ⚪", () => {
+  const ts = 10_000_000;
+  assert.equal(senderStatusGlyph(ts, ts + 48 * 3_600_000), "⚪");
 });
 
 // ---------------------------------------------------------------------------
