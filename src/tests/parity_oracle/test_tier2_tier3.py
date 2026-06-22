@@ -48,27 +48,19 @@ GOLDEN_PATH = repo_root() / "src" / "tests" / "e2e_ui" / "fixtures" / "golden" /
 # node whose key contains this prefix is allowed to differ until WS2 lands.
 WS2_DIVERGENT_PREFIX = "card:claude.code@lupin.deepily.ai#parity01>msg[0]"
 
-# Known WS1 finding (reported to Clayton): legacy's monolith carries
-#   .sender-card:not(.sender-card-active) { border-left: 3px solid var(--persona-color, transparent) }
-# (notifications.css:2090-2092) which WS1's extracted shared sheet did NOT carry,
-# so the legacy card computes border-left-width 3px and the mux 1px. The oracle
-# caught this exactly. Allowlisted (with a freshness guard) until WS1 closes it.
-WS1_BORDER_LEFT_PROP = "border-left-width"
+# WS1 border-left CLOSED (Clayton, commit 7d5b4d51 + golden recapture): the
+# `.sender-card[:not](.sender-card-active){ border-left:3px solid var(--persona-color,transparent) }`
+# left-accent rules were ported byte-faithful into notifications-surface.css
+# (notifications.css:2086-2092), so the mux now computes border-left-width 3px =
+# legacy. It is no longer an allowlist exemption — Tier 2 asserts it as a PROVEN
+# match. WS2/C2-d direction is the only remaining known divergence.
 
 # Geometry tolerance (Doc 01 Tier 3).
 GEOM_TOL_PX = 1.0
 
 
-def _is_card_node( key: str ) -> bool:
-    return key.startswith( "card:" ) and ">" not in key
-
-
 def _is_known_style_divergence( key: str, prop: str ) -> bool:
-    if key.startswith( WS2_DIVERGENT_PREFIX ):
-        return True                                  # WS2/C2-d direction
-    if _is_card_node( key ) and prop == WS1_BORDER_LEFT_PROP:
-        return True                                  # WS1 border-left extraction gap
-    return False
+    return key.startswith( WS2_DIVERGENT_PREFIX )    # WS2/C2-d direction — the only remaining gap
 
 
 def _golden() -> dict:
@@ -131,11 +123,12 @@ def _is_ws2( key: str ) -> bool:
 
 def test_tier2_computed_style_isomorphism( page ):
     """Tier 2 (core proof): every corresponding contract node has EQUAL declarative
-    layout style, except a documented known-divergence allowlist (WS2 direction +
-    the WS1 border-left extraction gap). A NEW divergence anywhere else fails with
-    the exact node+property+legacy+mux line. A freshness guard asserts the two
-    known divergences are still present, so this test fails (prompting allowlist
-    cleanup) the moment WS1/WS2 close them."""
+    layout style, except the one documented known-divergence (the WS2 direction
+    node). With WS1 closed, the `.sender-card` border-left is now a PROVEN match
+    (legacy 3px == mux 3px), included in the proven set. A NEW divergence anywhere
+    else fails with the exact node+property+legacy+mux line. A freshness guard
+    asserts the WS2 divergence is still present, so this test fails (prompting
+    allowlist cleanup) the moment WS2 lands."""
     legacy = _legacy_nodes( _golden() )
     mux    = _mux_nodes( page, _card_widths( legacy ) )
 
@@ -144,33 +137,34 @@ def test_tier2_computed_style_isomorphism( page ):
 
     unexpected: list[ str ] = []
     ws2_seen = False
-    border_seen = False
     for key in sorted( common ):
         for prop in LAYOUT_STYLE_PROPS:
             if legacy[ key ][ "styles" ].get( prop ) == mux[ key ][ "styles" ].get( prop ):
                 continue
             if _is_known_style_divergence( key, prop ):
-                if key.startswith( WS2_DIVERGENT_PREFIX ): ws2_seen = True
-                if prop == WS1_BORDER_LEFT_PROP:           border_seen = True
+                ws2_seen = True
                 continue
             unexpected.append(
                 f"  {key}  {prop}: legacy {legacy[key]['styles'].get(prop)!r} · mux {mux[key]['styles'].get(prop)!r}"
             )
 
     assert not unexpected, (
-        "Tier 2 NEW computed-style divergence (not in the WS1/WS2 allowlist):\n" + "\n".join( unexpected )
+        "Tier 2 NEW computed-style divergence (not in the WS2 allowlist):\n" + "\n".join( unexpected )
     )
-    # Freshness guards — when WS1/WS2 land, these flip and force allowlist cleanup.
+    # Freshness guard — when WS2 lands, this flips and forces allowlist cleanup.
     assert ws2_seen, "WS2 responded-reply style divergence vanished — WS2 may have landed; remove the allowlist entry"
-    assert border_seen, "WS1 border-left divergence vanished — WS1 may have closed it; remove the allowlist entry"
 
 
 @pytest.mark.xfail(
-    reason="Tier 3 geometry diffs are emergent CONSEQUENCES of the two Tier-2 root "
-           "causes — the WS1 .sender-card border-left 3px→1px gap (±2px horizontal) "
-           "and the WS2 .outgoing height delta (dy cascade on sibling rows). The "
-           "comparison machinery is correct (precise per-node Δpx report); it greens "
-           "once WS1 + WS2 close. strict=False so it never breaks the suite.",
+    reason="Tier 3 geometry, post-WS1-fix (the ±2px horizontal border diff is now "
+           "GONE — WS1 confirmed). Remaining diffs: (1) the WS2 .outgoing height "
+           "delta cascading ~60px down the persona'd card's sibling rows (flips "
+           "when WS2 wires the renderer direction param); (2) a residual ~7.5px "
+           "vertical delta on BOTH cards (legacy taller) — a separate intra-card "
+           "vertical-metric divergence (accordion/message spacing, or full-legacy-"
+           "vs-isolated context) flagged to the manager, under investigation. The "
+           "machinery is correct (precise per-node Δpx report); strict=False so it "
+           "never breaks the suite.",
     strict=False,
 )
 def test_tier3_geometry_isomorphism( page ):

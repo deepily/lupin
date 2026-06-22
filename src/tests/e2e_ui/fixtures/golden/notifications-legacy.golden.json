@@ -1,7 +1,7 @@
 {
   "captured_from": "legacy notifications.js",
   "scenario": "notifications-parity-scenario.json",
-  "shared_sheet_hash": "2739d97d0f1c",
+  "shared_sheet_hash": "4b590989a948",
   "skeleton": {
     "cards": [
       {
