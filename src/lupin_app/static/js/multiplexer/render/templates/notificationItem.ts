@@ -49,14 +49,17 @@ export function renderNotificationItem(
 
   // Build a div + use DOM ops directly so we can return HTMLElement (not DocumentFragment).
   const root = document.createElement("div");
-  // CSS-parity 2026-06-17: apply the `.incoming` chat-bubble variant. Legacy
-  // notifications.js (13698/14061) tagged each message `incoming`|`outgoing`
-  // off an `isResponse` flag; the multiplexer Notification model has NO
-  // direction field (every item in this store is an inbound notification from
-  // a persona), so all messages are `.incoming`. Without this class the
-  // `.sender-message.incoming` gradient + left-offset never engaged and
-  // messages rendered as flat undifferentiated rows.
-  root.className = expired ? "sender-message incoming expired-response" : "sender-message incoming";
+  // WS2 / C2-d (D3): chat-bubble direction. Legacy notifications.js tagged each
+  // message `incoming`|`outgoing` off an `isResponse` flag and split a responded
+  // notification into an incoming prompt + a synthetic `{id}-response` outgoing
+  // reply (notifications.js:14317-14330). The multiplexer mirrors that: the
+  // responded-split (NotificationStore.hydrateHistory at load time) sets
+  // `direction` on each Notification, and this renderer applies it. Absent →
+  // "incoming" (the inbound default — every live persona message is incoming).
+  const direction = notification.direction === "outgoing" ? "outgoing" : "incoming";
+  root.className = expired
+    ? `sender-message ${direction} expired-response`
+    : `sender-message ${direction}`;
   root.setAttribute("data-id-hash", notification.id_hash);
   if (inProgressGrp) {
     root.setAttribute("data-progress-group", notification.progress_group_id as string);

@@ -327,6 +327,13 @@ export interface Notification {
   progress_group_id?: string;         // groups messages with history accordion (Q-G)
   was_expired?      : boolean;        // true → renders EXPIRED badge on sender-message
   time_display?     : string;         // backend-provided "HH:MM TZ" override
+  // WS2 / C2-d (D3 — Rick 2026-06-20): chat-bubble direction. Absent/"incoming"
+  // → inbound persona message (.sender-message.incoming); "outgoing" → the
+  // user's response, rendered .sender-message.outgoing. Set by the responded-
+  // split (load-time: NotificationStore.hydrateHistory; harness: toMuxModel),
+  // which expands one responded notification into an incoming prompt + a
+  // synthetic `{id}-response` outgoing reply (mirrors legacy notifications.js).
+  direction?        : "incoming" | "outgoing";
 }
 
 export type NotificationChangeKind =

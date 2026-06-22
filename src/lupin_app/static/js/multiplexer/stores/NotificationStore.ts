@@ -309,6 +309,14 @@ class NotificationStoreImpl implements NotificationStore {
           if (!norm) continue;
           if (this.byId.has(norm.id_hash)) continue;   // live-first wins
           rows.push(norm);
+          // WS2 / C2-d (D3): load-time responded-split. A responded history row
+          // carries the user's answer in `response_value.value`; expand it into
+          // a synthetic `{id}-response` OUTGOING bubble immediately after the
+          // incoming prompt (mirrors legacy notifications.js:14317-14330). This
+          // is the F5-independent half — it consumes the answer the server
+          // already persisted; the live echo of a freshly-sent reply is F5.
+          const outgoing = this.buildOutgoingResponse(raw, norm);
+          if (outgoing && !this.byId.has(outgoing.id_hash)) rows.push(outgoing);
         }
       }
     }
@@ -522,6 +530,30 @@ class NotificationStoreImpl implements NotificationStore {
     if (typeof raw.progress_group_id === "string") norm.progress_group_id = raw.progress_group_id;
     if (typeof raw.time_display === "string")      norm.time_display      = raw.time_display;
     return norm;
+  }
+
+  // WS2 / C2-d (D3): build the synthetic OUTGOING reply for a responded history
+  // row, mirroring legacy notifications.js:14317-14330 — the user's answer in
+  // `response_value.value` becomes a `{id}-response` outgoing bubble timestamped
+  // at `responded_at` (falls back to the prompt's ts). Returns null for the
+  // common prompt-only case (no/empty response value), so non-responded rows are
+  // untouched. `incoming` is the already-normalized prompt (supplies sender_id +
+  // the id_hash stem + the ts fallback).
+  private buildOutgoingResponse(raw: ServerHistoryRow, incoming: Notification): Notification | null {
+    const rv = raw.response_value;
+    const value = rv !== null && typeof rv === "object" && typeof (rv as { value?: unknown }).value === "string"
+      ? (rv as { value: string }).value
+      : "";
+    if (value === "") return null;
+    const respondedAt = typeof raw.responded_at === "string" ? Date.parse(raw.responded_at) : Number.NaN;
+    return {
+      id_hash         : `${incoming.id_hash}-response`,
+      ts              : Number.isNaN(respondedAt) ? incoming.ts : respondedAt,
+      sender_id       : incoming.sender_id,
+      message         : value,
+      action_required : false,
+      direction       : "outgoing",
+    };
   }
 
   private normalize(raw: ServerNotificationFields): Notification | null {

@@ -51,11 +51,11 @@ test("notificationItem: was_expired=true adds .expired-response class + EXPIRED 
   assert.equal(badge!.textContent, "EXPIRED");
 });
 
-// CSS-parity 2026-06-17: every message is an inbound notification → `.incoming`
-// chat-bubble variant must be applied (the Notification model has no direction
-// field, so there is no `.outgoing` case). Covers both the plain and the
-// expired class-string branches.
-test("notificationItem: applies .incoming on the plain message", () => {
+// WS2 / C2-d (D3): direction is `incoming` by default (absent direction) and
+// `outgoing` when the Notification carries direction="outgoing" (the synthetic
+// `{id}-response` reply from the responded-split). Covers both the plain and
+// the expired class-string branches for BOTH directions.
+test("notificationItem: applies .incoming on the plain message (default direction)", () => {
   const el = renderNotificationItem(makeNotification(), { appTimezone: "UTC" });
   assert.ok(el.classList.contains("sender-message"));
   assert.ok(el.classList.contains("incoming"));
@@ -67,6 +67,26 @@ test("notificationItem: applies .incoming alongside .expired-response", () => {
   assert.ok(el.classList.contains("sender-message"));
   assert.ok(el.classList.contains("incoming"));
   assert.ok(el.classList.contains("expired-response"));
+});
+
+test("notificationItem: direction='outgoing' applies .outgoing, not .incoming", () => {
+  const el = renderNotificationItem(makeNotification({ direction: "outgoing" }), { appTimezone: "UTC" });
+  assert.ok(el.classList.contains("sender-message"));
+  assert.ok(el.classList.contains("outgoing"));
+  assert.equal(el.classList.contains("incoming"), false);
+});
+
+test("notificationItem: direction='outgoing' composes with .expired-response", () => {
+  const el = renderNotificationItem(makeNotification({ direction: "outgoing", was_expired: true }), { appTimezone: "UTC" });
+  assert.ok(el.classList.contains("outgoing"));
+  assert.ok(el.classList.contains("expired-response"));
+  assert.equal(el.classList.contains("incoming"), false);
+});
+
+test("notificationItem: explicit direction='incoming' applies .incoming", () => {
+  const el = renderNotificationItem(makeNotification({ direction: "incoming" }), { appTimezone: "UTC" });
+  assert.ok(el.classList.contains("incoming"));
+  assert.equal(el.classList.contains("outgoing"), false);
 });
 
 test("notificationItem: time_display backend override beats formatHM", () => {
