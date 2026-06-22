@@ -91,34 +91,10 @@
     max-width: 280px;
 }
 
-/* C2-a SEAM (→ WS2): the mux promoted the persona badge from a legacy
-   `<span class="persona-badge">` to a `<button class="sender-persona-badge">`
-   (popover intent / no-globals). The button carries UA chrome a span does not;
-   the reset below keeps it visually a pill. The shared-rule selector UNION
-   (legacy span ∪ mux button) is a WS2 + oracle-gated reconciliation — until
-   then this mux-only rule styles the button. */
-.sender-persona-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 1px 8px;
-    border-radius: 10px;
-    background-color: var( --persona-color, #6c757d );
-    color: #fff;
-    font-size: 11px;
-    font-weight: 600;
-    text-shadow: 0 1px 1px rgb( 0, 0, 0, 0.15 );
-    white-space: nowrap;
-    /* Reset native <button> defaults so the visual matches the legacy span. */
-    border: none;
-    cursor: pointer;
-    font-family: inherit;
-}
-
-.sender-persona-badge.borrowed {
-    border: 1px dashed #fff;
-    opacity: 0.8;
-}
+/* C2-a RESOLVED (WS2): the `.sender-persona-badge` (mux button) styling moved
+   to the shared sheet as a `.persona-badge, .sender-persona-badge` UNION that
+   makes the button compute identically to the legacy span. No mux-only badge
+   rule remains here. */
 
 /* ============================================================================
    Date-accordion MUX-ONLY / MECHANISM seams.
@@ -134,15 +110,9 @@
     letter-spacing: 0.3px;
 }
 
-/* C2-b COLLAPSE MECHANISM SEAM (→ WS2): the contract sheet collapses via
-   `.date-accordion-messages.collapsed` (the legacy class). The mux renderer
-   instead toggles `data-collapsed` on `.date-accordion`. This rule keeps the
-   mux's accordions collapsing; the `.collapsed ∪ [data-collapsed]` selector
-   union is a WS2 + oracle-gated reconciliation — NOT done here. WS1's bar is
-   NO functional regression: removing this would break mux collapse. */
-.date-accordion[ data-collapsed="true" ] .date-accordion-messages {
-    display: none;
-}
+/* C2-b RESOLVED (WS2): the `[data-collapsed]` collapse rule moved to the shared
+   sheet as a `.collapsed ∪ [data-collapsed]` UNION, so the single contract now
+   drives both clients' collapse. No mux-only collapse rule remains here. */
 
 /* ============================================================================
    Message-text markdown niceties — MUX-ONLY (absent from the monolith's

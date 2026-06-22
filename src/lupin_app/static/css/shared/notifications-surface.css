@@ -203,6 +203,62 @@ h1 {
     border-radius: 10px;
 }
 
+/* ----------------------------------------------------------------------------
+   C2-a — persona-badge selector UNION (WS2). notifications.css:1879-1921.
+   The monolith styles legacy's `<span.persona-badge>`; the multiplexer renders
+   `<button.sender-persona-badge>` (glyph-only, popover — F-Arnold). This shared
+   rule makes the BUTTON compute identically to the legacy SPAN: byte-faithful
+   legacy box properties + a `<button>` reset (appearance / font-family:inherit /
+   background from `--persona-color`, which senderCard.ts sets inline).
+
+   For LEGACY this rule is a no-op — the monolith (linked AFTER, RIDER A) wins,
+   so `.persona-badge` keeps the monolith's exact values incl. `cursor: default`;
+   the union's real effect is styling the mux button. `cursor: pointer` therefore
+   applies only to the mux button (genuinely interactive), never to the legacy span.
+   Overflow variant + `.persona-badge-icon`/`-name` children are legacy-only (the
+   mux badge is glyph-only / never `.overflow`) → not unioned. ---------------- */
+.persona-badge,
+.sender-persona-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 500;
+    color: #fff;
+    text-shadow: 0 1px 1px rgba( 0, 0, 0, 0.25 );
+    border: 1px solid rgba( 255, 255, 255, 0.15 );
+    box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.15 );
+    white-space: nowrap;
+    user-select: none;
+    line-height: 1.2;
+    /* <button> reset — no-op on the legacy <span> (monolith wins); makes the
+       mux button render as the span. background-color resolves --persona-color
+       (set inline by senderCard.ts); legacy sets its bg inline (overrides this). */
+    background-color: var( --persona-color, #6c757d );
+    cursor: pointer;
+    font-family: inherit;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.persona-badge.borrowed,
+.sender-persona-badge.borrowed {
+    border-style: dashed;
+    border-color: rgba( 255, 255, 255, 0.5 );
+    opacity: 0.85;
+}
+
+.persona-badge.borrowed::after,
+.sender-persona-badge.borrowed::after {
+    content: "↻";
+    margin-left: 2px;
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
 /* ============================================================================
    Date accordion — container, accordion, header, toggle/count, messages well.
    notifications.css:2733-2738 (.sender-card-dates), :2741-2747 (.date-accordion),
@@ -277,7 +333,13 @@ h1 {
     background-color: #fafafa;
 }
 
-.date-accordion-messages.collapsed {
+/* C2-b — collapse mechanism UNION (WS2). The monolith collapses via the
+   `.collapsed` class on `.date-accordion-messages` (notifications.css:2822);
+   the multiplexer toggles `data-collapsed="true"` on the parent `.date-accordion`
+   (dateAccordion.ts). The shared rule fires for BOTH selectors, so one contract
+   covers both clients — no renderer change, no functional regression. */
+.date-accordion-messages.collapsed,
+.date-accordion[ data-collapsed="true" ] .date-accordion-messages {
     display: none;
 }
 

@@ -141,13 +141,35 @@ def test_d2_mux_dropped_sender_cards_container_gap():
 
 
 # ---------------------------------------------------------------------------
-# No functional regression — mux keeps its collapse mechanism
+# WS2 C2-a / C2-b — selector unions single-sourced into the shared sheet
 # ---------------------------------------------------------------------------
 
-def test_mux_keeps_collapse_mechanism():
-    rules = _strip_css_comments( _read( MUX_CSS ) )
-    assert 'data-collapsed="true"' in rules and "display: none" in rules, \
-        "mux must keep the [data-collapsed] collapse rule (WS1 bar: no functional regression)"
+def test_c2a_persona_badge_union_in_shared():
+    """C2-a: the shared sheet unions the legacy span + mux button selectors so the
+    mux `<button.sender-persona-badge>` computes like the legacy `<span.persona-badge>`.
+    The mux sheet no longer carries a private `.sender-persona-badge` rule."""
+    shared = _strip_css_comments( _read( SHARED_CSS ) )
+    assert ".persona-badge," in shared and ".sender-persona-badge" in shared, \
+        "shared sheet must union .persona-badge, .sender-persona-badge (C2-a)"
+    # the <button> reset that makes the button render as the span
+    union_block = shared.split( ".sender-persona-badge {" )[ 1 ].split( "}" )[ 0 ]
+    assert "appearance: none" in union_block and "font-family: inherit" in union_block, \
+        "C2-a union must carry the <button> reset (appearance/font-family)"
+    mux = _strip_css_comments( _read( MUX_CSS ) )
+    assert ".sender-persona-badge {" not in mux, \
+        "mux sheet must NOT keep a private .sender-persona-badge rule (moved to shared union)"
+
+
+def test_c2b_collapse_union_in_shared():
+    """C2-b: the shared sheet's collapse rule fires for BOTH the legacy `.collapsed`
+    class AND the mux `[data-collapsed]` attribute (one contract, both clients).
+    The mux sheet no longer carries a private collapse mechanism rule."""
+    shared = _strip_css_comments( _read( SHARED_CSS ) )
+    assert ".date-accordion-messages.collapsed" in shared, "C2-b union missing the legacy .collapsed selector"
+    assert 'data-collapsed="true"' in shared, "C2-b union missing the mux [data-collapsed] selector"
+    mux = _strip_css_comments( _read( MUX_CSS ) )
+    assert "data-collapsed" not in mux, \
+        "mux sheet must NOT keep a private [data-collapsed] collapse rule (moved to shared union)"
 
 
 # ---------------------------------------------------------------------------
@@ -171,12 +193,12 @@ def test_shared_sheet_carries_left_accent_stripe():
 
 @pytest.mark.parametrize( "forbidden", [
     ".action-required-widget",      # disjoint Category-3 surface → action-required.css
-    "data-collapsed",               # mux collapse MECHANISM → mux sheet
     "#sender-cards-container",       # mux pane structure → mux sheet
     "#notifications-pane",           # mux pane structure → mux sheet
-    ".sender-persona-badge",         # C2-a mux button → mux sheet (WS2)
     ".sender-display-name",          # rename seam → mux sheet (WS2/WS4)
     ".date-text",                    # rename seam → mux sheet (WS2/WS4)
+    # NOTE: .sender-persona-badge + data-collapsed are NO LONGER forbidden — WS2
+    # C2-a/C2-b legitimately UNION them into the shared sheet (see the C2 tests).
 ] )
 def test_shared_sheet_excludes_mux_only_rules( forbidden ):
     rules = _strip_css_comments( _read( SHARED_CSS ) )
