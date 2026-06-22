@@ -311,19 +311,34 @@ def spawn_sessions(
     if count > spawn_cap:
         raise ValueError( f"count {count} exceeds spawn cap {spawn_cap}" )
 
-    # Collection + naming key on the manager PERSONA (dm-{persona}), matching the
-    # existing commons DM convention + cascade_heartbeat_scheduler.dm_topic_for().
-    # The manifest itself stays keyed on session_id (globally unique lineage).
+    # The DM/collection topic and the tmux SESSION name BOTH key on the manager
+    # PERSONA, but with DIFFERENT separators — and they MUST stay separate
+    # (Rick one-name mandate 2026-06-22). Coupling them through a single key is
+    # precisely the divergence bug this fix closes:
     #
-    # Phase 3 (persona-name normalization): a PERSONA-derived key routes through
-    # the shared `persona_slug` root (accent-proof, agrees with the canonical
-    # store key) so "María" → "dm-maria", not the accent-leaky "dm-maría" the old
-    # `_slug` produced. The `or "anon"` preserves `_slug`'s never-empty contract.
-    # The fallback key is a SESSION ID (not a persona) → stays on `_slug`; `role`
-    # below is general text → also stays on `_slug` (surgical: persona path only).
-    topic_key        = ( persona_slug( manager_persona, sep="-" ) or "anon" ) if manager_persona else _slug( manager_session_id )
-    collection_topic = f"dm-{topic_key}"
-    base             = f"cc-{_slug( role )}-{topic_key}"
+    #   • collection_topic → persona_slug( sep="_" ) → "dm-mr_radio" — THE canonical
+    #     DM-topic form shared by _derive_dm_topic / _dm_topic_for / every
+    #     *_gateway.dm_topic_for / cascade_heartbeat_scheduler.dm_topic_for. The
+    #     old sep="-" emitted "dm-mr-radio", a DIVERGENT topic string for
+    #     MULTI-WORD personas (single-word personas have no internal space, so
+    #     "dm-tiberius"/"dm-maria" are identical under either separator).
+    #   • base session name → persona_slug( sep="-" ) → "cc-<role>-mr-radio-<n>" —
+    #     the established tmux `cc-<role>-<persona>-<n>` convention that the sweep's
+    #     scan_tmux_mismatches validates with sep="-". The field delimiter is '-';
+    #     keeping the persona segment on sep="-" leaves the tmux parser + sweep
+    #     UNTOUCHED (a deliberately-separate non-topic use). See the session-name
+    #     caution in the persona-norm follow-on brief.
+    #
+    # Phase 3 accent-proofing is preserved on BOTH: persona_slug agrees with the
+    # canonical store key, so "María" → "maria" (not the accent-leaky "maría" the
+    # old `_slug` produced). `or "anon"` preserves `_slug`'s never-empty contract.
+    # The fallback key is a SESSION ID (not a persona) → stays on `_slug` for BOTH
+    # (hyphens survive, session-id path UNCHANGED); `role` is general text → also
+    # stays on `_slug` (surgical: persona path only).
+    dm_persona_key   = ( persona_slug( manager_persona, sep="_" ) or "anon" ) if manager_persona else _slug( manager_session_id )
+    name_persona_key = ( persona_slug( manager_persona, sep="-" ) or "anon" ) if manager_persona else _slug( manager_session_id )
+    collection_topic = f"dm-{dm_persona_key}"
+    base             = f"cc-{_slug( role )}-{name_persona_key}"
 
     # Names key on ROLE + manager + a lowest-free index computed across the live
     # manifest. This avoids collisions across (a) roles — reviewers vs an author
@@ -845,6 +860,13 @@ def quick_smoke_test():
         assert res[ "manager_persona" ] == "Tiberius"
         assert res[ "spawned" ][ 0 ][ "session_name" ] == "cc-reviewer-tiberius-1"
         assert all( s[ "status" ] == "spawned" for s in res[ "spawned" ] )
+        # MULTI-WORD persona: DM topic on sep="_" (canonical, "dm-mr_radio") but
+        # tmux session name on sep="-" ("cc-author-mr-radio-1") — the two MUST NOT
+        # share a separator (one-name mandate 2026-06-22).
+        mw = spawn_sessions( 1, "t", "mgr-mw", script_path="x", manager_persona="Mr. Radio",
+                             role="author", runner=runner, session_dir=sd )
+        assert mw[ "collection_topic" ] == "dm-mr_radio", mw[ "collection_topic" ]
+        assert mw[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-mr-radio-1"
         listed = list_spawned_sessions( "mgr-abc", runner=runner, session_dir=sd )
         assert listed[ "count" ] == 3 and all( s[ "alive" ] for s in listed[ "sessions" ] )
         print( "  ✓ spawn 3 → manifest + list (all live)" )

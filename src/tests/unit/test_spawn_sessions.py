@@ -268,6 +268,26 @@ class TestSpawnSessions:
         assert res[ "collection_topic" ] == "dm-maria"
         assert res[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-maria-1"
 
+    def test_multiword_persona_topic_underscore_session_hyphen_FLIP( self, tmp_path ):
+        """One-name mandate (2026-06-22): for a MULTI-WORD persona the DM/collection
+        topic and the tmux SESSION name use DIFFERENT separators and each MUST be the
+        canonical form of its own convention:
+          • collection_topic → "dm-mr_radio"  (persona_slug sep="_" — byte-identical
+            to _derive_dm_topic / _dm_topic_for / every *_gateway.dm_topic_for /
+            cascade_heartbeat_scheduler.dm_topic_for).
+          • session_name     → "cc-author-mr-radio-1"  (persona_slug sep="-" — the
+            tmux cc-<role>-<persona>-<n> convention the sweep's scan_tmux_mismatches
+            validates with sep="-").
+        FLIP: revert dm_persona_key to sep="-" → the topic assertion fails (the old
+        DIVERGENT "dm-mr-radio" regenerates). Revert name_persona_key to sep="_" →
+        the session-name assertion fails. Single-word personas (Tiberius/María) can
+        NEVER catch this — they have no internal space to separate."""
+        res = spawn_sessions( 1, "t", "sid-radio", script_path="x",
+                              manager_persona="Mr. Radio", role="author",
+                              runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "collection_topic" ] == "dm-mr_radio"
+        assert res[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-mr-radio-1"
+
     def test_punctuation_only_persona_falls_back_to_anon( self, tmp_path ):
         """The `or "anon"` guard preserves `_slug`'s never-empty contract when a
         truthy persona canonicalizes to "" (e.g. emoji/punct-only)."""
