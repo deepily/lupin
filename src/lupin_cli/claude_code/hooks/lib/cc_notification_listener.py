@@ -311,15 +311,15 @@ class CCNotificationListener( BaseWebSocketListener ):
             - Active recipient → buffered; idle (or unknown-state) recipient → tmux
             - Never raises (both downstream paths are self-isolating)
         """
-        if self._recipient_is_idle():
+        if self._recipient_is_injectable():
             self._handle_peer_dm( notification )
         else:
             self._buffer_message( notification )
 
-    def _recipient_is_idle( self ):
+    def _recipient_is_injectable( self ):
         """
-        Is this CC session PARKED AT A PROMPT right now (safe to tmux-inject /
-        wake an arriving peer DM into)?
+        Is this CC session safe to tmux-inject / wake an arriving peer DM into
+        right now — i.e. is it PARKED AT A PROMPT (not busy mid-turn)?
 
         Reads the most recent heartbeat outcome for this session and treats it as
         injectable iff it is one of the PARKED-AT-PROMPT outcomes — the pane sat

@@ -366,7 +366,7 @@ def last_emitted_outcome( session_id, base_dir=None ):
     `outcome` key, and their emit_* docstrings mandate that consumers ignore
     them on the outcome axis. A naive records[-1].get("outcome") let a trailing
     idle_prompt record mask a genuine `idle` outcome (returning None), which
-    flipped cc_notification_listener._recipient_is_idle() to False for a parked
+    flipped cc_notification_listener._recipient_is_injectable() to False for a parked
     worker → the manager's peer DM buffered instead of tmux-waking the pane →
     the worker went dark (bug baf5ea6d). So scan from the tail and return the
     first record that actually CARRIES an `outcome`.

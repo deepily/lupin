@@ -188,7 +188,7 @@ def test_last_emitted_outcome_skips_trailing_idle_prompt_kind( tmp_path ):
 
     Sequence reproduced: Stop hook emits EVENT_IDLE, then the Notification hook's
     idle_prompt branch (notification.py:83) appends an idle_prompt event. The
-    naive records[-1].get("outcome") returned None → _recipient_is_idle() saw the
+    naive records[-1].get("outcome") returned None → _recipient_is_injectable() saw the
     parked worker as ACTIVE → the manager's DM buffered instead of tmux-waking →
     the worker went dark.
     """
