@@ -55,12 +55,35 @@ WS2_DIVERGENT_PREFIX = "card:claude.code@lupin.deepily.ai#parity01>msg[0]"
 # legacy. It is no longer an allowlist exemption — Tier 2 asserts it as a PROVEN
 # match. WS2/C2-d direction is the only remaining known divergence.
 
+# Known WS2/WS4 date-label rename seam (documented-deferred in BOTH sheets:
+# notifications-surface.css:275-276 + notifications-list.css:103-106). Legacy JS
+# emits `.date-text` (notifications.js:13614) but legacy CSS still styles the dead
+# `.date-label` (notifications.css:2776 — 13px/500), so legacy's `.date-text`
+# renders UNSTYLED (browser-default 16px/24px/400); the mux styles `.date-text`
+# at 11px/600 in its own sheet. The line-height delta (24px vs 16.5px) is the
+# EXACT ~7.5px intra-card vertical gap (diagnosed REAL, not a harness artifact —
+# golden is the real legacy page + the harness links the same contract sheets;
+# per Tiberius's real-vs-artifact task). Allowlisted (freshness-guarded) until the
+# seam unifies `.date-text` into the shared contract at the designed 13px/500.
+# The ENTIRE `.date-text` node is the seam (legacy unstyled vs mux-styled), so
+# EVERY declared-style prop on it diverges from the same root cause (font-size /
+# line-height / font-weight — the ~7.5px driver — plus color + letter-spacing);
+# all converge when the seam unifies. Hence the allowlist covers the whole node.
+
 # Geometry tolerance (Doc 01 Tier 3).
 GEOM_TOL_PX = 1.0
 
 
+def _is_date_text_seam( key: str ) -> bool:
+    return key.endswith( ">date-text" )
+
+
 def _is_known_style_divergence( key: str, prop: str ) -> bool:
-    return key.startswith( WS2_DIVERGENT_PREFIX )    # WS2/C2-d direction — the only remaining gap
+    if key.startswith( WS2_DIVERGENT_PREFIX ):
+        return True                                  # WS2/C2-d direction
+    if _is_date_text_seam( key ):
+        return True                                  # WS2/WS4 date-label rename seam (whole .date-text node)
+    return False
 
 
 def _golden() -> dict:
@@ -137,34 +160,38 @@ def test_tier2_computed_style_isomorphism( page ):
 
     unexpected: list[ str ] = []
     ws2_seen = False
+    date_text_seen = False
     for key in sorted( common ):
         for prop in LAYOUT_STYLE_PROPS:
             if legacy[ key ][ "styles" ].get( prop ) == mux[ key ][ "styles" ].get( prop ):
                 continue
             if _is_known_style_divergence( key, prop ):
-                ws2_seen = True
+                if key.startswith( WS2_DIVERGENT_PREFIX ): ws2_seen = True
+                if _is_date_text_seam( key ):              date_text_seen = True
                 continue
             unexpected.append(
                 f"  {key}  {prop}: legacy {legacy[key]['styles'].get(prop)!r} · mux {mux[key]['styles'].get(prop)!r}"
             )
 
     assert not unexpected, (
-        "Tier 2 NEW computed-style divergence (not in the WS2 allowlist):\n" + "\n".join( unexpected )
+        "Tier 2 NEW computed-style divergence (not in the WS2 / date-text-seam allowlist):\n" + "\n".join( unexpected )
     )
-    # Freshness guard — when WS2 lands, this flips and forces allowlist cleanup.
+    # Freshness guards — when each seam lands, the matching flag flips and forces allowlist cleanup.
     assert ws2_seen, "WS2 responded-reply style divergence vanished — WS2 may have landed; remove the allowlist entry"
+    assert date_text_seen, "date-text rename-seam divergence vanished — WS2/WS4 may have unified .date-text; remove the allowlist entry"
 
 
 @pytest.mark.xfail(
     reason="Tier 3 geometry, post-WS1-fix (the ±2px horizontal border diff is now "
-           "GONE — WS1 confirmed). Remaining diffs: (1) the WS2 .outgoing height "
-           "delta cascading ~60px down the persona'd card's sibling rows (flips "
-           "when WS2 wires the renderer direction param); (2) a residual ~7.5px "
-           "vertical delta on BOTH cards (legacy taller) — a separate intra-card "
-           "vertical-metric divergence (accordion/message spacing, or full-legacy-"
-           "vs-isolated context) flagged to the manager, under investigation. The "
-           "machinery is correct (precise per-node Δpx report); strict=False so it "
-           "never breaks the suite.",
+           "GONE — WS1 confirmed). Remaining diffs are BOTH known-divergence "
+           "consequences: (1) the WS2 .outgoing height delta cascading ~60px down "
+           "the persona'd card's sibling rows (flips when WS2 wires the renderer "
+           "direction param); (2) the WS2/WS4 date-label rename seam — `.date-text` "
+           "line-height 24px(legacy, unstyled browser-default) vs 16.5px(mux) = the "
+           "~7.5px vertical delta on BOTH cards (diagnosed REAL, not harness noise; "
+           "closes when .date-text unifies into the shared contract at 13px/500). "
+           "The machinery is correct (precise per-node Δpx report); strict=False so "
+           "it never breaks the suite.",
     strict=False,
 )
 def test_tier3_geometry_isomorphism( page ):

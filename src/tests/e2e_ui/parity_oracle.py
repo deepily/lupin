@@ -102,6 +102,19 @@ CONTRACT_STYLE_GEOM_JS = r"""
                       geom: { dx: 0, dy: 0, w: round1( cardRect.width ), h: round1( cardRect.height ) } } );
         const header = card.querySelector( ':scope > .sender-card-header' );
         if ( header ) nodes.push( { key: `card:${sid}>header`, styles: styleOf( header ), geom: rel( header ) } );
+        // Date-accordion region nodes (positional accordion index) — captures the
+        // header→first-message gap surfaces so a vertical-metric divergence
+        // localizes to an exact node (accordion-header / its date-text label /
+        // the messages well) rather than only showing as a card-height delta.
+        const accs = [ ...card.querySelectorAll( '.date-accordion' ) ];
+        accs.forEach( ( acc, ai ) => {
+            const ah = acc.querySelector( '.date-accordion-header' );
+            if ( ah ) nodes.push( { key: `card:${sid}>acc[${ai}]>header`, styles: styleOf( ah ), geom: rel( ah ) } );
+            const dt = acc.querySelector( '.date-text' );
+            if ( dt ) nodes.push( { key: `card:${sid}>acc[${ai}]>date-text`, styles: styleOf( dt ), geom: rel( dt ) } );
+            const am = acc.querySelector( '.date-accordion-messages' );
+            if ( am ) nodes.push( { key: `card:${sid}>acc[${ai}]>messages`, styles: styleOf( am ), geom: rel( am ) } );
+        } );
         const msgs = [ ...card.querySelectorAll( '.sender-message' ) ];
         msgs.forEach( ( m, i ) => {
             nodes.push( { key: `card:${sid}>msg[${i}]`, styles: styleOf( m ), geom: rel( m ) } );
