@@ -25,7 +25,6 @@ to the user.
 import argparse
 import json
 import os
-import re
 import sys
 import time
 import uuid
@@ -46,6 +45,7 @@ if SRC_PATH not in sys.path:
 
 import requests
 from lupin_mcp.commons_store import CommonsStore
+from lupin_mcp.persona_normalization import persona_slug
 
 
 REGISTER_ENDPOINT       = "/api/commons/register-question"
@@ -67,25 +67,28 @@ def dm_topic_for( manager: str ) -> str:
     """
     Build a server-pattern-safe DM topic from a manager persona name.
 
-    Mirrors `lupin_mcp.cosa_voice_mcp._derive_dm_topic` so a daemon-built
-    poke topic is byte-identical to the topic the MCP DM layer routes to —
-    both yield "dm-mr_radio" for "mr radio". Uses the `re.UNICODE` word
-    class so non-ASCII persona names (e.g. "maría") are preserved rather
-    than mangled.
+    Routes through the shared `persona_slug` root (Phase 4 of the
+    persona-name-normalization plan), so a daemon-built poke topic is
+    byte-identical to `lupin_mcp.cosa_voice_mcp._derive_dm_topic` and the two
+    heartbeat gateways — all yield "dm-mr_radio" for "mr radio". Accent-proof:
+    the prior accent-leaky `re.sub( ..., re.UNICODE )` kept accents, so "María"
+    regenerated the SPLIT topic "dm-maría" rather than the canonical "dm-maria".
 
     Requires:
         - manager is a non-empty string
 
     Ensures:
         - return value starts with "dm-"
-        - return value matches the server-side [\\w-]+ (re.UNICODE) pattern
+        - return value matches the server-side [\\w-]+ pattern (persona_slug
+          strips punctuation/accents and maps internal spaces to "_")
+        - accent-proof: "María" → "dm-maria", not the split "dm-maría"
 
     PG-6 fix (Cascade Run 5): a manager name containing a space — e.g.
     "mr radio" — previously produced topic "dm-mr radio", which fails the
-    server's [\\w-]+ validation and 422-fails every register-question poke.
+    server's [\\w-]+ validation and 422-fails every register-question poke;
+    `persona_slug( sep='_' )` maps the space to "_" → "dm-mr_radio".
     """
-    slug = re.sub( r"[^\w-]+", "_", manager.strip().lower(), flags=re.UNICODE )
-    return f"dm-{slug}"
+    return f"dm-{persona_slug( manager, sep='_' )}"
 
 
 def fire_heartbeat(

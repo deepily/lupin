@@ -59,6 +59,31 @@ def _session_recipient( sid ):
 
 
 # ---------------------------------------------------------------------------
+# dm_topic_for — shared persona_slug root (Phase 4 gateway completeness)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "ident,expected", [
+    ( "Bob",        "dm-bob"       ),
+    ( "Mr Radio",   "dm-mr_radio"  ),   # internal space → "_"
+    ( "mr radio",   "dm-mr_radio"  ),   # already-pool form is idempotent
+] )
+def test_dm_topic_for_ascii( ident, expected ):
+    assert LupinCommonsGateway.dm_topic_for( ident ) == expected
+
+
+def test_dm_topic_for_accented_persona_FLIP():
+    """Phase 4 CONTRACT CHANGE + FLIP guard: `dm_topic_for` now routes through
+    the shared `persona_slug` root, so an accented/punctuated persona keys to the
+    CANONICAL topic — NOT the split "dm-maría" the old accent-leaky
+    `re.sub( r"[^\\w-]+", "_", name, flags=re.UNICODE )` produced. That split was
+    the live bug (both io/commons/dm-maría.md AND dm-maria.md existed). Revert
+    this seam to the re.UNICODE re.sub → "María" yields "dm-maría" → this
+    assertion fails → the test genuinely guards the cutover-durability fix."""
+    assert LupinCommonsGateway.dm_topic_for( "María" )     == "dm-maria"
+    assert LupinCommonsGateway.dm_topic_for( "Mr. Radio" ) == "dm-mr_radio"
+
+
+# ---------------------------------------------------------------------------
 # session_id branch (unchanged) — sanity
 # ---------------------------------------------------------------------------
 

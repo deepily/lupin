@@ -154,5 +154,26 @@ class TestCheckSectionBudgets( unittest.TestCase ):
         self.assertEqual( self.warning_calls[ 0 ][ "section" ], "cascaded-prototype-section-A" )
 
 
+class TestDmTopicForSlug( unittest.TestCase ):
+    """Phase 4: the daemon's `dm_topic_for` now routes through the shared
+    `persona_slug` root, byte-identical to the two heartbeat gateways + the MCP
+    DM layer. Guards accent-proofing + the PG-6 space→"_" contract."""
+
+    def setUp( self ):
+        self.module = _load_module()
+
+    def test_ascii_personas( self ):
+        self.assertEqual( self.module.dm_topic_for( "Mr Radio" ), "dm-mr_radio" )
+        self.assertEqual( self.module.dm_topic_for( "mr radio" ), "dm-mr_radio" )
+        self.assertEqual( self.module.dm_topic_for( "tiberius" ), "dm-tiberius" )
+
+    def test_accented_persona_FLIP( self ):
+        # FLIP guard: the retired accent-leaky re.sub(re.UNICODE) kept accents →
+        # "dm-maría" (the split-topic live bug). The persona_slug root strips the
+        # accent → the canonical "dm-maria". Revert → "dm-maría" → this fails.
+        self.assertEqual( self.module.dm_topic_for( "María" ),     "dm-maria" )
+        self.assertEqual( self.module.dm_topic_for( "Mr. Radio" ), "dm-mr_radio" )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -15,8 +15,9 @@ Three methods the consumer needs:
     - send_to()   → auto-ping a blocker via their DM topic
     - post()      → the manager-surface roster/recommendation
 """
-import re
 from typing import List, Optional
+
+from lupin_mcp.persona_normalization import persona_slug
 
 
 class LupinArbiterGateway:
@@ -46,12 +47,17 @@ class LupinArbiterGateway:
         Derive a server-pattern-safe DM topic from a recipient identifier.
 
         Ensures:
-            - Mirrors the Poker gateway / cascade scheduler:
-              "mr radio" → "dm-mr_radio" (re.UNICODE so non-ASCII personas
-              survive); spaces/punctuation collapse to "_"
+            - Routes through the shared `persona_slug` root (Phase 4 of the
+              persona-name-normalization plan) so the topic ALWAYS equals
+              `dm-{persona_slug( identifier, sep='_' )}` — byte-identical to the
+              Poker gateway, the cascade scheduler, and the MCP DM layer
+              (`_derive_dm_topic`). Accent-proof: "Mr Radio" → "dm-mr_radio",
+              "María" → "dm-maria". The prior accent-leaky
+              `re.sub( ..., re.UNICODE )` kept accents, regenerating the SPLIT
+              topic "dm-maría" (the live bug: both dm-maría.md and dm-maria.md
+              existed) — this seam now converges on the canonical "dm-maria".
         """
-        slug = re.sub( r"[^\w-]+", "_", identifier.strip().lower(), flags=re.UNICODE )
-        return f"dm-{slug}"
+        return f"dm-{persona_slug( identifier, sep='_' )}"
 
     def who( self, retention_hours: int = 24 ) -> List[ dict ]:
         """
