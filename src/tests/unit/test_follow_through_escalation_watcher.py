@@ -37,9 +37,14 @@ import cosa.rest.follow_through_escalation_watcher as ftw
 from cosa.rest.follow_through_escalation_watcher import (
     FollowThroughEscalationWatcher,
     is_awaiting_manager,
-    _norm_persona,
     ESCALATION_ACTOR,
 )
+# Phase 2: the private _norm_persona was RETIRED for the one canonical identity
+# root. The watcher now matches hold↔store personas by canonical_persona_key
+# (KEEP-spaces -> "mr radio", store-key parity), not the old space-dropping
+# "mrradio". The two tests below assert the new keep-spaces behavior and so
+# FLIP-FAIL if the code is reverted to the dropped-space _norm_persona.
+from lupin_mcp.persona_normalization import canonical_persona_key
 from lupin_cli.claude_code.hooks.lib import heartbeat_hold as hh
 
 NOW = datetime( 2026, 6, 17, 12, 0, tzinfo=timezone.utc )
@@ -154,20 +159,23 @@ def test_awaiting_manager_rejects_persona_other_than_manager():
 
 
 # ---------------------------------------------------------------------------
-# _norm_persona
+# canonical persona key (Phase 2 — retired the private _norm_persona)
 # ---------------------------------------------------------------------------
 
-def test_norm_persona_none_and_non_string_and_empty():
-    assert _norm_persona( None ) == ""
-    assert _norm_persona( 123 ) == ""
-    assert _norm_persona( "" ) == ""
+def test_persona_key_none_and_non_string_and_empty():
+    assert canonical_persona_key( None ) == ""
+    assert canonical_persona_key( 123 ) == ""
+    assert canonical_persona_key( "" ) == ""
 
 
-def test_norm_persona_strips_accents_emoji_punct_space():
-    assert _norm_persona( "María 🌸" ) == "maria"
-    assert _norm_persona( "Mr. Radio 🦉" ) == "mrradio"
-    assert _norm_persona( "mr radio" ) == "mrradio"
-    assert _norm_persona( "Krishna" ) == "krishna"
+def test_persona_key_keeps_spaces_strips_accents_emoji_punct():
+    # FLIP: under the retired _norm_persona these were "maria"/"mrradio" (spaces
+    # DROPPED). The canonical root KEEPS internal spaces -> "mr radio", the store
+    # key. A revert to _norm_persona makes the "mr radio" assertions fail.
+    assert canonical_persona_key( "María 🌸" )    == "maria"
+    assert canonical_persona_key( "Mr. Radio 🦉" ) == "mr radio"
+    assert canonical_persona_key( "mr radio" )     == "mr radio"
+    assert canonical_persona_key( "Krishna" )      == "krishna"
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +343,20 @@ def test_default_hold_check_matches_honored_hold( tmp_path ):
                    work_owed=True, ttl_seconds=900, held_at=NOW.isoformat(), base_dir=str( tmp_path ) )
     w = _hold_watcher( tmp_path )
     assert w._default_hold_check( "krishna" ) is True
+
+
+def test_default_hold_check_matches_mr_radio_hold_by_store_key( tmp_path ):
+    # Store-key parity: the hold writes display "Mr. Radio 🦉" but the owed-oracle
+    # / store form of the queried persona is "mr radio". The watcher matches them
+    # by the canonical KEEP-SPACES key (the value now EQUALS the store key). The
+    # matching itself is symmetric (the retired _norm_persona also matched these
+    # via "mrradio"=="mrradio"); the observable Phase-2 change is that `target`
+    # is now the store key "mr radio", proven by the canonical-key unit flip
+    # test_persona_key_keeps_spaces_strips_accents_emoji_punct above.
+    hh.write_hold( "sess-radio", "Mr. Radio 🦉", "parked awaiting peer review",
+                   work_owed=True, ttl_seconds=900, held_at=NOW.isoformat(), base_dir=str( tmp_path ) )
+    w = _hold_watcher( tmp_path )
+    assert w._default_hold_check( "mr radio" ) is True
 
 
 def test_default_hold_check_no_match_for_other_persona( tmp_path ):

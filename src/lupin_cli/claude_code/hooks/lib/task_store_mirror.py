@@ -60,6 +60,7 @@ import time
 
 from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
 from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona, resolve_project_name
+from lupin_mcp.persona_normalization import canonical_persona_key
 from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure
 from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_settings
 from lupin_cli.claude_code.hooks.lib import task_store_client as client
@@ -140,7 +141,8 @@ def _identity( session_id ):
         - Never raises
     """
     persona       = get_voice_persona( session_id )
-    persona_lower = ( persona.get( "name" ) or "unknown" ).lower() if isinstance( persona, dict ) else "unknown"
+    raw_name      = ( persona.get( "name" ) or "unknown" ) if isinstance( persona, dict ) else "unknown"
+    persona_lower = canonical_persona_key( raw_name ) or "unknown"
     return f"{persona_lower} {session_id[:8]}", persona_lower
 
 

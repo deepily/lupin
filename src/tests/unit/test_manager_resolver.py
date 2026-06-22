@@ -212,12 +212,25 @@ class TestResolveActiveManagersDeclared:
     def test_declared_match_is_punct_tolerant_JOURNAL_REGRESSION( self ):
         """F-B regression pin (2026-06-11): the EVENT-shape persona "mr radio"
         (no period) must satisfy declared "Mr. Radio" on the fanout site too —
-        pre-fix this site shared fleet_render's exact-compare miss."""
+        pre-fix this site shared fleet_render's exact-compare miss. Phase 2
+        swaps _normalize_for_match -> canonical_persona_key (keep-spaces);
+        "mr radio" still matches "Mr. Radio"."""
         managers = MR.resolve_active_managers(
             who_rows=[ ], bridge_sessions={ "mgr-new": "mr radio" },
             list_managers=lambda sd: set(),
             declared_managers=[ "Mr. Radio" ] )
         assert managers == [ "mr radio" ]                         # bridge casing emitted, role granted
+
+    def test_declared_match_is_accent_tolerant_FLIP( self ):
+        # FLIP (accent seam): bridge persona "maria" vs declared "María". The
+        # retired _normalize_for_match KEPT accents ("María"->"maría") and MISSED
+        # this; canonical_persona_key strips both to "maria" -> role granted.
+        # Reverting to _normalize_for_match makes this return [] (no match).
+        managers = MR.resolve_active_managers(
+            who_rows=[ ], bridge_sessions={ "mgr-m": "maria" },
+            list_managers=lambda sd: set(),
+            declared_managers=[ "María" ] )
+        assert managers == [ "maria" ]
 
     def test_declared_union_with_lineage_manager( self ):
         managers = MR.resolve_active_managers(

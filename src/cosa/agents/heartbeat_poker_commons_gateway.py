@@ -26,6 +26,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from cosa.agents.heartbeat_poker_job import RecipientSpec
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 class LupinCommonsGateway:
@@ -171,7 +172,11 @@ class LupinCommonsGateway:
                 if row.get( "session_id" ) == recipient.identifier:
                     return row.get( "last_post_ts" )
             else:
-                if ( row.get( "persona_name" ) or "" ).lower() == recipient.identifier.lower():
+                # Identity parity (Phase 2): match a persona-addressed recipient
+                # by the one canonical key so an accented/punctuated persona
+                # ("María", "Mr. Radio") matches its who()-row persona_name. Both
+                # compare sides moved in lockstep.
+                if canonical_persona_key( row.get( "persona_name" ) ) == canonical_persona_key( recipient.identifier ):
                     return row.get( "last_post_ts" )
         return None
 

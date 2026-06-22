@@ -738,5 +738,73 @@ def test_event_stream_rejects_out_of_bounds_pagination( client, repo, params ):
     repo.query_events.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 — persona-identity canonicalization at the /api/tasks choke point.
+# Each test is a FLIP: it asserts the value REACHING the repo (write) or the
+# repo query (read) is the canonical store key. Revert the router's _canon_*
+# helpers to the raw payload value and the "maria"/"mr radio" assertions fail.
+# ---------------------------------------------------------------------------
+
+def test_create_canonicalizes_owner_and_manager_FLIP( client, repo ):
+    repo.create_item.return_value = make_item()
+    client.post( "/api/tasks", json=dict( _CREATE_BODY,
+                 owner_persona="María", accountable_manager="Mr. Radio" ) )
+    kwargs = repo.create_item.call_args.kwargs
+    assert kwargs[ "owner_persona" ]       == "maria"        # was "María"
+    assert kwargs[ "accountable_manager" ] == "mr radio"     # was "Mr. Radio"
+
+
+def test_create_blank_persona_stays_none( client, repo ):
+    # A blank owner canonicalizes to None (a falsy create field stays falsy —
+    # never the "" sentinel) so it does not turn into an empty-string owner.
+    repo.create_item.return_value = make_item()
+    client.post( "/api/tasks", json=dict( _CREATE_BODY, owner_persona="  !!  " ) )
+    assert repo.create_item.call_args.kwargs[ "owner_persona" ] is None
+
+
+def test_query_canonicalizes_owner_filter_FLIP( client, repo ):
+    # The READ seam — the direct fix for the 2026-06-18 false-idle: a "María"
+    # filter must query the store's "maria" rows.
+    repo.query_tasks.return_value = [ ]
+    client.get( "/api/tasks", params={ "owner_persona": "María", "accountable_manager": "Mr. Radio" } )
+    kwargs = repo.query_tasks.call_args.kwargs
+    assert kwargs[ "owner_persona" ]       == "maria"
+    assert kwargs[ "accountable_manager" ] == "mr radio"
+
+
+def test_count_only_canonicalizes_owner_filter_FLIP( client, repo ):
+    repo.count_tasks.return_value = 0
+    client.get( "/api/tasks", params={ "owner_persona": "Mr. Radio", "count_only": "true" } )
+    assert repo.count_tasks.call_args.kwargs[ "owner_persona" ] == "mr radio"
+
+
+def test_transition_canonicalizes_persona_blocked_by_FLIP( client, repo ):
+    # A persona-typed blocked_by ref ("Mr. Radio") is stored canonical so a
+    # "blocked on Mr. Radio" item lines up with that persona's owner rows; a
+    # user-typed ref is left untouched (only kind=="persona" is canonicalized).
+    item  = make_item( status="claimed", updated_ts=NOW )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value     = make_event( item.id, transition="claimed->blocked" )
+    blocked = [ { "kind": "persona", "id": "Mr. Radio" }, { "kind": "user", "id": "Rick" } ]
+    client.post( f"/api/tasks/{item.id}/transition",
+                 json=_transition_body( to_status="blocked",
+                                        next_chase_ts="2026-06-30T00:00:00+00:00",
+                                        blocked_by=blocked ) )
+    sent = repo.apply_transition.call_args.kwargs[ "blocked_by" ]
+    assert sent[ 0 ] == { "kind": "persona", "id": "mr radio" }   # was "Mr. Radio"
+    assert sent[ 1 ] == { "kind": "user", "id": "Rick" }          # user ref untouched
+
+
+def test_patch_canonicalizes_owner_persona_FLIP( client, repo ):
+    # Re-owning an item via PATCH must store the canonical key, same as create.
+    item = make_item()
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    client.patch( f"/api/tasks/{item.id}",
+                  json={ "owner_persona": "María", "actor": "krishna a38ee857" } )
+    fields = repo.apply_patch.call_args.args[ 1 ]
+    assert fields[ "owner_persona" ] == "maria"                   # was "María"
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

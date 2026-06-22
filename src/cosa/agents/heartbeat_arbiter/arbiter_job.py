@@ -82,6 +82,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
     CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
 )
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 # Manager-surface topic + auto-ping message template
@@ -201,7 +202,13 @@ def _default_owed_work_fn( personas ):   # pragma: no cover - production store-r
     with get_db() as session:
         repo = TaskRepository( session )
         for persona in personas:
-            items = repo.query_tasks( owner_persona=persona )
+            # Identity parity (Phase 2): this is a DIRECT repo query that bypasses
+            # the /api/tasks router choke point, so it must canonicalize the
+            # owner_persona itself — querying "María"/"Mr. Radio" raw matched ZERO
+            # of the store's "maria"/"mr radio" rows (the 2026-06-18 false-idle).
+            # The OUTPUT key stays the original `persona` so the caller's
+            # roster-keyed lookups are unchanged.
+            items = repo.query_tasks( owner_persona=canonical_persona_key( persona ) or persona )
             out[ persona ] = [
                 { "id"         : str( it.id ),
                   "status"     : it.status,

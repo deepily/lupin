@@ -128,6 +128,17 @@ class TestDiscover:
             "project"         : "lupin",
         } ]
 
+    def test_accented_persona_canonicalized_FLIP( self ):
+        # FLIP (WRITE seam — drain back-fill): the drain stamps owner_persona for
+        # back-filled items. A bridge persona "María"/"Mr. Radio" must canonicalize
+        # to the store key "maria"/"mr radio". Under the retired bare .lower() these
+        # were "maría"/"mr. radio" -> rows the READ seam could never find.
+        find = lambda _t: [ ( "/b/cc-1.json", "sid1", { "name": "María" } ),
+                            ( "/b/cc-2.json", "sid2", { "name": "Mr. Radio" } ) ]
+        read = lambda _p: { "transcript_path": "/t.jsonl", "cwd": None }
+        out  = drain.discover_active_sessions( _find=find, _read_bridge=read, environ={ "LUPIN_ROOT": "/x/lupin" } )
+        assert [ s[ "persona_lower" ] for s in out ] == [ "maria", "mr radio" ]
+
     def test_unreadable_bridge_skipped( self ):
         find = lambda _t: [ ( "/b/cc-1.json", "sid1", { "name": "Krishna" } ) ]
         read = lambda _p: None

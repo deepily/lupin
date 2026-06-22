@@ -50,6 +50,7 @@ from ..voice_persona_helpers import (
     load_overflow_persona_from_config, allocate_requested_persona_for_session,
     allocate_persona_chain_for_session, parse_declared_managers
 )
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 router = APIRouter( prefix="/api/cosa-voice", tags=[ "cosa-voice" ] )
@@ -283,10 +284,14 @@ async def allocate_voice_persona_endpoint(
         existing = get_voice_persona( session_id )
 
         if requested_persona_name is not None:
-            # Request-or-swap path
-            normalized_request = requested_persona_name.strip().lower()
+            # Request-or-swap path. Identity parity (Phase 2): compare the two
+            # persona identity values by the one canonical key so a re-request of
+            # the SAME persona under accented/punctuated spelling ("María",
+            # "Mr. Radio") is recognized as idempotent rather than a swap. Both
+            # compare sides moved in lockstep.
+            normalized_request = canonical_persona_key( requested_persona_name )
 
-            if existing is not None and existing.get( "name", "" ).lower() == normalized_request:
+            if existing is not None and canonical_persona_key( existing.get( "name", "" ) ) == normalized_request:
                 # Same-as-existing → idempotent return
                 return JSONResponse( content={
                     "session_id"          : session_id,

@@ -29,7 +29,7 @@ import datetime
 
 from cosa.agents.heartbeat_arbiter.manager_resolver import SOURCE_LINEAGE
 # F-B: THE one persona-equivalence normalizer (allocation/DM path's own).
-from lupin_mcp.commons_persona_matcher import _normalize_for_match
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 # Liveness verdict thresholds (seconds). Defaults are render-layer constants
@@ -294,15 +294,18 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         except Exception:
             manager_ids = set()
     # F-B (2026.06.11 lineage-persistence design): persona equivalence uses THE
-    # one shared normalizer (commons_persona_matcher._normalize_for_match —
-    # "Mr. Radio"/"mr radio"/"MR.RADIO" → "mrradio"). Persona strings drift
-    # structurally across signal sources (bridge keeps display casing; the
-    # event-sourced fallback is lowercase punct-stripped), so the journal-
-    # confirmed miss — persona "mr radio" reading role=worker, with the F2
-    # manager-staleness tier config-dead for him — is inherent to any exact
-    # compare. Normalization is for COMPARISON only; display casing untouched.
-    declared_norm = { _normalize_for_match( str( name ) ) for name in ( declared_managers or [ ] )
-                      if _normalize_for_match( str( name ) ) }
+    # one shared identity root (persona_normalization.canonical_persona_key —
+    # "Mr. Radio"/"mr radio"/"MR.RADIO" → "mr radio"; "María" → "maria").
+    # Persona strings drift structurally across signal sources (bridge keeps
+    # display casing; the event-sourced fallback is lowercase punct-stripped),
+    # so the journal-confirmed miss — persona "mr radio" reading role=worker,
+    # with the F2 manager-staleness tier config-dead for him — is inherent to any
+    # exact compare. The swap from the space-dropping match-key to the keep-spaces
+    # canonical key is symmetric on both compare sides (equivalence preserved) and
+    # the value now EQUALS the store key. Normalization is for COMPARISON only;
+    # display casing untouched.
+    declared_norm = { canonical_persona_key( str( name ) ) for name in ( declared_managers or [ ] )
+                      if canonical_persona_key( str( name ) ) }
 
     rows = [ ]
     for sid in sorted( ( fleet_view or { } ).keys() ):
@@ -337,7 +340,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         if not include_offline and liveness.get( "verdict" ) == "offline":
             continue
         persona_value = view.get( "persona" )
-        is_declared   = bool( persona_value ) and _normalize_for_match( str( persona_value ) ) in declared_norm
+        is_declared   = bool( persona_value ) and canonical_persona_key( str( persona_value ) ) in declared_norm
         role          = "manager" if ( is_declared or any( _sid_matches( sid, mid ) for mid in manager_ids ) ) else "worker"
         manager       = None
         if resolve_manager_fn is not None:

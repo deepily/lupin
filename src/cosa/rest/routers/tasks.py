@@ -35,8 +35,67 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest import task_store_rules as rules
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 router = APIRouter( prefix="/api", tags=[ "tasks" ] )
+
+
+def _canon_persona( value ):
+    """
+    Canonicalize an OPTIONAL persona-identity string to the store key.
+
+    The single API-boundary choke point that guarantees the store invariant —
+    every `owner_persona` / `accountable_manager` value the store holds (and
+    every value any caller queries it by) is the SAME canonical key, so a
+    persona whose name carries an accent/punctuation ("María", "Mr. Radio") can
+    never split into mismatched "maría"/"maria"/"mr. radio"/"mr radio" rows
+    (the 2026-06-18 false-idle bug-class).
+
+    Requires:
+        - value is a str or None
+
+    Ensures:
+        - None / "" / whitespace-only / all-punctuation -> None (a falsy filter
+          stays falsy: an absent owner filter must keep matching every row, and
+          a blank create field stays blank rather than becoming "")
+        - otherwise returns canonical_persona_key( value ) (store-key parity)
+    """
+    if value is None:
+        return None
+    return canonical_persona_key( value ) or None
+
+
+def _canon_blocked_by( blocked_by ):
+    """
+    Canonicalize persona-typed refs inside a blocked_by list (identity parity).
+
+    A typed ref is { "kind": item|persona|user, "id": ... }. Only kind=="persona"
+    ids name a persona, so only those are routed through canonical_persona_key;
+    item/user refs (and any malformed/non-dict entry) pass through untouched so
+    this helper never changes what task_store_rules.validate_blocked_by_refs
+    sees structurally — it only normalizes the persona id's spelling.
+
+    Requires:
+        - blocked_by is the candidate value (any type; only a list of dict refs
+          is transformed)
+
+    Ensures:
+        - non-list / None -> returned unchanged (validation still rejects it)
+        - each persona-kind ref's id -> canonical_persona_key( id ) when the id
+          canonicalizes to a non-empty key; left verbatim otherwise (so an
+          un-canonicalizable id still hits the rules' non-empty-string check)
+        - item / user / malformed refs unchanged
+    """
+    if not isinstance( blocked_by, list ):
+        return blocked_by
+    out = [ ]
+    for ref in blocked_by:
+        if isinstance( ref, dict ) and ref.get( "kind" ) == "persona" and isinstance( ref.get( "id" ), str ):
+            canon = canonical_persona_key( ref[ "id" ] )
+            out.append( { **ref, "id": canon } if canon else ref )
+        else:
+            out.append( ref )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -269,8 +328,8 @@ def create_task(
             created_by          = payload.created_by,
             authority           = payload.authority,
             body                = payload.body,
-            owner_persona       = payload.owner_persona,
-            accountable_manager = payload.accountable_manager,
+            owner_persona       = _canon_persona( payload.owner_persona ),
+            accountable_manager = _canon_persona( payload.accountable_manager ),
             gate_class          = payload.gate_class,
             priority            = payload.priority,
             source_qid          = payload.source_qid,
@@ -316,13 +375,19 @@ def transition_task(
         if item is None:
             raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
 
+        # Identity parity (Phase 2): persona-typed blocked_by ids are stored
+        # canonical so a "blocked on María/Mr. Radio" ref matches that persona's
+        # owner_persona rows. Done before BOTH validate and apply so the value
+        # validated is the value persisted.
+        blocked_by = _canon_blocked_by( payload.blocked_by )
+
         _reject_if_errors( rules.validate_transition(
             from_status   = item.status,
             to_status     = payload.to_status,
             authority     = payload.authority,
             receipt_refs  = payload.receipt_refs,
             next_chase_ts = payload.next_chase_ts,
-            blocked_by    = payload.blocked_by,
+            blocked_by    = blocked_by,
             reason        = payload.reason,
         ) )
 
@@ -333,7 +398,7 @@ def transition_task(
             authority     = payload.authority,
             receipt_refs  = payload.receipt_refs,
             next_chase_ts = payload.next_chase_ts,
-            blocked_by    = payload.blocked_by,
+            blocked_by    = blocked_by,
             reason        = payload.reason,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
@@ -429,6 +494,13 @@ def patch_task(
     """
     fields = payload.model_dump( exclude_unset=True, exclude={ "actor", "authority" } )
 
+    # Identity parity (Phase 2): a PATCH that re-owns an item must store the
+    # canonical key, same as create — otherwise a re-owned item drifts out of
+    # the persona's owed-row set.
+    for _persona_field in ( "owner_persona", "accountable_manager" ):
+        if _persona_field in fields:
+            fields[ _persona_field ] = _canon_persona( fields[ _persona_field ] )
+
     errors = list( rules.validate_patch( fields ) )
     if payload.authority not in rules.VALID_AUTHORITIES:
         errors.append( f"authority '{payload.authority}' must be one of {rules.VALID_AUTHORITIES}" )
@@ -508,6 +580,14 @@ def query_tasks(
     if item_class is not None and item_class not in rules.VALID_ITEM_CLASSES:
         errors.append( f"item_class filter '{item_class}' must be one of {rules.VALID_ITEM_CLASSES}" )
     _reject_if_errors( errors )
+
+    # Identity parity (Phase 2): canonicalize the persona-typed filters so the
+    # READ seam queries by the SAME key the WRITE seam stored — the direct fix
+    # for the 2026-06-18 false-idle (owed-oracle queried "maría"/"mr. radio",
+    # store held "maria"/"mr radio", zero rows matched). A blank/absent filter
+    # canonicalizes to None and keeps matching every row.
+    owner_persona       = _canon_persona( owner_persona )
+    accountable_manager = _canon_persona( accountable_manager )
 
     with get_db() as session:
         repo = TaskRepository( session )

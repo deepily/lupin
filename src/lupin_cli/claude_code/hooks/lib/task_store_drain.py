@@ -14,7 +14,9 @@ This module replays each ACTIVE session's transcript and IDEMPOTENTLY creates
 a store item for every owed native item it finds, stamping the SAME identity
 the mirror would have stamped:
 
-    owner_persona        = the session's lowercased voice-persona name
+    owner_persona        = the session's canonical voice-persona key
+                           (canonical_persona_key: accent/punct-stripped,
+                           lowercased, internal spaces kept — store-key parity)
     accountable_manager  = same (mirror's create branch sets both)
     project              = the session's bridge-cwd-anchored project name
     correlation_key      = cc-task:<stable_sid>:g<generation>:<harness_id>
@@ -56,6 +58,7 @@ from lupin_cli.claude_code.hooks.lib.task_store_settings import load_task_store_
 from lupin_cli.claude_code.hooks.lib import task_store_client as client
 from lupin_cli.claude_code.hooks.lib import task_store_map as task_map
 from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions
+from lupin_mcp.persona_normalization import canonical_persona_key
 
 
 # STORE-side owed statuses (parity to stop.py STORE_OWED_STATUSES). The mirror
@@ -163,7 +166,8 @@ def discover_active_sessions(
         transcript_path = data.get( "transcript_path" )
         if not transcript_path:
             continue
-        persona_lower = ( persona.get( "name" ) or "unknown" ).lower() if isinstance( persona, dict ) else "unknown"
+        raw_name      = ( persona.get( "name" ) or "unknown" ) if isinstance( persona, dict ) else "unknown"
+        persona_lower = canonical_persona_key( raw_name ) or "unknown"
         try:
             project = _project_from_cwd( data.get( "cwd" ), environ=environ )
         except ( OSError, ValueError, RuntimeError ):

@@ -310,6 +310,27 @@ class TestIdentityFallback:
         _, payload = fake_client.calls[ -1 ]
         assert payload[ "created_by" ] == "unknown d03e6219"
 
+    def test_accented_persona_stamps_canonical_store_key_FLIP( self, tmp_path, manager_env, fake_client, monkeypatch ):
+        # FLIP (WRITE seam): the bridge persona is the display form "María"; the
+        # store key MUST be the canonical "maria" so the WRITE seam agrees with
+        # the READ seam (the 2026-06-18 false-idle was the WRITE storing "maría"
+        # the READ could never query). Under the retired bare .lower() this would
+        # stamp "maría"; canonical_persona_key stamps "maria".
+        monkeypatch.setattr( mr, "get_voice_persona", lambda sid: { "name": "María" } )
+        mirror( create_payload(), tmp_path )
+        _, payload = fake_client.calls[ -1 ]
+        assert payload[ "owner_persona" ]       == "maria"
+        assert payload[ "accountable_manager" ] == "maria"
+        assert payload[ "created_by" ]          == "maria d03e6219"
+
+    def test_punctuated_persona_stamps_canonical_store_key_FLIP( self, tmp_path, manager_env, fake_client, monkeypatch ):
+        # FLIP: bridge "Mr. Radio" -> store key "mr radio" (period dropped, space
+        # kept). Old .lower() would stamp "mr. radio".
+        monkeypatch.setattr( mr, "get_voice_persona", lambda sid: { "name": "Mr. Radio" } )
+        mirror( create_payload(), tmp_path )
+        _, payload = fake_client.calls[ -1 ]
+        assert payload[ "owner_persona" ] == "mr radio"
+
 
 # ---------------------------------------------------------------------------
 # C8 spool + drain + I4 flag-once
