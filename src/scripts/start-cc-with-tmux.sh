@@ -67,15 +67,18 @@ CLAUDE_ARGS=( "${POSITIONALS[@]:1}" )  # everything after the session name → c
 LUPIN_ROOT="${LUPIN_ROOT:?LUPIN_ROOT must be set}"
 VENV_ACTIVATE="$LUPIN_ROOT/.venv/bin/activate"
 
-# ── Single-source fleet roster (Rick, 2026-06-11) ─────────────────────────────
-# COSA_VOICE_MANAGERS__<PROJECT> is defined ONCE, in the repo's fleet-roster
-# env file (the arbiter systemd drop-in reads the SAME file via
-# EnvironmentFile=). set -a auto-exports the sourced keys so the forward loop
-# below can ship them across the tmux boundary. A missing file degrades to an
-# empty roster — same tolerate-missing contract as the drop-in's
+# ── Single-source fleet roster (Rick, 2026-06-11; user-level 2026-06-22) ──────
+# COSA_VOICE_MANAGERS__<PROJECT> is defined ONCE, fleet-wide, in the repo-
+# agnostic USER-level file ~/.claude/fleet-roster.env (the arbiter systemd
+# drop-in reads the SAME file via EnvironmentFile=). It lives at user level so
+# no product repo owns the fleet roster; the git-tracked versioned reference is
+# src/conf/fleet-roster.env.template. set -a auto-exports the sourced keys so
+# the forward loop below can ship them across the tmux boundary. A missing file
+# degrades to an empty roster — same tolerate-missing contract as the drop-in's
 # `EnvironmentFile=-` prefix.
 # Design: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
-FLEET_ROSTER_ENV="$LUPIN_ROOT/src/conf/fleet-roster.env"
+#         src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María)
+FLEET_ROSTER_ENV="$HOME/.claude/fleet-roster.env"
 if [[ -f "$FLEET_ROSTER_ENV" ]]; then
     set -a; source "$FLEET_ROSTER_ENV"; set +a
 fi

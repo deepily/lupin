@@ -32,9 +32,21 @@ from typing import Optional
 # The Claude Code subagent tool's hook `tool_name`.
 SUBAGENT_TOOL_NAMES = ( "Task", )
 
-_ENV_FLAG     = "LUPIN_SUBAGENT_GOVERNANCE"
-_ENV_MANAGERS = "LUPIN_MANAGER_PERSONAS"   # CSV list of standing manager-figure personas (e.g. "Tiberius,Mr. Radio,María"); empty → persona signal off
-_TRUE_VALUES  = ( "1", "true", "on", "yes" )
+_ENV_FLAG = "LUPIN_SUBAGENT_GOVERNANCE"
+_TRUE_VALUES = ( "1", "true", "on", "yes" )
+
+# Standing manager-figure personas are DERIVED from the single fleet roster
+# (no separate hand-set list — the retired LUPIN_MANAGER_PERSONAS). Two env-var
+# families, both forwarded into every session by start-cc-with-tmux.sh:
+#   • COSA_VOICE_MANAGERS__<PROJECT>          — the declared-manager roster
+#     (~/.claude/fleet-roster.env), comma-separated names; UNION across all repos.
+#   • COSA_VOICE_PREFERRED_PERSONA__<PROJECT> — the per-repo preferred-persona
+#     CHAIN; its HEAD (first element, never the "*" wildcard) is that repo's
+#     standing manager fallback.
+# Design: src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md §5.
+_ROSTER_PREFIX    = "COSA_VOICE_MANAGERS__"
+_PREFERRED_PREFIX = "COSA_VOICE_PREFERRED_PERSONA__"
+_CHAIN_WILDCARD   = "*"
 
 DENY_REASON = (
     "Crew managers create workers via spawn_sessions, NOT the Agent/Task tool. "
@@ -81,15 +93,45 @@ def _is_crew_manager( session_id, session_dir: Optional[ Path ] = None ) -> bool
 
 
 def _manager_personas( env=None ) -> list:
-    """Parse the LUPIN_MANAGER_PERSONAS CSV list (empty when unset)."""
-    env = env if env is not None else os.environ
-    raw = str( env.get( _ENV_MANAGERS, "" ) )
-    return [ p.strip() for p in raw.split( "," ) if p.strip() ]
+    """
+    Derive the standing manager-figure persona names from the fleet roster.
+
+    Sources (both env-var families are forwarded into every session by
+    start-cc-with-tmux.sh; the hook reads whichever the launch env carries):
+      • every COSA_VOICE_MANAGERS__<PROJECT> var — comma-separated roster, taken
+        as a UNION across all repos (a manager-figure in ANY repo is standing);
+      • every COSA_VOICE_PREFERRED_PERSONA__<PROJECT> var — the chain HEAD (first
+        comma element) is that repo's preferred manager; the "*" wildcard and the
+        chain tail are NOT managers.
+
+    Ensures:
+        - returns the de-duplicated names in first-seen order (roster vars first,
+          then preferred heads), empty when neither family is present
+    """
+    env  = env if env is not None else os.environ
+    seen = set()
+    out  = []
+
+    def _add( name ):
+        name = name.strip()
+        if name and name != _CHAIN_WILDCARD and name not in seen:
+            seen.add( name )
+            out.append( name )
+
+    for key, val in env.items():
+        if key.startswith( _ROSTER_PREFIX ):
+            for n in str( val ).split( "," ):
+                _add( n )
+    for key, val in env.items():
+        if key.startswith( _PREFERRED_PREFIX ):
+            _add( str( val ).split( "," )[ 0 ] )   # chain head only
+    return out
 
 
 def _is_manager_persona( session_id, env=None, persona_fn=None, canon_fn=None ) -> bool:
     """
-    True iff this session's voice-persona is in the standing manager-figure list.
+    True iff this session's voice-persona is a standing manager-figure derived
+    from the fleet roster (see _manager_personas).
 
     This is the second role signal (besides the spawn manifest): it catches an
     AD-HOC manager-figure who only ever uses subagents and never spawns (the
@@ -156,8 +198,9 @@ def subagent_deny_reason(
             return None
         # Two role signals (EITHER → crew-manager): (1) a non-empty spawn manifest
         # (has spawned workers); (2) the session's persona is a standing manager-
-        # figure (LUPIN_MANAGER_PERSONAS) — catches the ad-hoc manager who only
-        # subagents and never spawns (the founding case the manifest can't see).
+        # figure DERIVED from the fleet roster (COSA_VOICE_MANAGERS__* union +
+        # COSA_VOICE_PREFERRED_PERSONA__* heads) — catches the ad-hoc manager who
+        # only subagents and never spawns (the founding case the manifest can't see).
         is_manager = (
             _is_crew_manager( session_id, session_dir=session_dir )
             or _is_manager_persona( session_id, env=env, persona_fn=persona_fn, canon_fn=canon_fn )

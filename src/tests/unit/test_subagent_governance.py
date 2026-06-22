@@ -13,11 +13,16 @@ import json
 
 import pytest
 
+from pathlib import Path
+
 from lupin_cli.claude_code.hooks.lib.subagent_governance import (
     subagent_deny_reason,
     build_subagent_deny_response,
     _is_crew_manager,
+    _is_manager_persona,
+    _session_dir,
     _governance_enabled,
+    _manager_personas,
     DENY_REASON,
 )
 
@@ -98,7 +103,13 @@ def test_fail_open_on_unexpected_error():
 
 # deterministic canon for tests: lowercase, alnum-only ("Mr. Radio" → "mrradio")
 _CANON = lambda s: "".join( c for c in str( s ).lower() if c.isalnum() )
-_MGR_ENV = { "LUPIN_MANAGER_PERSONAS": "Tiberius,Mr. Radio,María" }
+# Managers are DERIVED from the fleet roster (no hand-set LUPIN_MANAGER_PERSONAS):
+# the roster var supplies Mr. Radio + Tiberius; the preferred-persona chain HEAD
+# supplies María. → manager set = {Mr. Radio, Tiberius, María}.
+_MGR_ENV = {
+    "COSA_VOICE_MANAGERS__LUPIN"          : "Mr. Radio, Tiberius",
+    "COSA_VOICE_PREFERRED_PERSONA__PLAN"  : "María,*",
+}
 
 
 def test_manager_persona_denied_without_any_manifest( tmp_path ):
@@ -125,8 +136,10 @@ def test_non_manager_persona_allowed( tmp_path ):
     assert reason is None
 
 def test_empty_manager_list_disables_persona_signal( tmp_path ):
+    # No roster / preferred-persona vars at all → derived manager list empty →
+    # persona signal off → a manager-named persona is NOT denied on this signal.
     reason = subagent_deny_reason(
-        "Task", "sid-x", enabled=True, session_dir=tmp_path, env={ "LUPIN_MANAGER_PERSONAS": "" },
+        "Task", "sid-x", enabled=True, session_dir=tmp_path, env={},
         persona_fn=lambda sid: { "name": "María" }, canon_fn=_CANON,
     )
     assert reason is None
@@ -137,6 +150,73 @@ def test_unreadable_persona_is_not_a_manager( tmp_path ):
         persona_fn=lambda sid: None, canon_fn=_CANON,
     )
     assert reason is None
+
+
+# ── manager-persona derivation (roster union + preferred-persona heads) ──────────
+
+def test_manager_personas_empty_env_is_empty():
+    assert _manager_personas( env={} ) == [ ]
+
+def test_manager_personas_defaults_to_os_environ():
+    # env=None → reads os.environ; just prove it resolves to a list without raising.
+    assert isinstance( _manager_personas(), list )
+
+def test_manager_personas_roster_union_across_repos():
+    env = {
+        "COSA_VOICE_MANAGERS__LUPIN" : "Mr. Radio, Tiberius",
+        "COSA_VOICE_MANAGERS__PLAN"  : "María",
+    }
+    assert _manager_personas( env ) == [ "Mr. Radio", "Tiberius", "María" ]
+
+def test_manager_personas_preferred_head_only_skips_tail_and_wildcard():
+    # The chain HEAD is a manager; the tail and the "*" wildcard are NOT.
+    env = { "COSA_VOICE_PREFERRED_PERSONA__LUPIN": "Mr. Radio, Tiberius, *" }
+    assert _manager_personas( env ) == [ "Mr. Radio" ]
+
+def test_manager_personas_lone_wildcard_head_is_skipped():
+    env = { "COSA_VOICE_PREFERRED_PERSONA__X": "*" }
+    assert _manager_personas( env ) == [ ]
+
+def test_manager_personas_dedup_roster_and_preferred_overlap():
+    # Mr. Radio appears in BOTH the roster and as a preferred head → once only.
+    env = {
+        "COSA_VOICE_MANAGERS__LUPIN"          : "Mr. Radio, Tiberius",
+        "COSA_VOICE_PREFERRED_PERSONA__LUPIN" : "Mr. Radio, Tiberius, *",
+        "COSA_VOICE_PREFERRED_PERSONA__PLAN"  : "María, *",
+    }
+    assert _manager_personas( env ) == [ "Mr. Radio", "Tiberius", "María" ]
+
+def test_manager_personas_skips_blank_roster_entries():
+    env = { "COSA_VOICE_MANAGERS__LUPIN": "Mr. Radio,, Tiberius," }
+    assert _manager_personas( env ) == [ "Mr. Radio", "Tiberius" ]
+
+def test_manager_personas_ignores_unrelated_env_keys():
+    env = { "PATH": "/usr/bin", "HOME": "/home/x", "COSA_VOICE_ROLE": "worker" }
+    assert _manager_personas( env ) == [ ]
+
+
+def test_session_dir_is_home_claude_sessions():
+    # Matches session_spawner.SESSION_DIR — the manifest directory the role
+    # signal reads when no session_dir is injected.
+    assert _session_dir() == Path.home() / ".claude" / "sessions"
+
+
+def test_is_manager_persona_fails_open_when_persona_fn_raises():
+    # FAIL-OPEN helper: a non-empty manager list but a persona lookup that blows
+    # up → swallow the error → False (a governance check never breaks a tool call).
+    def _boom( _sid ):
+        raise RuntimeError( "bridge read exploded" )
+    assert _is_manager_persona(
+        "sid-x", env=_MGR_ENV, persona_fn=_boom, canon_fn=_CANON,
+    ) is False
+
+
+def test_is_manager_persona_lazy_imports_real_bridge_helpers():
+    # persona_fn/canon_fn OMITTED + a non-empty derived manager list → the real
+    # session_bridge helpers are lazily imported; an unknown session id has no
+    # persona → not a manager. (Deterministic coverage of the import branch,
+    # independent of the ambient os.environ roster.)
+    assert _is_manager_persona( "no-such-session-xyz", env=_MGR_ENV ) is False
 
 
 # ── deny envelope ────────────────────────────────────────────────────────────────
