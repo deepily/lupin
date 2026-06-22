@@ -639,12 +639,35 @@ class TestEventHandling:
             mock_last.assert_called_once_with( self._FULL_ID )   # full id, not "sess1234"
 
     def test_recipient_is_idle_false_when_active_outcome( self, listener ):
-        """A non-idle last outcome (poked) under the resolved full id → active."""
+        """'poked' means decide_heartbeat blocked the Stop + re-engaged the model
+        (BUSY mid-turn) → NOT injectable → buffer. The held-worker-inject fix
+        deliberately keeps 'poked' excluded so a DM never corrupts a running turn."""
         with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
                     return_value={ "stable_session_id": self._FULL_ID } ), \
              patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
                     return_value="poked" ):
             assert listener._recipient_is_idle() is False
+
+    def test_recipient_is_idle_true_when_honored_hold( self, listener ):
+        """held-worker-inject fix: a parked pane defending a fresh HOLD emits
+        'honored' (decide_heartbeat → {"continue": True}, Stop completed, pane at a
+        prompt). It must be INJECTABLE (True) — a poke-suppressing held worker's
+        buffered DM might otherwise never drain."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                    return_value={ "stable_session_id": self._FULL_ID } ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
+                    return_value="honored" ):
+            assert listener._recipient_is_idle() is True
+
+    def test_recipient_is_idle_true_when_cap_reached( self, listener ):
+        """held-worker-inject fix: 'cap_reached' means owed work but the heartbeat
+        STOPPED nudging (decide_heartbeat → {"continue": True}, pane parked at a
+        prompt). Injectable (True) — waking it with an arriving DM is desirable."""
+        with patch( "lupin_cli.claude_code.hooks.lib.session_bridge.find_session_by_id",
+                    return_value={ "stable_session_id": self._FULL_ID } ), \
+             patch( "lupin_cli.claude_code.hooks.lib.heartbeat_events.last_emitted_outcome",
+                    return_value="cap_reached" ):
+            assert listener._recipient_is_idle() is True
 
     def test_recipient_is_idle_false_when_no_history( self, listener ):
         """No heartbeat history (None) under the resolved full id → ACTIVE (buffer)."""
@@ -769,6 +792,61 @@ class TestEventHandling:
         )
         # Still idle → tmux-wake, NOT buffer-into-the-void.
         assert probe._recipient_is_idle() is True
+
+    def test_deliver_peer_dm_honored_hold_injects_end_to_end( self, tmp_path, monkeypatch ):
+        """
+        HELD-WORKER IMMEDIATE-INJECT GAP — END-TO-END regression (Clayton 2026-06-22,
+        follow-on to bug baf5ea6d). Closes the prior fix's blind-spot: that fix only
+        proved the 'idle' outcome injects. A worker that declares a heartbeat HOLD
+        emits 'honored' (NEVER 'idle') and SUPPRESSES pokes, so before this fix its
+        arriving peer DM routed to _buffer_message — a file nothing drains at a
+        parked, poke-suppressing pane → delayed/unreliable delivery (only when a
+        chance later hook fired). After the fix 'honored' is an injectable
+        parked-at-prompt outcome → _deliver_peer_dm routes to _handle_peer_dm
+        (tmux-wake) immediately.
+
+        Faithful real-files reproduction (mirrors the F1 non-mocking pattern): write
+        a REAL bridge (8char→full uuid) + a REAL events file whose last outcome is
+        'honored', then drive the REAL _deliver_peer_dm / _recipient_is_idle path;
+        only the two terminal sinks are stubbed to observe ROUTING (we do not run
+        tmux). last_emitted_outcome + find_session_by_id run for real.
+        """
+        from lupin_cli.claude_code.hooks.lib import session_bridge, heartbeat_events, heartbeat_decision
+
+        full_id  = "ba5eba11-1111-2222-3333-444455556666"
+        short_id = full_id[ :8 ]   # "ba5eba11"
+
+        sessions_dir = tmp_path / "sessions"
+        events_dir   = tmp_path / "heartbeat-events"
+        sessions_dir.mkdir(); events_dir.mkdir()
+        monkeypatch.setattr( session_bridge, "SESSION_DIR", sessions_dir )
+        monkeypatch.setattr( heartbeat_events, "FLEET_EVENTS_DIR", events_dir )
+
+        ( sessions_dir / f"cc-{short_id}.json" ).write_text( json.dumps( {
+            "session_id"        : short_id,
+            "stable_session_id" : full_id,
+            "tmux_session"      : "lupin",
+        } ) )
+        # A held worker's pane: last emitted outcome = honored (fresh hold defended).
+        heartbeat_events.emit_outcome(
+            full_id, persona="rachel", outcome=heartbeat_decision.OUTCOME_HONORED,
+            poke_count=0, cap=1, base_dir=str( events_dir )
+        )
+
+        probe = CCNotificationListener(
+            email           = "test@test.ai",
+            password        = "pass",
+            session_id_hash = short_id,
+            buffer_path     = str( tmp_path / "buf.jsonl" ),
+        )
+        notif = { "direction": "ai_to_ai", "message": "manager: status on lane B?",
+                  "job_id": short_id }
+        with patch.object( probe, "_handle_peer_dm" ) as mock_tmux, \
+             patch.object( probe, "_buffer_message" ) as mock_buf:
+            probe._deliver_peer_dm( notif )
+            # honored = parked-at-prompt → tmux-wake immediately, NOT buffered.
+            mock_tmux.assert_called_once_with( notif )
+            mock_buf.assert_not_called()
 
     def test_peer_dm_builds_envelope_with_reply_affordance( self, listener ):
         """

@@ -318,16 +318,58 @@ class CCNotificationListener( BaseWebSocketListener ):
 
     def _recipient_is_idle( self ):
         """
-        Is this CC session sitting at an idle prompt right now?
+        Is this CC session PARKED AT A PROMPT right now (safe to tmux-inject /
+        wake an arriving peer DM into)?
 
-        Reads the most recent heartbeat outcome for this session: a last outcome
-        of EVENT_IDLE ("idle") means the session went idle and is waiting at a
-        prompt. Any other outcome (poked/honored/cap_reached/…) or None (no
-        heartbeat history yet — e.g. a freshly-started session) is treated as
-        ACTIVE, so a peer DM buffers cleanly rather than interrupting.
+        Reads the most recent heartbeat outcome for this session and treats it as
+        injectable iff it is one of the PARKED-AT-PROMPT outcomes — the pane sat
+        down at a prompt and will only resume on external input (a poke, a DM
+        injection, or the human). Three outcomes qualify (heartbeat_events /
+        heartbeat_decision):
+
+          - EVENT_IDLE     ("idle")        — the genuine-idle transition beacon;
+                                             the pane declared idle and waits.
+          - OUTCOME_HONORED ("honored")    — a fresh declared HOLD defended the
+                                             pane's quiescence: decide_heartbeat
+                                             returned {"continue": True} (it did
+                                             NOT block/re-engage), so the Stop hook
+                                             completed and the pane is parked at a
+                                             prompt. This is the held-worker case
+                                             this method exists to fix — a holding
+                                             worker SUPPRESSES pokes, so without
+                                             treating "honored" as injectable its
+                                             buffered DM may never drain.
+          - OUTCOME_CAP_REACHED ("cap_reached") — owed work, but the poke cap was
+                                             hit so the heartbeat STOPPED nudging;
+                                             decide_heartbeat returned {"continue":
+                                             True}, the Stop completed, the pane is
+                                             parked. Waking it with an arriving DM
+                                             is exactly desirable.
+
+        DELIBERATELY EXCLUDED — these mean the pane is BUSY (mid-turn), where a
+        tmux injection would corrupt the running turn:
+          - OUTCOME_POKE   ("poked")       — decide_heartbeat returned {"decision":
+                                             "block", "reason": …}: the Stop is
+                                             BLOCKED and the poke reason is injected
+                                             back into the model, RE-ENGAGING it.
+                                             So a last outcome of "poked" means the
+                                             model is actively running the poked
+                                             turn → NOT parked → buffer (drains at
+                                             the next clean tool boundary).
+          - OUTCOME_NOT_OWED ("not_owed")  — never emitted (per-turn noise, skipped
+                                             by emit policy), so it can never be the
+                                             last emitted outcome; listed only for
+                                             completeness.
+        None (no heartbeat history yet — a freshly-started session) is treated as
+        BUSY/active, so a peer DM buffers cleanly rather than interrupting.
+
+        Requires:
+            - self.session_id_hash is the 8-char CC session hash
 
         Ensures:
-            - Returns True iff last_emitted_outcome(<full stable uuid>) == EVENT_IDLE
+            - Returns True iff last_emitted_outcome(<full stable uuid>) is one of
+              {EVENT_IDLE, OUTCOME_HONORED, OUTCOME_CAP_REACHED}
+            - Returns False for "poked"/None (BUSY → buffer, never inject mid-turn)
             - Returns True when the full id can't be resolved, or on any
               read/import error (fail toward tmux-wake so a DM is never silently
               lost to a buffer that nothing drains)
@@ -337,6 +379,15 @@ class CCNotificationListener( BaseWebSocketListener ):
             from lupin_cli.claude_code.hooks.lib.heartbeat_events import (
                 last_emitted_outcome, EVENT_IDLE
             )
+            from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
+                OUTCOME_HONORED, OUTCOME_CAP_REACHED
+            )
+            # Outcomes whose MOST-RECENT value means the pane is parked at a prompt
+            # and therefore safe to tmux-inject (wake). "poked" is excluded on
+            # purpose — it re-engages the model (busy mid-turn); injecting there
+            # would corrupt the running turn. See the docstring for the per-outcome
+            # justification.
+            injectable_outcomes = ( EVENT_IDLE, OUTCOME_HONORED, OUTCOME_CAP_REACHED )
             # heartbeat events are keyed by the FULL stable UUID — the file is
             # <full_uuid>.jsonl, read by EXACT match (no prefix glob), and stop.py
             # writes via resolve_stable_session_id (full UUID). self.session_id_hash
@@ -350,7 +401,7 @@ class CCNotificationListener( BaseWebSocketListener ):
             if not full_id:
                 # No live bridge → can't resolve the full id → fail toward tmux-wake.
                 return True
-            return last_emitted_outcome( full_id ) == EVENT_IDLE
+            return last_emitted_outcome( full_id ) in injectable_outcomes
         except Exception as e:
             self._log( f"{self.LOG_PREFIX} idle-state read failed (assuming idle/tmux-wake): {e}" )
             return True
