@@ -48,7 +48,7 @@ from lupin_mcp.commons_store import CommonsStore
 from lupin_mcp.persona_normalization import persona_slug
 
 
-REGISTER_ENDPOINT       = "/api/commons/register-question"
+DM_SEND_ENDPOINT        = "/api/dm/send"
 NOTIFY_ENDPOINT         = "/api/notify"
 COMMONS_TOPICS_DIR      = Path( LUPIN_ROOT ) / "io" / "commons"
 SCHEDULER_SESSION_ID    = "cascade-scheduler"
@@ -85,7 +85,7 @@ def dm_topic_for( manager: str ) -> str:
 
     PG-6 fix (Cascade Run 5): a manager name containing a space — e.g.
     "mr radio" — previously produced topic "dm-mr radio", which fails the
-    server's [\\w-]+ validation and 422-fails every register-question poke;
+    server's [\\w-]+ validation and 422-fails every DM poke;
     `persona_slug( sep='_' )` maps the space to "_" → "dm-mr_radio".
     """
     return f"dm-{persona_slug( manager, sep='_' )}"
@@ -98,7 +98,7 @@ def fire_heartbeat(
     store        : CommonsStore,
     tick_num     : int,
 ) -> dict:
-    """Write a heartbeat entry to dm-<manager>.md + register-question for Phase 3 push."""
+    """Write a heartbeat entry to dm-<manager>.md + /api/dm/send notification-native push."""
     qid   = str( uuid.uuid4() )
     topic = dm_topic_for( manager )
     body  = (
@@ -125,19 +125,20 @@ def fire_heartbeat(
     except Exception as e:
         return { "tick": tick_num, "question_id": qid, "store_error": repr( e ) }
 
-    # Step 2: register for Phase 3 push to recipient's listener
+    # Step 2: notification-native push to the recipient's listener (body INLINE).
+    # Migrated off the deleted /api/commons/register-question route onto
+    # /api/dm/send (cosa-voice token-reduction Phase 4, 2026-06-15); thread_id
+    # carries the same qid as the disk post so board-polling receipts correlate.
     payload = {
-        "topic"             : topic,
-        "question_id"       : qid,
-        "asker_session_id"  : SCHEDULER_SESSION_ID,
+        "sender_session_id" : SCHEDULER_SESSION_ID,
         "recipient_persona" : manager,
-        "expect_reply"      : False,
-        "ttl_seconds"       : 60,
+        "body"              : body,
+        "thread_id"         : qid,
     }
     headers = { "X-API-Key": api_key }
     try:
         resp = requests.post(
-            f"{api_base_url}{REGISTER_ENDPOINT}",
+            f"{api_base_url}{DM_SEND_ENDPOINT}",
             json    = payload,
             headers = headers,
             timeout = 5,
@@ -150,7 +151,7 @@ def fire_heartbeat(
         if 200 <= resp.status_code < 300:
             try:
                 body_json = resp.json()
-                result[ "dm_dispatched" ] = body_json.get( "dm_dispatched" )
+                result[ "dispatched" ] = body_json.get( "dispatched" )
             except Exception:
                 pass
         else:
@@ -200,11 +201,12 @@ def fire_budget_warning(
     count        : int,
     threshold    : int,
 ) -> dict:
-    """Post budget-breach DM to manager via CommonsStore + Phase 3 push.
+    """Post budget-breach DM to manager via CommonsStore + /api/dm/send push.
 
-    Matches fire_heartbeat() shape — body lands on dm-<manager> topic and
-    register-question pushes the warn into the manager's CC session as
-    a COMMONS PEER MESSAGE system-reminder.
+    Matches fire_heartbeat() shape — body lands on dm-<manager> topic and the
+    /api/dm/send push delivers the warn INLINE into the manager's CC session as
+    a direction='ai_to_ai' peer DM (migrated off the deleted
+    /api/commons/register-question route, cosa-voice token-reduction Phase 4).
     """
     qid   = str( uuid.uuid4() )
     topic = dm_topic_for( manager )
@@ -230,17 +232,15 @@ def fire_budget_warning(
         return { "section": section, "store_error": repr( e ) }
 
     payload = {
-        "topic"             : topic,
-        "question_id"       : qid,
-        "asker_session_id"  : SCHEDULER_SESSION_ID,
+        "sender_session_id" : SCHEDULER_SESSION_ID,
         "recipient_persona" : manager,
-        "expect_reply"      : False,
-        "ttl_seconds"       : 60,
+        "body"              : body,
+        "thread_id"         : qid,
     }
     headers = { "X-API-Key": api_key }
     try:
         resp = requests.post(
-            f"{api_base_url}{REGISTER_ENDPOINT}",
+            f"{api_base_url}{DM_SEND_ENDPOINT}",
             json    = payload,
             headers = headers,
             timeout = 5,

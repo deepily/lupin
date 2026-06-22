@@ -175,5 +175,157 @@ class TestDmTopicForSlug( unittest.TestCase ):
         self.assertEqual( self.module.dm_topic_for( "Mr. Radio" ), "dm-mr_radio" )
 
 
+class _FakeResp:
+    """Minimal requests.Response double for the dm/send push."""
+    def __init__( self, status_code=201, json_body=None, text="" ):
+        self.status_code = status_code
+        self._json       = json_body if json_body is not None else { "dispatched": True }
+        self.text        = text
+    def json( self ):
+        return self._json
+
+
+class TestFireHeartbeatDmSend( unittest.TestCase ):
+    """fire_heartbeat()/fire_budget_warning() were migrated off the deleted
+    /api/commons/register-question route onto the notification-native
+    /api/dm/send push (body INLINE). These guard the repointed endpoint +
+    payload shape so the dead-route regression cannot return."""
+
+    def setUp( self ):
+        self.module = _load_module()
+        # Patch the module-global requests with a recording double — no real HTTP.
+        self.posts          = []
+        self._orig_requests = self.module.requests
+        fake_requests       = MagicMock()
+        def _post( url, json=None, headers=None, timeout=None ):
+            self.posts.append( { "url": url, "json": json, "headers": headers, "timeout": timeout } )
+            return _FakeResp()
+        fake_requests.post  = _post
+        self.module.requests = fake_requests
+
+    def tearDown( self ):
+        self.module.requests = self._orig_requests
+
+    def test_fire_heartbeat_posts_to_dm_send( self ):
+        result = self.module.fire_heartbeat(
+            api_base_url = "http://localhost:7999",
+            api_key      = "stub-key",
+            manager      = "tiberius",
+            store        = MagicMock(),
+            tick_num     = 7,
+        )
+        self.assertEqual( len( self.posts ), 1 )
+        call = self.posts[ 0 ]
+        self.assertEqual( call[ "url" ], "http://localhost:7999/api/dm/send" )
+        self.assertEqual( call[ "headers" ][ "X-API-Key" ], "stub-key" )
+        payload = call[ "json" ]
+        self.assertEqual( set( payload.keys() ),
+                          { "sender_session_id", "recipient_persona", "body", "thread_id" } )
+        self.assertEqual( payload[ "recipient_persona" ], "tiberius" )
+        self.assertEqual( payload[ "sender_session_id" ], self.module.SCHEDULER_SESSION_ID )
+        self.assertIn( "heartbeat-7", payload[ "body" ] )
+        # retired register-question fields are GONE
+        self.assertNotIn( "topic",        payload )
+        self.assertNotIn( "expect_reply", payload )
+        self.assertNotIn( "ttl_seconds",  payload )
+        # success body surfaces dm/send's `dispatched`
+        self.assertEqual( result[ "register_status" ], 201 )
+        self.assertTrue( result[ "dispatched" ] )
+
+    def test_fire_heartbeat_thread_id_equals_disk_question_id( self ):
+        store = MagicMock()
+        self.module.fire_heartbeat(
+            api_base_url = "http://h", api_key = "k", manager = "tiberius",
+            store = store, tick_num = 1,
+        )
+        # disk post metadata.question_id and the push thread_id are the same qid
+        disk_qid = store.post.call_args.kwargs[ "metadata" ][ "question_id" ]
+        self.assertEqual( self.posts[ 0 ][ "json" ][ "thread_id" ], disk_qid )
+
+    def test_fire_heartbeat_store_error_skips_push( self ):
+        store = MagicMock()
+        store.post.side_effect = RuntimeError( "disk down" )
+        result = self.module.fire_heartbeat(
+            api_base_url = "http://h", api_key = "k", manager = "tiberius",
+            store = store, tick_num = 3,
+        )
+        self.assertEqual( len( self.posts ), 0, "store failure short-circuits before the push" )
+        self.assertIn( "store_error", result )
+
+    def test_fire_heartbeat_non_2xx_surfaces_register_body( self ):
+        self.module.requests.post = lambda url, json=None, headers=None, timeout=None: \
+            _FakeResp( status_code=404, text="not found" )
+        result = self.module.fire_heartbeat(
+            api_base_url = "http://h", api_key = "k", manager = "tiberius",
+            store = MagicMock(), tick_num = 4,
+        )
+        self.assertEqual( result[ "register_status" ], 404 )
+        self.assertEqual( result[ "register_body" ], "not found" )
+        self.assertNotIn( "dispatched", result )
+
+    def test_fire_heartbeat_2xx_unparseable_body_is_swallowed( self ):
+        def _bad_json():
+            raise ValueError( "no body" )
+        resp = _FakeResp( status_code=201 )
+        resp.json = _bad_json
+        self.module.requests.post = lambda url, json=None, headers=None, timeout=None: resp
+        result = self.module.fire_heartbeat(
+            api_base_url = "http://h", api_key = "k", manager = "tiberius",
+            store = MagicMock(), tick_num = 5,
+        )
+        self.assertEqual( result[ "register_status" ], 201 )
+        self.assertNotIn( "dispatched", result )   # parse failure swallowed, no crash
+
+    def test_fire_heartbeat_push_exception_returns_register_error( self ):
+        def _boom( url, json=None, headers=None, timeout=None ):
+            raise RuntimeError( "network down" )
+        self.module.requests.post = _boom
+        result = self.module.fire_heartbeat(
+            api_base_url = "http://h", api_key = "k", manager = "tiberius",
+            store = MagicMock(), tick_num = 6,
+        )
+        self.assertIn( "register_error", result )
+
+    def test_fire_budget_warning_store_error_skips_push( self ):
+        store = MagicMock()
+        store.post.side_effect = RuntimeError( "disk down" )
+        result = self.module.fire_budget_warning(
+            api_base_url = "http://h", api_key = "k", manager = "tiberius",
+            store = store, section = "sec-A", count = 30, threshold = 25,
+        )
+        self.assertEqual( len( self.posts ), 0 )
+        self.assertIn( "store_error", result )
+
+    def test_fire_budget_warning_push_exception_returns_register_error( self ):
+        def _boom( url, json=None, headers=None, timeout=None ):
+            raise RuntimeError( "network down" )
+        self.module.requests.post = _boom
+        result = self.module.fire_budget_warning(
+            api_base_url = "http://h", api_key = "k", manager = "tiberius",
+            store = MagicMock(), section = "sec-A", count = 30, threshold = 25,
+        )
+        self.assertIn( "register_error", result )
+
+    def test_fire_budget_warning_posts_to_dm_send( self ):
+        result = self.module.fire_budget_warning(
+            api_base_url = "http://localhost:7999",
+            api_key      = "stub-key",
+            manager      = "mr radio",
+            store        = MagicMock(),
+            section      = "cascaded-prototype-section-A",
+            count        = 30,
+            threshold    = 25,
+        )
+        self.assertEqual( len( self.posts ), 1 )
+        call = self.posts[ 0 ]
+        self.assertEqual( call[ "url" ], "http://localhost:7999/api/dm/send" )
+        payload = call[ "json" ]
+        self.assertEqual( set( payload.keys() ),
+                          { "sender_session_id", "recipient_persona", "body", "thread_id" } )
+        self.assertEqual( payload[ "recipient_persona" ], "mr radio" )
+        self.assertIn( "30/25", payload[ "body" ] )
+        self.assertEqual( result[ "register_status" ], 201 )
+
+
 if __name__ == "__main__":
     unittest.main()
