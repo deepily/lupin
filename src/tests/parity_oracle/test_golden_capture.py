@@ -30,7 +30,9 @@ import requests
 
 from tests.e2e_ui.parity_oracle import (
     CONTRACT_SKELETON_JS,
+    CONTRACT_STYLE_GEOM_JS,
     HARNESS_URL_PATH,
+    LAYOUT_STYLE_PROPS,
     content_hash,
     load_scenario,
     repo_root,
@@ -132,19 +134,23 @@ def test_capture_legacy_golden( page ):
     print( json.dumps( summary, indent=2 ) )
 
     skeleton = page.evaluate( CONTRACT_SKELETON_JS, "#notifications-list" )
-    print( "\n=== LEGACY CONTRACT SKELETON ===" )
-    print( json.dumps( skeleton, indent=2 ) )
 
-    # Capture is wired below once the dump confirms alignment; write a provisional
-    # golden carrying the skeleton + the Rider-C shared-sheet hash trip-wire.
+    # Tier 2/3 maps: per-node declarative styles + intra-card geometry.
+    style_geom = page.evaluate(
+        CONTRACT_STYLE_GEOM_JS,
+        { "rootSel": "#notifications-list", "props": LAYOUT_STYLE_PROPS },
+    )
+
     GOLDEN_PATH.parent.mkdir( parents=True, exist_ok=True )
     golden = {
         "captured_from"     : "legacy notifications.js",
         "scenario"          : "notifications-parity-scenario.json",
         "shared_sheet_hash" : content_hash( shared_sheet_path() ),
         "skeleton"          : skeleton,
+        "style_geom"        : style_geom,
     }
     GOLDEN_PATH.write_text( json.dumps( golden, indent=2 ) + "\n" )
-    print( f"\n✓ wrote provisional golden → {GOLDEN_PATH}" )
+    print( f"\n✓ wrote golden ({len( style_geom['nodes'] )} style/geom nodes) → {GOLDEN_PATH}" )
 
     assert summary[ "card_count" ] >= 1
+    assert len( style_geom[ "nodes" ] ) >= 1

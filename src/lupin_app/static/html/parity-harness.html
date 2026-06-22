@@ -11,6 +11,11 @@
          mux render against the legacy golden apples-to-apples, with no sibling
          interference. NOT a user-facing page — served only for the oracle. -->
 
+    <!-- Base inherited context (font-family / color cascade) — both real pages
+         link this, so the isolated contract nodes inherit the SAME baseline and
+         Tier 2 computed-style comparison isn't polluted by inherited-prop drift. -->
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+
     <!-- Contract surfaces (single-source shared sheet from WS1) + the
          mux-specific mechanism rules (e.g. [data-collapsed] collapse). These
          mirror what /app/multiplexer links for the contract surfaces, so the

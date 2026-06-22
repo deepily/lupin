@@ -43,6 +43,78 @@ HARNESS_URL_PATH = "/static/html/parity-harness.html"
 # classes are verbatim-shared between clients (Q-C), so one walker fits both.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Tier 2/3 — computed-style + geometry walker (Doc 01; D4 rider).
+#
+# LAYOUT_STYLE_PROPS = the DECLARATIVE layout property set asserted EXACTLY by
+# Tier 2 (D4 rider): deliberately EXCLUDES resolved width/height/min/max sizing
+# (sub-pixel flex distribution → flaky; resolved geometry is Tier 3's ±1px job)
+# and excludes text/timestamps/animation mid-states (Category-4 noise).
+#
+# CONTRACT_STYLE_GEOM_JS returns, per contract node, a stable key + its declared
+# style subset + its geometry RELATIVE TO ITS OWN SENDER CARD (intra-card
+# offsets + node size). Intra-card framing makes Tier 3 robust to the fact that
+# the legacy golden is captured from the full legacy page (card sits below other
+# sections) while the mux render is isolated — only the card's own width must be
+# matched (the capture records it; the Tier 3 test sizes the harness to it).
+# Cards are keyed by data-sender-id (both clients set it); messages positionally
+# (legacy sets neither data-id-hash nor data-date-key — both newest-first).
+# ---------------------------------------------------------------------------
+
+LAYOUT_STYLE_PROPS = [
+    "display", "position", "box-sizing", "float", "clear",
+    "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "padding-top", "padding-right", "padding-bottom", "padding-left",
+    "border-top-width", "border-right-width", "border-bottom-width", "border-left-width",
+    "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
+    "flex-direction", "flex-wrap", "flex-grow", "flex-shrink", "align-items",
+    "align-self", "justify-content", "gap", "order",
+    "font-family", "font-size", "font-weight", "line-height", "letter-spacing",
+    "white-space", "text-align",
+    "color", "background-color", "box-shadow", "border-radius", "opacity",
+]
+
+CONTRACT_STYLE_GEOM_JS = r"""
+( args ) => {
+    const { rootSel, props } = args;
+    const root = document.querySelector( rootSel );
+    if ( !root ) return null;
+    const round1 = ( n ) => Math.round( n * 10 ) / 10;
+    const styleOf = ( el ) => {
+        const cs = getComputedStyle( el );
+        const out = {};
+        for ( const p of props ) out[ p ] = cs.getPropertyValue( p );
+        return out;
+    };
+    const nodes = [];
+    const cards = [ ...root.querySelectorAll( ':scope > .sender-card' ) ]
+        .sort( ( a, b ) => ( a.getAttribute( 'data-sender-id' ) || '' )
+            .localeCompare( b.getAttribute( 'data-sender-id' ) || '' ) );
+    for ( const card of cards ) {
+        const sid = card.getAttribute( 'data-sender-id' );
+        const cardRect = card.getBoundingClientRect();
+        const rel = ( el ) => {
+            const r = el.getBoundingClientRect();
+            return { dx: round1( r.left - cardRect.left ), dy: round1( r.top - cardRect.top ),
+                     w: round1( r.width ), h: round1( r.height ) };
+        };
+        nodes.push( { key: `card:${sid}`, styles: styleOf( card ),
+                      geom: { dx: 0, dy: 0, w: round1( cardRect.width ), h: round1( cardRect.height ) } } );
+        const header = card.querySelector( ':scope > .sender-card-header' );
+        if ( header ) nodes.push( { key: `card:${sid}>header`, styles: styleOf( header ), geom: rel( header ) } );
+        const msgs = [ ...card.querySelectorAll( '.sender-message' ) ];
+        msgs.forEach( ( m, i ) => {
+            nodes.push( { key: `card:${sid}>msg[${i}]`, styles: styleOf( m ), geom: rel( m ) } );
+            const t = m.querySelector( '.message-time' );
+            const x = m.querySelector( '.message-text' );
+            if ( t ) nodes.push( { key: `card:${sid}>msg[${i}]>time`, styles: styleOf( t ), geom: rel( t ) } );
+            if ( x ) nodes.push( { key: `card:${sid}>msg[${i}]>text`, styles: styleOf( x ), geom: rel( x ) } );
+        } );
+    }
+    return { nodes };
+}
+"""
+
 CONTRACT_SKELETON_JS = r"""
 ( rootSel ) => {
     const root = document.querySelector( rootSel );
