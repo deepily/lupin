@@ -468,5 +468,53 @@ def test_legal_graph_covers_every_live_mirror_edge():
     assert rules.validate_transition( "review", "review", "standing" )  != [ ]
 
 
+# ---------------------------------------------------------------------------
+# normalize_patch_fields (reassign §4.1) — the single write-side seam that
+# canonicalizes a PATCH's persona-identity fields so a re-owned item stays
+# inside the new owner's owed-row set (the 2026-06-18 false-idle guard).
+# Cases per spec §4.3: present / absent / explicit-null / accented.
+# ---------------------------------------------------------------------------
+
+class TestNormalizePatchFields:
+
+    def test_accented_persona_canonicalized( self ):
+        # A hand-supplied display name is folded to the store's canonical key.
+        out = rules.normalize_patch_fields( { "owner_persona": "María", "accountable_manager": "Mr. Radio" } )
+        assert out == { "owner_persona": "maria", "accountable_manager": "mr radio" }
+
+    def test_non_persona_fields_pass_through_verbatim( self ):
+        # Only PATCH_PERSONA_FIELDS are touched — title/body/priority/gate_class
+        # are never persona-matched, so they are copied through unchanged.
+        fields = { "title": "T", "body": "B", "priority": "P1", "gate_class": "none" }
+        assert rules.normalize_patch_fields( fields ) == fields
+
+    def test_explicit_null_owner_preserved_not_collapsed( self ):
+        # An explicit None (clear-the-owner) survives — never turned into "" or a
+        # canonicalized blank, so unassigning stays a deliberate, auditable clear.
+        out = rules.normalize_patch_fields( { "owner_persona": None } )
+        assert out == { "owner_persona": None }
+
+    def test_absent_persona_field_stays_absent( self ):
+        # No key is invented for a field the caller did not provide.
+        out = rules.normalize_patch_fields( { "priority": "P2" } )
+        assert "owner_persona" not in out
+        assert "accountable_manager" not in out
+
+    def test_empty_string_owner_left_verbatim( self ):
+        # A falsy "" is NOT canonicalized (would mint the "" sentinel) — left as-is.
+        out = rules.normalize_patch_fields( { "owner_persona": "" } )
+        assert out == { "owner_persona": "" }
+
+    def test_input_dict_never_mutated( self ):
+        # Returns a NEW dict — the caller's fields are untouched.
+        original = { "owner_persona": "María" }
+        out = rules.normalize_patch_fields( original )
+        assert original == { "owner_persona": "María" }
+        assert out is not original
+
+    def test_empty_dict_is_empty_dict( self ):
+        assert rules.normalize_patch_fields( { } ) == { }
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

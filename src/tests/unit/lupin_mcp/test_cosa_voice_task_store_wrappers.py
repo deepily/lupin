@@ -212,3 +212,59 @@ class TestTaskQueryWrapper:
         cv.task_query.fn( owner_persona="sam", terse=True )
         assert captured[ "terse" ]         is True
         assert captured[ "owner_persona" ] == "sam"
+
+
+class TestTaskReassignWrapper:
+
+    def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
+        # The handoff verb bridge-stamps `actor` (never a param — anti-impersonation)
+        # and threads every reassignment arg into the transport impl.
+        captured = { }
+        monkeypatch.setattr( cv, "task_reassign_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_reassign.fn(
+            task_id           = "abc-uuid",
+            new_owner_persona = "marcus",
+            reason            = "lane handoff — Tiberius now chasing",
+            new_manager       = "tiberius",
+            authority         = "user_direct",
+        )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url"      : "http://stub:7999",
+            "api_key"           : "ck_live_stub",
+            "actor"             : "krishna 38d15e3b",
+            "task_id"           : "abc-uuid",
+            "new_owner_persona" : "marcus",
+            "reason"            : "lane handoff — Tiberius now chasing",
+            "new_manager"       : "tiberius",
+            "authority"         : "user_direct",
+        }
+
+    def test_defaults_match_spec( self, stamped_identity, monkeypatch ):
+        # new_manager defaults to None (leave the chasing manager unchanged, Q6);
+        # authority defaults to the manager-relay handoff lane.
+        captured = { }
+        monkeypatch.setattr( cv, "task_reassign_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+        cv.task_reassign.fn( task_id="abc", new_owner_persona="marcus", reason="why" )
+        assert captured[ "new_manager" ] is None
+        assert captured[ "authority" ]   == "manager_relay"
+
+    def test_blank_reason_rejected_without_round_trip( self, stamped_identity, monkeypatch ):
+        # A non-empty reason is verb-enforced: a blank one returns the empty_reason
+        # error WITHOUT touching the transport (the impl would explode if called).
+        def must_not_call( **kwargs ):
+            raise AssertionError( "task_reassign_impl must not be called on a blank reason" )
+        monkeypatch.setattr( cv, "task_reassign_impl", must_not_call )
+
+        result = cv.task_reassign.fn( task_id="abc", new_owner_persona="marcus", reason="   " )
+        assert result[ "status" ] == "error"
+        assert result[ "reason" ] == "empty_reason"
+
+    def test_none_reason_rejected_without_round_trip( self, stamped_identity, monkeypatch ):
+        # The falsy-None branch of the guard (distinct from the whitespace branch).
+        monkeypatch.setattr( cv, "task_reassign_impl",
+                             lambda **kwargs: ( _ for _ in () ).throw( AssertionError( "must not call" ) ) )
+        result = cv.task_reassign.fn( task_id="abc", new_owner_persona="marcus", reason=None )
+        assert result[ "reason" ] == "empty_reason"

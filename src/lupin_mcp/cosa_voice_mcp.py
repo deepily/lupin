@@ -3254,7 +3254,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl
 
 
 def _task_store_identity() -> str:
@@ -3567,6 +3567,73 @@ def task_correlate(
         task_id         = task_id,
         correlation_key = correlation_key,
         authority       = authority,
+    )
+
+
+@mcp.tool
+def task_reassign(
+    task_id           : str,
+    new_owner_persona : str,
+    reason            : str,
+    new_manager       : Optional[ str ] = None,
+    authority         : str             = "manager_relay",
+) -> dict:
+    """
+    **[SELF-DISCLOSURE]** Reassign a task-store item to a new owner persona.
+
+    The manager's handoff primitive (design §4.2): pull a worker off a queue and
+    hand their in-flight work to another persona. Changes OWNERSHIP ONLY — it can
+    NEVER change `status` (the store walls PATCH off from the state machine,
+    design D4). If the handoff should also re-queue the item, that is a SEPARATE
+    `task_transition`. The server is the single normalization + audit seam: it
+    canonicalizes the new owner to the owed-query key (so the new owner's
+    `task_query(owner_persona=…)` finds the row — the 2026-06-18 false-idle
+    guard) and appends one `patched` event carrying your `reason`.
+
+    A non-empty `reason` is REQUIRED here at the verb (the manager's "why" for the
+    handoff) — a blank reason is rejected before any server round-trip.
+
+    Examples:
+        # Hand Tiffany's in-flight item to Marcus, manager unchanged:
+        task_reassign(task_id="<uuid>", new_owner_persona="marcus",
+                      reason="Tiffany pulled onto the P0 arbiter fix")
+
+        # Reassign AND move it under a new chasing manager:
+        task_reassign(task_id="<uuid>", new_owner_persona="marcus",
+                      new_manager="tiberius",
+                      reason="lane handoff — Tiberius now chasing")
+
+    Args:
+        task_id: The item's UUID
+        new_owner_persona: The handoff target (server normalizes to canonical key)
+        reason: Non-empty justification for the handoff (stamps the audit event)
+        new_manager: Optional new accountable_manager; when omitted the chasing
+            manager is left UNCHANGED (design Q6)
+        authority: standing | user_direct | manager_relay (default "manager_relay")
+
+    Returns:
+        { item, event } (server 200 body) verbatim, or an error dict:
+        {"status": "error", "reason": "empty_reason"} when `reason` is blank
+        (verb-enforced, no round-trip); a 404 carries "task {id} not found"
+        verbatim; a 422 (terminal item / bad authority) carries the server's
+        detail verbatim.
+
+    `actor` is NOT a parameter — bridge-stamped like task_transition's actor
+    (anti-impersonation; the manager-relay handoff is auditable to the real
+    session that issued it).
+    """
+    if not ( reason and reason.strip() ):
+        return { "status": "error", "reason": "empty_reason",
+                 "detail": "task_reassign requires a non-empty reason (the manager's justification for the handoff)" }
+    return task_reassign_impl(
+        api_base_url      = _get_server_url(),
+        api_key           = _mcp_outbound_api_key(),
+        actor             = _task_store_identity(),
+        task_id           = task_id,
+        new_owner_persona = new_owner_persona,
+        reason            = reason,
+        new_manager       = new_manager,
+        authority         = authority,
     )
 
 

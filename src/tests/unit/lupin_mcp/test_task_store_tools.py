@@ -19,6 +19,7 @@ from lupin_mcp.task_store_tools import (
     task_create_impl,
     task_transition_impl,
     task_correlate_impl,
+    task_reassign_impl,
     task_query_impl,
 )
 
@@ -312,6 +313,70 @@ class TestTaskCorrelateImpl:
             correlation_key = "corr-9",
         )
         assert result == { "status": "error", "http_status": 422, "detail": detail }
+
+
+class TestTaskReassignImpl:
+
+    def test_payload_and_route_omits_manager_when_absent( self, capture_request ):
+        # No new_manager -> accountable_manager NOT in the body, so the server's
+        # exclude_unset model_dump leaves the chasing manager UNCHANGED (Q6).
+        # Default authority is the manager-relay handoff lane.
+        body  = { "item": { "id": "abc" }, "event": { "transition": "patched" } }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_reassign_impl(
+            BASE_URL, API_KEY,
+            actor             = "tiberius d9e65cd8",
+            task_id           = "abc-def",
+            new_owner_persona = "marcus",
+            reason            = "Tiffany pulled onto the P0 arbiter fix",
+        )
+        assert result == body
+        assert calls[ "method" ] == "PATCH"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def"
+        assert calls[ "json" ]   == {
+            "owner_persona" : "marcus",
+            "reason"        : "Tiffany pulled onto the P0 arbiter fix",
+            "actor"         : "tiberius d9e65cd8",
+            "authority"     : "manager_relay",
+        }
+        assert "accountable_manager" not in calls[ "json" ]
+
+    def test_new_manager_included_when_supplied( self, capture_request ):
+        # An explicit new_manager re-homes the chasing manager too.
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_reassign_impl(
+            BASE_URL, API_KEY,
+            actor             = "tiberius d9e65cd8",
+            task_id           = "abc",
+            new_owner_persona = "marcus",
+            reason            = "lane handoff",
+            new_manager       = "tiberius",
+        )
+        assert calls[ "json" ][ "accountable_manager" ] == "tiberius"
+
+    def test_authority_override_passes_through( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ } ) )
+        task_reassign_impl(
+            BASE_URL, API_KEY,
+            actor             = "rick (multiplexer)",
+            task_id           = "abc",
+            new_owner_persona = "marcus",
+            reason            = "human edit",
+            authority         = "user_direct",
+        )
+        assert calls[ "json" ][ "authority" ] == "user_direct"
+
+    def test_404_surfaces_detail_verbatim( self, capture_request ):
+        # A bad task id is the server's 404 to report — transport carries it raw.
+        capture_request( FakeResponse( 404, json_body={ "detail": "task abc not found" } ) )
+        result = task_reassign_impl(
+            BASE_URL, API_KEY,
+            actor             = "tiberius d9e65cd8",
+            task_id           = "abc",
+            new_owner_persona = "marcus",
+            reason            = "whatever",
+        )
+        assert result == { "status": "error", "http_status": 404, "detail": "task abc not found" }
 
 
 class TestTaskQueryImpl:

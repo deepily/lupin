@@ -26,6 +26,8 @@ import os
 import re
 from typing import Optional
 
+from lupin_mcp.persona_normalization import canonical_persona_key
+
 
 # ---------------------------------------------------------------------------
 # Enums (design §2.1) — plain tuples, app-validated (house style: no PG ENUM)
@@ -333,6 +335,48 @@ def validate_transition(
 # ---------------------------------------------------------------------------
 
 PATCH_EDITABLE_FIELDS = ( "title", "body", "priority", "owner_persona", "accountable_manager", "gate_class" )
+
+# The persona-identity fields a PATCH may carry — the ONLY fields the
+# owed-work oracle compares by canonical key, so the ONLY ones to normalize
+# on write (title/body/priority/gate_class are never persona-matched).
+PATCH_PERSONA_FIELDS = ( "owner_persona", "accountable_manager" )
+
+
+def normalize_patch_fields( fields: dict ) -> dict:
+    """
+    Canonicalize the persona-identity fields of a PATCH on write — the single,
+    100%-testable seam that keeps a re-owned item inside the new owner's
+    owed-row set (the 2026-06-18 false-idle bug-class guard, §2.2).
+
+    Delegates to the ONE global persona normalizer — `canonical_persona_key`
+    (lupin_mcp.persona_normalization) — for `owner_persona` / `accountable_manager`
+    ONLY, and ONLY when the field is present AND non-empty: a re-owned item is
+    stored under the SAME key the owed-query reads by, so a hand-supplied display
+    name ("María", "Mr. Radio") can never split into a row the new owner's query
+    misses. An EXPLICIT None (clear-the-owner) is PRESERVED — never collapsed to
+    "" or to a canonicalized blank — so unassigning an item stays a deliberate,
+    auditable clear. `canonical_persona_key` is idempotent, so this is safe even
+    when a caller pre-normalizes.
+
+    Requires:
+        - fields is the dict of provided editable fields (the router's
+          model_dump(exclude_unset=True) minus actor/authority/reason); may be
+          empty
+
+    Ensures:
+        - returns a NEW dict (input is never mutated)
+        - every key not in PATCH_PERSONA_FIELDS is copied through verbatim
+        - a persona field that is present and truthy -> canonical_persona_key( value )
+        - a persona field that is present and falsy (None / "") -> left verbatim
+          (an explicit None clear survives; canonical_persona_key is NOT applied
+          to a falsy value, which would turn None into the "" sentinel)
+        - a persona field that is absent -> stays absent (no key is invented)
+    """
+    normalized = dict( fields )
+    for field_name in PATCH_PERSONA_FIELDS:
+        if field_name in normalized and normalized[ field_name ]:
+            normalized[ field_name ] = canonical_persona_key( normalized[ field_name ] )
+    return normalized
 
 
 def validate_patch( fields: dict ) -> list:

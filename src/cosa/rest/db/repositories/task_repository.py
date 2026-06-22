@@ -213,6 +213,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         fields    : dict,
         actor     : str,
         authority : str,
+        reason    = None,
     ) -> TaskEvent:
         """
         Apply an ALREADY-VALIDATED item-field edit + append a 'patched' event.
@@ -228,13 +229,16 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - fields keys are whitelist-validated editable field names
               (router validated via task_store_rules.validate_patch); values
               already wire-checked by the TaskPatchIn Pydantic model
+            - reason is an OPTIONAL caller-supplied justification (e.g. why a
+              task was reassigned); None / "" means "auto-describe the edit"
 
         Ensures:
             - each provided field whose value differs is written onto the item
             - exactly one TaskEvent appended: transition='patched',
-              receipt_refs=None, reason = the field delta ("k: old -> new; ...")
-              or a no-op marker when nothing actually changed (R3 — the edit is
-              auditable either way)
+              receipt_refs=None, reason = the caller-supplied `reason` when it is
+              non-empty, else the field delta ("k: old -> new; ...") or a no-op
+              marker when nothing actually changed (R3 — the edit is auditable
+              either way)
             - flush() called; commit NOT called (caller's get_db() commits)
 
         Returns:
@@ -247,8 +251,10 @@ class TaskRepository( BaseRepository[TaskItem] ):
                 setattr( item, key, new_value )
                 changes.append( f"{key}: {old_value!r} -> {new_value!r}" )
 
-        reason = "; ".join( changes ) if changes else "no-op patch (no field changed)"
-        return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=reason )
+        # Caller-supplied reason wins (the manager's "why" for a reassignment);
+        # otherwise auto-describe the field delta so the event is never blank.
+        event_reason = reason if reason else ( "; ".join( changes ) if changes else "no-op patch (no field changed)" )
+        return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=event_reason )
 
     def query_chase_due( self, now: datetime, limit: int = 100 ) -> List[TaskItem]:
         """

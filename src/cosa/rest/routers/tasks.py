@@ -199,7 +199,9 @@ class TaskPatchIn( BaseModel ):
     (validate_transition) and the /correlate seam, NEVER an item-PATCH.
     `extra='forbid'` makes that a HARD wire-level invariant: naming any of them
     is a 422, not a silent drop (reviewer ruling 2026-06-15 — PATCH can never
-    bypass the oracle). `actor`/`authority` stamp the audit event, not the item.
+    bypass the oracle). `actor`/`authority`/`reason` stamp the audit event, not
+    the item — `reason` is NOT an editable field (the manager-supplied "why" for
+    a reassignment); when absent the event records the auto-generated field delta.
     """
     model_config = ConfigDict( extra="forbid" )
 
@@ -211,6 +213,7 @@ class TaskPatchIn( BaseModel ):
     gate_class          : Optional[str] = Field( default=None )
     actor               : str           = Field( ..., min_length=1, max_length=255, description="persona + session id performing the edit" )
     authority           : str           = Field( default="standing" )
+    reason              : Optional[str] = Field( default=None, max_length=4000, description="free-text justification for the edit (e.g. why a task was reassigned); stamps the 'patched' audit event, falling back to the field delta when absent" )
 
 
 # ---------------------------------------------------------------------------
@@ -522,14 +525,15 @@ def patch_task(
         - field update + 'patched' event append are atomic (one transaction)
         - returns { item, event } serialized
     """
-    fields = payload.model_dump( exclude_unset=True, exclude={ "actor", "authority" } )
+    fields = payload.model_dump( exclude_unset=True, exclude={ "actor", "authority", "reason" } )
 
-    # Identity parity (Phase 2): a PATCH that re-owns an item must store the
-    # canonical key, same as create — otherwise a re-owned item drifts out of
-    # the persona's owed-row set.
-    for _persona_field in ( "owner_persona", "accountable_manager" ):
-        if _persona_field in fields:
-            fields[ _persona_field ] = _canon_persona( fields[ _persona_field ] )
+    # Identity parity (Phase 2 / reassign §4.1): a PATCH that re-owns an item must
+    # store the canonical key, same as create — otherwise a re-owned item drifts
+    # out of the new persona's owed-row set (the 2026-06-18 false-idle class).
+    # The normalization is a dedicated, 100%-testable rules helper delegating to
+    # the ONE global persona normalizer (canonical_persona_key); an explicit None
+    # (clear-the-owner) is preserved rather than collapsed.
+    fields = rules.normalize_patch_fields( fields )
 
     errors = list( rules.validate_patch( fields ) )
     if payload.authority not in rules.VALID_AUTHORITIES:
@@ -544,7 +548,7 @@ def patch_task(
         if item.status in rules.TERMINAL_STATUSES:
             _reject_if_errors( [ f"item is terminal ('{item.status}') — no edits to closed history" ] )
 
-        event = repo.apply_patch( item, fields, actor=payload.actor, authority=payload.authority )
+        event = repo.apply_patch( item, fields, actor=payload.actor, authority=payload.authority, reason=payload.reason )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
 
 

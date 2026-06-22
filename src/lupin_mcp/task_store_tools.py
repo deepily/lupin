@@ -30,7 +30,8 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
     Shared transport for the three task-store wrapper tools.
 
     Requires:
-        - method is "GET" or "POST"
+        - method is "GET", "POST", or "PATCH" (requests.request supports all
+          three; PATCH backs the item-field edit / task_reassign seam)
         - path starts with "/api/tasks"
         - api_base_url is the Lupin server base URL (no trailing slash needed)
         - api_key is the outbound X-API-Key value, or None when unloadable
@@ -215,6 +216,63 @@ def task_correlate_impl(
         "authority"       : authority,
     }
     return task_store_request( "POST", f"/api/tasks/{task_id}/correlate", api_base_url, api_key, json_body=payload )
+
+
+def task_reassign_impl(
+    api_base_url,
+    api_key,
+    actor,
+    task_id,
+    new_owner_persona,
+    reason,
+    new_manager = None,
+    authority   = "manager_relay",
+):
+    """
+    PATCH /api/tasks/{task_id} — re-own an item (ownership ONLY, never status).
+
+    The thin transport behind the `task_reassign` MCP verb (design §4.2). Builds
+    the item-PATCH body and rides the SAME `/api/tasks/{id}` endpoint Rick's
+    multiplexer uses for owner edits; the server is the single normalization +
+    audit seam (it canonicalizes the persona fields via `normalize_patch_fields`
+    and appends one `patched` event carrying `reason`). Transport stays thin —
+    no client-side normalization, no pre-validation (a bad id / blank reason is
+    the server's reject to report, not ours).
+
+    Requires:
+        - actor is the bridge-stamped identity ("<persona> <8-hex sid>"); the
+          CALLER (cosa_voice_mcp) stamps it — never a tool param, so a session
+          cannot impersonate (spec §4.2, same lane as task_transition's actor)
+        - task_id is the item's UUID string (a malformed id is the server's 422
+          to report, not ours — transport only)
+        - new_owner_persona is the handoff target's name (the server normalizes
+          it to the canonical owed-query key)
+        - reason is the manager's non-empty justification (the verb enforces
+          non-empty; here it passes through verbatim to stamp the audit event)
+
+    Ensures:
+        - PATCH body carries owner_persona + reason + actor + authority always
+        - accountable_manager is included ONLY when new_manager is not None — an
+          omitted new_manager leaves the chasing manager UNCHANGED (design Q6),
+          because the server's model_dump(exclude_unset=True) would otherwise
+          read an explicit null as "clear the manager"
+        - status is NEVER in the body — PATCH is walled off from the state
+          machine (design D4); a handoff that should also re-queue is a separate
+          task_transition
+        - returns { item, event } (200 body) verbatim on success
+        - 404 surfaces "task {id} not found" verbatim
+        - 422 surfaces the server's detail.errors VERBATIM (terminal item / bad
+          authority / blank reason are the server's reject, never pre-checked)
+    """
+    payload = {
+        "owner_persona" : new_owner_persona,
+        "reason"        : reason,
+        "actor"         : actor,
+        "authority"     : authority,
+    }
+    if new_manager is not None:
+        payload[ "accountable_manager" ] = new_manager
+    return task_store_request( "PATCH", f"/api/tasks/{task_id}", api_base_url, api_key, json_body=payload )
 
 
 def task_query_impl(
