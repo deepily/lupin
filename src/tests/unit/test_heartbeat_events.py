@@ -178,6 +178,34 @@ def test_last_emitted_outcome_missing_field_is_none( tmp_path ):
     assert e.last_emitted_outcome( "i3", base_dir=tmp_path ) is None
 
 
+def test_last_emitted_outcome_skips_trailing_idle_prompt_kind( tmp_path ):
+    """
+    Bug baf5ea6d regression: a kind-tagged recency record (idle_prompt) appended
+    AFTER the genuine `idle` outcome must NOT mask it. last_emitted_outcome means
+    "the last EMITTED OUTCOME" — it MUST filter out the kind-tagged records that
+    deliberately omit `outcome` (idle_prompt / task_transition / reaped), per the
+    contract stated in their emit_* docstrings.
+
+    Sequence reproduced: Stop hook emits EVENT_IDLE, then the Notification hook's
+    idle_prompt branch (notification.py:83) appends an idle_prompt event. The
+    naive records[-1].get("outcome") returned None → _recipient_is_idle() saw the
+    parked worker as ACTIVE → the manager's DM buffered instead of tmux-waking →
+    the worker went dark.
+    """
+    e.emit_outcome( "ipo", "P", e.EVENT_IDLE, 0, 3, work_owed=False, base_dir=tmp_path )
+    e.emit_idle_prompt( "ipo", persona="P", base_dir=tmp_path )
+    # The real last OUTCOME is still "idle" — the trailing idle_prompt is recency-only.
+    assert e.last_emitted_outcome( "ipo", base_dir=tmp_path ) == e.EVENT_IDLE
+
+
+def test_last_emitted_outcome_skips_trailing_task_transition_kind( tmp_path ):
+    """A trailing task_transition recency record (no `outcome` key) likewise must
+    not mask the prior poked outcome."""
+    e.emit_outcome( "tto", "P", OUTCOME_POKE, 1, 3, base_dir=tmp_path )
+    e.emit_task_transition( "tto", persona="P", base_dir=tmp_path )
+    assert e.last_emitted_outcome( "tto", base_dir=tmp_path ) == OUTCOME_POKE
+
+
 def test_is_idle_transition_first_idle_is_transition( tmp_path ):
     assert e.is_idle_transition( "i4", base_dir=tmp_path ) is True   # no prior events
 

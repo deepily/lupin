@@ -721,6 +721,55 @@ class TestEventHandling:
         )
         assert probe._recipient_is_idle() is True
 
+    def test_recipient_is_idle_survives_trailing_idle_prompt_event( self, tmp_path, monkeypatch ):
+        """
+        Bug baf5ea6d END-TO-END regression (crew-wide manager→worker dark-out):
+        a genuinely-idle worker emits EVENT_IDLE, then the Notification hook's
+        idle_prompt branch appends a kind=idle_prompt recency event (NO outcome
+        key). The pre-fix last_emitted_outcome returned that trailing record's
+        absent outcome → None → _recipient_is_idle() == False → the manager's DM
+        routed to _buffer_message (a file nothing drains at a parked pane) instead
+        of the tmux-wake path → the worker went dark.
+
+        Faithful real-files reproduction (mirrors the F1 non-mocking test): write
+        a REAL bridge + a REAL events file containing [idle, idle_prompt] and
+        assert _recipient_is_idle() stays True so _deliver_peer_dm tmux-wakes.
+        """
+        from lupin_cli.claude_code.hooks.lib import session_bridge, heartbeat_events
+
+        full_id  = "feed1234-1111-2222-3333-444455556666"
+        short_id = full_id[ :8 ]   # "feed1234"
+
+        sessions_dir = tmp_path / "sessions"
+        events_dir   = tmp_path / "heartbeat-events"
+        sessions_dir.mkdir(); events_dir.mkdir()
+        monkeypatch.setattr( session_bridge, "SESSION_DIR", sessions_dir )
+        monkeypatch.setattr( heartbeat_events, "FLEET_EVENTS_DIR", events_dir )
+
+        ( sessions_dir / f"cc-{short_id}.json" ).write_text( json.dumps( {
+            "session_id"        : short_id,
+            "stable_session_id" : full_id,
+            "tmux_session"      : "lupin",
+        } ) )
+        # The lethal real-world ordering: genuine idle outcome, THEN the
+        # idle_prompt 4th-signal recency event (no `outcome` key) lands on top.
+        heartbeat_events.emit_outcome(
+            full_id, persona="rachel", outcome=heartbeat_events.EVENT_IDLE,
+            poke_count=0, cap=1, base_dir=str( events_dir )
+        )
+        heartbeat_events.emit_idle_prompt(
+            full_id, persona="rachel", base_dir=str( events_dir )
+        )
+
+        probe = CCNotificationListener(
+            email           = "test@test.ai",
+            password        = "pass",
+            session_id_hash = short_id,
+            buffer_path     = str( tmp_path / "buf.jsonl" ),
+        )
+        # Still idle → tmux-wake, NOT buffer-into-the-void.
+        assert probe._recipient_is_idle() is True
+
     def test_peer_dm_builds_envelope_with_reply_affordance( self, listener ):
         """
         _handle_peer_dm injects a PEER DM envelope — sender persona + icon +
