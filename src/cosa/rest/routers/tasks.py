@@ -35,6 +35,7 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest import task_store_rules as rules
+from cosa.agents.utils.sender_id import canonicalize_project_name
 from lupin_mcp.persona_normalization import canonical_persona_key
 
 router = APIRouter( prefix="/api", tags=[ "tasks" ] )
@@ -63,6 +64,35 @@ def _canon_persona( value ):
     if value is None:
         return None
     return canonical_persona_key( value ) or None
+
+
+def _canon_project( value ):
+    """
+    Canonicalize a project name to the store's single alias form — the
+    project-axis twin of `_canon_persona` (bug de653086 / its sibling c6751cf8).
+
+    The owed-work oracle scopes by `resolve_project_name()`, which alias-
+    normalizes through the ONE `_PROJECT_ALIASES` table (e.g.
+    "planning-is-prompting" -> "plan"). A row written under the RAW repo name
+    therefore splits OUT of the oracle's `project=` filter, and the owning
+    session false-idles while genuinely owing work (the alias-axis sibling of
+    the 2026-06-18 persona-drift P0). The MCP client wrappers already alias on
+    write, but a NON-wrapper POST (or a future caller) would store raw — so this
+    is the SERVER-side choke point, symmetric with persona canonicalization,
+    that makes read and write agree on ONE canonical form regardless of which
+    client wrote the row. Reuses the single shared `canonicalize_project_name`
+    (no second alias map) and is idempotent on already-canonical names.
+
+    Requires:
+        - value is a str or None
+
+    Ensures:
+        - None -> None (an absent project filter must keep matching every row)
+        - a known alias key -> its canonical short name
+          ("planning-is-prompting" -> "plan")
+        - any other name -> returned unchanged (already-canonical / non-aliased)
+    """
+    return canonicalize_project_name( value )
 
 
 def _canon_blocked_by( blocked_by ):
@@ -324,7 +354,7 @@ def create_task(
         item = repo.create_item(
             item_class          = payload.item_class,
             title               = payload.title,
-            project             = payload.project,
+            project             = _canon_project( payload.project ),
             created_by          = payload.created_by,
             authority           = payload.authority,
             body                = payload.body,
@@ -588,6 +618,11 @@ def query_tasks(
     # canonicalizes to None and keeps matching every row.
     owner_persona       = _canon_persona( owner_persona )
     accountable_manager = _canon_persona( accountable_manager )
+    # Alias parity (bug de653086): canonicalize the project filter through the
+    # SAME alias table the WRITE seam now uses, so a query by the raw repo name
+    # ("planning-is-prompting") still matches rows stored canonically ("plan") —
+    # read and write agree on one form at the server choke point.
+    project             = _canon_project( project )
 
     with get_db() as session:
         repo = TaskRepository( session )

@@ -806,5 +806,44 @@ def test_patch_canonicalizes_owner_persona_FLIP( client, repo ):
     assert fields[ "owner_persona" ] == "maria"                   # was "María"
 
 
+# ---------------------------------------------------------------------------
+# Bug de653086 — project-alias canonicalization at the /api/tasks choke point.
+# The project-axis twin of the persona FLIPs above: each asserts the project
+# value REACHING the repo (write) or the repo query (read) is the canonical
+# alias form ("planning-is-prompting" -> "plan"). Revert the router's
+# _canon_project helper to the raw payload value and the "plan" assertions
+# fail. Closes the false-idle gap where a row written under the raw repo name
+# splits out of the owed-oracle's alias-normalized project filter.
+# ---------------------------------------------------------------------------
+
+def test_create_canonicalizes_project_FLIP( client, repo ):
+    # A new row must store the canonical alias form, so the owed-oracle (which
+    # queries project="plan") finds it — symmetric with persona canonicalization.
+    repo.create_item.return_value = make_item()
+    client.post( "/api/tasks", json=dict( _CREATE_BODY, project="planning-is-prompting" ) )
+    assert repo.create_item.call_args.kwargs[ "project" ] == "plan"   # was "planning-is-prompting"
+
+
+def test_create_non_aliased_project_unchanged( client, repo ):
+    # A non-aliased repo name is returned verbatim (idempotent / no false rewrite).
+    repo.create_item.return_value = make_item()
+    client.post( "/api/tasks", json=dict( _CREATE_BODY, project="lupin" ) )
+    assert repo.create_item.call_args.kwargs[ "project" ] == "lupin"
+
+
+def test_query_canonicalizes_project_filter_FLIP( client, repo ):
+    # The READ seam: a query by the raw repo name must match rows stored under
+    # the canonical alias — read and write agree on one form at the server.
+    repo.query_tasks.return_value = [ ]
+    client.get( "/api/tasks", params={ "project": "planning-is-prompting" } )
+    assert repo.query_tasks.call_args.kwargs[ "project" ] == "plan"
+
+
+def test_count_only_canonicalizes_project_filter_FLIP( client, repo ):
+    repo.count_tasks.return_value = 0
+    client.get( "/api/tasks", params={ "project": "planning-is-prompting", "count_only": "true" } )
+    assert repo.count_tasks.call_args.kwargs[ "project" ] == "plan"
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
