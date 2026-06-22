@@ -1056,20 +1056,21 @@ def _dm_topic_for( persona_name ):
     """
     Derive the commons DM-topic name for a persona.
 
-    Mirrors `cosa_voice_mcp._dm_topic` / `arbiter_gateway.dm_topic_for` (the
-    canonical sluggers): lowercase, then collapse non-word chars to "_" with
-    re.UNICODE so non-ASCII personas survive ("mr radio" → "dm-mr_radio",
-    "María" → "dm-maría").
+    Routes through the shared `persona_slug` root (Phase 3 of the persona-name
+    normalization plan) so the slug is accent-proof and agrees with the store's
+    canonical persona key: "Mr. Radio" → "dm-mr_radio", "María" → "dm-maria"
+    (NOT the prior accent-leaky "dm-maría"). `sep='_'` keeps the established
+    `dm-<persona>` topic-file convention (spaces → underscore).
 
     Requires:
-        - persona_name is a non-empty string
+        - persona_name is a string or None
 
     Ensures:
         - Returns "dm-<slug>" matching the server-side topic pattern
+        - Accent/punctuation in the persona collapses to the canonical form
     """
-    import re
-    slug = re.sub( r"[^\w-]+", "_", persona_name.strip().lower(), flags=re.UNICODE )
-    return f"dm-{slug}"
+    from lupin_mcp.persona_normalization import persona_slug
+    return f"dm-{persona_slug( persona_name, sep='_' )}"
 
 
 def _gather_outstanding_delegations( session_id ):

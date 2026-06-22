@@ -249,10 +249,32 @@ class TestSpawnSessions:
         assert len( manifest ) == 3
 
     def test_persona_fallback_to_session_id( self, tmp_path ):
-        # manager_persona omitted → topic keys on the session_id slug
+        # manager_persona omitted → topic keys on the session_id slug (stays on
+        # `_slug`, so the hyphen survives: "Mgr-XYZ" → "dm-mgr-xyz"). This is the
+        # surgical proof the session-id path is UNCHANGED by Phase 3.
         res = spawn_sessions( 1, "t", "Mgr-XYZ", script_path="x",
                               runner=FakeRunner(), session_dir=tmp_path )
         assert res[ "collection_topic" ] == "dm-mgr-xyz"
+
+    def test_persona_path_canonicalizes_accent_FLIP( self, tmp_path ):
+        """Phase 3 FLIP: a PERSONA-derived topic/session name now routes through
+        `persona_slug`, so "María" canonicalizes to "maria" (was the accent-leaky
+        "maría" the old `_slug` produced, since "í".isalnum() is True). Revert the
+        persona branch at session_spawner.py:315 to `_slug(manager_persona)` and
+        both assertions fail. The session-id fallback stays on `_slug` — surgical."""
+        res = spawn_sessions( 1, "t", "sid-maria", script_path="x",
+                              manager_persona="María", role="author",
+                              runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "collection_topic" ] == "dm-maria"
+        assert res[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-maria-1"
+
+    def test_punctuation_only_persona_falls_back_to_anon( self, tmp_path ):
+        """The `or "anon"` guard preserves `_slug`'s never-empty contract when a
+        truthy persona canonicalizes to "" (e.g. emoji/punct-only)."""
+        res = spawn_sessions( 1, "t", "sid-anon", script_path="x",
+                              manager_persona="🦉", role="reviewer",
+                              runner=FakeRunner(), session_dir=tmp_path )
+        assert res[ "collection_topic" ] == "dm-anon"
 
     def test_failed_spawn_not_persisted( self, tmp_path ):
         runner = FakeRunner( returncode=1 )  # every spawn "fails"
