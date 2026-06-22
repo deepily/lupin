@@ -186,6 +186,9 @@ class TestRunSweep:
                                session_names=[], apply=False, out=lines.append )
         assert res[ "no_op" ] is True
         assert any( "no-op" in ln for ln in lines )
+        # Nit (Phase 4): the resolved commons dir is logged so a worktree-launched
+        # sweep can't silently report a misleading no-op against the wrong path.
+        assert any( "commons dir resolved" in ln and str( tmp_path ) in ln for ln in lines )
 
     def test_dry_run_reports_but_does_not_mutate( self, tmp_path ):
         _touch( tmp_path, "dm-mr radio.md" )

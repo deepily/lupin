@@ -51,6 +51,8 @@ Each item carries far richer vocabulary than the old harness list:
 
 **Discipline (enforced server-side):** `→done` REQUIRES a receipt (`commit` / `test_run` / `qid` / `doc_path` / `log_line`); `→blocked` REQUIRES a typed `blocked_by` AND a `next_chase_ts`. *No receipt → not done.*
 
+**Persona-key invariant (single source of truth):** `owner_persona`, `accountable_manager`, and persona-typed `blocked_by` refs are stored as a **canonical key** — accent-stripped, punctuation-stripped, lowercased, internal spaces kept (`María` → `maria`, `Mr. Radio` → `mr radio`). Every seam that writes, queries, or compares a persona MUST route through the ONE root `lupin_mcp.persona_normalization.canonical_persona_key` (the WRITE seam, the `/api/tasks` boundary, the owed-oracle READ seam, the arbiter role-matchers, and `follow_through_escalation_watcher` all do). DM-topic / session-name derivation uses the sibling `persona_slug` (same root, internal spaces → separator → `dm-mr_radio`); noisy free-text human input resolves via `normalize_for_match` (root minus spaces). **Never** hand-roll a `.lower()` / `re.sub` persona normalizer — divergence here is the exact bug that produced the 2026-06-18 false-idle P0 (READ queried `maría`, store held `maria`, zero rows matched) and the split DM-topic (`dm-maría` vs `dm-maria`). Authority: `src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md`.
+
 ### Store API + agent verbs
 
 - **HTTP**: `:7999 /api/tasks` — `routers/tasks.py` (handler) backed by `task_repository.py`. `GET /api/tasks?owner_persona=&status=` returns full-fidelity rows; `count_only=true` returns `{count}` via `func.count` (no row serialization) for the cheap poke path.

@@ -21,12 +21,11 @@ Design: `src/rnd/v0.1.7/2026.05.22-heartbeat-poker-d1d4-class-spec.md` §2.3, §
 
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from cosa.agents.heartbeat_poker_job import RecipientSpec
-from lupin_mcp.persona_normalization import canonical_persona_key
+from lupin_mcp.persona_normalization import canonical_persona_key, persona_slug
 
 
 class LupinCommonsGateway:
@@ -105,12 +104,17 @@ class LupinCommonsGateway:
         """
         Derive a server-pattern-safe DM topic from a recipient identifier.
 
-        Mirrors the cascade scheduler's `dm_topic_for` + the MCP DM layer:
-        `"mr radio"` → `"dm-mr_radio"`. Uses `re.UNICODE` so non-ASCII persona
-        names survive rather than being mangled.
+        Routes through the shared `persona_slug` root (Phase 4 of the
+        persona-name-normalization plan) so the topic ALWAYS equals
+        `dm-{persona_slug( identifier, sep='_' )}` — byte-identical to the
+        Arbiter gateway, the cascade scheduler, and the MCP DM layer
+        (`_derive_dm_topic`). Accent-proof: `"Mr Radio"` → `"dm-mr_radio"`,
+        `"María"` → `"dm-maria"`. The prior accent-leaky
+        `re.sub( ..., re.UNICODE )` kept accents, regenerating the SPLIT topic
+        `"dm-maría"` (the live bug: both `dm-maría.md` and `dm-maria.md`
+        existed) — this seam now converges on the canonical `"dm-maria"`.
         """
-        slug = re.sub( r"[^\w-]+", "_", identifier.strip().lower(), flags=re.UNICODE )
-        return f"dm-{slug}"
+        return f"dm-{persona_slug( identifier, sep='_' )}"
 
     def send_to( self, recipient: RecipientSpec, body: str ) -> None:
         """

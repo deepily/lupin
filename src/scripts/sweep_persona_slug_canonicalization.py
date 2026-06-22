@@ -292,6 +292,11 @@ def run_sweep(
     tmux_mm  = scan_tmux_mismatches( session_names, owners )
 
     out( f"persona-slug canonicalization sweep  ({'APPLY' if apply else 'DRY-RUN'})" )
+    # Log the RESOLVED commons dir (nit, Phase 4 review): the path keys off
+    # LUPIN_ROOT, so a sweep launched from a git WORKTREE points at the worktree's
+    # (usually empty) io/commons and falsely reports "no-op". Surfacing the path
+    # makes that misdirection visible at a glance instead of silently misleading.
+    out( f"  commons dir resolved  : {commons_dir}" )
     out( f"  owners scanned        : {len( owners )}" )
     out( f"  topic-file mismatches : {len( topic_mm )}" )
     out( f"  tmux-session mismatches: {len( tmux_mm )}  (report-only)" )

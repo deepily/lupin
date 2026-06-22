@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-19
 **Branch**: `wip-v0.1.9-2026.06.19-bug-fixing`
-**Status**: PLAN APPROVED → in implementation
+**Status**: ✅ ALL PHASES COMPLETE — Phases 0–3 LANDED on `wip-v0.1.9-2026.06.21-bug-fix-implementation` (latest merge `d7d53ff5`); Phase 4 built + green + HELD in worktree (2026-06-22, awaiting Rick push + live cutover)
 **Severity**: Rick P0 follow-up — kills the persona-normalizer drift bug-class permanently
 **Supersedes the follow-up scoped in**: `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.18-owed-oracle-persona-normalizer-drift-and-store-unknown-false-idle.md` §Follow-up
 **Antecedents**: `src/rnd/v0.1.8/2026.06.04-heartbeat-hook/2026.06.18-...false-idle.md` (READ-seam fix) · `src/rnd/v0.1.8/2026.06.11-arbiter-lineage-persistence-and-persona-matching.md` (arbiter role-match)
@@ -161,10 +161,19 @@ Authored on Rick's laptop; pytest execution delegated to the SWE team on the dev
   - `test_commons_persona_matcher.py` accent assertion updated (`"María"`→`"maria"`, the intended fix).
   - Local validation: `py_compile` clean on all edited files; a 10-check parity script confirms delegation, the accent-fix alias identity, `match_persona` resolution, and slug forms.
 
-### ⬜ Remaining (not yet implemented)
-- **Phase 2 — Identity-key centralization (the actual bug fix):** write seam (`task_store_mirror`/`task_store_drain` `_identity()`), `/api/tasks` router boundary, arbiter (`fleet_render`/`manager_resolver`/`arbiter_job`), escalation watcher (retire `_norm_persona`), voice-persona dedup/helpers, `manager_figure`, commons gateway; store backfill probe; flip tests at each seam.
-- **Phase 3 — Slug unification:** `_dm_topic_for` / `_dm_topic` / `session_spawner` persona path → `persona_slug`; persisted-name migration sweep.
-- **Phase 4 — Collapse + docs:** migrate remaining imports to the new home, reduce shims; update `fleet-liveness-and-task-store-architecture.md` + the 2026-06-18 / 2026-06-11 R&D docs.
+### ✅ Phases 2–3 — LANDED on the working branch
+- **Phase 2 — Identity-key centralization (the bug fix): ✅ LANDED.** Write seam (`task_store_mirror`/`task_store_drain` `_identity()`), `/api/tasks` router boundary, arbiter (`fleet_render`/`manager_resolver`/`arbiter_job`), escalation watcher (`_norm_persona` retired), voice-persona dedup/helpers, `manager_figure`, commons gateway `last_post_ts`; store backfill probe; flip tests at each seam.
+- **Phase 3 — Slug unification: ✅ LANDED.** `stop._dm_topic_for` / `cosa_voice_mcp._derive_dm_topic` / `session_spawner` persona path → `persona_slug( sep='_' )`; persisted-name migration sweep (`src/scripts/sweep_persona_slug_canonicalization.py`).
+
+### ✅ Phase 4 — Collapse to one name + gateway completeness + docs (2026-06-22, HELD in worktree)
+- **Gateway completeness (P1 — the cutover-durability fix, Krishna fresh-critical finding):** the last two live persona-DM-topic sluggers still used the accent-leaky `re.sub( r"[^\w-]+", "_", name, flags=re.UNICODE )`, regenerating the SPLIT topic `dm-maría` (live evidence: both `io/commons/dm-maría.md` and `dm-maria.md` existed). Both now route through `persona_slug( sep='_' )`, byte-identical to `_derive_dm_topic`:
+  - `src/cosa/agents/heartbeat_arbiter/arbiter_gateway.py` `dm_topic_for` (dropped now-unused `import re`).
+  - `src/cosa/agents/heartbeat_poker_commons_gateway.py` `dm_topic_for` (dropped now-unused `import re`; added `persona_slug` to the existing `persona_normalization` import).
+  - **Plus a third surviving slugger found by the collapse grep:** `src/scripts/cascade_heartbeat_scheduler.py` `dm_topic_for` (same accent-leaky pattern) → routed through `persona_slug` (dropped now-unused `import re`).
+  - FLIP tests at all three seams (revert → `dm-maría` regenerates → assertion fails): `test_heartbeat_arbiter_gateway.py`, `test_heartbeat_poker_commons_gateway.py`, `test_cascade_budget_tracker.py`.
+- **Collapse ("one name" rule):** grep confirms **no private persona normalizer survives** — every structured-identity site already imports `canonical_persona_key` directly from `lupin_mcp.persona_normalization`; `session_bridge.canonical_persona_key` (lazy-delegating shim, preserves hook-bootstrap path safety) and `commons_persona_matcher._normalize_for_match` (pure re-export) carry zero private algorithm. Surviving `_slug` / `_normalize_classname` / `_normalize_route` sites are deliberately non-persona (general session-id/role text, TFE classnames, URL test helpers).
+- **Docs:** this status section → Phase-4-complete; `src/docs/fleet-liveness-and-task-store-architecture.md` → persona-key invariant; the 2026-06-18 owed-oracle-drift doc → follow-up marked **DONE**; the 2026-05-17 "unicode-all-the-way-down" DM-topic directive → marked **SUPERSEDED for persona-derived topics** (Rick ratified 2026-06-22).
+- **Nit:** `sweep_persona_slug_canonicalization.run_sweep` now logs the resolved commons dir (keys off `LUPIN_ROOT` → a worktree-launched sweep otherwise falsely reports no-op).
 
 ### SWE-team test checklist (run on server, in PR-merge order)
 1. Unit (`:7999`): the suites listed in §Verification, `--cov-fail-under=100` on touched `cosa` surface.

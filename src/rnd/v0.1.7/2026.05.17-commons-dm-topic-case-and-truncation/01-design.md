@@ -71,6 +71,20 @@ with NO body text below. Confirmed via direct `cat` inspection, not via `commons
 
 ### 2.1 The fix line (ratified Q8: broaden to unicode)
 
+> **⚠️ SUPERSEDED for persona-derived topics (Rick ratified 2026-06-22).** The Q8
+> "unicode all the way down" directive below — keep the persona's exact unicode
+> spelling so `María` → `dm-maría` — has been **reversed for persona-derived DM
+> topics**. Carrying accents into the topic slug produced the **split-topic** bug:
+> the SAME persona keyed as both `dm-maría` and `dm-maria` depending on which
+> sub-system slugged the name, fragmenting the very thread this doc set out to
+> unify (live evidence: both `io/commons/dm-maría.md` and `dm-maria.md` existed).
+> Persona-derived topics now slug through the ONE canonical root
+> `lupin_mcp.persona_normalization.persona_slug` (NFKD accent-strip → `María` →
+> `dm-maria`), so every producer converges on a single topic file. See
+> `src/rnd/v0.1.9/2026.06.19-persona-name-normalization/01-centralized-persona-normalization-plan.md`
+> (Phase 4). The unicode-preserving form is retained only for genuinely
+> non-persona, free-text topic names (none currently).
+
 `src/lupin_mcp/cosa_voice_mcp.py:2291` currently reads:
 
 ```python

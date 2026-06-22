@@ -51,10 +51,23 @@ def _gw( store=None ):
 @pytest.mark.parametrize( "ident,expected", [
     ( "Bob", "dm-bob" ),
     ( "Mr Radio", "dm-mr_radio" ),
-    ( "  María 🌸 ", "dm-maría_" ),          # unicode survives; trailing punct → _
+    ( "Mr. Radio", "dm-mr_radio" ),          # period (punctuation) stripped → mr_radio
+    ( "  María 🌸 ", "dm-maria" ),            # Phase 4: accent-stripped + emoji/space trimmed
 ] )
 def test_dm_topic_for_slug( ident, expected ):
     assert LupinArbiterGateway.dm_topic_for( ident ) == expected
+
+
+def test_dm_topic_for_accented_persona_FLIP():
+    """Phase 4 CONTRACT CHANGE + FLIP guard: `dm_topic_for` now routes through
+    the shared `persona_slug` root, so an accented persona keys to the CANONICAL
+    "dm-maria" — NOT the split "dm-maría" the old accent-leaky
+    `re.sub( r"[^\\w-]+", "_", name, flags=re.UNICODE )` produced. That split was
+    the live bug: both io/commons/dm-maría.md AND dm-maria.md existed. Revert this
+    seam to the re.UNICODE re.sub → it yields "dm-maría" → this assertion fails →
+    the test genuinely guards the gateway-completeness fix that durables the cutover."""
+    assert LupinArbiterGateway.dm_topic_for( "María" )     == "dm-maria"
+    assert LupinArbiterGateway.dm_topic_for( "Mr. Radio" ) == "dm-mr_radio"
 
 
 def test_who_delegates_with_retention():
