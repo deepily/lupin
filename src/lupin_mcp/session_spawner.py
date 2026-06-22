@@ -28,6 +28,8 @@ import subprocess
 from pathlib import Path
 from typing  import Any, Callable, Dict, List, Optional
 
+from lupin_mcp.persona_normalization import persona_slug
+
 
 # Default ceiling on concurrent reviewers a single manager may spawn. Overridden
 # at the call site by the INI key `cc session spawn max reviewers`.
@@ -312,7 +314,14 @@ def spawn_sessions(
     # Collection + naming key on the manager PERSONA (dm-{persona}), matching the
     # existing commons DM convention + cascade_heartbeat_scheduler.dm_topic_for().
     # The manifest itself stays keyed on session_id (globally unique lineage).
-    topic_key        = _slug( manager_persona ) if manager_persona else _slug( manager_session_id )
+    #
+    # Phase 3 (persona-name normalization): a PERSONA-derived key routes through
+    # the shared `persona_slug` root (accent-proof, agrees with the canonical
+    # store key) so "María" → "dm-maria", not the accent-leaky "dm-maría" the old
+    # `_slug` produced. The `or "anon"` preserves `_slug`'s never-empty contract.
+    # The fallback key is a SESSION ID (not a persona) → stays on `_slug`; `role`
+    # below is general text → also stays on `_slug` (surgical: persona path only).
+    topic_key        = ( persona_slug( manager_persona, sep="-" ) or "anon" ) if manager_persona else _slug( manager_session_id )
     collection_topic = f"dm-{topic_key}"
     base             = f"cc-{_slug( role )}-{topic_key}"
 

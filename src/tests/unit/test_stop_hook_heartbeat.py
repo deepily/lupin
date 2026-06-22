@@ -637,9 +637,18 @@ class TestDmTopicFor:
         from lupin_cli.claude_code.hooks.stop import _dm_topic_for
         assert _dm_topic_for( " Tiberius " ) == "dm-tiberius"
 
-    def test_unicode_persona_survives( self ):
+    def test_accent_stripped_to_canonical( self ):
+        """Phase 3 CONTRACT CHANGE + FLIP guard: `_dm_topic_for` now routes
+        through `persona_slug`, so the accent strips to the canonical store form
+        ("María" → "dm-maria", was the accent-leaky "dm-maría"). Revert the seam
+        to the old `re.sub` UNICODE slugger and this assertion fails."""
         from lupin_cli.claude_code.hooks.stop import _dm_topic_for
-        assert _dm_topic_for( "María" ) == "dm-maría"
+        assert _dm_topic_for( "María" ) == "dm-maria"
+
+    def test_punctuation_persona_canonicalized( self ):
+        """"Mr. Radio" (period) → "dm-mr_radio" via the canonical key."""
+        from lupin_cli.claude_code.hooks.stop import _dm_topic_for
+        assert _dm_topic_for( "Mr. Radio" ) == "dm-mr_radio"
 
 
 class TestIsSameSession:

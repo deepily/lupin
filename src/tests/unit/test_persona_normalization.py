@@ -118,6 +118,28 @@ class TestPersonaSlug:
         once = persona_slug( "Mr. Radio", sep="-" )
         assert persona_slug( once, sep="-" ) == once
 
+    def test_idempotent_for_underscore_sep( self ):
+        """bug 9980dd9a also covered for sep='_' (the DM-topic separator)."""
+        once = persona_slug( "Mr. Radio", sep="_" )
+        assert once == "mr_radio"
+        assert persona_slug( once, sep="_" ) == once
+
+    @pytest.mark.parametrize( "name", [ "Mr. Radio", "María", "Tiberius", "mr radio", "maría" ] )
+    @pytest.mark.parametrize( "sep", [ "-", "_" ] )
+    def test_reslugging_an_already_slugged_value_round_trips( self, name, sep ):
+        """The fix's contract: an ALREADY-slugged value must survive a second slug
+        pass unchanged for the SAME sep — else canonical_persona_key would fuse
+        "mr-radio" → "mrradio" (the bug). FLIP: revert the idempotency fix and the
+        Mr. Radio case re-fuses and this fails."""
+        once = persona_slug( name, sep=sep )
+        assert persona_slug( once, sep=sep ) == once
+
+    def test_falsy_sep_strips_spaces_and_is_idempotent( self ):
+        """Defensive branch: a falsy sep skips the boundary-restore step; the slug
+        then strips spaces (like normalize_for_match) and is still idempotent."""
+        assert persona_slug( "Mr. Radio", sep="" ) == "mrradio"
+        assert persona_slug( persona_slug( "Mr. Radio", sep="" ), sep="" ) == "mrradio"
+
 
 class TestCrossPrimitiveConsistency:
     """The three primitives must share ONE root, differing only in space handling."""

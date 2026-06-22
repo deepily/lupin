@@ -46,6 +46,8 @@ from typing import List, Optional
 from pydantic import ValidationError
 from fastmcp import FastMCP
 
+from lupin_mcp.persona_normalization import persona_slug
+
 # Import from lupin_cli.notifications (the notification library)
 from lupin_cli.notifications.notification_models import (
     NotificationRequest,
@@ -2777,27 +2779,35 @@ def _derive_dm_topic( recipient: str ) -> str:
     """
     Derive a server-pattern-safe DM topic from a recipient persona name.
 
-    Per Rick's Q8 architectural directive (2026-05-17 coordinator walkthrough):
-    unicode all the way down. Topic file names preserve the persona's exact
-    unicode spelling (e.g. `María` → `dm-maría`, `José Ruiz` → `dm-josé_ruiz`).
-    The `re.UNICODE` flag treats letters in any script as word characters;
-    only path-dangerous chars and whitespace collapse to `_`.
+    Phase 3 of the persona-name normalization plan
+    (`src/rnd/v0.1.9/2026.06.19-persona-name-normalization/`) routes this through
+    the shared `persona_slug` root so a DM topic ALWAYS equals the recipient's
+    canonical persona key with spaces → `_`: "Mr. Radio" → "dm-mr_radio",
+    "María"/"MARÍA" → "dm-maria". DM topics are always persona-derived, and the
+    store/bridges hold the canonical (accent-stripped, ASCII) pool form, so this
+    is the form that actually matches in practice.
 
-    Pairs with the unicode-broadened server-side topic pattern at
-    `src/cosa/rest/routers/commons.py:100` (`_TOPIC_OR_QID_PATTERN`).
+    NOTE — this REVERSES the 2026-05-17 Q8 "unicode all the way down" directive
+    that previously preserved exact unicode spelling ("María" → "dm-maría",
+    "中文" → "dm-中文", "jean-luc" → "dm-jean-luc"). Under the canonical root,
+    accents strip ("dm-maria"), non-Latin scripts reduce to "" ("中文" →
+    "dm-"), and internal hyphens are dropped ("jean-luc" → "dm-jeanluc"). This
+    is intentional for real personas (all ASCII/accented-Latin pool names), but
+    it is a contract change on arbitrary input — see the Phase 3 flag.
+
+    Pairs with the server-side topic pattern at
+    `src/cosa/rest/routers/commons.py:100` (`_TOPIC_OR_QID_PATTERN`): the
+    canonical output is `[a-z0-9_-]+`, a strict subset of the accepted `[\\w-]+`.
 
     Requires:
-        - recipient is a non-empty string
+        - recipient is a string or None
 
     Ensures:
-        - return value matches the server-side `[\\w-]+` (re.UNICODE) pattern
         - return value starts with `"dm-"`
-        - input is lowercased before sanitization (case-insensitive topic-file
-          collision per Sub-bug A fix)
-        - whitespace and other non-word chars collapse to `_` (Sub-bug C fix)
+        - the slug equals `persona_slug( recipient, sep='_' )` — canonical,
+          accent-stripped, lowercased, ASCII-only
     """
-    sanitized = re.sub( r"[^\w-]+", "_", recipient.lower(), flags=re.UNICODE )
-    return f"dm-{sanitized}"
+    return f"dm-{persona_slug( recipient, sep='_' )}"
 
 
 def _commons_ask_async_dispatch(

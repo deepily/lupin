@@ -121,6 +121,15 @@ def persona_slug( name, sep="-" ) -> str:
     unlike the prior inline `re.sub` sluggers), differing only in the final
     space->separator substitution.
 
+    Idempotency (bug 9980dd9a): `canonical_persona_key` strips ALL punctuation,
+    including the separator itself, so naively re-slugging an already-slugged
+    value FUSES its words — `persona_slug( "mr-radio", "-" )` would key as
+    "mrradio" and return "mrradio", losing the word boundary and breaking the
+    round-trip. The fix substitutes `sep` back to a space BEFORE
+    canonicalization, so a boundary a prior slug encoded as `sep` survives the
+    punctuation strip and re-slugging reproduces the original. Holds for any
+    single fixed `sep` a caller round-trips through (e.g. "-" and "_").
+
     Requires:
         - name is a string or None
         - sep is a string (typically "-" or "_")
@@ -129,7 +138,8 @@ def persona_slug( name, sep="-" ) -> str:
         - None / non-string / empty / all-punctuation -> ""
         - "Mr. Radio" -> "mr" + sep + "radio" (e.g. "mr-radio" or "mr_radio")
         - "María" -> "maria"
-        - IDEMPOTENT for a fixed sep
+        - IDEMPOTENT for a fixed sep:
+              persona_slug( persona_slug( x, sep ), sep ) == persona_slug( x, sep )
 
     Args:
         name: A persona name in display or already-normalized form
@@ -138,6 +148,10 @@ def persona_slug( name, sep="-" ) -> str:
     Returns:
         str: the slug, or "" for unusable input
     """
+    # Restore word boundaries a prior slug encoded as `sep` so re-slugging
+    # round-trips (canonical_persona_key would otherwise drop `sep` as punctuation).
+    if isinstance( name, str ) and sep:
+        name = name.replace( sep, " " )
     key = canonical_persona_key( name )
     return key.replace( " ", sep ) if key else ""
 
