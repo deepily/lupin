@@ -40,7 +40,6 @@ import re
 import signal as signal_mod
 import sys
 import time
-import unicodedata
 import uuid
 from pathlib import Path
 from typing import Optional, Tuple
@@ -94,12 +93,12 @@ def canonical_persona_key( name ) -> str:
     Returns:
         str: the canonical store key
     """
-    if not name or not isinstance( name, str ):
-        return ""
-    decomposed = unicodedata.normalize( "NFKD", name )
-    ascii_only = "".join( c for c in decomposed if not unicodedata.combining( c ) )
-    stripped   = re.sub( r"[^a-z0-9 ]", "", ascii_only.lower() )
-    return re.sub( r"\s+", " ", stripped ).strip()
+    # Implementation moved to the centralized home lupin_mcp.persona_normalization
+    # (2026-06-19) so there is exactly ONE algorithm across the codebase. Delegated
+    # here to preserve existing `from ...session_bridge import canonical_persona_key`
+    # call sites (stop.py read seam, hook write seam, tests).
+    from lupin_mcp.persona_normalization import canonical_persona_key as _impl
+    return _impl( name )
 
 
 def _is_pid_alive( pid: int ) -> bool:

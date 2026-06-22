@@ -9,7 +9,6 @@ mechanical matching fails, falls back to a stubbed local-LLM disambiguator
 Per AC8 in src/rnd/v0.1.7/2026.05.09-inter-session-commons/02-phase1-file-commons-design.md.
 """
 
-import re
 from typing import List, Optional
 
 
@@ -35,21 +34,12 @@ def configure_llm_disambiguator( disambiguator ) -> None:
     _disambiguator_singleton = disambiguator
 
 
-def _normalize_for_match( s: str ) -> str:
-    """
-    Strip non-alphanumerics and lowercase.
-
-    Requires:
-        - s is a string (may be empty)
-
-    Ensures:
-        - Returns "" for empty input
-        - Returns lowercase alphanumeric-only string
-        - "Mr. Radio" / "mr radio" / "mrradio" / "MR.RADIO" all → "mrradio"
-        - Unicode letters preserved via re.UNICODE
-    """
-    if not s: return ""
-    return re.sub( r"[^\w]", "", s, flags=re.UNICODE ).lower()
+# Persona match-normalization moved to the centralized home lupin_mcp.persona_normalization
+# (2026-06-19). `_normalize_for_match` is kept as a back-compat alias for the many call
+# sites that import it; it now shares the ONE canonical root and gains accent-stripping,
+# FIXING the prior "María" -> "maría" divergence from the store key (the old re.UNICODE
+# form kept accents, so an accented reference never matched the store's "maria").
+from lupin_mcp.persona_normalization import normalize_for_match as _normalize_for_match
 
 
 def disambiguate_via_llm( input_str: str, candidate_personas: List[ str ] ) -> Optional[ str ]:
