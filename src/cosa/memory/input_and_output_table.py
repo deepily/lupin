@@ -8,7 +8,6 @@ from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
 
 import lancedb
-import threading
 from typing import Optional, Any
 
 # @singleton
@@ -243,9 +242,13 @@ class InputAndOutputTable():
                     print( f"Error: {e}" )
                     du.print_stack_trace( e, explanation="Async embedding generation failed", caller="insert_io_row async thread" )
             
-            # Start background thread
-            embedding_thread = threading.Thread( target=generate_embeddings_and_insert, daemon=True )
-            embedding_thread.start()
+            # Submit to the shared bounded pool (bug 81854972) instead of spawning
+            # an unbounded daemon thread per call. The pool caps GLOBAL embedding
+            # concurrency so the asyncio event loop is never starved, and bounds the
+            # backlog so a sustained burst can't grow memory without limit. A full
+            # backlog drops the work (backpressure) — the caller never blocks.
+            from cosa.memory.embedding_pool import get_embedding_pool
+            get_embedding_pool( self._config_mgr, debug=self.debug ).submit( generate_embeddings_and_insert )
             
         else:
             # Sync mode: generate embeddings before inserting (original behavior)
