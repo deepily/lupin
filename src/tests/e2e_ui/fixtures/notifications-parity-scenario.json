@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "description": "Canonical notifications layout-parity scenario (WS3 oracle, v0.1.9). The SINGLE source of truth for the shared fixture: both the legacy notifications.js client and the multiplexer render this same logical content, so any layout delta is attributable to CSS/DOM, never data (Doc 00 §3 Premise C; Doc 01 'The shared fixture'). Deterministic timestamps (pinned ISO-8601 UTC, exactly as the existing visual fixtures do) so goldens are byte-stable. Exercises the contract surfaces both clients already render: .sender-card (header / persona badge / active indicator / counts), .date-accordion (header / date-text / count / toggle / messages), .sender-message.incoming AND .sender-message.outgoing. The D3 responded pair (parity-responded-1 → incoming prompt + synthetic {id}-response outgoing bubble) puts .outgoing styling under the oracle from day one.",
+  "app_timezone": "UTC",
+  "senders": [
+    {
+      "sender_id": "claude.code@lupin.deepily.ai#parity01",
+      "display_name": "Tiberius",
+      "last_activity": "2026-06-20T14:04:30.000Z",
+      "new_count": 4,
+      "voice_persona": {
+        "name": "Tiberius",
+        "voice_id": "vid_parity_tiberius",
+        "icon": "👑",
+        "color": "#7E57C2",
+        "borrowed": false
+      },
+      "manager_persona": null,
+      "notifications": [
+        {
+          "id": "parity-plain-1",
+          "message": "Plain inbound status line from a persona'd CC session.",
+          "timestamp": "2026-06-20T14:00:00.000Z"
+        },
+        {
+          "id": "parity-abstract-1",
+          "message": "Inbound message carrying an abstract for the indicator.",
+          "abstract": "Detailed context that surfaces via the 📋 abstract-indicator on click.",
+          "timestamp": "2026-06-20T14:01:00.000Z"
+        },
+        {
+          "id": "parity-expired-1",
+          "message": "A prompt that timed out before it was answered.",
+          "was_expired": true,
+          "timestamp": "2026-06-20T14:02:00.000Z"
+        },
+        {
+          "id": "parity-responded-1",
+          "message": "Continue with the deployment?",
+          "response_requested": true,
+          "response_type": "yes_no",
+          "response_options": [ "yes", "no" ],
+          "timestamp": "2026-06-20T14:03:00.000Z",
+          "responded_at": "2026-06-20T14:04:30.000Z",
+          "response_value": { "value": "yes" }
+        }
+      ]
+    },
+    {
+      "sender_id": "lupin-arbiter-app-8001",
+      "display_name": "lupin-arbiter-app-8001",
+      "last_activity": "2026-06-20T13:30:00.000Z",
+      "new_count": 1,
+      "voice_persona": null,
+      "manager_persona": null,
+      "notifications": [
+        {
+          "id": "parity-ext-1",
+          "message": "[ARBITER] Persona-less external advisory — gray treatment, no persona badge.",
+          "timestamp": "2026-06-20T13:30:00.000Z"
+        }
+      ]
+    }
+  ]
+}
