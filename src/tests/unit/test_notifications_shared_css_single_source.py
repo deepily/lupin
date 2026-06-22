@@ -191,14 +191,30 @@ def test_shared_sheet_carries_left_accent_stripe():
         "left-accent stripe must be byte-faithful 3px solid var( --persona-color, transparent )"
 
 
+def test_date_text_rename_completed_in_shared():
+    """WS2 (Rick-ruled 2026-06-22): the `.date-label`→`.date-text` rename is
+    COMPLETE — the shared sheet styles the real emitted `.date-text` class at the
+    designed 13px/500 (byte-faithful from notifications.css:2776); the mux 11px
+    placeholder and the dead monolith `.date-label` rule are removed."""
+    shared = _strip_css_comments( _read( SHARED_CSS ) )
+    assert ".date-text {" in shared, "shared sheet must style .date-text (rename completion)"
+    block = shared.split( ".date-text {" )[ 1 ].split( "}" )[ 0 ]
+    assert "font-size: 13px" in block and "font-weight: 500" in block, \
+        ".date-text must carry the designed 13px/500 (notifications.css:2776 .date-label intent)"
+    mux = _strip_css_comments( _read( MUX_CSS ) )
+    assert ".date-text {" not in mux, "mux 11px .date-text placeholder must be removed (now shared)"
+    # the dead monolith rule must be gone (no class ever emitted it)
+    monolith = _strip_css_comments( _read( os.path.join( STATIC, "css", "notifications.css" ) ) )
+    assert ".date-label" not in monolith, "dead .date-label rule must be removed from the monolith"
+
+
 @pytest.mark.parametrize( "forbidden", [
     ".action-required-widget",      # disjoint Category-3 surface → action-required.css
     "#sender-cards-container",       # mux pane structure → mux sheet
     "#notifications-pane",           # mux pane structure → mux sheet
     ".sender-display-name",          # rename seam → mux sheet (WS2/WS4)
-    ".date-text",                    # rename seam → mux sheet (WS2/WS4)
-    # NOTE: .sender-persona-badge + data-collapsed are NO LONGER forbidden — WS2
-    # C2-a/C2-b legitimately UNION them into the shared sheet (see the C2 tests).
+    # NOTE: .sender-persona-badge + data-collapsed + .date-text are NO LONGER
+    # forbidden — WS2 C2-a/C2-b/.date-text legitimately live in the shared sheet.
 ] )
 def test_shared_sheet_excludes_mux_only_rules( forbidden ):
     rules = _strip_css_comments( _read( SHARED_CSS ) )

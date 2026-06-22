@@ -100,15 +100,9 @@
    Date-accordion MUX-ONLY / MECHANISM seams.
    ============================================================================ */
 
-/* RENAME SEAM (→ WS2/WS4): the mux emits `.date-text`; the monolith styles the
-   equivalent label as `.date-label`. Mux keeps its own label styling until the
-   names are unified. */
-.date-text {
-    font-size: 11px;
-    font-weight: 600;
-    color: #495057;
-    letter-spacing: 0.3px;
-}
+/* RENAME COMPLETED (WS2): the `.date-label`→`.date-text` rename is done — the
+   shared sheet now styles `.date-text` at the designed 13px/500 (byte-faithful
+   from notifications.css:2776), so this mux 11px placeholder is removed. */
 
 /* C2-b RESOLVED (WS2): the `[data-collapsed]` collapse rule moved to the shared
    sheet as a `.collapsed ∪ [data-collapsed]` UNION, so the single contract now

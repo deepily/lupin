@@ -2773,11 +2773,10 @@
             text-align: center;
         }
 
-        .date-label {
-            font-size: 13px;
-            font-weight: 500;
-            color: #495057;
-        }
+        /* `.date-label` rule REMOVED (WS2, 2026-06-22): it styled a class no DOM
+           ever emitted (legacy + mux both render `.date-text`), so it was dead.
+           The designed 13px/500/#495057 values now live on `.date-text` in the
+           shared sheet css/shared/notifications-surface.css. Rename completed. */
 
         .date-count {
             font-size: 11px;

@@ -272,8 +272,8 @@ h1 {
    mechanism rule lives in `multiplexer/notifications-list.css` so the mux's
    accordions keep collapsing. The `.collapsed ∪ [data-collapsed]` union is a
    WS2 + oracle-gated reconciliation — NOT done here.
-   The label class also differs (legacy `.date-label` vs mux `.date-text`):
-   that rename is a WS2/WS4 seam; the mux keeps `.date-text` in its own sheet.
+   The date label was a `.date-label`→`.date-text` rename, now COMPLETED in this
+   sheet (the `.date-text` rule below) — both clients style the real emitted class.
    ============================================================================ */
 
 .sender-card-dates {
@@ -308,6 +308,20 @@ h1 {
 
 .date-accordion-header:hover {
     background-color: #e9ecef;
+}
+
+/* Date label — rename COMPLETED (WS2, Rick-ruled 2026-06-22). Both clients emit
+   `.date-text` (mux dateAccordion.ts; legacy notifications.js:13614), but the
+   monolith historically styled the never-emitted `.date-label` (notifications.css
+   :2776) — so legacy rendered its date label UNSTYLED (browser-default 16px) and
+   the mux drifted to an 11px placeholder. This shared rule restores the DESIGNED
+   `.date-label` values byte-faithful onto the real `.date-text` class, converging
+   both clients AND repairing legacy's unstyled label (authorized bug-fix; the
+   dead `.date-label` rule + the mux 11px placeholder are removed). */
+.date-text {
+    font-size: 13px;
+    font-weight: 500;
+    color: #495057;
 }
 
 .date-toggle {
