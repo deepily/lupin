@@ -3280,6 +3280,7 @@ def task_create(
     accountable_manager : Optional[ str ] = None,
     gate_class          : str             = "none",
     priority            : str             = "P2",
+    urgency             : str             = "normal",
     source_qid          : Optional[ str ] = None,
     correlation_key     : Optional[ str ] = None,
     authority           : str             = "standing",
@@ -3365,6 +3366,9 @@ def task_create(
         accountable_manager: Who chases it
         gate_class: none | operator (default "none")
         priority: P0..P3 (default "P2")
+        urgency: urgent | normal | low (default "normal") — operator-gate TIME-
+            sensitivity (NOT priority/importance); the arbiter routes a gate by it
+            (urgent→interrupt, normal→digest, low→queue)
         source_qid: Originating commons question_id, when DM-born
         correlation_key: Upsert key for hook-mirrored items
         authority: standing | user_direct | manager_relay (default "standing")
@@ -3389,6 +3393,7 @@ def task_create(
         accountable_manager = accountable_manager,
         gate_class          = gate_class,
         priority            = priority,
+        urgency             = urgency,
         source_qid          = source_qid,
         correlation_key     = correlation_key,
         authority           = authority,
@@ -3462,6 +3467,7 @@ def task_query(
     owner_persona       : Optional[ str ] = None,
     status              : Optional[ str ] = None,
     gate_class          : Optional[ str ] = None,
+    urgency             : Optional[ str ] = None,
     accountable_manager : Optional[ str ] = None,
     project             : Optional[ str ] = None,
     item_class          : Optional[ str ] = None,
@@ -3497,6 +3503,7 @@ def task_query(
         owner_persona: Filter by who owes the work
         status: Filter by status (queued | in_progress | blocked | done | dropped)
         gate_class: Filter by gate (none | operator)
+        urgency: Filter by operator-gate urgency tier (urgent | normal | low)
         accountable_manager: Filter by chasing manager
         project: Filter by owning project
         item_class: Filter by class (task | decision | review_request | bug | gate)
@@ -3517,6 +3524,7 @@ def task_query(
         owner_persona       = owner_persona,
         status              = status,
         gate_class          = gate_class,
+        urgency             = urgency,
         accountable_manager = accountable_manager,
         project             = project,
         item_class          = item_class,

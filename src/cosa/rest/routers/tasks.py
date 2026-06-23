@@ -151,6 +151,7 @@ class TaskCreateIn( BaseModel ):
     accountable_manager : Optional[str]  = Field( default=None, max_length=255 )
     gate_class          : str            = Field( default="none" )
     priority            : str            = Field( default="P2" )
+    urgency             : str            = Field( default="normal" )
     source_qid          : Optional[str]  = Field( default=None, max_length=64 )
     correlation_key     : Optional[str]  = Field( default=None, max_length=255 )
     # max_length values mirror the VARCHAR widths in postgres_models.TaskItem
@@ -211,6 +212,7 @@ class TaskPatchIn( BaseModel ):
     owner_persona       : Optional[str] = Field( default=None, max_length=255 )
     accountable_manager : Optional[str] = Field( default=None, max_length=255 )
     gate_class          : Optional[str] = Field( default=None )
+    urgency             : Optional[str] = Field( default=None )
     actor               : str           = Field( ..., min_length=1, max_length=255, description="persona + session id performing the edit" )
     authority           : str           = Field( default="standing" )
     reason              : Optional[str] = Field( default=None, max_length=4000, description="free-text justification for the edit (e.g. why a task was reassigned); stamps the 'patched' audit event, falling back to the field delta when absent" )
@@ -245,6 +247,7 @@ def _serialize_item( item ) -> dict:
         "next_chase_ts"       : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
         "gate_class"          : item.gate_class,
         "priority"            : item.priority,
+        "urgency"             : item.urgency,
         "source_qid"          : item.source_qid,
         "correlation_key"     : item.correlation_key,
         "created_ts"          : item.created_ts.isoformat(),
@@ -350,7 +353,7 @@ def create_task(
         - item + creation event written atomically (one get_db() transaction)
         - returns the serialized item (201)
     """
-    _reject_if_errors( rules.validate_create( payload.item_class, payload.gate_class, payload.priority, payload.authority ) )
+    _reject_if_errors( rules.validate_create( payload.item_class, payload.gate_class, payload.priority, payload.authority, payload.urgency ) )
 
     with get_db() as session:
         repo = TaskRepository( session )
@@ -365,6 +368,7 @@ def create_task(
             accountable_manager = _canon_persona( payload.accountable_manager ),
             gate_class          = payload.gate_class,
             priority            = payload.priority,
+            urgency             = payload.urgency,
             source_qid          = payload.source_qid,
             correlation_key     = payload.correlation_key,
         )
@@ -569,6 +573,7 @@ def query_tasks(
     owner_persona       : Optional[str] = None,
     status              : Optional[str] = None,
     gate_class          : Optional[str] = None,
+    urgency             : Optional[str] = None,
     accountable_manager : Optional[str] = None,
     project             : Optional[str] = None,
     item_class          : Optional[str] = None,
@@ -611,6 +616,8 @@ def query_tasks(
         errors.append( f"status filter '{status}' must be one of {rules.VALID_STATUSES}" )
     if gate_class is not None and gate_class not in rules.VALID_GATE_CLASSES:
         errors.append( f"gate_class filter '{gate_class}' must be one of {rules.VALID_GATE_CLASSES}" )
+    if urgency is not None and urgency not in rules.VALID_URGENCIES:
+        errors.append( f"urgency filter '{urgency}' must be one of {rules.VALID_URGENCIES}" )
     if item_class is not None and item_class not in rules.VALID_ITEM_CLASSES:
         errors.append( f"item_class filter '{item_class}' must be one of {rules.VALID_ITEM_CLASSES}" )
     _reject_if_errors( errors )
@@ -637,6 +644,7 @@ def query_tasks(
                 owner_persona       = owner_persona,
                 status              = status,
                 gate_class          = gate_class,
+                urgency             = urgency,
                 accountable_manager = accountable_manager,
                 project             = project,
                 item_class          = item_class,
@@ -647,6 +655,7 @@ def query_tasks(
             owner_persona       = owner_persona,
             status              = status,
             gate_class          = gate_class,
+            urgency             = urgency,
             accountable_manager = accountable_manager,
             project             = project,
             item_class          = item_class,

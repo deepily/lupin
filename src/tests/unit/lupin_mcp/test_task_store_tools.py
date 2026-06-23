@@ -157,6 +157,7 @@ class TestTaskCreateImpl:
             "accountable_manager" : None,
             "gate_class"          : "none",
             "priority"            : "P2",
+            "urgency"             : "normal",
             "source_qid"          : None,
             "correlation_key"     : None,
         }

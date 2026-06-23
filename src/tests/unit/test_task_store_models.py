@@ -74,6 +74,7 @@ def test_item_indexes_match_migration( items_table ):
         "ix_task_items_owner_persona",
         "ix_task_items_project",
         "ix_task_items_status",
+        "ix_task_items_urgency",
     }
     assert { i.name for i in items_table.indexes } == expected
 

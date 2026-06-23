@@ -25,7 +25,7 @@ from cosa.rest.db.auto_migrate import build_alembic_config
 
 # The TRUE baseline (migration zero) and the current head.
 _BASELINE_REVISION = "000000000000"
-_HEAD_REVISION     = "b8c9d0e1f2a3"
+_HEAD_REVISION     = "c9d0e1f2a3b4"
 
 # The post-baseline span that MUST be preserved, base-first.
 _POST_BASELINE_CHAIN = [
@@ -38,7 +38,8 @@ _POST_BASELINE_CHAIN = [
     "e5f6a7b8c9d0",   # proxy/trust/prediction/server_lifecycle tables + 5 notif cols
     "f6a7b8c9d0e1",   # canonicalize task_items.project aliases (bug c6751cf8)
     "a7b8c9d0e1f2",   # re-heal task_items.project back-catalogue (Tiberius REQUEST-CHANGES)
-    "b8c9d0e1f2a3",   # rename gate_class 'ricks_court' -> 'operator' (head, Lane A0)
+    "b8c9d0e1f2a3",   # rename gate_class 'ricks_court' -> 'operator' (Lane A0)
+    "c9d0e1f2a3b4",   # add task_items.urgency column (head, Lane A2 operator-gate tiering)
 ]
 
 # The eight pre-baseline revisions absorbed INTO the baseline — they must no

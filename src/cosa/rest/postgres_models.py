@@ -1353,6 +1353,14 @@ class TaskItem( Base ):
         default="P2",
         server_default="P2"
     )
+    urgency: Mapped[str] = mapped_column(
+        String( 8 ),
+        nullable=False,
+        default="normal",
+        server_default="normal",
+        index=True
+    )  # proactive-manager A2 (fcb5dbc0): operator-gate TIME-SENSITIVITY {urgent|normal|low},
+       # distinct from `priority` (importance). The arbiter routes operator gates by this.
 
     # Provenance + correlation
     source_qid: Mapped[Optional[str]] = mapped_column(

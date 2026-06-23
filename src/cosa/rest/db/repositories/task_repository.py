@@ -89,6 +89,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         accountable_manager : Optional[str] = None,
         gate_class          : str = "none",
         priority            : str = "P2",
+        urgency             : str = "normal",
         source_qid          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
     ) -> TaskItem:
@@ -123,6 +124,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
             blocked_by          = [ ],
             gate_class          = gate_class,
             priority            = priority,
+            urgency             = urgency,
             source_qid          = source_qid,
             correlation_key     = correlation_key,
         )
@@ -316,6 +318,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         owner_persona       : Optional[str] = None,
         status              : Optional[str] = None,
         gate_class          : Optional[str] = None,
+        urgency             : Optional[str] = None,
         accountable_manager : Optional[str] = None,
         project             : Optional[str] = None,
         item_class          : Optional[str] = None,
@@ -344,6 +347,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
         if status is not None:              query = query.filter( TaskItem.status == status )
         if gate_class is not None:          query = query.filter( TaskItem.gate_class == gate_class )
+        if urgency is not None:             query = query.filter( TaskItem.urgency == urgency )
         if accountable_manager is not None: query = query.filter( TaskItem.accountable_manager == accountable_manager )
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )
@@ -356,6 +360,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         owner_persona       : Optional[str] = None,
         status              : Optional[str] = None,
         gate_class          : Optional[str] = None,
+        urgency             : Optional[str] = None,
         accountable_manager : Optional[str] = None,
         project             : Optional[str] = None,
         item_class          : Optional[str] = None,
@@ -384,6 +389,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if owner_persona is not None:       query = query.filter( TaskItem.owner_persona == owner_persona )
         if status is not None:              query = query.filter( TaskItem.status == status )
         if gate_class is not None:          query = query.filter( TaskItem.gate_class == gate_class )
+        if urgency is not None:             query = query.filter( TaskItem.urgency == urgency )
         if accountable_manager is not None: query = query.filter( TaskItem.accountable_manager == accountable_manager )
         if project is not None:             query = query.filter( TaskItem.project == project )
         if item_class is not None:          query = query.filter( TaskItem.item_class == item_class )

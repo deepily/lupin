@@ -5,7 +5,7 @@ This module is the ONE place where the task store's structural invariants live
 (design §2.2 "enforcement-light to start": the API enforces structural rules;
 social/role rules stay practice-layer in v1):
 
-    - status / item_class / gate_class / priority / authority enum membership
+    - status / item_class / gate_class / priority / urgency / authority enum membership
     - receipt_refs key whitelist + per-key shape rules (design §4.1 AC1 —
       "receipt validation is not theater-able")
     - typed blocked_by refs ({kind: item|persona|user, id}) (design §2.1)
@@ -38,6 +38,10 @@ TERMINAL_STATUSES      = ( "done", "dropped" )
 VALID_ITEM_CLASSES     = ( "task", "decision", "review_request", "bug", "gate" )
 VALID_GATE_CLASSES     = ( "none", "manager", "operator" )
 VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3" )
+# proactive-manager A2 (fcb5dbc0): operator-gate TIME-SENSITIVITY, distinct from the
+# `priority` IMPORTANCE field. Default "normal". The arbiter (single pusher) routes an
+# operator gate by this: urgent→interrupt, normal→digest, low→queue-until-pulled.
+VALID_URGENCIES        = ( "urgent", "normal", "low" )
 VALID_AUTHORITIES      = ( "standing", "user_direct", "manager_relay" )
 VALID_BLOCKED_BY_KINDS = ( "item", "persona", "user" )
 
@@ -223,7 +227,8 @@ def validate_blocked_by_refs( blocked_by ) -> list:
 # Creation + transition rules
 # ---------------------------------------------------------------------------
 
-def validate_create( item_class: str, gate_class: str, priority: str, authority: str ) -> list:
+def validate_create( item_class: str, gate_class: str, priority: str, authority: str,
+                     urgency: str = "normal" ) -> list:
     """
     Validate the enum fields of a new item (creation is always status=queued —
     the creation event stamps "->queued"; transitions move it from there).
@@ -231,9 +236,11 @@ def validate_create( item_class: str, gate_class: str, priority: str, authority:
     Requires:
         - item_class, gate_class, priority, authority are the candidate
           string values (authority stamps the "->queued" creation event)
+        - urgency is the candidate operator-gate time-sensitivity (default
+          "normal"); A2 proactive-manager dimension, distinct from priority
 
     Ensures:
-        - returns [] iff all four are members of their enums
+        - returns [] iff all five are members of their enums
         - one error string per offending field otherwise
     """
     errors = [ ]
@@ -245,6 +252,8 @@ def validate_create( item_class: str, gate_class: str, priority: str, authority:
         errors.append( f"priority '{priority}' must be one of {VALID_PRIORITIES}" )
     if authority not in VALID_AUTHORITIES:
         errors.append( f"authority '{authority}' must be one of {VALID_AUTHORITIES}" )
+    if urgency not in VALID_URGENCIES:
+        errors.append( f"urgency '{urgency}' must be one of {VALID_URGENCIES}" )
     return errors
 
 
@@ -334,7 +343,7 @@ def validate_transition(
 # Item-field edit rules (Phase 2.1 — PATCH /api/tasks/{id})
 # ---------------------------------------------------------------------------
 
-PATCH_EDITABLE_FIELDS = ( "title", "body", "priority", "owner_persona", "accountable_manager", "gate_class" )
+PATCH_EDITABLE_FIELDS = ( "title", "body", "priority", "owner_persona", "accountable_manager", "gate_class", "urgency" )
 
 # The persona-identity fields a PATCH may carry — the ONLY fields the
 # owed-work oracle compares by canonical key, so the ONLY ones to normalize
@@ -399,6 +408,7 @@ def validate_patch( fields: dict ) -> list:
             title      - non-empty string (the column is NOT NULL)
             priority   - member of VALID_PRIORITIES
             gate_class - member of VALID_GATE_CLASSES
+            urgency    - member of VALID_URGENCIES
           (body / owner_persona / accountable_manager are nullable free text —
           a provided null clears them; no shape rule beyond the wire max_length)
         - an empty patch (no editable field set) is rejected — a PATCH must
@@ -415,6 +425,8 @@ def validate_patch( fields: dict ) -> list:
         errors.append( f"priority '{fields[ 'priority' ]}' must be one of {VALID_PRIORITIES}" )
     if "gate_class" in fields and fields[ "gate_class" ] not in VALID_GATE_CLASSES:
         errors.append( f"gate_class '{fields[ 'gate_class' ]}' must be one of {VALID_GATE_CLASSES}" )
+    if "urgency" in fields and fields[ "urgency" ] not in VALID_URGENCIES:
+        errors.append( f"urgency '{fields[ 'urgency' ]}' must be one of {VALID_URGENCIES}" )
     return errors
 
 

@@ -263,6 +263,32 @@ def test_create_rejects_retired_ricks_court_gate_class():
     assert any( "gate_class" in e and "ricks_court" in e for e in errors )
 
 
+@pytest.mark.parametrize( "urgency", rules.VALID_URGENCIES )
+def test_create_accepts_every_urgency_tier( urgency ):
+    # A2 — every urgency tier (urgent/normal/low) is a valid create field.
+    assert rules.validate_create( "decision", "operator", "P0", "user_direct", urgency ) == [ ]
+
+
+def test_create_defaults_urgency_to_normal():
+    # A2 — urgency defaults to "normal" (the low-friction default) when omitted.
+    assert rules.validate_create( "task", "none", "P2", "standing" ) == [ ]
+
+
+def test_create_rejects_invalid_urgency():
+    # A2 — a junk urgency value is a 422-worthy enum violation.
+    errors = rules.validate_create( "decision", "operator", "P0", "user_direct", "panic" )
+    assert any( "urgency" in e and "panic" in e for e in errors )
+
+
+def test_patch_accepts_valid_urgency():
+    assert rules.validate_patch( { "urgency": "urgent" } ) == [ ]
+
+
+def test_patch_rejects_invalid_urgency():
+    errors = rules.validate_patch( { "urgency": "panic" } )
+    assert any( "urgency" in e and "panic" in e for e in errors )
+
+
 # ---------------------------------------------------------------------------
 # validate_transition
 # ---------------------------------------------------------------------------

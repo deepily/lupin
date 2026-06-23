@@ -376,6 +376,7 @@ def test_query_passes_all_filters_through( client, repo ):
         "owner_persona"       : "krishna",
         "status"              : "in_progress",
         "gate_class"          : "operator",
+        "urgency"             : "urgent",
         "accountable_manager" : "tiberius",
         "project"             : "lupin",
         "item_class"          : "task",
@@ -386,6 +387,7 @@ def test_query_passes_all_filters_through( client, repo ):
     assert r.status_code == 200 and r.json() == { "tasks": [ ], "count": 0 }
     kwargs = repo.query_tasks.call_args.kwargs
     assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "gate_class" ] == "operator"
+    assert kwargs[ "urgency" ] == "urgent"
     assert kwargs[ "correlation_key" ] == "cc-task:sid:5"
     assert kwargs[ "limit" ] == 7 and kwargs[ "offset" ] == 3
 
@@ -393,6 +395,7 @@ def test_query_passes_all_filters_through( client, repo ):
 @pytest.mark.parametrize( "params, fragment", [
     ( { "status": "finished" }, "status filter" ),
     ( { "gate_class": "side-gate" }, "gate_class filter" ),
+    ( { "urgency": "panic" }, "urgency filter" ),
     ( { "item_class": "chore" }, "item_class filter" ),
 ] )
 def test_query_rejects_junk_enum_filters( client, repo, params, fragment ):

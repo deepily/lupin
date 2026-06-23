@@ -100,11 +100,12 @@ def test_create_item_passes_optional_fields_through( repo ):
         accountable_manager = "tiberius",
         gate_class          = "manager",
         priority            = "P1",
+        urgency             = "urgent",
         source_qid          = "fef1f7fa-0000-0000-0000-000000000000",
         correlation_key     = "harness-7",
     )
     assert item.owner_persona == "clayton" and item.accountable_manager == "tiberius"
-    assert item.gate_class == "manager" and item.priority == "P1"
+    assert item.gate_class == "manager" and item.priority == "P1" and item.urgency == "urgent"
     assert item.source_qid.startswith( "fef1f7fa" ) and item.correlation_key == "harness-7"
     assert item.body == "details"
 
@@ -209,6 +210,7 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
         owner_persona       = "krishna",
         status              = "in_progress",
         gate_class          = "operator",
+        urgency             = "urgent",
         accountable_manager = "tiberius",
         project             = "lupin",
         item_class          = "task",
@@ -217,7 +219,7 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
         offset              = 3,
     )
 
-    assert query.filter.call_count == 7                       # one per provided filter, AND semantics
+    assert query.filter.call_count == 8                       # one per provided filter, AND semantics
     query.limit.assert_called_once_with( 7 )
     query.offset.assert_called_once_with( 3 )
 
@@ -226,6 +228,7 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
     ( { "owner_persona": "krishna" }, 1 ),
     ( { "status": "queued" }, 1 ),
     ( { "gate_class": "manager" }, 1 ),
+    ( { "urgency": "low" }, 1 ),
     ( { "accountable_manager": "tiberius" }, 1 ),
     ( { "project": "lupin" }, 1 ),
     ( { "item_class": "bug" }, 1 ),
@@ -263,18 +266,20 @@ def test_count_tasks_applies_every_provided_filter( repo, session ):
         owner_persona       = "krishna",
         status              = "in_progress",
         gate_class          = "operator",
+        urgency             = "urgent",
         accountable_manager = "tiberius",
         project             = "lupin",
         item_class          = "task",
         correlation_key     = "cc-task:sid:5",
     )
-    assert query.filter.call_count == 7                       # one per provided filter, AND semantics
+    assert query.filter.call_count == 8                       # one per provided filter, AND semantics
 
 
 @pytest.mark.parametrize( "kwargs, expected_filters", [
     ( { "owner_persona": "krishna" }, 1 ),
     ( { "status": "queued" }, 1 ),
     ( { "gate_class": "manager" }, 1 ),
+    ( { "urgency": "low" }, 1 ),
     ( { "accountable_manager": "tiberius" }, 1 ),
     ( { "project": "lupin" }, 1 ),
     ( { "item_class": "bug" }, 1 ),
