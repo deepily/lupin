@@ -598,10 +598,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._owed_work_fn = owed_work_fn
         # 6929f4ac outward-twin backstop (§9.2): the per-session hold reader. None
         # keeps the seam INERT — the _classify_owed open-gate→ACTIVE override and the
-        # user-gate resurface detector both no-op (byte-identical to today), so
-        # in-pool / unit-fake construction needs no wiring. The :8001 factory wires a
-        # real reader (heartbeat_hold.read_hold scoped to the project root). Mirrors
-        # the owed_work_fn None-seam pattern: a None seam is visibly inert.
+        # user-gate resurface detector both no-op — so unit-fake construction needs no
+        # wiring. The production paths WIRE heartbeat_hold.read_hold (project-root
+        # scoped): the :8001 fleet-arbiter factory (lupin_arbiter_app/fleet_arbiter_loop.py),
+        # the in-process bootstrap (cosa/rest/arbiter_bootstrap.py), and the dev runner
+        # (scripts/run-heartbeat-arbiter.py). Mirrors the owed_work_fn seam pattern.
         self._hold_reader_fn            = hold_reader_fn
         self.user_gate_resurface_seconds = user_gate_resurface_seconds
         # DM-as-liveness toggle (2026-06-17): two seams. (1) the runtime-flag
@@ -901,8 +902,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
         fleet_dark          = self._check_fleet_dark( self._last_full_snapshot, self._last_published_n, now )
         # 6929f4ac outward-twin backstop: resurface a dark session's aged user-gate
         # to Rick (case 18). Reads the FULL snapshot (offline rows included) so a
-        # gone-dark session's buried gate is still seen. Inert unless hold_reader_fn
-        # is wired (the :8001 factory wires it; in-pool / unit-fake stays inert).
+        # gone-dark session's buried gate is still seen. The production factories wire
+        # hold_reader_fn (read_hold) so this is LIVE on :8001; unit-fake construction
+        # leaves it None → inert.
         gates_resurfaced    = self._check_user_gate_resurface( self._last_full_snapshot, now )
         # post-game F1: why-not-poked gate evaluation — runs AFTER both poke tiers
         # so the emitted vectors reflect this poll's episode state.

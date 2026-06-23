@@ -210,6 +210,33 @@ def test_build_factory_default_no_declared_managers():
     assert job.declared_fallback_manager == "dut"                # INI fallback unchanged
 
 
+# ── 6929f4ac: the :8001 factory MUST wire the outward-twin hold reader ─────────
+# Deploy-honesty regression guard (Rachel's catch): without this wiring the seam
+# is None → the dark-session user-gate resurface + the open-gate→ACTIVE override
+# are DECORATIVE on the actual :8001 deploy. This factory is the real deploy path
+# (NOT arbiter_bootstrap, which is the default-OFF in-process path).
+
+def test_build_factory_wires_real_hold_reader_by_default():
+    """The :8001 factory defaults hold_reader_fn to the real read_hold so the
+    outward-twin backstop is LIVE on deploy (regression guard against silent inertness)."""
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
+    gw, store = FakeGateway(), LocalSnapshotStore()
+    job = build_fleet_arbiter_job_factory( gw, store, log_fn=lambda *a, **k: None )()
+    assert job._hold_reader_fn is read_hold                       # non-None AND resolves to read_hold
+    assert job.user_gate_resurface_seconds == 1800               # default ceiling threaded
+
+
+def test_build_factory_threads_resurface_seconds_and_allows_fake_reader():
+    """A custom ceiling is threaded; an injected fake hold reader overrides the default (test seam)."""
+    gw, store = FakeGateway(), LocalSnapshotStore()
+    fake = lambda sid: None
+    job  = build_fleet_arbiter_job_factory(
+        gw, store, log_fn=lambda *a, **k: None,
+        hold_reader_fn=fake, user_gate_resurface_seconds=900 )()
+    assert job._hold_reader_fn is fake
+    assert job.user_gate_resurface_seconds == 900
+
+
 # ── eng#7: follow-through watcher factory (build-plan §3b) ───────────────────
 
 import types

@@ -66,6 +66,7 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     """
     from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
+    from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
 
     poll_seconds      = int( config_mgr.get( "arbiter poll seconds", default=60, return_type="int" ) )
     manager_on_duty   = config_mgr.get( "arbiter manager on duty", default="manager-on-duty" ) or "manager-on-duty"
@@ -74,6 +75,10 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     tap_min_interval  = int( config_mgr.get( "arbiter tap min interval seconds", default=300, return_type="int" ) )
     ack_window        = int( config_mgr.get( "arbiter manager ack window seconds", default=600, return_type="int" ) )
     stall_window      = int( config_mgr.get( "arbiter fleet stall window seconds", default=1800, return_type="int" ) )
+    # 6929f4ac outward-twin backstop: the aged-gate resurface ceiling (hold_reader_fn
+    # is wired to the real read_hold below so the in-process arbiter, when enabled,
+    # also resurfaces a dark session's open gate to Rick).
+    gate_resurface    = int( config_mgr.get( "arbiter user gate resurface seconds", default=1800, return_type="int" ) )
 
     # §4b worktree janitor (Worktree Lifecycle Contract). DEFAULT-OFF: the flag is
     # False unless explicitly enabled in lupin-app.ini, so wiring it here is INERT
@@ -102,6 +107,8 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         tap_min_interval_seconds   = tap_min_interval,
         manager_ack_window_seconds = ack_window,
         fleet_stall_window_seconds = stall_window,
+        hold_reader_fn             = read_hold,               # 6929f4ac: real per-session hold reader (outward-twin backstop)
+        user_gate_resurface_seconds = gate_resurface,         # 6929f4ac: aged-gate resurface ceiling
         worktree_janitor_fn        = worktree_janitor_fn,    # §4b: None unless `arbiter worktree janitor enabled` (default-off → inert)
         user_id                  = "system",
         user_email               = "system@lupin.deepily.ai",
