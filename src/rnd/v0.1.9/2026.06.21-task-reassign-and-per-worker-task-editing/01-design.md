@@ -1,6 +1,6 @@
 # Task Reassignment + Per-Worker Task Editing — Design & Implementation Plan
 
-**Status**: 📋 Planning — DRAFT FOR REVIEW (no implementation yet; build deferred to ≥ 2026-06-22 after review)
+**Status**: ✅ IMPLEMENTATION-READY (§10 resolved by Rick 2026-06-23). Phase 1 (`task_reassign` verb + PATCH `reason`/normalization hardening) SHIPPED (`0ee68b07`). Phase 2 (mux per-worker editing) CLEARED FOR BUILD — Mr. Radio manages; workers build; commit-HELD, no push.
 **Date**: 2026-06-21
 **Version / branch**: v0.1.9 / `wip-v0.1.9-2026.06.19-bug-fixing`
 **Author**: planning session (Rick + Claude)
@@ -81,7 +81,9 @@ in a **normalized** form. A manager reassigning to a hand-supplied display name
 class this guards against). **So the reassign path must normalize the target
 persona to the same canonical form every other seam uses.**
 
-> **⚠️ DEPENDENCY — defer to Rick's global persona-normalization process; do NOT
+> **✅ RESOLVED (Rick 2026-06-23): the global persona normalizer IS `canonical_persona_key`** ([`src/lupin_mcp/persona_normalization.py:37`](../../../lupin_mcp/persona_normalization.py)) — bind the reassign write-seam directly to it. NO separate pending plan, NO local scheme; the build does NOT wait on anything here. (Historical framing retained below for context.)
+>
+> **⚠️ DEPENDENCY (historical) — defer to Rick's global persona-normalization process; do NOT
 > invent a local one.** Rick already has a dedicated plan that establishes **one
 > definitive, global persona-name normalization process**, to be used in *all*
 > transactions that compare persona names (store write, owed-oracle read, arbiter
@@ -137,7 +139,7 @@ HTTP PATCH seam that Phase 2 also rides.
 ### 4.1 Harden the HTTP PATCH endpoint (server-side)
 - **Add optional `reason`** to `TaskPatchIn` ([tasks.py:103](../../../cosa/rest/routers/tasks.py)): `reason: Optional[str] = Field(default=None, max_length=…)`. In `patch_task`, add `"reason"` to the `model_dump(..., exclude={"actor","authority"})` exclusion set so it is **not** treated as an editable field; pass it to `apply_patch`.
 - **Thread `reason` through `apply_patch`** ([task_repository.py:210](../../../cosa/rest/db/repositories/task_repository.py)): add `reason=None`; when provided, the `patched` event records it (fall back to the auto-generated field-delta string when absent).
-- **Normalize the target persona on write — via the global normalizer (§2.2 dependency).** Add `normalize_patch_fields(fields)` to [task_store_rules.py](../../../cosa/rest/task_store_rules.py) (a dedicated helper → testable to 100%) that **delegates to Rick's global persona-normalization process** (currently `canonical_persona_key`; bind to whatever seam the global plan finalizes — do **not** add a second normalizer) for `owner_persona`/`accountable_manager` **only when present and non-empty** — preserve an explicit `None` (clear-the-owner) rather than collapsing it to the empty sentinel. Call it in `patch_task` right after building `fields`. The global normalizer is idempotent → safe even if a caller pre-normalizes. **The implementing agent confirms the exact global seam from the shared cross-instance context before wiring this** (§2.2 coordination note).
+- **Normalize the target persona on write — via the global normalizer (§2.2 dependency).** Add `normalize_patch_fields(fields)` to [task_store_rules.py](../../../cosa/rest/task_store_rules.py) (a dedicated helper → testable to 100%) that **delegates to Rick's global persona-normalization process** (currently `canonical_persona_key`; bind to whatever seam the global plan finalizes — do **not** add a second normalizer) for `owner_persona`/`accountable_manager` **only when present and non-empty** — preserve an explicit `None` (clear-the-owner) rather than collapsing it to the empty sentinel. Call it in `patch_task` right after building `fields`. The global normalizer is idempotent → safe even if a caller pre-normalizes. **The global seam is `canonical_persona_key`** ([`src/lupin_mcp/persona_normalization.py:37`](../../../lupin_mcp/persona_normalization.py)) — confirmed by Rick 2026-06-23; bind §4.1 directly to it (no separate-plan dependency, no shared-context confirmation step).
 
 ### 4.2 Add the `task_reassign` MCP verb
 - **Transport** ([task_store_tools.py](../../../lupin_mcp/task_store_tools.py)): add `task_reassign_impl(api_base_url, api_key, actor, task_id, new_owner_persona, reason, new_manager=None)` building a PATCH body `{owner_persona, accountable_manager?, reason, actor, authority}` and calling `task_store_request("PATCH", f"/api/tasks/{task_id}", …)`. Update `task_store_request`'s docstring contract to list **PATCH** alongside GET/POST (`requests.request` already supports it). Keep transport thin; normalization is server-side (§4.1, D5).
@@ -160,7 +162,7 @@ endpoint. **No new backend endpoints.** Scope per D2/D3: per-row **priority edit
 [TaskListStore.ts](../../../lupin_app/static/js/multiplexer/stores/TaskListStore.ts) — clone the optimistic `{ restoreState }` pattern from `JobStore.delete`:
 - `patchTask(id, fields)` → `api.patch('/api/tasks/{id}', {...fields, actor, authority:'user_direct'})` (priority + owner edits).
 - `dropTask(id, reason)` → `api.post('/api/tasks/{id}/transition', {to_status:'dropped', reason, actor, authority:'user_direct'})`.
-- `actor` = the authenticated human's display identity (e.g. `"rick (multiplexer)"`); `authority='user_direct'`. Optimistic local update; `restoreState()` on failure.
+- `actor` = **derived from the authenticated account: `<authed-user-email> (multiplexer)`** via `deriveTaskActor`/`actorProvider` (§10 Q1 RE-RESOLVED 2026-06-23: the multiplexer is **MULTI-USER** — the stamp MUST reflect the logged-in account, NEVER a hardcoded literal); `authority='user_direct'`. Optimistic local update; `restoreState()` on failure.
 
 ### 5.2 Renderer + template controls (TS)
 - [taskListTable.ts](../../../lupin_app/static/js/multiplexer/render/templates/taskListTable.ts): per-row actions affordance — a **priority control** (P0–P3 dropdown/segmented; reuse `taskPriorityClass`), a **reassign control** (owner dropdown), a **drop button**. All DOM via `createElement` + `textContent` (no `innerHTML`), matching the existing templates.
@@ -226,11 +228,13 @@ the existing `transition` endpoint — no backend endpoints, lower risk. Phase 2
 
 ---
 
-## 10. Review checklist / open questions (to settle before build)
+## 10. Resolved decisions (settled by Rick 2026-06-23 — BUILD-READY)
 
-1. **Human `actor` string** for UI edits — confirm the exact identity stamp (e.g. `"rick (multiplexer)"` vs. derive from the authed user/email).
-2. **Global persona-normalization seam (owned by Rick's normalization plan, not decided here)** — confirm the exact global-normalizer entry point this work binds to (the §2.2 dependency), via the shared cross-instance context. Sub-question for that plan: is the *create* path (`task_create`, which does not normalize today) brought onto the same global process in the same effort, or tracked as the global plan's own work item? This reassign work simply consumes whatever the global plan establishes.
-3. **`reason` max length** on `TaskPatchIn` — pick a cap consistent with `transition`'s `reason` (≈4000).
-4. **Drop reason UX** in the card — inline text input vs. a small modal/confirm; is there an existing confirm pattern to reuse?
-5. **Owner dropdown source** — confirm the persona roster the fleet-status card uses is the right list for reassignment targets (active personas only? include "Sam" overflow?).
-6. **`new_manager` semantics** on `task_reassign` — when omitted, leave `accountable_manager` unchanged (recommended) vs. default it to the caller.
+1. **Human `actor` string** for UI edits → **derived from the authenticated account: `<authed-user-email> (multiplexer)`** via `deriveTaskActor` + `actorProvider(authManager.getCurrentUserEmail)` (RE-RESOLVED by Rick 2026-06-23, emphatic: the multiplexer is **MULTI-USER** — the audit stamp MUST reflect the logged-in account, NEVER a hardcoded literal). The existing committed code (`45e7a024`) already implements this correctly — KEEP it, do not collapse to a constant.
+2. **Global persona-normalization seam** → **`canonical_persona_key`** ([`src/lupin_mcp/persona_normalization.py:37`](../../../lupin_mcp/persona_normalization.py)). RESOLVED — it is the single global normalizer; no separate plan. Bind §4.1's `normalize_patch_fields` to it. The `task_create` non-normalizing path is a SEPARATE pre-existing item — out of scope for this build (do not expand scope to fix it here).
+3. **`reason` max length** on `TaskPatchIn` → **4000** (match `transition`'s `reason` cap).
+4. **Drop reason UX** in the card → **inline text input** on the row (no modal); clone the existing inline-affordance pattern. The `→dropped` rule requires non-empty, so block the submit until the input is non-empty.
+5. **Owner dropdown source** → **the same persona roster the fleet-status card consumes** (`renderFleetStatusTable(model, personas)`): active personas **plus the "Sam" overflow** persona. Real personas only, never free text.
+6. **`new_manager` semantics** on `task_reassign` → when omitted, **leave `accountable_manager` UNCHANGED** (already implemented in Phase 1).
+
+All six settled; no open questions remain. Phase 2 is cleared for the build crew.
