@@ -406,6 +406,23 @@ def test_write_hold_defaults_6929f4ac_fields( tmp_path ):
     assert hold[ "last_looked_in_on_workers_ts" ] is None
 
 
+def test_write_hold_defaults_a1_proactive_fields( tmp_path ):
+    # A1 Face A / Face B debounce stamps default to None on a plain hold.
+    hh.write_hold( "sid12346", "Sam", "plain hold", base_dir=tmp_path )
+    hold = hh.read_hold( "sid12346", base_dir=tmp_path )
+    assert hold[ "last_spinup_check_ts" ] is None
+    assert hold[ "last_surfaced_questions_ts" ] is None
+
+
+def test_write_hold_round_trips_a1_proactive_fields( tmp_path ):
+    hh.write_hold( "sid12347", "Sam", "held", base_dir=tmp_path,
+                   last_spinup_check_ts="2026-06-23T10:00:00+00:00",
+                   last_surfaced_questions_ts="2026-06-23T11:00:00+00:00" )
+    hold = hh.read_hold( "sid12347", base_dir=tmp_path )
+    assert hh.get_last_spinup_check_ts( hold )       == "2026-06-23T10:00:00+00:00"
+    assert hh.get_last_surfaced_questions_ts( hold ) == "2026-06-23T11:00:00+00:00"
+
+
 def test_get_pending_user_gates_variants():
     assert hh.get_pending_user_gates( None )                          == [ ]
     assert hh.get_pending_user_gates( { } )                           == [ ]   # field absent
@@ -420,6 +437,22 @@ def test_get_last_looked_in_ts_variants():
     assert hh.get_last_looked_in_ts( { "last_looked_in_on_workers_ts": 123 } )    is None   # non-str
     ts = "2026-06-22T12:00:00+00:00"
     assert hh.get_last_looked_in_ts( { "last_looked_in_on_workers_ts": ts } )     == ts
+
+
+def test_get_last_spinup_check_ts_variants():
+    assert hh.get_last_spinup_check_ts( None )                              is None
+    assert hh.get_last_spinup_check_ts( { } )                              is None   # field absent
+    assert hh.get_last_spinup_check_ts( { "last_spinup_check_ts": 123 } )   is None   # non-str
+    ts = "2026-06-23T10:00:00+00:00"
+    assert hh.get_last_spinup_check_ts( { "last_spinup_check_ts": ts } )    == ts
+
+
+def test_get_last_surfaced_questions_ts_variants():
+    assert hh.get_last_surfaced_questions_ts( None )                                    is None
+    assert hh.get_last_surfaced_questions_ts( { } )                                    is None   # field absent
+    assert hh.get_last_surfaced_questions_ts( { "last_surfaced_questions_ts": 123 } )   is None   # non-str
+    ts = "2026-06-23T11:00:00+00:00"
+    assert hh.get_last_surfaced_questions_ts( { "last_surfaced_questions_ts": ts } )    == ts
 
 
 # ── quick_smoke_test ──────────────────────────────────────────────────────────

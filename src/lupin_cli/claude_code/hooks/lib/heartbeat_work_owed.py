@@ -64,6 +64,25 @@ INBOUND_STALE_AFTER_SECONDS = 86400
 # stall-aware escalation is v2. PURE: the clock is injected, never read here.
 VERIFICATION_DEBOUNCE_SECONDS = 600
 
+# Proactive-manager mechanism (fcb5dbc0, Lane A1 — design-of-record planning-is-
+# prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md D1/D2/D3).
+# The SAME debounce shape as the 6929f4ac inward twin, GENERALIZED to the manager's
+# two proactive self-checks folded into the Stop-hook oracle (zero brute-force tick):
+#   Face A (item 11, proactive DOWN): a manager sitting on a backlog with idle crew
+#     capacity owes a "consider spinning up a crew" NUDGE every `threshold` seconds.
+#     Self-clears when it stamps last_spinup_check_ts (it considered the nudge).
+#   Face B (item 1, proactive UP): a session holding open operator gates owes a
+#     RE-SURFACE of those asks every `threshold` seconds — ONE per-manager debounce
+#     (last_surfaced_questions_ts) generalizing the per-gate due_gates 10-min hack
+#     (D3 "retires the N per-session re-ask timers"). Self-clears on the surface stamp.
+# Defaults mirror T_escalate / the verification window (Rick: ~10 min); the stop.py
+# shell passes the INI-overridable runtime values in. PURE: clock injected here.
+SPINUP_CHECK_DEBOUNCE_SECONDS      = 600
+SURFACE_QUESTIONS_DEBOUNCE_SECONDS = 600
+# Face A backlog floor: a backlog of fewer than this many owed items never warrants
+# a crew-spin-up nudge (a manager judges small backlogs itself). INI-overridable.
+SPINUP_BACKLOG_MIN_N = 3
+
 # Poke-prompt sentinel (c121037b, 2026-06-16) — the SHARED opening clause of
 # every heartbeat self-poke `reason`. The poke is re-submitted as a prompt via
 # tmux send-keys, which fires the UserPromptSubmit hook; that hook must NOT treat
@@ -249,6 +268,95 @@ def manager_needs_verification( outstanding_delegations, last_verification_ts,
     return age >= threshold_seconds
 
 
+def manager_needs_spinup_check( backlog_count, idle_capacity, last_spinup_check_ts,
+                                now_epoch,
+                                threshold_seconds=SPINUP_CHECK_DEBOUNCE_SECONDS,
+                                backlog_min_n=SPINUP_BACKLOG_MIN_N ):
+    """
+    Face A (item 11, design D1/D2): does this MANAGER owe a crew-spin-up NUDGE
+    right now? The pure debounce predicate, sibling of manager_needs_verification.
+
+    A manager sitting on a backlog with idle crew capacity must read as work-owed
+    so the oracle NAMES "consider spinning up a crew" on its next Stop — the
+    manager then decides + acts of its own accord (D2: nudge, NOT auto-spin). It
+    self-clears the instant the manager stamps last_spinup_check_ts (it considered
+    the nudge), so a manager who just checked is not re-nudged and one who sits is.
+
+    Requires:
+        - backlog_count is the manager's owed-item count (queued + in_progress,
+          gathered by the IO shell via task_query(accountable_manager=me)); any
+          type accepted (foreign data) — only a non-bool int >= backlog_min_n counts
+        - idle_capacity is a bool — True iff the manager has room to spawn another
+          worker under the cap-8 fleet bound (live_workers < cap)
+        - last_spinup_check_ts is the most-recent spin-up-check stamp (ISO-8601
+          str) or None (never checked)
+        - now_epoch is the caller's injected "now" (POSIX seconds)
+        - threshold_seconds is the debounce window (Rick: 600 = 10 min)
+        - backlog_min_n is the backlog floor below which no nudge fires
+
+    Ensures:
+        - Returns False unless ALL THREE hold — no idle capacity OR backlog < N
+          short-circuits to False regardless of elapsed (a full crew or a small
+          backlog never nudges; the manager's judgment is preserved)
+        - bool backlog_count is rejected (True must not slip through as 1)
+        - With capacity AND backlog >= N: True iff there is no datable prior check
+          (None/unparseable ⇒ bias-to-nudge a first check; the poke cap bounds the
+          cost) OR the check age >= threshold_seconds
+        - Boundary: age EXACTLY == threshold owes (>=)
+        - PURE: no clock, no IO; never raises on well-formed input
+    """
+    if not idle_capacity:
+        return False
+    if isinstance( backlog_count, bool ) or not isinstance( backlog_count, int ):
+        return False
+    if backlog_count < backlog_min_n:
+        return False
+    age = _iso_age_seconds( last_spinup_check_ts, now_epoch )
+    if age is None:
+        return True
+    return age >= threshold_seconds
+
+
+def manager_needs_question_surface( open_operator_gates, last_surfaced_questions_ts,
+                                    now_epoch,
+                                    threshold_seconds=SURFACE_QUESTIONS_DEBOUNCE_SECONDS ):
+    """
+    Face B (item 1, design D1/D3): does this session owe a RE-SURFACE of its open
+    operator gates right now? The pure per-manager debounce predicate.
+
+    A session holding ≥1 open (unanswered) operator gate must re-fire those asks
+    every `threshold` seconds so a decision the human owes is never buried under a
+    "ball's in your court" park. This GENERALIZES the per-gate due_gates 10-min
+    hack to ONE per-manager debounce (D3 "retires the N per-session re-ask
+    timers"): instead of N independent per-gate timers, the single
+    last_surfaced_questions_ts gates the whole re-surface. Self-clears when the
+    session stamps last_surfaced_questions_ts after re-firing.
+
+    Requires:
+        - open_operator_gates is an iterable of truthy gate entries (the OPEN,
+          unanswered operator gates, gathered by the IO shell), or None
+        - last_surfaced_questions_ts is the most-recent surface stamp (ISO-8601
+          str) or None (never surfaced)
+        - now_epoch is the caller's injected "now" (POSIX seconds)
+        - threshold_seconds is the debounce window (Rick: 600 = 10 min)
+
+    Ensures:
+        - Returns False when there is NO open operator gate (nothing to surface —
+          gates the whole predicate, mirroring the no-workers gate of the inward twin)
+        - With ≥1 open gate: True iff there is no datable prior surface
+          (None/unparseable ⇒ bias-to-surface) OR the surface age >= threshold_seconds
+        - Boundary: age EXACTLY == threshold owes (>=)
+        - PURE: no clock, no IO; never raises on well-formed input
+    """
+    gates = [ g for g in ( open_operator_gates or [ ] ) if g ]
+    if not gates:
+        return False
+    age = _iso_age_seconds( last_surfaced_questions_ts, now_epoch )
+    if age is None:
+        return True
+    return age >= threshold_seconds
+
+
 def partition_inbound_by_age( inbound, now_epoch,
                               stale_after_seconds=INBOUND_STALE_AFTER_SECONDS ):
     """
@@ -283,7 +391,9 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
                         unanswered_inbound_questions=None,
                         outstanding_delegations=None,
                         needs_verification=False,
-                        open_user_gates=None ):
+                        open_user_gates=None,
+                        needs_question_surface=False,
+                        needs_spinup_check=False ):
     """
     Pure work-owed verdict over injected state (§0 step 3).
 
@@ -293,6 +403,9 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
           dicts, or None (treated as empty)
         - needs_verification is a bool — the inward twin's already-computed
           debounce verdict (manager_needs_verification, the IO shell calls it)
+        - needs_question_surface / needs_spinup_check are bools — the Face B / Face A
+          proactive-manager debounce verdicts (manager_needs_question_surface /
+          manager_needs_spinup_check, the IO shell calls them)
 
     Ensures:
         - Returns a verdict dict:
@@ -303,7 +416,8 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
         - signals order is fixed strongest-first:
           todo_in_progress, todo_unstarted, pending_decision,
           unanswered_inbound_question, outstanding_delegation,
-          needs_verification, outstanding_user_gate
+          needs_verification, outstanding_user_gate, surface_operator_gates,
+          spinup_nudge
         - outstanding_delegation fires iff ≥1 truthy entry is injected — an
           ALIVE, un-reaped spawned worker is owed work (the manager still owes
           review/reap); all-dead/reaped ⇒ empty ⇒ no signal ⇒ idle allowed.
@@ -317,6 +431,15 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
           the outward twin (6929f4ac §9): an open direct user-gate is owed work
           that must be RE-SURFACED (re-asked), never parked. The IO shell filters
           to the OPEN (unanswered) gates; an answered gate clears it
+        - surface_operator_gates fires iff the injected bool is truthy — Face B
+          (proactive-manager D3): the per-manager re-surface debounce has elapsed
+          while ≥1 operator gate is open. The IO shell computes the bool via
+          manager_needs_question_surface; this oracle only routes it to a signal
+        - spinup_nudge fires iff the injected bool is truthy — Face A (proactive-
+          manager D2): a backlog ≥ N with idle crew capacity AND the spin-up-check
+          debounce elapsed. The IO shell computes the bool via
+          manager_needs_spinup_check; the manager then decides + acts of its own
+          accord (a NUDGE, never an auto-spin)
         - Never fetches live data; never raises on well-formed list input
     """
     todo_items                   = todo_items or [ ]
@@ -355,6 +478,12 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
     if open_gates:
         signals.append( "outstanding_user_gate" )
         specifics.append( f"{len( open_gates )} open user-gate(s) awaiting Rick — re-ask now (stamp last_asked_ts)" )
+    if needs_question_surface:
+        signals.append( "surface_operator_gates" )
+        specifics.append( "operator-gate re-surface overdue — re-fire your open operator-gate asks (stamp last_surfaced_questions_ts)" )
+    if needs_spinup_check:
+        signals.append( "spinup_nudge" )
+        specifics.append( "big backlog, idle crew capacity — consider spinning up a crew of your own accord (stamp last_spinup_check_ts)" )
 
     return {
         "work_owed" : bool( signals ),
@@ -428,6 +557,21 @@ def quick_smoke_test():
     v = evaluate_work_owed( open_user_gates=[ { "id": "g1" } ] )
     assert v[ "work_owed" ] is True and v[ "signals" ] == [ "outstanding_user_gate" ]
     assert evaluate_work_owed( open_user_gates=[ None ] )[ "work_owed" ] is False
+
+    # Face A (spin-up nudge) — debounce predicate + signal
+    assert manager_needs_spinup_check( 5, True,  None, 1_000_000.0 ) is True      # backlog+capacity+never-checked
+    assert manager_needs_spinup_check( 5, False, None, 1_000_000.0 ) is False     # no idle capacity ⇒ never
+    assert manager_needs_spinup_check( 1, True,  None, 1_000_000.0 ) is False     # backlog < N ⇒ never
+    assert manager_needs_spinup_check( True, True, None, 1_000_000.0 ) is False   # bool backlog rejected
+    v = evaluate_work_owed( needs_spinup_check=True )
+    assert v[ "work_owed" ] is True and v[ "signals" ] == [ "spinup_nudge" ]
+
+    # Face B (operator-gate re-surface) — debounce predicate + signal
+    assert manager_needs_question_surface( [ { "id": "og1" } ], None, 1_000_000.0 ) is True   # open gate, never surfaced
+    assert manager_needs_question_surface( [ ], None, 1_000_000.0 ) is False                  # no open gate ⇒ never
+    assert manager_needs_question_surface( [ None ], None, 1_000_000.0 ) is False             # falsy entries filtered
+    v = evaluate_work_owed( needs_question_surface=True )
+    assert v[ "work_owed" ] is True and v[ "signals" ] == [ "surface_operator_gates" ]
 
     reason = build_poke_reason( evaluate_work_owed(
         todo_items=[ { "status": TODO_IN_PROGRESS, "owned_by_me": True } ] ) )

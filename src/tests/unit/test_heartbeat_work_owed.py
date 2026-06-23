@@ -222,6 +222,106 @@ def test_iso_age_seconds_shared_helper():
     assert o._iso_age_seconds( "nope", _NOW ) is None
 
 
+# ── Face A: manager_needs_spinup_check — the spin-up nudge debounce predicate ──
+
+def test_spinup_no_idle_capacity_is_false():
+    # No room under the cap ⇒ never nudge, regardless of backlog / elapsed.
+    assert o.manager_needs_spinup_check( 99, False, None, _NOW ) is False
+
+
+def test_spinup_backlog_below_floor_is_false():
+    # Backlog < N ⇒ never nudge (the manager judges small backlogs itself).
+    assert o.manager_needs_spinup_check( o.SPINUP_BACKLOG_MIN_N - 1, True, None, _NOW ) is False
+
+
+def test_spinup_bool_backlog_rejected():
+    # bool is an int subclass — True must NOT slip through as backlog 1.
+    assert o.manager_needs_spinup_check( True, True, None, _NOW ) is False
+
+
+def test_spinup_non_int_backlog_rejected():
+    # Foreign/garbage backlog value ⇒ never nudge (never raises).
+    assert o.manager_needs_spinup_check( "5", True, None, _NOW ) is False
+
+
+def test_spinup_backlog_and_capacity_never_checked_is_true():
+    # Backlog ≥ N + idle capacity + no prior check ⇒ bias-to-nudge a first check.
+    assert o.manager_needs_spinup_check( o.SPINUP_BACKLOG_MIN_N, True, None, _NOW ) is True
+
+
+def test_spinup_unparseable_ts_is_true():
+    assert o.manager_needs_spinup_check( 5, True, "not-a-ts", _NOW ) is True
+
+
+def test_spinup_fresh_check_is_false():
+    # Checked 1 min ago (< 10 min debounce) ⇒ not yet due.
+    assert o.manager_needs_spinup_check( 5, True, _ago( 60 ), _NOW ) is False
+
+
+def test_spinup_stale_check_is_true():
+    # Checked 11 min ago (> 10 min debounce) ⇒ due to re-nudge.
+    assert o.manager_needs_spinup_check( 5, True, _ago( 660 ), _NOW ) is True
+
+
+def test_spinup_boundary_equal_is_true():
+    assert o.manager_needs_spinup_check(
+        5, True, _ago( o.SPINUP_CHECK_DEBOUNCE_SECONDS ), _NOW ) is True
+
+
+def test_spinup_custom_thresholds():
+    # Custom debounce + custom backlog floor both honored.
+    assert o.manager_needs_spinup_check( 5, True, _ago( 300 ), _NOW, threshold_seconds=240 ) is True
+    assert o.manager_needs_spinup_check( 5, True, _ago( 300 ), _NOW, threshold_seconds=600 ) is False
+    assert o.manager_needs_spinup_check( 2, True, None, _NOW, backlog_min_n=2 ) is True
+
+
+def test_spinup_nudge_signal_routes():
+    v = o.evaluate_work_owed( needs_spinup_check=True )
+    assert v[ "work_owed" ] is True and v[ "signals" ] == [ "spinup_nudge" ]
+    assert o.evaluate_work_owed( needs_spinup_check=False )[ "work_owed" ] is False
+
+
+# ── Face B: manager_needs_question_surface — the re-surface debounce predicate ──
+
+def test_surface_no_open_gate_is_false():
+    # No open operator gate ⇒ nothing to surface (gates the whole predicate).
+    assert o.manager_needs_question_surface( [ ], None, _NOW ) is False
+    assert o.manager_needs_question_surface( None, None, _NOW ) is False
+    assert o.manager_needs_question_surface( [ None, 0 ], None, _NOW ) is False   # falsy entries filtered
+
+
+def test_surface_open_gate_never_surfaced_is_true():
+    assert o.manager_needs_question_surface( [ { "id": "og1" } ], None, _NOW ) is True
+
+
+def test_surface_unparseable_ts_is_true():
+    assert o.manager_needs_question_surface( [ { "id": "og1" } ], "not-a-ts", _NOW ) is True
+
+
+def test_surface_fresh_is_false():
+    assert o.manager_needs_question_surface( [ { "id": "og1" } ], _ago( 60 ), _NOW ) is False
+
+
+def test_surface_stale_is_true():
+    assert o.manager_needs_question_surface( [ { "id": "og1" } ], _ago( 660 ), _NOW ) is True
+
+
+def test_surface_boundary_equal_is_true():
+    assert o.manager_needs_question_surface(
+        [ { "id": "og1" } ], _ago( o.SURFACE_QUESTIONS_DEBOUNCE_SECONDS ), _NOW ) is True
+
+
+def test_surface_custom_threshold():
+    assert o.manager_needs_question_surface( [ { "id": "og1" } ], _ago( 300 ), _NOW, threshold_seconds=240 ) is True
+    assert o.manager_needs_question_surface( [ { "id": "og1" } ], _ago( 300 ), _NOW, threshold_seconds=600 ) is False
+
+
+def test_surface_operator_gates_signal_routes():
+    v = o.evaluate_work_owed( needs_question_surface=True )
+    assert v[ "work_owed" ] is True and v[ "signals" ] == [ "surface_operator_gates" ]
+    assert o.evaluate_work_owed( needs_question_surface=False )[ "work_owed" ] is False
+
+
 # ── ordering + composition ────────────────────────────────────────────────────
 
 def test_all_signals_fire_strongest_first():
@@ -244,6 +344,32 @@ def test_all_signals_fire_strongest_first():
     ]
     # specifics carries all seven counts (6 separators)
     assert v[ "specifics" ].count( ";" ) == 6
+
+
+def test_all_nine_signals_fire_strongest_first():
+    # The two proactive-manager signals (surface_operator_gates, spinup_nudge)
+    # append AFTER outstanding_user_gate, strongest-first order preserved.
+    v = o.evaluate_work_owed(
+        todo_items = [
+            { "status": o.TODO_IN_PROGRESS, "owned_by_me": True },
+            { "status": o.TODO_PENDING,     "owned_by_me": True },
+        ],
+        pending_decisions            = [ { "blocked_on_user": False } ],
+        unanswered_inbound_questions = [ { "question_id": "q1" } ],
+        outstanding_delegations      = [ { "session_name": "cc-reviewer-x-1" } ],
+        needs_verification           = True,
+        open_user_gates              = [ { "id": "g1" } ],
+        needs_question_surface       = True,
+        needs_spinup_check           = True,
+    )
+    assert v[ "work_owed" ] is True
+    assert v[ "signals" ] == [
+        "todo_in_progress", "todo_unstarted", "pending_decision",
+        "unanswered_inbound_question", "outstanding_delegation",
+        "needs_verification", "outstanding_user_gate",
+        "surface_operator_gates", "spinup_nudge",
+    ]
+    assert v[ "specifics" ].count( ";" ) == 8
 
 
 # ── build_poke_reason ─────────────────────────────────────────────────────────

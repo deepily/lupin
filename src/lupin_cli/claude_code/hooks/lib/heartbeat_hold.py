@@ -36,6 +36,14 @@ Schema (§0 decision #7 + 6929f4ac §9.2 — the public interface; hold to it ex
                                           §3-§5 inward twin debounce clock); None ⇒
                                           never looked in. The agent stamps this
                                           when it verifies workers (explicit v1).
+    last_spinup_check_ts         : str|None — ISO-8601 of the MANAGER's most-recent
+                                          spin-up self-check (proactive-manager A1
+                                          Face A debounce clock); None ⇒ never. The
+                                          agent stamps it after considering a crew.
+    last_surfaced_questions_ts   : str|None — ISO-8601 of the session's most-recent
+                                          operator-gate re-surface (A1 Face B
+                                          debounce clock); None ⇒ never. The agent
+                                          stamps it after re-firing its open asks.
 
 This module deals ONLY with the declared hold artifact. The work-owed
 *oracle* (TODO / Pending-Decisions scan, §0 #3) and the `Stop`-hook decision
@@ -52,13 +60,21 @@ from pathlib import Path
 HOLD_FILENAME_TEMPLATE = ".heartbeat-hold-{session_id}.json"
 HOLD_SCHEMA_FIELDS     = ( "session_id", "persona", "held_at", "ttl_seconds",
                            "work_owed", "reason", "awaiting",
-                           "pending_user_gates", "last_looked_in_on_workers_ts" )
+                           "pending_user_gates", "last_looked_in_on_workers_ts",
+                           "last_spinup_check_ts", "last_surfaced_questions_ts" )
 DEFAULT_TTL_SECONDS    = 900
 AWAITING_NONE          = "none"
 
 # 6929f4ac field names (single-source so readers/writers never drift)
 PENDING_USER_GATES_FIELD = "pending_user_gates"
 LAST_LOOKED_IN_FIELD     = "last_looked_in_on_workers_ts"
+
+# Proactive-manager debounce clocks (fcb5dbc0, Lane A1) — the per-manager Face A /
+# Face B stamps the agent writes after it acts. Persisted in the hold artifact so
+# they SURVIVE /clear (the hold file outlives a context reset), exactly like the
+# 6929f4ac look-in stamp above. Single-source field names so readers/writers never drift.
+LAST_SPINUP_CHECK_FIELD      = "last_spinup_check_ts"
+LAST_SURFACED_QUESTIONS_FIELD = "last_surfaced_questions_ts"
 
 
 def _resolve_base_dir( base_dir ):
@@ -161,7 +177,8 @@ def _parse_iso( value ):
 def write_hold( session_id, persona, reason, work_owed=True,
                 ttl_seconds=DEFAULT_TTL_SECONDS, awaiting=AWAITING_NONE,
                 held_at=None, base_dir=None,
-                pending_user_gates=None, last_looked_in_on_workers_ts=None ):
+                pending_user_gates=None, last_looked_in_on_workers_ts=None,
+                last_spinup_check_ts=None, last_surfaced_questions_ts=None ):
     """
     Write (atomically) this session's hold artifact and return the dict.
 
@@ -173,12 +190,16 @@ def write_hold( session_id, persona, reason, work_owed=True,
         - awaiting is a string (see schema)
         - pending_user_gates is a list of gate-row dicts or None (⇒ [])
         - last_looked_in_on_workers_ts is an ISO-8601 string or None
+        - last_spinup_check_ts / last_surfaced_questions_ts are ISO-8601 strings
+          or None (the Face A / Face B proactive-manager debounce stamps, A1)
 
     Ensures:
         - Writes <base_dir>/.heartbeat-hold-<session_id>.json with EXACTLY
-          the HOLD_SCHEMA_FIELDS fields, in order (incl. the two 6929f4ac fields)
+          the HOLD_SCHEMA_FIELDS fields, in order (incl. the two 6929f4ac fields
+          AND the two A1 proactive-manager debounce fields)
         - pending_user_gates defaults to [] (no open gates) when not supplied;
-          last_looked_in_on_workers_ts defaults to None (never looked in)
+          last_looked_in_on_workers_ts / last_spinup_check_ts /
+          last_surfaced_questions_ts default to None (never run)
         - held_at defaults to now (UTC, seconds precision) when not supplied
         - Write is atomic (temp file + os.replace) so a concurrent fleet
           Poker never reads a half-written file
@@ -200,6 +221,8 @@ def write_hold( session_id, persona, reason, work_owed=True,
         "awaiting"                     : awaiting,
         "pending_user_gates"           : list( pending_user_gates ) if pending_user_gates else [ ],
         "last_looked_in_on_workers_ts" : last_looked_in_on_workers_ts,
+        "last_spinup_check_ts"         : last_spinup_check_ts,
+        "last_surfaced_questions_ts"   : last_surfaced_questions_ts,
     }
 
     path = hold_path( session_id, base_dir=base_dir )
@@ -447,6 +470,52 @@ def get_last_looked_in_ts( hold ):
     return value if isinstance( value, str ) else None
 
 
+def get_last_spinup_check_ts( hold ):
+    """
+    The MANAGER's most-recent spin-up-check stamp (Face A, fcb5dbc0 A1).
+
+    The Face A debounce clock: the IO shell feeds this to
+    manager_needs_spinup_check. A hold without the field (pre-A1, or a manager
+    that never ran the check) yields None ⇒ a manager with a backlog + idle
+    capacity reads as owing a first spin-up nudge.
+
+    Requires:
+        - hold is a dict or None
+
+    Ensures:
+        - Returns the str value of hold["last_spinup_check_ts"] when present
+        - Returns None when there is no hold, the field is absent, or it is non-str
+        - Never raises
+    """
+    if not hold:
+        return None
+    value = hold.get( LAST_SPINUP_CHECK_FIELD )
+    return value if isinstance( value, str ) else None
+
+
+def get_last_surfaced_questions_ts( hold ):
+    """
+    The session's most-recent operator-gate re-surface stamp (Face B, fcb5dbc0 A1).
+
+    The Face B debounce clock: the IO shell feeds this to
+    manager_needs_question_surface. A hold without the field (pre-A1, or a session
+    that never re-surfaced) yields None ⇒ a session holding an open operator gate
+    reads as owing a first re-surface.
+
+    Requires:
+        - hold is a dict or None
+
+    Ensures:
+        - Returns the str value of hold["last_surfaced_questions_ts"] when present
+        - Returns None when there is no hold, the field is absent, or it is non-str
+        - Never raises
+    """
+    if not hold:
+        return None
+    value = hold.get( LAST_SURFACED_QUESTIONS_FIELD )
+    return value if isinstance( value, str ) else None
+
+
 def quick_smoke_test():
     """
     Self-contained, side-effect-free smoke test (uses a temp dir).
@@ -464,7 +533,9 @@ def quick_smoke_test():
         gate = { "id": "g1", "answered": False }
         write_hold( sid, "Tiffany 💍", "holding on the 3-way seam review",
                     work_owed=True, ttl_seconds=900, awaiting="peer:Rachel", base_dir=tmp,
-                    pending_user_gates=[ gate ], last_looked_in_on_workers_ts="2026-06-22T12:00:00+00:00" )
+                    pending_user_gates=[ gate ], last_looked_in_on_workers_ts="2026-06-22T12:00:00+00:00",
+                    last_spinup_check_ts="2026-06-23T10:00:00+00:00",
+                    last_surfaced_questions_ts="2026-06-23T11:00:00+00:00" )
         hold = read_hold( sid, base_dir=tmp )
         assert hold is not None,                      "round-trip read failed"
         assert tuple( hold.keys() ) == HOLD_SCHEMA_FIELDS, "schema field set/order drift"
@@ -473,10 +544,13 @@ def quick_smoke_test():
         assert declared_work_owed( hold ) is True,    "work_owed not read back"
         assert get_pending_user_gates( hold ) == [ gate ], "gates not read back"
         assert get_last_looked_in_ts( hold ) == "2026-06-22T12:00:00+00:00", "look-in ts not read back"
-        # Defaults: a hold written without the 6929f4ac fields → [] / None
+        assert get_last_spinup_check_ts( hold ) == "2026-06-23T10:00:00+00:00", "spinup ts not read back"
+        assert get_last_surfaced_questions_ts( hold ) == "2026-06-23T11:00:00+00:00", "surface ts not read back"
+        # Defaults: a hold written without the 6929f4ac / A1 fields → [] / None
         write_hold( sid, "Tiffany 💍", "plain hold", base_dir=tmp )
         plain = read_hold( sid, base_dir=tmp )
         assert get_pending_user_gates( plain ) == [ ] and get_last_looked_in_ts( plain ) is None
+        assert get_last_spinup_check_ts( plain ) is None and get_last_surfaced_questions_ts( plain ) is None
 
         # Expired hold → undeclared ⇒ pokeable (not honored)
         old = ( _now() - datetime.timedelta( seconds=10_000 ) ).isoformat( timespec="seconds" )
