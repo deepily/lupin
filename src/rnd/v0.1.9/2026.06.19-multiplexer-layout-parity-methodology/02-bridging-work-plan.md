@@ -35,8 +35,18 @@ schedule.
 ### WS1 — CSS single-sourcing (Doc 01 Pillar 1) · unblocks G0
 
 1. Extract the **contract surfaces** (page-frame + `.sender-card*` + `.date-accordion*` +
-   `.sender-message*` + `.action-required-*`) from `notifications.css` into
+   `.sender-message*` + expired/abstract/progress) from `notifications.css` into
    `css/shared/notifications-surface.css`.
+   > **Build-time refinement (2026-06-22, Clayton 😎 finding · Tiberius ruling):** `.action-required-*`
+   > is **EXCLUDED from the shared sheet this slice.** The two clients use **disjoint** class sets —
+   > legacy renders an *interactive* widget (`.action-required-notification/-header/-timer/-progress-bar…`),
+   > the mux a *read-only* one (`.action-required-widget/-prompt/-response-type-badge/-countdown…`) whose
+   > classes **do not exist in the monolith**. There is no shared selector to single-source byte-faithful,
+   > so this is **Category-3 (functional divergence), not a CSS one.** Keep the mux's read-only
+   > `.action-required-widget` rules in the mux-specific sheet; it folds into the shared sheet only once
+   > the mux widget reaches **functional parity** with legacy (classes converge then) — WS4 / 06-10 lane,
+   > oracle-gated. Rachel's full-page Tier 1 will report it as a MISSING structure-parity node (expected,
+   > not a regression). Seam comment → WS4/action-required.
 2. `multiplexer.html`: replace `page-frame.css` + `notifications-list.css` with the shared sheet
    (keep the multiplexer-specific sheets: `reading-pane`, `session-strip`, `jobs-pane`, …).
 3. `notifications.html`: link the shared sheet; delete the now-duplicated rules from the monolith
@@ -127,14 +137,16 @@ WS4 (Category-3 functional gaps, per 06-10) ──► G4 climbs to 100%, each st
 
 ## Decisions for ratification
 
-| # | Decision | Recommendation |
+> **✅ ALL RATIFIED — walkthrough 2026-06-22 (Tiberius 👑, session 704c71b2; Rick).** D1/D2/D4/D5/D6 ratified as recommended, with reviewer refinements A/B/C folded in (see riders below). D3 was already resolved by Rick 2026-06-20. Decisions Log: `TODO.md` (2026-06-22 block).
+
+| # | Decision | Ruling |
 |---|---|---|
-| D1 | **CSS strategy** S1 / S2 / S3 (Doc 01) | **S2 — shared extracted sheet** (single source, low collision) |
-| D2 | **C2-c spacing model** — legacy `margin` vs mux `gap` as the contract | **Legacy `margin`** (it is the parity target) |
-| D3 | **C2-d message direction** — add a direction field vs ratify "inbound-only" | **RESOLVED (Rick, 2026-06-20) — `.outgoing` supported DAY-ONE, no deferral, no exemption.** Legacy renders outgoing on cold load by splitting a responded notification into prompt + response ([notifications.js:14317-14330](../../../lupin_app/static/js/notifications.js)); the multiplexer adopts the same from the start. **Load-time outgoing** is F5-independent → core slice (WS2). **Live outgoing** pulls the send-path (F5) **forward** into scope (not deferred). CSS already ported; work = direction param + responded-split + F5. |
-| D4 | **Oracle authority** — is Tier 2 (computed-style) the *definition* of done, with Tier 4 (pixel) advisory? | **Yes** — Tier 2/3 gate; Tier 4 backstop. Pixel diffs never block on AA noise. |
-| D5 | **Golden artifact home** — tracked path for goldens (since `io/test-suite/visual-baselines` is gitignored) | **`src/tests/e2e_ui/fixtures/golden/`** (small JSON, git-tracked) |
-| D6 | **Scope of this v0.1.9 slice** — land G0–G3 now and hand G4 to the 06-10 lane, or fold both into one push? | **Land G0–G3 + the oracle now.** Note: day-one `.outgoing` (D3) pulls the F5 user-send path **into** this slice, so the G0–G3 boundary now includes that piece — larger than a pure-CSS session, still high-leverage. |
+| D1 | **CSS strategy** S1 / S2 / S3 (Doc 01) | **✅ S2 — shared extracted sheet.** **Rider A:** extract byte-faithful to the monolith; legacy links the shared sheet **BEFORE** its monolith (monolith still wins any cascade conflict) so the **parity reference cannot regress**; monolith de-duplication deferred to a later, separately-verified pass. |
+| D2 | **C2-c spacing model** — legacy `margin` vs mux `gap` as the contract | **✅ Legacy `margin`** (`.collapsible-section { margin-bottom:30px }`); drop the drift-invented `#sender-cards-container { gap:8px }`. It is the parity target → oracle green by construction. |
+| D3 | **C2-d message direction** — add a direction field vs ratify "inbound-only" | **RESOLVED (Rick, 2026-06-20) — `.outgoing` supported DAY-ONE, no deferral, no exemption.** Legacy renders outgoing on cold load by splitting a responded notification into prompt + response ([notifications.js:14317-14330](../../../lupin_app/static/js/notifications.js)); the multiplexer adopts the same from the start. **Load-time outgoing** is F5-independent → core slice (WS2). **Live outgoing** pulls the send-path (F5) **forward** into scope (not deferred). CSS already ported; work = direction param + responded-split + F5. (See D6 Rider B for how the live half sequences.) |
+| D4 | **Oracle authority** — is Tier 2 (computed-style) the *definition* of done, with Tier 4 (pixel) advisory? | **✅ Yes** — Tier 2/3 gate; Tier 4 backstop, never blocks on AA noise. **WS3 rider:** Tier 2 asserts declarative layout props exactly but **NOT resolved `width`/`height`** (sub-pixel flex distribution → flaky); resolved geometry is left to Tier 3's tolerant ±1px check. |
+| D5 | **Golden artifact home** — tracked path for goldens (since `io/test-suite/visual-baselines` is gitignored) | **✅ `src/tests/e2e_ui/fixtures/golden/`** (small JSON, git-tracked). **Rider C:** bake the shared-sheet content hash into each golden as a **staleness trip-wire** — under S2, legacy-contract drift IS a shared-sheet change, so hash drift fails the golden and forces recapture. |
+| D6 | **Scope of this v0.1.9 slice** — land G0–G3 now and hand G4 to the 06-10 lane, or fold both into one push? | **✅ Land G0–G3 + the oracle now;** hand G4 to the 06-10 lane (oracle-gated). **Rider B:** load-time `.outgoing` (responded-split off the server's existing `response_value`, F5-independent) is in-slice and is **all the oracle needs** to verify `.outgoing` day-one; the **live-echo half (full F5 send-path) lands just behind** so a feature build cannot gate oracle-green. |
 
 ## Net
 
