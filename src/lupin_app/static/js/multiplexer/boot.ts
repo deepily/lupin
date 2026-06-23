@@ -48,6 +48,7 @@ import {
   createMissedBadgeRenderer,
   createFleetStatusRenderer,
   createTaskListRenderer,
+  createSectionToolbarRenderer,
   type TtsPreviewSliderRenderer,
 } from "./render";
 import { DEFAULT_TTS_FRACTION } from "./render/TtsPreviewSliderRenderer";
@@ -268,6 +269,10 @@ function bootMultiplexer(): void {
       // notifications mount interactive thumbs-vote controls in the
       // notification-item render path (createStores already builds the store).
       predictionVote : stores.predictionVote,
+      // Section-toolbar / accordion-collapse parity (2026-06-23) — the renderer
+      // reads persisted accordion collapse on render + persists header-click
+      // toggles, and applies toolbar-driven collapse-all/expand-all.
+      viewState      : stores.viewState,
     },
     // Phase 6c Node D Step D5 — inject the conversation-mode-aware sort
     // BEFORE first render so the initial paint already respects pin priority.
@@ -501,6 +506,20 @@ function bootMultiplexer(): void {
   taskListRenderer.mount(taskListMountEl);
   stores.taskList.startPolling();
 
+  // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
+  // carbon-copy of the legacy floating #section-toolbar: per-section visibility
+  // toggles + collapse-all/expand-all. Drives the ViewStateStore (persisted);
+  // collapse-all/expand-all fan out to NotificationsListRenderer's accordions
+  // via store_view_state_changed. Per-accordion header-click toggle is wired in
+  // NotificationsListRenderer (above). The layout-mode ⇆ stays in
+  // #reading-pane-toolbar (mux-N/A here — see design doc 06).
+  const sectionToolbarRenderer = createSectionToolbarRenderer({
+    stores : { viewState: stores.viewState },
+  });
+  const sectionToolbarMountEl = document.getElementById("section-toolbar-mount");
+  if (sectionToolbarMountEl === null) throw new Error("multiplexer: #section-toolbar-mount not found");
+  sectionToolbarRenderer.mount(sectionToolbarMountEl);
+
   // Lane E WP14 / F8 — prediction-hint vote: the PredictionVoteStore is wired
   // into createStores() AND injected into the NotificationsListRenderer above
   // (stores.predictionVote). The vote CONTROLS template (predictionVoteControls)
@@ -543,6 +562,8 @@ function bootMultiplexer(): void {
       missedBadgeRenderer         : "mounted",
       fleetStatusRenderer         : "mounted",
       taskListRenderer            : "mounted",
+      // Section-toolbar + accordion-collapse parity (2026-06-23).
+      sectionToolbarRenderer      : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -569,6 +590,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] missedBadgeRenderer:mounted");
   console.log("[multiplexer] fleetStatusRenderer:mounted");
   console.log("[multiplexer] taskListRenderer:mounted");
+  console.log("[multiplexer] sectionToolbarRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

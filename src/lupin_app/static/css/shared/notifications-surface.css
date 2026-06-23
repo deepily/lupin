@@ -634,3 +634,68 @@ h1 {
     color: #212529;
     word-break: break-word;
 }
+
+/* ============================================================================
+   SECTION-TOOLBAR BUTTONS — shared contract (2026-06-23, Rachel 🕊️ / Mr. Radio
+   lane). The per-section visibility toggles (.toolbar-btn) + collapse-all /
+   expand-all controls (.task-accordion-btn) the legacy client floats in its
+   #section-toolbar. Carbon-copied BYTE-FAITHFUL from the legacy monolith
+   (notifications.css:31-58 .toolbar-btn; task-list.css:128-145
+   .task-accordion-btn) so /app/notifications + /app/multiplexer render the
+   buttons identically. The legacy monolith still defines these (it links AFTER
+   this sheet + wins the identical cascade) — no rule is deleted there in this
+   slice. The #section-toolbar CONTAINER is layout-specific (legacy vertical
+   position:fixed vs mux horizontal top-bar), so it is NOT here — each client
+   styles its own container (mux: css/multiplexer/section-toolbar.css).
+   ============================================================================ */
+
+.toolbar-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 6px;
+    background: #f8f9fa;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    opacity: 0.4;
+}
+
+.toolbar-btn.active {
+    opacity: 1;
+    background: #e7f1ff;
+}
+
+.toolbar-btn:hover {
+    background: #dee2e6;
+    transform: scale( 1.1 );
+}
+
+.toolbar-btn:hover:not(.active) {
+    opacity: 0.7;
+}
+
+/* Collapse-all / expand-all controls. Mirror .toolbar-btn sizing but stay
+   full-opacity (they are actions, not visibility toggles, so they carry NO
+   active/dimmed state). */
+.task-accordion-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 6px;
+    background: #f8f9fa;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.task-accordion-btn:hover {
+    background: #dee2e6;
+    transform: scale( 1.1 );
+}

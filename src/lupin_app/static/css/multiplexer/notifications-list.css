@@ -170,6 +170,18 @@
     margin-left: 8px;
 }
 
+/* Sender-card collapse (2026-06-23, section-toolbar/accordion parity, Rachel
+   🕊️). NotificationsListRenderer flips `data-collapsed="true"` on the
+   `.sender-card` on a header click (carbon-copy of legacy toggleSenderCard,
+   which hid `.sender-card-dates` via inline `style.display`). The mux uses a
+   data-attr (parallel to the date-accordion `[data-collapsed]` idiom) instead
+   of inline style; only the dates region collapses (header + any CC voice-input
+   row stay visible), matching legacy. This is a MUX MECHANISM — legacy carries
+   no equivalent CSS class, so the rule is mux-only (not in the shared sheet). */
+.sender-card[ data-collapsed="true" ] .sender-card-dates {
+    display: none;
+}
+
 /* C2-a RESOLVED (WS2): the `.sender-persona-badge` (mux button) styling moved
    to the shared sheet as a `.persona-badge, .sender-persona-badge` UNION that
    makes the button compute identically to the legacy span. No mux-only badge

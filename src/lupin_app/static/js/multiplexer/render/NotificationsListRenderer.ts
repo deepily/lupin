@@ -32,6 +32,7 @@ import type {
   StoreNotificationsChangedPayload,
   StoreActionRequiredChangedPayload,
   StorePredictionVoteChangedPayload,
+  StoreViewStateChangedPayload,
 } from "../shared/types";
 import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
@@ -58,6 +59,15 @@ interface PredictionVoteStoreLike {
   setContext( notificationId: string, ctx: PredictionVoteContext ): void;
   vote( notificationId: string, dir: PredictionVoteDir ): Promise<boolean>;
 }
+// Section-toolbar / accordion-collapse parity (2026-06-23) — the per-accordion
+// collapse state this renderer reads on render + writes on header-click. The
+// production ViewStateStore satisfies it structurally. Optional in the stores
+// bag: when absent (some unit harnesses) accordion clicks still toggle the DOM
+// but the state is not persisted across re-renders/reloads.
+interface ViewStateStoreLike {
+  isAccordionCollapsed( accordionId: string ): boolean;
+  setAccordionCollapsed( accordionId: string, collapsed: boolean ): void;
+}
 
 export interface NotificationsListRendererStores {
   notifications  : NotificationStoreLike;
@@ -68,6 +78,9 @@ export interface NotificationsListRendererStores {
   // INTERACTIVE (cast-vote highlight + click → POST + reconcile). Absent (some
   // unit harnesses) → controls render but are inert. Boot always wires it.
   predictionVote?: PredictionVoteStoreLike;
+  // Section-toolbar / accordion-collapse parity (2026-06-23). Optional — see
+  // ViewStateStoreLike. Boot always wires it (stores.viewState).
+  viewState?     : ViewStateStoreLike;
 }
 
 export interface NotificationsListRenderer {
@@ -118,6 +131,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // render inert). Built once in the constructor.
   private readonly predictionVoteStore       : PredictionVoteStoreLike | undefined;
   private readonly predictionVoteIntegration : PredictionVoteIntegration | undefined;
+  // Section-toolbar / accordion-collapse parity (2026-06-23).
+  private readonly viewState                 : ViewStateStoreLike | undefined;
 
   constructor(opts: NotificationsListRendererOptions) {
     this.bus                  = opts.eventBus;
@@ -125,6 +140,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.appTimezone          = opts.appTimezone;
     this.senderSortComparator = opts.senderSortComparator ?? DEFAULT_SENDER_SORT;
     this.predictionVoteStore  = opts.stores.predictionVote;
+    this.viewState            = opts.stores.viewState;
     this.predictionVoteIntegration = this.predictionVoteStore === undefined
       ? undefined
       : {
@@ -211,6 +227,15 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         () => this.renderSenderSection(),
       ),
     );
+    // Section-toolbar collapse-all / expand-all (2026-06-23). The toolbar drives
+    // ViewStateStore.requestBulkAccordionCollapse, which emits this; the
+    // renderer (sole owner of the accordion DOM) flips every accordion.
+    this.unsubscribers.push(
+      this.bus.on<StoreViewStateChangedPayload>(
+        "store_view_state_changed",
+        (e) => this.applyBulkAccordionCollapse(e.payload.changeKind === "collapse-all"),
+      ),
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -284,6 +309,10 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // Re-mark expanded progress groups after the render (state preserved
     // across re-renders per F14).
     this.reapplyExpandedGroups();
+    // Re-apply persisted accordion-collapse state (sender cards + date
+    // accordions) so a user's collapse survives keyed re-renders + reloads
+    // (2026-06-23 section-toolbar/accordion parity).
+    this.reapplyAccordionCollapse();
   }
 
   // -------------------------------------------------------------------------
@@ -399,20 +428,128 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.clickHandler = (e: Event) => {
       const target = e.target as Element | null;
       if (target === null) return;  // covered by null-target click test
+
+      // 1. Progress-group lazy-expand toggle (Q-G + F14).
       const toggle = target.closest(".progress-group-toggle") as HTMLElement | null;
-      if (toggle === null) return;  // covered by non-toggle click test
-      const head = toggle.closest(".progress-group-head");
-      /* c8 ignore next */ // defensive: head is the immediate parent of toggle by template; if a future template change breaks this, the toggle wouldn't visually land in a group anyway.
-      if (head === null) return;
-      const messageEl = head.closest("[data-progress-group]") as HTMLElement | null;
-      /* c8 ignore next */ // defensive: head is always inside a [data-progress-group] message by template invariant.
-      if (messageEl === null) return;
-      const progressGroupId = messageEl.getAttribute("data-progress-group");
-      /* c8 ignore next */ // defensive: progressGroupId attribute is set by the template; getAttribute returns null only if the attribute was removed.
-      if (progressGroupId === null) return;
-      this.toggleProgressGroup(progressGroupId, messageEl, toggle);
+      if (toggle !== null) {
+        const head = toggle.closest(".progress-group-head");
+        /* c8 ignore next */ // defensive: head is the immediate parent of toggle by template; if a future template change breaks this, the toggle wouldn't visually land in a group anyway.
+        if (head === null) return;
+        const messageEl = head.closest("[data-progress-group]") as HTMLElement | null;
+        /* c8 ignore next */ // defensive: head is always inside a [data-progress-group] message by template invariant.
+        if (messageEl === null) return;
+        const progressGroupId = messageEl.getAttribute("data-progress-group");
+        /* c8 ignore next */ // defensive: progressGroupId attribute is set by the template; getAttribute returns null only if the attribute was removed.
+        if (progressGroupId === null) return;
+        this.toggleProgressGroup(progressGroupId, messageEl, toggle);
+        return;
+      }
+
+      // 2. Date-accordion header click → collapse/expand that date group
+      //    (carbon-copy of legacy toggleDateAccordion). The header carries only
+      //    spans (no interactive controls), so any click in it toggles.
+      const dateHeader = target.closest(".date-accordion-header");
+      if (dateHeader !== null) {
+        this.toggleDateAccordion(dateHeader);
+        return;
+      }
+
+      // 3. Sender-card header click → collapse/expand the whole sender card
+      //    (carbon-copy of legacy toggleSenderCard). The header ALSO holds
+      //    interactive controls (persona badge, copy/gist/rename, delete) — a
+      //    click on any of those is owned by its own handler, NOT a collapse.
+      const senderHeader = target.closest(".sender-card-header");
+      if (senderHeader !== null) {
+        if (target.closest("button, .copy-btn, .sender-session-name") !== null) return;
+        this.toggleSenderCard(senderHeader);
+        return;
+      }
     };
     this.senderCardsMount.addEventListener("click", this.clickHandler);
+  }
+
+  // -------------------------------------------------------------------------
+  // Accordion collapse (sender card + date accordion) — section-toolbar parity
+  // (2026-06-23). Carbon-copy of legacy toggleSenderCard / toggleDateAccordion
+  // re-expressed via `data-collapsed` (the mux idiom; the hide CSS already
+  // exists in the shared sheet for date accordions + the mux list sheet for
+  // sender cards). State persists in ViewStateStore (when wired) so it survives
+  // keyed re-renders + reloads.
+  // -------------------------------------------------------------------------
+
+  private toggleDateAccordion(header: Element): void {
+    const accordion = header.closest(".date-accordion") as HTMLElement | null;
+    /* c8 ignore next */ // defensive: a .date-accordion-header is always inside a .date-accordion by template.
+    if (accordion === null) return;
+    const next = accordion.getAttribute("data-collapsed") !== "true";
+    this.applyCollapsed(accordion, next, ".date-toggle");
+    const id = this.dateAccordionId(accordion);
+    if (id !== null) this.viewState?.setAccordionCollapsed(id, next);
+  }
+
+  private toggleSenderCard(header: Element): void {
+    const card = header.closest(".sender-card") as HTMLElement | null;
+    /* c8 ignore next */ // defensive: a .sender-card-header is always inside a .sender-card by template.
+    if (card === null) return;
+    const next = card.getAttribute("data-collapsed") !== "true";
+    this.applyCollapsed(card, next, ".sender-toggle");
+    const senderId = card.dataset["senderId"];
+    if (senderId !== undefined) this.viewState?.setAccordionCollapsed(`sender::${senderId}`, next);
+  }
+
+  // Apply a collapsed flag to an accordion element + flip its toggle glyph
+  // (▼ expanded / ▶ collapsed). `toggleSelector` finds the header chevron.
+  private applyCollapsed(el: HTMLElement, collapsed: boolean, toggleSelector: string): void {
+    el.setAttribute("data-collapsed", collapsed ? "true" : "false");
+    const toggle = el.querySelector(toggleSelector) as HTMLElement | null;
+    /* c8 ignore next */ // defensive: the chevron span is emitted by the template for every accordion header.
+    if (toggle !== null) toggle.textContent = collapsed ? "▶" : "▼";
+  }
+
+  // Stable persistence id for a date accordion: `date::<sender_id>::<date_key>`.
+  private dateAccordionId(accordion: HTMLElement): string | null {
+    const card     = accordion.closest(".sender-card") as HTMLElement | null;
+    const senderId = card?.dataset["senderId"];
+    const dateKey  = accordion.dataset["dateKey"];
+    if (senderId === undefined || dateKey === undefined) return null;
+    return `date::${senderId}::${dateKey}`;
+  }
+
+  // Walk every accordion currently in the mount — each sender card (id
+  // `sender::<sender_id>`, chevron `.sender-toggle`) and each date accordion
+  // within it (id from dateAccordionId, chevron `.date-toggle`). The per-id
+  // guard branches (a card without `data-sender-id`, an accordion without a
+  // resolvable id) live HERE only, so both reapply + bulk share one coverage
+  // surface.
+  private forEachAccordion(fn: (el: HTMLElement, id: string, toggleSel: string) => void): void {
+    /* c8 ignore next */ // defensive: callers (reapply via render, bulk via bus) both run while mounted; subscriptions detach before senderCardsMount is nulled.
+    if (this.senderCardsMount === null) return;
+    for (const card of Array.from(this.senderCardsMount.querySelectorAll<HTMLElement>(".sender-card"))) {
+      const senderId = card.dataset["senderId"];
+      if (senderId !== undefined) fn(card, `sender::${senderId}`, ".sender-toggle");
+      for (const acc of Array.from(card.querySelectorAll<HTMLElement>(".date-accordion"))) {
+        const id = this.dateAccordionId(acc);
+        if (id !== null) fn(acc, id, ".date-toggle");
+      }
+    }
+  }
+
+  // Re-apply persisted collapse state to every accordion after a render. Reads
+  // the store; a no-op when no store is wired.
+  private reapplyAccordionCollapse(): void {
+    const store = this.viewState;
+    if (store === undefined) return;
+    this.forEachAccordion((el, id, sel) => this.applyCollapsed(el, store.isAccordionCollapsed(id), sel));
+  }
+
+  // Collapse-all / expand-all (toolbar-driven). Flips EVERY accordion (sender
+  // cards AND date accordions) + persists each (when a store is wired).
+  private applyBulkAccordionCollapse(collapsed: boolean): void {
+    const store = this.viewState;
+    this.forEachAccordion((el, id, sel) => {
+      this.applyCollapsed(el, collapsed, sel);
+      store?.setAccordionCollapsed(id, collapsed);
+    });
   }
 
   private toggleProgressGroup(progressGroupId: string, headMessageEl: HTMLElement, toggle: HTMLElement): void {
