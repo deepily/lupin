@@ -366,6 +366,15 @@ def spawn_sessions(
             "COSA_VOICE_HEADLESS"   : "1",
             "COSA_VOICE_ROLE"       : role
         }
+        # Owner-lineage drift fix (2026-06-22): freeze the manager's persona AS IT
+        # IS NOW (spawn time) so the child can stamp it onto its bridge. The
+        # arbiter then resolves a finished/dead worker's manager from this frozen
+        # SNAPSHOT, never re-deriving the manager session's CURRENT persona (which
+        # drifts as personas recycle). Only set when known (managers may spawn
+        # without a resolved persona — then the child has no snapshot and the
+        # resolver falls back to re-derivation, the legacy behavior).
+        if manager_persona:
+            env[ "COSA_VOICE_SPAWNED_BY_PERSONA" ] = manager_persona
         # Transport the persona chain to the child — THE missing link that
         # made spawn_sessions(persona_preference=...) a silent no-op for a
         # month (Rio→Krishna repros, root-caused 2026-06-11). The child's

@@ -903,6 +903,15 @@ def main():
             session_data[ "headless" ]        = os.environ.get( "COSA_VOICE_HEADLESS", "" ) == "1"
             session_data[ "role" ]            = os.environ.get( "COSA_VOICE_ROLE", "reviewer" )
             session_data[ "speakerphone_on" ] = False
+            # Owner-lineage drift fix (2026-06-22): freeze the manager's persona-at-
+            # spawn onto this worker's bridge so the arbiter resolves the TRUE
+            # spawning manager for a finished/dead worker WITHOUT re-deriving the
+            # manager session's CURRENT (drift-prone) persona. Worker-keyed, durable.
+            # Omitted when the spawner couldn't resolve a manager persona (legacy
+            # behavior: resolver falls back to re-derivation).
+            _spawned_by_persona = os.environ.get( "COSA_VOICE_SPAWNED_BY_PERSONA" )
+            if _spawned_by_persona:
+                session_data[ "spawned_by_persona" ] = _spawned_by_persona
 
         # Carry voice_persona forward across ANY context reset (/clear,
         # /compact, resume, --continue double-fire) so the user keeps the same

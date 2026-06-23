@@ -244,6 +244,9 @@ class TestSpawnSessions:
         assert env[ "COSA_VOICE_SPAWNED_BY" ] == "sid-0da4"
         assert env[ "COSA_VOICE_HEADLESS" ]   == "1"
         assert env[ "COSA_VOICE_ROLE" ]       == "reviewer"
+        # owner-lineage drift fix: the manager's persona-at-spawn is frozen into the
+        # child env so the child can stamp it onto its bridge (resolver snapshot).
+        assert env[ "COSA_VOICE_SPAWNED_BY_PERSONA" ] == "Tiberius"
         # manifest persisted with 3 entries
         manifest = _read_manifest( _manifest_path( "sid-0da4", tmp_path ) )
         assert len( manifest ) == 3
@@ -252,9 +255,14 @@ class TestSpawnSessions:
         # manager_persona omitted → topic keys on the session_id slug (stays on
         # `_slug`, so the hyphen survives: "Mgr-XYZ" → "dm-mgr-xyz"). This is the
         # surgical proof the session-id path is UNCHANGED by Phase 3.
+        runner = FakeRunner()
         res = spawn_sessions( 1, "t", "Mgr-XYZ", script_path="x",
-                              runner=FakeRunner(), session_dir=tmp_path )
+                              runner=runner, session_dir=tmp_path )
         assert res[ "collection_topic" ] == "dm-mgr-xyz"
+        # no manager_persona resolved → NO snapshot env (resolver falls back to
+        # re-derivation, the legacy behavior — the omitted-snapshot branch).
+        _argv, env = runner.calls[ 0 ]
+        assert "COSA_VOICE_SPAWNED_BY_PERSONA" not in env
 
     def test_persona_path_canonicalizes_accent_FLIP( self, tmp_path ):
         """Phase 3 FLIP: a PERSONA-derived topic/session name now routes through

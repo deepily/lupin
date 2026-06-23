@@ -508,3 +508,52 @@ class TestResolveWindowTokens:
     def test_nonpositive_env_falls_back( self, monkeypatch ):
         monkeypatch.setenv( "LUPIN_CC_WINDOW_TOKENS", "-5" )
         assert register_session._resolve_window_tokens() == 1_000_000
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestSpawnLineageStamp — owner-lineage drift fix (2026-06-22)
+# A manager-spawned worker stamps spawned_by + the persona-at-spawn SNAPSHOT
+# (spawned_by_persona) onto its bridge so the arbiter resolves the TRUE spawning
+# manager for a finished/dead worker WITHOUT re-deriving the manager session's
+# drift-prone CURRENT persona.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestSpawnLineageStamp:
+    def test_persona_snapshot_stamped_on_bridge( self, isolated_session_dir, patched_main, monkeypatch ):
+        """COSA_VOICE_SPAWNED_BY_PERSONA present → frozen onto the bridge."""
+        monkeypatch.setenv( "COSA_VOICE_SPAWNED_BY",         "mgr-session-uuid" )
+        monkeypatch.setenv( "COSA_VOICE_SPAWNED_BY_PERSONA", "Mr. Radio" )
+        monkeypatch.setenv( "COSA_VOICE_ROLE",               "author" )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge[ "spawned_by" ]         == "mgr-session-uuid"
+        assert bridge[ "spawned_by_persona" ] == "Mr. Radio"      # the frozen snapshot
+        assert bridge[ "role" ]               == "author"
+        assert bridge[ "speakerphone_on" ]    is False
+
+    def test_no_persona_env_omits_snapshot( self, isolated_session_dir, patched_main, monkeypatch ):
+        """spawned_by present but NO persona env → snapshot omitted (legacy path:
+        resolver falls back to re-derivation). The False branch of the stamp gate."""
+        monkeypatch.setenv(  "COSA_VOICE_SPAWNED_BY", "mgr-session-uuid" )
+        monkeypatch.delenv( "COSA_VOICE_SPAWNED_BY_PERSONA", raising=False )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert bridge[ "spawned_by" ] == "mgr-session-uuid"
+        assert "spawned_by_persona" not in bridge
+
+    def test_no_spawned_by_env_no_lineage_stamp( self, isolated_session_dir, patched_main, monkeypatch ):
+        """No COSA_VOICE_SPAWNED_BY (an ordinary interactive session) → the whole
+        lineage block is skipped; no spawned_by / spawned_by_persona on the bridge.
+        (Explicit delenv because a SPAWNED test-runner inherits the var.)"""
+        monkeypatch.delenv( "COSA_VOICE_SPAWNED_BY",         raising=False )
+        monkeypatch.delenv( "COSA_VOICE_SPAWNED_BY_PERSONA", raising=False )
+
+        register_session.main()
+
+        bridge = _read_bridge( isolated_session_dir )
+        assert "spawned_by" not in bridge
+        assert "spawned_by_persona" not in bridge

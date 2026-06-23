@@ -270,6 +270,16 @@ def resolve_manager(
           (PRIMARY — authoritative, globally unique), falling back to the
           tmux_session → manifest-name scan ONLY when `spawned_by` is
           absent/empty (legacy bridges that predate the field)
+        - PERSONA-AT-SPAWN SNAPSHOT (owner-lineage drift fix, 2026-06-22): when
+          the bridge carries BOTH `spawned_by` AND a non-blank `spawned_by_persona`
+          (the manager persona FROZEN at spawn), the manager persona is read from
+          that snapshot — NEVER re-derived from the manager session's CURRENT
+          persona. Re-derivation (`persona_lookup(spawned_by)`) DRIFTS as personas
+          recycle across /clear/compaction, so a finished/dead worker would be
+          mis-attributed to the manager's LATER persona (and carry_forward_lineage
+          would cache that wrong value into death). The snapshot is worker-keyed
+          and immune to that drift. Re-derivation remains ONLY for legacy bridges
+          predating the snapshot (snapshot absent/blank/non-string).
         - "lineage" requires BOTH a manager_session_id (via either source) AND
           a DM-able manager persona; a hit without a usable persona degrades
           (never DM a None persona)
@@ -289,18 +299,28 @@ def resolve_manager(
         return { "manager_session_id": None, "manager_persona": None, "source": SOURCE_UNRESOLVED }
 
     try:
-        bridge = bridge_lookup( worker_session_id )
+        bridge    = bridge_lookup( worker_session_id )
+        is_bridge = isinstance( bridge, dict )
         # PRIMARY: spawned_by = the manager's real session id — unique, so the
         # persona-indexed-name collision (cc-<role>-<persona>-<N> reused across
         # sessions + stale manifests) cannot arise on this path.
-        manager_id = bridge.get( "spawned_by" ) if isinstance( bridge, dict ) else None
+        manager_id = bridge.get( "spawned_by" ) if is_bridge else None
+        # PERSONA-AT-SPAWN SNAPSHOT: the manager persona FROZEN onto the worker
+        # bridge at spawn. Normalize to a stripped str ("" when absent/blank/
+        # non-string) so the short-circuit below is a clean truthiness test.
+        snapshot   = bridge.get( "spawned_by_persona" ) if is_bridge else None
+        snapshot   = snapshot.strip() if isinstance( snapshot, str ) else ""
+        if manager_id and snapshot:
+            # Frozen attribution — immune to the manager session's persona drift.
+            return { "manager_session_id": manager_id, "manager_persona": snapshot, "source": SOURCE_LINEAGE }
         if not manager_id:
             # FALLBACK (legacy bridges without spawned_by): manifest-name scan,
             # multi-match-guarded — ambiguity still degrades, never guesses.
-            tmux       = bridge.get( "tmux_session" ) if isinstance( bridge, dict ) else None
+            tmux       = bridge.get( "tmux_session" ) if is_bridge else None
             manager_id = manifest_scan( tmux, session_dir ) if tmux else None
         if not manager_id:
             return _fallback()
+        # Legacy path only (no snapshot): re-derive the manager's CURRENT persona.
         persona = persona_lookup( manager_id )
         name    = persona.get( "name" ) if isinstance( persona, dict ) else None
         if not name:
@@ -322,6 +342,17 @@ def quick_smoke_test():
     )
     assert out == { "manager_session_id": "tib-uuid-real", "manager_persona": "Tiberius", "source": "lineage" }, out
     assert scan_calls == [ ], scan_calls   # spawned_by short-circuits the manifest scan
+
+    # persona-at-spawn SNAPSHOT wins over a DRIFTED re-derivation (owner-lineage
+    # drift fix): the frozen "Mr. Radio" beats persona_lookup's current "Tiberius".
+    lookup_calls = [ ]
+    out = resolve_manager(
+        "dead-worker",
+        bridge_lookup  = lambda sid: { "spawned_by": "mgr-uuid", "spawned_by_persona": "Mr. Radio" },
+        persona_lookup = lambda mid: lookup_calls.append( mid ) or { "name": "Tiberius" },
+    )
+    assert out == { "manager_session_id": "mgr-uuid", "manager_persona": "Mr. Radio", "source": "lineage" }, out
+    assert lookup_calls == [ ], lookup_calls   # snapshot short-circuits the drift-prone re-derivation
 
     # spawned_by present but persona un-DM-able → degrade, never guess
     out = resolve_manager(
