@@ -1,6 +1,6 @@
 # Multiplexer Full-Parity Build — Round-2 Revised Plan (for Rick's ratification)
 
-**Date:** 2026-06-22 · **Author:** Tiberius 👑 (session 704c71b2, for Rick) · **Status:** REVISED DRAFT — folds all Round-1 cascaded-review findings (see `01-implementation-plan.md` §Cascaded Review Round 1). Rick ruled "I revise now, you ratify" (2026-06-22). Awaiting Rick ratification; re-review by the 3 lenses optional on his word.
+**Date:** 2026-06-22 · **Author:** Tiberius 👑 (session 704c71b2, for Rick) · **Status:** ✅ RATIFIED by Rick 2026-06-22 — now in execution. Folds all Round-1 cascaded-review findings (see `01-implementation-plan.md` §Cascaded Review Round 1). Rick ruled "I revise now, you ratify" (2026-06-22). Ratified product calls: a11y OUT-of-cutover-bar (except live legacy aria), F5 caret-splice PORT, Reading-Pane reduced first pass — PLUS the MATCH-LEGACY voice-input override (rebuild legacy's inline voice-input row; Tier-3 voice-region carve is temporary). Feature lanes spinning (Foundation already green+merged at `3a5d87eb`).
 
 ## What changed vs Round 1 (the review's verdict was right)
 Round 1 (all 3 lenses REQUEST CHANGES) exposed that the draft **consumed a parity oracle it never built or laned**, **measured layout instead of function**, and **ignored the convergence-file merge bottleneck**. This revision fixes all of that. The WS4 feature decomposition (F1–F12) was sound and is retained.
