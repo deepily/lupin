@@ -78,8 +78,20 @@ src/terraform/**/terraform.tfvars
 src/terraform/**/*.auto.tfvars
 src/terraform/**/crash.log
 
-# Skip the io directory (logs, outputs, etc.)
-io/
+# Skip the io directory (logs, outputs, etc.) — runtime artifacts.
+# Pattern is `io/**` (recursive contents) rather than `io/` (whole dir) so the
+# committed visual-regression baselines below can be re-included: git cannot
+# re-include a path whose parent directory is excluded as a whole.
+io/**
+
+# EXCEPTION — playwright visual-regression baselines are git-TRACKED so they
+# round-trip into a fresh :8000 / CI test container (CI-portable; no host-resident
+# dependency). Scoped carve: re-include ONLY io/test-suite/visual-baselines/ — the
+# failure-diff store (io/test-suite/visual-failures/) and all other io/ artifacts
+# stay ignored. Wiring: pytest.ini `playwright_visual_snapshots_path`. (task 6ca79dc2)
+!io/test-suite/
+!io/test-suite/visual-baselines/
+!io/test-suite/visual-baselines/**
 
 # Omit Mail Map
 .mailmap
