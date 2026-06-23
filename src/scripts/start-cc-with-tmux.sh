@@ -141,6 +141,17 @@ for _v in $( compgen -A variable | grep '^COSA_VOICE_MANAGERS__' || true ); do
     fi
 done
 
+# Forward the subagent-governance runtime flag across the tmux boundary so the
+# manager-spawn governance hook (subagent_governance.py, default-OFF behind
+# LUPIN_SUBAGENT_GOVERNANCE) actually sees it. tmux does not inherit arbitrary
+# parent env, so a bare `export LUPIN_SUBAGENT_GOVERNANCE=1` never reaches the
+# hook without this forward (activation 0dcf3a10, 2026-06-23). Runtime-flag
+# design preserved: unset/empty → hook stays default-OFF; Rick toggles it via
+# his shell export.
+if [[ -n "${LUPIN_SUBAGENT_GOVERNANCE:-}" ]]; then
+    PERSONA_ENV_FLAGS+=( -e "LUPIN_SUBAGENT_GOVERNANCE=${LUPIN_SUBAGENT_GOVERNANCE}" )
+fi
+
 # ── Dry-run: print what would happen and exit (no tmux side effects) ──────────
 # Sits AFTER the env-flag assembly (moved 2026-06-11) so the PERSONA-ENV line
 # shows the REAL forwarded flags — the fleet-roster unit test asserts the
