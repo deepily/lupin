@@ -64,6 +64,11 @@ HOLD_SCHEMA_FIELDS     = ( "session_id", "persona", "held_at", "ttl_seconds",
                            "last_spinup_check_ts", "last_surfaced_questions_ts" )
 DEFAULT_TTL_SECONDS    = 900
 AWAITING_NONE          = "none"
+HOLD_GLOB              = ".heartbeat-hold-*.json"
+# Janitor grace (bug b39562e4 pt2): a hold must be EXPIRED by at least this margin
+# BEYOND its own ttl before it is prunable — 6h is far past any plausible live or
+# long-single-turn session, so the janitor can never reap a hold still in use.
+DEFAULT_PRUNE_GRACE_SECONDS = 21600
 
 # 6929f4ac field names (single-source so readers/writers never drift)
 PENDING_USER_GATES_FIELD = "pending_user_gates"
@@ -354,6 +359,66 @@ def clear_hold( session_id, base_dir=None ):
         path.unlink( missing_ok=True )
     except OSError:
         pass
+
+
+def prune_stale_hold_files( base_dir=None, now=None,
+                            grace_seconds=DEFAULT_PRUNE_GRACE_SECONDS,
+                            live_session_ids=None ):
+    """
+    Reclaim hold artifacts that have been EXPIRED far longer than any plausible
+    live session — the accumulating `.heartbeat-hold-*.json` cruft in the project
+    root (bug b39562e4 pt2 — the arbiter-side janitor seam).
+
+    A file is PRUNABLE iff ALL of:
+      - its held_at parses AND (now - held_at) >= ttl_seconds + grace_seconds
+        (expired beyond the generous grace window — a live or long-single-turn
+        session refreshes well inside this, so it is never at risk), AND
+      - its session_id is NOT in `live_session_ids` (belt-and-suspenders: never
+        reap a currently-live session's hold even if its clock looks ancient).
+
+    CONSERVATIVE BY CONSTRUCTION — a file that is unreadable, non-JSON, not a
+    dict, missing/unparseable held_at, or carrying a non-numeric ttl is KEPT: the
+    janitor only ever deletes a hold it can PROVE is ancient.
+
+    Requires:
+        - base_dir is path-like / str / None; now is an aware datetime or None;
+          grace_seconds >= 0; live_session_ids is an iterable of session-id
+          strings or None
+
+    Ensures:
+        - deletes only provably-ancient hold files; returns the sorted list of
+          pruned file paths (as strings)
+        - never raises (a per-file OSError / JSON error skips that file)
+    """
+    if now is None:
+        now = _now()
+    live   = set( live_session_ids or ( ) )
+    base   = _resolve_base_dir( base_dir )
+    pruned = [ ]
+    try:
+        candidates = sorted( base.glob( HOLD_GLOB ) )
+    except OSError:
+        return pruned
+    for path in candidates:
+        try:
+            hold = json.loads( path.read_text() )
+        except ( OSError, ValueError ):
+            continue                                       # unreadable/garbage → KEEP
+        if not isinstance( hold, dict ):
+            continue
+        if hold.get( "session_id" ) in live:
+            continue                                       # live session → never reap
+        held_dt = _parse_iso( hold.get( "held_at" ) )
+        ttl     = hold.get( "ttl_seconds" )
+        if held_dt is None or isinstance( ttl, bool ) or not isinstance( ttl, ( int, float ) ):
+            continue                                       # can't prove age → KEEP
+        if ( now - held_dt ).total_seconds() >= ttl + grace_seconds:
+            try:
+                path.unlink()
+                pruned.append( str( path ) )
+            except OSError:
+                pass                                       # racing delete → fine
+    return pruned
 
 
 def is_fresh( hold, now=None ):

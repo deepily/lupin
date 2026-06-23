@@ -45,6 +45,7 @@ from cosa.agents.heartbeat_arbiter.operator_gate_routing import DEFAULT_DIGEST_C
 # real here so the :8001 service actually resurfaces a dark session's aged user-gate
 # to Rick (without this wiring the seam stays None → the backstop is decorative).
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold as _default_hold_reader
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import prune_stale_hold_files as _default_hold_janitor
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
 
@@ -360,16 +361,21 @@ class FleetArbiterLoop:
 
     def __init__(
         self,
-        job_factory : Callable[ [ ], ArbiterConsumerJob ],
+        job_factory     : Callable[ [ ], ArbiterConsumerJob ],
         *,
-        log_fn      : Optional[ Callable ] = None,
+        log_fn          : Optional[ Callable ] = None,
+        hold_janitor_fn : Optional[ Callable ] = None,
     ) -> None:
-        self._job_factory = job_factory
-        self._log_fn      = log_fn if log_fn is not None else _default_log_fn
-        self._stop        = threading.Event()
-        self._current_job = None
-        self._thread      = None
-        self.cycles       = 0
+        self._job_factory    = job_factory
+        self._log_fn         = log_fn if log_fn is not None else _default_log_fn
+        # b39562e4 pt2: prune ancient .heartbeat-hold-* cruft once per supervisor
+        # cycle (each arbiter start + ~12h recycle). Injectable so tests never touch
+        # the real project root. Conservative by construction (6h grace).
+        self._hold_janitor_fn = hold_janitor_fn if hold_janitor_fn is not None else _default_hold_janitor
+        self._stop           = threading.Event()
+        self._current_job    = None
+        self._thread         = None
+        self.cycles          = 0
 
     def run( self ) -> None:
         """
@@ -382,6 +388,7 @@ class FleetArbiterLoop:
             - never raises
         """
         while not self._stop.is_set():
+            self._reap_stale_holds()             # b39562e4 pt2: janitor — clear ancient hold-file cruft
             job = self._job_factory()
             self._current_job = job
             self.cycles += 1
@@ -394,6 +401,22 @@ class FleetArbiterLoop:
             if self._stop.is_set():
                 break
             self._log_fn( "fleet_arbiter_recycle", reason="clean cap-exit — relaunching", summary=summary )
+
+    def _reap_stale_holds( self ) -> None:
+        """
+        Prune ancient `.heartbeat-hold-*` cruft (bug b39562e4 pt2). Never raises —
+        the janitor is best-effort housekeeping and must never kill the supervisor.
+
+        Ensures:
+            - calls the injected hold-janitor; logs a count when anything is pruned
+            - swallows + logs any janitor exception
+        """
+        try:
+            pruned = self._hold_janitor_fn()
+            if pruned:
+                self._log_fn( "fleet_arbiter_hold_janitor", pruned_count=len( pruned ) )
+        except Exception as e:                   # janitor must never kill the supervisor
+            self._log_fn( "fleet_arbiter_hold_janitor_error", error=str( e ) )
 
     def start( self ) -> None:
         """Spawn the daemon supervisor thread."""

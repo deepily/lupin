@@ -132,7 +132,7 @@ def test_runner_recycles_until_stop():
         n[ "c" ] += 1
         if n[ "c" ] >= 2: runner._stop.set()       # stop AT the 2nd job (after its do_all)
         return FakeJob( result="hard-cap" )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=lambda: [ ] )
     runner.run()
     assert runner.cycles == 2
     assert len( [ e for e, _ in rec.logs if e == "fleet_arbiter_recycle" ] ) == 1     # one relaunch
@@ -145,7 +145,7 @@ def test_runner_swallows_job_error():
     def factory():
         runner._stop.set()                          # stop after this one job
         return FakeJob( raises=True )
-    runner = FleetArbiterLoop( factory, log_fn=rec.log )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=lambda: [ ] )
     runner.run()
     assert runner.cycles == 1
     assert any( e == "fleet_arbiter_job_error" for e, _ in rec.logs )
@@ -155,11 +155,41 @@ def test_runner_start_stop_thread():
     rec = Recorder()
     ev  = threading.Event()
     job = FakeJob( block=ev )
-    runner = FleetArbiterLoop( lambda: job, log_fn=rec.log )
+    runner = FleetArbiterLoop( lambda: job, log_fn=rec.log, hold_janitor_fn=lambda: [ ] )
     runner.start()
     runner.stop()                                   # _stop + request_cancel → ev.set → do_all returns → break → join
     assert job.cancelled is True
     assert runner._thread is not None
+
+
+def test_runner_janitor_logs_when_pruned():
+    # b39562e4 pt2: janitor runs each cycle; a non-empty prune is logged with a count
+    rec = Recorder()
+    runner = None
+    def factory():
+        runner._stop.set()
+        return FakeJob( result="hard-cap" )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log,
+                               hold_janitor_fn=lambda: [ "/x/.heartbeat-hold-a.json",
+                                                         "/x/.heartbeat-hold-b.json" ] )
+    runner.run()
+    janitor_logs = [ kw for e, kw in rec.logs if e == "fleet_arbiter_hold_janitor" ]
+    assert janitor_logs and janitor_logs[ 0 ][ "pruned_count" ] == 2
+
+
+def test_runner_janitor_exception_swallowed():
+    # janitor blow-up must NOT kill the supervisor — logged + cycle proceeds
+    rec = Recorder()
+    runner = None
+    def factory():
+        runner._stop.set()
+        return FakeJob( result="hard-cap" )
+    def _boom():
+        raise OSError( "janitor exploded" )
+    runner = FleetArbiterLoop( factory, log_fn=rec.log, hold_janitor_fn=_boom )
+    runner.run()
+    assert runner.cycles == 1
+    assert any( e == "fleet_arbiter_hold_janitor_error" for e, _ in rec.logs )
 
 
 def test_runner_stop_cancel_error_swallowed():

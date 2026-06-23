@@ -155,6 +155,79 @@ def test_clear_hold_oserror_swallowed( tmp_path ):
     hh.clear_hold( "cdir", base_dir=tmp_path )     # must not raise
 
 
+# ── prune_stale_hold_files — bug b39562e4 pt2 (janitor seam) ──────────────────
+
+_PRUNE_NOW = datetime.datetime( 2026, 6, 23, 12, 0, 0, tzinfo=UTC )
+
+
+def _hold_file( base, sid, age_seconds, ttl=900, **extra ):
+    """Write a hold file for `sid` whose held_at is `age_seconds` before _PRUNE_NOW."""
+    held_at = ( _PRUNE_NOW - datetime.timedelta( seconds=age_seconds ) ).isoformat()
+    d = { "session_id": sid, "held_at": held_at, "ttl_seconds": ttl,
+          "work_owed": True, "reason": "x" }
+    d.update( extra )
+    ( base / f".heartbeat-hold-{sid}.json" ).write_text( json.dumps( d ) )
+
+
+def test_prune_reaps_only_ancient_keeps_fresh_and_within_grace( tmp_path ):
+    # ancient: expired > ttl + 6h grace → REAP ; fresh: now → KEEP ;
+    # within-grace: expired but inside grace window → KEEP
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100 )
+    _hold_file( tmp_path, "fresh",   age_seconds=0 )
+    _hold_file( tmp_path, "recent",  age_seconds=900 + 60 )   # expired 1m ago, < grace
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW )
+    assert pruned == [ str( tmp_path / ".heartbeat-hold-ancient.json" ) ]
+    assert     ( tmp_path / ".heartbeat-hold-fresh.json"  ).exists()
+    assert     ( tmp_path / ".heartbeat-hold-recent.json" ).exists()
+    assert not ( tmp_path / ".heartbeat-hold-ancient.json" ).exists()
+
+
+def test_prune_never_reaps_a_live_session_even_if_ancient( tmp_path ):
+    _hold_file( tmp_path, "livesid", age_seconds=900 + 21600 + 999 )
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW,
+                                        live_session_ids=[ "livesid" ] )
+    assert pruned == [ ]
+    assert ( tmp_path / ".heartbeat-hold-livesid.json" ).exists()
+
+
+def test_prune_keeps_unprovable_files( tmp_path ):
+    # garbage JSON / non-dict / missing held_at / non-numeric ttl / bool ttl → all KEPT
+    ( tmp_path / ".heartbeat-hold-garbage.json" ).write_text( "{not json" )
+    ( tmp_path / ".heartbeat-hold-list.json"    ).write_text( "[]" )
+    _hold_file( tmp_path, "noheld",  age_seconds=999999 ); \
+        ( tmp_path / ".heartbeat-hold-noheld.json" ).write_text( json.dumps(
+            { "session_id": "noheld", "ttl_seconds": 900, "reason": "x" } ) )
+    _hold_file( tmp_path, "strttl",  age_seconds=999999, ttl="nope" )
+    _hold_file( tmp_path, "boolttl", age_seconds=999999, ttl=True )
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW )
+    assert pruned == [ ]
+    for sid in ( "garbage", "list", "noheld", "strttl", "boolttl" ):
+        assert ( tmp_path / f".heartbeat-hold-{sid}.json" ).exists()
+
+
+def test_prune_defaults_now_and_no_files( tmp_path ):
+    # empty dir → [] ; also exercises the now=None default path
+    assert hh.prune_stale_hold_files( base_dir=tmp_path ) == [ ]
+
+
+def test_prune_glob_oserror_returns_empty( monkeypatch ):
+    class _BadBase:
+        def glob( self, pattern ):
+            raise OSError( "boom" )
+    monkeypatch.setattr( hh, "_resolve_base_dir", lambda b: _BadBase() )
+    assert hh.prune_stale_hold_files( base_dir="anything", now=_PRUNE_NOW ) == [ ]
+
+
+def test_prune_unlink_oserror_is_skipped( tmp_path, monkeypatch ):
+    import pathlib
+    _hold_file( tmp_path, "ancient", age_seconds=900 + 21600 + 100 )
+    def _boom( self, *a, **k ):
+        raise OSError( "unlink denied" )
+    monkeypatch.setattr( pathlib.Path, "unlink", _boom )
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW )
+    assert pruned == [ ]                                   # unlink failed → not reported pruned
+
+
 # ── is_fresh ──────────────────────────────────────────────────────────────────
 
 def _hold( held_at, ttl_seconds=900, reason="r", work_owed=True ):
