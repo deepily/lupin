@@ -35,6 +35,7 @@ import type {
   LupinEvent,
   Notification,
   NotificationChangeKind,
+  PredictionHint,
   StoreNotificationsChangedPayload,
   VoicePersona,
 } from "../shared/types";
@@ -186,6 +187,7 @@ interface ServerNotificationFields {
   progress_group_id   ?: string;
   was_expired         ?: boolean;
   time_display        ?: string;
+  prediction_hint     ?: PredictionHint;   // WP14 (F8) — thumbs-vote training-signal source
 }
 
 interface ResponsePayload {
@@ -584,6 +586,7 @@ class NotificationStoreImpl implements NotificationStore {
     if (raw.progress_group_id !== undefined) norm.progress_group_id = raw.progress_group_id;
     if (raw.was_expired !== undefined)       norm.was_expired       = raw.was_expired;
     if (raw.time_display !== undefined)      norm.time_display      = raw.time_display;
+    if (raw.prediction_hint !== undefined)   norm.prediction_hint   = raw.prediction_hint;
     return norm;
   }
 

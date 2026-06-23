@@ -7,17 +7,18 @@ stash → vote(id, dir) → `POST /api/notify/prediction-vote/{id}` (stubbed) �
 recorded vote, driven through the test-hook store (real in-browser ApiClient +
 EventBus).
 
-SCOPE NOTE (explicit per "USER IS NEVER A TESTER" — name what cannot be
-automated yet + why): the vote CONTROLS template (`renderPredictionVoteControls`
-— the ≥50%-confidence gate, the 👍🏼/👎🏼 buttons, the `.voted`/`.selected`
-highlight) is invoked by the notification-item render path
-(NotificationsListRenderer), which is the INTEGRATION OWNER's surface and is NOT
-yet wired in the multiplexer. The DOM-level control assertions
-(`test_vote_controls_*` below) are therefore `@pytest.mark.skip` with that reason
-until the integration owner mounts the template; the store-level round-trip
-(the POST contract + reducer) IS exercised now. The gate + DOM highlight are
-already covered at 100% by the unit suite
-(templates_prediction_vote_controls.test.ts).
+SCOPE (F8 integration landed 2026-06-22, Tiffany 💍): the vote CONTROLS template
+(`renderPredictionVoteControls` — the ≥50%-confidence gate, the 👍🏼/👎🏼 buttons,
+the `.voted`/`.selected` highlight) is now wired into the notification-item render
+path (NotificationsListRenderer ← boot.ts injects stores.predictionVote). The
+previously-skipped DOM-level test (`test_vote_controls_dom_render_and_gate`) is
+implemented + un-skipped: it seeds a prediction notification through the live
+queue-update reducer and asserts the full-page render (gate present/absent),
+the vote POST, the optimistic highlight, and the reconcile. It runs GREEN only
+against a boot.js that includes the F8 wiring (rebuild via
+src/scripts/build-multiplexer.sh). The store-level round-trip + the unit suite
+(templates_prediction_vote_controls.test.ts, notifications_list_renderer.test.ts)
+remain the fast logic gate.
 
 Venue: :8000 (monopolize, scheduled) — `test_multiplexer_*` E2E batch. Authored
 by Lane E; RUN by the manager.
@@ -136,12 +137,94 @@ def test_vote_without_context_is_rejected_no_post( page ):
     assert hits[ "n" ] == 0
 
 
-@pytest.mark.skip(
-    reason="Vote-controls template (gate + 👍🏼/👎🏼 + .voted/.selected) is invoked by "
-           "NotificationsListRenderer (integration owner's surface), not yet mounted in the "
-           "multiplexer. DOM-level control assertions land once the integration owner wires "
-           "renderPredictionVoteControls into the notification-item render path. The gate + "
-           "highlight are covered at 100% by templates_prediction_vote_controls.test.ts."
-)
-def test_vote_controls_dom_render_and_gate():  # pragma: no cover - documented deferral
-    raise NotImplementedError
+# Seed a NON-action-required notification carrying a prediction_hint through the
+# live queue-update path, so the NotificationsListRenderer paints it (sender
+# section). `confidence` drives the gate (≥50% → controls mount). Returns once
+# the synchronous reducer + re-render have run.
+_SEED_PREDICTION_NOTIFICATION_JS = """
+( args ) => {
+    const hook = window.__multiplexerTestHook;
+    if ( !hook || !hook.eventBus ) throw new Error( "eventBus missing on test hook" );
+    hook.eventBus.emit( {
+        type    : "notification_queue_update",
+        payload : { notification : {
+            id_hash         : args.id,
+            message         : args.message,
+            sender_id       : args.sender,
+            timestamp       : "2026-06-22T14:00:00.000Z",
+            response_type   : "yes_no",
+            prediction_hint : { confidence: args.confidence, predicted_value: "yes", category: "calendar" },
+        } },
+        source : "test",
+        ts     : 1750600000000,
+    } );
+}
+"""
+
+# Locate the vote control sub-tree for a given notification id_hash in the
+# rendered sender section. Returns presence + the cast-highlight state so one
+# round-trip can assert mount → optimistic → reconcile.
+_VOTE_CONTROL_STATE_JS = """
+( id ) => {
+    const msg = document.querySelector( `.sender-message[data-id-hash="${id}"]` );
+    if ( msg === null ) return { present: false };
+    const controls = msg.querySelector( '.prediction-hint-vote' );
+    if ( controls === null ) return { present: false };
+    const up   = controls.querySelector( '.prediction-vote-up' );
+    const down = controls.querySelector( '.prediction-vote-down' );
+    return {
+        present      : true,
+        voted        : controls.classList.contains( 'voted' ),
+        up_selected  : up   !== null && up.classList.contains( 'selected' ),
+        down_selected: down !== null && down.classList.contains( 'selected' ),
+    };
+}
+"""
+
+
+def test_vote_controls_dom_render_and_gate( page ):
+    """F8 acceptance (Gate 1 + Gate 2): the vote-controls contract node renders
+    PRESENT for a prediction notification clearing the confidence gate, is ABSENT
+    below it, and a click drives the POST + optimistic highlight + reconcile.
+
+    Drives the FULL multiplexer page (boot.js): seed a prediction notification
+    through the live queue-update reducer → NotificationsListRenderer paints the
+    notification-item → vote controls. The integration wiring (boot.ts injects
+    stores.predictionVote into the renderer) must be in the served boot.js — so
+    this runs GREEN only against a build that includes the F8 wiring.
+    """
+    hits = { "n": 0, "last_url": "", "last_body": "" }
+    _open( page, hits )
+
+    # --- Gate (below threshold → NO controls): confidence 0.40 < 0.50 ---
+    page.evaluate( _SEED_PREDICTION_NOTIFICATION_JS, {
+        "id": "pred-low", "message": "Low-confidence hint?", "sender": "sess_pred_low", "confidence": 0.40,
+    } )
+    page.wait_for_selector( '.sender-message[data-id-hash="pred-low"]', timeout=5_000 )
+    low = page.evaluate( _VOTE_CONTROL_STATE_JS, "pred-low" )
+    assert low[ "present" ] is False, "controls must NOT render below the 50% gate"
+
+    # --- Gate 1 (at/above threshold → controls PRESENT): confidence 0.90 ---
+    page.evaluate( _SEED_PREDICTION_NOTIFICATION_JS, {
+        "id": "pred-hi", "message": "Schedule the meeting?", "sender": "sess_pred_hi", "confidence": 0.90,
+    } )
+    page.wait_for_selector( '.sender-message[data-id-hash="pred-hi"] .prediction-hint-vote', timeout=5_000 )
+    before = page.evaluate( _VOTE_CONTROL_STATE_JS, "pred-hi" )
+    assert before[ "present" ] is True, "vote-controls contract node must render PRESENT for a prediction notification"
+    assert before[ "voted" ] is False and before[ "up_selected" ] is False, "no cast yet → unhighlighted"
+
+    # --- Gate 2 (round-trip): click 👍🏼 → optimistic highlight + POST fires ---
+    page.click( '.sender-message[data-id-hash="pred-hi"] .prediction-vote-up' )
+    page.wait_for_selector( '.sender-message[data-id-hash="pred-hi"] .prediction-vote-up.selected', timeout=5_000 )
+    assert hits[ "n" ] == 1, "exactly one prediction-vote POST must fire"
+    assert "/api/notify/prediction-vote/pred-hi" in hits[ "last_url" ]
+    body = json.loads( hits[ "last_body" ] )
+    assert body[ "vote" ] == "up"
+    assert body[ "question" ] == "Schedule the meeting?"
+    assert body[ "response_type" ] == "yes_no"
+
+    # --- Reconcile: the recorded vote survives the post-POST re-render ---
+    after = page.evaluate( _VOTE_CONTROL_STATE_JS, "pred-hi" )
+    assert after[ "present" ] is True
+    assert after[ "voted" ] is True and after[ "up_selected" ] is True, "reconciled cast-vote highlight persists"
+    assert after[ "down_selected" ] is False

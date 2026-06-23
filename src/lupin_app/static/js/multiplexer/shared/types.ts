@@ -308,6 +308,21 @@ export interface VoicePersona {
 // `normalize()` copies each through when present.
 // ---------------------------------------------------------------------------
 
+// WP14 (F8) — prediction-hint payload riding on a notification. The server
+// stamps a hint (CBR/LLM prediction of how the user will answer) onto the
+// notification frame; NotificationStore.normalize() copies it through, and the
+// notification-item render path mounts the thumbs-vote controls when the hint's
+// confidence clears PREDICTION_VOTE_MIN_PCT. `response_type` (the kind of
+// answer predicted) already rides on Notification above. `predicted_value` is
+// echoed back verbatim at vote-POST time (the server does not persist the hint,
+// so the client supplies what was voted on — parity with legacy notifications.js
+// `_predictionVoteContext`).
+export interface PredictionHint {
+  confidence      : number;     // 0.0–1.0; ×100 → percent for the gate + display
+  predicted_value : unknown;    // echoed back on vote (opaque to the renderer)
+  category        : string;     // training-signal bucket (echoed back on vote)
+}
+
 export interface Notification {
   id_hash         : string;
   ts              : number;          // ms epoch (normalized from server `timestamp` ISO string)
@@ -321,6 +336,7 @@ export interface Notification {
   response_type?  : "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
   options?        : ReadonlyArray<string>;   // valid choices for multiple_choice; ["yes","no"] for yes_no
   default_value?  : string;          // returned on local expiry without POST
+  prediction_hint?: PredictionHint;  // WP14 (F8) — thumbs-vote training-signal source
   // Phase 5 D-B (2026-05-05) — renderer-surfaced fields.
   voice_persona?    : VoicePersona;   // per-sender persona for --persona-color CSS var
   abstract?         : string;         // detailed description; surfaced via 📋 indicator

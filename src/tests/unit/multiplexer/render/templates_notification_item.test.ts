@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { renderNotificationItem } from "../../../../lupin_app/static/js/multiplexer/render/templates/notificationItem";
-import type { Notification } from "../../../../lupin_app/static/js/multiplexer/shared/types";
+import type { PredictionVoteIntegration } from "../../../../lupin_app/static/js/multiplexer/render/templates/predictionVoteControls";
+import type { Notification, PredictionVoteDir } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -144,4 +145,90 @@ test("notificationItem: progress-group head nests badge + indicator INSIDE .mess
   const text = el.querySelector(".progress-group-head .message-text")!;
   assert.notEqual(text.querySelector(".expired-badge"), null, "badge nests in .message-text within the head");
   assert.notEqual(text.querySelector(".abstract-indicator"), null, "indicator nests in .message-text within the head");
+});
+
+// ---------------------------------------------------------------------------
+// WP14 (F8) — prediction-hint vote controls in the notification-item path.
+// Presence is PURE-DATA (notification.prediction_hint + gate); the optional
+// integration supplies the cast-vote highlight + click forwarding.
+// ---------------------------------------------------------------------------
+
+function makeIntegration(
+  vote?: PredictionVoteDir,
+): { integration: PredictionVoteIntegration; calls: Array<{ id: string; dir: PredictionVoteDir }> } {
+  const calls: Array<{ id: string; dir: PredictionVoteDir }> = [];
+  const integration: PredictionVoteIntegration = {
+    getVote: () => vote,
+    onVote : (id, dir) => { calls.push({ id, dir }); },
+  };
+  return { integration, calls };
+}
+
+test("notificationItem: no prediction_hint → no vote controls", () => {
+  const el = renderNotificationItem(makeNotification(), { appTimezone: "UTC" });
+  assert.equal(el.querySelector(".prediction-hint-vote"), null);
+});
+
+test("notificationItem: prediction_hint below the gate → no vote controls", () => {
+  const el = renderNotificationItem(
+    makeNotification({ prediction_hint: { confidence: 0.49, predicted_value: "yes", category: "calendar" } }),
+    { appTimezone: "UTC" },
+  );
+  assert.equal(el.querySelector(".prediction-hint-vote"), null);
+});
+
+test("notificationItem: prediction_hint at/above the gate mounts the vote controls (pure-data, no integration)", () => {
+  const el = renderNotificationItem(
+    makeNotification({ prediction_hint: { confidence: 0.5, predicted_value: "yes", category: "calendar" } }),
+    { appTimezone: "UTC" },
+  );
+  const controls = el.querySelector(".prediction-hint-vote");
+  assert.notEqual(controls, null);
+  assert.notEqual(el.querySelector(".prediction-vote-up"), null);
+  assert.notEqual(el.querySelector(".prediction-vote-down"), null);
+  // No integration → no prior cast highlight.
+  assert.equal(controls!.classList.contains("voted"), false);
+});
+
+test("notificationItem: vote controls render AFTER the message text (appended to .sender-message)", () => {
+  const el = renderNotificationItem(
+    makeNotification({ prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "calendar" } }),
+    { appTimezone: "UTC" },
+  );
+  const kids = Array.from(el.children);
+  const textIdx = kids.findIndex(k => k.querySelector(".message-text") !== null || k.classList.contains("message-text"));
+  const voteIdx = kids.findIndex(k => k.classList.contains("prediction-hint-vote"));
+  assert.ok(voteIdx > textIdx, "vote controls must come after the message text");
+});
+
+test("notificationItem: integration.onVote is forwarded with the notification id_hash + dir on click", () => {
+  const { integration, calls } = makeIntegration();
+  const el = renderNotificationItem(
+    makeNotification({ id_hash: "pred-7", prediction_hint: { confidence: 0.8, predicted_value: "no", category: "calendar" } }),
+    { appTimezone: "UTC", predictionVote: integration },
+  );
+  el.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click();
+  el.querySelector<HTMLButtonElement>(".prediction-vote-down")!.click();
+  assert.deepEqual(calls, [ { id: "pred-7", dir: "up" }, { id: "pred-7", dir: "down" } ]);
+});
+
+test("notificationItem: integration.getVote drives the cast-vote highlight on render", () => {
+  const { integration } = makeIntegration("down");
+  const el = renderNotificationItem(
+    makeNotification({ prediction_hint: { confidence: 0.8, predicted_value: "no", category: "calendar" } }),
+    { appTimezone: "UTC", predictionVote: integration },
+  );
+  const controls = el.querySelector(".prediction-hint-vote")!;
+  assert.ok(controls.classList.contains("voted"));
+  assert.ok(el.querySelector(".prediction-vote-down")!.classList.contains("selected"));
+  assert.equal(el.querySelector(".prediction-vote-up")!.classList.contains("selected"), false);
+});
+
+test("notificationItem: prediction controls also mount on a progress-group message", () => {
+  const el = renderNotificationItem(
+    makeNotification({ progress_group_id: "pg_1", prediction_hint: { confidence: 0.8, predicted_value: "yes", category: "calendar" } }),
+    { appTimezone: "UTC" },
+  );
+  assert.notEqual(el.querySelector(".progress-group-head"), null);
+  assert.notEqual(el.querySelector(".prediction-hint-vote"), null);
 });

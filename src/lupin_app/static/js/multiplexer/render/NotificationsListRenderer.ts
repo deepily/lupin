@@ -28,14 +28,18 @@ import type {
   ActionRequiredItem,
   LupinEvent,
   SenderSortComparator,
+  PredictionVoteDir,
   StoreNotificationsChangedPayload,
   StoreActionRequiredChangedPayload,
+  StorePredictionVoteChangedPayload,
 } from "../shared/types";
+import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
 import { keyedListMerge } from "./dom";
 import { formatCountdown } from "./time";
 import { renderSenderCard } from "./templates/senderCard";
 import { renderActionRequiredReadOnly } from "./templates/actionRequiredReadOnly";
+import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 
 interface NotificationStoreLike {
   list(): ReadonlyArray<Notification>;
@@ -46,11 +50,24 @@ interface SenderStoreLike {
 interface ActionRequiredStoreLike {
   list(): ReadonlyArray<ActionRequiredItem>;
 }
+// WP14 (F8) — narrowed PredictionVoteStore surface this renderer consumes
+// (getVote for the highlight, setContext + vote for the cast). The production
+// PredictionVoteStore satisfies it structurally.
+interface PredictionVoteStoreLike {
+  getVote( notificationId: string ): PredictionVoteDir | undefined;
+  setContext( notificationId: string, ctx: PredictionVoteContext ): void;
+  vote( notificationId: string, dir: PredictionVoteDir ): Promise<boolean>;
+}
 
 export interface NotificationsListRendererStores {
   notifications  : NotificationStoreLike;
   senders        : SenderStoreLike;
   actionRequired : ActionRequiredStoreLike;
+  // WP14 (F8) — optional. Prediction-hint controls RENDER from pure data
+  // (notification.prediction_hint) regardless; this store makes them
+  // INTERACTIVE (cast-vote highlight + click → POST + reconcile). Absent (some
+  // unit harnesses) → controls render but are inert. Boot always wires it.
+  predictionVote?: PredictionVoteStoreLike;
 }
 
 export interface NotificationsListRenderer {
@@ -95,11 +112,25 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private senderCardsMount    : HTMLElement | null = null;
   private clickHandler        : ((e: Event) => void) | null = null;
 
+  // WP14 (F8) — prediction-vote orchestration. `predictionVoteStore` is the
+  // injected store (undefined in storeless harnesses); `predictionVoteIntegration`
+  // is the bridge threaded into the sender-card render path (undefined → controls
+  // render inert). Built once in the constructor.
+  private readonly predictionVoteStore       : PredictionVoteStoreLike | undefined;
+  private readonly predictionVoteIntegration : PredictionVoteIntegration | undefined;
+
   constructor(opts: NotificationsListRendererOptions) {
     this.bus                  = opts.eventBus;
     this.stores               = opts.stores;
     this.appTimezone          = opts.appTimezone;
     this.senderSortComparator = opts.senderSortComparator ?? DEFAULT_SENDER_SORT;
+    this.predictionVoteStore  = opts.stores.predictionVote;
+    this.predictionVoteIntegration = this.predictionVoteStore === undefined
+      ? undefined
+      : {
+          getVote : (id) => this.predictionVoteStore!.getVote(id),
+          onVote  : (id, dir) => this.castPredictionVote(id, dir),
+        };
   }
 
   mount(root: HTMLElement): void {
@@ -169,6 +200,17 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         (e) => this.onActionRequiredChange(e),
       ),
     );
+    // WP14 (F8) — reconcile prediction-vote highlight to authoritative store
+    // state. The store emits this after a vote is RECORDED (POST 2xx), so a
+    // re-render paints the cast-vote `.selected` from getVote() (idempotent with
+    // the optimistic click highlight). A failed/rejected cast does NOT emit;
+    // castPredictionVote re-renders explicitly to revert in that case.
+    this.unsubscribers.push(
+      this.bus.on<StorePredictionVoteChangedPayload>(
+        "store_prediction_vote_changed",
+        () => this.renderSenderSection(),
+      ),
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -222,15 +264,19 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // boot override hoists conversation-mode-pinned senders to the top.
     entries.sort((a, b) => this.senderSortComparator(a.sender, b.sender));
 
+    // WP14 (F8): thread the vote integration into the card render path so
+    // prediction-hint notifications mount interactive controls (senderCard →
+    // dateAccordion → notificationItem).
+    const cardOpts = { appTimezone: this.appTimezone, predictionVote: this.predictionVoteIntegration };
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
-      create  : (e) => renderSenderCard(e.sender, e.notifications, { appTimezone: this.appTimezone }),
+      create  : (e) => renderSenderCard(e.sender, e.notifications, cardOpts),
       // On match, re-create-and-replace is the simplest correct strategy for
       // Phase 5 (sender card chrome may have changed: persona, unread count,
       // last_active). Phase 6 may optimize.
       update  : (existing, e) => {
-        const fresh = renderSenderCard(e.sender, e.notifications, { appTimezone: this.appTimezone });
+        const fresh = renderSenderCard(e.sender, e.notifications, cardOpts);
         existing.replaceWith(fresh);
       },
     });
@@ -238,6 +284,37 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // Re-mark expanded progress groups after the render (state preserved
     // across re-renders per F14).
     this.reapplyExpandedGroups();
+  }
+
+  // -------------------------------------------------------------------------
+  // WP14 (F8) — prediction-vote cast orchestration. Invoked by the integration
+  // bridge when a vote button is clicked (the template already painted the
+  // optimistic highlight synchronously). Stashes the hint context the server
+  // does not persist (parity with legacy `_predictionVoteContext`), POSTs the
+  // vote, and reconciles: a recorded vote re-renders via the store event
+  // subscription (keeps the highlight); a rejected/thrown cast re-renders here
+  // to REVERT (getVote → undefined → control paints unselected).
+  // -------------------------------------------------------------------------
+
+  private castPredictionVote(id: string, dir: PredictionVoteDir): void {
+    const store = this.predictionVoteStore;
+    /* c8 ignore next */ // defensive: the integration (sole caller) exists only when the store does.
+    if (store === undefined) return;
+    const notification = this.stores.notifications.list().find((n) => n.id_hash === id);
+    /* c8 ignore next */ // defensive: the control is painted only for an in-list prediction_hint row.
+    if (notification?.prediction_hint === undefined) return;
+    const hint = notification.prediction_hint;
+    store.setContext(id, {
+      question        : notification.message,
+      predicted_value : hint.predicted_value,
+      category        : hint.category,
+      response_type   : notification.response_type ?? "",
+    });
+    void store.vote(id, dir).then((ok) => {
+      if (!ok) this.renderSenderSection();
+    }).catch(() => {
+      this.renderSenderSection();
+    });
   }
 
   private renderActionRequiredSection(): void {
