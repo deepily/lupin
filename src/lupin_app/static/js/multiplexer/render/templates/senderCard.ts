@@ -127,17 +127,30 @@ export function renderSenderCard(
   //
   // `.sender-session-name` is empty until a rename feature lands — SenderRecord
   // carries no session-name field (mirrors legacy `${sessionName || ''}`).
+  //
+  // VOICE-INPUT ROW (F5 lane, 2026-06-22 — Rick-ratified MATCH-LEGACY rebuild):
+  // CC sessions ALSO emit the legacy inline `.cc-voice-input` > `.cc-voice-input-row`
+  // (conv-mode toggle + mic + text input + send), positioned BETWEEN the header
+  // and `.sender-card-dates` (legacy notifications.js:13504-13521). Mux idiom: NO
+  // inline onclick — SenderCardRecorderRenderer wires all four via delegated
+  // clicks. This is STATIC structure so the component-isolation parity harness
+  // (which renders renderSenderCard alone, NO recorder mount) sees the row; the
+  // recorder renderer adds only behavior + recording-state, operating on these
+  // existing elements. The single shared `sessionHash` feeds both the session
+  // block and the voice row.
   const isCCSession = sender.sender_id.includes("#");
-  let sessionBlock: DocumentFragment | null = null;
+  let sessionBlock:  DocumentFragment | null = null;
+  let voiceInputRow: DocumentFragment | null = null;
   if (isCCSession) {
-    /* c8 ignore next */ // `?? ""` is a noUncheckedIndexedAccess type-guard; isCCSession guarantees a '#', so split("#")[1] is always a string (possibly "" for a trailing '#') — the ?? branch is unreachable at runtime (same convention as the sessionHash derivation below).
-    const sessionId = sender.sender_id.split("#")[1] ?? "";
+    /* c8 ignore next */ // `?? ""` is a noUncheckedIndexedAccess type-guard; isCCSession guarantees a '#', so split("#")[1] is always a string (possibly "" for a trailing '#') — the ?? branch is unreachable at runtime.
+    const sessionHash = sender.sender_id.split("#")[1] ?? "";
     sessionBlock = html`
-      <span class="sender-session-id">#${sessionId}</span>
+      <span class="sender-session-id">#${sessionHash}</span>
       <span class="sender-session-copy copy-btn" role="button" tabindex="0" title="Copy session ID">📋</span>
       <button class="sender-gist-btn" type="button" title="Generate smart gist from conversation">✨</button>
       <span class="sender-session-name" role="button" tabindex="0" title="Click to rename"></span>
     ` as DocumentFragment;
+    voiceInputRow = renderVoiceInputRow(sender, sessionHash);
   }
 
   const headerFrag = html`
@@ -157,6 +170,7 @@ export function renderSenderCard(
       <button class="sender-delete-btn" type="button" title="Delete all">×</button>
       <span class="sender-toggle">▼</span>
     </div>
+    ${voiceInputRow}
     <div class="sender-card-dates"></div>
   ` as DocumentFragment;
   root.appendChild(headerFrag);
@@ -171,21 +185,53 @@ export function renderSenderCard(
     create  : (e) => renderDateAccordion(e.group.dateKey, e.group.items, opts),
   });
 
-  // Phase 6c Node C Step C1 (2026-05-19): voice-input footer mount point.
-  // Verbatim attribute names per legacy `notifications.js:10956`. The
-  // SenderCardRecorderRenderer wires record + send buttons via click
-  // delegation on the .cc-voice-input container.
-  /* c8 ignore next 3 */ // sessionHash derivation: tests use sender_ids without '#' so only the else-branch is exercised at unit tier. Real wire shape (`claude.code@lupin.deepily.ai#abc123`) exercises the includes('#')→split path at smoke + integration tier.
-  const sessionHash = sender.sender_id.includes("#")
-    ? sender.sender_id.split("#")[1] ?? ""
-    : sender.sender_id;
-  const voiceInput = document.createElement("div");
-  voiceInput.className = "cc-voice-input";
-  voiceInput.setAttribute("data-session-hash", sessionHash);
-  voiceInput.setAttribute("data-sender-id", sender.sender_id);
-  root.appendChild(voiceInput);
-
   return root;
+}
+
+/**
+ * Render the legacy inline `.cc-voice-input` > `.cc-voice-input-row` for a CC
+ * session (F5 lane, MATCH-LEGACY rebuild). Legacy-verbatim markup
+ * (notifications.js:13504-13521) in mux idiom (NO inline onclick — the
+ * SenderCardRecorderRenderer wires the conv-mode toggle / mic / send via
+ * delegated clicks and drives recording-state on these existing elements):
+ *   - `.sender-conversation-mode-btn` (+ `is-active` when conversation mode is on),
+ *     `data-session-id`, glyph 🔊 (active) / 🤭 (idle).
+ *   - `.stt-button.cc-session-stt`, id `cc-session-stt-<hash>`, 🎤.
+ *   - `<input type="text" class="cc-session-msg-input">`, id `cc-session-input-<hash>`.
+ *   - `.response-submit-button.cc-session-send`, id `cc-session-send-<hash>`.
+ *
+ * The `id` attributes are PRE-COMPOSED whole strings because the `html` helper
+ * only interpolates whole attribute values (its ATTR regex matches `attr="` at a
+ * segment end — mid-attribute `id="prefix-${x}"` concatenation is NOT supported).
+ *
+ * Requires:
+ *   - `sessionHash` is the CC session's 8-char hash (sender_id after the `#`).
+ * Ensures:
+ *   - Returns a `.cc-voice-input` fragment carrying `data-session-hash` +
+ *     `data-sender-id` (the recorder's click-delegation + state keys), with the
+ *     conv-mode button reflecting `sender.conversation_mode_active`.
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; the body is always entered when called).
+function renderVoiceInputRow(sender: SenderRecord, sessionHash: string): DocumentFragment {
+  const active       = sender.conversation_mode_active === true;
+  const convBtnClass = active ? "sender-conversation-mode-btn is-active" : "sender-conversation-mode-btn";
+  const convIcon     = active ? "🔊" : "🤭";
+  const convTitle    = active
+    ? "Conversation mode ON — click to silence (quiet)"
+    : "Conversation mode OFF — click to enable (speakerphone)";
+  const sttId   = `cc-session-stt-${sessionHash}`;
+  const inputId = `cc-session-input-${sessionHash}`;
+  const sendId  = `cc-session-send-${sessionHash}`;
+  return html`
+    <div class="cc-voice-input" data-session-hash="${sessionHash}" data-sender-id="${sender.sender_id}">
+      <div class="cc-voice-input-row">
+        <button type="button" class="${convBtnClass}" data-session-id="${sessionHash}" title="${convTitle}">${convIcon}</button>
+        <button type="button" class="stt-button cc-session-stt" id="${sttId}" title="Click to record (30s max, ESC to cancel)">🎤</button>
+        <input type="text" class="cc-session-msg-input" id="${inputId}" placeholder="Send voice/text to CC session..." />
+        <button type="button" class="response-submit-button cc-session-send" id="${sendId}">Send</button>
+      </div>
+    </div>
+  ` as DocumentFragment;
 }
 
 /**

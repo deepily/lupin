@@ -23,6 +23,13 @@
     <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
 
+    <!-- F5 lane (2026-06-22): the voice-input row is now STATIC structure in
+         senderCard.ts (rendered by renderSenderCard, which this harness mounts),
+         so its CSS must load here for the row to compute its legacy ~51px height
+         — the geometry Tier-3 compares once the voice-region carve lifts. The
+         real /app/multiplexer loads this same sheet. -->
+    <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
+
     <!-- renderMarkdownInline reuses the page-loaded marked + DOMPurify globals
          (Q-E) — same vendor scripts the real clients load. -->
     <script src="/static/js/vendor/marked.min.js"></script>
