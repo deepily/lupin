@@ -498,7 +498,7 @@ function bootMultiplexer(): void {
   const taskListRenderer = createTaskListRenderer({
     eventBus,
     // Phase 2 — the fleet store supplies the owner-reassignment roster (active
-    // personas, Sam excluded) from the SAME source the fleet-status card uses.
+    // personas, Sam included — Q5) from the SAME source the fleet-status card uses.
     stores : { taskList: stores.taskList, fleet: stores.fleetStatus },
   });
   const taskListMountEl = document.getElementById("task-list-pane");

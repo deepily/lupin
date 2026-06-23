@@ -4,7 +4,7 @@ E2E — Multiplexer Phase 2: per-worker task EDITING in the task-list card.
 
 Exercises the Phase-2 editing surface end-to-end in a real browser: the per-row
 priority dropdown (P0–P3), the owner-reassignment dropdown (active personas,
-'Sam' overflow EXCLUDED per Rick's Q5), and the inline drop-with-reason control
+'Sam' overflow INCLUDED per Rick's Q5), and the inline drop-with-reason control
 (Q4 — inline row input, not a modal). The store's optimistic patchTask/dropTask
 fire the real HTTP PATCH / transition calls; those endpoints are STUBBED via
 `page.route` so the request bodies can be asserted deterministically without
@@ -16,7 +16,7 @@ What this verifies that the unit tests cannot:
       + `authority='user_direct'`, and the transition body carries
       `to_status='dropped'` + the inline reason
     - the owner roster is sourced from the SAME fleet-state feed the fleet card
-      uses, with the 'Sam' overflow persona excluded (Q5)
+      uses, with the 'Sam' overflow persona included (Q5)
     - a blank drop reason surfaces the inline error stripe and fires NO request
 
 COLOR / class-presence: like the read-only card E2E, the redundancy carriers are
@@ -113,7 +113,7 @@ _TASKS = {
 }
 
 # Fleet-state feed: active personas amy/bob/carol + the 'Sam' overflow persona
-# (which the owner roster MUST exclude per Q5).
+# (which the owner roster MUST include per Q5 — same roster the fleet card shows).
 _FLEET = {
     "app_timezone"  : "America/New_York",
     "fleet_arbiter" : { "sessions": [
@@ -186,14 +186,15 @@ def test_actions_column_and_controls_render( page ):
     assert row.locator( ".task-priority-select" ).input_value() == "P2"
 
 
-def test_owner_roster_excludes_sam( page ):
+def test_owner_roster_includes_sam( page ):
     _open_card( page )
     options = _row( page, "t1" ).locator( ".task-owner-select option" ).all_text_contents()
-    # Current owner amy + live targets bob/carol; Sam EXCLUDED (Q5).
+    # Current owner amy + live targets bob/carol/Sam; Sam INCLUDED (Q5 — same
+    # roster the fleet-status card shows, which carries Sam as a live persona).
     assert "amy" in options
     assert "bob" in options
     assert "carol" in options
-    assert "Sam" not in options and "sam" not in [ o.lower() for o in options ]
+    assert "Sam" in options
 
 
 # ---------------------------------------------------------------------------

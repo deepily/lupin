@@ -123,11 +123,6 @@ export function priorityRank( priority: string | null | undefined ): number {
 // top-to-bottom in the same urgency order the rows sort by (priorityRank).
 export const EDITABLE_PRIORITIES: ReadonlyArray<string> = [ "P0", "P1", "P2", "P3" ];
 
-// The overflow persona excluded from reassignment targets (Rick's Q5 ruling
-// 2026-06-23: ACTIVE personas only, EXCLUDING the 'Sam' overflow persona). The
-// match is case-insensitive so a "Sam" / "sam" / "SAM" display name is caught.
-const REASSIGN_EXCLUDED_PERSONA = "sam";
-
 // ---------------------------------------------------------------------------
 // Labels
 // ---------------------------------------------------------------------------
@@ -340,8 +335,10 @@ export function deriveTaskActor( email: string | null | undefined ): string {
 /**
  * Build the reassignment-target roster from the SAME source the fleet-status
  * card consumes (`FleetStatusStore` → `fleet_arbiter.sessions`), filtered to
- * ACTIVE (non-offline) personas and EXCLUDING the 'Sam' overflow persona (Rick's
- * Q5 ruling 2026-06-23). Distinct, alpha-sorted. Pure + degrade-safe.
+ * ACTIVE (non-offline) personas — INCLUDING the 'Sam' overflow persona (Rick's
+ * Q5 ruling 2026-06-23: the roster is the same one the fleet-status card shows,
+ * which carries Sam as a live persona; no reassign-only exclusion). Distinct,
+ * alpha-sorted. Pure + degrade-safe.
  *
  * Requires:
  *   - fleet is the FleetComposite the fleet card caches, or null (pre-first-poll
@@ -350,7 +347,7 @@ export function deriveTaskActor( email: string | null | undefined ): string {
  *   - null / missing fleet_arbiter / missing sessions → []
  *   - only LIVE sessions contribute (splitFleetByLiveness — same "live" rule the
  *     fleet card shows by default); offline personas never become targets
- *   - blank personas dropped; 'Sam' (any case) excluded; duplicates collapsed
+ *   - blank personas dropped; duplicates collapsed; Sam (when live) is a target
  *   - returned alpha-sorted
  *   - never throws
  */
@@ -364,7 +361,6 @@ export function activeReassignTargets( fleet: FleetComposite | null | undefined 
   for ( const s of live ) {
     const persona = s.persona;
     if ( !persona ) continue;
-    if ( persona.trim().toLowerCase() === REASSIGN_EXCLUDED_PERSONA ) continue;
     seen.add( persona );
   }
   return Array.from( seen ).sort( ( a, b ) => a.localeCompare( b ) );

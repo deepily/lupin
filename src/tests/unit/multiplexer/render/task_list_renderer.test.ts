@@ -362,7 +362,7 @@ const FLEET = (): FleetComposite => ({
   fleet_arbiter: { sessions: [
     { persona: "amy" },
     { persona: "bob" },
-    { persona: "Sam" },   // overflow persona — excluded from the roster (Q5)
+    { persona: "Sam" },   // overflow persona — INCLUDED in the roster (Q5)
   ] },
 });
 
@@ -403,10 +403,11 @@ test("owner select change → patchTask({owner_persona})", () => {
   assert.deepEqual(store.patchArgs, [{ id: "t1", fields: { owner_persona: "bob" } }]);
 });
 
-test("owner roster comes from the fleet store, EXCLUDES Sam, includes current owner", () => {
+test("owner roster comes from the fleet store, INCLUDES Sam, includes current owner", () => {
   const { root } = renderOne(makeFleet(FLEET()));
   const sel = root.querySelector<HTMLSelectElement>(".task-owner-select");
-  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy", "bob"]);   // Sam excluded
+  // Current owner "amy" prepended; live roster amy/bob/Sam alpha-sorted, deduped (Q5: Sam included).
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy", "bob", "Sam"]);
 });
 
 test("no fleet store → owner select shows only the current owner", () => {

@@ -47,9 +47,9 @@ function td( className: string, text: string ): HTMLTableCellElement {
  * Ensures:
  *   - `.task-priority-select` — P0–P3 options (EDITABLE_PRIORITIES), current
  *     priority pre-selected; reuses taskPriorityClass for the heat tint
- *   - `.task-owner-select` — reassignment roster (active personas, Sam already
- *     excluded by the caller); the current owner is pre-selected (prepended if
- *     not already a target so the select reflects reality); an unassigned task
+ *   - `.task-owner-select` — reassignment roster (active personas, INCLUDING the
+ *     'Sam' overflow persona — Q5); the current owner is pre-selected (prepended
+ *     if not already a target so the select reflects reality); an unassigned task
  *     leads with a disabled "(unassigned)" placeholder
  *   - `.task-drop-reason` text input + `.task-drop-button` — the inline
  *     drop-with-reason affordance (Q4: inline row input, not a modal)
@@ -125,7 +125,7 @@ function renderActionsCell( task: TaskItem, reassignTargets: ReadonlyArray<strin
  * Requires:
  *   - task is a TaskItem (fields rendered defensively — falsy → "—")
  *   - ianaZone is the IANA zone for the next-chase cell, or null/undefined
- *   - reassignTargets is the active-persona roster (Sam already excluded) for the
+ *   - reassignTargets is the active-persona roster (Sam INCLUDED — Q5) for the
  *     owner select; defaults to [] (e.g. read-only callers / fleet unavailable)
  * Ensures:
  *   - Status cell carries a `.task-status-dot` color-keyed span + the status word
@@ -229,7 +229,7 @@ function renderGroupHeader( group: TaskGroup, isCollapsed: boolean, idSlug: stri
  *     `collapsed` class (CSS hides its rows; the header bar stays), chevron ▸,
  *     aria-expanded="false"; otherwise chevron ▾, aria-expanded="true"
  *   - each row carries the trailing Actions cell (priority/owner edit + drop);
- *     reassignTargets (active personas, Sam excluded) populates the owner selects
+ *     reassignTargets (active personas, Sam included — Q5) populates the owner selects
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; all internal branches are exercised by tests.
 export function renderTaskListTable(
