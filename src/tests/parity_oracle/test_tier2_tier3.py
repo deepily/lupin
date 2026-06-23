@@ -151,18 +151,20 @@ def test_tier2_computed_style_isomorphism( page ):
 
 
 @pytest.mark.xfail(
-    reason="Tier 3 geometry — ALL CSS/style seams are now CLOSED (WS1 border-left, "
-           "WS2/C2-d direction, WS2/WS4 date-text), and the persona-LESS arbiter "
-           "card is FULLY parity-green (0 diffs). The remaining geometry delta is "
-           "confined to the persona'd CC-session card: a ~51.7px vertical gap from "
-           "the accordion down + residual `.message-text` width diffs (msg[2]/[3]). "
-           "This is the next layer the oracle peeled once styling converged — a "
-           "WS4/G4 STRUCTURE-parity gap (the mux does not yet render the CC-session "
-           "sender-card header chrome — project-name/session-id/status/delete/toggle, "
-           "Category-3 / the 06-10 gap-bridge), NOT a CSS divergence and NOT in WS2 "
-           "scope. Per Doc 02 this climbs to green as G4 functional gaps land; "
-           "manager-routed. Remove this xfail when the CC header chrome ships. "
-           "strict=False so it never breaks the suite.",
+    reason="Tier 3 geometry — NARROWED (oracle verify 2026-06-22, task bfcb162c). "
+           "The CC header chrome SHIPPED (commit 028aec5a): Tier-1 structure is now "
+           "GREEN — all chrome nodes (project-name/session-id/status/delete/toggle) "
+           "render PRESENT — and Tier-2 computed-style + golden-conformance pass. So "
+           "this is NO LONGER a missing-structure gap. The residual ~51px is a header "
+           "LAYOUT divergence confined to the persona'd CC-session card: legacy STACKS "
+           "the CC session-id as a SECOND header row, while the mux renders all chrome "
+           "in ONE flex row (.sender-card-header) → the mux card is ~51px SHORTER "
+           "(card h: legacy 335.2 vs mux 283.8, Δ51.4px; everything below the header "
+           "sits ~51px higher). NOT a CSS-property divergence (the chrome IS styled) "
+           "and NOT a flake — the legacy golden is correct, the mux is genuinely short. "
+           "Folds into the multiplexer parity / WS4 sender-card header family (manager- "
+           "routed, captured in the plan). Remove this xfail when the mux header becomes "
+           "TWO-ROW matching legacy. strict=False so it never breaks the suite.",
     strict=False,
 )
 def test_tier3_geometry_isomorphism( page ):
