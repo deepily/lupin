@@ -81,8 +81,13 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     TIER_BLOCKER_AND_MANAGER, TIER_DROP, tier_for, CASE_AUTO_POKE_REAP_REC,
     CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
     CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
+    CASE_USER_GATE_RESURFACE,
 )
 from lupin_mcp.persona_normalization import canonical_persona_key
+# 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
+# arbiter resurfaces a dark session's aged user-gate to Rick.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates
+from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates
 
 
 # Manager-surface topic + auto-ping message template
@@ -131,6 +136,7 @@ CASE_KINDS = {
     CASE_FLEET_DARK             : "fleet_dark",
     CASE_MANAGER_AWAITING_USER  : "manager_awaiting_user",   # L1 (2026-06-17)
     CASE_MANAGER_DONE_ADVISORY  : "manager_done_advisory",   # L1 (2026-06-17)
+    CASE_USER_GATE_RESURFACE    : "user_gate_resurface",     # 6929f4ac (2026-06-22)
 }
 
 # ── L1 store-classification constants (2026-06-17, arbiter detector gaps) ────
@@ -431,6 +437,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
         owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
+        hold_reader_fn           : Optional[ Callable ] = None,   # 6929f4ac: per-session hold reader (session_id) -> hold|None (None → inert: classify-override + resurface tier never fire)
+        user_gate_resurface_seconds : int               = 1800,  # 6929f4ac: aged-gate ceiling (30 min) — resurface a DARK session's open gate older than this to Rick
         worktree_janitor_fn      : Optional[ Callable ] = None,   # §4b janitor: per-poll abandoned-worktree reconcile (None → INERT, no sweep; the :8001 factory wires worktree_reaper.reconcile_worktrees)
         count_dm_as_liveness_fn  : Optional[ Callable ] = None,   # DM-toggle: per-poll INI re-read (None → lambda True; runtime-tunable)
         dm_activity_fn           : Optional[ Callable ] = None,   # DM-toggle: per-poll SENT-DM store read (None → inert; dm_ts None everywhere)
@@ -545,6 +553,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
             )
         if not manager_recipient:
             raise ValueError( "manager_recipient must be a non-empty string" )
+        # 6929f4ac: a zero/negative resurface ceiling would config-dead the outward-
+        # twin backstop (an aged-gate window with no floor) — fail fast, same guard
+        # bug-class as quiet < alive above.
+        if user_gate_resurface_seconds <= 0:
+            raise ValueError( f"user_gate_resurface_seconds must be positive, got {user_gate_resurface_seconds}" )
 
         # --- config ---
         self.poll_seconds            = poll_seconds
@@ -583,6 +596,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # stays inert unless a fake is injected. (Mirrors the Item B None-seam
         # pattern: a None seam is visibly inert, never a hidden behavior change.)
         self._owed_work_fn = owed_work_fn
+        # 6929f4ac outward-twin backstop (§9.2): the per-session hold reader. None
+        # keeps the seam INERT — the _classify_owed open-gate→ACTIVE override and the
+        # user-gate resurface detector both no-op (byte-identical to today), so
+        # in-pool / unit-fake construction needs no wiring. The :8001 factory wires a
+        # real reader (heartbeat_hold.read_hold scoped to the project root). Mirrors
+        # the owed_work_fn None-seam pattern: a None seam is visibly inert.
+        self._hold_reader_fn            = hold_reader_fn
+        self.user_gate_resurface_seconds = user_gate_resurface_seconds
         # DM-as-liveness toggle (2026-06-17): two seams. (1) the runtime-flag
         # re-read — None → `lambda: True` (inert-safe; reproduces the INI default
         # so in-pool / unit-fake construction needs no wiring; the :8001 factory
@@ -689,6 +710,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # their current (un-acked) tap — so manager-down escalates ONCE, not every
         # poll, until the manager re-acks (shows liveness after the tap).
         self._manager_down_escalated = set()
+        # 6929f4ac: keys "<session_id>:<gate_id>" already resurfaced to Rick this
+        # dark episode — escalate-once; re-arms when the gate clears or the session
+        # freshens out of the eligible set (mirrors the _mgr_* episode trackers).
+        self._resurfaced_gates = set()
         # L1 (2026-06-17) store-aware advisory tracking: a tapped-but-quiet manager
         # classified BLOCKED_ON_USER / DONE is NOT escalated MANAGER-DOWN — instead
         # it gets at most ONE advisory per un-acked tap. These sets are the
@@ -874,6 +899,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # snapshot + published count the publish step just stashed on the instance.
         manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers, owed_class=owed_class )  # #F2 (L1 store-aware, lane 4)
         fleet_dark          = self._check_fleet_dark( self._last_full_snapshot, self._last_published_n, now )
+        # 6929f4ac outward-twin backstop: resurface a dark session's aged user-gate
+        # to Rick (case 18). Reads the FULL snapshot (offline rows included) so a
+        # gone-dark session's buried gate is still seen. Inert unless hold_reader_fn
+        # is wired (the :8001 factory wires it; in-pool / unit-fake stays inert).
+        gates_resurfaced    = self._check_user_gate_resurface( self._last_full_snapshot, now )
         # post-game F1: why-not-poked gate evaluation — runs AFTER both poke tiers
         # so the emitted vectors reflect this poll's episode state.
         self._emit_poke_gates( fleet_view, self._last_full_snapshot, now )
@@ -912,6 +942,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "pokes_fired"         : pokes_fired,
             "manager_stale_pokes" : manager_stale_pokes,
             "fleet_dark"          : fleet_dark,
+            "gates_resurfaced"    : gates_resurfaced,         # 6929f4ac outward-twin backstop
             "outreach_acks"       : outreach_acks,
             "reannounces"         : reannounces,
             "ft_escalated"        : ft_escalated,            # eng#7 follow-through one-shot escalations this poll
@@ -923,7 +954,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if any( summary[ k ] for k in (
                 "pings_fired", "taps_fired", "managers_down", "decisions",
                 "stalled", "pokes_fired", "manager_stale_pokes", "fleet_dark", "cycles",
-                "outreach_acks", "reannounces", "ft_escalated", "worktrees_swept" ) ):
+                "gates_resurfaced", "outreach_acks", "reannounces", "ft_escalated", "worktrees_swept" ) ):
             self._log( "arbiter_poll_activity", **summary )
         return summary
 
@@ -1874,6 +1905,30 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 result[ persona ] = CLASS_BLOCKED_ON_USER
             else:
                 result[ persona ] = CLASS_ACTIVE
+
+        # 6929f4ac OUTWARD-twin override (§9.2): a persona whose owning session
+        # holds an OPEN user-gate owes a RE-ASK to Rick — that is ACTIVE work, NOT a
+        # suppressible BLOCKED_ON_USER / DONE state (the §9 inversion: a user-gated
+        # session must keep re-asking, not be treated as "correctly parked"). The
+        # gate lives in the hold artifact, not the store, so reading the hold is the
+        # ONLY way to see it. Override only when the hold-reader seam is wired
+        # (None → inert → today's store-only behavior, all existing tests unchanged).
+        if self._hold_reader_fn is not None and names:
+            persona_to_sid = {
+                v.get( "persona" ): k
+                for k, v in ( fleet_view or { } ).items()
+                if isinstance( v, dict ) and v.get( "persona" )
+            }
+            for persona in names:
+                sid = persona_to_sid.get( persona )
+                if not sid:
+                    continue
+                try:
+                    hold = self._hold_reader_fn( sid )
+                except Exception:
+                    hold = None
+                if open_gates( get_pending_user_gates( hold ) ):
+                    result[ persona ] = CLASS_ACTIVE
         return result
 
     def session_is_not_owed( self, persona, fleet_view=None ):
@@ -2495,6 +2550,81 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 self._mgr_poke_count[ sid ] += 1
                 fired += 1
             # else: poke-capped — the advisory already fired; silence (anti-storm)
+        return fired
+
+    # ── 6929f4ac: outward-twin user-gate resurface (dark session → Rick) ────────
+
+    def _check_user_gate_resurface( self, snapshot, now ):
+        """
+        6929f4ac OUTWARD-twin backstop (§9.2): a session that went DARK while still
+        holding an OPEN, AGED direct user-gate (it stopped re-asking) → surface the
+        buried question to RICK on the session's behalf (case 18, Rick-only), so a
+        dead/silent session's owed gate still reaches him even when it can no longer
+        re-ask. The primary mechanism is the Stop-hook self-poke (Parts 1-3); this
+        is the external backstop for when self-regulation has gone dark.
+
+        Inert in TWO layers: (a) no hold-reader wired (None seam) → return 0, no
+        work, byte-identical to today; (b) wired but no session is both dark AND
+        holding an aged open gate. Swallow-safe per the observer invariant: a
+        hold-read hiccup degrades that session to "no gate seen", never kills the poll.
+
+        Darkness = the row's liveness verdict is "offline" OR its freshest signal
+        age is unknown / older than user_gate_resurface_seconds (it is not actively
+        alive). Aged gate = an OPEN gate whose last_asked_ts is older than the same
+        ceiling (the session has clearly stopped re-asking). Escalate-once per
+        (session, gate); a gate that clears (answered/removed) or a session that
+        freshens leaves the eligible set → its key re-arms for a future episode.
+
+        Requires:
+            - snapshot is the FULL (include_offline=True) detection snapshot
+            - now is an aware datetime
+
+        Ensures:
+            - returns 0 when the hold-reader seam is unwired (inert)
+            - resurfaces each newly-eligible aged gate exactly once (case 18 → Rick)
+            - returns the count resurfaced this poll; never raises
+        """
+        if self._hold_reader_fn is None:
+            return 0
+        ceiling   = self.user_gate_resurface_seconds
+        now_epoch = now.timestamp()
+        eligible  = { }    # "<sid>:<gate_id>" -> ( sid, persona, gate )
+        for row in ( snapshot or { } ).get( "sessions", [ ] ):
+            if not isinstance( row, dict ):
+                continue
+            sid = row.get( "session_id" )
+            if not sid:
+                continue
+            liveness = row.get( "liveness" ) if isinstance( row.get( "liveness" ), dict ) else { }
+            age      = liveness.get( "freshest_age_s" )
+            is_dark  = ( liveness.get( "verdict" ) == "offline" ) or age is None or age >= ceiling
+            if not is_dark:
+                continue
+            try:
+                hold = self._hold_reader_fn( sid )
+            except Exception:
+                hold = None
+            persona = row.get( "persona" ) or sid
+            for gate in aged_open_gates( get_pending_user_gates( hold ), now_epoch, ceiling ):
+                eligible[ f"{sid}:{gate.get( 'id' )}" ] = ( sid, persona, gate )
+        # re-arm: drop already-resurfaced keys no longer eligible (gate cleared /
+        # session freshened) so a future dark episode re-surfaces.
+        self._resurfaced_gates &= set( eligible )
+        fired = 0
+        for key, ( sid, persona, gate ) in eligible.items():
+            if key in self._resurfaced_gates:
+                continue
+            self._resurfaced_gates.add( key )
+            question = gate.get( "question" ) or "(question text unavailable)"
+            ask_kind = gate.get( "ask_kind" ) or "unknown"
+            self._route(
+                CASE_USER_GATE_RESURFACE,
+                f"USER-GATE RESURFACED (on behalf of a dark session): {persona} "
+                f"({sid[ :8 ]}) went silent still awaiting your answer to a direct "
+                f"gate and has stopped re-asking it — surfacing it so it reaches "
+                f"you. Question: \"{question}\" (ask kind: {ask_kind}).",
+            )
+            fired += 1
         return fired
 
     # ── post-game F3: fleet-dark advisory (hybrid trigger, 2026-06-11) ──────────

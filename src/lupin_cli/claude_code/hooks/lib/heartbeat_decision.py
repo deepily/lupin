@@ -105,20 +105,42 @@ def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None ):
                                       should_increment=True
         - The poke reason quotes the oracle specifics when work is oracle-owed,
           else uses DECLARED_OWED_REASON (self-declared via the hold)
+        - 6929f4ac obligation override (the §9 inversion of hold semantics): when
+          the verdict carries `needs_verification` (the manager owes a worker
+          look-in) or `outstanding_user_gate` (the session owes a re-ask to Rick),
+          BOTH the honored-hold short-circuit (step 2) AND the self-declared-done
+          short-circuit (step 3) are SKIPPED — the obligation is owed work that a
+          declared hold must NOT suppress (a user-gated / verification-owing hold
+          is a standing obligation to act, never a license to go quiet). Every
+          OTHER signal leaves a fresh reasoned hold honored exactly as before.
+          The cap still bounds the poke (an obligation stops nagging at poke_cap;
+          the durable re-ask cadence is the /loop tick + the arbiter backstop).
     """
-    # Step 2 — honored declared hold defends its quiescence → never poke
-    if is_honored( hold, now=now ):
-        return _result( OUTCOME_HONORED, { "continue": True } )
+    # 6929f4ac obligation override — does a receipts-of-progress obligation
+    # outrank the hold's quiescence this tick?
+    signals              = ( oracle_verdict or { } ).get( "signals" ) or [ ]
+    obligation_overrides = ( "needs_verification" in signals
+                             or "outstanding_user_gate" in signals )
 
-    # Step 3 — work-owed: the hold's self-declared work_owed wins; else oracle
-    declared = declared_work_owed( hold )
-    if declared is False:
-        return _result( OUTCOME_NOT_OWED, { "continue": True } )
+    if obligation_overrides:
+        # The obligation IS owed work by construction (the signal ⇒ the verdict's
+        # work_owed is True), so skip steps 2-3 and head straight to the cap gate.
+        oracle_owed = True
+        owed        = True
+    else:
+        # Step 2 — honored declared hold defends its quiescence → never poke
+        if is_honored( hold, now=now ):
+            return _result( OUTCOME_HONORED, { "continue": True } )
 
-    oracle_owed = bool( oracle_verdict and oracle_verdict.get( "work_owed" ) )
-    owed        = True if declared is True else oracle_owed
-    if not owed:
-        return _result( OUTCOME_NOT_OWED, { "continue": True } )
+        # Step 3 — work-owed: the hold's self-declared work_owed wins; else oracle
+        declared = declared_work_owed( hold )
+        if declared is False:
+            return _result( OUTCOME_NOT_OWED, { "continue": True } )
+
+        oracle_owed = bool( oracle_verdict and oracle_verdict.get( "work_owed" ) )
+        owed        = True if declared is True else oracle_owed
+        if not owed:
+            return _result( OUTCOME_NOT_OWED, { "continue": True } )
 
     # Steps 4 / 5 — owed: poke under cap, else stop nudging
     if poke_count >= cap:
@@ -165,6 +187,16 @@ def quick_smoke_test():
     empty = owed_mod.evaluate_work_owed()
     r = decide_heartbeat( None, empty, 0, 3, now=now )
     assert r[ "outcome" ] == OUTCOME_NOT_OWED
+
+    # 6929f4ac override — an open user-gate POKES even under a fresh reasoned hold
+    gate_verdict = owed_mod.evaluate_work_owed( open_user_gates=[ { "id": "g1" } ] )
+    r = decide_heartbeat( honored_hold, gate_verdict, 0, 3, now=now )
+    assert r[ "outcome" ] == OUTCOME_POKE, "open user-gate must override an honored hold"
+    # …and a verification debt likewise overrides a self-declared-done hold
+    done_hold = { "held_at": fresh_at, "ttl_seconds": 900, "reason": "done", "work_owed": False }
+    verify_verdict = owed_mod.evaluate_work_owed( needs_verification=True )
+    r = decide_heartbeat( done_hold, verify_verdict, 0, 3, now=now )
+    assert r[ "outcome" ] == OUTCOME_POKE, "verification debt must override declared-done"
 
     return True
 

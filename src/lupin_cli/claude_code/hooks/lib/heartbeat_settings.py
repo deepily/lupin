@@ -56,6 +56,14 @@ DEFAULT_COUNT_INBOUND_AS_OWED = False
 # the source. Rollback = flip back to False (no redeploy).
 DEFAULT_OWED_SOURCE_FROM_STORE = False
 
+# Receipts-of-progress inward twin (6929f4ac, Rick 2026-06-22): the manager
+# worker-verification debounce window, in seconds. While a manager's last look-in
+# is older than this AND workers are out, the oracle fires `needs_verification`
+# (work-owed) so the manager keeps getting poked to verify. Rick: 10 min (600s).
+# Mirrors VERIFICATION_DEBOUNCE_SECONDS in heartbeat_work_owed (the pure default);
+# this is the settings-overridable runtime value the stop.py shell passes in.
+DEFAULT_VERIFICATION_THRESHOLD_SECONDS = 600
+
 
 def load_heartbeat_settings() -> dict:
     """
@@ -67,7 +75,8 @@ def load_heartbeat_settings() -> dict:
             "enabled"  : bool,
             "poke_cap" : int,   # > 0
             "count_inbound_questions_as_owed" : bool,  # Thread B; default False
-            "owed_source_from_store" : bool            # Step-2; default False
+            "owed_source_from_store" : bool,           # Step-2; default False
+            "verification_threshold_seconds" : int     # 6929f4ac; default 600 (>0)
           }
         }
 
@@ -87,12 +96,15 @@ def load_heartbeat_settings() -> dict:
           coerced to bool (Python truthiness)
         - "owed_source_from_store" missing → DEFAULT False (the old transcript
           path); non-bool → coerced to bool (Python truthiness)
-        - Returns dict with exactly four keys: "enabled" (bool), "poke_cap"
+        - "verification_threshold_seconds" missing → DEFAULT 600 (Rick's 10 min);
+          non-positive-int → raises ValueError (fail-loud, like poke_cap)
+        - Returns dict with exactly five keys: "enabled" (bool), "poke_cap"
           (int > 0), "count_inbound_questions_as_owed" (bool),
-          "owed_source_from_store" (bool)
+          "owed_source_from_store" (bool), "verification_threshold_seconds" (int > 0)
 
     Raises:
-        ValueError: malformed poke_cap (non-int, bool, or value <= 0)
+        ValueError: malformed poke_cap or verification_threshold_seconds
+          (non-int, bool, or value <= 0)
     """
     settings_path = Path( os.path.expanduser( "~/.claude/settings.json" ) )
 
@@ -117,14 +129,18 @@ def load_heartbeat_settings() -> dict:
                                      DEFAULT_COUNT_INBOUND_AS_OWED ) )
     owed_source_from_store = bool( block.get( "owed_source_from_store",
                                               DEFAULT_OWED_SOURCE_FROM_STORE ) )
+    verification_threshold = block.get( "verification_threshold_seconds",
+                                        DEFAULT_VERIFICATION_THRESHOLD_SECONDS )
 
     _validate_poke_cap( poke_cap )
+    _validate_verification_threshold( verification_threshold )
 
     return {
         "enabled"                        : enabled,
         "poke_cap"                       : poke_cap,
         "count_inbound_questions_as_owed": count_inbound,
         "owed_source_from_store"         : owed_source_from_store,
+        "verification_threshold_seconds" : verification_threshold,
     }
 
 
@@ -135,6 +151,7 @@ def _defaults() -> dict:
         "poke_cap"                       : DEFAULT_POKE_CAP,
         "count_inbound_questions_as_owed": DEFAULT_COUNT_INBOUND_AS_OWED,
         "owed_source_from_store"         : DEFAULT_OWED_SOURCE_FROM_STORE,
+        "verification_threshold_seconds" : DEFAULT_VERIFICATION_THRESHOLD_SECONDS,
     }
 
 
@@ -162,6 +179,32 @@ def _validate_poke_cap( value: Any ) -> None:
         )
 
 
+def _validate_verification_threshold( value: Any ) -> None:
+    """
+    Raise ValueError if verification_threshold_seconds is not a positive int.
+
+    Same fail-loud bug-class guard as poke_cap (no silent fallback chains): a
+    bogus threshold would silently config-dead or thrash the inward-twin debounce.
+    Bool is a subclass of int — explicitly rejected so `True` doesn't slip as 1.
+
+    Requires:
+        - value is anything (foreign settings data)
+
+    Ensures:
+        - Returns None when value is an int > 0
+        - Raises ValueError otherwise
+    """
+    if isinstance( value, bool ) or not isinstance( value, int ):
+        raise ValueError(
+            f"heartbeat.verification_threshold_seconds must be an int, "
+            f"got {type( value ).__name__}: {value!r}"
+        )
+    if value <= 0:
+        raise ValueError(
+            f"heartbeat.verification_threshold_seconds must be > 0, got {value}"
+        )
+
+
 def quick_smoke_test():
     """
     Self-contained smoke test for heartbeat_settings.
@@ -174,12 +217,17 @@ def quick_smoke_test():
     d = _defaults()
     assert d == { "enabled": False, "poke_cap": DEFAULT_POKE_CAP,
                   "count_inbound_questions_as_owed": False,
-                  "owed_source_from_store": False }, d
+                  "owed_source_from_store": False,
+                  "verification_threshold_seconds": DEFAULT_VERIFICATION_THRESHOLD_SECONDS }, d
 
     # Valid poke_caps pass validation
     _validate_poke_cap( 1 )
     _validate_poke_cap( 3 )
     _validate_poke_cap( 99 )
+
+    # Valid verification thresholds pass validation
+    _validate_verification_threshold( 1 )
+    _validate_verification_threshold( 600 )
 
     # Note: the exhaustive INVALID-poke_cap raise matrix (string / bool / float
     # / zero / negative / None / list) is owned by the unit test
@@ -194,6 +242,7 @@ def quick_smoke_test():
     assert isinstance( loaded[ "poke_cap" ], int ) and loaded[ "poke_cap" ] > 0
     assert isinstance( loaded[ "count_inbound_questions_as_owed" ], bool )
     assert isinstance( loaded[ "owed_source_from_store" ], bool )
+    assert isinstance( loaded[ "verification_threshold_seconds" ], int ) and loaded[ "verification_threshold_seconds" ] > 0
 
     return True
 

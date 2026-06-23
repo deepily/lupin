@@ -109,6 +109,56 @@ def test_owed_over_cap_stops_nudging():
     assert r[ "outcome" ] == hd.OUTCOME_CAP_REACHED
 
 
+# ── 6929f4ac obligation override (the §9 inversion of hold semantics) ──────────
+
+def _gate_verdict():
+    return owed_mod.evaluate_work_owed( open_user_gates=[ { "id": "g1" } ] )
+
+
+def _verify_verdict():
+    return owed_mod.evaluate_work_owed( needs_verification=True )
+
+
+def test_open_user_gate_overrides_honored_hold():
+    # A FRESH reasoned hold would normally be HONORED (no poke). An open user-gate
+    # is a standing re-ask obligation that must override that quiescence → POKE.
+    r = hd.decide_heartbeat( _hold(), _gate_verdict(), 0, 3, now=NOW )
+    assert r[ "outcome" ] == hd.OUTCOME_POKE
+    assert r[ "hook_output" ][ "decision" ] == "block"
+    assert "user-gate" in r[ "hook_output" ][ "reason" ]
+    assert r[ "should_increment" ] is True
+
+
+def test_verification_debt_overrides_honored_hold():
+    r = hd.decide_heartbeat( _hold(), _verify_verdict(), 0, 3, now=NOW )
+    assert r[ "outcome" ] == hd.OUTCOME_POKE
+    assert "verification overdue" in r[ "hook_output" ][ "reason" ]
+
+
+def test_obligation_overrides_self_declared_done_hold():
+    # work_owed:False hold normally short-circuits to NOT_OWED. An obligation
+    # (gate / verification) must override that too — owed by construction.
+    done = _hold( work_owed=False )
+    assert hd.decide_heartbeat( done, _gate_verdict(),   0, 3, now=NOW )[ "outcome" ] == hd.OUTCOME_POKE
+    assert hd.decide_heartbeat( done, _verify_verdict(), 0, 3, now=NOW )[ "outcome" ] == hd.OUTCOME_POKE
+
+
+def test_obligation_override_still_bounded_by_cap():
+    # The override does NOT bypass the poke cap — an obligation stops nagging at
+    # the cap (durable cadence is the /loop tick + arbiter backstop).
+    r = hd.decide_heartbeat( _hold(), _gate_verdict(), 3, 3, now=NOW )
+    assert r[ "outcome" ] == hd.OUTCOME_CAP_REACHED
+    assert r[ "should_notify_cap" ] is True
+
+
+def test_no_obligation_leaves_fresh_hold_honored():
+    # Regression guard: a verdict WITHOUT either new signal leaves a fresh
+    # reasoned hold honored exactly as before (override is surgical).
+    r = hd.decide_heartbeat( _hold(), owed_mod.evaluate_work_owed(
+        outstanding_delegations=[ { "session_name": "w" } ] ), 0, 3, now=NOW )
+    assert r[ "outcome" ] == hd.OUTCOME_HONORED
+
+
 # ── quick_smoke_test ──────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():

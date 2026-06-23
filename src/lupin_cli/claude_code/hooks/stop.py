@@ -57,7 +57,11 @@ from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
 #    stop_hook_active loop guard; voice always wins. Leaf modules are pure +
 #    100%-covered; this file holds only the thin adapter. See:
 #    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold_resilient
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (
+    read_hold_resilient, get_pending_user_gates, get_last_looked_in_ts,
+)
+# 6929f4ac receipts-of-progress — the pure gate-row transforms (outward twin).
+from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import (
     get_poke_count, increment_poke_count,
 )
@@ -69,6 +73,7 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS,
+    manager_needs_verification,
 )
 # Spine Step-2 (store-canonical task management) — the flag-gated store-count
 # owed source. DEFAULT-old (transcript replay) until the fleet cutover flips
@@ -1439,10 +1444,35 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
             owed_items = _synthesize_owed_items( store_count )
     else:
         owed_items = owed_items_from_state( task_state )
+    # ── 6929f4ac receipts-of-progress — TWO new owed signals off the hold ──────
+    # Both are PURE predicates over the (already-read) hold + the delegations
+    # gathered above; no extra IO, no :7999 dependency, never raise.
+    #   (a) INWARD twin (§3-§5): a MANAGER owes a fresh worker-verification
+    #       receipt — workers OUT *and* its last look-in is stale (debounce, Rick
+    #       10 min). The worker-set itself gates manager-scope: a non-manager has
+    #       an empty manifest ⇒ no delegations ⇒ never a verification debt. The
+    #       agent CLEARS it by stamping last_looked_in_on_workers_ts when it
+    #       verifies (explicit v1; the poke reason instructs the stamp).
+    #   (b) OUTWARD twin (§9): any OPEN (unanswered) user-gate is owed work that
+    #       must be RE-SURFACED — keeps the session alive to re-ask Rick. The
+    #       Stop hook CANNOT call ask_* (SSE-blocking, 1s budget) — it only keeps
+    #       the session awake + NAMES the due gates in the poke; the AGENT
+    #       re-fires the ask_* + stamps last_asked_ts (per the §9.1 doctrine).
+    #       Parallel to outstanding_delegation: ANY open gate ⇒ owed (design §9.2).
+    now_epoch          = time.time()
+    last_look_in_ts    = get_last_looked_in_ts( hold )
+    needs_verification = manager_needs_verification(
+        delegations, last_look_in_ts, now_epoch,
+        threshold_seconds = settings[ "verification_threshold_seconds" ] )
+    user_gates    = get_pending_user_gates( hold )
+    open_gates    = heartbeat_user_gates.open_gates( user_gates )      # owed set (any open)
+    due_gates     = heartbeat_user_gates.due_gates( user_gates, now_epoch )  # re-ask NOW (poke detail)
     verdict    = evaluate_work_owed(
         todo_items                   = owed_items,
         unanswered_inbound_questions = open_inbound,
         outstanding_delegations      = delegations,
+        needs_verification           = needs_verification,
+        open_user_gates              = open_gates,
     )
     result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
 
@@ -1476,6 +1506,9 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
         "delegations"  : len( delegations ),
         "open_inbound"  : len( open_inbound ),
         "stale_inbound" : len( stale_inbound ),   # surfaced-for-review, not owed
+        "needs_verification" : needs_verification,            # 6929f4ac inward twin
+        "open_user_gates"    : len( open_gates ),             # 6929f4ac outward twin (owed)
+        "due_user_gates"     : len( due_gates ),              # 6929f4ac outward twin (re-ask now)
         "poke_count"   : get_poke_count( session_id ),
         "cap"          : settings[ "poke_cap" ],
         "awaiting"     : ( hold.get( "awaiting" ) if hold else None ),

@@ -131,6 +131,97 @@ def test_falsy_delegation_entries_dropped():
     assert v[ "work_owed" ] is False
 
 
+# ── needs_verification signal (inward twin, 6929f4ac §3-§5) ───────────────────
+
+def test_needs_verification_true_owes_work():
+    v = o.evaluate_work_owed( needs_verification=True )
+    assert v[ "work_owed" ] is True
+    assert v[ "signals" ] == [ "needs_verification" ]
+    assert "worker-verification overdue" in v[ "specifics" ]
+    assert "last_looked_in_on_workers_ts" in v[ "specifics" ]   # guard: stamp instruction present
+
+
+def test_needs_verification_false_owes_nothing():
+    assert o.evaluate_work_owed( needs_verification=False )[ "work_owed" ] is False
+    # default (omitted) is also off
+    assert o.evaluate_work_owed()[ "signals" ] == [ ]
+
+
+# ── outstanding_user_gate signal (outward twin, 6929f4ac §9) ──────────────────
+
+def test_open_user_gate_owes_work():
+    v = o.evaluate_work_owed( open_user_gates=[ { "id": "g1" } ] )
+    assert v[ "work_owed" ] is True
+    assert v[ "signals" ] == [ "outstanding_user_gate" ]
+    assert "awaiting Rick" in v[ "specifics" ]
+    assert "last_asked_ts" in v[ "specifics" ]                  # guard: stamp instruction present
+
+
+def test_open_user_gate_counts_multiple():
+    v = o.evaluate_work_owed( open_user_gates=[ { "id": "g1" }, { "id": "g2" } ] )
+    assert "2 open user-gate(s)" in v[ "specifics" ]
+
+
+def test_falsy_user_gate_entries_dropped():
+    v = o.evaluate_work_owed( open_user_gates=[ { }, None, 0 ] )
+    assert v[ "work_owed" ] is False
+
+
+def test_empty_user_gates_owes_nothing():
+    assert o.evaluate_work_owed( open_user_gates=[ ] )[ "work_owed" ] is False
+
+
+# ── manager_needs_verification — the pure debounce predicate ──────────────────
+
+def test_manager_needs_verification_no_workers_is_false():
+    # No worker out ⇒ nothing to verify ⇒ never a verification debt (gate).
+    assert o.manager_needs_verification( [ ], None, _NOW ) is False
+    assert o.manager_needs_verification( None, None, _NOW ) is False
+    assert o.manager_needs_verification( [ None, { } ], None, _NOW ) is False   # all falsy filtered
+
+
+def test_manager_needs_verification_never_looked_in_is_true():
+    # Workers out + no prior look-in ⇒ owe a first look (bias-to-owe).
+    assert o.manager_needs_verification( [ { "session_name": "w" } ], None, _NOW ) is True
+
+
+def test_manager_needs_verification_unparseable_ts_is_true():
+    # Workers out + undateable stamp ⇒ bias-to-owe (poke cap bounds cost).
+    assert o.manager_needs_verification( [ { "session_name": "w" } ], "not-a-ts", _NOW ) is True
+
+
+def test_manager_needs_verification_fresh_look_in_is_false():
+    # Looked in 1 min ago (< 10 min debounce) ⇒ not yet due.
+    assert o.manager_needs_verification( [ { "session_name": "w" } ], _ago( 60 ), _NOW ) is False
+
+
+def test_manager_needs_verification_stale_look_in_is_true():
+    # Looked in 11 min ago (> 10 min debounce) ⇒ due to verify again.
+    assert o.manager_needs_verification( [ { "session_name": "w" } ], _ago( 660 ), _NOW ) is True
+
+
+def test_manager_needs_verification_boundary_equal_is_true():
+    # Exactly at the threshold owes (>=) — a 10-min-old look-in is due.
+    assert o.manager_needs_verification(
+        [ { "session_name": "w" } ], _ago( o.VERIFICATION_DEBOUNCE_SECONDS ), _NOW ) is True
+
+
+def test_manager_needs_verification_custom_threshold():
+    # Looked in 5 min ago, threshold 4 min ⇒ due.
+    assert o.manager_needs_verification(
+        [ { "session_name": "w" } ], _ago( 300 ), _NOW, threshold_seconds=240 ) is True
+    assert o.manager_needs_verification(
+        [ { "session_name": "w" } ], _ago( 300 ), _NOW, threshold_seconds=600 ) is False
+
+
+def test_iso_age_seconds_shared_helper():
+    # The extracted single-source age helper underlies both inbound + verification.
+    assert abs( o._iso_age_seconds( _ago( 120 ), _NOW ) - 120 ) < 1
+    assert o._iso_age_seconds( None, _NOW )   is None
+    assert o._iso_age_seconds( 123, _NOW )    is None
+    assert o._iso_age_seconds( "nope", _NOW ) is None
+
+
 # ── ordering + composition ────────────────────────────────────────────────────
 
 def test_all_signals_fire_strongest_first():
@@ -142,14 +233,17 @@ def test_all_signals_fire_strongest_first():
         pending_decisions            = [ { "blocked_on_user": False } ],
         unanswered_inbound_questions = [ { "question_id": "q1" } ],
         outstanding_delegations      = [ { "session_name": "cc-reviewer-x-1" } ],
+        needs_verification           = True,
+        open_user_gates              = [ { "id": "g1" } ],
     )
     assert v[ "work_owed" ] is True
     assert v[ "signals" ] == [
         "todo_in_progress", "todo_unstarted", "pending_decision",
-        "unanswered_inbound_question", "outstanding_delegation"
+        "unanswered_inbound_question", "outstanding_delegation",
+        "needs_verification", "outstanding_user_gate",
     ]
-    # specifics carries all five counts
-    assert v[ "specifics" ].count( ";" ) == 4
+    # specifics carries all seven counts (6 separators)
+    assert v[ "specifics" ].count( ";" ) == 6
 
 
 # ── build_poke_reason ─────────────────────────────────────────────────────────

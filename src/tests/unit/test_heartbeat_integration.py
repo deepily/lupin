@@ -70,6 +70,7 @@ if _src_path not in sys.path:   # pragma: no cover - src is always already on sy
 
 import lupin_cli.claude_code.hooks.stop as stop
 from lupin_cli.claude_code.hooks.lib import heartbeat_events, heartbeat_poke_cap, heartbeat_hold
+from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates as _ug
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import (
     DECLARED_OWED_REASON, OUTCOME_POKE, OUTCOME_HONORED,
     OUTCOME_NOT_OWED, OUTCOME_CAP_REACHED,
@@ -210,7 +211,8 @@ class _Chain:
         """Patch the settings loader (the live flag must not bleed in)."""
         self._mp.setattr( stop, "load_heartbeat_settings",
                           lambda: { "enabled": enabled, "poke_cap": cap,
-                                    "owed_source_from_store": False } )
+                                    "owed_source_from_store": False,
+                                    "verification_threshold_seconds": 600 } )
 
     def persona( self, value ):
         """Override the (external) voice-bridge persona resolver."""
@@ -933,3 +935,76 @@ class TestGroupSSettingsLoaderSeam:
         tp = roots.task_transcript( _OWED )
         assert stop._run_heartbeat( "sidS2", tp )[ 0 ] is None      # dormant by default → no exhaust
         assert roots.events( "sidS2" ) == [ ]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# GROUP H — receipts-of-progress (6929f4ac): real .heartbeat-hold round-trip
+# through the REAL leaves (write_hold → read_hold_resilient → oracle → decision).
+# These are the whole-chain e2e proofs the design requires: (a) a sitting manager
+# with stale verification AND (b) a session with an open user-gate both read
+# work_owed=true and POKE — even under a fresh reasoned hold (the §9 override).
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestGroupHReceiptsOfProgress:
+
+    def _stale( self, seconds=10_000 ):
+        return _iso( datetime.datetime.now( UTC ) - datetime.timedelta( seconds=seconds ) )
+
+    def _write_hold( self, roots, sid, **extra ):
+        """REAL fresh+reasoned (would-be-HONORED) hold + 6929f4ac fields, on disk."""
+        return heartbeat_hold.write_hold(
+            sid, "Mr. Radio 🦉", "awaiting workers", work_owed=True,
+            ttl_seconds=900, awaiting="none", held_at=_iso( datetime.datetime.now( UTC ) ),
+            base_dir=roots.hold_dir, **extra )
+
+    def test_h1_open_user_gate_overrides_fresh_hold_and_pokes( self, roots ):
+        """OUTWARD twin e2e: a real hold carrying an OPEN, overdue user-gate pokes
+        through the full chain even though the hold is fresh+reasoned (would be
+        honored). Proves work_owed=true reaches the poke + the reason re-asks."""
+        roots.enable( cap=3 )
+        gate = _ug.make_gate( "g1", "Proceed with the prod deploy?", "ask_yes_no",
+                              last_asked_ts=self._stale() )
+        self._write_hold( roots, "sidH1", pending_user_gates=[ gate ] )
+        tp = roots.task_transcript( _EMPTY )                  # no Task* owed — gate is the sole signal
+        out, _ = stop._run_heartbeat( "sidH1", tp )
+        assert out[ "decision" ] == "block"
+        assert "user-gate" in out[ "reason" ] and "last_asked_ts" in out[ "reason" ]
+        assert roots.poke_count( "sidH1" ) == 1
+
+    def test_h2_answered_gate_leaves_fresh_hold_honored( self, roots ):
+        """OUTWARD twin clear: an ANSWERED gate is not owed → the fresh reasoned
+        hold is honored → no poke (Rick answered ⇒ obligation gone)."""
+        roots.enable( cap=3 )
+        gate = _ug.make_gate( "g1", "Proceed?", "ask_yes_no",
+                              last_asked_ts=self._stale(), answered=True )
+        self._write_hold( roots, "sidH2", pending_user_gates=[ gate ] )
+        tp = roots.task_transcript( _EMPTY )
+        assert stop._run_heartbeat( "sidH2", tp )[ 0 ] is None    # honored → no poke
+        assert roots.poke_count( "sidH2" ) == 0
+
+    def test_h3_stale_verification_overrides_fresh_hold_and_pokes( self, roots, monkeypatch ):
+        """INWARD twin e2e: a manager with a live worker + a STALE look-in pokes
+        through the full chain even under a fresh reasoned hold. Delegations are a
+        filesystem externality (manifest∩bridge) → injected here."""
+        roots.enable( cap=3 )
+        monkeypatch.setattr( stop, "_gather_outstanding_delegations",
+                             lambda sid: [ { "session_name": "cc-worker-1", "session_id": "w1" } ] )
+        self._write_hold( roots, "sidH3", last_looked_in_on_workers_ts=self._stale() )
+        tp = roots.task_transcript( _EMPTY )
+        out, _ = stop._run_heartbeat( "sidH3", tp )
+        assert out[ "decision" ] == "block"
+        assert "worker-verification overdue" in out[ "reason" ]
+        assert "last_looked_in_on_workers_ts" in out[ "reason" ]
+
+    def test_h4_fresh_verification_leaves_fresh_hold_honored( self, roots, monkeypatch ):
+        """INWARD twin self-clear: a manager that JUST looked in (fresh stamp) +
+        live worker → needs_verification False → the live worker alone
+        (outstanding_delegation, non-override) leaves the fresh hold HONORED."""
+        roots.enable( cap=3 )
+        monkeypatch.setattr( stop, "_gather_outstanding_delegations",
+                             lambda sid: [ { "session_name": "cc-worker-1", "session_id": "w1" } ] )
+        self._write_hold( roots, "sidH4",
+                          last_looked_in_on_workers_ts=_iso( datetime.datetime.now( UTC ) ) )
+        tp = roots.task_transcript( _EMPTY )
+        assert stop._run_heartbeat( "sidH4", tp )[ 0 ] is None    # honored → no poke
+        assert roots.poke_count( "sidH4" ) == 0

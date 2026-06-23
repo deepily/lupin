@@ -27,11 +27,13 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_settings as hs
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import DEFAULT_POKE_CAP
 
 
-# Full default dict (4 keys as of Spine Step-2). Single source for the many
-# "returns defaults" assertions below — bump it here if a 5th key ever lands.
+# Full default dict (5 keys as of 6929f4ac verification_threshold_seconds).
+# Single source for the many "returns defaults" assertions below — bump it here
+# if a 6th key ever lands.
 _DEFAULTS = { "enabled": False, "poke_cap": DEFAULT_POKE_CAP,
               "count_inbound_questions_as_owed": False,
-              "owed_source_from_store": False }
+              "owed_source_from_store": False,
+              "verification_threshold_seconds": 600 }
 
 
 # ── Fixture: point the loader's expanduser at a tmp settings.json ─────────────
@@ -101,9 +103,7 @@ def test_block_not_dict_returns_defaults( settings_file ):
 
 def test_enabled_true_poke_cap_read( settings_file ):
     settings_file( { "heartbeat": { "enabled": True, "poke_cap": 5 } } )
-    assert hs.load_heartbeat_settings() == { "enabled": True, "poke_cap": 5,
-                                             "count_inbound_questions_as_owed": False,
-                                             "owed_source_from_store": False }
+    assert hs.load_heartbeat_settings() == { **_DEFAULTS, "enabled": True, "poke_cap": 5 }
 
 
 def test_enabled_coerced_to_bool( settings_file ):
@@ -116,16 +116,12 @@ def test_enabled_coerced_to_bool( settings_file ):
 
 def test_enabled_present_poke_cap_missing_uses_default( settings_file ):
     settings_file( { "heartbeat": { "enabled": True } } )
-    assert hs.load_heartbeat_settings() == { "enabled": True, "poke_cap": DEFAULT_POKE_CAP,
-                                             "count_inbound_questions_as_owed": False,
-                                             "owed_source_from_store": False }
+    assert hs.load_heartbeat_settings() == { **_DEFAULTS, "enabled": True }
 
 
 def test_poke_cap_present_enabled_missing_defaults_off( settings_file ):
     settings_file( { "heartbeat": { "poke_cap": 7 } } )
-    assert hs.load_heartbeat_settings() == { "enabled": False, "poke_cap": 7,
-                                             "count_inbound_questions_as_owed": False,
-                                             "owed_source_from_store": False }
+    assert hs.load_heartbeat_settings() == { **_DEFAULTS, "poke_cap": 7 }
 
 
 # ── Thread B: count_inbound_questions_as_owed gate key ────────────────────────
@@ -158,6 +154,40 @@ def test_count_inbound_falsy_non_bool_coerced( settings_file ):
     """Falsy non-bool (0) coerces to False — the gate stays OFF."""
     settings_file( { "heartbeat": { "count_inbound_questions_as_owed": 0 } } )
     assert hs.load_heartbeat_settings()[ "count_inbound_questions_as_owed" ] is False
+
+
+# ── 6929f4ac: verification_threshold_seconds (read + fail-loud validation) ────
+
+def test_verification_threshold_default_is_600():
+    assert hs.DEFAULT_VERIFICATION_THRESHOLD_SECONDS == 600
+
+
+def test_verification_threshold_missing_defaults_600( settings_file ):
+    settings_file( { "heartbeat": { "enabled": True, "poke_cap": 3 } } )
+    assert hs.load_heartbeat_settings()[ "verification_threshold_seconds" ] == 600
+
+
+def test_verification_threshold_read( settings_file ):
+    settings_file( { "heartbeat": { "verification_threshold_seconds": 1200 } } )
+    assert hs.load_heartbeat_settings()[ "verification_threshold_seconds" ] == 1200
+
+
+@pytest.mark.parametrize( "bad", [ "ten", True, False, 600.0, 0, -1, None, [ 600 ] ] )
+def test_invalid_verification_threshold_raises( settings_file, bad ):
+    settings_file( { "heartbeat": { "verification_threshold_seconds": bad } } )
+    with pytest.raises( ValueError ):
+        hs.load_heartbeat_settings()
+
+
+@pytest.mark.parametrize( "good", [ 1, 600, 3600 ] )
+def test_valid_verification_threshold_passes( good ):
+    hs._validate_verification_threshold( good )   # must not raise
+
+
+@pytest.mark.parametrize( "bad", [ "x", True, False, 2.5, 0, -5, None, [ 3 ] ] )
+def test_validate_verification_threshold_rejects( bad ):
+    with pytest.raises( ValueError ):
+        hs._validate_verification_threshold( bad )
 
 
 # ── poke_cap validation (fail-loud) ───────────────────────────────────────────

@@ -31,6 +31,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     TIER_OWNING_MANAGER, TIER_BLOCKER_AND_MANAGER, TIER_DROP, TIER_LOG_THEN_RICK,
     CASE_AUTO_POKE_REAP_REC, CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
     CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
+    CASE_USER_GATE_RESURFACE,
 )
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 from cosa.agents.heartbeat_arbiter import manager_resolver as MR
@@ -97,7 +98,16 @@ def test_case_tiers_is_exhaustive_part6_plus_2b3_reap_rec():
     # Part-6 outputs 1..12 + the 2b-3 auto-poke reap-recommendation (case 13)
     # + the post-game cases (14 manager-stale advisory, 15 fleet-dark — 2026-06-11)
     # + the L1 store-aware advisories (16 manager-awaiting-user, 17 manager-done — 2026-06-17)
-    assert set( CASE_TIERS ) == set( range( 1, 18 ) )
+    # + the 6929f4ac user-gate resurface (18 — 2026-06-22)
+    assert set( CASE_TIERS ) == set( range( 1, 19 ) )
+
+
+def test_user_gate_resurface_routes_rick_only():
+    """6929f4ac (2026-06-22): a dark session's aged, unanswered user-gate is
+    surfaced to RICK ONLY — a direct user-gate is the human's to answer (mirrors
+    #10 decision-needed); a dark session has no manager fan-out value."""
+    assert CASE_USER_GATE_RESURFACE == 18
+    assert tier_for( CASE_USER_GATE_RESURFACE ) == TIER_RICK_ONLY
 
 
 def test_l1_store_aware_advisory_cases_route_rick_and_managers():

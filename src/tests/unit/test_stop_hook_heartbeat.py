@@ -143,7 +143,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_v2_fm19_catch_no_hold_owed_task_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """FM-19: no hold + owed Task* (in_progress) → poke (the v2 headline catch)."""
         self.mock_replay.return_value = _OWED_STATE
@@ -164,7 +164,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_v1_preserved_stale_declared_hold_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """v1 preserved: stale self-declared-owed hold pokes even with no owed Task*."""
         mock_read.return_value       = _stale_owed_hold()
@@ -183,7 +183,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_fresh_hold_honored( self, mock_load, mock_read, mock_count, mock_incr ):
         mock_read.return_value = _fresh_reasoned_hold()
         assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None
@@ -193,7 +193,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_not_owed_empty_taskset_emits_idle( self, mock_load, mock_read, mock_count ):
         """not_owed + empty Task* set → genuine-idle beacon (transition)."""
         self.mock_replay.return_value = _EMPTY_STATE
@@ -208,7 +208,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_not_owed_nonempty_taskset_no_idle( self, mock_load, mock_read, mock_count ):
         """not_owed but tasks exist (all completed) → NOT genuine-idle → no beacon."""
         self.mock_replay.return_value = _DONE_STATE        # nothing owed, but task set NON-empty
@@ -220,7 +220,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=3 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_cap_reached_notifies_no_increment( self, mock_load, mock_read, mock_count,
                                                  mock_incr, mock_notify ):
         """Owed Task* but at cap → no poke, cap FYI, no increment."""
@@ -229,13 +229,100 @@ class TestRunHeartbeat:
         mock_notify.assert_called_once_with( "sid" )
         mock_incr.assert_not_called()
 
+    # ── 6929f4ac receipts-of-progress tick driver (inward + outward twins) ─────
+
+    @staticmethod
+    def _hold_with( **extra ):
+        """A fresh, reasoned (would-be-HONORED) hold + 6929f4ac fields merged in."""
+        base = {
+            "session_id": "s", "persona": "Mr Radio", "held_at": _now().isoformat(),
+            "ttl_seconds": 900, "work_owed": True, "reason": "awaiting workers",
+            "awaiting": "none", "pending_user_gates": [ ],
+            "last_looked_in_on_workers_ts": None,
+        }
+        base.update( extra )
+        return base
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
+    def test_stale_verification_overrides_hold_and_carries_signal( self, mock_load, mock_read, mock_count, mock_incr ):
+        """INWARD twin: a manager with a live worker + a STALE look-in is poked
+        even under a fresh reasoned hold, and the poke reason names the debt."""
+        self.mock_delegations.return_value = [ { "session_name": "w", "session_id": "x" } ]
+        stale_look_in = ( _now() - datetime.timedelta( seconds=10_000 ) ).isoformat()
+        mock_read.return_value = self._hold_with( last_looked_in_on_workers_ts=stale_look_in )
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out[ "decision" ] == "block"
+        assert "worker-verification overdue" in out[ "reason" ]      # inward-twin specifics
+        assert "last_looked_in_on_workers_ts" in out[ "reason" ]     # guard: stamp instruction
+        mock_incr.assert_called_once_with( "sid" )
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
+    def test_fresh_verification_leaves_hold_honored( self, mock_load, mock_read, mock_count, mock_incr ):
+        """INWARD twin self-clear: a manager that JUST looked in (fresh stamp) and
+        declared a hold is NOT nagged — needs_verification is False, so the live
+        worker alone (outstanding_delegation, a non-override signal) leaves the
+        fresh reasoned hold HONORED."""
+        self.mock_delegations.return_value = [ { "session_name": "w", "session_id": "x" } ]
+        fresh_look_in = _now().isoformat()
+        mock_read.return_value = self._hold_with( last_looked_in_on_workers_ts=fresh_look_in )
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None       # honored → no poke
+        mock_incr.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.log_to_stream" )
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
+    def test_open_user_gate_overrides_hold_and_logs_due( self, mock_load, mock_read, mock_count, mock_incr, mock_log ):
+        """OUTWARD twin: an OPEN, overdue user-gate pokes even under a fresh
+        reasoned hold (the §9 inversion), the reason instructs the re-ask, and the
+        oracle log carries the open + due gate counts."""
+        from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates as ug
+        stale_ask = ( _now() - datetime.timedelta( seconds=10_000 ) ).isoformat()
+        gate = ug.make_gate( "g1", "Proceed with deploy?", "ask_yes_no", last_asked_ts=stale_ask )
+        mock_read.return_value = self._hold_with( pending_user_gates=[ gate ] )
+        self.mock_replay.return_value = _EMPTY_STATE
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out[ "decision" ] == "block"
+        assert "user-gate" in out[ "reason" ] and "last_asked_ts" in out[ "reason" ]
+        mock_incr.assert_called_once_with( "sid" )
+        oracle_logs = [ c.kwargs[ "extra" ] for c in mock_log.call_args_list
+                        if c.kwargs.get( "extra", { } ).get( "phase" ) == "heartbeat_oracle" ]
+        assert oracle_logs and oracle_logs[ 0 ][ "open_user_gates" ] == 1
+        assert oracle_logs[ 0 ][ "due_user_gates" ] == 1
+        assert oracle_logs[ 0 ][ "needs_verification" ] is False
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
+    def test_answered_gate_does_not_poke( self, mock_load, mock_read, mock_count, mock_incr ):
+        """OUTWARD twin clear: an ANSWERED gate is not owed — a fresh reasoned hold
+        with only an answered gate is honored (Rick answered ⇒ obligation gone)."""
+        from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates as ug
+        gate = ug.make_gate( "g1", "Proceed?", "ask_yes_no", last_asked_ts=_now().isoformat(), answered=True )
+        mock_read.return_value = self._hold_with( pending_user_gates=[ gate ] )
+        self.mock_replay.return_value = _EMPTY_STATE
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None       # honored → no poke
+        mock_incr.assert_not_called()
+
     # ── emit details ──
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=1 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_emit_persona_and_awaiting_from_hold( self, mock_load, mock_read, mock_count, mock_incr ):
         self.mock_persona.return_value = { "name": "Rachel" }
         mock_read.return_value         = _stale_owed_hold()      # awaiting="none"
@@ -251,7 +338,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_emit_failure_never_breaks_poke( self, mock_load, mock_read, mock_count, mock_incr, mock_log ):
         """§0 #2: emission failure must NOT break the poke."""
         self.mock_replay.return_value = _OWED_STATE
@@ -266,7 +353,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_manager_with_alive_worker_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """The manager bug fix: zero Task* items, one live spawned worker → poke."""
         self.mock_delegations.return_value = [ { "session_name": "cc-reviewer-x-1", "session_id": "c1" } ]
@@ -279,7 +366,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_manager_all_workers_reaped_idles( self, mock_load, mock_read, mock_count ):
         """All children reaped (gatherer returns []) → no delegation signal → idle path."""
         self.mock_delegations.return_value = [ ]
@@ -289,7 +376,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_worker_with_open_inbound_dm_pokes( self, mock_load, mock_read, mock_count, mock_incr ):
         """The worker fix, OPT-IN (Thread B): with count_inbound_questions_as_owed
         True, an unhandled inbound assignment DM → poke to resume/finish (the v3
@@ -305,7 +392,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_worker_open_inbound_default_off_no_poke( self, mock_load, mock_read, mock_count, mock_incr ):
         """Thread B DEFAULT-OFF (the Rick-visible fix): the SAME unhandled inbound
         DM, with the gate key False, is gated OUT of the owed feed → NOT owed → no
@@ -320,7 +407,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_oracle_log_carries_live_signal_counts( self, mock_load, mock_read, mock_count, mock_log ):
         """Observability: the heartbeat_oracle log line carries both new counts."""
         self.mock_delegations.return_value = [ ]
@@ -336,7 +423,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_poke_pairs_block_with_single_tmux_inject( self, mock_load, mock_read, mock_count, mock_incr ):
         """f0d79d71 EXACTLY-ONE-CONTINUATION: a poke returns the decision:block
         dict (the continue receipt the caller emits ONCE) AND injects the poke
@@ -351,7 +438,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_no_poke_does_not_inject( self, mock_load, mock_read, mock_count, mock_incr ):
         """A fresh reasoned hold is honored → no poke → NO tmux injection."""
         mock_read.return_value = _fresh_reasoned_hold()
@@ -363,7 +450,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=3 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_cap_reached_does_not_inject( self, mock_load, mock_read, mock_count, mock_incr, mock_cap ):
         """Re-entry bound: owed Task* but poke_cap reached → no poke → NO injection.
         The cap is the guard that stops a re-fire from double-injecting."""
@@ -376,7 +463,7 @@ class TestRunHeartbeat:
     @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False } )
+            return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_poke_empty_reason_skips_inject( self, mock_load, mock_read, mock_count, mock_incr, mock_decide ):
         """Defensive `if poke_reason` False arm: a poke whose hook_output carries an
         empty reason does NOT inject (inject requires non-empty text), yet still
@@ -919,7 +1006,7 @@ class TestMainSpeakerphonePokeMatrix:
              patch( "lupin_cli.claude_code.hooks.stop._try_auto_narrate" ), \
              patch( "lupin_cli.claude_code.hooks.stop._has_pending_voice", return_value=False ), \
              patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
-                    return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False } ), \
+                    return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } ), \
              patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
              patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
              patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" ), \
@@ -1270,7 +1357,7 @@ class TestRunHeartbeatStoreSource:
             yield
 
     _STORE_ON = { "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False,
-                  "owed_source_from_store": True }
+                  "owed_source_from_store": True, "verification_threshold_seconds": 600 }
 
     @patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 2, True ) )
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
@@ -1361,7 +1448,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True,
-                           "owed_source_from_store": True } )
+                           "owed_source_from_store": True, "verification_threshold_seconds": 600 } )
     def test_O1_store_unreachable_with_inbound_STILL_pokes( self, mock_load, mock_read, mock_count,
                                                             mock_incr, mock_store, mock_log ):
         """O1 REGRESSION GUARD (worker side): store UNREACHABLE + an unanswered
@@ -1380,7 +1467,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": False,
-                           "owed_source_from_store": False } )
+                           "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
     def test_flag_off_uses_transcript_not_store( self, mock_load, mock_read, mock_count,
                                                   mock_incr, mock_store ):
         """DEFAULT (flag OFF): owed source is the transcript replay; the store
@@ -1410,7 +1497,7 @@ class TestRunHeartbeatStoreSource:
     @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None )
     @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
             return_value={ "enabled": True, "poke_cap": 3, "count_inbound_questions_as_owed": True,
-                           "owed_source_from_store": True } )
+                           "owed_source_from_store": True, "verification_threshold_seconds": 600 } )
     def test_j2_inbound_still_feeds_oracle_under_store_source( self, mock_load, mock_read,
                                                                mock_count, mock_incr, mock_store ):
         """§B: with the store owed-count 0 and the inbound gate ON, an unanswered

@@ -67,6 +67,7 @@ def drive_oracle( monkeypatch, e2e_server, tmp_path ):
             "poke_cap"                       : 1000,
             "count_inbound_questions_as_owed": False,
             "owed_source_from_store"         : flag,
+            "verification_threshold_seconds" : 600,
         } )
         monkeypatch.setattr( stop, "load_task_store_settings", lambda: {
             "enabled"           : True,

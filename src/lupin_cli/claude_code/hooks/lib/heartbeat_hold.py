@@ -19,7 +19,7 @@ safe** — each instance writes/reads only its own file (derived from the
 `session_id` in the hook input); a future fleet Poker globs
 `.heartbeat-hold-*.json` for the cross-session view.
 
-Schema (§0 decision #7 — the public interface; hold to it exactly):
+Schema (§0 decision #7 + 6929f4ac §9.2 — the public interface; hold to it exactly):
     session_id  : str   — = filename suffix
     persona     : str   — owning persona (e.g. "María 🌸")
     held_at     : str   — ISO-8601 timestamp the hold was declared
@@ -27,6 +27,15 @@ Schema (§0 decision #7 — the public interface; hold to it exactly):
     work_owed   : bool  — False ⇒ done ⇒ never poke
     reason      : str   — why the instance is holding
     awaiting    : str   — "user:<name>" / "peer:<persona>" / "commons:<topic>" / "none"
+    pending_user_gates           : list — structured open/answered direct-user-gate
+                                          rows (6929f4ac §9.2 outward twin; promotes
+                                          the free-text `awaiting: user:rick` to
+                                          re-askable rows). See heartbeat_user_gates.
+    last_looked_in_on_workers_ts : str|None — ISO-8601 of the MANAGER's most-recent
+                                          worker-verification look-in (6929f4ac
+                                          §3-§5 inward twin debounce clock); None ⇒
+                                          never looked in. The agent stamps this
+                                          when it verifies workers (explicit v1).
 
 This module deals ONLY with the declared hold artifact. The work-owed
 *oracle* (TODO / Pending-Decisions scan, §0 #3) and the `Stop`-hook decision
@@ -39,11 +48,17 @@ import datetime
 from pathlib import Path
 
 
-# Public interface constants — §0 decision #7
+# Public interface constants — §0 decision #7 + 6929f4ac §9.2
 HOLD_FILENAME_TEMPLATE = ".heartbeat-hold-{session_id}.json"
-HOLD_SCHEMA_FIELDS     = ( "session_id", "persona", "held_at", "ttl_seconds", "work_owed", "reason", "awaiting" )
+HOLD_SCHEMA_FIELDS     = ( "session_id", "persona", "held_at", "ttl_seconds",
+                           "work_owed", "reason", "awaiting",
+                           "pending_user_gates", "last_looked_in_on_workers_ts" )
 DEFAULT_TTL_SECONDS    = 900
 AWAITING_NONE          = "none"
+
+# 6929f4ac field names (single-source so readers/writers never drift)
+PENDING_USER_GATES_FIELD = "pending_user_gates"
+LAST_LOOKED_IN_FIELD     = "last_looked_in_on_workers_ts"
 
 
 def _resolve_base_dir( base_dir ):
@@ -145,7 +160,8 @@ def _parse_iso( value ):
 
 def write_hold( session_id, persona, reason, work_owed=True,
                 ttl_seconds=DEFAULT_TTL_SECONDS, awaiting=AWAITING_NONE,
-                held_at=None, base_dir=None ):
+                held_at=None, base_dir=None,
+                pending_user_gates=None, last_looked_in_on_workers_ts=None ):
     """
     Write (atomically) this session's hold artifact and return the dict.
 
@@ -155,10 +171,14 @@ def write_hold( session_id, persona, reason, work_owed=True,
         - work_owed is a bool
         - ttl_seconds is a positive int
         - awaiting is a string (see schema)
+        - pending_user_gates is a list of gate-row dicts or None (⇒ [])
+        - last_looked_in_on_workers_ts is an ISO-8601 string or None
 
     Ensures:
         - Writes <base_dir>/.heartbeat-hold-<session_id>.json with EXACTLY
-          the 7 schema fields, in HOLD_SCHEMA_FIELDS order
+          the HOLD_SCHEMA_FIELDS fields, in order (incl. the two 6929f4ac fields)
+        - pending_user_gates defaults to [] (no open gates) when not supplied;
+          last_looked_in_on_workers_ts defaults to None (never looked in)
         - held_at defaults to now (UTC, seconds precision) when not supplied
         - Write is atomic (temp file + os.replace) so a concurrent fleet
           Poker never reads a half-written file
@@ -171,13 +191,15 @@ def write_hold( session_id, persona, reason, work_owed=True,
         held_at = _now().isoformat( timespec="seconds" )
 
     hold = {
-        "session_id"  : session_id,
-        "persona"     : persona,
-        "held_at"     : held_at,
-        "ttl_seconds" : ttl_seconds,
-        "work_owed"   : work_owed,
-        "reason"      : reason,
-        "awaiting"    : awaiting,
+        "session_id"                   : session_id,
+        "persona"                      : persona,
+        "held_at"                      : held_at,
+        "ttl_seconds"                  : ttl_seconds,
+        "work_owed"                    : work_owed,
+        "reason"                       : reason,
+        "awaiting"                     : awaiting,
+        "pending_user_gates"           : list( pending_user_gates ) if pending_user_gates else [ ],
+        "last_looked_in_on_workers_ts" : last_looked_in_on_workers_ts,
     }
 
     path = hold_path( session_id, base_dir=base_dir )
@@ -384,6 +406,47 @@ def declared_work_owed( hold ):
     return None
 
 
+def get_pending_user_gates( hold ):
+    """
+    The hold's structured pending-user-gate rows (6929f4ac §9.2 outward twin).
+
+    Requires:
+        - hold is a dict or None
+
+    Ensures:
+        - Returns the list value of hold["pending_user_gates"] when it is a list
+        - Returns [] when there is no hold, the field is absent, or it is non-list
+          (a pre-6929f4ac hold has no gates ⇒ [] ⇒ outward twin silent)
+        - Never raises
+    """
+    if not hold:
+        return [ ]
+    value = hold.get( PENDING_USER_GATES_FIELD )
+    return value if isinstance( value, list ) else [ ]
+
+
+def get_last_looked_in_ts( hold ):
+    """
+    The MANAGER's most-recent worker-verification look-in stamp (6929f4ac §3-§5).
+
+    The inward-twin debounce clock: the IO shell feeds this to
+    manager_needs_verification. A pre-6929f4ac hold (or one that never looked in)
+    yields None ⇒ a manager with workers out reads as owing a first look-in.
+
+    Requires:
+        - hold is a dict or None
+
+    Ensures:
+        - Returns the str value of hold["last_looked_in_on_workers_ts"] when present
+        - Returns None when there is no hold, the field is absent, or it is non-str
+        - Never raises
+    """
+    if not hold:
+        return None
+    value = hold.get( LAST_LOOKED_IN_FIELD )
+    return value if isinstance( value, str ) else None
+
+
 def quick_smoke_test():
     """
     Self-contained, side-effect-free smoke test (uses a temp dir).
@@ -398,14 +461,22 @@ def quick_smoke_test():
         sid = "smoke1234"
 
         # Fresh declared hold → honored, not pokeable
+        gate = { "id": "g1", "answered": False }
         write_hold( sid, "Tiffany 💍", "holding on the 3-way seam review",
-                    work_owed=True, ttl_seconds=900, awaiting="peer:Rachel", base_dir=tmp )
+                    work_owed=True, ttl_seconds=900, awaiting="peer:Rachel", base_dir=tmp,
+                    pending_user_gates=[ gate ], last_looked_in_on_workers_ts="2026-06-22T12:00:00+00:00" )
         hold = read_hold( sid, base_dir=tmp )
         assert hold is not None,                      "round-trip read failed"
         assert tuple( hold.keys() ) == HOLD_SCHEMA_FIELDS, "schema field set/order drift"
         assert is_fresh( hold ),                      "fresh hold reported stale"
         assert is_honored( hold ),                    "reasoned fresh hold not honored"
         assert declared_work_owed( hold ) is True,    "work_owed not read back"
+        assert get_pending_user_gates( hold ) == [ gate ], "gates not read back"
+        assert get_last_looked_in_ts( hold ) == "2026-06-22T12:00:00+00:00", "look-in ts not read back"
+        # Defaults: a hold written without the 6929f4ac fields → [] / None
+        write_hold( sid, "Tiffany 💍", "plain hold", base_dir=tmp )
+        plain = read_hold( sid, base_dir=tmp )
+        assert get_pending_user_gates( plain ) == [ ] and get_last_looked_in_ts( plain ) is None
 
         # Expired hold → undeclared ⇒ pokeable (not honored)
         old = ( _now() - datetime.timedelta( seconds=10_000 ) ).isoformat( timespec="seconds" )

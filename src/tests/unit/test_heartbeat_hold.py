@@ -386,6 +386,42 @@ def test_read_hold_resilient_dedups_when_cwd_is_project_root( tmp_path, monkeypa
     assert hold[ "persona" ] == "Rio"
 
 
+# ── 6929f4ac §9.2 — pending_user_gates + last_looked_in_on_workers_ts fields ──
+
+def test_write_hold_includes_6929f4ac_fields_in_schema( tmp_path ):
+    gate = { "id": "g1", "answered": False }
+    hh.write_hold( "sid12345", "Sam", "holding", base_dir=tmp_path,
+                   pending_user_gates=[ gate ],
+                   last_looked_in_on_workers_ts="2026-06-22T12:00:00+00:00" )
+    hold = hh.read_hold( "sid12345", base_dir=tmp_path )
+    assert tuple( hold.keys() ) == hh.HOLD_SCHEMA_FIELDS
+    assert hold[ "pending_user_gates" ] == [ gate ]
+    assert hold[ "last_looked_in_on_workers_ts" ] == "2026-06-22T12:00:00+00:00"
+
+
+def test_write_hold_defaults_6929f4ac_fields( tmp_path ):
+    hh.write_hold( "sid12345", "Sam", "plain hold", base_dir=tmp_path )
+    hold = hh.read_hold( "sid12345", base_dir=tmp_path )
+    assert hold[ "pending_user_gates" ] == [ ]
+    assert hold[ "last_looked_in_on_workers_ts" ] is None
+
+
+def test_get_pending_user_gates_variants():
+    assert hh.get_pending_user_gates( None )                          == [ ]
+    assert hh.get_pending_user_gates( { } )                           == [ ]   # field absent
+    assert hh.get_pending_user_gates( { "pending_user_gates": "x" } ) == [ ]   # non-list
+    rows = [ { "id": "g1" }, { "id": "g2" } ]
+    assert hh.get_pending_user_gates( { "pending_user_gates": rows } ) == rows
+
+
+def test_get_last_looked_in_ts_variants():
+    assert hh.get_last_looked_in_ts( None )                                       is None
+    assert hh.get_last_looked_in_ts( { } )                                        is None   # field absent
+    assert hh.get_last_looked_in_ts( { "last_looked_in_on_workers_ts": 123 } )    is None   # non-str
+    ts = "2026-06-22T12:00:00+00:00"
+    assert hh.get_last_looked_in_ts( { "last_looked_in_on_workers_ts": ts } )     == ts
+
+
 # ── quick_smoke_test ──────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():

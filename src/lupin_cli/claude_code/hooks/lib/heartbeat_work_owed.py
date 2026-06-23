@@ -55,6 +55,15 @@ TODO_COMPLETED   = "completed"
 # threshold + the partition itself are PURE (clock injected, never read here).
 INBOUND_STALE_AFTER_SECONDS = 86400
 
+# Receipts-of-progress inward twin (6929f4ac, Rick 2026-06-22): the manager
+# worker-verification debounce. A MANAGER with workers OUT owes a fresh
+# verification receipt (artifact-delta look-in) every `threshold` seconds; while
+# its last look-in is older than this it reads as work-owed (so it keeps getting
+# poked to verify, closing the "sit-back-and-wait-for-a-notification" loophole at
+# the code layer — design §2/§3). v1 = the debounce alone (Rick: 10 min); the
+# stall-aware escalation is v2. PURE: the clock is injected, never read here.
+VERIFICATION_DEBOUNCE_SECONDS = 600
+
 # Poke-prompt sentinel (c121037b, 2026-06-16) — the SHARED opening clause of
 # every heartbeat self-poke `reason`. The poke is re-submitted as a prompt via
 # tmux send-keys, which fires the UserPromptSubmit hook; that hook must NOT treat
@@ -155,6 +164,33 @@ def _actionable_pending_decisions( pending_decisions ):
     ]
 
 
+def _iso_age_seconds( ts, now_epoch ):
+    """
+    Age in seconds of an ISO-8601 timestamp string, or None when undateable.
+
+    The shared, single-source age-of-a-timestamp helper (one descriptive name
+    everywhere): consumed by both _inbound_age_seconds (inbound-DM age-out) and
+    manager_needs_verification (the look-in debounce).
+
+    Requires:
+        - ts is anything (defensive over foreign data); only a str dates
+        - now_epoch is a float/int POSIX timestamp ("now", injected by caller)
+
+    Ensures:
+        - Returns ( now_epoch - parsed_ts ) in seconds for a parseable str ts
+        - Returns None when ts is missing / non-string / unparseable
+        - PURE: parses the injected string + arithmetic only; reads no clock
+        - Trailing "Z" is normalized to "+00:00" so UTC stamps parse on 3.10
+    """
+    if not isinstance( ts, str ):
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat( ts.replace( "Z", "+00:00" ) )
+    except ValueError:
+        return None
+    return now_epoch - parsed.timestamp()
+
+
 def _inbound_age_seconds( entry, now_epoch ):
     """
     Age in seconds of one inbound entry, or None when it cannot be dated.
@@ -166,17 +202,51 @@ def _inbound_age_seconds( entry, now_epoch ):
     Ensures:
         - Returns ( now_epoch - parsed_ts ) in seconds for a parseable ts
         - Returns None when ts is missing / non-string / unparseable
-        - PURE: parses the injected string + arithmetic only; reads no clock
-        - Trailing "Z" is normalized to "+00:00" so UTC stamps parse on 3.10
+        - Delegates dating to _iso_age_seconds (single-source age helper)
     """
     ts = entry.get( "ts" ) if isinstance( entry, dict ) else None
-    if not isinstance( ts, str ):
-        return None
-    try:
-        parsed = datetime.datetime.fromisoformat( ts.replace( "Z", "+00:00" ) )
-    except ValueError:
-        return None
-    return now_epoch - parsed.timestamp()
+    return _iso_age_seconds( ts, now_epoch )
+
+
+def manager_needs_verification( outstanding_delegations, last_verification_ts,
+                                now_epoch,
+                                threshold_seconds=VERIFICATION_DEBOUNCE_SECONDS ):
+    """
+    Inward twin (6929f4ac §3-§5): does this MANAGER owe a fresh worker-
+    verification receipt right now? The pure debounce predicate.
+
+    A manager that merely waits — no fresh look-in — must read as work-owed so
+    the oracle keeps poking it to VERIFY (liveness ≠ progress; being owed ≠ doing
+    the owed thing). It self-clears the instant the manager looks in (stamps
+    `last_looked_in_on_workers_ts`), so a manager who is actually managing resets
+    the clock for free and a manager who sits does not.
+
+    Requires:
+        - outstanding_delegations is an iterable of (truthy ⇒ alive worker)
+          entries, or None — the SAME list the outstanding_delegation signal
+          consumes (manifest ∩ live bridges, gathered by the IO shell)
+        - last_verification_ts is the manager's most-recent verification stamp
+          (ISO-8601 str) or None (never looked in)
+        - now_epoch is the caller's injected "now" (POSIX seconds)
+        - threshold_seconds is the debounce window (Rick: 600 = 10 min)
+
+    Ensures:
+        - Returns False when NO worker is out (all dead/reaped ⇒ nothing to
+          verify ⇒ never a verification debt) — gates the whole predicate
+        - With ≥1 worker out: True iff there is no datable prior look-in
+          (last_verification_ts None or unparseable ⇒ bias-to-owe a first/again
+          look; the poke cap bounds the cost) OR the look-in age ≥ threshold
+        - Boundary: age EXACTLY == threshold owes (>=) — a 10-min-old look-in is
+          due, mirroring "verify at least every 10 min"
+        - PURE: no clock, no IO; never raises on well-formed input
+    """
+    workers = [ d for d in ( outstanding_delegations or [ ] ) if d ]
+    if not workers:
+        return False
+    age = _iso_age_seconds( last_verification_ts, now_epoch )
+    if age is None:
+        return True
+    return age >= threshold_seconds
 
 
 def partition_inbound_by_age( inbound, now_epoch,
@@ -211,14 +281,18 @@ def partition_inbound_by_age( inbound, now_epoch,
 
 def evaluate_work_owed( todo_items=None, pending_decisions=None,
                         unanswered_inbound_questions=None,
-                        outstanding_delegations=None ):
+                        outstanding_delegations=None,
+                        needs_verification=False,
+                        open_user_gates=None ):
     """
     Pure work-owed verdict over injected state (§0 step 3).
 
     Requires:
-        - todo_items, pending_decisions, unanswered_inbound_questions and
-          outstanding_delegations are each an iterable of dicts, or None
-          (treated as empty)
+        - todo_items, pending_decisions, unanswered_inbound_questions,
+          outstanding_delegations and open_user_gates are each an iterable of
+          dicts, or None (treated as empty)
+        - needs_verification is a bool — the inward twin's already-computed
+          debounce verdict (manager_needs_verification, the IO shell calls it)
 
     Ensures:
         - Returns a verdict dict:
@@ -228,23 +302,34 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
         - work_owed is True iff at least one signal fired
         - signals order is fixed strongest-first:
           todo_in_progress, todo_unstarted, pending_decision,
-          unanswered_inbound_question, outstanding_delegation
+          unanswered_inbound_question, outstanding_delegation,
+          needs_verification, outstanding_user_gate
         - outstanding_delegation fires iff ≥1 truthy entry is injected — an
           ALIVE, un-reaped spawned worker is owed work (the manager still owes
           review/reap); all-dead/reaped ⇒ empty ⇒ no signal ⇒ idle allowed.
           The live gathering (manifest ∩ live bridges) is the CALLER's IO, not
           this oracle's (pure-core discipline unchanged)
+        - needs_verification fires iff the injected bool is truthy — the inward
+          twin (6929f4ac): a manager owes a fresh worker-verification receipt
+          (workers out AND its look-in is stale). The IO shell computes the bool
+          via manager_needs_verification; this oracle only routes it to a signal
+        - outstanding_user_gate fires iff ≥1 truthy open-gate entry is injected —
+          the outward twin (6929f4ac §9): an open direct user-gate is owed work
+          that must be RE-SURFACED (re-asked), never parked. The IO shell filters
+          to the OPEN (unanswered) gates; an answered gate clears it
         - Never fetches live data; never raises on well-formed list input
     """
     todo_items                   = todo_items or [ ]
     pending_decisions            = pending_decisions or [ ]
     unanswered_inbound_questions = unanswered_inbound_questions or [ ]
     outstanding_delegations      = outstanding_delegations or [ ]
+    open_user_gates              = open_user_gates or [ ]
 
     in_progress, unstarted = _actionable_todos( todo_items )
     actionable_decisions   = _actionable_pending_decisions( pending_decisions )
     unanswered             = [ q for q in unanswered_inbound_questions if q ]
     outstanding            = [ d for d in outstanding_delegations if d ]
+    open_gates             = [ g for g in open_user_gates if g ]
 
     signals   = [ ]
     specifics = [ ]
@@ -264,6 +349,12 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
     if outstanding:
         signals.append( "outstanding_delegation" )
         specifics.append( f"{len( outstanding )} live worker(s) still out" )
+    if needs_verification:
+        signals.append( "needs_verification" )
+        specifics.append( "worker-verification overdue — look in on your workers (stamp last_looked_in_on_workers_ts)" )
+    if open_gates:
+        signals.append( "outstanding_user_gate" )
+        specifics.append( f"{len( open_gates )} open user-gate(s) awaiting Rick — re-ask now (stamp last_asked_ts)" )
 
     return {
         "work_owed" : bool( signals ),
@@ -326,6 +417,17 @@ def quick_smoke_test():
     # All workers reaped (falsy entries filtered) ⇒ idle allowed
     v = evaluate_work_owed( outstanding_delegations=[ None, { } ] )
     assert v[ "work_owed" ] is False
+
+    # Inward twin — manager owes a fresh verification (debounce predicate + signal)
+    assert manager_needs_verification( [ { "session_name": "w" } ], None, 1_000_000.0 ) is True
+    assert manager_needs_verification( [ ], None, 1_000_000.0 ) is False     # no workers ⇒ no debt
+    v = evaluate_work_owed( needs_verification=True )
+    assert v[ "work_owed" ] is True and v[ "signals" ] == [ "needs_verification" ]
+
+    # Outward twin — an open user-gate is owed work (re-ask); answered clears it
+    v = evaluate_work_owed( open_user_gates=[ { "id": "g1" } ] )
+    assert v[ "work_owed" ] is True and v[ "signals" ] == [ "outstanding_user_gate" ]
+    assert evaluate_work_owed( open_user_gates=[ None ] )[ "work_owed" ] is False
 
     reason = build_poke_reason( evaluate_work_owed(
         todo_items=[ { "status": TODO_IN_PROGRESS, "owned_by_me": True } ] ) )

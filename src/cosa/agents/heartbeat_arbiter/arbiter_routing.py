@@ -88,6 +88,16 @@ CASE_FLEET_DARK             = 15
 CASE_MANAGER_AWAITING_USER  = 16
 CASE_MANAGER_DONE_ADVISORY  = 17
 
+# 6929f4ac ADDITION (2026-06-22, receipts-of-progress outward twin — design
+# src/rnd/2026.06.22-receipts-of-progress-heartbeat-owed-calc.md §9.2):
+#   18  USER-GATE-RESURFACE — a session that went DARK while still holding an
+#       OPEN, AGED direct user-gate (it stopped re-asking) → the arbiter surfaces
+#       the buried question to Rick ON THE SESSION'S BEHALF. Rick ONLY: a direct
+#       user-gate is the human's to answer (mirrors #10 decision-needed); a dark
+#       session has no manager fan-out value here, and the whole point is the
+#       owed gate reaching Rick when the session can no longer re-ask it.
+CASE_USER_GATE_RESURFACE    = 18
+
 CASE_TIERS = {
     1  : TIER_RICK_ONLY,
     2  : TIER_RICK_ONLY,
@@ -106,6 +116,7 @@ CASE_TIERS = {
     CASE_FLEET_DARK             : TIER_RICK_ONLY,           # post-game F3 (2026-06-11)
     CASE_MANAGER_AWAITING_USER  : TIER_RICK_AND_MANAGERS,   # L1 (2026-06-17) blocked-on-Rick advisory
     CASE_MANAGER_DONE_ADVISORY  : TIER_RICK_AND_MANAGERS,   # L1 (2026-06-17) consider-reaping advisory
+    CASE_USER_GATE_RESURFACE    : TIER_RICK_ONLY,           # 6929f4ac (2026-06-22) dark-session gate → Rick
 }
 
 
@@ -127,9 +138,12 @@ def tier_for( case: int ) -> str:
 def quick_smoke_test():
     """Self-contained smoke test. Returns True or raises AssertionError."""
     # every case maps to a known tier (Part-6 1..12 + the 2b-3 reap-rec case 13
-    # + the post-game cases 14/15 + the L1 advisory cases 16/17)
-    assert set( CASE_TIERS ) == set( range( 1, 18 ) )
+    # + the post-game cases 14/15 + the L1 advisory cases 16/17 + the 6929f4ac
+    # user-gate resurface case 18)
+    assert set( CASE_TIERS ) == set( range( 1, 19 ) )
     assert all( t in ALL_TIERS for t in CASE_TIERS.values() )
+    # 6929f4ac (2026-06-22): the dark-session user-gate resurface is Rick-only
+    assert tier_for( CASE_USER_GATE_RESURFACE ) == TIER_RICK_ONLY
     assert tier_for( CASE_AUTO_POKE_REAP_REC ) == TIER_RICK_AND_MANAGERS   # 2b-3
     # post-game (2026-06-11): manager-stale fans to Rick + managers; fleet-dark
     # is Rick-only (no managers remain by definition)
