@@ -246,8 +246,8 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( stampUpdated ) this.stampUpdated();
   }
 
-  // The owner-reassignment roster: active personas (Sam excluded) from the SAME
-  // fleet source the fleet-status card consumes. Empty when no fleet store is
+  // The owner-reassignment roster: active personas (Sam INCLUDED — Q5) from the
+  // SAME fleet source the fleet-status card consumes. Empty when no fleet store is
   // wired (optional construction) or no fleet data is cached yet (null composite).
   private reassignTargets(): string[] {
     return activeReassignTargets( this.stores.fleet?.composite() ?? null );

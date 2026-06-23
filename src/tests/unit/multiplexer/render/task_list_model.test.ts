@@ -266,7 +266,7 @@ test("deriveTaskActor: null/undefined/blank → anonymous fallback", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Phase 2 — activeReassignTargets (active personas, Sam excluded; Q5)
+// Phase 2 — activeReassignTargets (active personas, Sam INCLUDED; Q5)
 // ---------------------------------------------------------------------------
 
 test("activeReassignTargets: null / missing fleet_arbiter / non-array sessions → []", () => {
@@ -287,14 +287,15 @@ test("activeReassignTargets: distinct live personas, alpha-sorted", () => {
   assert.deepEqual(activeReassignTargets(fleet), ["amy", "bob", "zoe"]);
 });
 
-test("activeReassignTargets: EXCLUDES the Sam overflow persona (any case)", () => {
+test("activeReassignTargets: INCLUDES the Sam overflow persona (Q5)", () => {
+  // Q5 ruling 2026-06-23: the roster is the SAME one the fleet-status card shows,
+  // which carries Sam as a live persona — no reassign-only exclusion. Sam is a
+  // valid reassignment target alongside the other live personas.
   const fleet = { fleet_arbiter: { sessions: [
     { persona: "Sam" },
-    { persona: "sam" },
-    { persona: "SAM" },
     { persona: "amy" },
   ] } };
-  assert.deepEqual(activeReassignTargets(fleet), ["amy"]);
+  assert.deepEqual(activeReassignTargets(fleet), ["amy", "Sam"]);
 });
 
 test("activeReassignTargets: offline personas are excluded (only live contribute)", () => {
