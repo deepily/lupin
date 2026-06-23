@@ -45,14 +45,16 @@ from cosa.agents.heartbeat_arbiter.arbiter_state import (
     FleetEventAccumulator, PingLedger, DEFAULT_TAIL_MAXLEN,
 )
 from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
-from cosa.agents.heartbeat_arbiter.dependency_graph import build_graph
+from cosa.agents.heartbeat_arbiter.dependency_graph import (
+    build_graph, build_store_wait_edges, cycle_is_store_backed,
+)
 from cosa.agents.heartbeat_arbiter.idle_roster import build_roster
 from cosa.agents.heartbeat_arbiter import ping_throttle
 # v2.1 direct-state visibility (design 03 §10.2-§10.4): per-session liveness off
 # the bridge-mtime clock, change-or-tick render, and the queryable snapshot push.
 from cosa.agents.heartbeat_arbiter.fleet_render import (
-    build_snapshot, carry_forward_lineage, frame_signature, prune_offline_rows,
-    render_fleet_table, render_tick,
+    build_snapshot, carry_forward_lineage, compute_liveness, frame_signature,
+    prune_offline_rows, render_fleet_table, render_tick,
 )
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn, DELIVERED_OUTCOMES
 # Item B (§3.4/§3.5): the dm-topic slug (receipt polling reads the SAME board the
@@ -147,6 +149,12 @@ CLASS_BLOCKED_ON_USER = "blocked_on_user"   # every non-terminal owed item is Ri
 CLASS_DONE            = "done"              # zero non-terminal owed items → consider-reaping, not down
 CLASS_ACTIVE          = "active"           # has ≥1 normal (non-Rick-gated) owed item → today's behavior
 CLASS_UNKNOWN         = "unknown"          # store read failed / seam unwired → FAIL SAFE (today's behavior)
+
+# Sentinel: distinguishes "_classify_owed must do its own owed read" (default)
+# from "a pre-read owed dict (possibly None) was threaded in by the caller" — so
+# the per-poll one-read can be SHARED with the deadlock corroboration source
+# (build_store_wait_edges) without re-querying the store.
+_UNREAD = object()
 
 # The owed-classes that SUPPRESS a blocking escalation (lane 4, 2026-06-17): a
 # session is "not owed" — not a stall, not down — iff its owed work is entirely
@@ -414,6 +422,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         tail_maxlen              : int                  = DEFAULT_TAIL_MAXLEN,
         tap_min_interval_seconds : int                  = 300,
         manager_ack_window_seconds : int                = 600,
+        deadlock_dwell_seconds     : int                = 300,    # store-backed ring must PERSIST this long before escalating (progressing-wait belt; 0 → fire on first corroborated sight)
         fleet_stall_window_seconds : int                = 1800,
         poll_error_escalate_threshold : int             = 3,
         auto_poke_enabled        : bool                 = True,
@@ -640,6 +649,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                                                      declared_managers=self.declared_managers ) )
         self.tap_min_interval_seconds      = tap_min_interval_seconds
         self.manager_ack_window_seconds    = manager_ack_window_seconds
+        self.deadlock_dwell_seconds        = deadlock_dwell_seconds
         self.fleet_stall_window_seconds    = fleet_stall_window_seconds
         self.poll_error_escalate_threshold = poll_error_escalate_threshold
         # 2b-3 auto-poke (Rick redline-narrowing confirmed): bounded, non-destructive
@@ -711,6 +721,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # their current (un-acked) tap — so manager-down escalates ONCE, not every
         # poll, until the manager re-acks (shows liveness after the tap).
         self._manager_down_escalated = set()
+        # bug 436a366b deadlock state (store-corroborated rings only): per
+        # ring-signature first-seen datetime (dwell/progressing-wait belt) + the
+        # set of signatures already escalated (de-dup: fire ONCE per store-backed
+        # ring). Both prune when a ring disappears (resolved → re-arm).
+        self._deadlock_first_seen = { }
+        self._deadlock_escalated  = set()
         # 6929f4ac: keys "<session_id>:<gate_id>" already resurfaced to Rick this
         # dark episode — escalate-once; re-arms when the gate clears or the session
         # freshens out of the eligible set (mirrors the _mgr_* episode trackers).
@@ -872,9 +888,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
               if isinstance( v, dict ) and v.get( "persona" ) }
             | set( self._last_tap_at.keys() )
         )
-        owed_class = self._classify_owed( eval_personas, fleet_view )
+        owed_items  = self._read_owed( eval_personas )                    # ONE per-poll owed read, shared below
+        owed_class  = self._classify_owed( eval_personas, fleet_view, owed=owed_items )
+        # bug 436a366b: the AUTHORITATIVE store dependency ring — the deadlock
+        # escalation is corroborated against THIS, never the derived holding_on
+        # edges alone. Built from the SAME owed read (one query per poll).
+        store_edges = build_store_wait_edges( owed_items )
 
-        self._escalate_deadlocks( graph[ "cycles" ], active_managers )    # #5 Rick + all mgrs
+        self._escalate_deadlocks( graph[ "cycles" ], store_edges, now, active_managers )  # #5 Rick + all mgrs (store-corroborated)
         # REAPED/OFFLINE-PRUNE (lane 4, 2026-06-17): only auto-ping on behalf of an
         # ALIVE holder. A reaped/long-offline session whose stale `holding_on:
         # peer:X` lingers on its view row was generating phantom blocker pings (+
@@ -891,7 +912,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
         taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers )  # #7 / #8
-        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class )  # #9 (L1 store-aware)
+        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm )  # #9 (L1 store-aware, 5-signal ACK)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
         pokes_fired   = self._auto_poke( fleet_view, now, active_managers )          # 2b-3 auto-poke
@@ -1593,24 +1614,66 @@ class ArbiterConsumerJob( AgenticJobBase ):
                f"I've nudged {blocker} directly — chase if they stay silent." )
         return manager, cc
 
-    def _escalate_deadlocks( self, cycles, active_managers=None ):
+    def _escalate_deadlocks( self, cycles, store_edges, now, active_managers=None ):
         """
         Escalate deadlock cycles — NEVER auto-break (§4). Part-6 #5: Rick + ALL
         active managers (a human/manager breaks the cycle).
 
+        STORE-CORROBORATED + DWELL + DE-DUP (bug 436a366b): the derived
+        `holding_on: peer:X` cycles are SELF-REPORTED — a fresh, legitimately
+        PROGRESSING sequencing wait (Krishna awaiting Mr Radio's merge+build)
+        self-reported a ring and false-escalated to Rick every poll all session.
+        Three gates now stand between a derived cycle and an escalation:
+          1. STORE-CORROBORATION (Mr Radio's single-source-of-truth mandate): a
+             cycle fires ONLY when EVERY ring edge is backed by an authoritative
+             store `blocked_by` owner-edge (cycle_is_store_backed over
+             build_store_wait_edges). A pure-coordination ring with ZERO store
+             rows is OUT OF SCOPE v1 (rare, human-broken, and the right fix is
+             managers expressing real waits as store blocked_by — a hygiene
+             forcing-function). When the owed read is unwired/hiccupped,
+             store_edges is empty → NOTHING fires: deadlock detection
+             fail-SUPPRESSES (the opposite bias from the stall/manager-down
+             detectors, BY DESIGN — over-escalation is THIS bug).
+          2. DWELL / PROGRESSING-WAIT BELT: a store-backed ring must PERSIST for
+             deadlock_dwell_seconds before it escalates. A fresh ring is recorded
+             (first-seen) and given the grace window to self-resolve — a
+             progressing wait clears within it and never fires. dwell=0 ⇒ fire on
+             first corroborated sight.
+          3. DE-DUP: each persisting store-backed ring escalates ONCE (not every
+             poll). Both trackers PRUNE a signature the moment its ring is no
+             longer present (resolved) so a genuine recurrence re-arms.
+
         Requires:
             - cycles is a list of canonical peer cycles (build_graph output)
+            - store_edges is build_store_wait_edges output { holder: set(awaited) }
+            - now is an aware datetime (poll clock)
             - active_managers is the resolved on-duty manager set (or None)
 
         Ensures:
-            - fires ONE escalation per poll when any cycle exists — to Rick
-              (notify_fn) + each active manager (send_to) — the arbiter surfaces
-              deadlocks; a human/manager decides the break
-            - no-op when there are no cycles
+            - fires ONE escalation per poll listing the rings NEWLY crossing the
+              dwell this poll — to Rick (notify_fn) + each active manager
+              (send_to); no-op when no store-backed ring has persisted past dwell
+            - never raises
         """
-        if cycles:
-            rendered = "; ".join( " → ".join( c ) for c in cycles )
-            self._route( 5, f"DEADLOCK detected (no autonomous break) — escalating: {rendered}",
+        backed  = [ c for c in ( cycles or [ ] ) if cycle_is_store_backed( c, store_edges ) ]
+        present = { tuple( c ) for c in backed }
+        # prune resolved rings (re-arm): drop first-seen + escalated for any sig
+        # whose ring is gone this poll.
+        self._deadlock_first_seen = { s: t for s, t in self._deadlock_first_seen.items() if s in present }
+        self._deadlock_escalated  = self._deadlock_escalated & present
+        firing = [ ]
+        for c in backed:
+            sig   = tuple( c )
+            first = self._deadlock_first_seen.setdefault( sig, now )      # record fresh ring → dwell grace
+            if ( now - first ).total_seconds() < self.deadlock_dwell_seconds:
+                continue                                                  # still progressing-wait window → suppress
+            if sig in self._deadlock_escalated:
+                continue                                                  # de-dup: fire ONCE per store-backed ring
+            firing.append( c )
+            self._deadlock_escalated.add( sig )
+        if firing:
+            rendered = "; ".join( " → ".join( c ) for c in firing )
+            self._route( 5, f"DEADLOCK detected (store-corroborated, no autonomous break) — escalating: {rendered}",
                          active_managers=active_managers )
 
     def _prune_recent_pings( self, now ):
@@ -1776,44 +1839,64 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 best = ts
         return best
 
-    def _manager_bridge_activity( self, manager, fleet_view ):
+    def _manager_liveness_activity( self, manager, fleet_view, now, count_dm ):
         """
-        Freshest bridge-file mtime (as an aware-UTC datetime) across the
-        session(s) whose persona is `manager`, or None.
+        Freshest liveness DATETIME for `manager` via the AUTHORITATIVE 5-signal
+        union (fleet_render.compute_liveness) across that manager's session
+        view row(s), or None.
 
-        The bridge mtime is bumped UNCONDITIONALLY by every PreToolUse hook
-        (touch_bridge_mtime — fires for ALL tools, MCP calls included), so a
-        fresh mtime PROVES an actively-working manager is alive even when they
-        post NOTHING to commons. This is the same wedge-resilient liveness clock
-        the fleet render already trusts (_publish_fleet_snapshot via
-        _bridge_mtime_fn); the manager-down detector consults it here so a
-        hard-working-but-commons-silent manager is never falsely declared down
-        (bug 9694fb11).
+        SINGLE SOURCE OF TRUTH (bug e8f40042): the tap-ACK now consumes EXACTLY
+        the same liveness inputs as the general fleet-render verdict path —
+        bridge_age + event_age + commons_age + idle_prompt_age + dm_age (dm gated
+        by `count_dm`, the `arbiter count dm as liveness` toggle). The OLD tap-ACK
+        looked at only {commons, bridge}, so it was STRICTLY NARROWER than the
+        verdict: a manager whose only sign of life was a sent DM (coordination-
+        only, no Read/Edit/Bash to bump the bridge) or a fresh stop-event read
+        `down` and false-escalated MANAGER-DOWN to Rick every
+        manager_ack_window_seconds while it was demonstrably LIVE. Reusing
+        compute_liveness means the ACK can never drift narrower than the verdict
+        again.
+
+        Persona→view matching goes through canonical_persona_key (THE F-B
+        persona-equivalence normalizer the allocation/DM path uses) so a fresh
+        row whose persona spelling differs from the tap key is NOT missed — this
+        also closes the secondary _manager_bridge_activity association miss
+        (exact `==` left bridge_activity None even on a fresh bridge file).
+
+        compute_liveness's thresholds only colour the verdict LABEL; the ACK
+        decision uses `freshest_age_s` alone, so the render-layer defaults are
+        fine. The freshest age (int seconds) is converted back to an absolute
+        datetime (`now - age`) so the caller's `last_activity >= tapped_at`
+        comparison stays unchanged.
 
         Requires:
             - manager is a persona name (str)
             - fleet_view is the build_fleet_view dict { session_id: VIEW } or None
+            - now is an aware datetime; count_dm is a bool
 
         Ensures:
-            - returns the most-recent bridge mtime (aware-UTC datetime) among the
-              manager's sessions, or None when fleet_view is None/empty, no view
-              matches the persona, or no bridge resolves
-            - NEVER raises (a single session's bridge-read hiccup is swallowed —
-              the observer invariant)
+            - returns the freshest liveness datetime among the manager's session
+              rows, or None when fleet_view is None/empty, no view's
+              canonical persona matches, or NO signal is present on any match
+            - NEVER raises (the observer invariant — a per-row hiccup is swallowed
+              by compute_liveness, which is itself never-raises)
         """
-        best = None
+        target = canonical_persona_key( manager ) or manager
+        best   = None
         for view in ( fleet_view or { } ).values():
-            if not isinstance( view, dict ) or view.get( "persona" ) != manager:
+            if not isinstance( view, dict ):
                 continue
-            sid   = view.get( "session_id" )
-            mtime = self._bridge_mtime_fn( sid ) if sid else None
-            if mtime is None:
+            vp = view.get( "persona" )
+            if ( canonical_persona_key( vp ) or vp ) != target:
                 continue
-            try:
-                ts = datetime.datetime.fromtimestamp( mtime, tz=datetime.timezone.utc )
-            except ( TypeError, ValueError, OSError, OverflowError ):
-                ts = None
-            if ts is not None and ( best is None or ts > best ):
+            sid      = view.get( "session_id" )
+            mtime    = self._bridge_mtime_fn( sid ) if sid else None
+            liveness = compute_liveness( view, mtime, now, count_dm=count_dm )
+            age      = liveness[ "freshest_age_s" ]
+            if age is None:
+                continue
+            ts = now - datetime.timedelta( seconds=age )
+            if best is None or ts > best:
                 best = ts
         return best
 
@@ -1861,7 +1944,32 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     return True
         return False
 
-    def _classify_owed( self, personas, fleet_view ):
+    def _read_owed( self, personas ):
+        """
+        ONE swallow-safe non-terminal owed read for `personas` →
+        { persona: [ item-dicts ] } or None.
+
+        The SINGLE per-poll store read shared by BOTH consumers of owed work:
+        _classify_owed (→ CLASS_* labels) AND build_store_wait_edges (→ the
+        authoritative deadlock-corroboration owner-ring). Extracted so the poll
+        keeps its one-read-per-poll discipline (the observer invariant) instead of
+        querying the store twice.
+
+        Ensures:
+            - returns the injected owed_work_fn's result, or None when the seam is
+              unwired (owed_work_fn is None), there are no personas, or the read
+              RAISED (swallowed → None = fail-SAFE for the classifier / suppress
+              for the deadlock gate); never raises
+        """
+        names = sorted( { p for p in ( personas or [ ] ) if p } )
+        if self._owed_work_fn is None or not names:
+            return None
+        try:
+            return self._owed_work_fn( names )
+        except Exception:
+            return None        # store hiccup → None → fail SAFE (observer invariant)
+
+    def _classify_owed( self, personas, fleet_view, owed=_UNREAD ):
         """
         L1 (2026-06-17): classify each persona under evaluation this poll into
         BLOCKED_ON_USER / DONE / ACTIVE / UNKNOWN from a SINGLE swallow-safe store
@@ -1883,18 +1991,22 @@ class ArbiterConsumerJob( AgenticJobBase ):
         poll, never silently suppresses a real escalation). The holding_on "user:"
         corroboration (consumed by the detectors) is best-effort wording only.
 
+        `owed` (bug 436a366b): the caller MAY thread in a pre-read owed dict so the
+        per-poll read is SHARED with build_store_wait_edges (deadlock
+        corroboration) — one store read feeds both. Default `_UNREAD` ⇒ do our own
+        read via _read_owed (the single-persona session_is_not_owed path). A passed
+        value (including None) is used verbatim — None ⇒ all UNKNOWN, as if the read
+        had failed.
+
         Ensures:
             - returns { persona: CLASS_* } for each non-empty persona in `personas`
-            - owed_work_fn is called AT MOST once (skipped when None or no personas)
+            - owed_work_fn is called AT MOST once, and NOT AT ALL when `owed` is
+              threaded in (the read already happened upstream)
             - never raises
         """
         names = sorted( { p for p in ( personas or [ ] ) if p } )
-        owed  = None
-        if self._owed_work_fn is not None and names:
-            try:
-                owed = self._owed_work_fn( names )
-            except Exception:
-                owed = None        # store hiccup → UNKNOWN → fail SAFE (observer invariant)
+        if owed is _UNREAD:                # default: do our own one read (single-persona callers)
+            owed = self._read_owed( names )
         result = { }
         for persona in names:
             if owed is None or persona not in owed:
@@ -1960,24 +2072,32 @@ class ArbiterConsumerJob( AgenticJobBase ):
         cls = self._classify_owed( [ persona ], fleet_view or { } ).get( persona, CLASS_UNKNOWN )
         return owed_class_suppresses( cls )
 
-    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None ):
+    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None, count_dm=True ):
         """
         B4/D4 manager-down detector via the liveness-proxy ACK.
 
         A manager tapped at T is treated as having "acked" (present-to-act) while
-        their liveness is fresh AT/AFTER T. Liveness is the UNION of two aliveness
-        sources: commons activity from who() AND a fresh bridge-mtime bump (the
-        wedge-resilient clock every PreToolUse touches). If a TAPPED manager shows
-        NO liveness from EITHER source since the tap AND ≥
-        manager_ack_window_seconds have elapsed → MANAGER-DOWN → escalate to Rick
-        (notify_fn) + HOLD.
+        their liveness is fresh AT/AFTER T. Liveness is the AUTHORITATIVE 5-signal
+        union — the SAME inputs as the general fleet-render verdict
+        (fleet_render.compute_liveness): bridge-mtime + stop-event + commons +
+        idle_prompt + sent-DM (dm gated by `count_dm`). If a TAPPED manager shows
+        NO fresh signal since the tap AND ≥ manager_ack_window_seconds have
+        elapsed → MANAGER-DOWN → escalate to Rick (notify_fn) + HOLD.
 
-        Why the bridge-mtime source (bug 9694fb11): there is NO deliverable
-        tap-ACK path — a manager literally cannot DM the arbiter back. So the only
-        honest ACK is a liveness proxy, and commons-activity ALONE under-counts: a
-        manager working hard (edits/tools/MCP, all of which bump the bridge mtime)
-        but posting nothing to commons looked "down" and false-escalated to Rick.
-        Folding the bridge mtime in treats real work as the implicit ACK it is.
+        Why a liveness proxy (bug 9694fb11): there is NO deliverable tap-ACK path
+        — a manager literally cannot DM the arbiter back. So the only honest ACK
+        is a liveness proxy.
+
+        Why the FULL union (bug e8f40042): the ACK formerly looked at only
+        {commons, bridge}, making it STRICTLY NARROWER than the verdict path that
+        consumes all five. A manager whose only sign of life was a sent DM
+        (coordination-only — no Read/Edit/Bash to bump the bridge, nothing to
+        commons) or a fresh stop-event read `down` and false-escalated
+        MANAGER-DOWN to Rick every window while demonstrably LIVE. Routing the ACK
+        through compute_liveness (via _manager_liveness_activity) makes the ACK a
+        strict SUPERSET of the verdict's life signals — it can never drift
+        narrower again. The who()-sourced commons activity is retained as a belt
+        (the view's commons_ts is phantom-nulled when the bridge is absent).
 
         IMPORTANT (semantics): the liveness-proxy proves ALIVENESS, not
         CONSUMPTION. That's correct for D4, whose trigger IS manager-DOWN —
@@ -2024,14 +2144,17 @@ class ArbiterConsumerJob( AgenticJobBase ):
         holding    = self._holding_on_by_persona( fleet_view )
         down = 0
         for manager, tapped_at in list( self._last_tap_at.items() ):
+            # Implicit tap-ACK from the AUTHORITATIVE 5-signal liveness union
+            # (bug e8f40042 — was {commons, bridge}-only, strictly narrower than
+            # the verdict, so a DM-only / coordination manager false-DOWNed every
+            # window). commons_activity from who_rows is KEPT as a belt: the view
+            # path's commons_ts is phantom-nulled when the bridge is absent, so a
+            # bridge-less-but-commons-posting manager would otherwise lose that
+            # ACK — max() of both makes the new path a strict SUPERSET of the old.
             commons_activity = self._manager_last_activity( manager, who_rows )
-            bridge_activity  = self._manager_bridge_activity( manager, fleet_view )
-            # Implicit tap-ACK from EITHER aliveness source (bug 9694fb11): the
-            # most-recent of commons-post liveness and the bridge-mtime clock. A
-            # fresh bridge bump means the manager is actively running tools right
-            # now — alive, hence acked — even with zero commons posts.
-            candidates    = [ t for t in ( commons_activity, bridge_activity ) if t is not None ]
-            last_activity = max( candidates ) if candidates else None
+            view_activity    = self._manager_liveness_activity( manager, fleet_view, now, count_dm )
+            candidates       = [ t for t in ( commons_activity, view_activity ) if t is not None ]
+            last_activity    = max( candidates ) if candidates else None
             if last_activity is not None and last_activity >= tapped_at:
                 self._manager_down_escalated.discard( manager )    # acked → clear (re-arm)
                 self._manager_blocked_advised.discard( manager )
