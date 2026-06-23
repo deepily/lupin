@@ -198,6 +198,87 @@ test("senderCard: non-CC sender (no '#') omits the session block (legacy parity)
   assert.equal(card.querySelector(".sender-session-name"), null);
 });
 
+// ---------------------------------------------------------------------------
+// F5 lane (Cheech 2026-06-22) — inline voice-input row (MATCH-LEGACY rebuild).
+// CC sessions emit `.cc-voice-input` > `.cc-voice-input-row` (conv-mode + mic +
+// input + send) BETWEEN the header and `.sender-card-dates`; non-CC omit it.
+// The static structure is what the component-isolation parity harness sees, so
+// the Tier-3 voice-region carve can lift. SenderCardRecorderRenderer adds only
+// behavior on top.
+// ---------------------------------------------------------------------------
+
+test("senderCard: CC session emits the inline voice-input row with all four legacy controls", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "claude.code@lupin.deepily.ai#parity01" }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  const vi = card.querySelector(".cc-voice-input");
+  assert.notEqual(vi, null, ".cc-voice-input present for a CC session");
+  assert.equal(vi!.getAttribute("data-session-hash"), "parity01");
+  assert.equal(vi!.getAttribute("data-sender-id"), "claude.code@lupin.deepily.ai#parity01");
+  const row = vi!.querySelector(".cc-voice-input-row");
+  assert.notEqual(row, null, ".cc-voice-input-row present");
+  // The four legacy-verbatim controls.
+  assert.notEqual(row!.querySelector(".sender-conversation-mode-btn"), null, "conv-mode toggle present");
+  assert.notEqual(row!.querySelector(".stt-button.cc-session-stt"), null, "mic present");
+  const msgInput = row!.querySelector("input.cc-session-msg-input") as HTMLInputElement | null;
+  assert.notEqual(msgInput, null, "text input present");
+  assert.equal(msgInput!.getAttribute("id"), "cc-session-input-parity01", "input id composed with the session hash");
+  assert.equal(msgInput!.getAttribute("placeholder"), "Send voice/text to CC session...");
+  assert.notEqual(row!.querySelector(".response-submit-button.cc-session-send"), null, "send present");
+  // Mux idiom: NO inline onclick anywhere in the row.
+  assert.equal(vi!.querySelector("[onclick]"), null, "no inline onclick (mux idiom)");
+});
+
+test("senderCard: voice-input row sits BETWEEN the header and the dates region (legacy position)", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "claude.code@lupin.deepily.ai#parity01" }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  const kids = [ ...card.children ].map(el => el.className);
+  const headerIdx = kids.findIndex(c => c.includes("sender-card-header"));
+  const voiceIdx  = kids.findIndex(c => c.includes("cc-voice-input"));
+  const datesIdx  = kids.findIndex(c => c.includes("sender-card-dates"));
+  assert.ok(headerIdx >= 0 && voiceIdx >= 0 && datesIdx >= 0, "all three regions present");
+  assert.ok(headerIdx < voiceIdx && voiceIdx < datesIdx,
+    `expected header < voice-input < dates; got ${headerIdx}/${voiceIdx}/${datesIdx}`);
+});
+
+test("senderCard: conversation_mode_active=true marks the toggle is-active with the 🔊 glyph", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "claude.code@lupin.deepily.ai#parity01", conversation_mode_active: true }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  const btn = card.querySelector(".sender-conversation-mode-btn")!;
+  assert.ok(btn.classList.contains("is-active"), "is-active when conversation mode is on");
+  assert.equal(btn.textContent, "🔊");
+  assert.equal(btn.getAttribute("data-session-id"), "parity01");
+});
+
+test("senderCard: conversation_mode_active=false omits is-active and uses the 🤭 glyph", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "claude.code@lupin.deepily.ai#parity01", conversation_mode_active: false }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  const btn = card.querySelector(".sender-conversation-mode-btn")!;
+  assert.ok(!btn.classList.contains("is-active"), "no is-active when conversation mode is off");
+  assert.equal(btn.textContent, "🤭");
+});
+
+test("senderCard: non-CC sender (no '#') omits the voice-input row entirely (legacy parity)", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "lupin-arbiter-app-8001" }),
+    [],
+    { appTimezone: "UTC" },
+  );
+  assert.equal(card.querySelector(".cc-voice-input"), null, "no voice row for a non-CC sender");
+  assert.equal(card.querySelector(".cc-voice-input-row"), null);
+});
+
 test("senderCard: injected opts.now drives the status glyph deterministically", () => {
   const ts  = Date.UTC(2026, 4, 5, 14, 0);
   // now == 30 min after last activity → active (🟢).

@@ -1,29 +1,39 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
-// Multiplexer Phase 6c Node C — SenderCardRecorderRenderer.
+// Multiplexer F5 lane — SenderCardRecorderRenderer (MATCH-LEGACY rebuild, 2026-06-22).
 //
-// Thin wrapper renderer that wires the recordingManager singleton to the
-// per-sender-card `.cc-voice-input` footers rendered by senderCard.ts
-// (Step C1 mount points). Subscribes to clicks on `.record-button` /
-// `.send-button` via event delegation; manages a per-context state machine
-// (idle → recording → ready_to_send) and renders the appropriate buttons.
+// Behavior layer for the legacy inline `.cc-voice-input` > `.cc-voice-input-row`
+// (conv-mode toggle + mic + text input + send) that senderCard.ts now renders
+// STATICALLY between the card header and `.sender-card-dates`. This renderer
+// does NOT build the row markup (that moved to senderCard.ts so the
+// component-isolation parity harness sees it) — it wires delegated clicks and
+// drives recording state on the EXISTING row elements:
+//   - `.cc-session-stt`  (mic)  — click to record, click again to stop.
+//   - `.cc-session-send` (send) — POST the text input to /api/notify.
+//   - `.sender-conversation-mode-btn` — POST the conv-mode toggle (legacy-verbatim
+//     /api/cosa-voice/speakerphone/<hash>; the server broadcasts a
+//     conversation_mode_changed WS event the SenderStore consumes → is-active
+//     flips on the next card re-render — no optimistic flip, no new EventBus event).
 //
-// AuthManager order critical (per F-Arnold-C4 + Recon-C7): the renderer
-// REQUIRES authManager.getCurrentUserEmail() to resolve before mount; boot
-// wiring asserts this. The current user email is the `sender_id` field on
-// the outbound user_initiated_message POST (legacy parity).
+// Persistent-input model (vs the retired Record→Stop→ready_to_send paint): the
+// `<input class="cc-session-msg-input">` lives in the static row and PERSISTS.
+// The F5 caret-splice (insert-at-caret on re-record) folds in here, operating on
+// that input. Recording state + the last input value are held in a per-session
+// `states` Map so they SURVIVE the card re-create+replace that
+// NotificationsListRenderer performs on every store_senders_changed
+// (NotificationsListRenderer.ts: `existing.replaceWith(fresh)`): after a replace,
+// `store_senders_changed` fires and `reapplyVoiceInput` restores the mic's
+// recording class + the input value onto the freshly-rendered row.
 //
-// Wire shape (per F-Arnold-C1 + F-Arnold-C2 + Recon-C3): send-button POST
-// uses URL-query-string body to `/api/notify`; fields:
-//   type=user_initiated_message
-//   job_id=<sessionHash>
-//   sender_id=<opts.currentUserEmail>
-//   target_user=<derived from data-sender-id.split('#')[0]>
-//   message=<textarea value>
+// AuthManager order (per F-Arnold-C4 + Recon-C7): the renderer REQUIRES
+// authManager.getCurrentUserEmail() to resolve before mount; boot wiring asserts
+// this. That email is the `sender_id` field on the outbound
+// user_initiated_message POST (legacy parity).
 //
-// Path δ note: this Step C3 implementation lands the core click-delegation
-// + recordingManager invocation surface. The per-state DOM rendering uses
-// minimal markup. AC-C3 was marked N/A per Round-1 Q-C2 collapse; coverage
-// hoisted to AC-C4 (renderer tests) + the port-parity tests.
+// Send-button wire shape (legacy parity, unchanged from the prior renderer):
+//   POST /api/notify?<query>  with
+//     type=user_initiated_message  priority=medium  job_id=<sessionHash>
+//     sender_id=<opts.currentUserEmail>  target_user=<data-sender-id before '#'>
+//     message=<input value>
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreSendersChangedPayload } from "../shared/types";
@@ -43,24 +53,31 @@ export interface SenderCardRecorderRendererOptions {
   getAuthToken?    : () => string | null;
 }
 
-type RecorderState = "idle" | "recording" | "ready_to_send";
-
-// WP6 (F5 insert-at-caret port) — the textarea snapshot captured when a
-// Re-record starts, BEFORE the recording-state repaint destroys the element.
-// `selStart`/`selEnd` are null when the element exposed no caret.
+// The text-input snapshot captured when a record starts, BEFORE onComplete
+// splices the transcription in. `selStart`/`selEnd` are null when the element
+// exposed no caret (insertTranscriptionText then APPENDS — legacy F5 parity).
 interface RerecordStash {
   text     : string;
   selStart : number | null;
   selEnd   : number | null;
 }
 
+// Per-session recording state. `value` is the last input value the renderer
+// knows about (post-splice / post-send) — restored onto a re-created row so the
+// user's transcription survives a card replace. `caret` is the post-splice caret
+// to restore after a record completes (null ⇒ element exposed no caret).
+interface SessionState {
+  recording : boolean;
+  value?    : string;
+  stash?    : RerecordStash;
+  caret?    : number | null;
+}
+
 class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
   private readonly bus              : EventBus;
   private readonly currentUserEmail : string;
   private readonly getAuthToken     : () => string | null;
-  // sessionHash → state (idle/recording/ready_to_send) + pending transcription
-  // + WP6 re-record stash (caret-splice source) + caret to restore post-paint.
-  private readonly states           : Map<string, { state: RecorderState; transcription?: string; stash?: RerecordStash; caret?: number | null }> = new Map();
+  private readonly states          : Map<string, SessionState> = new Map();
   private readonly unsubscribers    : Array<() => void> = [];
 
   private root         : HTMLElement | null = null;
@@ -82,23 +99,19 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     this.clickHandler = (e: Event): void => this.onClick(e);
     root.addEventListener("click", this.clickHandler);
 
-    // Subscribe to store_senders_changed so when NotificationsListRenderer
-    // creates a new .sender-card (and its .cc-voice-input footer) in
-    // response to an arriving notification, this renderer re-paints the
-    // newly-arrived footers with their Record buttons. Without this
-    // subscription, sender cards rendered AFTER mount would never get
-    // Record buttons because paintAllVoiceInputs only ran once at mount
-    // time when zero footers existed yet.
+    // Subscribe to store_senders_changed: NotificationsListRenderer re-creates +
+    // replaces each .sender-card (and its static .cc-voice-input row) on every
+    // emission, so the freshly-rendered row needs its recording-state +
+    // last-known input value re-applied from the states Map. Also covers the
+    // initial-paint case (sets data-recorder-state="idle" on existing rows).
     this.unsubscribers.push(
       this.bus.on<StoreSendersChangedPayload>(
         "store_senders_changed",
-        () => this.paintAllVoiceInputs(),
+        () => this.reapplyAll(),
       ),
     );
 
-    // Initial paint: idle UI on every existing .cc-voice-input footer
-    // (covers the rare case of sender cards already in the DOM at mount).
-    this.paintAllVoiceInputs();
+    this.reapplyAll();
   }
 
   unmount(): void {
@@ -115,7 +128,42 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
   }
 
   forceRenderForTesting(): void {
-    this.paintAllVoiceInputs();
+    this.reapplyAll();
+  }
+
+  // -------------------------------------------------------------------------
+  // Re-apply recording state onto the (possibly re-created) static rows
+  // -------------------------------------------------------------------------
+
+  private reapplyAll(): void {
+    /* c8 ignore next */ // defensive: reapplyAll only runs from mount/store-event/forceRender; root is set.
+    if (this.root === null) return;
+    for (const el of this.root.querySelectorAll<HTMLElement>(".cc-voice-input")) {
+      this.reapplyVoiceInput(el);
+    }
+  }
+
+  private reapplyVoiceInput(voiceInput: HTMLElement): void {
+    const sessionHash = voiceInput.getAttribute("data-session-hash") ?? "";
+    const entry       = this.states.get(sessionHash);
+    const recording   = entry?.recording === true;
+    voiceInput.setAttribute("data-recorder-state", recording ? "recording" : "idle");
+    this.setMicRecordingClass(voiceInput, recording);
+    // Restore the last-known input value onto a freshly-created row so a
+    // transcription survives the card replace. Only when we actually hold one —
+    // an untouched session leaves the static empty input alone.
+    if (entry !== undefined && entry.value !== undefined) {
+      const input = voiceInput.querySelector<HTMLInputElement>(".cc-session-msg-input");
+      /* c8 ignore next */ // defensive: the static CC row always renders the input.
+      if (input !== null) input.value = entry.value;
+    }
+  }
+
+  private setMicRecordingClass(voiceInput: HTMLElement, recording: boolean): void {
+    const mic = voiceInput.querySelector<HTMLButtonElement>(".cc-session-stt");
+    /* c8 ignore next */ // defensive: the static row always carries the mic button; a row without it is not produced by senderCard.ts.
+    if (mic === null) return;
+    mic.classList.toggle("recording", recording);
   }
 
   // -------------------------------------------------------------------------
@@ -127,107 +175,125 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     /* c8 ignore next */ // defensive: e.target is always non-null Element during a fired click event.
     if (target === null) return;
 
-    const recordBtn = target.closest<HTMLButtonElement>(".record-button");
-    if (recordBtn !== null) {
-      this.handleRecordClick(recordBtn);
+    const mic = target.closest<HTMLButtonElement>(".cc-session-stt");
+    if (mic !== null) {
+      this.handleMicClick(mic);
       return;
     }
-    const sendBtn = target.closest<HTMLButtonElement>(".send-button");
+    const sendBtn = target.closest<HTMLButtonElement>(".cc-session-send");
     if (sendBtn !== null) {
       void this.handleSendClick(sendBtn);
+      return;
+    }
+    const convBtn = target.closest<HTMLButtonElement>(".sender-conversation-mode-btn");
+    if (convBtn !== null) {
+      void this.handleConvModeClick(convBtn);
       return;
     }
   }
 
   // -------------------------------------------------------------------------
-  // Event handlers
+  // Mic — record / stop (folds the F5 caret-splice on completion)
   // -------------------------------------------------------------------------
 
-  private handleRecordClick(button: HTMLButtonElement): void {
+  private handleMicClick(button: HTMLButtonElement): void {
     const voiceInput = button.closest<HTMLElement>(".cc-voice-input");
-    /* c8 ignore next */ // defensive: record button only renders inside .cc-voice-input footers.
+    /* c8 ignore next */ // defensive: the mic button only renders inside .cc-voice-input rows.
     if (voiceInput === null) return;
     const sessionHash = voiceInput.getAttribute("data-session-hash") ?? "";
-    // Defensive: senderCard.ts Step C1 always sets data-session-hash; the
-    // missing-attribute path is unit-tested (footer without the attr).
+    // Defensive: senderCard.ts always sets data-session-hash on CC rows; the
+    // missing-attribute path is unit-tested (row without the attr).
     if (sessionHash === "") return;
 
     const current = this.states.get(sessionHash);
-    /* c8 ignore start */ // stop-recording branch fires only after a successful start; full state-cycle exercised at smoke tier (requires microphone access).
-    if (current !== undefined && current.state === "recording") {
+    /* c8 ignore start */ // stop-recording branch fires only after a successful start; the full state-cycle is exercised at smoke tier (requires microphone access).
+    if (current !== undefined && current.recording === true) {
       void recordingManager.stopRecording(sessionHash);
       return;
     }
     /* c8 ignore stop */
 
-    // WP6 (F5 insert-at-caret port): a Re-record from ready_to_send must NOT
-    // clobber the user's edits — the repaint below destroys the textarea, so
-    // snapshot its value + selection FIRST. Selection survives the button
-    // click stealing focus (legacy contract, proven by the F5 e2e suite).
+    // F5 (insert-at-caret): snapshot the live input value + selection BEFORE
+    // recording, so the new transcription splices at the caret instead of
+    // clobbering. ALWAYS stash — an empty input splices "" at caret 0 (plain
+    // fill); a non-empty input gets the caret splice. (Legacy always inserts at
+    // the caret; there is no separate "first record" code path.)
     let stash: RerecordStash | undefined;
-    if (current !== undefined && current.state === "ready_to_send") {
-      const liveTextarea = voiceInput.querySelector<HTMLTextAreaElement>(".cc-voice-input-textarea");
-      if (liveTextarea !== null) {
-        stash = {
-          text     : liveTextarea.value,
-          selStart : liveTextarea.selectionStart,
-          selEnd   : liveTextarea.selectionEnd,
-        };
-      }
+    const input = voiceInput.querySelector<HTMLInputElement>(".cc-session-msg-input");
+    /* c8 ignore next */ // defensive: the static CC row always renders the input; a row without it is not produced by senderCard.ts.
+    if (input !== null) {
+      stash = { text: input.value, selStart: input.selectionStart, selEnd: input.selectionEnd };
     }
 
-    // Start a new recording. transitions to recording state immediately.
-    this.states.set(sessionHash, { state: "recording", stash });
-    this.paintVoiceInput(voiceInput);
+    this.states.set(sessionHash, { recording: true, stash });
+    voiceInput.setAttribute("data-recorder-state", "recording");
+    this.setMicRecordingClass(voiceInput, true);
+
     void recordingManager.startRecording({
       contextId : sessionHash,
       authToken : this.getAuthToken(),
-      // onComplete: transcription succeeded → ready_to_send + repaint. Plain
-      // state-set + repaint; unit-tested via a stubbed recordingManager (the
-      // real mic→STT round-trip that drives it is the smoke tier).
-      // WP6: with a re-record stash, the new transcription is CARET-SPLICED
-      // into the preserved text (replace selected range / insert at caret /
-      // append when caret unknown) instead of replacing the user's edits.
+      // onComplete: transcription succeeded. Splice it into the stashed input
+      // text at the caret (replace selected range / insert at caret / append
+      // when caret unknown), write the result onto the live input, drop back to
+      // idle, and restore focus+caret. Unit-tested via a stubbed recordingManager
+      // (the real mic→STT round-trip is the smoke tier).
       onComplete: (transcription, _blob) => {
         const pending = this.states.get(sessionHash)?.stash;
-        if (pending !== undefined) {
-          const spliced = insertTranscriptionText(
-            pending.text, pending.selStart, pending.selEnd, transcription ?? "",
-          );
-          this.states.set(sessionHash, { state: "ready_to_send", transcription: spliced.value, caret: spliced.caret });
-        } else {
-          this.states.set(sessionHash, { state: "ready_to_send", transcription });
-        }
-        this.paintVoiceInput(voiceInput);
-        this.restoreCaret(voiceInput, sessionHash);
+        /* c8 ignore next */ // defensive: a stash is always set above before startRecording runs; the undefined arm guards an out-of-band onComplete.
+        const base    = pending ?? { text: "", selStart: null, selEnd: null };
+        const spliced = insertTranscriptionText(
+          base.text, base.selStart, base.selEnd, transcription ?? "",
+        );
+        this.states.set(sessionHash, { recording: false, value: spliced.value, caret: spliced.caret });
+        voiceInput.setAttribute("data-recorder-state", "idle");
+        this.setMicRecordingClass(voiceInput, false);
+        this.applyInputValueAndCaret(voiceInput, spliced.value, spliced.caret);
       },
       onError   : (err) => {
-        // Order matters: paintVoiceInput's replaceChildren wipes the
-        // container, so we MUST paint first (state→idle) and THEN append
-        // the error element. Reversing the order silently wipes the error.
-        this.states.set(sessionHash, { state: "idle" });
-        this.paintVoiceInput(voiceInput);
+        // Drop the stash (state→idle) so the next record is a clean snapshot,
+        // THEN surface the error. The order matters only for the data-recorder-
+        // state attribute; renderError appends a child and never wipes the row.
+        this.states.set(sessionHash, { recording: false });
+        voiceInput.setAttribute("data-recorder-state", "idle");
+        this.setMicRecordingClass(voiceInput, false);
         this.renderError(voiceInput, err.message);
       },
     });
   }
 
-  /* c8 ignore start */ // fetch + URLSearchParams network path; exercised at smoke tier via real `/api/notify` POST.
+  private applyInputValueAndCaret(voiceInput: HTMLElement, value: string, caret: number | null): void {
+    const input = voiceInput.querySelector<HTMLInputElement>(".cc-session-msg-input");
+    /* c8 ignore next */ // defensive: the static row always renders the input before a record can complete.
+    if (input === null) return;
+    input.value = value;
+    input.focus();
+    // caret === null ⇒ the source exposed no caret (append path) → focus only,
+    // skip setSelectionRange (legacy parity — it would otherwise throw).
+    if (caret !== null) {
+      input.setSelectionRange(caret, caret);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Send — POST the text input to /api/notify
+  // -------------------------------------------------------------------------
+
+  /* c8 ignore start */ // fetch + URLSearchParams network path; exercised at smoke tier via real /api/notify POST.
   private async handleSendClick(button: HTMLButtonElement): Promise<void> {
     const voiceInput = button.closest<HTMLElement>(".cc-voice-input");
-    /* c8 ignore next */ // defensive: send button only renders inside .cc-voice-input footers.
+    /* c8 ignore next */ // defensive: send button only renders inside .cc-voice-input rows.
     if (voiceInput === null) return;
     const sessionHash = voiceInput.getAttribute("data-session-hash") ?? "";
     const senderId    = voiceInput.getAttribute("data-sender-id")    ?? "";
-    /* c8 ignore next */ // defensive: both data- attributes are always set by senderCard.ts Step C1.
+    /* c8 ignore next */ // defensive: both data- attributes are always set by senderCard.ts.
     if (sessionHash === "" || senderId === "") return;
     if (!senderId.includes("#")) {
       this.renderError(voiceInput, "Malformed sender_id; cannot send.");
       return;
     }
 
-    const textarea = voiceInput.querySelector<HTMLTextAreaElement>(".cc-voice-input-textarea");
-    const message  = (textarea?.value ?? "").trim();
+    const input   = voiceInput.querySelector<HTMLInputElement>(".cc-session-msg-input");
+    const message = (input?.value ?? "").trim();
     if (message === "") {
       this.renderError(voiceInput, "Message is empty.");
       return;
@@ -253,9 +319,9 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
         const errText = await resp.text().catch(() => "");
         throw new Error(errText !== "" ? errText : `HTTP ${resp.status}`);
       }
-      // Reset to idle on successful send.
-      this.states.set(sessionHash, { state: "idle" });
-      this.paintVoiceInput(voiceInput);
+      // Reset on successful send: clear the input + the persisted value.
+      this.states.set(sessionHash, { recording: false, value: "" });
+      if (input !== null) input.value = "";
     } catch (err) {
       this.renderError(voiceInput, (err as Error).message);
     }
@@ -263,77 +329,50 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
   /* c8 ignore stop */
 
   // -------------------------------------------------------------------------
-  // Rendering
+  // Conversation-mode toggle — legacy-verbatim speakerphone POST
   // -------------------------------------------------------------------------
 
-  private paintAllVoiceInputs(): void {
-    /* c8 ignore next */ // defensive: paintAllVoiceInputs only runs from mount/forceRender; root is set.
-    if (this.root === null) return;
-    for (const el of this.root.querySelectorAll<HTMLElement>(".cc-voice-input")) {
-      this.paintVoiceInput(el);
-    }
-  }
-
-  private paintVoiceInput(voiceInput: HTMLElement): void {
+  /* c8 ignore start */ // fetch network path; exercised at smoke/E2E tier via the real /api/cosa-voice/speakerphone POST + the conversation_mode_changed round-trip.
+  private async handleConvModeClick(button: HTMLButtonElement): Promise<void> {
+    const voiceInput = button.closest<HTMLElement>(".cc-voice-input");
+    /* c8 ignore next */ // defensive: the conv-mode button only renders inside .cc-voice-input rows.
+    if (voiceInput === null) return;
     const sessionHash = voiceInput.getAttribute("data-session-hash") ?? "";
-    const entry       = this.states.get(sessionHash) ?? { state: "idle" as RecorderState };
-    voiceInput.setAttribute("data-recorder-state", entry.state);
-    voiceInput.replaceChildren();
+    if (sessionHash === "") return;
 
-    if (entry.state === "idle") {
-      const recordBtn = document.createElement("button");
-      recordBtn.type = "button";
-      recordBtn.className = "record-button";
-      recordBtn.textContent = "Record";
-      voiceInput.appendChild(recordBtn);
-    } else if (entry.state === "recording") {
-      const stopBtn = document.createElement("button");
-      stopBtn.type = "button";
-      stopBtn.className = "record-button recording";
-      stopBtn.textContent = "Stop";
-      voiceInput.appendChild(stopBtn);
-    } else {
-      // ready_to_send paint (textarea + Re-record + Send). Unit-tested by
-      // driving onComplete via a stubbed recordingManager — both the
-      // transcription-present and undefined-transcription (`?? ""`) arms.
-      const textarea = document.createElement("textarea");
-      textarea.className = "cc-voice-input-textarea";
-      textarea.value = entry.transcription ?? "";
-      voiceInput.appendChild(textarea);
+    // Current state from the button's is-active class (senderCard.ts renders it
+    // from sender.conversation_mode_active). Legacy toggles to !current; the
+    // server reaffirms via the conversation_mode_changed WS event → SenderStore
+    // → card re-render flips is-active. No optimistic local flip.
+    const active = button.classList.contains("is-active");
 
-      const rerecordBtn = document.createElement("button");
-      rerecordBtn.type = "button";
-      rerecordBtn.className = "record-button";
-      rerecordBtn.textContent = "Re-record";
-      voiceInput.appendChild(rerecordBtn);
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const token = this.getAuthToken();
+    if (token !== null) headers["Authorization"] = `Bearer ${token}`;
 
-      const sendBtn = document.createElement("button");
-      sendBtn.type = "button";
-      sendBtn.className = "send-button";
-      sendBtn.textContent = "Send";
-      voiceInput.appendChild(sendBtn);
+    try {
+      const resp = await fetch(
+        `/api/cosa-voice/speakerphone/${encodeURIComponent(sessionHash)}`,
+        { method: "POST", headers, body: JSON.stringify({ on: !active }) },
+      );
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        throw new Error(errText !== "" ? errText : `HTTP ${resp.status}`);
+      }
+    } catch (err) {
+      this.renderError(voiceInput, (err as Error).message);
     }
   }
+  /* c8 ignore stop */
 
-  // WP6 — after a re-record splice repaint, return focus to the textarea and
-  // place the caret immediately after the inserted text (legacy F5 parity).
-  // No-op when the state carries no caret entry (plain first-record path —
-  // its behavior is deliberately unchanged) or when the element exposed no
-  // caret at stash time (caret === null → focus only, skip setSelectionRange).
-  private restoreCaret(voiceInput: HTMLElement, sessionHash: string): void {
-    const entry = this.states.get(sessionHash);
-    if (entry === undefined || entry.caret === undefined) return;
-    const textarea = voiceInput.querySelector<HTMLTextAreaElement>(".cc-voice-input-textarea");
-    /* c8 ignore next */ // defensive: ready_to_send paint always renders the textarea before this runs.
-    if (textarea === null) return;
-    textarea.focus();
-    if (entry.caret !== null) {
-      textarea.setSelectionRange(entry.caret, entry.caret);
-    }
-  }
+  // -------------------------------------------------------------------------
+  // Error surface
+  // -------------------------------------------------------------------------
 
   private renderError(voiceInput: HTMLElement, message: string): void {
-    /* c8 ignore next 4 */ // pure DOM append; the rendered error path is exercised by smoke tests (state=idle+error case). Unit tests cover the wrapping branch sites in handleRecordClick + handleSendClick.
+    /* c8 ignore next 6 */ // pure DOM append; the rendered error path is exercised by smoke tests. Unit tests cover the wrapping branch sites in handleMicClick (onError) + handleSendClick. A single error element is kept per row (replace any prior one).
+    const prior = voiceInput.querySelector(".cc-voice-input-error");
+    if (prior !== null) prior.remove();
     const errorEl = document.createElement("div");
     errorEl.className = "cc-voice-input-error";
     errorEl.textContent = message;

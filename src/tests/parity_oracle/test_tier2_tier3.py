@@ -151,98 +151,57 @@ def test_tier2_computed_style_isomorphism( page ):
 
 
 # ---------------------------------------------------------------------------
-# Tier 3 carve (Cheech, 2026-06-22 — reproduce-not-trust; Tiberius-ratified).
+# Tier 3 carve LIFTED (Cheech, 2026-06-22 — F5 voice-input-row rebuild; Rick-
+# ratified MATCH-LEGACY, Tiberius-tracked).
 #
-# SUPERSEDES the stale "2-row-header" narrowing in 140dc3d8. That diagnosis was
-# OVERTURNED by running the oracle: the persona'd CC card's `>header` node matches
-# legacy dx/dy/w/h EXACTLY — the header is NOT two-row. The residual ~51px is the
-# `.cc-voice-input` ROW: legacy stacks a full mic/text/send row (~51px) BETWEEN
-# the header and the date accordions, so everything below the header sits ~51px
-# lower and the card is ~51px taller (legacy 335.2 vs mux 283.8). The mux
-# DELIBERATELY redesigned that surface — a store-driven SenderCardRecorderRenderer
-# + the ratified F5 caret-splice, mounted separately (and absent from this
-# component-isolation harness). Forcing pixel-parity on the card's TOTAL height or
-# on the voice-input region would force a revert of a sanctioned feature.
+# HISTORY: the temporary carve (140dc3d8 → reproduce-not-trust correction)
+# excused a ~51px CC-card divergence: legacy stacked a full inline voice-input
+# row (mic/text/send, ~51px) BETWEEN the header and the date accordions, while
+# the mux rendered only a minimal store-driven Record-button flow appended at
+# card bottom (absent from this component-isolation harness). Tier 3 therefore
+# (a) re-anchored CC dates-region `dy` to the dates-region origin and (b)
+# excluded the CC card's height.
 #
-# So Tier 3 proves the NOTIFICATION-SURFACE geometry — the header + every date
-# accordion + every message — and CARVES the voice-input region two ways, ONLY for
-# CC-session cards (sid carries a '#'; persona-less external cards have no voice
-# row and keep FULL absolute-geometry parity):
-#   (a) the dates-region nodes (acc[*]/msg[*]) are compared with `dy` re-anchored
-#       to the card's dates-region origin (its acc[0] header), so the carved
-#       voice-input height cancels — the SHAPE below the header must still match
-#       within ±1px;
-#   (b) the CC card NODE's height is excluded (it spans the carved region).
-# A NEW divergence anywhere in the surface still fails loudly with node+axis —
-# "that line IS the bug report" (Doc 01). Whether FULL parity should instead match
-# legacy's inline voice-input UX is a separate Rick product call (Tiberius is
-# tracking it); it does NOT gate this surface-geometry proof.
+# RESOLUTION: Rick ratified MATCH-LEGACY (2026-06-22). senderCard.ts now renders
+# the legacy inline `.cc-voice-input` > `.cc-voice-input-row` STATICALLY between
+# the header and `.sender-card-dates` (so renderSenderCard — what THIS harness
+# mounts — emits it), and sender-card-recorder.css ports the legacy row geometry
+# (the harness links it). The CC card is now the SAME height as legacy and every
+# node below the header sits at the legacy ABSOLUTE offset. Both carves are
+# LIFTED: Tier 3 below asserts FULL absolute intra-card geometry (dx/dy/w/h) for
+# EVERY node on EVERY card — CC and persona-less alike — with NO anchoring and NO
+# height exclusion. Empirically confirmed green (carve-lift run, 2026-06-22).
+# A NEW divergence anywhere fails loudly with node+axis — "that line IS the bug
+# report" (Doc 01).
 # ---------------------------------------------------------------------------
 
 
-def _sid_of( key: str ) -> str:
-    """The data-sender-id a contract-node key belongs to. Keys are `card:<sid>`
-    or `card:<sid>>...`; sids never contain '>'."""
-    body = key[ len( "card:" ): ]
-    gt   = body.find( ">" )
-    return body if gt < 0 else body[ :gt ]
-
-
-def _dates_anchor( nodes: dict, sid: str ) -> float:
-    """The dates-region origin for a card = the dy of its acc[0] header. Asserts
-    presence (fail-loud) rather than branching — the parity scenario always
-    renders at least one date accordion per card, so a missing anchor is itself a
-    contract regression worth surfacing."""
-    node = nodes.get( f"card:{sid}>acc[0]>header" )
-    assert node is not None, f"Tier 3 re-scope anchor missing: card:{sid}>acc[0]>header"
-    return node[ "geom" ][ "dy" ]
-
-
 def test_tier3_geometry_isomorphism( page ):
-    """Tier 3: notification-surface geometry (offset + size) within ±1px for every
-    corresponding node — header + accordions + messages. The persona-less arbiter
-    card is proven with FULL absolute geometry; the persona'd CC card's voice-input
-    region is carved (see the module-level Tier 3 carve note): its dates-region
-    nodes are dy-anchored to the dates-region origin and its card height is
-    excluded, so a sanctioned voice-input redesign neither masks nor
-    falsely-fails the surface comparison."""
+    """Tier 3: FULL absolute intra-card geometry (offset + size) within ±1px for
+    EVERY corresponding node — card + header + inline voice-input row + every date
+    accordion + every message — across BOTH the persona-less arbiter card and the
+    persona'd CC card. The former voice-region carve (CC dates-region dy re-anchor
+    + CC card-height exclusion) is LIFTED now that the mux renders the legacy
+    inline voice-input row (F5 lane): the CC card is the same height as legacy and
+    everything below the header sits at the legacy absolute offset, so no anchoring
+    is needed. Any divergence fails with the exact node+axis+legacy+mux line."""
     legacy = _legacy_nodes( _golden() )
     mux    = _mux_nodes( page, _card_widths( legacy ) )
 
     common = set( legacy ) & set( mux )
     assert common, "no aligned contract nodes between mux and golden"
 
-    # Per-card dates-region anchors — only for CC-session cards (the carve set).
-    cc_sids       = { _sid_of( k ) for k in common if "#" in _sid_of( k ) }
-    legacy_anchor = { sid: _dates_anchor( legacy, sid ) for sid in cc_sids }
-    mux_anchor    = { sid: _dates_anchor( mux,    sid ) for sid in cc_sids }
-
     unexpected: list[ str ] = []
     for key in sorted( common ):
-        sid             = _sid_of( key )
-        is_cc           = "#" in sid
-        is_card         = ">" not in key
-        is_dates_region = ">acc[" in key or ">msg[" in key
         lg, mg = legacy[ key ][ "geom" ], mux[ key ][ "geom" ]
         for axis in ( "dx", "dy", "w", "h" ):
-            # Carve (b): the CC card node's total height spans the voice-input row.
-            if is_cc and is_card and axis == "h":
-                continue
-            lv, mv   = lg[ axis ], mg[ axis ]
-            anchored = is_cc and is_dates_region and axis == "dy"
-            if anchored:
-                # Carve (a): cancel the voice-input height by anchoring dates-region
-                # dy to the card's dates-region origin (its acc[0] header).
-                lv -= legacy_anchor[ sid ]
-                mv -= mux_anchor[ sid ]
-            if abs( lv - mv ) > GEOM_TOL_PX:
-                suffix = " (anchored to dates-region origin)" if anchored else ""
+            if abs( lg[ axis ] - mg[ axis ] ) > GEOM_TOL_PX:
                 unexpected.append(
                     f"  {key}  {axis}: legacy {lg[axis]} · mux {mg[axis]} "
-                    f"(Δ{round(abs(lv-mv),1)}px){suffix}"
+                    f"(Δ{round(abs(lg[axis]-mg[axis]),1)}px)"
                 )
 
     assert not unexpected, (
-        "Tier 3 surface-geometry divergence (±1px, voice-input region carved):\n"
+        "Tier 3 absolute-geometry divergence (±1px, voice-region carve LIFTED):\n"
         + "\n".join( unexpected )
     )
