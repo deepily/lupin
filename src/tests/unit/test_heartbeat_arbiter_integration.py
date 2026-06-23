@@ -244,9 +244,17 @@ class TestGroupPCLoopClosure:
         Proves the two independently-built halves interoperate on disk — the one
         thing neither side's unit tests can show (each mocks the other half).
         """
-        # producer harness (real leaves, isolated roots)
-        monkeypatch.setattr( stop, "load_heartbeat_settings", lambda: { "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
+        # producer harness (real leaves, isolated roots). The settings mock carries
+        # the FULL key set the loader returns — incl. count_inbound_questions_as_owed
+        # (default False) which stop.py reads at the inbound-owed gate (else KeyError).
+        monkeypatch.setattr( stop, "load_heartbeat_settings", lambda: { "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600, "count_inbound_questions_as_owed": False } )
         monkeypatch.setattr( stop, "get_voice_persona", lambda _s: { "name": "Mr. Radio 🦉" } )
+        # HERMETIC: the persona is a REAL fleet persona, so the live-bridge inbound
+        # gatherer + the Face A store-backed backlog read would pull REAL DM/store
+        # state into this disk-chain test. Stub both to their empty/fail-safe shapes
+        # so the chain is driven ONLY by the owed transcript below (deterministic).
+        monkeypatch.setattr( stop, "_gather_unanswered_inbound_questions", lambda _s: { "owed": [ ], "stale": [ ] } )
+        monkeypatch.setattr( stop, "_backlog_count_from_store", lambda _s: ( 0, False ) )
         import cosa.utils.util as cu
         proj = tmp_path / "proj"; proj.mkdir()
         monkeypatch.setattr( cu, "get_project_root", lambda: str( proj ) )

@@ -59,6 +59,7 @@ from lupin_cli.claude_code.hooks.lib.anything_else_ask import (
 #    src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (
     read_hold_resilient, get_pending_user_gates, get_last_looked_in_ts,
+    get_last_spinup_check_ts, get_last_surfaced_questions_ts,
 )
 # 6929f4ac receipts-of-progress — the pure gate-row transforms (outward twin).
 from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates
@@ -73,7 +74,8 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_events
 # v2 Track-A — live work-owed oracle (Task* replay from the session transcript).
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (
     evaluate_work_owed, partition_inbound_by_age, TODO_IN_PROGRESS,
-    manager_needs_verification,
+    manager_needs_verification, manager_needs_spinup_check, manager_needs_question_surface,
+    SPINUP_CHECK_DEBOUNCE_SECONDS, SURFACE_QUESTIONS_DEBOUNCE_SECONDS, SPINUP_BACKLOG_MIN_N,
 )
 # Spine Step-2 (store-canonical task management) — the flag-gated store-count
 # owed source. DEFAULT-old (transcript replay) until the fleet cutover flips
@@ -1307,6 +1309,134 @@ def _synthesize_owed_items( count ):
     return [ { "status": TODO_IN_PROGRESS, "owned_by_me": True } for _ in range( count ) ]
 
 
+# Proactive-manager mechanism (fcb5dbc0, Lane A1) — the spawn-cap default that
+# bounds Face A's idle-crew-capacity test (INI `cc session spawn max reviewers`).
+DEFAULT_SPAWN_CAP = 8
+
+
+def _backlog_count_from_store( session_id ):
+    """
+    Resolve THIS manager's BACKLOG count from the store (Face A, A1) — the owed
+    items it is ACCOUNTABLE for (queued + in_progress), via accountable_manager.
+
+    The Face A backlog source (design: task_query(accountable_manager=me, status
+    in queued/in_progress)). Distinct from _owed_count_from_store (which counts the
+    session's OWN owner_persona rows): a manager's spin-up decision keys on the
+    chase-list it is accountable for, not its own hands-on work. Querying by
+    accountable_manager=me ALSO inherently gates manager-scope — a non-manager has
+    ~zero rows accountable to itself, so Face A never nudges a plain worker.
+
+    Requires:
+        - session_id is the resolved stable session id string
+
+    Ensures:
+        - Returns ( count, ok ): ok True iff the store answered cleanly; count is
+          the summed queued+in_progress count accountable to this persona (0 when
+          not ok)
+        - store unreachable / timeout / malformed → ( 0, False ) (§C fail-safe:
+          Face A does NOT nudge on a bad read — never guess)
+        - NEVER raises (degrade-safe IO shell)
+    """
+    try:
+        settings    = load_task_store_settings()
+        api_key     = read_api_key()
+        persona     = get_voice_persona( session_id )
+        persona_key = canonical_persona_key( persona.get( "name" ) if isinstance( persona, dict ) else None ) or "unknown"
+        project     = resolve_project_name()
+        ok, count   = query_owed( settings, api_key, persona_key, STORE_OWED_STATUSES,
+                                  project=project, owner_field="accountable_manager" )
+        return count, ok
+    except Exception:
+        return 0, False
+
+
+def _has_idle_crew_capacity( delegations, cap ):
+    """
+    Does this manager have room to spawn another worker under the fleet cap?
+
+    Face A's "idle crew capacity" predicate (pure): the count of this manager's
+    LIVE delegated workers is below the spawn cap. A manager already at the cap
+    has no idle capacity ⇒ never nudged to spin up more (the nudge would be a
+    no-op it cannot act on).
+
+    Requires:
+        - delegations is the gathered live-worker list (truthy ⇒ alive), or None
+        - cap is the spawn-concurrency cap (positive int)
+
+    Ensures:
+        - Returns True iff len( live workers ) < cap; never raises
+    """
+    live = len( [ d for d in ( delegations or [ ] ) if d ] )
+    return live < cap
+
+
+def _resolve_proactive_manager_config():
+    """
+    Read the proactive-manager Face A / Face B knobs from lupin-app.ini (A1).
+
+    Mirrors _resolve_idle_behavior: ConfigurationManager under redirect_stdout
+    (its banners would corrupt the hook's stdout JSON protocol channel), fail-safe
+    to the module defaults on ANY error / missing key / non-positive-int value.
+
+    Ensures:
+        - Returns a dict { spinup_threshold_s, surface_threshold_s,
+          spinup_backlog_min, spawn_cap } of positive ints
+        - any unreadable / non-positive key falls back to its default
+          (SPINUP_CHECK_DEBOUNCE_SECONDS / SURFACE_QUESTIONS_DEBOUNCE_SECONDS /
+          SPINUP_BACKLOG_MIN_N / DEFAULT_SPAWN_CAP)
+        - never raises; never writes to stdout
+    """
+    import contextlib
+    import io
+
+    defaults = {
+        "spinup_threshold_s"  : SPINUP_CHECK_DEBOUNCE_SECONDS,
+        "surface_threshold_s" : SURFACE_QUESTIONS_DEBOUNCE_SECONDS,
+        "spinup_backlog_min"  : SPINUP_BACKLOG_MIN_N,
+        "spawn_cap"           : DEFAULT_SPAWN_CAP,
+    }
+    keys = {
+        "spinup_threshold_s"  : "stop hook spinup check threshold seconds",
+        "surface_threshold_s" : "stop hook surface questions threshold seconds",
+        "spinup_backlog_min"  : "stop hook spinup backlog min",
+        "spawn_cap"           : "cc session spawn max reviewers",
+    }
+    try:
+        with contextlib.redirect_stdout( io.StringIO() ):
+            mgr = ConfigurationManager(
+                env_var_name  = "LUPIN_CONFIG_MGR_CLI_ARGS",
+                silent        = True,
+                mute_splainer = True,
+            )
+            out = { }
+            for field, ini_key in keys.items():
+                out[ field ] = _positive_int_or_default(
+                    mgr.get( ini_key, default=defaults[ field ], silent=True ), defaults[ field ] )
+        return out
+    except Exception:
+        return dict( defaults )
+
+
+def _positive_int_or_default( value, default ):
+    """
+    Coerce a config value to a positive int, else return `default` (pure).
+
+    Bool is an int subclass — rejected so a stray True/False never slips through
+    as 1/0. A string of digits is accepted (INI values arrive as strings).
+
+    Ensures:
+        - Returns int( value ) when it is (or parses to) a positive int
+        - Returns default on None / bool / non-positive / unparseable; never raises
+    """
+    if isinstance( value, bool ):
+        return default
+    try:
+        ivalue = int( value )
+    except ( TypeError, ValueError ):
+        return default
+    return ivalue if ivalue > 0 else default
+
+
 def _run_heartbeat( session_id, transcript_path, cwd=None ):
     """
     Branch-C heartbeat self-poke adapter (thin; composes the pure leaf modules).
@@ -1467,12 +1597,39 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
     user_gates    = get_pending_user_gates( hold )
     open_gates    = heartbeat_user_gates.open_gates( user_gates )      # owed set (any open)
     due_gates     = heartbeat_user_gates.due_gates( user_gates, now_epoch )  # re-ask NOW (poke detail)
+    # ── Proactive-manager mechanism (fcb5dbc0, A1) — TWO new debounced signals ──
+    # Both ride the SAME pure-debounce shape as the 6929f4ac inward twin, gated on
+    # the per-manager stamps in the hold (survive /clear). Config (per-face
+    # thresholds + backlog floor + spawn cap) is INI-resolved once per Stop;
+    # fail-safe to defaults. Both gatherers are degrade-safe — a store outage / a
+    # parked non-manager simply never fires the signal (never a false poke).
+    #   Face A (item 11): backlog this manager is ACCOUNTABLE for >= floor AND idle
+    #     crew capacity AND the spin-up-check debounce elapsed → NUDGE "spin up a
+    #     crew" (the manager decides + acts of its own accord). The store read is
+    #     fail-safe: on a not-ok read Face A stays silent (never guess).
+    #   Face B (item 1): >=1 open operator gate AND the per-manager re-surface
+    #     debounce elapsed → re-fire the operator-gate asks (one debounce, D3).
+    pm_config          = _resolve_proactive_manager_config()
+    last_spinup_ts     = get_last_spinup_check_ts( hold )
+    last_surfaced_ts   = get_last_surfaced_questions_ts( hold )
+    backlog_count, backlog_ok = _backlog_count_from_store( session_id )
+    needs_spinup_check = backlog_ok and manager_needs_spinup_check(
+        backlog_count,
+        _has_idle_crew_capacity( delegations, pm_config[ "spawn_cap" ] ),
+        last_spinup_ts, now_epoch,
+        threshold_seconds = pm_config[ "spinup_threshold_s" ],
+        backlog_min_n     = pm_config[ "spinup_backlog_min" ] )
+    needs_question_surface = manager_needs_question_surface(
+        open_gates, last_surfaced_ts, now_epoch,
+        threshold_seconds = pm_config[ "surface_threshold_s" ] )
     verdict    = evaluate_work_owed(
         todo_items                   = owed_items,
         unanswered_inbound_questions = open_inbound,
         outstanding_delegations      = delegations,
         needs_verification           = needs_verification,
         open_user_gates              = open_gates,
+        needs_question_surface       = needs_question_surface,
+        needs_spinup_check           = needs_spinup_check,
     )
     result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
 

@@ -1507,3 +1507,85 @@ class TestRunHeartbeatStoreSource:
         out, _ = _run_heartbeat( "sid", "/t.jsonl" )
         assert out[ "decision" ] == "block"
         assert "unanswered inbound question" in out[ "reason" ]
+
+
+# ── Proactive-manager mechanism helpers (fcb5dbc0, Lane A1b) ──────────────────
+# Face A / Face B IO-shell helpers wired into _run_heartbeat. The pure debounce
+# logic lives (100%-covered) in heartbeat_work_owed; these cover the thin shells.
+from lupin_cli.claude_code.hooks.stop import (
+    _positive_int_or_default, _has_idle_crew_capacity,
+    _backlog_count_from_store, _resolve_proactive_manager_config,
+)
+
+_STOP = "lupin_cli.claude_code.hooks.stop"
+
+
+class TestPositiveIntOrDefault:
+
+    def test_valid_int_passthrough( self ):
+        assert _positive_int_or_default( 7, 3 ) == 7
+
+    def test_digit_string_parsed( self ):
+        assert _positive_int_or_default( "600", 1 ) == 600   # INI values arrive as strings
+
+    def test_none_falls_back( self ):
+        assert _positive_int_or_default( None, 3 ) == 3
+
+    def test_bool_rejected( self ):
+        # bool is an int subclass — never slip True/False through as 1/0.
+        assert _positive_int_or_default( True, 3 ) == 3
+        assert _positive_int_or_default( False, 5 ) == 5
+
+    def test_zero_and_negative_fall_back( self ):
+        assert _positive_int_or_default( 0, 3 ) == 3
+        assert _positive_int_or_default( -4, 3 ) == 3
+
+    def test_unparseable_falls_back( self ):
+        assert _positive_int_or_default( "abc", 9 ) == 9
+
+
+class TestHasIdleCrewCapacity:
+
+    def test_below_cap_is_capacity( self ):
+        assert _has_idle_crew_capacity( [ { "s": 1 }, { "s": 2 } ], 8 ) is True
+
+    def test_at_cap_no_capacity( self ):
+        assert _has_idle_crew_capacity( [ { "s": i } for i in range( 8 ) ], 8 ) is False
+
+    def test_none_delegations_is_capacity( self ):
+        assert _has_idle_crew_capacity( None, 8 ) is True
+
+    def test_falsy_entries_filtered( self ):
+        # 1 live worker < cap 2 ⇒ capacity (None / falsy entries don't count).
+        assert _has_idle_crew_capacity( [ None, 0, { "s": 1 } ], 2 ) is True
+
+
+class TestBacklogCountFromStore:
+
+    def test_success_filters_accountable_manager( self ):
+        with patch( f"{_STOP}.load_task_store_settings", return_value={ } ), \
+             patch( f"{_STOP}.read_api_key", return_value="k" ), \
+             patch( f"{_STOP}.get_voice_persona", return_value={ "name": "Mr. Radio 🦉" } ), \
+             patch( f"{_STOP}.resolve_project_name", return_value="lupin" ), \
+             patch( f"{_STOP}.query_owed", return_value=( True, 5 ) ) as q:
+            assert _backlog_count_from_store( "sid" ) == ( 5, True )
+            assert q.call_args.kwargs.get( "owner_field" ) == "accountable_manager"
+
+    def test_except_path_fails_safe( self ):
+        # ANY IO error ⇒ (0, False): Face A never nudges on a bad read.
+        with patch( f"{_STOP}.get_voice_persona", side_effect=RuntimeError( "boom" ) ):
+            assert _backlog_count_from_store( "sid" ) == ( 0, False )
+
+
+class TestResolveProactiveManagerConfig:
+
+    def test_reads_ini_defaults( self ):
+        cfg = _resolve_proactive_manager_config()
+        assert cfg == { "spinup_threshold_s": 600, "surface_threshold_s": 600,
+                        "spinup_backlog_min": 3, "spawn_cap": 8 }
+
+    def test_except_path_fails_safe_to_defaults( self ):
+        with patch( f"{_STOP}.ConfigurationManager", side_effect=RuntimeError( "boom" ) ):
+            cfg = _resolve_proactive_manager_config()
+            assert cfg == { "spinup_threshold_s": 600, "surface_threshold_s": 600,
+                            "spinup_backlog_min": 3, "spawn_cap": 8 }

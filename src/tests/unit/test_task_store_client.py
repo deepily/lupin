@@ -248,6 +248,23 @@ class TestQueryOwed:
         method, _path, headers = conn_seq[ "requests" ][ 0 ]
         assert method == "GET" and headers == { "X-API-Key": "k" }
 
+    def test_owner_field_defaults_to_owner_persona( self, conn_seq ):
+        # Default owner_field preserves the owed-count behavior (filters owner_persona).
+        conn_seq[ "outcomes" ] = [ _count_resp( 1 ), _count_resp( 0 ) ]
+        tc.query_owed( SETTINGS, "k", "krishna", OWED, project="lupin" )
+        paths = [ path for _method, path, _headers in conn_seq[ "requests" ] ]
+        assert "owner_persona=krishna" in paths[ 0 ] and "accountable_manager" not in paths[ 0 ]
+
+    def test_owner_field_accountable_manager_filters_chase_list( self, conn_seq ):
+        # Face A (proactive-manager A1): owner_field="accountable_manager" counts a
+        # manager's chase-list instead of its own owned rows.
+        conn_seq[ "outcomes" ] = [ _count_resp( 4 ), _count_resp( 2 ) ]
+        ok, count = tc.query_owed( SETTINGS, "k", "mr radio", OWED, project="lupin",
+                                   owner_field="accountable_manager" )
+        assert ( ok, count ) == ( True, 6 )
+        paths = [ path for _method, path, _headers in conn_seq[ "requests" ] ]
+        assert "accountable_manager=mr+radio" in paths[ 0 ] and "owner_persona" not in paths[ 0 ]
+
     def test_connection_reused_across_statuses( self, conn_seq ):
         # O3: ONE socket opened for the whole multi-status loop (not one per status),
         # and it is closed exactly once on the way out.

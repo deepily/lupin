@@ -252,7 +252,8 @@ def _count_on_connection( connection, path_with_query, api_key ):
     return True, count
 
 
-def query_owed( settings, api_key, owner_persona, statuses, project=None, timeout=None ):
+def query_owed( settings, api_key, owner_persona, statuses, project=None, timeout=None,
+                owner_field="owner_persona" ):
     """
     GET /api/tasks owed-row COUNT for one owner (Spine Step-2 store-count seam).
 
@@ -274,11 +275,15 @@ def query_owed( settings, api_key, owner_persona, statuses, project=None, timeou
     Requires:
         - settings is the load_task_store_settings() dict (provides api_base_url)
         - api_key is a string (may be empty — server 401s it)
-        - owner_persona is the persona string the PostToolUse mirror stamped on
-          the rows (lowercased; "unknown" when the bridge had no persona)
+        - owner_persona is the persona string filtered on (lowercased canonical
+          key): by default the row's owner (the PostToolUse mirror stamp), or the
+          accountable_manager when owner_field="accountable_manager"
         - statuses is an iterable of store status strings (the owed set)
         - project is the resolve_project_name() scope, or None to omit the filter
         - timeout overrides DEFAULT_OWED_TIMEOUT_SECONDS (seconds, per request)
+        - owner_field selects WHICH persona column the value filters: the default
+          "owner_persona" preserves the owed-count behavior; "accountable_manager"
+          counts a manager's chase-list (proactive-manager A1 Face A backlog)
 
     Ensures:
         - Returns ( ok, count ):
@@ -312,7 +317,7 @@ def query_owed( settings, api_key, owner_persona, statuses, project=None, timeou
             # count_only=true (O2): true COUNT(*), never a page-length saturating
             # at the endpoint's limit cap — a session with >100 owed rows counts
             # exactly. All statuses ride the SAME socket (O3).
-            params = { "owner_persona": owner_persona, "status": status, "count_only": "true" }
+            params = { owner_field: owner_persona, "status": status, "count_only": "true" }
             if project:
                 params[ "project" ] = project
             path = f"/api/tasks?{urllib.parse.urlencode( params )}"

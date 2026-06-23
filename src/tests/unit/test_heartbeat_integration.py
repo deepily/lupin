@@ -169,6 +169,16 @@ class _Chain:
         self.transcripts = tmp_path / "transcripts"
         self.transcripts.mkdir( exist_ok=True )
         self._t_seq      = 0
+        # HERMETIC: stub the three live-bridge / live-store IO gatherers _run_heartbeat
+        # calls, so this disk-chain harness is driven ONLY by the holds + transcripts it
+        # seeds — never by whatever real DMs / delegations / store rows happen to exist
+        # for a mocked persona. (Without this, accumulating fleet DMs make open_inbound
+        # truthy and the Thread-B gate KeyErrors — the FLAG-2 env-flake class.) Tests
+        # that exercise those signals seed them through the leaf modules directly.
+        self._mp.setattr( stop, "_gather_unanswered_inbound_questions",
+                          lambda _sid: { "owed": [ ], "stale": [ ] } )
+        self._mp.setattr( stop, "_gather_outstanding_delegations", lambda _sid: [ ] )
+        self._mp.setattr( stop, "_backlog_count_from_store", lambda _sid: ( 0, False ) )
 
     # ── leaf-state seeding (REAL writes through the leaf modules) ──
 
@@ -212,7 +222,8 @@ class _Chain:
         self._mp.setattr( stop, "load_heartbeat_settings",
                           lambda: { "enabled": enabled, "poke_cap": cap,
                                     "owed_source_from_store": False,
-                                    "verification_threshold_seconds": 600 } )
+                                    "verification_threshold_seconds": 600,
+                                    "count_inbound_questions_as_owed": False } )
 
     def persona( self, value ):
         """Override the (external) voice-bridge persona resolver."""
