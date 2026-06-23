@@ -19,6 +19,7 @@ import { keyedListMerge } from "../dom";
 import { formatDateKey, formatHM } from "../time";
 import { renderDateAccordion } from "./dateAccordion";
 import { slugifySenderId } from "./slugify";
+import type { PredictionVoteIntegration } from "./predictionVoteControls";
 import type { SenderRecord, Notification } from "../../shared/types";
 
 interface RenderOptions {
@@ -27,6 +28,9 @@ interface RenderOptions {
   // glyph (`.sender-status`). Defaults to Date.now() at the call site; tests
   // pass a fixed value so `senderStatusGlyph` stays deterministic.
   now?: number;
+  // WP14 (F8) — forwarded verbatim to renderDateAccordion → renderNotificationItem
+  // (the prediction-vote orchestrator bridge). Absent in the parity harness.
+  predictionVote?: PredictionVoteIntegration;
 }
 
 /**

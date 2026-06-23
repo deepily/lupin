@@ -16,10 +16,16 @@ import { html } from "../html";
 import type { Value } from "../html";
 import { renderMarkdownInline } from "../markdown";
 import { formatHM } from "../time";
+import { renderPredictionVoteControls } from "./predictionVoteControls";
+import type { PredictionVoteIntegration } from "./predictionVoteControls";
 import type { Notification } from "../../shared/types";
 
 interface RenderOptions {
   appTimezone?: string;
+  // WP14 (F8) — bridge to the vote orchestrator (NotificationsListRenderer).
+  // Absent in the storeless parity harness: controls still render (presence is
+  // pure-data) but clicks are inert. Threaded senderCard → dateAccordion → here.
+  predictionVote?: PredictionVoteIntegration;
 }
 
 /**
@@ -94,6 +100,28 @@ export function renderNotificationItem(
       <span class="message-text">${renderMarkdownInline(notification.message)}${expired ? expiredBadge() : null}${hasAbstract ? abstractIndicator(notification.abstract as string) : null}</span>
     ` as DocumentFragment;
     root.appendChild(flat);
+  }
+
+  // WP14 (F8) — prediction-hint thumbs vote. Presence is PURE-DATA: a
+  // notification carrying a `prediction_hint` whose confidence clears the gate
+  // (≥ PREDICTION_VOTE_MIN_PCT, enforced inside renderPredictionVoteControls)
+  // mounts the 👍🏼/👎🏼 controls. The `predictionVote` integration (optional —
+  // absent in the storeless parity harness) supplies the cast-vote highlight on
+  // (re)render and the click orchestration (optimistic + POST + reconcile).
+  // Ports legacy notifications.js `buildPredictionHintSection` → `_buildPredictionVoteControls`.
+  const hint = notification.prediction_hint;
+  if (hint !== undefined) {
+    const integration = opts.predictionVote;
+    const id = notification.id_hash;
+    const controls = renderPredictionVoteControls(
+      {
+        notificationId : id,
+        confidencePct  : Math.round(hint.confidence * 100),
+        castVote       : integration?.getVote(id),
+      },
+      { onVote: (dir) => integration?.onVote(id, dir) },
+    );
+    if (controls !== null) root.appendChild(controls);
   }
 
   return root;

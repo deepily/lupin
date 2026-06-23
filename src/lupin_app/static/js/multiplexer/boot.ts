@@ -264,6 +264,10 @@ function bootMultiplexer(): void {
       notifications  : stores.notifications,
       senders        : stores.senders,
       actionRequired : stores.actionRequired,
+      // WP14 (F8) — wire the prediction-vote store so prediction-hint
+      // notifications mount interactive thumbs-vote controls in the
+      // notification-item render path (createStores already builds the store).
+      predictionVote : stores.predictionVote,
     },
     // Phase 6c Node D Step D5 — inject the conversation-mode-aware sort
     // BEFORE first render so the initial paint already respects pin priority.
@@ -497,10 +501,11 @@ function bootMultiplexer(): void {
   taskListRenderer.mount(taskListMountEl);
   stores.taskList.startPolling();
 
-  // Lane E WP14 — prediction-hint vote: the PredictionVoteStore is wired into
-  // createStores(); the vote CONTROLS template (predictionVoteControls) is
-  // invoked by the notification-item render path (NotificationsListRenderer),
-  // which is the integration owner's surface — no standalone mount here.
+  // Lane E WP14 / F8 — prediction-hint vote: the PredictionVoteStore is wired
+  // into createStores() AND injected into the NotificationsListRenderer above
+  // (stores.predictionVote). The vote CONTROLS template (predictionVoteControls)
+  // is now mounted by the notification-item render path for any prediction-hint
+  // notification clearing the confidence gate — no standalone mount here.
 
   attachLifecycleListeners();
 

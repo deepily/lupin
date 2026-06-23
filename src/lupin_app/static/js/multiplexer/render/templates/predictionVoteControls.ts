@@ -24,6 +24,24 @@ export interface PredictionVoteHandlers {
   onVote( dir: PredictionVoteDir ): void;
 }
 
+/**
+ * The notification-item render path's bridge to the vote orchestrator. Built
+ * once by NotificationsListRenderer (which owns the PredictionVoteStore + the
+ * optimistic-highlight + reconcile machinery) and threaded down through the
+ * render options (senderCard → dateAccordion → notificationItem). The template
+ * stays pure: it reads `getVote` for the `.selected` highlight and forwards
+ * clicks to `onVote`. Absent in the storeless component-isolation parity harness
+ * — there the controls still RENDER (presence is pure-data, driven by
+ * `notification.prediction_hint`), and clicks are inert (no orchestrator), so
+ * the harness stays store-free.
+ */
+export interface PredictionVoteIntegration {
+  /** Authoritative cast vote for the notification id (for the `.selected` highlight on (re)render). */
+  getVote( notificationId: string ): PredictionVoteDir | undefined;
+  /** Forward a click: the orchestrator does optimistic highlight + context stash + POST + reconcile. */
+  onVote( notificationId: string, dir: PredictionVoteDir ): void;
+}
+
 export interface PredictionVoteOpts {
   notificationId : string;
   confidencePct  : number;
@@ -71,14 +89,27 @@ export function renderPredictionVoteControls(
   const up   = root.querySelector<HTMLButtonElement>( ".prediction-vote-up" );
   const down = root.querySelector<HTMLButtonElement>( ".prediction-vote-down" );
 
+  // Optimistic local highlight applied SYNCHRONOUSLY on click — the user sees
+  // the cast before the POST round-trips. The orchestrator (NotificationsListRenderer)
+  // reconciles to the authoritative store state on store_prediction_vote_changed
+  // (success → re-render keeps it) or reverts via re-render (failure → getVote
+  // returns undefined). Idempotent: marks the chosen button, unmarks the other.
+  const markSelected = ( dir: PredictionVoteDir ): void => {
+    root.classList.add( "voted" );
+    /* c8 ignore next */ // defensive: html`` always produces the up button (same invariant as the wiring guards below).
+    if ( up !== null )   up.classList.toggle( "selected", dir === "up" );
+    /* c8 ignore next */ // defensive: html`` always produces the down button.
+    if ( down !== null ) down.classList.toggle( "selected", dir === "down" );
+  };
+
   /* c8 ignore next */ // defensive: html`` always produces the up button.
   if ( up !== null ) {
-    up.addEventListener( "click", () => handlers.onVote( "up" ) );
+    up.addEventListener( "click", () => { markSelected( "up" ); handlers.onVote( "up" ); } );
     if ( opts.castVote === "up" ) up.classList.add( "selected" );
   }
   /* c8 ignore next */ // defensive: html`` always produces the down button.
   if ( down !== null ) {
-    down.addEventListener( "click", () => handlers.onVote( "down" ) );
+    down.addEventListener( "click", () => { markSelected( "down" ); handlers.onVote( "down" ); } );
     if ( opts.castVote === "down" ) down.classList.add( "selected" );
   }
 

@@ -19,7 +19,9 @@ import type {
   Notification,
   SenderRecord,
   ActionRequiredItem,
+  PredictionVoteDir,
 } from "../../../../lupin_app/static/js/multiplexer/shared/types";
+import type { PredictionVoteContext } from "../../../../lupin_app/static/js/multiplexer/stores/PredictionVoteStore";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -865,5 +867,176 @@ test("AC-D5 #5: backward-compat (F-Arnold-D4) — pre-existing comparator-less c
   renderer.mount(root);
   assert.deepEqual(senderIdsInOrder(sCardsRoot), ["b", "a"],
     "undefined comparator opt → default most-recent-first behavior preserved");
+  renderer.unmount();
+});
+
+// ===========================================================================
+// WP14 (F8) — prediction-vote integration in the notification-item paint path
+// ===========================================================================
+
+type VoteResult = "true" | "false" | "reject";
+
+interface FakeVoteStore {
+  getVote( id: string ): PredictionVoteDir | undefined;
+  setContext( id: string, ctx: PredictionVoteContext ): void;
+  vote( id: string, dir: PredictionVoteDir ): Promise<boolean>;
+}
+
+// A controllable PredictionVoteStore double. On a successful vote it mirrors the
+// real store: records the cast + emits store_prediction_vote_changed so the
+// renderer's reconcile subscription re-renders. `result` selects the vote outcome.
+function makeFakeVoteStore(
+  bus: ReturnType<typeof createEventBusForTesting>,
+  result: VoteResult,
+): {
+  store     : FakeVoteStore;
+  contexts  : Map<string, PredictionVoteContext>;
+  voteCalls : Array<{ id: string; dir: PredictionVoteDir }>;
+} {
+  const votes     = new Map<string, PredictionVoteDir>();
+  const contexts  = new Map<string, PredictionVoteContext>();
+  const voteCalls : Array<{ id: string; dir: PredictionVoteDir }> = [];
+  const store: FakeVoteStore = {
+    getVote    : (id) => votes.get(id),
+    setContext : (id, ctx) => { contexts.set(id, ctx); },
+    vote       : async (id, dir) => {
+      voteCalls.push({ id, dir });
+      await Promise.resolve();                  // simulate the async POST round-trip
+      if (result === "reject") throw new Error("POST failed");
+      if (result === "false") return false;
+      votes.set(id, dir);
+      bus.emit({
+        type    : "store_prediction_vote_changed",
+        payload : { notificationId: id, vote: dir },
+        source  : "FakeVoteStore",
+        ts      : 0,
+      });
+      return true;
+    },
+  };
+  return { store, contexts, voteCalls };
+}
+
+function setupRendererWithVote(
+  bus: ReturnType<typeof createEventBusForTesting>,
+  voteStore: FakeVoteStore | undefined,
+): { notifList: Notification[]; senderList: SenderRecord[]; renderer: NotificationsListRenderer; root: HTMLElement } {
+  const notifList : Notification[]       = [];
+  const senderList: SenderRecord[]       = [];
+  const arList    : ActionRequiredItem[] = [];
+  const renderer = createNotificationsListRenderer({
+    eventBus: bus,
+    stores  : {
+      notifications  : { list: () => notifList },
+      senders        : { list: () => senderList },
+      actionRequired : { list: () => arList },
+      predictionVote : voteStore,
+    },
+    appTimezone: "UTC",
+  });
+  const root = document.createElement("section");
+  root.id = "notifications-pane";
+  const arSection = document.createElement("div"); arSection.id = "action-required-section";
+  const sCards    = document.createElement("div"); sCards.id    = "sender-cards-container";
+  root.appendChild(arSection); root.appendChild(sCards);
+  return { notifList, senderList, renderer, root };
+}
+
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+function predNotification(over: Partial<Notification> = {}): Notification {
+  return {
+    id_hash         : "pred1",
+    ts              : Date.UTC(2026, 4, 5, 14, 7),
+    sender_id       : "sess_42",
+    message         : "Schedule the meeting?",
+    action_required : false,
+    response_type   : "yes_no",
+    prediction_hint : { confidence: 0.9, predicted_value: "yes", category: "calendar" },
+    ...over,
+  };
+}
+
+test("F8: store wired → prediction notification mounts interactive vote controls + records the cast", async () => {
+  const bus  = createEventBusForTesting();
+  const fake = makeFakeVoteStore(bus, "true");
+  const { renderer, root, notifList, senderList } = setupRendererWithVote(bus, fake.store);
+  notifList.push(predNotification());
+  senderList.push(makeSender());
+  renderer.mount(root);
+
+  assert.notEqual(root.querySelector(".prediction-hint-vote"), null, "controls mount for a prediction notification");
+
+  root.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click();
+  // setContext stashed the full hint context (question = message, response_type carried).
+  assert.deepEqual(fake.contexts.get("pred1"), {
+    question        : "Schedule the meeting?",
+    predicted_value : "yes",
+    category        : "calendar",
+    response_type   : "yes_no",
+  });
+  assert.deepEqual(fake.voteCalls, [ { id: "pred1", dir: "up" } ]);
+
+  await flush();
+  // Recorded vote emitted store_prediction_vote_changed → reconcile re-render keeps the highlight.
+  assert.ok(root.querySelector(".prediction-vote-up")!.classList.contains("selected"));
+  renderer.unmount();
+});
+
+test("F8: cast context uses empty response_type when the notification lacks one", async () => {
+  const bus  = createEventBusForTesting();
+  const fake = makeFakeVoteStore(bus, "true");
+  const { renderer, root, notifList, senderList } = setupRendererWithVote(bus, fake.store);
+  notifList.push(predNotification({ response_type: undefined }));
+  senderList.push(makeSender());
+  renderer.mount(root);
+
+  root.querySelector<HTMLButtonElement>(".prediction-vote-down")!.click();
+  assert.equal(fake.contexts.get("pred1")!.response_type, "");
+  await flush();
+  renderer.unmount();
+});
+
+test("F8: a rejected (false) cast reverts the optimistic highlight via re-render", async () => {
+  const bus  = createEventBusForTesting();
+  const fake = makeFakeVoteStore(bus, "false");
+  const { renderer, root, notifList, senderList } = setupRendererWithVote(bus, fake.store);
+  notifList.push(predNotification());
+  senderList.push(makeSender());
+  renderer.mount(root);
+
+  root.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click();
+  assert.ok(root.querySelector(".prediction-vote-up")!.classList.contains("selected"), "optimistic highlight applied on click");
+  await flush();
+  // No store event for a false cast → castPredictionVote re-renders to REVERT (getVote → undefined).
+  assert.equal(root.querySelector(".prediction-vote-up")!.classList.contains("selected"), false);
+  renderer.unmount();
+});
+
+test("F8: a thrown cast reverts the optimistic highlight via re-render", async () => {
+  const bus  = createEventBusForTesting();
+  const fake = makeFakeVoteStore(bus, "reject");
+  const { renderer, root, notifList, senderList } = setupRendererWithVote(bus, fake.store);
+  notifList.push(predNotification());
+  senderList.push(makeSender());
+  renderer.mount(root);
+
+  root.querySelector<HTMLButtonElement>(".prediction-vote-down")!.click();
+  await flush();
+  assert.equal(root.querySelector(".prediction-vote-down")!.classList.contains("selected"), false);
+  renderer.unmount();
+});
+
+test("F8: store absent → controls still render (pure-data) and clicks are inert (no throw)", () => {
+  const bus = createEventBusForTesting();
+  const { renderer, root, notifList, senderList } = setupRendererWithVote(bus, undefined);
+  notifList.push(predNotification());
+  senderList.push(makeSender());
+  renderer.mount(root);
+
+  const controls = root.querySelector(".prediction-hint-vote");
+  assert.notEqual(controls, null, "presence is pure-data — controls render without the store");
+  assert.equal(controls!.classList.contains("voted"), false, "no integration → no prior cast highlight");
+  assert.doesNotThrow(() => root.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click());
   renderer.unmount();
 });

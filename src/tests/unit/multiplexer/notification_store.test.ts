@@ -98,6 +98,8 @@ function emitNotification(bus: ReturnType<typeof createEventBusForTesting>, fiel
   progress_group_id   ?: string;
   was_expired         ?: boolean;
   time_display        ?: string;
+  // WP14 (F8) — prediction-hint payload.
+  prediction_hint     ?: { confidence: number; predicted_value: unknown; category: string };
 }): void {
   bus.emit({
     type    : "notification_queue_update",
@@ -232,6 +234,27 @@ test("normalization: response_requested + timeout_seconds → action_required + 
   assert.equal(n.response_type, "yes_no");
   assert.deepEqual(n.options, ["yes", "no"]);
   assert.equal(n.default_value, "no");
+});
+
+// WP14 (F8): prediction_hint carries through normalize() onto the Notification.
+test("normalization: prediction_hint copied through onto the notification (F8)", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, {
+    id_hash         : "pred1",
+    message         : "Schedule the meeting?",
+    response_type   : "yes_no",
+    prediction_hint : { confidence: 0.9, predicted_value: "yes", category: "calendar" },
+  });
+  const n = store.list()[0]!;
+  assert.deepEqual(n.prediction_hint, { confidence: 0.9, predicted_value: "yes", category: "calendar" });
+});
+
+// Absent prediction_hint stays undefined (the `!== undefined` copy-guard's false arm).
+test("normalization: no prediction_hint → field stays undefined", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, { id_hash: "plain1", message: "no hint here" });
+  const n = store.list()[0]!;
+  assert.equal(n.prediction_hint, undefined);
 });
 
 // ===========================================================================
