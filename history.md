@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.23 - Session 3d7c4c2e (Tiberius 👑) | FCM live-standup deployed + verified · VM docker relocate · task-board cleanup · MEMORY.md recompact
+
+**Accomplishments**:
+- **FCM live-standup COMPLETE (task `9f19a416`, P1)**: deployed the keyless-ADC FCM wake-service to the cloud-test VM. Built+pushed `lupin:1.2.0` (firebase-admin 6.9.0 baked from `uv.lock`), synced the ADC code (`3155ca22`) to the VM `./src` bind-mount + set `fcm wake auth mode = adc` in `[Lupin: Testing-GCS]`, redeployed (`up -d --force-recreate`). Validated: `[FCM-WAKE] Enabled — Firebase app 'lupin-fcm-wake' initialized (ADC)`, firebase_admin 6.9.0, running image 1.2.0. ADC→FCM send-auth PROVEN via a LIVE `messaging.send` (dummy token → `InvalidArgumentError` = FCM accepted ADC creds, rejected only the token; a 401 UNAUTHENTICATED would precede token validation). María reproduce-not-trust APPROVED (`e86cab1f`); on-device runbook-92 probe handed to Tiffany (her task `63790ce3`, gated on Rick's APK rebuild). Closed, receipt `3155ca22`.
+- **VM disk blocker → Option B relocate (Rick-decided)**: `docker pull 1.2.0` failed "no space left on device" — boot disk 97GB/86% full (a 2nd ~50GB image won't fit) while a 196GB data disk sat 99% idle (docker mis-provisioned onto the boot disk). Rick chose relocate; moved `/var/lib/containerd`+`/var/lib/docker` → `/mnt/lupin-data` + symlinked back (preserves overlay abs-paths) → boot disk **86%→6%** (~78G freed), 3 containers healthy, rollback copies deleted post-health. Filed `77cc8add` (delete old `1.1.0` after soak; non-urgent).
+- **Task-board cleanup (Rick broadcast)**: triaged 11→7; verified Rachel `f6dc0043` + Clayton `084f78be` merged (María closed), `436a366b` deployed cycles=0 (Mr Radio closed), Krishna `1b3c2c43` (Mr Radio). No blind closes — each checked vs git/deploy state.
+- **MEMORY.md recompact (task `06cdb6fa`)**: 26.2KB→16.1KB (<17.1KB read-limit), all 119 pointers preserved, 0 rules dropped; María reproduce-not-trust verified + closed. Resolved a 3-way collision (Mr Radio's concurrent draft bounced on "file modified", no clobber). 2 new memory refs: `reference_user_gate_row_schema_in_hold`, `reference_gcp_vm_docker_boot_disk_capacity`.
+
+**Docs**: `src/rnd/2026.06.23-firebase-admin-image-rebuild-and-redeploy-runbook.md` (EXECUTED+VALIDATED), `src/rnd/2026.06.23-firebase-android-provisioning-for-live-fcm.md` (scoping). **Unpushed/held**: `3155ca22` (ADC code, committed pre-session) remains local-only — the VM runs synced-but-unpushed code; push is Rick's gate. **Owed next**: `d8c699aa` GCP code-sync design (fresh input from today's manual relocate), `fcb5dbc0` proactive-mgr (needs Mr Radio + shared `:8001` coord), `9cce9f27` task-reassign (blocked on Rick).
+
 ### 2026.06.23 - Session 9998b3ef (Mr. Radio 🦉) | Receipts-of-progress + governance-forward deployed · task-reassign Phase 2 merged · overnight fleet wind-down
 
 **Accomplishments**:
