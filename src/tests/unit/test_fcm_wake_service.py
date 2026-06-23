@@ -171,6 +171,14 @@ class TestConstructionArms:
         service, _ = _service( overrides={ "fcm wake debounce seconds": 7 } )
         assert service.debounce_seconds == 7
 
+    def test_auth_mode_defaults_to_key_file( self ):
+        service, _ = _service()
+        assert service._auth_mode == "key_file"
+
+    def test_auth_mode_loaded_from_ini( self ):
+        service, _ = _service( overrides={ "fcm wake auth mode": "adc" } )
+        assert service._auth_mode == "adc"
+
 
 # ── Real-transport init success (fake firebase) + AC-S6.3 priority pin ───────
 
@@ -212,6 +220,106 @@ class TestRealTransport:
         assert akwargs[ "priority" ] == "high"
         _sargs, skwargs = fake_messaging.send.call_args
         assert skwargs[ "app" ] == "new-app"
+
+
+# ── ADC (keyless) real-transport init — feature-flag fork ────────────────────
+
+class TestAdcAuthMode:
+    """
+    The keyless ADC auth path (org policy iam.disableServiceAccountKeyCreation
+    blocks downloaded keys). No key FILE, no env var: credentials resolve via
+    firebase_admin.credentials.ApplicationDefault(), then the SAME named-app +
+    messaging transport flow as key_file mode.
+    """
+
+    def _adc_service( self, monkeypatch, get_app_exists=False, adc_error=None ):
+        """Build an ADC-mode service against fake firebase; no env var / file set."""
+        # ADC mode must NOT consult the env var — prove it by clearing it.
+        monkeypatch.delenv( "FCM_SERVICE_ACCOUNT_JSON", raising=False )
+        fakes = _install_fake_firebase( monkeypatch, get_app_exists=get_app_exists )
+        _fake_admin, fake_credentials, _fake_messaging = fakes
+        if adc_error is not None:
+            fake_credentials.ApplicationDefault.side_effect = adc_error
+        service = FcmWakeService(
+            _FakeConfig( { "fcm wake auth mode": "adc" } ),
+            token_lookup    = lambda u: [ "tok-A" ],
+            mobile_liveness = lambda u: False
+        )
+        return service, fakes
+
+    def test_adc_init_success_creates_named_app( self, monkeypatch ):
+        service, ( fake_admin, fake_credentials, _ ) = self._adc_service( monkeypatch )
+        assert service.enabled is True and service.disabled_reason is None
+        fake_credentials.ApplicationDefault.assert_called_once()
+        # Key-file path must NOT have been consulted in ADC mode.
+        fake_credentials.Certificate.assert_not_called()
+        fake_admin.initialize_app.assert_called_once()
+        _args, kwargs = fake_admin.initialize_app.call_args
+        assert kwargs[ "name" ] == FIREBASE_APP_NAME
+
+    def test_adc_init_reuses_existing_named_app( self, monkeypatch ):
+        service, ( fake_admin, _, _ ) = self._adc_service( monkeypatch, get_app_exists=True )
+        assert service.enabled is True
+        fake_admin.initialize_app.assert_not_called()
+
+    def test_adc_enabled_log_line_names_adc( self, monkeypatch, capsys ):
+        self._adc_service( monkeypatch )
+        out = capsys.readouterr().out
+        assert "[FCM-WAKE] Enabled" in out and "(ADC)" in out
+
+    def test_adc_transport_sends_data_only_high_priority( self, monkeypatch ):
+        service, ( _fake_admin, _, fake_messaging ) = self._adc_service( monkeypatch )
+        payload = build_wake_payload( WAKE_REASON_UNDELIVERED )
+        service._transport( "tok-A", payload )
+
+        _args, kwargs = fake_messaging.Message.call_args
+        assert kwargs[ "token" ] == "tok-A"
+        assert kwargs[ "data" ]  == payload
+        assert "notification" not in kwargs
+        _aargs, akwargs = fake_messaging.AndroidConfig.call_args
+        assert akwargs[ "priority" ] == "high"
+        _sargs, skwargs = fake_messaging.send.call_args
+        assert skwargs[ "app" ] == "new-app"
+
+    def test_adc_resolution_failure_disables( self, monkeypatch ):
+        service, _ = self._adc_service( monkeypatch, adc_error=RuntimeError( "no metadata server" ) )
+        assert service.enabled is False
+        assert "Application Default Credentials could not be resolved" in service.disabled_reason
+
+    def test_adc_init_app_failure_disables( self, monkeypatch ):
+        # ApplicationDefault() resolves, but initialize_app() then errors.
+        fakes = _install_fake_firebase( monkeypatch )
+        fake_admin, _fake_credentials, _ = fakes
+        fake_admin.initialize_app.side_effect = RuntimeError( "project mismatch" )
+        service = FcmWakeService(
+            _FakeConfig( { "fcm wake auth mode": "adc" } ),
+            token_lookup=lambda u: [], mobile_liveness=lambda u: False
+        )
+        assert service.enabled is False
+        assert "Firebase init failed (ADC)" in service.disabled_reason
+
+    def test_adc_module_missing_disables( self, monkeypatch ):
+        monkeypatch.setitem( sys.modules, "firebase_admin", None )
+        service = FcmWakeService(
+            _FakeConfig( { "fcm wake auth mode": "adc" } ),
+            token_lookup=lambda u: [], mobile_liveness=lambda u: False
+        )
+        assert service.enabled is False
+        assert "not importable" in service.disabled_reason
+
+    def test_key_file_mode_does_not_call_application_default( self, monkeypatch, tmp_path ):
+        # Belt-and-suspenders: explicit key_file mode never touches ADC.
+        creds = tmp_path / "sa.json"
+        creds.write_text( "{}" )
+        monkeypatch.setenv( "FCM_SERVICE_ACCOUNT_JSON", str( creds ) )
+        _fake_admin, fake_credentials, _ = _install_fake_firebase( monkeypatch )
+        service = FcmWakeService(
+            _FakeConfig( { "fcm wake auth mode": "key_file" } ),
+            token_lookup=lambda u: [], mobile_liveness=lambda u: False
+        )
+        assert service.enabled is True
+        fake_credentials.Certificate.assert_called_once()
+        fake_credentials.ApplicationDefault.assert_not_called()
 
 
 # ── maybe_send_wake policy arms (AC-S6.2) ────────────────────────────────────
