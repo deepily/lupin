@@ -68,6 +68,50 @@ def browser_type_launch_args( browser_type_launch_args ):
 
 
 # ---------------------------------------------------------------------------
+# Deterministic Viewport for Visual Regression  (bug 99326963)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture( scope="session" )
+def browser_context_args( browser_context_args ):
+    """
+    Pin the Playwright viewport to a FIXED size for every e2e_ui context.
+
+    Root cause of bug 99326963 (mux visual-e2e render non-determinism):
+    pytest-playwright leaves `viewport` UNSET on `browser.new_context()`, so
+    Playwright falls back to Chromium's built-in default. That fallback is an
+    ENVIRONMENT-dependent value — it can differ between pytest-playwright
+    versions, host vs container, and headless vs headed — so a visual baseline
+    captured in one environment can render at a DIFFERENT width than a COMPARE
+    run in another. Element screenshots inherit the context width, so the whole
+    image dimension flips (observed: 1280-wide baselines vs 960-wide recaptures)
+    and pixelmatch fails on a size mismatch that NO rebaseline can reconcile.
+
+    Pinning the viewport here makes EVERY capture and EVERY compare use
+    byte-identical context dimensions, so `--update-snapshots` and a plain
+    COMPARE run can never diverge on size. The width (1280) matches the
+    multiplexer's intended layout target (the horizontal-mode toggle hint reads
+    "Best at viewports >= 1200px wide"); height (720) is the standard 16:9 pair.
+    Element screenshots taller than 720 still capture in full (Playwright scrolls
+    the element), so the height pin does not clip tall panes — only the WIDTH is
+    load-bearing for the size-mismatch class this fixes.
+
+    Requires:
+        - browser_context_args is the default pytest-playwright fixture
+
+    Ensures:
+        - Every browser context is created with viewport 1280x720
+        - Capture and compare runs share identical context dimensions
+
+    See bug 99326963 + src/rnd/v0.1.6/2026.04.10-visual-regression-cold-warm-drift.md
+    (sibling determinism fixture `browser_type_launch_args` above).
+    """
+    return {
+        **browser_context_args,
+        "viewport": { "width": 1280, "height": 720 },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Test ordering — force visual regression to run FIRST
 # ---------------------------------------------------------------------------
 
