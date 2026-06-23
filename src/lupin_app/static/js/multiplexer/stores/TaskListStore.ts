@@ -13,13 +13,39 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreTaskListChangedPayload } from "../shared/types";
-import type { TaskListComposite } from "../render/taskListModel";
+import type { TaskItem, TaskListComposite } from "../render/taskListModel";
+import { deriveTaskActor } from "../render/taskListModel";
 
-// Narrowed ApiClient surface (shared with FleetStatusStore). The production
-// ApiClient.get throws ApiError (carrying `.status`) on non-2xx; we map that to
-// the display-only sentinels rather than letting it propagate.
+// Narrowed ApiClient surface. The production ApiClient.get throws ApiError
+// (carrying `.status`) on non-2xx; refresh() maps that to the display-only
+// sentinels rather than letting it propagate. Phase 2 widens this to the WRITE
+// verbs the editing controls ride: PATCH (priority / owner reassignment) and
+// POST (drop-with-reason via the transition endpoint). The production ApiClient
+// satisfies all three structurally; the read-only fleet/get callers are
+// unaffected (they only ever touch `.get`).
 export interface TaskListApiClient {
   get<T>( path: string ): Promise<T>;
+  patch<T>( path: string, body: unknown ): Promise<T>;
+  post<T>( path: string, body: unknown ): Promise<T>;
+}
+
+// The descriptive fields the PATCH endpoint accepts from the card (D2/D3 scope):
+// priority (P0–P3) and owner_persona (reassignment; null clears the owner).
+// Title/body/accountable_manager/gate_class are PATCH-able server-side but out
+// of the per-row editing scope, so they are not surfaced here.
+export interface TaskPatchFields {
+  priority?      : string;
+  owner_persona? : string | null;
+}
+
+// The optimistic-mutation handle returned by patchTask/dropTask — mirrors the
+// `{ restoreState }` rollback contract of JobStore.delete, plus a `done` promise
+// the renderer awaits to drive the JobsPaneRenderer-style success / 404-as-
+// success / rollback-on-error flow. `done` resolves on a 2xx and rejects with
+// the ApiError the production ApiClient throws on non-2xx.
+export interface TaskMutation {
+  restoreState : () => void;
+  done         : Promise<void>;
 }
 
 // v1 read-contract: the whole fleet board, newest-first, capped. Rick's
@@ -40,6 +66,25 @@ export interface TaskListStore {
   startPolling(): void;
   /** Stop the poll + clear the interval handle. Idempotent. */
   stopPolling(): void;
+  /**
+   * Phase 2 — optimistically PATCH a cached task's descriptive fields (priority
+   * and/or owner reassignment) and fire the server PATCH. The cached row is
+   * mutated in place + `store_task_list_changed` emitted (no "updated" re-stamp
+   * — the edit is not a fetch) so the card repaints instantly; the returned
+   * `restoreState` reverts that optimistic edit (and re-emits) for the renderer
+   * to call on a non-404 failure. `actor` is derived from the authenticated user
+   * (Q1) and `authority='user_direct'` is stamped server-side audit (F4). A miss
+   * (no cached composite / unknown id) is a no-op: no api call, resolved `done`,
+   * no-op `restoreState`.
+   */
+  patchTask( id: string, fields: TaskPatchFields ): TaskMutation;
+  /**
+   * Phase 2 — optimistically DROP a task (D3 — `transition`→`dropped`, preserving
+   * the append-only audit trail) with a non-blank `reason` (server requires it).
+   * The cached row is removed from the open view + emitted; `restoreState`
+   * re-inserts it. Same no-op semantics as patchTask on a miss.
+   */
+  dropTask( id: string, reason: string ): TaskMutation;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -51,6 +96,15 @@ export interface TaskListStoreOptions {
   nowFn?          : () => number;
   setIntervalFn?  : ( cb: () => void, ms: number ) => number;
   clearIntervalFn?: ( handle: number ) => void;
+  /**
+   * Phase 2 — supplies the authenticated user's identity (e.g. the JWT email
+   * claim) for the audit `actor` of UI edits (Q1). Boot wires
+   * `() => authManager.getCurrentUserEmail()`; the store funnels the result
+   * through `deriveTaskActor`. Defaults to `() => null` (→ "anonymous
+   * (multiplexer)") when omitted — read-only constructions never reach the
+   * write paths, so the default is an ignored production fallback.
+   */
+  actorProvider?  : () => string | null;
 }
 
 class TaskListStoreImpl implements TaskListStore {
@@ -60,6 +114,7 @@ class TaskListStoreImpl implements TaskListStore {
   private readonly nowFn    : () => number;
   private readonly setIntervalFn   : ( cb: () => void, ms: number ) => number;
   private readonly clearIntervalFn : ( handle: number ) => void;
+  private readonly actorProvider   : () => string | null;
 
   private lastComposite : TaskListComposite | null = null;
   private inFlight      = false;
@@ -68,6 +123,8 @@ class TaskListStoreImpl implements TaskListStore {
   constructor( opts: TaskListStoreOptions ) {
     this.bus = opts.bus;
     this.api = opts.api;
+    /* c8 ignore next */ // production-default fallback: boot wires the real authManager email provider; read-only test constructions never reach the write paths.
+    this.actorProvider = opts.actorProvider ?? ( () => null );
     /* c8 ignore next */ // production-default fallback: the canonical endpoint; tests inject an explicit one.
     this.endpoint = opts.endpoint ?? TASK_LIST_ENDPOINT;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
@@ -113,6 +170,40 @@ class TaskListStoreImpl implements TaskListStore {
   /* c8 ignore stop */
 
   // -------------------------------------------------------------------------
+  // Phase 2 — optimistic mutations (PATCH priority/owner; transition→dropped)
+  // -------------------------------------------------------------------------
+
+  patchTask( id: string, fields: TaskPatchFields ): TaskMutation {
+    const tasks = this.openTasksOrNull();
+    if ( tasks === null ) return NOOP_MUTATION();
+    const idx = tasks.findIndex( ( t ) => t.id === id );
+    if ( idx < 0 ) return NOOP_MUTATION();
+
+    const snapshot = tasks.slice();          // shallow copy for rollback
+    tasks[ idx ] = { ...tasks[ idx ], ...fields };   // optimistic clone-and-merge
+    this.emitChanged( false );               // repaint now; NOT a fetch → no re-stamp
+
+    const body = { ...fields, actor: this.actor(), authority: "user_direct" };
+    const done = this.api.patch<unknown>( `/api/tasks/${id}`, body ).then( () => undefined );
+    return { restoreState: this.makeRestorer( snapshot ), done };
+  }
+
+  dropTask( id: string, reason: string ): TaskMutation {
+    const tasks = this.openTasksOrNull();
+    if ( tasks === null ) return NOOP_MUTATION();
+    const idx = tasks.findIndex( ( t ) => t.id === id );
+    if ( idx < 0 ) return NOOP_MUTATION();
+
+    const snapshot = tasks.slice();
+    tasks.splice( idx, 1 );                   // optimistic removal from the open view
+    this.emitChanged( false );
+
+    const body = { to_status: "dropped", reason, actor: this.actor(), authority: "user_direct" };
+    const done = this.api.post<unknown>( `/api/tasks/${id}/transition`, body ).then( () => undefined );
+    return { restoreState: this.makeRestorer( snapshot ), done };
+  }
+
+  // -------------------------------------------------------------------------
   // Internals
   // -------------------------------------------------------------------------
 
@@ -126,14 +217,45 @@ class TaskListStoreImpl implements TaskListStore {
     }
   }
 
-  private emitChanged(): void {
+  // The cached open-task array (the live, mutable `tasks` reference), or null
+  // when no good fetch is cached (pre-first-poll / auth / unreachable sentinel).
+  private openTasksOrNull(): TaskItem[] | null {
+    const c = this.lastComposite;
+    return ( c !== null && Array.isArray( c.tasks ) ) ? c.tasks : null;
+  }
+
+  // Build a rollback closure from a pre-mutation array snapshot: refill whatever
+  // tasks array is currently cached (re-read at call time so a poll that lands
+  // mid-edit restores into the CURRENT composite, never a stale one) and re-emit.
+  private makeRestorer( snapshot: TaskItem[] ): () => void {
+    return (): void => {
+      const tasks = this.openTasksOrNull();
+      /* c8 ignore next */ // defensive: rollback only fires from the renderer's failure path while a composite is cached; a sentinel-replacing poll racing in between is not exercised.
+      if ( tasks === null ) return;
+      tasks.length = 0;
+      tasks.push( ...snapshot );
+      this.emitChanged( false );
+    };
+  }
+
+  private actor(): string {
+    return deriveTaskActor( this.actorProvider() );
+  }
+
+  private emitChanged( stampUpdated: boolean = true ): void {
     this.bus.emit<StoreTaskListChangedPayload>( {
       type    : "store_task_list_changed",
-      payload : { stampUpdated: true },
+      payload : { stampUpdated },
       source  : "TaskListStore",
       ts      : this.nowFn(),
     } );
   }
+}
+
+// A no-op mutation handle for the cache-miss path (no cached composite / unknown
+// id): no api call, an immediately-resolved `done`, an inert `restoreState`.
+function NOOP_MUTATION(): TaskMutation {
+  return { restoreState: () => { /* nothing to revert */ }, done: Promise.resolve() };
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.

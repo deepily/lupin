@@ -5,10 +5,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  activeReassignTargets,
+  deriveTaskActor,
+  EDITABLE_PRIORITIES,
   formatChaseTime,
   formatTaskBlockedBy,
   groupTasksByOwner,
   isOpenStatus,
+  priorityRank,
   taskCellOrDash,
   taskOwnerLabel,
   taskPriorityClass,
@@ -224,4 +228,89 @@ test("formatChaseTime: invalid IANA zone → degrades to browser-local (no throw
   const out = formatChaseTime("2026-06-16T14:30:00Z", "Not/AZone");
   assert.notEqual(out, "—");
   assert.match(out, /\d/);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — priorityRank (now exported), EDITABLE_PRIORITIES
+// ---------------------------------------------------------------------------
+
+test("priorityRank: P0 highest; unknown/absent sort last", () => {
+  assert.equal(priorityRank("P0"), 0);
+  assert.equal(priorityRank("P3"), 3);
+  assert.equal(priorityRank(null), 99);
+  assert.equal(priorityRank(undefined), 99);
+  assert.equal(priorityRank("nonsense"), 99);
+});
+
+test("EDITABLE_PRIORITIES: P0–P3 in urgency order", () => {
+  assert.deepEqual([...EDITABLE_PRIORITIES], ["P0", "P1", "P2", "P3"]);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — deriveTaskActor (Q1: derive from authed user, not a fixed literal)
+// ---------------------------------------------------------------------------
+
+test("deriveTaskActor: email → '<email> (multiplexer)'", () => {
+  assert.equal(deriveTaskActor("rick@example.com"), "rick@example.com (multiplexer)");
+});
+
+test("deriveTaskActor: trims surrounding whitespace", () => {
+  assert.equal(deriveTaskActor("  rick@example.com  "), "rick@example.com (multiplexer)");
+});
+
+test("deriveTaskActor: null/undefined/blank → anonymous fallback", () => {
+  assert.equal(deriveTaskActor(null), "anonymous (multiplexer)");
+  assert.equal(deriveTaskActor(undefined), "anonymous (multiplexer)");
+  assert.equal(deriveTaskActor(""), "anonymous (multiplexer)");
+  assert.equal(deriveTaskActor("   "), "anonymous (multiplexer)");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — activeReassignTargets (active personas, Sam excluded; Q5)
+// ---------------------------------------------------------------------------
+
+test("activeReassignTargets: null / missing fleet_arbiter / non-array sessions → []", () => {
+  assert.deepEqual(activeReassignTargets(null), []);
+  assert.deepEqual(activeReassignTargets(undefined), []);
+  assert.deepEqual(activeReassignTargets({}), []);                                  // no fleet_arbiter
+  assert.deepEqual(activeReassignTargets({ fleet_arbiter: {} }), []);              // no sessions
+  assert.deepEqual(activeReassignTargets({ fleet_arbiter: { sessions: "x" as unknown as [] } }), []);
+});
+
+test("activeReassignTargets: distinct live personas, alpha-sorted", () => {
+  const fleet = { fleet_arbiter: { sessions: [
+    { persona: "zoe" },
+    { persona: "amy" },
+    { persona: "amy" },   // duplicate collapses
+    { persona: "bob" },
+  ] } };
+  assert.deepEqual(activeReassignTargets(fleet), ["amy", "bob", "zoe"]);
+});
+
+test("activeReassignTargets: EXCLUDES the Sam overflow persona (any case)", () => {
+  const fleet = { fleet_arbiter: { sessions: [
+    { persona: "Sam" },
+    { persona: "sam" },
+    { persona: "SAM" },
+    { persona: "amy" },
+  ] } };
+  assert.deepEqual(activeReassignTargets(fleet), ["amy"]);
+});
+
+test("activeReassignTargets: offline personas are excluded (only live contribute)", () => {
+  const fleet = { fleet_arbiter: { sessions: [
+    { persona: "amy", liveness: { verdict: "live" } },
+    { persona: "bob", liveness: { verdict: "offline" } },   // dropped
+    { persona: "carol" },                                    // no verdict → live
+  ] } };
+  assert.deepEqual(activeReassignTargets(fleet), ["amy", "carol"]);
+});
+
+test("activeReassignTargets: blank/absent personas dropped", () => {
+  const fleet = { fleet_arbiter: { sessions: [
+    { persona: "" },
+    { session_id: "abc" },   // no persona
+    { persona: "amy" },
+  ] } };
+  assert.deepEqual(activeReassignTargets(fleet), ["amy"]);
 });

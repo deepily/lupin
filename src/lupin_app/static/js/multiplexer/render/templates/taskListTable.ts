@@ -12,6 +12,7 @@
 // column), so a row never repeats its owner.
 
 import {
+  EDITABLE_PRIORITIES,
   formatChaseTime,
   formatTaskBlockedBy,
   taskCellOrDash,
@@ -24,7 +25,10 @@ import {
 } from "../taskListModel";
 import { ownerKeyForGroup, taskGroupIdSlug } from "../taskListCollapse";
 
-const TASK_COLSPAN = 8;
+// Nine columns post-Phase-2: the eight read-only data columns + an Actions
+// column carrying the per-row editing controls (priority select · owner-reassign
+// select · drop button + inline reason input).
+const TASK_COLSPAN = 9;
 
 function td( className: string, text: string ): HTMLTableCellElement {
   const cell = document.createElement( "td" );
@@ -34,11 +38,95 @@ function td( className: string, text: string ): HTMLTableCellElement {
 }
 
 /**
- * Render a single task row (<tr>) with the eight columns.
+ * Build the per-row Actions cell (Phase 2 — D2/D3 editing controls). All DOM via
+ * createElement + textContent/setAttribute — NO innerHTML (table-section parse
+ * safety + safe-write for store-sourced persona/priority strings). The controls
+ * carry NO inline listeners: TaskListRenderer delegates `change` (selects) and
+ * `click` (drop button) at the persistent container, surviving every re-render.
+ *
+ * Ensures:
+ *   - `.task-priority-select` — P0–P3 options (EDITABLE_PRIORITIES), current
+ *     priority pre-selected; reuses taskPriorityClass for the heat tint
+ *   - `.task-owner-select` — reassignment roster (active personas, Sam already
+ *     excluded by the caller); the current owner is pre-selected (prepended if
+ *     not already a target so the select reflects reality); an unassigned task
+ *     leads with a disabled "(unassigned)" placeholder
+ *   - `.task-drop-reason` text input + `.task-drop-button` — the inline
+ *     drop-with-reason affordance (Q4: inline row input, not a modal)
+ */
+function renderActionsCell( task: TaskItem, reassignTargets: ReadonlyArray<string> ): HTMLTableCellElement {
+  const cell = document.createElement( "td" );
+  cell.className = "task-col-actions";
+
+  // Priority select (P0–P3). The heat class makes the current urgency legible
+  // even before the user opens the dropdown (color is redundant with the text).
+  const prioSelect = document.createElement( "select" );
+  const prioClass  = taskPriorityClass( task.priority );
+  prioSelect.className = "task-priority-select" + ( prioClass ? ` ${prioClass}` : "" );
+  prioSelect.setAttribute( "aria-label", "Set priority" );
+  for ( const p of EDITABLE_PRIORITIES ) {
+    const opt = document.createElement( "option" );
+    opt.value = p;
+    opt.textContent = p;
+    if ( ( task.priority ?? "" ) === p ) opt.selected = true;
+    prioSelect.appendChild( opt );
+  }
+  cell.appendChild( prioSelect );
+
+  // Owner-reassignment select. The current owner is pre-selected; an unassigned
+  // task gets a disabled placeholder so the control isn't blank.
+  const ownerSelect = document.createElement( "select" );
+  ownerSelect.className = "task-owner-select";
+  ownerSelect.setAttribute( "aria-label", "Reassign owner" );
+  const currentOwner = task.owner_persona ?? "";
+  if ( !currentOwner ) {
+    const placeholder = document.createElement( "option" );
+    placeholder.value = "";
+    placeholder.textContent = "(unassigned)";
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    ownerSelect.appendChild( placeholder );
+  }
+  const seen = new Set<string>();
+  const ordered = currentOwner ? [ currentOwner, ...reassignTargets ] : reassignTargets;
+  for ( const persona of ordered ) {
+    if ( !persona || seen.has( persona ) ) continue;
+    seen.add( persona );
+    const opt = document.createElement( "option" );
+    opt.value = persona;
+    opt.textContent = persona;
+    if ( persona === currentOwner ) opt.selected = true;
+    ownerSelect.appendChild( opt );
+  }
+  cell.appendChild( ownerSelect );
+
+  // Drop-with-reason: inline reason input + Drop button (Q4 — inline row input,
+  // not a modal). The renderer reads the sibling input's value on click and
+  // enforces the non-blank reason the `→dropped` transition requires.
+  const reasonInput = document.createElement( "input" );
+  reasonInput.type = "text";
+  reasonInput.className = "task-drop-reason";
+  reasonInput.setAttribute( "placeholder", "drop reason…" );
+  reasonInput.setAttribute( "aria-label", "Drop reason" );
+  cell.appendChild( reasonInput );
+
+  const dropBtn = document.createElement( "button" );
+  dropBtn.type = "button";
+  dropBtn.className = "task-drop-button";
+  dropBtn.textContent = "Drop";
+  cell.appendChild( dropBtn );
+
+  return cell;
+}
+
+/**
+ * Render a single task row (<tr>) with the eight data columns + the Actions cell.
  *
  * Requires:
  *   - task is a TaskItem (fields rendered defensively — falsy → "—")
  *   - ianaZone is the IANA zone for the next-chase cell, or null/undefined
+ *   - reassignTargets is the active-persona roster (Sam already excluded) for the
+ *     owner select; defaults to [] (e.g. read-only callers / fleet unavailable)
  * Ensures:
  *   - Status cell carries a `.task-status-dot` color-keyed span + the status word
  *   - Blocked-by / Accountable / Project: falsy/"none" → "—"
@@ -46,10 +134,14 @@ function td( className: string, text: string ): HTMLTableCellElement {
  *   - the row carries a `task-status-*` class (status→accent); the Priority cell
  *     carries a `task-prio-*` heat class when recognized. Color is redundant
  *     with the status WORD / priority text (WCAG 1.4.1).
+ *   - the row carries `data-task-id` (the row's id, or "" when absent) so the
+ *     renderer's delegated handlers can resolve the target task from any control
+ *   - the trailing Actions cell carries the priority/owner selects + drop affordance
  */
 export function renderTaskRow(
-  task     : TaskItem,
-  ianaZone : string | null | undefined,
+  task            : TaskItem,
+  ianaZone        : string | null | undefined,
+  reassignTargets : ReadonlyArray<string> = [],
 ): HTMLTableRowElement {
   const status      = task.status || "unknown";
   const statusClass = taskStatusClass( task.status );
@@ -57,6 +149,7 @@ export function renderTaskRow(
 
   const tr = document.createElement( "tr" );
   tr.className = `task-row ${statusClass}`;
+  tr.setAttribute( "data-task-id", task.id ?? "" );
 
   tr.appendChild( td( "task-col-title", taskTitleLabel( task ) ) );
 
@@ -87,6 +180,8 @@ export function renderTaskRow(
     taskCellOrDash( task.priority ),
   ) );
   tr.appendChild( td( "task-col-project", taskCellOrDash( task.project ) ) );
+
+  tr.appendChild( renderActionsCell( task, reassignTargets ) );
 
   return tr;
 }
@@ -133,13 +228,15 @@ function renderGroupHeader( group: TaskGroup, isCollapsed: boolean, idSlug: stri
  *     accordion seam): a group whose owner key ∈ collapsedOwners gets the
  *     `collapsed` class (CSS hides its rows; the header bar stays), chevron ▸,
  *     aria-expanded="false"; otherwise chevron ▾, aria-expanded="true"
- *   - Read-only: no action column, no mutating controls
+ *   - each row carries the trailing Actions cell (priority/owner edit + drop);
+ *     reassignTargets (active personas, Sam excluded) populates the owner selects
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; all internal branches are exercised by tests.
 export function renderTaskListTable(
   model           : TaskListModel,
   ianaZone        : string | null | undefined,
   collapsedOwners : ReadonlySet<string> = new Set(),
+  reassignTargets : ReadonlyArray<string> = [],
 ): HTMLTableElement {
   const table = document.createElement( "table" );
   table.className = "task-list-table";
@@ -155,6 +252,7 @@ export function renderTaskListTable(
     [ "task-col-accountable", "Accountable" ],
     [ "task-col-priority", "Priority" ],
     [ "task-col-project", "Project" ],
+    [ "task-col-actions", "Actions" ],
   ];
   for ( const [ cls, label ] of headers ) {
     const th = document.createElement( "th" );
@@ -179,7 +277,7 @@ export function renderTaskListTable(
 
     tbody.appendChild( renderGroupHeader( group, isCollapsed, idSlug ) );
     for ( const task of group.tasks ) {
-      tbody.appendChild( renderTaskRow( task, ianaZone ) );
+      tbody.appendChild( renderTaskRow( task, ianaZone, reassignTargets ) );
     }
     table.appendChild( tbody );
   }

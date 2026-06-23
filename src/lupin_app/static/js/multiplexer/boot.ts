@@ -204,6 +204,10 @@ function bootMultiplexer(): void {
     eventBus,
     storage,
     api                 : apiClient,
+    // Phase 2 — the TaskList edit audit `actor` derives from the authenticated
+    // user's identity (Q1). AuthManager is constructed above; its email claim is
+    // stable across refresh, so reading it lazily per-edit is correct.
+    actorProvider       : () => authManager.getCurrentUserEmail(),
     audioContextFactory : () => {
       // Production AudioContext factory. Browser autoplay policy may throw
       // if no user gesture preceded — AudioStore catches and emits
@@ -484,7 +488,9 @@ function bootMultiplexer(): void {
   // the WS transports; it polls /api/tasks on its own 60s timer.
   const taskListRenderer = createTaskListRenderer({
     eventBus,
-    stores : { taskList: stores.taskList },
+    // Phase 2 — the fleet store supplies the owner-reassignment roster (active
+    // personas, Sam excluded) from the SAME source the fleet-status card uses.
+    stores : { taskList: stores.taskList, fleet: stores.fleetStatus },
   });
   const taskListMountEl = document.getElementById("task-list-pane");
   if (taskListMountEl === null) throw new Error("multiplexer: #task-list-pane not found");

@@ -112,7 +112,7 @@ test("renderTaskRow: empty blocked_by array → em-dash cell", () => {
 // renderTaskListTable
 // ---------------------------------------------------------------------------
 
-test("renderTaskListTable: 8 headers; owner + Unassigned group headers; rows render", () => {
+test("renderTaskListTable: 9 headers (incl. Actions); owner + Unassigned group headers; rows render", () => {
   const tasks: TaskItem[] = [
     { owner_persona: "amy", title: "a1", status: "queued" },
     { title: "orphan", status: "blocked" },   // → Unassigned
@@ -120,7 +120,8 @@ test("renderTaskListTable: 8 headers; owner + Unassigned group headers; rows ren
   const table = renderTaskListTable(groupTasksByOwner(tasks), "America/New_York");
 
   assert.ok(table.classList.contains("task-list-table"));
-  assert.equal(table.querySelectorAll("thead th").length, 8);
+  assert.equal(table.querySelectorAll("thead th").length, 9);
+  assert.equal(table.querySelector("thead th.task-col-actions")?.textContent, "Actions");
 
   const groupHeaders = table.querySelectorAll(".task-group-header");
   assert.equal(groupHeaders.length, 2);
@@ -215,4 +216,100 @@ test("renderTaskListTable: omitting collapsedOwners defaults to all-expanded (fi
   );   // no 3rd arg → default new Set()
   assert.equal(table.querySelectorAll("tbody.task-group.collapsed").length, 0);
   assert.equal(table.querySelector(".task-group-header")?.getAttribute("aria-expanded"), "true");
+});
+
+// ---------------------------------------------------------------------------
+// Phase 2 — per-row Actions cell (priority/owner edit + drop)
+// ---------------------------------------------------------------------------
+
+test("renderTaskRow: carries data-task-id from the row id", () => {
+  const tr = renderTaskRow({ id: "task-42", title: "t", status: "queued" }, undefined);
+  assert.equal(tr.getAttribute("data-task-id"), "task-42");
+});
+
+test("renderTaskRow: missing id → data-task-id is empty string (defensive)", () => {
+  const tr = renderTaskRow({ title: "t", status: "queued" }, undefined);
+  assert.equal(tr.getAttribute("data-task-id"), "");
+});
+
+test("renderTaskRow: Actions cell — priority select has P0–P3, current selected, heat tint", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", priority: "P1" }, undefined);
+  const sel = tr.querySelector<HTMLSelectElement>(".task-priority-select");
+  assert.ok(sel, "priority select present");
+  assert.ok(sel?.classList.contains("task-prio-high"), "P1 heat tint reused");
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["P0", "P1", "P2", "P3"]);
+  assert.equal(sel?.value, "P1", "current priority pre-selected");
+});
+
+test("renderTaskRow: priority select with no current priority → no heat tint, nothing pre-selected to a P1", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued" }, undefined);
+  const sel = tr.querySelector<HTMLSelectElement>(".task-priority-select");
+  assert.equal(sel?.className, "task-priority-select", "no heat class when priority absent");
+  // No option matches "", so the browser defaults selection to the first option (P0).
+  assert.equal(sel?.value, "P0");
+});
+
+test("renderTaskRow: owner select — current owner pre-selected + reassign targets, deduped", () => {
+  const tr = renderTaskRow(
+    { id: "x", title: "t", status: "queued", owner_persona: "amy" },
+    undefined,
+    ["bob", "amy", "carol"],   // amy duplicates the current owner → collapsed
+  );
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.ok(sel, "owner select present");
+  // current owner "amy" leads; "bob"/"carol" follow; the duplicate "amy" is dropped.
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy", "bob", "carol"]);
+  assert.equal(sel?.value, "amy", "current owner pre-selected");
+});
+
+test("renderTaskRow: owner select — current owner NOT in targets is prepended", () => {
+  const tr = renderTaskRow(
+    { id: "x", title: "t", status: "queued", owner_persona: "zoe" },
+    undefined,
+    ["bob"],
+  );
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["zoe", "bob"]);
+  assert.equal(sel?.value, "zoe");
+});
+
+test("renderTaskRow: unassigned task → disabled (unassigned) placeholder + targets", () => {
+  const tr = renderTaskRow(
+    { id: "x", title: "t", status: "queued" },   // no owner_persona
+    undefined,
+    ["bob", "carol"],
+  );
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  const opts = Array.from(sel!.options);
+  assert.equal(opts[0]?.value, "");
+  assert.equal(opts[0]?.textContent, "(unassigned)");
+  assert.equal(opts[0]?.disabled, true);
+  assert.deepEqual(opts.slice(1).map(o => o.value), ["bob", "carol"]);
+});
+
+test("renderTaskRow: owner select drops blank/empty target entries", () => {
+  const tr = renderTaskRow(
+    { id: "x", title: "t", status: "queued", owner_persona: "amy" },
+    undefined,
+    ["", "bob"],   // blank entry must be skipped
+  );
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["amy", "bob"]);
+});
+
+test("renderTaskRow: default reassignTargets ([]) → unassigned shows placeholder only", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued" }, undefined);
+  const sel = tr.querySelector<HTMLSelectElement>(".task-owner-select");
+  assert.equal(sel?.options.length, 1);
+  assert.equal(sel?.options[0]?.value, "");
+});
+
+test("renderTaskRow: Actions cell — inline drop reason input + Drop button", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued" }, undefined);
+  const input = tr.querySelector<HTMLInputElement>(".task-drop-reason");
+  const btn   = tr.querySelector<HTMLButtonElement>(".task-drop-button");
+  assert.equal(input?.type, "text");
+  assert.equal(input?.getAttribute("placeholder"), "drop reason…");
+  assert.equal(btn?.type, "button");
+  assert.equal(btn?.textContent, "Drop");
 });

@@ -53,7 +53,7 @@ import type { PredictionVoteStore } from "./PredictionVoteStore";
 import { createPredictionVoteStore } from "./PredictionVoteStore";
 import type { FleetStatusStore, FleetApiClient } from "./FleetStatusStore";
 import { createFleetStatusStore } from "./FleetStatusStore";
-import type { TaskListStore } from "./TaskListStore";
+import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
 
 export interface StoreSet {
@@ -87,12 +87,17 @@ export interface StoreSet {
 export interface CreateStoresOptions {
   eventBus            : EventBus;
   storage             : StorageService;
-  // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus). The
-  // production ApiClient satisfies both structurally.
-  api                 : ActionRequiredApiClient & FleetApiClient;
+  // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus) +
+  // get/patch/post (TaskList Phase-2 writes). The production ApiClient satisfies
+  // all three structurally.
+  api                 : ActionRequiredApiClient & FleetApiClient & TaskListApiClient;
   // Forward AudioStore options so boot.ts can pass production-side
   // `audioContextFactory`. Tests usually omit (default factory is browser-only).
   audioContextFactory?: AudioStoreOptions["audioContextFactory"];
+  // Phase 2 — authenticated-user identity provider for TaskList edit audit
+  // `actor` (Q1). Boot wires `() => authManager.getCurrentUserEmail()`; omitted
+  // in read-only test constructions (the store defaults to anonymous).
+  actorProvider?      : () => string | null;
 }
 
 /**
@@ -136,7 +141,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const missed         = createMissedStore        ({ bus: opts.eventBus, api: opts.api });
   const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
   const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
-  const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api });
+  const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
 
   return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList };
 }
