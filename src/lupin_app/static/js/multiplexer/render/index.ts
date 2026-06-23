@@ -103,6 +103,14 @@ export {
   type TaskListRendererOptions,
   type TaskListStoreLike,
 } from "./TaskListRenderer";
+// Section-toolbar + accordion-collapse parity (2026-06-23).
+export {
+  createSectionToolbarRenderer,
+  type SectionToolbarRenderer,
+  type SectionToolbarRendererOptions,
+  type SectionToolbarRendererStores,
+  type ViewStateStoreLike,
+} from "./SectionToolbarRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";

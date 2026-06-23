@@ -125,7 +125,14 @@ export type LupinEventType =
   | "store_fleet_status_changed"
   // Step 4 (task-list card): TaskListStore emits when a `/api/tasks` poll
   //   resolves (success, unreachable, or 401).
-  | "store_task_list_changed";
+  | "store_task_list_changed"
+  // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel): the
+  // ViewStateStore emits this ONLY for the cross-renderer bulk intent
+  // (collapse-all / expand-all). Per-section + per-accordion mutations persist
+  // silently (the owning renderer applies the DOM directly), so they do NOT
+  // emit — only the toolbar → NotificationsListRenderer bulk signal rides the
+  // bus. NotificationsListRenderer subscribes and flips every accordion.
+  | "store_view_state_changed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -637,6 +644,10 @@ export interface BootCompletePayload {
     // after the task-list card mounts. Optional per the same forward/backward-
     // compat pattern + runtime-unconditional in boot.ts.
     taskListRenderer?            : string;
+    // Section-toolbar + accordion-collapse parity (2026-06-23): literal
+    // "mounted" emitted after the section-toolbar mounts at the NEW-LANE MOUNT
+    // SLOT. Optional per the forward/backward-compat pattern.
+    sectionToolbarRenderer?     : string;
   };
 }
 
@@ -689,6 +700,24 @@ export type ReadingPaneChangeKind =
 
 export interface StoreReadingPaneChangedPayload {
   changeKind : ReadingPaneChangeKind;
+}
+
+// ---------------------------------------------------------------------------
+// Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️ / Mr.
+// Radio lane). ViewStateStore owns two persisted maps (section visibility +
+// accordion collapse). It emits `store_view_state_changed` ONLY for the
+// cross-renderer bulk intent — collapse-all / expand-all driven from the
+// section-toolbar, applied by NotificationsListRenderer to every accordion.
+// Per-section + per-accordion toggles persist silently (owning renderer
+// applies DOM directly), so the only `changeKind`s are the two bulk ones.
+// ---------------------------------------------------------------------------
+
+export type ViewStateChangeKind =
+  | "collapse-all"   // requestBulkAccordionCollapse(true): collapse every accordion
+  | "expand-all";    // requestBulkAccordionCollapse(false): expand every accordion
+
+export interface StoreViewStateChangedPayload {
+  changeKind : ViewStateChangeKind;
 }
 
 // ---------------------------------------------------------------------------

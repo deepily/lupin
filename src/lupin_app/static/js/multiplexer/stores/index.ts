@@ -55,6 +55,8 @@ import type { FleetStatusStore, FleetApiClient } from "./FleetStatusStore";
 import { createFleetStatusStore } from "./FleetStatusStore";
 import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
+import type { ViewStateStore } from "./ViewStateStore";
+import { createViewStateStore } from "./ViewStateStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -82,6 +84,10 @@ export interface StoreSet {
   predictionVote : PredictionVoteStore;
   fleetStatus    : FleetStatusStore;
   taskList       : TaskListStore;
+  // Section-toolbar + accordion-collapse parity (2026-06-23) — view-preference
+  // state (section visibility + accordion collapse), persisted. Order-neutral
+  // (subscribes to no server frames), so it appends after the pinned five.
+  viewState      : ViewStateStore;
 }
 
 export interface CreateStoresOptions {
@@ -142,8 +148,11 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
   const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
   const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
+  // persisted section-visibility + accordion-collapse maps at construction.
+  const viewState      = createViewStateStore     ({ bus: opts.eventBus, storage: opts.storage });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, viewState };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -191,4 +200,6 @@ export type { FleetStatusStore, FleetStatusStoreOptions, FleetApiClient } from "
 export { createFleetStatusStore } from "./FleetStatusStore";
 export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
 export { createTaskListStore } from "./TaskListStore";
+export type { ViewStateStore, ViewStateStoreOptions } from "./ViewStateStore";
+export { createViewStateStore } from "./ViewStateStore";
 /* c8 ignore stop */
