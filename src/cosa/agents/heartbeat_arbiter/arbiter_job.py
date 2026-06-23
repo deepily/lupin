@@ -47,6 +47,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_state import (
 from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
     build_graph, build_store_wait_edges, cycle_is_store_backed, hold_is_stale,
+    build_wait_edges, find_deadlock_cycles,
 )
 from cosa.agents.heartbeat_arbiter.idle_roster import build_roster
 from cosa.agents.heartbeat_arbiter import ping_throttle
@@ -900,7 +901,19 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # edges alone. Built from the SAME owed read (one query per poll).
         store_edges = build_store_wait_edges( owed_items )
 
-        self._escalate_deadlocks( graph[ "cycles" ], store_edges, now, active_managers )  # #5 Rick + all mgrs (store-corroborated)
+        # María review of bc1bc373/c88a7431 (CHANGES-REQUESTED): the deadlock
+        # ESCALATION reads the UNFILTERED peer graph — NOT graph["cycles"] (which is
+        # built with stale_holders and so is FILTERED). The bc1bc373 staleness-filter
+        # correctly drops a dead-hold holder's phantom edge from the ADVISORY graph
+        # ("X blocking Y"), but _stale_hold_holders is hold-FILE-only (zero store-
+        # awareness): an alive-but-slow X with an EXPIRED hold AND a REAL store-backed
+        # cycle (X→Y→X in the store's blocked_by) would have its peer edge filtered, the
+        # cycle would drop out of graph["cycles"], and a GENUINE store-backed deadlock
+        # would go UNESCALATED. cycle_is_store_backed (inside _escalate_deadlocks) stays
+        # the gate — non-store phantoms still never escalate — and the ADVISORY path
+        # keeps the filtered graph above; only this escalation feed is un-filtered.
+        escalation_cycles = find_deadlock_cycles( build_wait_edges( fleet_view ) )
+        self._escalate_deadlocks( escalation_cycles, store_edges, now, active_managers )  # #5 Rick + all mgrs (store-corroborated, UNFILTERED cycles)
         # REAPED/OFFLINE-PRUNE (lane 4, 2026-06-17): only auto-ping on behalf of an
         # ALIVE holder. A reaped/long-offline session whose stale `holding_on:
         # peer:X` lingers on its view row was generating phantom blocker pings (+

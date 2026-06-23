@@ -365,6 +365,46 @@ def test_poll_once_no_hold_reader_is_inert( tmp_path ):
     assert summary[ "edges" ] == 1 and summary[ "pings_fired" ] == 1
 
 
+def test_poll_once_stale_participant_store_backed_cycle_still_escalates( tmp_path ):
+    """María review of bc1bc373/c88a7431 (CHANGES-REQUESTED regression): a REAL
+    store-backed deadlock must STILL escalate even when a participant's hold is
+    stale. alice (alive but with an EXPIRED hold) ↔ bob mutually hold (peer cycle);
+    alice's dead hold filters her edge out of the ADVISORY graph so graph["cycles"]
+    is EMPTY — the OLD feed (graph["cycles"]) would MISS the deadlock — but the store
+    carries a real alice↔bob blocked_by ring, so the UNFILTERED escalation feed
+    (find_deadlock_cycles(build_wait_edges(fleet_view))) STILL sees it and escalates."""
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", awaiting="peer:bob",   persona="alice" ) )
+    _write_events( str( tmp_path ), "s2", _event( "s2", "honored", awaiting="peer:alice", persona="bob"   ) )
+    gw = FakeGateway( who_rows=[
+        { "session_id": "s1", "persona_name": "alice", "last_post_ts": NOW_ISO },
+        { "session_id": "s2", "persona_name": "bob",   "last_post_ts": NOW_ISO },
+    ] )
+    store_cycle = {
+        "alice": [ { "id": "a1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "bob" } ] } ],
+        "bob":   [ { "id": "b1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "alice" } ] } ],
+    }
+    escal = [ ]
+    job = _make_job( tmp_path, gateway=gw,
+                     hold_reader_fn         = lambda sid: _dead_hold() if sid == "s1" else None,
+                     owed_work_fn           = lambda names: store_cycle,
+                     deadlock_dwell_seconds = 0,                     # fire on first corroborated sight
+                     notify_fn              = lambda msg, *a, **k: escal.append( msg ) )
+    summary = job._poll_once()
+    # the ADVISORY graph is FILTERED empty (alice's dead-hold edge dropped) → the OLD
+    # graph["cycles"] feed would have MISSED this real deadlock...
+    assert summary[ "cycles" ] == 0
+    # ...but the UNFILTERED escalation feed (find_deadlock_cycles(build_wait_edges(...)))
+    # sees the store-backed alice↔bob ring → the deadlock STILL escalates. Asserting the
+    # store-corroborated DEADLOCK message NAMES BOTH participants proves it fired via the
+    # unfiltered store-backed path specifically (María's ask: a future re-filter of the
+    # escalation feed → empty cycles → no DEADLOCK escalation → this fails, never silent).
+    deadlock_msgs = [ m for m in escal if "DEADLOCK" in m and "store-corroborated" in m ]
+    assert deadlock_msgs, escal
+    assert "alice" in deadlock_msgs[ 0 ] and "bob" in deadlock_msgs[ 0 ]
+
+
 def test_stale_hold_holders_missing_hold_keeps_edge( tmp_path ):
     """A session with NO readable hold is NOT added to the stale set (absence ≠
     deadness) — the edge survives. Directly exercises _stale_hold_holders."""
