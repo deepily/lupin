@@ -292,34 +292,96 @@ class TestManagerAckTracking:
         down = job._check_manager_acks( late, [ ], fleet_view )
         assert down == 1 and "MANAGER-DOWN" in escal[ 0 ]
 
-    def test_manager_bridge_activity_picks_freshest_and_handles_edges( self ):
-        """Direct unit of the helper: freshest mtime across the manager's
-        sessions wins; non-dict views, persona mismatches, missing session_id,
-        unresolved bridges (None), and un-convertible mtimes are all skipped."""
+    def test_manager_liveness_activity_picks_freshest_and_handles_edges( self ):
+        """Direct unit of the 5-signal helper (bug e8f40042): the freshest of the
+        full union (bridge + event + commons + idle_prompt + dm) across the
+        manager's session rows wins, converted back to an absolute datetime;
+        canonical_persona_key matching (mixed-case spelling), count_dm gating,
+        non-dict views, persona mismatches, missing session_id, and rows with NO
+        signal at all are all handled. The OLD _manager_bridge_activity saw only
+        bridge — this helper is the single-source-of-truth replacement."""
         job  = _job( _Gateway(), { } )
-        base = NOW.timestamp()
-        mtimes = {
-            "s-new"    : base + 99,
-            "s-old"    : base + 10,     # older than s-new → does NOT update best
-            "s-newest" : base + 150,    # newest → updates best
-            "s-none"   : None,          # no bridge resolves → skipped
-            "s-bad"    : "garbage",     # fromtimestamp raises (TypeError) → skipped
-        }
+        now  = NOW + datetime.timedelta( seconds=700 )
+        # bridge mtime on one row (oldest signal); a FRESHER event/dm on others.
+        mtimes = { "s-bridge": ( now - datetime.timedelta( seconds=400 ) ).timestamp(),
+                   "s-event" : None, "s-dm": None, "s-bare": None, "s-other": None }
         job._bridge_mtime_fn = lambda sid: mtimes.get( sid )
         fleet_view = {
-            "s-new"    : { "session_id": "s-new",    "persona": "Tiberius" },
-            "s-old"    : { "session_id": "s-old",    "persona": "Tiberius" },
-            "s-newest" : { "session_id": "s-newest", "persona": "Tiberius" },
-            "s-none"   : { "session_id": "s-none",   "persona": "Tiberius" },
-            "s-bad"    : { "session_id": "s-bad",    "persona": "Tiberius" },
-            "s-other"  : { "session_id": "s-other",  "persona": "SomeoneElse" },  # persona mismatch
-            "s-nosid"  : { "persona": "Tiberius" },                               # no session_id → None
-            "not-dict" : "x",                                                     # non-dict view → skipped
+            "s-bridge" : { "session_id": "s-bridge", "persona": "Tiberius" },                         # bridge_age 400
+            "s-event"  : { "session_id": "s-event",  "persona": "tiberius",                           # canon-match (mixed case)
+                           "last_event_ts": now - datetime.timedelta( seconds=200 ) },                # event_age 200
+            "s-dm"     : { "session_id": "s-dm",     "persona": "Tiberius",
+                           "dm_ts": now - datetime.timedelta( seconds=30 ) },                         # dm_age 30 (freshest)
+            "s-stale"  : { "session_id": "s-stale",  "persona": "Tiberius",                           # OLDER than running best
+                           "last_event_ts": now - datetime.timedelta( seconds=500 ) },                # → does NOT update best
+            "s-bare"   : { "session_id": "s-bare",   "persona": "Tiberius" },                         # NO signal → skipped
+            "s-other"  : { "session_id": "s-other",  "persona": "SomeoneElse",                        # persona mismatch → skipped
+                           "dm_ts": now - datetime.timedelta( seconds=1 ) },
+            "not-dict" : "x",                                                                          # non-dict → skipped
         }
-        best = job._manager_bridge_activity( "Tiberius", fleet_view )
-        assert best == datetime.datetime.fromtimestamp( base + 150, tz=datetime.timezone.utc )
-        assert job._manager_bridge_activity( "Nobody",   fleet_view ) is None    # no persona match
-        assert job._manager_bridge_activity( "Tiberius", None )       is None    # None fleet_view
+        # count_dm=True → dm (age 30) is freshest across the matched rows.
+        best = job._manager_liveness_activity( "Tiberius", fleet_view, now, count_dm=True )
+        assert best == now - datetime.timedelta( seconds=30 )
+        # count_dm=False → dm excluded; freshest of the remaining union is event (age 200).
+        best_no_dm = job._manager_liveness_activity( "Tiberius", fleet_view, now, count_dm=False )
+        assert best_no_dm == now - datetime.timedelta( seconds=200 )
+        # no persona match / None fleet_view → None.
+        assert job._manager_liveness_activity( "Nobody",   fleet_view, now, count_dm=True ) is None
+        assert job._manager_liveness_activity( "Tiberius", None,       now, count_dm=True ) is None
+
+    # ── bug e8f40042: tap-ACK must consume the FULL 5-signal union, not {commons,bridge} ──
+
+    def test_dm_only_manager_not_false_downed( self ):
+        """
+        REPRODUCTION (bug e8f40042): a coordination-only manager whose ONLY sign
+        of life is a sent DM (dm_age fresh) — silent on commons AND with a stale
+        bridge (no Read/Edit/Bash to bump it) — was false-DOWNed every window by
+        the OLD {commons, bridge}-only ACK. With the 5-signal union it ACKs.
+        This is exactly María's divergence check.
+        """
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late  = NOW + datetime.timedelta( seconds=700 )                  # past the 600s window
+        stale = ( NOW - datetime.timedelta( seconds=50 ) ).timestamp()   # bridge OLDER than the tap
+        job._bridge_mtime_fn = lambda sid: stale
+        # dm_ts fresh AT/AFTER the tap; commons (who) empty; no event/idle signal.
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius",
+                               "dm_ts": NOW + datetime.timedelta( seconds=650 ) } }
+        down = job._check_manager_acks( late, [ ], fleet_view, count_dm=True )
+        assert down == 0 and escal == [ ]
+        assert "Tiberius" not in job._manager_down_escalated
+
+    def test_dm_only_manager_downs_when_dm_toggle_off( self ):
+        """NEGATIVE CONTROL: the SAME DM-only manager — fresh dm, stale bridge,
+        no commons/event — DOES down when count_dm=False (the runtime toggle
+        `arbiter count dm as liveness` off), proving the DM signal is what saved
+        it above and that count_dm is honored end-to-end."""
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late  = NOW + datetime.timedelta( seconds=700 )
+        stale = ( NOW - datetime.timedelta( seconds=50 ) ).timestamp()
+        job._bridge_mtime_fn = lambda sid: stale
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius",
+                               "dm_ts": NOW + datetime.timedelta( seconds=650 ) } }
+        down = job._check_manager_acks( late, [ ], fleet_view, count_dm=False )
+        assert down == 1 and len( escal ) == 1 and "MANAGER-DOWN" in escal[ 0 ]
+
+    def test_fresh_stop_event_acks_commons_and_bridge_silent_manager( self ):
+        """The event_age fold (bug e8f40042): a manager whose only fresh signal is
+        a STOP event (last_event_ts) — stale bridge, empty commons, no dm — ACKs.
+        The OLD {commons, bridge}-only path false-DOWNed it."""
+        gw, escal = _Gateway(), [ ]
+        job = _job( gw, { }, notify=lambda m, *a, **k: escal.append( m ) )
+        job._last_tap_at[ "Tiberius" ] = NOW
+        late  = NOW + datetime.timedelta( seconds=700 )
+        stale = ( NOW - datetime.timedelta( seconds=50 ) ).timestamp()
+        job._bridge_mtime_fn = lambda sid: stale
+        fleet_view = { "s1": { "session_id": "s1", "persona": "Tiberius",
+                               "last_event_ts": NOW + datetime.timedelta( seconds=640 ) } }
+        down = job._check_manager_acks( late, [ ], fleet_view, count_dm=True )
+        assert down == 0 and escal == [ ]
 
 
 if __name__ == "__main__":

@@ -221,8 +221,9 @@ def test_route_drop_emits_nothing():
 def test_deadlock_routes_rick_and_managers():
     """#5: deadlock → Rick (notify) + each active manager (send_to)."""
     gw, notes = _GW(), [ ]
-    job = _job( gw, notify=notes.append )
-    job._escalate_deadlocks( [ [ "A", "B" ] ], active_managers=[ "M1" ] )
+    job = _job( gw, notify=notes.append, deadlock_dwell_seconds=0 )
+    store_edges = { "a": { "b" }, "b": { "a" } }                   # corroborates A↔B (canonical lower)
+    job._escalate_deadlocks( [ [ "A", "B" ] ], store_edges, NOW, active_managers=[ "M1" ] )
     assert notes and "DEADLOCK" in notes[ 0 ]
     assert gw.sent == [ ( "M1", notes[ 0 ] ) ]
 

@@ -315,17 +315,47 @@ class TestGroupPCLoopClosure:
         assert "Alice" in body and "blocking worker" in body
 
     def test_pc5_mutual_await_is_deadlock_escalated_not_broken( self, fleet ):
-        """Two real sessions awaiting each other → deadlock cycle → ESCALATE (never auto-broken)."""
+        """Two real sessions awaiting each other AND a corroborating STORE
+        dependency ring (Alice's task blocked_by Bob's, and vice versa) → deadlock
+        → ESCALATE (never auto-broken). Bug 436a366b: the derived ring alone is no
+        longer enough — it must be store-corroborated (dwell=0 fires on first
+        corroborated sight)."""
         _emit( fleet, "s1", "honored", awaiting="peer:Bob",   persona="Alice" )
         _emit( fleet, "s2", "honored", awaiting="peer:Alice", persona="Bob" )
+        # AUTHORITATIVE store ring: Alice↔Bob really block each other (item-kind).
+        owed = {
+            "Alice": [ { "id": "tA", "status": "blocked", "gate_class": "none",
+                         "blocked_by": [ { "kind": "item", "id": "tB" } ] } ],
+            "Bob"  : [ { "id": "tB", "status": "blocked", "gate_class": "none",
+                         "blocked_by": [ { "kind": "item", "id": "tA" } ] } ],
+        }
         escalations = [ ]
-        arb     = _make_arbiter( fleet, notify_fn=lambda m: escalations.append( m ) )
+        arb     = _make_arbiter( fleet, notify_fn=lambda m: escalations.append( m ),
+                                 owed_work_fn=lambda names: owed, deadlock_dwell_seconds=0 )
         summary = arb._poll_once()
         assert summary[ "cycles" ] == 1
         # Part-6 #5: surfaced to Rick (notify_fn) + active managers — not posted to a
         # roster topic (#6 dropped), and NEVER autonomously broken
         assert escalations and "DEADLOCK" in escalations[ 0 ]
+        assert "store-corroborated" in escalations[ 0 ]
         assert arb._commons.posts == [ ]                          # #6: no roster broadcast
+
+    def test_pc5b_mutual_await_without_store_backing_not_escalated( self, fleet ):
+        """Bug 436a366b regression (the false-fire that bit us all session): the
+        SAME derived mutual-await ring but with NO corroborating store rows (a
+        fresh, progressing sequencing wait — Krishna↔Mr Radio) → the cycle is
+        SEEN (summary cycles==1) but NOT escalated. Store-corroboration suppresses
+        the derived-only ring."""
+        _emit( fleet, "s1", "honored", awaiting="peer:Bob",   persona="Alice" )
+        _emit( fleet, "s2", "honored", awaiting="peer:Alice", persona="Bob" )
+        escalations = [ ]
+        # owed_work_fn returns ZERO owed items for both → empty store ring.
+        arb     = _make_arbiter( fleet, notify_fn=lambda m: escalations.append( m ),
+                                 owed_work_fn=lambda names: { "Alice": [ ], "Bob": [ ] },
+                                 deadlock_dwell_seconds=0 )
+        summary = arb._poll_once()
+        assert summary[ "cycles" ] == 1                           # the derived ring still EXISTS
+        assert escalations == [ ]                                 # but is NOT escalated (no store backing)
 
 
 # ═════════════════════════════════════════════════════════════════════════════

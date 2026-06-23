@@ -14,6 +14,7 @@ per-poll-exception-swallowed) + do_all.
 
 Venue: :7999-eligible / local — fully mocked I/O, no server, sub-second.
 """
+import datetime
 import json
 import os
 import sys
@@ -317,17 +318,66 @@ def test_clear_on_resume_drops_edge_state( tmp_path ):
 # ── _escalate_deadlocks ───────────────────────────────────────────────────────
 
 def test_escalate_deadlocks_notifies( tmp_path ):
+    """A STORE-CORROBORATED ring (dwell=0 → fires on first sight) escalates."""
     fired = [ ]
-    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ) )
-    job._escalate_deadlocks( [ [ "Alice", "Bob" ] ] )
-    assert fired and "DEADLOCK" in fired[ 0 ]
+    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ), deadlock_dwell_seconds=0 )
+    now = datetime.datetime.fromisoformat( NOW_ISO )
+    store_edges = { "alice": { "bob" }, "bob": { "alice" } }       # corroborates Alice↔Bob
+    job._escalate_deadlocks( [ [ "Alice", "Bob" ] ], store_edges, now )
+    assert fired and "DEADLOCK" in fired[ 0 ] and "store-corroborated" in fired[ 0 ]
 
 
 def test_escalate_deadlocks_noop_when_empty( tmp_path ):
     fired = [ ]
     job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ) )
-    job._escalate_deadlocks( [ ] )
+    now = datetime.datetime.fromisoformat( NOW_ISO )
+    job._escalate_deadlocks( [ ], { }, now )
     assert fired == [ ]
+
+
+def test_escalate_deadlocks_suppressed_without_store_backing( tmp_path ):
+    """Bug 436a366b: a derived ring with NO corroborating store edges does NOT
+    escalate (the false-fire we are killing) — even past the dwell."""
+    fired = [ ]
+    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ), deadlock_dwell_seconds=0 )
+    now = datetime.datetime.fromisoformat( NOW_ISO )
+    job._escalate_deadlocks( [ [ "Alice", "Bob" ] ], { }, now )    # empty store_edges → not corroborated
+    assert fired == [ ]
+
+
+def test_escalate_deadlocks_dwell_belt_suppresses_fresh_ring( tmp_path ):
+    """Progressing-wait belt: a store-backed ring younger than deadlock_dwell_seconds
+    is suppressed on first sight, then escalates ONCE after the dwell, and a SECOND
+    poll past the dwell does NOT re-escalate (de-dup)."""
+    fired = [ ]
+    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ), deadlock_dwell_seconds=300 )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    store_edges = { "alice": { "bob" }, "bob": { "alice" } }
+    cycles      = [ [ "Alice", "Bob" ] ]
+    job._escalate_deadlocks( cycles, store_edges, now )                                  # fresh → recorded, suppressed
+    assert fired == [ ]
+    job._escalate_deadlocks( cycles, store_edges, now + datetime.timedelta( seconds=200 ) )   # still within dwell
+    assert fired == [ ]
+    job._escalate_deadlocks( cycles, store_edges, now + datetime.timedelta( seconds=400 ) )   # past dwell → fire ONCE
+    assert len( fired ) == 1
+    job._escalate_deadlocks( cycles, store_edges, now + datetime.timedelta( seconds=500 ) )   # de-dup: no re-fire
+    assert len( fired ) == 1
+
+
+def test_escalate_deadlocks_rearms_after_ring_resolves( tmp_path ):
+    """A resolved ring (gone from this poll) prunes its first-seen + escalated
+    state, so a genuine RECURRENCE re-arms and can escalate again."""
+    fired = [ ]
+    job = _make_job( tmp_path, notify_fn=lambda m: fired.append( m ), deadlock_dwell_seconds=0 )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    store_edges = { "alice": { "bob" }, "bob": { "alice" } }
+    cycles      = [ [ "Alice", "Bob" ] ]
+    job._escalate_deadlocks( cycles, store_edges, now )                                  # fires once
+    assert len( fired ) == 1
+    job._escalate_deadlocks( [ ], { }, now + datetime.timedelta( seconds=10 ) )          # ring gone → prune/re-arm
+    assert ( "Alice", "Bob" ) not in job._deadlock_escalated
+    job._escalate_deadlocks( cycles, store_edges, now + datetime.timedelta( seconds=20 ) )   # recurrence fires again
+    assert len( fired ) == 2
 
 
 # ── _prune_recent_pings ───────────────────────────────────────────────────────
