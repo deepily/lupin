@@ -423,6 +423,58 @@ def test_apply_patch_no_change_records_noop_marker( repo ):
     assert event.transition == "patched"
 
 
+def test_apply_patch_caller_reason_wins_over_field_delta( repo ):
+    """
+    ITEM A (Tiffany's Phase-1 finding) — the caller-reason-WINS branch of
+    apply_patch's `event_reason = reason if reason else <auto-delta>` ternary is
+    COVERAGE-INVISIBLE: coverage.py reports the line 100% covered whether or not
+    its truthy arm ever runs (intra-line ternary branches are not tracked). The
+    caller-supplied reason IS the headline of task_reassign — recording the
+    manager's WHY — so the truthy arm must be proven directly.
+
+    WITH a reason: the caller's "why" is recorded verbatim and the auto-delta is
+    NOT used, even though the field genuinely changed (a delta string would
+    otherwise have been generated). WITHOUT a reason: the SAME field change falls
+    back to the field-delta string — proving the ternary's else-arm is the only
+    thing that flipped the outcome.
+    """
+    # Truthy-arm: caller reason wins, auto-delta suppressed (the headline path).
+    item  = _item( title="old title" )
+    event = repo.apply_patch(
+        item      = item,
+        fields    = { "title": "new title" },
+        actor     = "mr_radio a1b2c3",
+        authority = "standing",
+        reason    = "reassigned to balance the queue",
+    )
+    assert item.title       == "new title"                        # the edit still lands
+    assert event.reason     == "reassigned to balance the queue"  # caller reason WINS
+    assert "title:"     not in event.reason                       # the auto-delta is NOT used
+    assert event.transition == "patched"
+
+    # Else-arm parity: an absent reason on the SAME change falls back to the delta.
+    item2  = _item( title="old title" )
+    event2 = repo.apply_patch(
+        item      = item2,
+        fields    = { "title": "new title" },
+        actor     = "mr_radio a1b2c3",
+        authority = "standing",
+    )
+    assert event2.reason == "title: 'old title' -> 'new title'"   # absent-reason falls back to the delta
+
+    # Else-arm also covers an EMPTY-STRING reason — `reason if reason` gates on
+    # truthiness, not `is not None`, so "" must behave like absent, not win.
+    item3  = _item( title="old title" )
+    event3 = repo.apply_patch(
+        item      = item3,
+        fields    = { "title": "new title" },
+        actor     = "mr_radio a1b2c3",
+        authority = "standing",
+        reason    = "",
+    )
+    assert event3.reason == "title: 'old title' -> 'new title'"   # "" is falsy -> delta, not the empty reason
+
+
 # ---------------------------------------------------------------------------
 # Phase 2.1 — query_chase_due + apply_chase (chase consumer support)
 # ---------------------------------------------------------------------------
