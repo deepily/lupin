@@ -85,6 +85,34 @@ function stubTranscription( text: string | undefined ): () => void {
   return stubStart( async (opts) => { opts.onComplete?.( text as string, new Blob() ); } );
 }
 
+// global.fetch stub (peer pattern — JobsPaneRenderer / ApiClient tests stub
+// globalThis.fetch the same way). Returns a restore fn; ALWAYS restore in a
+// finally so a stub never leaks into the next test.
+type FetchStub = ( input: string, init?: RequestInit ) => Promise<Response>;
+
+function stubFetch( fn: FetchStub ): () => void {
+  const original = ( globalThis as { fetch?: unknown } ).fetch;
+  ( globalThis as unknown as { fetch: FetchStub } ).fetch = fn;
+  return () => { ( globalThis as unknown as { fetch: unknown } ).fetch = original; };
+}
+
+// Minimal Response stand-in carrying only the fields the renderer reads
+// (ok / status / text). `text` defaults to resolving "" — pass a REJECTING impl
+// to exercise the `.text().catch(() => "")` arm (→ "" → "HTTP <status>").
+function fakeResp( opts: { ok: boolean; status?: number; text?: () => Promise<string> } ): Response {
+  return {
+    ok     : opts.ok,
+    status : opts.status ?? ( opts.ok ? 200 : 500 ),
+    text   : opts.text ?? ( async () => "" ),
+  } as unknown as Response;
+}
+
+// Drain the microtask queue so a fire-and-forget `void this.handle*Click()` (the
+// onClick delegate does not await the network handlers) settles before asserts.
+function flush(): Promise<void> {
+  return new Promise( res => setTimeout( res, 0 ) );
+}
+
 // ---------------------------------------------------------------------------
 // Mount / lifecycle
 // ---------------------------------------------------------------------------
@@ -376,7 +404,231 @@ test("conv-mode click is routed to the handler (delegation branch)", () => {
   const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
   r.mount(root);
   const vi = root.querySelector(".cc-voice-input")!;
-  // No throw + no recording started; the POST itself is the smoke-tier path.
+  // Delegation only: routed to the handler, no recording started. The POST
+  // shape + outcomes are covered by the conv-mode network tests below.
   conv(vi).click();
   assert.equal(recordingManager.getActiveContextId(), null);
+});
+
+// ---------------------------------------------------------------------------
+// Send — network paths (global.fetch stubbed). These exercise the logic the
+// prior whole-method c8-ignore masked: success / !resp.ok (with + without a
+// body) / network rejection / token ±.
+// ---------------------------------------------------------------------------
+
+test("send success POSTs /api/notify with the legacy query shape + Bearer header, then clears the input", async () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x", getAuthToken: () => "tok123" });
+  r.mount(root);
+  const vi = root.querySelector(".cc-voice-input")!;
+  input(vi).value = "hello team";
+
+  let captured: { url: string; init?: RequestInit } | null = null;
+  const restore = stubFetch( async (url, init) => { captured = { url, init }; return fakeResp({ ok: true }); } );
+  try { send(vi).click(); await flush(); } finally { restore(); }
+
+  assert.notEqual(captured, null);
+  assert.match(captured!.url, /^\/api\/notify\?/);
+  const qs = new URLSearchParams(captured!.url.split("?")[1] ?? "");
+  assert.equal(qs.get("type"),        "user_initiated_message");
+  assert.equal(qs.get("message"),     "hello team");
+  assert.equal(qs.get("target_user"), "user@x");
+  assert.equal(qs.get("sender_id"),   "me@x");
+  assert.equal(qs.get("job_id"),      "abc");
+  assert.equal(qs.get("priority"),    "medium");
+  assert.equal(captured!.init?.method, "POST");
+  assert.equal((captured!.init?.headers as Record<string, string>)["Authorization"], "Bearer tok123");
+  assert.equal(input(vi).value, "");
+  assert.equal(vi.querySelector(".cc-voice-input-error"), null);
+});
+
+test("send failure (!resp.ok) with a body surfaces the server error; no Bearer header when token absent; input retained", async () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });   // no getAuthToken → token null
+  r.mount(root);
+  const vi = root.querySelector(".cc-voice-input")!;
+  input(vi).value = "boom";
+
+  let captured: { init?: RequestInit } | null = null;
+  const restore = stubFetch( async (_url, init) => { captured = { init }; return fakeResp({ ok: false, status: 500, text: async () => "server exploded" }); } );
+  try { send(vi).click(); await flush(); } finally { restore(); }
+
+  const err = vi.querySelector(".cc-voice-input-error");
+  assert.notEqual(err, null);
+  assert.match(err!.textContent ?? "", /server exploded/);
+  assert.equal((captured!.init?.headers as Record<string, string>)["Authorization"], undefined);
+  assert.equal(input(vi).value, "boom", "input is not cleared on failure");
+});
+
+test("send failure with no body falls back to 'HTTP <status>' (exercises the .text() catch arm)", async () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+  const vi = root.querySelector(".cc-voice-input")!;
+  input(vi).value = "boom";
+
+  const restore = stubFetch( async () => fakeResp({ ok: false, status: 503, text: async () => { throw new Error("no body"); } }) );
+  try { send(vi).click(); await flush(); } finally { restore(); }
+
+  assert.match(vi.querySelector(".cc-voice-input-error")!.textContent ?? "", /HTTP 503/);
+});
+
+test("send network rejection is caught and surfaced", async () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+  const vi = root.querySelector(".cc-voice-input")!;
+  input(vi).value = "boom";
+
+  const restore = stubFetch( async () => { throw new Error("offline"); } );
+  try { send(vi).click(); await flush(); } finally { restore(); }
+
+  assert.match(vi.querySelector(".cc-voice-input-error")!.textContent ?? "", /offline/);
+});
+
+// Build a one-card root, remove a data- attribute, return the row — for the
+// missing-attribute early-return guards (mirrors the mic empty-hash test).
+function mountRowMissing( attr: string ): HTMLElement {
+  const bus  = createEventBusForTesting();
+  const root = document.createElement("div");
+  root.id = "sender-cards-container";
+  const card = document.createElement("div");
+  card.className = "sender-card";
+  const vi = makeVoiceInput("user@x#abc");
+  vi.removeAttribute(attr);
+  card.appendChild(vi);
+  root.appendChild(card);
+  document.body.appendChild(root);
+  createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" }).mount(root);
+  return vi;
+}
+
+test("send with an empty data-session-hash early-returns (no POST, no error)", async () => {
+  const vi = mountRowMissing("data-session-hash");
+  input(vi).value = "hi";
+  let called = false;
+  const restore = stubFetch( async () => { called = true; return fakeResp({ ok: true }); } );
+  try { send(vi).click(); await flush(); } finally { restore(); }
+  assert.equal(called, false);
+  assert.equal(vi.querySelector(".cc-voice-input-error"), null);
+});
+
+test("send with an empty data-sender-id early-returns (no POST, no error)", async () => {
+  const vi = mountRowMissing("data-sender-id");
+  input(vi).value = "hi";
+  let called = false;
+  const restore = stubFetch( async () => { called = true; return fakeResp({ ok: true }); } );
+  try { send(vi).click(); await flush(); } finally { restore(); }
+  assert.equal(called, false);
+  assert.equal(vi.querySelector(".cc-voice-input-error"), null);
+});
+
+test("renderError keeps a single error element per row (replaces a prior one)", async () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+  const vi = root.querySelector(".cc-voice-input")!;
+  // Two empty-message sends → two renderError calls; the second removes the
+  // first (covers the `prior !== null` replace branch).
+  send(vi).click(); await flush();
+  send(vi).click(); await flush();
+  assert.equal(vi.querySelectorAll(".cc-voice-input-error").length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Conversation-mode toggle — network paths (global.fetch stubbed): empty-hash
+// guard / active T+F (POST body {on:!active}) / token ± / !resp.ok (with +
+// without a body) / network rejection.
+// ---------------------------------------------------------------------------
+
+function mountConvCard( opts: { active: boolean; token?: string } ): { vi: HTMLElement } {
+  const bus  = createEventBusForTesting();
+  const root = document.createElement("div");
+  root.id = "sender-cards-container";
+  root.appendChild( makeCard("user@x#abc", { active: opts.active }) );
+  document.body.appendChild(root);
+  const r = createSenderCardRecorderRenderer({
+    eventBus: bus, currentUserEmail: "me@x",
+    ...(opts.token !== undefined ? { getAuthToken: () => opts.token! } : {}),
+  });
+  r.mount(root);
+  return { vi: root.querySelector(".cc-voice-input") as HTMLElement };
+}
+
+test("conv-mode with empty data-session-hash is ignored (early return, no POST)", async () => {
+  const bus  = createEventBusForTesting();
+  const root = document.createElement("div");
+  root.id = "sender-cards-container";
+  const card = document.createElement("div");
+  card.className = "sender-card";
+  const vi = makeVoiceInput("user@x#abc");
+  vi.removeAttribute("data-session-hash");   // force the empty-hash early return
+  card.appendChild(vi);
+  root.appendChild(card);
+  document.body.appendChild(root);
+
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+
+  let called = false;
+  const restore = stubFetch( async () => { called = true; return fakeResp({ ok: true }); } );
+  try { conv(vi).click(); await flush(); } finally { restore(); }
+  assert.equal(called, false, "no POST when the session hash is empty");
+});
+
+test("conv-mode (inactive) POSTs {on:true} to the legacy speakerphone endpoint with Bearer header", async () => {
+  const { vi } = mountConvCard({ active: false, token: "tokC" });
+
+  let captured: { url: string; init?: RequestInit } | null = null;
+  const restore = stubFetch( async (url, init) => { captured = { url, init }; return fakeResp({ ok: true }); } );
+  try { conv(vi).click(); await flush(); } finally { restore(); }
+
+  assert.equal(captured!.url, "/api/cosa-voice/speakerphone/abc");
+  assert.equal(captured!.init?.method, "POST");
+  assert.equal(JSON.parse(captured!.init?.body as string).on, true);
+  assert.equal((captured!.init?.headers as Record<string, string>)["Authorization"], "Bearer tokC");
+  assert.equal(vi.querySelector(".cc-voice-input-error"), null);
+});
+
+test("conv-mode (active) POSTs {on:false}; no Bearer header when token absent", async () => {
+  const { vi } = mountConvCard({ active: true });   // no token
+
+  let captured: { init?: RequestInit } | null = null;
+  const restore = stubFetch( async (_url, init) => { captured = { init }; return fakeResp({ ok: true }); } );
+  try { conv(vi).click(); await flush(); } finally { restore(); }
+
+  assert.equal(JSON.parse(captured!.init?.body as string).on, false);
+  assert.equal((captured!.init?.headers as Record<string, string>)["Authorization"], undefined);
+});
+
+test("conv-mode failure (!resp.ok) with a body surfaces the server error", async () => {
+  const { vi } = mountConvCard({ active: false });
+
+  const restore = stubFetch( async () => fakeResp({ ok: false, status: 500, text: async () => "speakerphone down" }) );
+  try { conv(vi).click(); await flush(); } finally { restore(); }
+
+  assert.match(vi.querySelector(".cc-voice-input-error")!.textContent ?? "", /speakerphone down/);
+});
+
+test("conv-mode failure with no body falls back to 'HTTP <status>'", async () => {
+  const { vi } = mountConvCard({ active: false });
+
+  const restore = stubFetch( async () => fakeResp({ ok: false, status: 502, text: async () => { throw new Error("no body"); } }) );
+  try { conv(vi).click(); await flush(); } finally { restore(); }
+
+  assert.match(vi.querySelector(".cc-voice-input-error")!.textContent ?? "", /HTTP 502/);
+});
+
+test("conv-mode network rejection is caught and surfaced", async () => {
+  const { vi } = mountConvCard({ active: false });
+
+  const restore = stubFetch( async () => { throw new Error("conv offline"); } );
+  try { conv(vi).click(); await flush(); } finally { restore(); }
+
+  assert.match(vi.querySelector(".cc-voice-input-error")!.textContent ?? "", /conv offline/);
 });

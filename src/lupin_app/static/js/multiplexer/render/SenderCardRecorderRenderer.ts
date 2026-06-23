@@ -278,14 +278,14 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
   // Send — POST the text input to /api/notify
   // -------------------------------------------------------------------------
 
-  /* c8 ignore start */ // fetch + URLSearchParams network path; exercised at smoke tier via real /api/notify POST.
   private async handleSendClick(button: HTMLButtonElement): Promise<void> {
     const voiceInput = button.closest<HTMLElement>(".cc-voice-input");
     /* c8 ignore next */ // defensive: send button only renders inside .cc-voice-input rows.
     if (voiceInput === null) return;
     const sessionHash = voiceInput.getAttribute("data-session-hash") ?? "";
     const senderId    = voiceInput.getAttribute("data-sender-id")    ?? "";
-    /* c8 ignore next */ // defensive: both data- attributes are always set by senderCard.ts.
+    // Both data- attributes are set by senderCard.ts; guard + unit-test the
+    // missing-attribute early return anyway (mirrors handleMicClick).
     if (sessionHash === "" || senderId === "") return;
     if (!senderId.includes("#")) {
       this.renderError(voiceInput, "Malformed sender_id; cannot send.");
@@ -293,12 +293,14 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
     }
 
     const input   = voiceInput.querySelector<HTMLInputElement>(".cc-session-msg-input");
+    /* c8 ignore next */ // defensive `?? ""`: the static CC row always renders the input (senderCard.ts), so input?.value is undefined only in the impossible no-input row — mirrors handleMicClick's input null-guard.
     const message = (input?.value ?? "").trim();
     if (message === "") {
       this.renderError(voiceInput, "Message is empty.");
       return;
     }
 
+    /* c8 ignore next */ // split("#")[0] is always a string (senderId contains '#' per the guard above); the ?? "" is a noUncheckedIndexedAccess type-guard, unreachable at runtime.
     const targetUser = senderId.split("#")[0] ?? "";
     const params = new URLSearchParams({
       message,
@@ -321,18 +323,17 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
       }
       // Reset on successful send: clear the input + the persisted value.
       this.states.set(sessionHash, { recording: false, value: "" });
+      /* c8 ignore next */ // input is provably non-null here (the empty-message guard above returns when input is null → message ""); the guard satisfies the type-checker.
       if (input !== null) input.value = "";
     } catch (err) {
       this.renderError(voiceInput, (err as Error).message);
     }
   }
-  /* c8 ignore stop */
 
   // -------------------------------------------------------------------------
   // Conversation-mode toggle — legacy-verbatim speakerphone POST
   // -------------------------------------------------------------------------
 
-  /* c8 ignore start */ // fetch network path; exercised at smoke/E2E tier via the real /api/cosa-voice/speakerphone POST + the conversation_mode_changed round-trip.
   private async handleConvModeClick(button: HTMLButtonElement): Promise<void> {
     const voiceInput = button.closest<HTMLElement>(".cc-voice-input");
     /* c8 ignore next */ // defensive: the conv-mode button only renders inside .cc-voice-input rows.
@@ -363,14 +364,15 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
       this.renderError(voiceInput, (err as Error).message);
     }
   }
-  /* c8 ignore stop */
 
   // -------------------------------------------------------------------------
   // Error surface
   // -------------------------------------------------------------------------
 
   private renderError(voiceInput: HTMLElement, message: string): void {
-    /* c8 ignore next 6 */ // pure DOM append; the rendered error path is exercised by smoke tests. Unit tests cover the wrapping branch sites in handleMicClick (onError) + handleSendClick. A single error element is kept per row (replace any prior one).
+    // A single error element is kept per row — remove any prior one before
+    // appending the fresh message (both the first-error and replace-prior
+    // branches are unit-covered via the send/conv-mode error-path tests).
     const prior = voiceInput.querySelector(".cc-voice-input-error");
     if (prior !== null) prior.remove();
     const errorEl = document.createElement("div");
