@@ -586,3 +586,28 @@ def test_follow_through_sweep_non_dict_result_returns_zero( tmp_path ):
     job     = _make_job( tmp_path, follow_through_watcher_factory=lambda j: watcher )
     assert job._sweep_follow_through() == 0
     assert watcher.calls == 1
+
+
+# ── §4b worktree janitor seam (Worktree Lifecycle Contract) ─────────────────────
+
+def test_worktree_janitor_inert_by_default( tmp_path ):
+    # None seam → no reconcile, byte-identical to today; summary reports 0.
+    summary = _make_job( tmp_path )._poll_once()
+    assert summary[ "worktrees_swept" ] == 0
+
+
+def test_worktree_janitor_fires_when_wired( tmp_path ):
+    calls = []
+    def janitor():
+        calls.append( 1 )
+        return { "swept": [ { "path": "/wt/a" }, { "path": "/wt/b" } ], "skipped": [], "errors": [] }
+    summary = _make_job( tmp_path, worktree_janitor_fn=janitor )._poll_once()
+    assert calls == [ 1 ]                        # invoked exactly once per poll
+    assert summary[ "worktrees_swept" ] == 2     # swept-count surfaced to the journal
+
+
+def test_worktree_janitor_hiccup_is_swallowed( tmp_path ):
+    # Observer invariant: a reconcile exception must NOT kill the poll.
+    def janitor(): raise RuntimeError( "reconcile boom" )
+    summary = _make_job( tmp_path, worktree_janitor_fn=janitor )._poll_once()
+    assert summary[ "worktrees_swept" ] == 0     # demoted to 0, poll completes
