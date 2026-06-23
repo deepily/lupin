@@ -59,7 +59,7 @@ class TestTaskCreateWrapper:
             body                = "details",
             owner_persona       = "tiffany",
             accountable_manager = "tiberius",
-            gate_class          = "ricks_court",
+            gate_class          = "operator",
             priority            = "P1",
             source_qid          = "qid-1",
             correlation_key     = "corr-1",
@@ -77,7 +77,7 @@ class TestTaskCreateWrapper:
             "body"                : "details",
             "owner_persona"       : "tiffany",
             "accountable_manager" : "tiberius",
-            "gate_class"          : "ricks_court",
+            "gate_class"          : "operator",
             "priority"            : "P1",
             "source_qid"          : "qid-1",
             "correlation_key"     : "corr-1",
@@ -191,12 +191,12 @@ class TestTaskQueryWrapper:
     def test_filters_pass_through( self, stamped_identity, monkeypatch ):
         captured = { }
         monkeypatch.setattr( cv, "task_query_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
-        cv.task_query.fn( owner_persona="sam", status="queued", gate_class="ricks_court",
+        cv.task_query.fn( owner_persona="sam", status="queued", gate_class="operator",
                           accountable_manager="tiberius", project="lupin", item_class="gate",
                           correlation_key="todo:abc123", limit=7, offset=14 )
         assert captured[ "owner_persona" ]       == "sam"
         assert captured[ "status" ]              == "queued"
-        assert captured[ "gate_class" ]          == "ricks_court"
+        assert captured[ "gate_class" ]          == "operator"
         assert captured[ "accountable_manager" ] == "tiberius"
         assert captured[ "project" ]             == "lupin"
         assert captured[ "item_class" ]          == "gate"

@@ -375,7 +375,7 @@ def test_query_passes_all_filters_through( client, repo ):
     r = client.get( "/api/tasks", params={
         "owner_persona"       : "krishna",
         "status"              : "in_progress",
-        "gate_class"          : "ricks_court",
+        "gate_class"          : "operator",
         "accountable_manager" : "tiberius",
         "project"             : "lupin",
         "item_class"          : "task",
@@ -385,7 +385,7 @@ def test_query_passes_all_filters_through( client, repo ):
     } )
     assert r.status_code == 200 and r.json() == { "tasks": [ ], "count": 0 }
     kwargs = repo.query_tasks.call_args.kwargs
-    assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "gate_class" ] == "ricks_court"
+    assert kwargs[ "owner_persona" ] == "krishna" and kwargs[ "gate_class" ] == "operator"
     assert kwargs[ "correlation_key" ] == "cc-task:sid:5"
     assert kwargs[ "limit" ] == 7 and kwargs[ "offset" ] == 3
 

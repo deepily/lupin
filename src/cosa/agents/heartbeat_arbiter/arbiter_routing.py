@@ -80,7 +80,7 @@ CASE_FLEET_DARK             = 15
 # and NOT a stall — instead of the repeating MANAGER-DOWN / WHOLE-FLEET-STALL
 # loop, the arbiter emits at most ONE of these advisories per un-acked tap.
 #   16  MANAGER-AWAITING-USER advisory — a tapped manager correctly BLOCKED on
-#       Rick (every owed item ricks_court or blocked-on-user). Rick + ALL active
+#       Rick (every owed item operator-gated or blocked-on-user). Rick + ALL active
 #       managers: Rick is the one who unblocks; managers see the crew is parked.
 #   17  MANAGER-DONE advisory — a tapped manager with ZERO non-terminal owed work
 #       (consider reaping). Rick + ALL active managers (the reap is theirs to

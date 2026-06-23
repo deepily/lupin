@@ -208,7 +208,7 @@ def test_query_tasks_applies_every_provided_filter( repo, session ):
     repo.query_tasks(
         owner_persona       = "krishna",
         status              = "in_progress",
-        gate_class          = "ricks_court",
+        gate_class          = "operator",
         accountable_manager = "tiberius",
         project             = "lupin",
         item_class          = "task",
@@ -262,7 +262,7 @@ def test_count_tasks_applies_every_provided_filter( repo, session ):
     repo.count_tasks(
         owner_persona       = "krishna",
         status              = "in_progress",
-        gate_class          = "ricks_court",
+        gate_class          = "operator",
         accountable_manager = "tiberius",
         project             = "lupin",
         item_class          = "task",

@@ -36,7 +36,7 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 VALID_STATUSES         = ( "queued", "claimed", "in_progress", "blocked", "review", "done", "dropped" )
 TERMINAL_STATUSES      = ( "done", "dropped" )
 VALID_ITEM_CLASSES     = ( "task", "decision", "review_request", "bug", "gate" )
-VALID_GATE_CLASSES     = ( "none", "manager", "ricks_court" )
+VALID_GATE_CLASSES     = ( "none", "manager", "operator" )
 VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3" )
 VALID_AUTHORITIES      = ( "standing", "user_direct", "manager_relay" )
 VALID_BLOCKED_BY_KINDS = ( "item", "persona", "user" )

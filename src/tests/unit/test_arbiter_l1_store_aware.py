@@ -60,7 +60,7 @@ def _job( *, owed_work_fn=None, notify=None ):
 
 
 # ── owed-item shapes ─────────────────────────────────────────────────────────
-def _ricks_court( ): return { "id": "i1", "status": "in_progress", "gate_class": "ricks_court", "blocked_by": None }
+def _operator( ): return { "id": "i1", "status": "in_progress", "gate_class": "operator", "blocked_by": None }
 def _blocked_user(): return { "id": "i2", "status": "blocked", "gate_class": "none",
                               "blocked_by": [ { "kind": "user", "id": "rick" } ] }
 def _normal(      ): return { "id": "i3", "status": "in_progress", "gate_class": "none", "blocked_by": None }
@@ -69,8 +69,8 @@ def _normal(      ): return { "id": "i3", "status": "in_progress", "gate_class":
 # ── _item_is_user_gated ──────────────────────────────────────────────────────
 class TestItemIsUserGated:
 
-    def test_ricks_court_is_user_gated( self ):
-        assert ArbiterConsumerJob._item_is_user_gated( _ricks_court() ) is True
+    def test_operator_is_user_gated( self ):
+        assert ArbiterConsumerJob._item_is_user_gated( _operator() ) is True
 
     def test_blocked_with_user_ref_is_user_gated( self ):
         assert ArbiterConsumerJob._item_is_user_gated( _blocked_user() ) is True
@@ -116,8 +116,8 @@ class TestHoldingOnByPersona:
 # ── _classify_owed ───────────────────────────────────────────────────────────
 class TestClassifyOwed:
 
-    def test_all_ricks_court_is_blocked_on_user( self ):
-        job = _job( owed_work_fn=lambda ps: { "Mgr": [ _ricks_court(), _ricks_court() ] } )
+    def test_all_operator_is_blocked_on_user( self ):
+        job = _job( owed_work_fn=lambda ps: { "Mgr": [ _operator(), _operator() ] } )
         assert job._classify_owed( [ "Mgr" ], { } ) == { "Mgr": CLASS_BLOCKED_ON_USER }
 
     def test_all_blocked_on_user_refs_is_blocked_on_user( self ):
@@ -126,7 +126,7 @@ class TestClassifyOwed:
 
     def test_mixed_one_normal_item_is_active( self ):
         # the AC: one non-Rick-gated owed item ⇒ NOT suppressed (ACTIVE)
-        job = _job( owed_work_fn=lambda ps: { "Mgr": [ _ricks_court(), _normal() ] } )
+        job = _job( owed_work_fn=lambda ps: { "Mgr": [ _operator(), _normal() ] } )
         assert job._classify_owed( [ "Mgr" ], { } ) == { "Mgr": CLASS_ACTIVE }
 
     def test_empty_owed_list_is_done( self ):
@@ -160,7 +160,7 @@ class TestClassifyOwed:
         assert calls == [ ]                                     # reader never called with no names
 
     def test_multiple_personas_classified_independently( self ):
-        owed = { "A": [ _ricks_court() ], "B": [ _normal() ], "C": [ ] }
+        owed = { "A": [ _operator() ], "B": [ _normal() ], "C": [ ] }
         job  = _job( owed_work_fn=lambda ps: owed )
         assert job._classify_owed( [ "A", "B", "C" ], { } ) == {
             "A": CLASS_BLOCKED_ON_USER, "B": CLASS_ACTIVE, "C": CLASS_DONE }
@@ -359,7 +359,7 @@ class TestPollOnceWiring:
         # manager bridge-discovered but STALE (older than its tap) → no liveness ACK
         bridges = { "mgr-tiberius": "Tiberius" }
         mtimes  = { "mgr-tiberius": ( NOW - datetime.timedelta( seconds=800 ) ).timestamp() }
-        owed    = { "Tiberius": [ _ricks_court() ] }
+        owed    = { "Tiberius": [ _operator() ] }
         job = _poll_job( tmp_path, clock, bridges=bridges, mtimes=mtimes,
                          owed_work_fn=lambda ps: owed, notify=notify )
         job._last_tap_at[ "Tiberius" ] = NOW - datetime.timedelta( seconds=700 )   # tapped, window elapsed
@@ -396,7 +396,7 @@ class TestOwedClassSuppresses:
 
 class TestSessionIsNotOwed:
     def test_blocked_on_user_is_not_owed( self ):
-        job = _job( owed_work_fn=lambda ps: { "Mgr": [ _ricks_court() ] } )
+        job = _job( owed_work_fn=lambda ps: { "Mgr": [ _operator() ] } )
         assert job.session_is_not_owed( "Mgr" ) is True
 
     def test_done_is_not_owed( self ):

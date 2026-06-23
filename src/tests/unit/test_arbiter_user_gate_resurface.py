@@ -108,7 +108,7 @@ class TestClassifyOwedGateOverride:
         assert job._classify_owed( [ "Sam" ], fleet_view ) == { "Sam": CLASS_ACTIVE }
 
     def test_open_gate_overrides_blocked_on_user_to_active( self ):
-        owed = { "Sam": [ { "status": "in_progress", "gate_class": "ricks_court", "blocked_by": None } ] }
+        owed = { "Sam": [ { "status": "in_progress", "gate_class": "operator", "blocked_by": None } ] }
         job  = _job( owed_work_fn=lambda names: owed,
                      hold_reader_fn=self._open_gate_hold( "s1" ) )
         fleet_view = { "s1": { "persona": "Sam" } }

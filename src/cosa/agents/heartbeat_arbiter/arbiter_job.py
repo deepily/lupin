@@ -1927,7 +1927,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         """
         Is a single non-terminal owed item gated on Rick (the human)?
 
-        TRUE iff gate_class == "ricks_court" OR (status == "blocked" AND blocked_by
+        TRUE iff gate_class == "operator" OR (status == "blocked" AND blocked_by
         carries ≥1 typed ref {kind: "user"}). These are the two store encodings of
         "correctly waiting on the human" (build-plan §3.0).
 
@@ -1936,7 +1936,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         """
         if not isinstance( item, dict ):
             return False
-        if item.get( "gate_class" ) == "ricks_court":
+        if item.get( "gate_class" ) == "operator":
             return True
         if item.get( "status" ) == "blocked":
             for ref in ( item.get( "blocked_by" ) or [ ] ):

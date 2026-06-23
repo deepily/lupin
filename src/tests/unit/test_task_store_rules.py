@@ -246,7 +246,21 @@ def test_create_rejects_each_bad_enum():
 
 @pytest.mark.parametrize( "item_class", rules.VALID_ITEM_CLASSES )
 def test_create_accepts_every_item_class( item_class ):
-    assert rules.validate_create( item_class, "ricks_court", "P0", "user_direct" ) == [ ]
+    assert rules.validate_create( item_class, "operator", "P0", "user_direct" ) == [ ]
+
+
+def test_create_accepts_operator_gate_class():
+    # AC-A0.2 — the renamed `operator` value is a member of the gate-class enum.
+    assert "operator" in rules.VALID_GATE_CLASSES
+    assert rules.validate_create( "decision", "operator", "P0", "user_direct" ) == [ ]
+
+
+def test_create_rejects_retired_ricks_court_gate_class():
+    # AC-A0.2 — the retired `ricks_court` value is no longer a member of the
+    # gate-class enum (one-name-everywhere, no compat alias) → validation rejects it.
+    assert "ricks_court" not in rules.VALID_GATE_CLASSES
+    errors = rules.validate_create( "decision", "ricks_court", "P0", "user_direct" )
+    assert any( "gate_class" in e and "ricks_court" in e for e in errors )
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +417,7 @@ def test_patch_all_editable_fields_valid():
         "priority"            : "P1",
         "owner_persona"       : "tiffany",
         "accountable_manager" : "tiberius",
-        "gate_class"          : "ricks_court",
+        "gate_class"          : "operator",
     } ) == [ ]
 
 

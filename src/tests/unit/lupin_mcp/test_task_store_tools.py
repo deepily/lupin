@@ -172,7 +172,7 @@ class TestTaskCreateImpl:
             body                = "Options: A, B",
             owner_persona       = "tiberius",
             accountable_manager = "tiberius",
-            gate_class          = "ricks_court",
+            gate_class          = "operator",
             priority            = "P1",
             source_qid          = "qid-123",
             correlation_key     = "corr-456",
@@ -182,7 +182,7 @@ class TestTaskCreateImpl:
         assert sent[ "body" ]                == "Options: A, B"
         assert sent[ "owner_persona" ]       == "tiberius"
         assert sent[ "accountable_manager" ] == "tiberius"
-        assert sent[ "gate_class" ]          == "ricks_court"
+        assert sent[ "gate_class" ]          == "operator"
         assert sent[ "priority" ]            == "P1"
         assert sent[ "source_qid" ]          == "qid-123"
         assert sent[ "correlation_key" ]     == "corr-456"
@@ -408,7 +408,7 @@ class TestTaskQueryImpl:
             BASE_URL, API_KEY,
             owner_persona       = "sam",
             status              = "queued",
-            gate_class          = "ricks_court",
+            gate_class          = "operator",
             accountable_manager = "tiberius",
             project             = "lupin",
             item_class          = "decision",
@@ -419,7 +419,7 @@ class TestTaskQueryImpl:
         assert calls[ "params" ] == {
             "owner_persona"       : "sam",
             "status"              : "queued",
-            "gate_class"          : "ricks_court",
+            "gate_class"          : "operator",
             "accountable_manager" : "tiberius",
             "project"             : "lupin",
             "item_class"          : "decision",

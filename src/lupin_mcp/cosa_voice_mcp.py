@@ -3312,7 +3312,7 @@ def task_create(
         (a) a CROSS-PERSONA item — `owner_persona` / `accountable_manager`
             set to someone OTHER than yourself (assigning work to a worker);
         (b) a TYPED item — `item_class` in {decision, gate, bug, review_request}
-            (e.g. a `decision` with `gate_class="ricks_court"` for Rick's court,
+            (e.g. a `decision` with `gate_class="operator"` for the operator queue,
             a durable `bug`, a `review_request`, a `gate`).
       If your item is neither (a) nor (b), you are at the WRONG door — go use
       the harness `TaskCreate`.
@@ -3348,10 +3348,10 @@ def task_create(
                     project="lupin", owner_persona="tiffany",
                     accountable_manager="tiberius")
 
-        # A decision for Rick's court (TYPED — harness can't):
+        # A decision for the operator queue (TYPED — harness can't):
         task_create(item_class="decision", title="Deploy window for MCP restart",
                     project="lupin", body="Options: ... Recommendation: ...",
-                    gate_class="ricks_court")
+                    gate_class="operator")
 
         # Your OWN work stub → DON'T use this; use the harness instead:
         #   TaskCreate(subject="Draft the docstring", description="...")
@@ -3363,7 +3363,7 @@ def task_create(
         body: Optional long-form payload (decision framing lives here)
         owner_persona: Who owes the work
         accountable_manager: Who chases it
-        gate_class: none | ricks_court (default "none")
+        gate_class: none | operator (default "none")
         priority: P0..P3 (default "P2")
         source_qid: Originating commons question_id, when DM-born
         correlation_key: Upsert key for hook-mirrored items
@@ -3490,13 +3490,13 @@ def task_query(
         # My owed work (terse list):
         task_query(owner_persona="sam", status="in_progress", terse=True)
 
-        # Rick's court, full rows (need the body):
-        task_query(gate_class="ricks_court")
+        # Operator queue, full rows (need the body):
+        task_query(gate_class="operator")
 
     Args:
         owner_persona: Filter by who owes the work
         status: Filter by status (queued | in_progress | blocked | done | dropped)
-        gate_class: Filter by gate (none | ricks_court)
+        gate_class: Filter by gate (none | operator)
         accountable_manager: Filter by chasing manager
         project: Filter by owning project
         item_class: Filter by class (task | decision | review_request | bug | gate)

@@ -1346,7 +1346,7 @@ class TaskItem( Base ):
         default="none",
         server_default="none",
         index=True
-    )  # Rick's court becomes SELECT ... WHERE gate_class='ricks_court'
+    )  # operator queue becomes SELECT ... WHERE gate_class='operator'
     priority: Mapped[str] = mapped_column(
         String( 2 ),
         nullable=False,
