@@ -67,26 +67,31 @@ export function renderNotificationItem(
 
   // Inner structure differs slightly when message is part of a progress group:
   // legacy renders `.progress-group-head` wrapper around the time + text.
+  //
+  // WS3 parity (2026-06-22): the expired-badge + abstract-indicator nest INSIDE
+  // `.message-text` (after the markdown), verbatim to legacy
+  // notifications.js:13788 (progress-group head) + :13800 (flat). They are NOT
+  // flex siblings of `.message-text`: the `.sender-message` row is a flexbox
+  // with `.message-text { flex: 1 }`, so a sibling badge/indicator would steal
+  // ~badge-width from the text run (the real Tier-3 geometry divergence the
+  // layout-parity oracle flagged — msg-text width short by ~badge+gap).
+  // Nesting keeps the text run full-width, matching the legacy golden.
   if (inProgressGrp) {
-    /* c8 ignore next 9 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every progress-group test fixture.
+    /* c8 ignore next 8 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every progress-group test fixture.
     const head = html`
       <div class="progress-group-head">
         <span class="message-time">${timeText}</span>
-        <span class="message-text">${renderMarkdownInline(notification.message)}</span>
-        ${expired ? expiredBadge() : null}
-        ${hasAbstract ? abstractIndicator(notification.abstract as string) : null}
+        <span class="message-text">${renderMarkdownInline(notification.message)}${expired ? expiredBadge() : null}${hasAbstract ? abstractIndicator(notification.abstract as string) : null}</span>
         <span class="progress-group-toggle" aria-expanded="false" role="button" tabindex="0">▶</span>
       </div>
       <div class="progress-group-history" hidden></div>
     ` as DocumentFragment;
     root.appendChild(head);
   } else {
-    /* c8 ignore next 6 */ // tagged-template literal: c8 reports phantom branches on each $-interpolation; the runtime path is straight-line and exercised by every test that renders a non-progress-group notification (the inProgressGrp=true branch above is the alternate, also covered).
+    /* c8 ignore next 4 */ // tagged-template literal: c8 reports phantom branches on each $-interpolation; the runtime path is straight-line and exercised by every test that renders a non-progress-group notification (the inProgressGrp=true branch above is the alternate, also covered).
     const flat = html`
       <span class="message-time">${timeText}</span>
-      <span class="message-text">${renderMarkdownInline(notification.message)}</span>
-      ${expired ? expiredBadge() : null}
-      ${hasAbstract ? abstractIndicator(notification.abstract as string) : null}
+      <span class="message-text">${renderMarkdownInline(notification.message)}${expired ? expiredBadge() : null}${hasAbstract ? abstractIndicator(notification.abstract as string) : null}</span>
     ` as DocumentFragment;
     root.appendChild(flat);
   }

@@ -263,9 +263,15 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
 # (`/api/queue/job-history` → 404) slipped EVERY tier because:
 #   GAP 1  JobsPaneRenderer.ts:169 `hydrateHistory(api).catch()` SWALLOWS the
 #          rejection — the page boots, "page-loads" e2e stays green.
+#   GAP 2  the boot e2e registered ONLY page.on("response") for 4xx — a JS
+#          error that emits NO 4xx (a TypeError in a renderer, an uncaught
+#          throw in boot.ts, a console.error from a failed dynamic import)
+#          left the page "loaded" and the suite green. (WS3 cross-cutting,
+#          2026-06-22: closed by the console/pageerror capture below.)
 #   GAP 3  the boot e2e had no no-4xx / no-console-error assertion and no
 #          positive "Jobs pane actually hydrated" assertion.
-# This test adds BOTH guards, so a swallowed boot-time 4xx can no longer hide.
+# This test adds ALL THREE guards, so a swallowed boot-time 4xx OR a no-4xx
+# JS error can no longer hide.
 #
 # >>> VENUE / RUN STATUS: NOT YET RUN. Requires the :8000 test server in
 # >>> monopolize mode (live backend + real `/api/job-history` data), scheduled
@@ -280,6 +286,10 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
           during the `/app/multiplexer` cold load. A swallowed JobStore 404
           (or any sibling client-URL typo) shows up HERE even though the
           renderer's `.catch()` keeps the page booting.
+        - ZERO console errors and ZERO uncaught page errors during the boot.
+          A JS error that emits no 4xx (a renderer TypeError, an uncaught
+          throw in boot.ts, a failed dynamic import) is invisible to the 4xx
+          guard but fails HERE (GAP 2).
         - the Jobs pane genuinely HYDRATES: `JobStore.isHistoryHydrated()` is
           true AND the history bucket holds real rows — proving the
           `/api/job-history` round-trip resolved and populated the store, not
@@ -313,6 +323,23 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
 
     page.on( "response", _record_response )
 
+    # GAP 2 — capture JS errors that emit NO 4xx. `console` fires for every
+    # console.* call (we keep only type=="error"); `pageerror` fires for every
+    # uncaught exception that reaches the window. Registered BEFORE navigation
+    # (inside _open) so nothing on the boot path is missed.
+    console_errors: list[ str ] = []
+    page_errors:    list[ str ] = []
+
+    def _record_console( msg ):
+        if msg.type == "error":
+            console_errors.append( msg.text )
+
+    def _record_pageerror( error ):
+        page_errors.append( str( error ) )
+
+    page.on( "console",   _record_console )
+    page.on( "pageerror", _record_pageerror )
+
     # Cold load against the REAL hydration path (no route stubs).
     _open( page, access, refresh, stub_routes=False )
 
@@ -329,6 +356,18 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
         "boot issued request(s) that returned 4xx — a swallowed client-URL "
         "error (the JobStore 404 class):\n"
         + "\n".join( f"  {r['status']}  {r['url']}" for r in bad_responses )
+    )
+
+    # --- Negative side: zero JS errors during the boot (GAP 2) --------------
+    assert not page_errors, (
+        "boot raised uncaught page error(s) — a JS exception that emits no "
+        "4xx and would otherwise pass the 4xx-only guard:\n"
+        + "\n".join( f"  {e}" for e in page_errors )
+    )
+    assert not console_errors, (
+        "boot logged console error(s) — a no-4xx failure surface (failed "
+        "dynamic import, renderer TypeError, etc.):\n"
+        + "\n".join( f"  {e}" for e in console_errors )
     )
 
     # --- Positive side: the Jobs pane really hydrated -----------------------

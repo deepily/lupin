@@ -1081,3 +1081,125 @@ test("Test 29: non-ApiError Error still produces stripe; verifies todo → todo 
   renderer.unmount();
   jobs.disposeForTesting();
 });
+
+// =============================================================================
+// WS3 cross-cutting — hydration_failed CONSUMER (visible fail-loud affordance
+// + Retry). Before this consumer the event had ZERO subscribers, so a hydrate
+// failure was invisible. Fault-injection: api.get rejects (== /api/job-history
+// 500) → assert the affordance is VISIBLE in the DOM.
+// =============================================================================
+
+/** An api whose first `get` (hydrate) call rejects, subsequent ones resolve. */
+function makeFlakyHydrateApi(
+  failTimes: number,
+  rejectWith: unknown = new ApiError("HTTP 500", 500),
+): SimpleApiStub {
+  const calls: string[] = [];
+  let getCount = 0;
+  return {
+    calls,
+    get: async <T>(path: string): Promise<T> => {
+      calls.push(path);
+      getCount += 1;
+      if (getCount <= failTimes) {
+        return Promise.reject(rejectWith) as Promise<T>;
+      }
+      return { jobs: [] } as unknown as T;
+    },
+    delete: async <T>(path: string): Promise<T> => {
+      calls.push(`DELETE ${path}`);
+      return null as T;
+    },
+  };
+}
+
+test("Test 31: fault-injection — hydrate 500 paints a VISIBLE hydration-error banner with Retry (consumer)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeFlakyHydrateApi(1);
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  // Let the floated hydrateHistory().catch → emit → consumer microtasks settle.
+  await flushMicrotasks();
+
+  const banner = root.querySelector(".jobs-hydration-error") as HTMLElement | null;
+  assert.ok(banner, "hydration-error banner should be VISIBLE in the DOM after a 500");
+  assert.equal(banner!.getAttribute("role"), "alert", "banner is an assertive alert");
+  assert.match(banner!.textContent ?? "", /Could not load job history/);
+  assert.match(banner!.textContent ?? "", /HTTP 500/, "the underlying error surfaces to the user");
+  const retry = banner!.querySelector(".jobs-hydration-retry") as HTMLButtonElement | null;
+  assert.ok(retry, "Retry affordance should be present");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+test("Test 32: hydration_failed from a NON-jobs source is ignored (no banner)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await flushMicrotasks();
+
+  // A different renderer's hydrate failure must not paint the jobs banner.
+  bus.emit<HydrationFailedPayload>({
+    type    : "hydration_failed",
+    payload : { source: "commons", error: new Error("not ours") },
+    source  : "CommonsPanelRenderer",
+    ts      : Date.now(),
+  });
+
+  assert.equal(root.querySelector(".jobs-hydration-error"), null, "non-jobs source must be ignored");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+test("Test 33: Retry success removes the banner + hydrates the buckets (consumer)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeFlakyHydrateApi(1);   // first get fails, second succeeds
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await flushMicrotasks();
+
+  const banner = root.querySelector(".jobs-hydration-error") as HTMLElement | null;
+  assert.ok(banner, "banner present after initial failure");
+
+  (banner!.querySelector(".jobs-hydration-retry") as HTMLButtonElement).click();
+  await flushMicrotasks();
+
+  assert.equal(root.querySelector(".jobs-hydration-error"), null, "Retry success removes the banner");
+  // Two get calls: the failed hydrate + the successful retry.
+  assert.equal(api.calls.filter(p => p.startsWith("/api/job-history")).length, 2);
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+test("Test 34: Retry that fails again repaints the banner (replace, not stack)", async () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeFlakyHydrateApi(2);   // both hydrate + retry fail
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+  await flushMicrotasks();
+
+  assert.ok(root.querySelector(".jobs-hydration-error"), "banner after first failure");
+
+  (root.querySelector(".jobs-hydration-retry") as HTMLButtonElement).click();
+  await flushMicrotasks();
+
+  // Exactly ONE banner — the second failure replaced the first, did not stack.
+  const banners = root.querySelectorAll(".jobs-hydration-error");
+  assert.equal(banners.length, 1, "repeated failure replaces the banner, never stacks");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});

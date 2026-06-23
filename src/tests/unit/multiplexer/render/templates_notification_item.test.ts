@@ -118,3 +118,30 @@ test("notificationItem: abstract present → .abstract-indicator with data-abstr
   assert.notEqual(indicator, null);
   assert.equal(indicator!.getAttribute("data-abstract"), "long form context");
 });
+
+// WS3 parity (2026-06-22): expired-badge + abstract-indicator must nest INSIDE
+// `.message-text` (verbatim legacy notifications.js:13800), NOT be flex siblings
+// of it — otherwise they steal width from the flex:1 text run and the Tier-3
+// geometry oracle flags a message-text width divergence.
+test("notificationItem: expired-badge + abstract-indicator nest INSIDE .message-text (flat, parity)", () => {
+  const el = renderNotificationItem(
+    makeNotification({ was_expired: true, abstract: "ctx" }),
+    { appTimezone: "UTC" },
+  );
+  const text = el.querySelector(".message-text")!;
+  assert.notEqual(text.querySelector(".expired-badge"), null, "badge must be a CHILD of .message-text");
+  assert.notEqual(text.querySelector(".abstract-indicator"), null, "indicator must be a CHILD of .message-text");
+  // And NOT a direct sibling of .message-text under .sender-message.
+  assert.equal(el.querySelector(":scope > .expired-badge"), null, "badge must NOT be a flex sibling of .message-text");
+  assert.equal(el.querySelector(":scope > .abstract-indicator"), null, "indicator must NOT be a flex sibling of .message-text");
+});
+
+test("notificationItem: progress-group head nests badge + indicator INSIDE .message-text (parity)", () => {
+  const el = renderNotificationItem(
+    makeNotification({ progress_group_id: "pg_1", was_expired: true, abstract: "ctx" }),
+    { appTimezone: "UTC" },
+  );
+  const text = el.querySelector(".progress-group-head .message-text")!;
+  assert.notEqual(text.querySelector(".expired-badge"), null, "badge nests in .message-text within the head");
+  assert.notEqual(text.querySelector(".abstract-indicator"), null, "indicator nests in .message-text within the head");
+});

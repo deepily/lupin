@@ -116,6 +116,11 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   private bucketsMount   : HTMLElement | null = null;
   private clickHandler   : ((e: Event) => void) | null = null;
 
+  // The visible hydration-failure banner (null when no failure is showing).
+  // Tracked so repeated failures replace rather than stack, and so unmount
+  // tears it down with the rest of the pane.
+  private hydrationErrorEl : HTMLElement | null = null;
+
   // Phase 6b — idHashes of jobs whose DELETE is in flight. Rapid double-click
   // on the same `.job-delete-button` is gated by this set (5B-7); the entry
   // is removed in the .finally() of the apiClient.delete promise chain.
@@ -163,9 +168,16 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.renderAll();
 
     // Q-A7 — eager hydration. Float the promise; mount returns immediately.
-    // Pass 1 F3 — wrap the rejection in a `.catch(...)` so unhandled-rejection
-    // events never fire, and emit `hydration_failed` so a future 6b retry
-    // affordance can subscribe.
+    this.hydrateWithFailureSignal();
+  }
+
+  // Eager hydration with a fail-loud UI signal. Floats the hydrate promise so
+  // mount() (and the Retry affordance) return immediately; a rejection is
+  // (a) caught so no unhandled-rejection event ever fires (Pass 1 F3) and
+  // (b) re-published as `hydration_failed { source: "jobs" }` so
+  // onHydrationFailed paints the visible Retry banner. Extracted so mount()
+  // and the Retry button share ONE hydrate path.
+  private hydrateWithFailureSignal(): void {
     this.stores.jobs.hydrateHistory(this.api).catch((err: unknown) => {
       const error = err instanceof Error ? err : new Error(String(err));
       console.warn("JobsPaneRenderer: hydrateHistory rejected:", error);
@@ -183,6 +195,8 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
+
+    this.clearHydrationError();
 
     if (this.clickHandler !== null && this.root !== null) {
       this.root.removeEventListener("click", this.clickHandler);
@@ -210,6 +224,70 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
         (e) => this.onJobsChanged(e),
       ),
     );
+    // hydration_failed CONSUMER. Before this, the event had ZERO subscribers,
+    // so a hydrate failure was invisible to the user (only a console.warn).
+    // JobsPaneRenderer is both the emitter (its floated hydrateHistory
+    // rejection) AND the natural consumer: it owns the jobs-pane DOM, so it is
+    // where a "Could not load job history" + Retry affordance belongs (the
+    // 6b retry affordance the emit site always anticipated).
+    this.unsubscribers.push(
+      this.bus.on<HydrationFailedPayload>(
+        "hydration_failed",
+        (e) => this.onHydrationFailed(e),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // hydration_failed consumer — visible fail-loud affordance + Retry
+  // -------------------------------------------------------------------------
+
+  private onHydrationFailed(e: LupinEvent<HydrationFailedPayload>): void {
+    // Only OUR source. Other renderers' hydrate failures (future) carry a
+    // different `source` and are surfaced by their own consumers.
+    if (e.payload.source !== "jobs") return;
+    this.renderHydrationError(e.payload.error);
+  }
+
+  private renderHydrationError(error: Error): void {
+    /* c8 ignore next */ // defensive: the hydration_failed listener is detached in unmount() BEFORE root is nulled, so onHydrationFailed cannot fire with a null root via the bus; this guards only a synthetic direct call.
+    if (this.root === null || this.bucketsMount === null) return;
+    // Replace any prior banner so repeated failures don't stack.
+    this.clearHydrationError();
+
+    const banner = document.createElement("div");
+    banner.className = "jobs-hydration-error";
+    banner.setAttribute("role", "alert");
+    banner.setAttribute("aria-live", "polite");
+
+    const message = document.createElement("span");
+    message.className = "jobs-hydration-error-message";
+    message.textContent = `Could not load job history: ${error.message}`;
+    banner.appendChild(message);
+
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "jobs-hydration-retry";
+    retry.textContent = "Retry";
+    banner.appendChild(retry);
+
+    // Banner sits at the top of the pane, above the buckets.
+    this.root.insertBefore(banner, this.bucketsMount);
+    this.hydrationErrorEl = banner;
+  }
+
+  private clearHydrationError(): void {
+    if (this.hydrationErrorEl !== null) {
+      this.hydrationErrorEl.remove();
+      this.hydrationErrorEl = null;
+    }
+  }
+
+  private handleRetryClick(): void {
+    // Clear the banner immediately; a fresh failure re-emits hydration_failed
+    // (→ onHydrationFailed repaints it), a success leaves it cleared.
+    this.clearHydrationError();
+    this.hydrateWithFailureSignal();
   }
 
   private onJobsChanged(_e: LupinEvent<StoreJobsChangedPayload>): void {
@@ -271,6 +349,14 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
       const target = e.target as Element | null;
       /* c8 ignore next */ // defensive: browser-dispatched click events always carry a target; null-target is unreachable from real user input but guards against synthetic events constructed without a target.
       if (target === null) return;
+      // hydration_failure Retry dispatch BEFORE the job paths — the banner
+      // lives above the buckets and carries no .job-card, but ordering it
+      // first keeps the intent explicit.
+      const retryButton = target.closest(".jobs-hydration-retry") as HTMLElement | null;
+      if (retryButton !== null) {
+        this.handleRetryClick();
+        return;
+      }
       // Phase 6b — delete-button dispatch BEFORE the card-header toggle path
       // so the Q-B10 optimistic-delete flow fires and the toggle never does
       // (preserves the Pass 2 F23 invariant under active-button semantics).

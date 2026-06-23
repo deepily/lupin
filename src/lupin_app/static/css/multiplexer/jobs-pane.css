@@ -322,3 +322,45 @@
 .jobs-bucket .job-card.job-paused .job-card-header {
     background : #fffbeb;
 }
+
+/* ============================================================================
+   hydration-failure banner (the hydration_failed CONSUMER affordance — WS3
+   cross-cutting, 2026-06-22). Painted at the top of #jobs-pane when
+   JobsPaneRenderer's eager hydrateHistory rejects, so the failure is VISIBLE
+   instead of console-only. Carries a Retry button that re-runs hydration.
+   ============================================================================ */
+
+.jobs-hydration-error {
+    display         : flex;
+    align-items     : center;
+    justify-content : space-between;
+    gap             : 12px;
+    margin          : 8px;
+    padding         : 10px 12px;
+    background      : #f8d7da;
+    border          : 1px solid #f5c2c7;
+    border-left     : 3px solid #dc3545;
+    border-radius   : 4px;
+    color           : #721c24;
+    font-size       : 13px;
+}
+
+.jobs-hydration-error-message {
+    flex : 1;
+}
+
+.jobs-hydration-retry {
+    flex-shrink   : 0;
+    padding       : 4px 12px;
+    background    : #dc3545;
+    color         : #fff;
+    border        : none;
+    border-radius : 3px;
+    font-size     : 12px;
+    font-weight   : 600;
+    cursor        : pointer;
+}
+
+.jobs-hydration-retry:hover {
+    background : #bb2d3b;
+}
