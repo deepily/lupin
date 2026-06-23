@@ -46,7 +46,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_state import (
 )
 from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
-    build_graph, build_store_wait_edges, cycle_is_store_backed,
+    build_graph, build_store_wait_edges, cycle_is_store_backed, hold_is_stale,
 )
 from cosa.agents.heartbeat_arbiter.idle_roster import build_roster
 from cosa.agents.heartbeat_arbiter import ping_throttle
@@ -866,7 +866,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
             self._acc.snapshot(), who_rows, now, self.alive_threshold_seconds,
             bridge_sessions=bridge_sessions, dm_activity=dm_activity,
         )
-        graph = build_graph( fleet_view )
+        # bc1bc373 STALENESS-FILTER: drop a DEAD-hold holder's phantom peer edge
+        # UPSTREAM of all edge inference (blocked-edge, deadlock cycles, the
+        # manager-blocking advisory). Inert when the hold-reader seam is unwired
+        # (None → empty set → today's behavior); the deadlock LOGIC is untouched.
+        stale_holders = self._stale_hold_holders( fleet_view, now )
+        graph = build_graph( fleet_view, stale_holders=stale_holders )
 
         # 2b-2 Part-6 fanout inputs: the active-managers-on-duty set (phantom-
         # guarded) for the Rick+managers tier, and a persona→session_id map (off
@@ -2071,6 +2076,51 @@ class ArbiterConsumerJob( AgenticJobBase ):
         """
         cls = self._classify_owed( [ persona ], fleet_view or { } ).get( persona, CLASS_UNKNOWN )
         return owed_class_suppresses( cls )
+
+    def _stale_hold_holders( self, fleet_view, now ):
+        """
+        Personas whose declared hold is DEAD (bug bc1bc373) — their `holding_on:
+        peer:X` edge must contribute ZERO inferred edges this poll, killing the
+        phantom "X is blocking worker Y" advisory a stale/expired/not-owed hold
+        otherwise feeds (Tiffany's empty store board produced no real blocked_by,
+        yet a lingering dead hold drove the edge).
+
+        IO seam: reads the hold artifact via the wired `_hold_reader_fn`
+        (heartbeat_hold.read_hold on :8001). The pure staleness verdict is
+        dependency_graph.hold_is_stale. Only PEER-edge holders are read (an edge
+        is only inferred from a `peer:` holding_on, so reading other holds is
+        wasted IO).
+
+        Requires:
+            - fleet_view is the per-poll view dict; now is an aware datetime
+
+        Ensures:
+            - returns the SET of holder personas with a readable DEAD hold
+            - INERT when the reader seam is unwired (None → empty set → today's
+              behavior, every existing test + the deployed deadlock path unchanged)
+            - a session with NO readable hold is NOT added (absence ≠ deadness — the
+              filter only SUBTRACTS an edge for a proven-dead hold; never over-filters)
+            - swallow-safe: a raising reader degrades that session to "not stale"
+              (its edge survives — fail toward the prior behavior); never raises
+        """
+        if self._hold_reader_fn is None:
+            return set()
+        stale = set()
+        for view in ( fleet_view or { } ).values():
+            if not isinstance( view, dict ):
+                continue
+            persona    = view.get( "persona" )
+            sid        = view.get( "session_id" )
+            holding_on = view.get( "holding_on" )
+            if not persona or not sid or not isinstance( holding_on, str ) or not holding_on.startswith( "peer:" ):
+                continue
+            try:
+                hold = self._hold_reader_fn( sid )
+            except Exception:
+                hold = None
+            if hold is not None and hold_is_stale( hold, now ):
+                stale.add( persona )
+        return stale
 
     def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None, count_dm=True ):
         """

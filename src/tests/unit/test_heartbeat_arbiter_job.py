@@ -315,6 +315,92 @@ def test_clear_on_resume_drops_edge_state( tmp_path ):
     assert job._ping_attempts == { }
 
 
+# ── bc1bc373 staleness-filter (dead hold → zero phantom edges) ──────────────────
+
+def _live_hold( now_iso=NOW_ISO ):
+    """A fresh, honored, work-owed hold (held 10s before now)."""
+    held = ( datetime.datetime.fromisoformat( now_iso ) - datetime.timedelta( seconds=10 ) ).isoformat()
+    return { "held_at": held, "ttl_seconds": 900, "work_owed": True, "reason": "waiting on Bob" }
+
+
+def _dead_hold( now_iso=NOW_ISO ):
+    """An EXPIRED hold (held 10_000s before now, ttl 900) → stale."""
+    held = ( datetime.datetime.fromisoformat( now_iso ) - datetime.timedelta( seconds=10_000 ) ).isoformat()
+    return { "held_at": held, "ttl_seconds": 900, "work_owed": True, "reason": "stale" }
+
+
+def test_poll_once_dead_hold_drops_phantom_ping( tmp_path ):
+    """AC B.1: s1's hold is DEAD (expired) → its peer:Bob edge contributes ZERO
+    edges → NO 'Bob is blocking' phantom ping fires."""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:Bob", persona="Alice" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, hold_reader_fn=lambda sid: _dead_hold() )
+    summary = job._poll_once()
+    assert summary[ "edges" ] == 0
+    assert summary[ "pings_fired" ] == 0
+    assert gw.sent == [ ]
+
+
+def test_poll_once_live_hold_keeps_ping( tmp_path ):
+    """AC B.2: s1's hold is LIVE+honored+work-owed → its peer edge survives → the
+    blocker is still pinged (no over-filtering regression)."""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:Bob", persona="Alice" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, hold_reader_fn=lambda sid: _live_hold() )
+    summary = job._poll_once()
+    assert summary[ "edges" ] == 1
+    assert summary[ "pings_fired" ] == 1
+    assert gw.sent[ 0 ][ 0 ] == "Bob"
+
+
+def test_poll_once_no_hold_reader_is_inert( tmp_path ):
+    """Reader unwired (default None) → filter inert → today's behavior (pings)."""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:Bob", persona="Alice" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "Alice", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw )                          # no hold_reader_fn
+    summary = job._poll_once()
+    assert summary[ "edges" ] == 1 and summary[ "pings_fired" ] == 1
+
+
+def test_stale_hold_holders_missing_hold_keeps_edge( tmp_path ):
+    """A session with NO readable hold is NOT added to the stale set (absence ≠
+    deadness) — the edge survives. Directly exercises _stale_hold_holders."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: None )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "Alice", "session_id": "s1", "holding_on": "peer:Bob" } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
+def test_stale_hold_holders_swallows_reader_error_and_skips_non_peer( tmp_path ):
+    """A raising reader degrades that session to 'not stale' (edge survives); a
+    non-peer / persona-less / non-dict view is skipped without a read."""
+    reads = [ ]
+    def boom( sid ):
+        reads.append( sid )
+        raise RuntimeError( "reader down" )
+    job  = _make_job( tmp_path, hold_reader_fn=boom )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = {
+        "s1": { "persona": "Alice", "session_id": "s1", "holding_on": "peer:Bob" },  # read → raises → not stale
+        "s2": { "persona": "Cal",   "session_id": "s2", "holding_on": "user:Rick" }, # non-peer → skipped (no read)
+        "s3": { "persona": "Dan",   "session_id": "",   "holding_on": "peer:Eve" },  # no sid → skipped
+        "s4": { "session_id": "s4", "holding_on": "peer:Eve" },                      # no persona → skipped
+        "s5": "not-a-dict",                                                          # non-dict → skipped
+    }
+    assert job._stale_hold_holders( view, now ) == set()
+    assert reads == [ "s1" ]                                         # ONLY the peer-edge holder was read
+
+
+def test_stale_hold_holders_inert_when_reader_none( tmp_path ):
+    job  = _make_job( tmp_path )                                     # hold_reader_fn defaults to None
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "Alice", "session_id": "s1", "holding_on": "peer:Bob" } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
 # ── _escalate_deadlocks ───────────────────────────────────────────────────────
 
 def test_escalate_deadlocks_notifies( tmp_path ):

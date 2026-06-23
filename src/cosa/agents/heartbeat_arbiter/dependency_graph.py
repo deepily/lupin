@@ -24,13 +24,87 @@ Radio): a PURE-coordination ring — two managers mutually awaiting with ZERO st
 rows — is out of scope; it is rare, a human breaks it anyway, and the correct fix
 is managers expressing real waits as store `blocked_by` (this gate is a hygiene
 forcing-function, a feature not a gap).
+
+STALENESS-FILTER (bug bc1bc373, 2026-06-23): the `holding_on: peer:X` edge is
+SELF-REPORTED from the most-recent heartbeat `awaiting` field. When the declaring
+session's HOLD goes DEAD (expired / work_owed=false / past next_chase), the
+lingering `awaiting` still produced a phantom peer edge that fed the
+manager-blocking advisory ("mr radio blocking Tiffany") and any other edge
+consumer with NO store `blocked_by` backing. `hold_is_stale` is the PURE predicate
+(three staleness axes); `build_wait_edges`/`build_graph` accept an OPTIONAL
+`stale_holders` set whose members contribute ZERO edges. This is ADDITIVE and
+UPSTREAM of all edge inference — the deployed deadlock LOGIC (build_store_wait_edges
++ cycle_is_store_backed + the escalation) is byte-identical; a dead holder removed
+from `edges` is simply also absent from `cycles` (it was never store-backed
+anyway). The hold READ lives in the arbiter orchestrator seam
+(ArbiterConsumerJob._stale_hold_holders); this leaf stays pure.
 """
+import datetime
+
 from lupin_mcp.persona_normalization import canonical_persona_key
+# Staleness primitives REUSED (no reinvention) — the single source of truth for
+# the hold freshness window (held_at + ttl_seconds) and the declared work_owed flag.
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import is_fresh, declared_work_owed
 
 PEER_PREFIX = "peer:"
 
 
-def build_wait_edges( fleet_view ):
+def _parse_iso( value ):
+    """Parse an ISO-8601 timestamp → aware datetime, or None. Never raises."""
+    if not value or not isinstance( value, str ):
+        return None
+    text = value.strip()
+    if text.endswith( "Z" ):
+        text = text[ :-1 ] + "+00:00"
+    try:
+        parsed = datetime.datetime.fromisoformat( text )
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace( tzinfo=datetime.timezone.utc )
+    return parsed
+
+
+def hold_is_stale( hold, now ):
+    """
+    Is this declared hold DEAD for edge-inference purposes (bug bc1bc373)?
+
+    A DEAD hold must contribute ZERO inferred edges — its `holding_on: peer:X`
+    wait-edge is a phantom (the session has expired/finished/handed-off its wait).
+    A hold is STALE on ANY of three axes:
+      - EXPIRED         : not is_fresh( hold, now ) — now − held_at ≥ ttl_seconds
+                          (also fires on an uncredible held_at / non-numeric ttl,
+                          a hold that cannot prove freshness → bias-to-suppress,
+                          matching the deadlock detector's documented fail-SUPPRESS)
+      - NOT-WORK-OWED   : declared_work_owed( hold ) is False (explicit False ⇒ the
+                          session is done ⇒ never a real wait; None/absent ≠ stale)
+      - PAST-NEXT-CHASE : an optional `next_chase` ISO ts is present, parseable, and
+                          ≤ now (forward-compatible — holds don't emit it today)
+
+    Requires:
+        - hold is a dict or None; now is an aware datetime
+
+    Ensures:
+        - returns False for a missing / non-dict hold (absence of a hold is NOT
+          evidence of a dead hold — never over-filter a session that simply has no
+          hold; the filter only SUBTRACTS edges for a readable DEAD hold)
+        - returns True iff the hold is EXPIRED, explicitly NOT-WORK-OWED, or
+          PAST-NEXT-CHASE; otherwise False
+        - never raises
+    """
+    if not hold or not isinstance( hold, dict ):
+        return False
+    if not is_fresh( hold, now=now ):
+        return True
+    if declared_work_owed( hold ) is False:
+        return True
+    next_chase = _parse_iso( hold.get( "next_chase" ) )
+    if next_chase is not None and next_chase <= now:
+        return True
+    return False
+
+
+def build_wait_edges( fleet_view, stale_holders=None ):
     """
     Extract holder→awaited-peer edges from the fleet view.
 
@@ -38,13 +112,19 @@ def build_wait_edges( fleet_view ):
         - fleet_view is a dict { session_id: VIEW } (build_fleet_view output);
           each VIEW carries "persona" and "holding_on" (e.g. "peer:Sam",
           "user:Rick", "commons:foo", "none")
+        - stale_holders is a set/collection of holder PERSONAS whose hold is DEAD
+          (bug bc1bc373) — their peer edge is dropped at ingestion — or None
+          (⇒ no filtering, byte-identical to the prior behavior)
 
     Ensures:
         - Returns dict { holder_persona: awaited_persona } for ONLY peer:* edges
           with a non-empty holder AND a non-empty awaited persona
+        - a holder in `stale_holders` contributes ZERO edges (its dead hold's
+          phantom wait-edge is filtered out UPSTREAM of all edge inference)
         - LAST edge wins if a holder appears twice (functional graph)
         - Non-dict views are skipped; never raises
     """
+    stale = stale_holders or set()
     edges = { }
     for view in fleet_view.values():
         if not isinstance( view, dict ):
@@ -52,6 +132,8 @@ def build_wait_edges( fleet_view ):
         holder     = view.get( "persona" )
         holding_on = view.get( "holding_on" )
         if not holder or not isinstance( holding_on, str ) or not holding_on.startswith( PEER_PREFIX ):
+            continue
+        if holder in stale:                                  # bc1bc373: dead hold → zero edges
             continue
         awaited = holding_on[ len( PEER_PREFIX ): ].strip()
         if awaited:
@@ -103,18 +185,23 @@ def find_deadlock_cycles( wait_edges ):
     return cycles
 
 
-def build_graph( fleet_view ):
+def build_graph( fleet_view, stale_holders=None ):
     """
     Build the dependency graph + deadlock cycles from the fleet view.
 
     Requires:
         - fleet_view is a dict { session_id: VIEW }
+        - stale_holders is a set of dead-hold holder personas (bug bc1bc373) whose
+          peer edge is dropped, or None (⇒ no filtering)
 
     Ensures:
         - Returns { "edges": {holder: awaited}, "cycles": [canonical cycles] }
+        - a holder in `stale_holders` is absent from BOTH edges and cycles (the
+          dead hold contributes ZERO inferred edges to every consumer); the
+          deadlock LOGIC downstream is unchanged — it simply sees fewer rings
         - Never raises
     """
-    edges = build_wait_edges( fleet_view )
+    edges = build_wait_edges( fleet_view, stale_holders=stale_holders )
     return { "edges": edges, "cycles": find_deadlock_cycles( edges ) }
 
 
@@ -249,6 +336,22 @@ def quick_smoke_test():
     }
     assert build_store_wait_edges( owed2 ) == { "sam": { "dot" } }
     assert build_store_wait_edges( None ) == { } and build_store_wait_edges( "x" ) == { }
+
+    # staleness-filter (bug bc1bc373): a dead holder contributes ZERO edges.
+    now_dt = datetime.datetime( 2026, 6, 23, 12, 0, 0, tzinfo=datetime.timezone.utc )
+    fresh_held = ( now_dt - datetime.timedelta( seconds=10 ) ).isoformat()
+    expired_held = ( now_dt - datetime.timedelta( seconds=10_000 ) ).isoformat()
+    live_hold = { "held_at": fresh_held, "ttl_seconds": 900, "work_owed": True, "reason": "waiting" }
+    assert hold_is_stale( None, now_dt ) is False and hold_is_stale( "x", now_dt ) is False
+    assert hold_is_stale( live_hold, now_dt ) is False
+    assert hold_is_stale( { **live_hold, "held_at": expired_held }, now_dt ) is True       # EXPIRED
+    assert hold_is_stale( { **live_hold, "work_owed": False }, now_dt ) is True             # NOT-WORK-OWED
+    assert hold_is_stale( { **live_hold, "next_chase": fresh_held }, now_dt ) is True       # PAST-NEXT-CHASE
+    # edge filter: Ann's dead hold drops her edge; Bob's live edge stays.
+    fv2 = { "a": { "persona": "Ann", "holding_on": "peer:Bob" },
+            "b": { "persona": "Bob", "holding_on": "peer:Ann" } }
+    assert build_wait_edges( fv2, stale_holders={ "Ann" } ) == { "Bob": "Ann" }
+    assert build_graph( fv2, stale_holders={ "Ann", "Bob" } )[ "cycles" ] == [ ]
     return True
 
 
