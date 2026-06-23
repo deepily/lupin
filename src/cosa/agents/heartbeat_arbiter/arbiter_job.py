@@ -84,13 +84,18 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     TIER_BLOCKER_AND_MANAGER, TIER_DROP, tier_for, CASE_AUTO_POKE_REAP_REC,
     CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
     CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
-    CASE_USER_GATE_RESURFACE,
+    CASE_USER_GATE_RESURFACE, CASE_OPERATOR_GATE,
 )
 from lupin_mcp.persona_normalization import canonical_persona_key
 # 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
 # arbiter resurfaces a dark session's aged user-gate to Rick.
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates
 from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates
+# Proactive-manager A2/A3 (fcb5dbc0): the PURE D4 operator-gate urgency router — the
+# arbiter is its single thin consumer (interrupt urgent / digest normal / queue low).
+from cosa.agents.heartbeat_arbiter.operator_gate_routing import (
+    route_operator_gates, DEFAULT_DIGEST_CADENCE_SECONDS,
+)
 
 
 # Manager-surface topic + auto-ping message template
@@ -123,6 +128,11 @@ DARK_LOOKBACK_SECONDS    = 7200
 # F1: arbiter_outreach carries a truncated message head, not the full body.
 OUTREACH_SUMMARY_MAXLEN  = 160
 
+# A2/A3 (fcb5dbc0): cap on the number of gate titles listed inline in the operator-
+# gate NORMAL digest message; overflow folds into "+N more" (keeps the Rick-bound
+# advisory readable when many normal gates are pending).
+OPERATOR_DIGEST_LIST_CAP = 8
+
 # F1: routed-case → log `kind` vocabulary (the direct-send kinds — stuck_poke,
 # manager_stale_poke, decision_cc, poll_error_escalation — are literals at their
 # emission sites).
@@ -140,6 +150,7 @@ CASE_KINDS = {
     CASE_MANAGER_AWAITING_USER  : "manager_awaiting_user",   # L1 (2026-06-17)
     CASE_MANAGER_DONE_ADVISORY  : "manager_done_advisory",   # L1 (2026-06-17)
     CASE_USER_GATE_RESURFACE    : "user_gate_resurface",     # 6929f4ac (2026-06-22)
+    CASE_OPERATOR_GATE          : "operator_gate",           # A2/A3 (fcb5dbc0)
 }
 
 # ── L1 store-classification constants (2026-06-17, arbiter detector gaps) ────
@@ -232,6 +243,42 @@ def _default_owed_work_fn( personas ):   # pragma: no cover - production store-r
                 for it in items if it.status not in _TERMINAL
             ]
     return out
+
+
+def _default_operator_gates_fn():   # pragma: no cover - production store-read IO boundary
+    """
+    Default OPEN-operator-gate store reader (proactive-manager A2/A3, fcb5dbc0).
+
+    The arbiter as the SINGLE pusher of operator gates: return EVERY open
+    (non-terminal) `gate_class='operator'` item, FLEET-WIDE — one DB session per
+    poll. Because the read is by gate_class (NOT per-session/per-persona), it sees
+    a gate regardless of whether the owning session is alive or DARK — that is what
+    extends the case-18 dark-only resurface to ALL open operator gates. The routing
+    LOGIC that consumes this list (operator_gate_routing.route_operator_gates) is
+    fully unit-tested via an injected fake, so this IO boundary is no-cover
+    (mirrors _default_owed_work_fn / build_arbiter_job).
+
+    Ensures:
+        - returns a list of { id, title, status, gate_class, urgency, owner_persona }
+          for each open operator gate (urgency drives the D4 routing tier)
+        - raising is acceptable — the caller (_route_operator_gates) swallows any
+          exception into an empty read (observer invariant: never crash the poll)
+    """
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories.task_repository import TaskRepository
+    _TERMINAL = ( "done", "dropped" )
+    with get_db() as session:
+        repo  = TaskRepository( session )
+        items = repo.query_tasks( gate_class="operator" )
+        return [
+            { "id"            : str( it.id ),
+              "title"         : it.title,
+              "status"        : it.status,
+              "gate_class"    : it.gate_class,
+              "urgency"       : it.urgency,
+              "owner_persona" : it.owner_persona }
+            for it in items if it.status not in _TERMINAL
+        ]
 
 
 # DM-as-liveness window (2026-06-17): bound the SENT-DM scan to the verdict's
@@ -449,6 +496,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
         hold_reader_fn           : Optional[ Callable ] = None,   # 6929f4ac: per-session hold reader (session_id) -> hold|None (None → inert: classify-override + resurface tier never fire)
         user_gate_resurface_seconds : int               = 1800,  # 6929f4ac: aged-gate ceiling (30 min) — resurface a DARK session's open gate older than this to Rick
+        operator_gates_fn        : Optional[ Callable ] = None,   # A2/A3 (fcb5dbc0): fleet-wide open-operator-gate store read () -> [gate-dict] (None → inert: operator-gate routing never fires)
+        operator_digest_cadence_seconds : int           = DEFAULT_DIGEST_CADENCE_SECONDS,  # A2/A3: NORMAL-urgency operator-gate digest cadence (30 min)
         worktree_janitor_fn      : Optional[ Callable ] = None,   # §4b janitor: per-poll abandoned-worktree reconcile (None → INERT, no sweep; the :8001 factory wires worktree_reaper.reconcile_worktrees)
         count_dm_as_liveness_fn  : Optional[ Callable ] = None,   # DM-toggle: per-poll INI re-read (None → lambda True; runtime-tunable)
         dm_activity_fn           : Optional[ Callable ] = None,   # DM-toggle: per-poll SENT-DM store read (None → inert; dm_ts None everywhere)
@@ -568,6 +617,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # bug-class as quiet < alive above.
         if user_gate_resurface_seconds <= 0:
             raise ValueError( f"user_gate_resurface_seconds must be positive, got {user_gate_resurface_seconds}" )
+        # A2/A3 (fcb5dbc0): a zero/negative digest cadence would config-dead the
+        # NORMAL-urgency digest debounce (same fail-fast bug-class as above).
+        if operator_digest_cadence_seconds <= 0:
+            raise ValueError( f"operator_digest_cadence_seconds must be positive, got {operator_digest_cadence_seconds}" )
 
         # --- config ---
         self.poll_seconds            = poll_seconds
@@ -615,6 +668,18 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # (scripts/run-heartbeat-arbiter.py). Mirrors the owed_work_fn seam pattern.
         self._hold_reader_fn            = hold_reader_fn
         self.user_gate_resurface_seconds = user_gate_resurface_seconds
+        # A2/A3 (fcb5dbc0) operator-gate routing seam: the fleet-wide open-operator-
+        # gate store read. None keeps it INERT (the routing never fires → unit-fake
+        # construction needs no wiring; byte-identical to today). The :8001 factory +
+        # in-process bootstrap WIRE _default_operator_gates_fn so it activates live.
+        # Mirrors the owed_work_fn / hold_reader_fn None-seam pattern.
+        self._operator_gates_fn          = operator_gates_fn
+        self.operator_digest_cadence_seconds = operator_digest_cadence_seconds
+        # Per-arbiter routing state: the NORMAL-digest cadence clock (ISO str, None =
+        # never emitted ⇒ first digest is due) + the escalate-once de-dup of URGENT
+        # gates already interrupted (re-armed each poll to the present urgent set).
+        self._last_operator_digest_ts    = None
+        self._routed_operator_gates      = set()
         # DM-as-liveness toggle (2026-06-17): two seams. (1) the runtime-flag
         # re-read — None → `lambda: True` (inert-safe; reproduces the INI default
         # so in-pool / unit-fake construction needs no wiring; the :8001 factory
@@ -945,6 +1010,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # hold_reader_fn (read_hold) so this is LIVE on :8001; unit-fake construction
         # leaves it None → inert.
         gates_resurfaced    = self._check_user_gate_resurface( self._last_full_snapshot, now )
+        # A2/A3 (fcb5dbc0): the arbiter's single-pusher operator-gate routing — read
+        # ALL open operator gates (store, fleet-wide → covers dark + alive), route by
+        # D4 urgency (urgent interrupt / normal digest / low pull-only). Inert until
+        # the operator_gates_fn seam is wired (the :8001 factory + bootstrap wire it).
+        operator_gates_routed = self._route_operator_gates( now )
         # post-game F1: why-not-poked gate evaluation — runs AFTER both poke tiers
         # so the emitted vectors reflect this poll's episode state.
         self._emit_poke_gates( fleet_view, self._last_full_snapshot, now )
@@ -984,6 +1054,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "manager_stale_pokes" : manager_stale_pokes,
             "fleet_dark"          : fleet_dark,
             "gates_resurfaced"    : gates_resurfaced,         # 6929f4ac outward-twin backstop
+            "operator_gates_routed" : operator_gates_routed,  # A2/A3 operator-gate urgency routing (fcb5dbc0)
             "outreach_acks"       : outreach_acks,
             "reannounces"         : reannounces,
             "ft_escalated"        : ft_escalated,            # eng#7 follow-through one-shot escalations this poll
@@ -995,7 +1066,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if any( summary[ k ] for k in (
                 "pings_fired", "taps_fired", "managers_down", "decisions",
                 "stalled", "pokes_fired", "manager_stale_pokes", "fleet_dark", "cycles",
-                "gates_resurfaced", "outreach_acks", "reannounces", "ft_escalated", "worktrees_swept" ) ):
+                "gates_resurfaced", "operator_gates_routed", "outreach_acks", "reannounces",
+                "ft_escalated", "worktrees_swept" ) ):
             self._log( "arbiter_poll_activity", **summary )
         return summary
 
@@ -2813,6 +2885,86 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 f"you. Question: \"{question}\" (ask kind: {ask_kind}).",
             )
             fired += 1
+        return fired
+
+    def _route_operator_gates( self, now ):
+        """
+        A2/A3 (fcb5dbc0): the arbiter as the SINGLE pusher of STORE operator gates,
+        routed by D4 urgency — the thin consumer of the PURE router
+        (operator_gate_routing.route_operator_gates).
+
+        Each poll reads EVERY open operator gate FLEET-WIDE via the store seam (by
+        gate_class, NOT per-session — so it sees a gate whether the owning session is
+        alive or DARK; that is the case-18 dark-only resurface EXTENDED to ALL open
+        operator gates), then routes by urgency:
+          - URGENT → interrupt Rick immediately, escalate-once per gate (the de-dup is
+            re-armed to the present urgent set, so a cleared-then-reopened or re-tiered
+            gate re-fires)
+          - NORMAL → batched into ONE digest emitted at most every
+            operator_digest_cadence_seconds; the digest clock is stamped on emission
+            (route_operator_gates returns an empty digest until the cadence elapses)
+          - LOW    → pull-only; never auto-pushed
+
+        Inert TWO ways: (a) seam unwired (operator_gates_fn None) → return 0,
+        byte-identical to today; (b) wired but no open operator gate. Swallow-safe per
+        the observer invariant: a store-read hiccup degrades to "no gates seen", never
+        kills the poll.
+
+        Requires:
+            - now is an aware datetime (the poll clock)
+
+        Ensures:
+            - returns the count of arbiter emissions this poll (urgent interrupts +
+              at most one digest); never raises
+        """
+        if self._operator_gates_fn is None:
+            return 0
+        try:
+            gates = self._operator_gates_fn()
+        except Exception:
+            gates = None
+        gates   = [ g for g in ( gates or [ ] ) if isinstance( g, dict ) ]
+        verdict = route_operator_gates(
+            gates, self._last_operator_digest_ts, now, self.operator_digest_cadence_seconds )
+
+        fired = 0
+        # URGENT — interrupt each, escalate-once. Re-arm to the present urgent set so a
+        # gate that cleared (answered / re-tiered / removed) re-fires if it re-opens.
+        present_urgent = { g.get( "id" ) for g in verdict[ "interrupt" ] }
+        self._routed_operator_gates &= present_urgent
+        for gate in verdict[ "interrupt" ]:
+            gid = gate.get( "id" )
+            if gid in self._routed_operator_gates:
+                continue
+            self._routed_operator_gates.add( gid )
+            title = gate.get( "title" ) or "(untitled)"
+            owner = gate.get( "owner_persona" ) or "a session"
+            self._route(
+                CASE_OPERATOR_GATE,
+                f"URGENT operator gate awaiting your decision (from {owner}): "
+                f"\"{title}\". Marked urgent — it needs you now.",
+            )
+            fired += 1
+
+        # NORMAL — one batched digest when the cadence is due (route returns [] until
+        # then). Stamp the clock ONLY on an actual emission so a due-but-empty poll
+        # keeps the window open for the next normal gate.
+        digest = verdict[ "digest" ]
+        if digest:
+            titles = [ ( g.get( "title" ) or "(untitled)" ) for g in digest ]
+            head   = "; ".join( titles[ :OPERATOR_DIGEST_LIST_CAP ] )
+            more   = len( titles ) - OPERATOR_DIGEST_LIST_CAP
+            if more > 0:
+                head += f"; +{more} more"
+            self._route(
+                CASE_OPERATOR_GATE,
+                f"Operator-gate digest: {len( titles )} normal-urgency gate(s) awaiting "
+                f"your decision — {head}. (Urgent gates interrupt separately; low-urgency "
+                f"gates wait in the queue until you pull them.)",
+            )
+            self._last_operator_digest_ts = now.isoformat()
+            fired += 1
+
         return fired
 
     # ── post-game F3: fleet-dark advisory (hybrid trigger, 2026-06-11) ──────────

@@ -31,7 +31,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     TIER_OWNING_MANAGER, TIER_BLOCKER_AND_MANAGER, TIER_DROP, TIER_LOG_THEN_RICK,
     CASE_AUTO_POKE_REAP_REC, CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
     CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
-    CASE_USER_GATE_RESURFACE,
+    CASE_USER_GATE_RESURFACE, CASE_OPERATOR_GATE,
 )
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 from cosa.agents.heartbeat_arbiter import manager_resolver as MR
@@ -99,7 +99,8 @@ def test_case_tiers_is_exhaustive_part6_plus_2b3_reap_rec():
     # + the post-game cases (14 manager-stale advisory, 15 fleet-dark — 2026-06-11)
     # + the L1 store-aware advisories (16 manager-awaiting-user, 17 manager-done — 2026-06-17)
     # + the 6929f4ac user-gate resurface (18 — 2026-06-22)
-    assert set( CASE_TIERS ) == set( range( 1, 19 ) )
+    # + the A2/A3 operator-gate urgency routing (19 — fcb5dbc0)
+    assert set( CASE_TIERS ) == set( range( 1, 20 ) )
 
 
 def test_user_gate_resurface_routes_rick_only():
@@ -108,6 +109,14 @@ def test_user_gate_resurface_routes_rick_only():
     #10 decision-needed); a dark session has no manager fan-out value."""
     assert CASE_USER_GATE_RESURFACE == 18
     assert tier_for( CASE_USER_GATE_RESURFACE ) == TIER_RICK_ONLY
+
+
+def test_operator_gate_routes_rick_only():
+    """A2/A3 (fcb5dbc0): operator-gate urgency routing surfaces to RICK ONLY — an
+    operator gate is the human/operator's to answer (mirrors #18/#10); urgent
+    interrupts, normal digests, low is pull-only, all Rick-bound."""
+    assert CASE_OPERATOR_GATE == 19
+    assert tier_for( CASE_OPERATOR_GATE ) == TIER_RICK_ONLY
 
 
 def test_l1_store_aware_advisory_cases_route_rick_and_managers():

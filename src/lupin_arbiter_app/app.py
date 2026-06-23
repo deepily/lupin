@@ -310,6 +310,9 @@ def assemble_app(
         # 6929f4ac outward-twin backstop: the aged-gate resurface ceiling (hold_reader_fn
         # itself defaults to the real read_hold inside the factory, mirroring owed_work_fn).
         user_gate_resurface_seconds = int( cfg.get( "arbiter user gate resurface seconds", default=1800, return_type="int" ) ),
+        # A2/A3 (fcb5dbc0): the operator-gate NORMAL-urgency digest cadence (operator_gates_fn
+        # itself defaults to the real fleet-wide store reader inside the factory).
+        operator_digest_cadence_seconds = int( cfg.get( "arbiter operator gate digest cadence seconds", default=1800, return_type="int" ) ),
         start_period_seconds = int( cfg.get( "arbiter start period seconds", default=120, return_type="int" ) ),
         # Item B (2026.06.11 receipts design): delivery-receipt seams + knobs.
         # Ledger path: relative INI value combined with the project root at

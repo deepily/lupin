@@ -64,7 +64,7 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         - manager_recipient here is the v2.1-era single fallback; v2.2 per-group
           routing (B6 resolve_manager) overrides it per stuck worker at tap time
     """
-    from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+    from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_operator_gates_fn
     from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
     from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold
 
@@ -79,6 +79,10 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     # is wired to the real read_hold below so the in-process arbiter, when enabled,
     # also resurfaces a dark session's open gate to Rick).
     gate_resurface    = int( config_mgr.get( "arbiter user gate resurface seconds", default=1800, return_type="int" ) )
+    # A2/A3 (fcb5dbc0): the NORMAL-urgency operator-gate digest cadence (operator_gates_fn
+    # is wired to the real fleet-wide store reader below so the in-process arbiter, when
+    # enabled, also routes operator gates by urgency — urgent interrupt / normal digest).
+    operator_digest_cadence = int( config_mgr.get( "arbiter operator gate digest cadence seconds", default=1800, return_type="int" ) )
 
     # §4b worktree janitor (Worktree Lifecycle Contract). DEFAULT-OFF: the flag is
     # False unless explicitly enabled in lupin-app.ini, so wiring it here is INERT
@@ -109,6 +113,8 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         fleet_stall_window_seconds = stall_window,
         hold_reader_fn             = read_hold,               # 6929f4ac: real per-session hold reader (outward-twin backstop)
         user_gate_resurface_seconds = gate_resurface,         # 6929f4ac: aged-gate resurface ceiling
+        operator_gates_fn          = _default_operator_gates_fn,   # A2/A3: real fleet-wide operator-gate store reader
+        operator_digest_cadence_seconds = operator_digest_cadence, # A2/A3: normal-urgency digest cadence
         worktree_janitor_fn        = worktree_janitor_fn,    # §4b: None unless `arbiter worktree janitor enabled` (default-off → inert)
         user_id                  = "system",
         user_email               = "system@lupin.deepily.ai",

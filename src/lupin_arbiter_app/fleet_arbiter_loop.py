@@ -39,7 +39,8 @@ import threading
 from typing import Any, Callable, Optional
 
 from lupin_arbiter_app.health_watcher import SystemClock
-from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_owed_work_fn, _default_dm_activity_fn
+from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_owed_work_fn, _default_dm_activity_fn, _default_operator_gates_fn
+from cosa.agents.heartbeat_arbiter.operator_gate_routing import DEFAULT_DIGEST_CADENCE_SECONDS
 # 6929f4ac outward-twin backstop (§9.2): the per-session hold reader — defaulted
 # real here so the :8001 service actually resurfaces a dark session's aged user-gate
 # to Rick (without this wiring the seam stays None → the backstop is decorative).
@@ -249,6 +250,12 @@ def build_fleet_arbiter_job_factory(
     # decorative); injectable for tests (never CALLED at construction).
     hold_reader_fn       : Optional[ Callable ] = None,
     user_gate_resurface_seconds : int           = 1800,
+    # A2/A3 (fcb5dbc0): the fleet-wide open-operator-gate store reader + the NORMAL-
+    # urgency digest cadence. operator_gates_fn defaults to the real DB reader so the
+    # :8001 service activates the operator-gate urgency routing (urgent interrupt /
+    # normal digest / low pull-only); injectable for tests (never CALLED here).
+    operator_gates_fn    : Optional[ Callable ] = None,
+    operator_digest_cadence_seconds : int       = DEFAULT_DIGEST_CADENCE_SECONDS,
     # DM-as-liveness toggle (2026-06-17): (1) the per-poll runtime-flag re-read
     # (None → the job defaults to `lambda: True`; app.py wires a per-poll
     # mtime-gated INI read so the flag is runtime-tunable with no bounce). (2) the
@@ -289,6 +296,9 @@ def build_fleet_arbiter_job_factory(
     # the outward-twin backstop (open-gate→ACTIVE classify override + dark-session
     # gate resurface); an injected fake overrides it for tests.
     hold_reader_fn = hold_reader_fn if hold_reader_fn is not None else _default_hold_reader
+    # A2/A3 (fcb5dbc0): wire the real fleet-wide operator-gate reader by default so the
+    # :8001 service activates the operator-gate urgency routing; a fake overrides it.
+    operator_gates_fn = operator_gates_fn if operator_gates_fn is not None else _default_operator_gates_fn
     escalation_notify = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn )
 
     def factory() -> ArbiterConsumerJob:
@@ -299,6 +309,8 @@ def build_fleet_arbiter_job_factory(
             owed_work_fn               = owed_work_fn,                              # L1 store-aware seam
             hold_reader_fn             = hold_reader_fn,                            # 6929f4ac outward-twin backstop
             user_gate_resurface_seconds = user_gate_resurface_seconds,             # 6929f4ac aged-gate ceiling
+            operator_gates_fn          = operator_gates_fn,                         # A2/A3 operator-gate store reader
+            operator_digest_cadence_seconds = operator_digest_cadence_seconds,      # A2/A3 normal-digest cadence
             count_dm_as_liveness_fn    = count_dm_as_liveness_fn,                   # DM-toggle runtime flag (app.py wires cfg read)
             dm_activity_fn             = dm_activity_fn,                            # DM-toggle SENT-DM store reader
             poll_seconds               = poll_seconds,
