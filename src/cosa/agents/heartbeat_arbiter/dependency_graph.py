@@ -40,6 +40,7 @@ anyway). The hold READ lives in the arbiter orchestrator seam
 (ArbiterConsumerJob._stale_hold_holders); this leaf stays pure.
 """
 import datetime
+import re
 
 from lupin_mcp.persona_normalization import canonical_persona_key
 # Staleness primitives REUSED (no reinvention) — the single source of truth for
@@ -47,6 +48,44 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import is_fresh, declared_work_owed
 
 PEER_PREFIX = "peer:"
+
+# A peer reference is "peer:<persona>". The <persona> token may legitimately carry
+# single internal spaces ("mr radio") and hyphens-without-spaces ("cc-author-mr-radio-1"),
+# but a heartbeat `awaiting` field is FREE-FORM and routinely carries either a
+# MULTI-peer list ("peer:Krishna,peer:maria") or a PROSE tail
+# ("peer:krishna — Krishna's FOLLOW-ON SHA ..."). Only the FIRST canonical persona
+# token may mint a wait-edge; the list tail and prose MUST be dropped. Splitting on
+# a comma / semicolon / open-paren / space-delimited dash isolates the first token
+# while preserving a persona's own internal spaces and bare hyphens.
+_PEER_PROSE_DELIMITERS = re.compile( r"[,;(]|\s[—–-]\s" )
+
+
+def _parse_peer_target( holding_on ):
+    """
+    Extract the single canonical awaited-persona from a `peer:` holding string
+    (bug b39562e4 — a prose/list tail was being swallowed whole into a garbage
+    "awaited persona", minting a phantom blocking edge + a 422 push_unavailable).
+
+    Requires:
+        - holding_on is a string beginning with PEER_PREFIX
+
+    Ensures:
+        - returns the FIRST canonical persona token — internal single spaces and
+          bare hyphens preserved ("mr radio", "cc-author-mr-radio-1") — with any
+          multi-peer list tail (after a comma/semicolon) and any prose tail (after
+          an open-paren or a space-delimited em/en/hyphen dash) STRIPPED
+        - returns None when no non-empty persona remains (pure prose / empty body)
+        - never raises (pure string op)
+
+    NOTE (documented v1 limitation): a holder awaiting MULTIPLE peers
+    ("peer:A,peer:B") mints an edge only for the FIRST peer. This is a strict
+    improvement over the prior garbage-edge behavior and is sufficient because the
+    deadlock escalation is independently store-`blocked_by`-gated; modelling every
+    peer of a multi-await holder is a possible follow-on, not this bug.
+    """
+    body  = holding_on[ len( PEER_PREFIX ): ]
+    first = _PEER_PROSE_DELIMITERS.split( body, maxsplit=1 )[ 0 ].strip()
+    return first or None
 
 
 def _parse_iso( value ):
@@ -119,6 +158,10 @@ def build_wait_edges( fleet_view, stale_holders=None ):
     Ensures:
         - Returns dict { holder_persona: awaited_persona } for ONLY peer:* edges
           with a non-empty holder AND a non-empty awaited persona
+        - the awaited persona is the FIRST canonical token from the peer string
+          (`_parse_peer_target` — bug b39562e4): a multi-peer list tail or free
+          prose after the first persona is DROPPED, so a free-form `awaiting`
+          field can no longer mint a garbage/phantom edge
         - a holder in `stale_holders` contributes ZERO edges (its dead hold's
           phantom wait-edge is filtered out UPSTREAM of all edge inference)
         - LAST edge wins if a holder appears twice (functional graph)
@@ -135,7 +178,7 @@ def build_wait_edges( fleet_view, stale_holders=None ):
             continue
         if holder in stale:                                  # bc1bc373: dead hold → zero edges
             continue
-        awaited = holding_on[ len( PEER_PREFIX ): ].strip()
+        awaited = _parse_peer_target( holding_on )           # b39562e4: first canonical peer only (drop list/prose tail)
         if awaited:
             edges[ holder ] = awaited
     return edges

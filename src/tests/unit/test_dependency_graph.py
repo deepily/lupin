@@ -17,9 +17,12 @@ if _src_path not in sys.path:
 
 import datetime
 
+import pytest
+
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
     build_wait_edges, find_deadlock_cycles, build_graph,
     build_store_wait_edges, cycle_is_store_backed, hold_is_stale, quick_smoke_test,
+    _parse_peer_target,
 )
 
 
@@ -51,6 +54,42 @@ class TestBuildWaitEdges:
 
     def test_empty_view( self ):
         assert build_wait_edges( { } ) == { }
+
+    def test_prose_and_list_awaiting_do_not_mint_garbage_edges( self ):
+        # bug b39562e4: a free-form `awaiting` (prose tail / multi-peer list) used
+        # to be swallowed whole into a garbage awaited-persona → phantom blocking
+        # edge + 422 push_unavailable. Now only the FIRST canonical peer survives.
+        fleet = {
+            "s1": { "persona": "mr radio", "holding_on": "peer:krishna — Krishna's FOLLOW-ON SHA for the fix" },
+            "s2": { "persona": "maria",    "holding_on": "peer:Krishna,peer:tiberius" },
+            "s3": { "persona": "Sam",      "holding_on": "peer:cc-author-mr-radio-1" },   # bare hyphens kept
+        }
+        assert build_wait_edges( fleet ) == {
+            "mr radio": "krishna",          # prose tail dropped
+            "maria"   : "Krishna",          # only the first peer of the list
+            "Sam"     : "cc-author-mr-radio-1",
+        }
+
+
+# ── peer-target parse (bug b39562e4) ────────────────────────────────────────────
+
+class TestParsePeerTarget:
+    @pytest.mark.parametrize( "holding_on, expected", [
+        ( "peer:krishna",                               "krishna" ),                # plain
+        ( "peer:mr radio",                              "mr radio" ),               # internal space preserved
+        ( "peer:cc-author-mr-radio-1",                  "cc-author-mr-radio-1" ),   # bare hyphens preserved
+        ( "peer:Krishna,peer:maria",                    "Krishna" ),                # comma list → first
+        ( "peer:a;peer:b",                              "a" ),                      # semicolon list → first
+        ( "peer:maria (Lane B handoff)",               "maria" ),                  # paren prose dropped
+        ( "peer:krishna — long em-dash prose tail",     "krishna" ),                # em-dash prose dropped
+        ( "peer:rio – en-dash prose",                   "rio" ),                    # en-dash prose dropped
+        ( "peer:bob - hyphen-with-spaces prose",        "bob" ),                    # spaced hyphen = prose
+        ( "peer:  spacey  ",                            "spacey" ),                 # surrounding ws stripped
+        ( "peer:",                                      None ),                     # empty body
+        ( "peer: — pure prose",                         None ),                     # nothing before delimiter
+    ] )
+    def test_first_canonical_token_only( self, holding_on, expected ):
+        assert _parse_peer_target( holding_on ) == expected
 
 
 # ── cycle detection ─────────────────────────────────────────────────────────────
