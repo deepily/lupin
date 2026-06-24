@@ -381,23 +381,35 @@ def _heartbeat_goal_line( session_id, bridge_role ):
         return ""
 
 
-def _idle_sentence( persona_name, owed_unknown=False ) -> str:
+def _idle_sentence( persona_name, owed_unknown=False, owed=False, total_owed=0 ) -> str:
     """
     The first-person idle status sentence for the `idle_announce` behavior
     (seeded from the dropped poke-scaffold's NOT_OWED case). Pure.
 
+    Owed-aware (bug aa403e03): the Stop idle-announce now consults the SAME
+    hold-aware verdict (_resolve_owed_state) the Notification idle-beacon uses, so
+    the two never disagree. Precedence — UNKNOWN first (cannot assert a count),
+    then OWED (work owed but no poke THIS Stop, e.g. the poke-cap halted poking),
+    then plain idle.
+
     Ensures:
-        - owed_unknown False → "Momentarily idle." (persona-agnostic; the
-          sender_id already renders the card AS the persona)
-        - owed_unknown True  → "Owed status unknown." — the store was
-          unreachable, so genuine-idle CANNOT be asserted (UNKNOWN ≠ IDLE)
+        - owed_unknown True → "Owed status unknown." (UNKNOWN ≠ IDLE)
+        - owed True         → "Idle, but N item(s) owed." (or "Idle, but work
+          owed." when total_owed is 0 — owed via a referent-less signal); the
+          phrasing matches the Notification beacon for cross-hook consistency
+        - otherwise         → "Momentarily idle." (genuinely not owed)
     """
     if owed_unknown:
         return "Owed status unknown."
+    if owed:
+        if total_owed > 0:
+            plural = "" if total_owed == 1 else "s"
+            return f"Idle, but {total_owed} item{plural} owed."
+        return "Idle, but work owed."
     return "Momentarily idle."
 
 
-def _announce_idle( session_id, persona_name, owed_unknown=False ):
+def _announce_idle( session_id, persona_name, owed_unknown=False, owed=False, total_owed=0 ):
     """
     Fire ONE low-priority, non-blocking idle status notify for the
     `idle_announce` behavior. The persona "speaks" its own idle state.
@@ -426,11 +438,14 @@ def _announce_idle( session_id, persona_name, owed_unknown=False ):
     """
     if owed_unknown:
         abstract = "Heartbeat: owed status unknown (task store unreachable) — NOT idle; verify manually."
+    elif owed:
+        detail   = f"{total_owed} owed referent(s)" if total_owed > 0 else "work owed (referent-less signal)"
+        abstract = f"Heartbeat: idle but NOT done — {detail} (hold-aware verdict, e.g. poke-cap reached). Stop + beacon agree."
     else:
         abstract = "Heartbeat: idle — nothing owed."
     try:
         request = AsyncNotificationRequest(
-            message   = _idle_sentence( persona_name, owed_unknown=owed_unknown ),
+            message   = _idle_sentence( persona_name, owed_unknown=owed_unknown, owed=owed, total_owed=total_owed ),
             priority  = NotificationPriority.LOW,
             sender_id = build_sender_id_for_cc( session_id ),
             abstract  = abstract,
@@ -1525,55 +1540,78 @@ def _positive_int_or_default( value, default ):
     return ivalue if ivalue > 0 else default
 
 
-def _run_heartbeat( session_id, transcript_path, cwd=None ):
+def _empty_owed_state( config_error, enabled ):
     """
-    Branch-C heartbeat self-poke adapter (thin; composes the pure leaf modules).
+    The fail-safe owed-state bundle for the short-circuit paths (malformed config
+    or heartbeat-disabled) where _resolve_owed_state returns BEFORE doing any hold
+    read / transcript replay / store query — preserving the "no reads when
+    disabled" contract the Stop-hook tests pin. owed=False / owed_unknown=False /
+    total_owed=0 ⇒ the idle consumers render a plain "Momentarily idle." (the
+    legacy behavior on a disabled or misconfigured heartbeat).
+    """
+    return {
+        "config_error"       : config_error,
+        "enabled"            : enabled,
+        "outcome"            : None,
+        "owed"               : False,
+        "owed_unknown"       : False,
+        "total_owed"         : 0,
+        "result"             : None,
+        "verdict"            : None,
+        "settings"           : None,
+        "hold"               : None,
+        "poke_count"         : 0,
+        "task_state"         : { },
+        "owed_items"         : [ ],
+        "delegations"        : [ ],
+        "open_inbound"       : [ ],
+        "stale_inbound"      : [ ],
+        "needs_verification" : False,
+        "open_gates"         : [ ],
+        "due_gates"          : [ ],
+    }
 
-    The §0 5-step decision logic lives entirely in the pure, 100%-covered leaf
-    modules (heartbeat_hold / heartbeat_work_owed / heartbeat_poke_cap /
-    heartbeat_decision). This adapter is ONLY the side-effecting shell: read the
-    hold + poke count + live work-owed verdict, call decide_heartbeat, apply the
-    increment / cap-FYI / emit side effects it signals, and return the block
-    dict to emit when (and only when) the heartbeat owns this stop.
 
-    **v2 scope (Task* live oracle — §0.3, corrected TodoWrite→Task*):** the
-    work-owed verdict comes from the session's OWN Task* state, replayed from
-    its transcript (`transcript_path`). So v2 ALSO catches the FM-19
-    undeclared-lazy-stop case: a session with NO hold that stops with owed Task*
-    work (in_progress / pending) is poked. v1 behavior is preserved — a fresh
-    reasoned hold is still honored; the hold's self-declared work_owed still
-    wins over the oracle (decide_heartbeat order). `owned_by_me` is TRUE by
-    construction (the Task* calls live in THIS session's transcript). The
-    transcript read is `:7999`-free and never a dependency of the poke (the
-    reader never raises; a missing/empty transcript ⇒ no owed work ⇒
-    conservative).
+def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
+    """
+    The single canonical, HOLD-AWARE owed-work verdict — shared by the Stop-hook
+    self-poke (_run_heartbeat) AND the two idle consumers (the Stop idle-announce
+    gating + the Notification idle-beacon) so they never disagree on whether a
+    session is idle (bug aa403e03).
 
-    Gated by ~/.claude/settings.json ["heartbeat"]["enabled"] (DEFAULT False).
-    A malformed config (ValueError from the loader) fails SAFE → disabled.
+    Before this extraction the consumers computed "owed" DIFFERENTLY: the Stop hook
+    ran the full oracle through decide_heartbeat (honoring the .heartbeat-hold,
+    poke-count and the 6929f4ac obligation overrides), while the idle-beacon read
+    _owed_count_from_store ALONE (raw store count, hold-blind). A held / blocked /
+    hold-suppressed store row therefore read 0-owed on the Stop path but N-owed on
+    the beacon ("Momentarily idle." vs "Idle, but N owed" within ~60s). Routing
+    BOTH through this one verdict kills the class of bug.
 
     Requires:
-        - session_id is a string
-        - transcript_path is the Stop-hook payload's transcript_path (str/None)
-        - called DOWNSTREAM of the stop_hook_active loop guard, and ONLY when
-          no voice input is pending — Branch C's no-voice_ctx path, or the §3
-          speakerphone branch behind its _has_pending_voice peek. Voice always
-          wins; never poke on a re-fire
+        - session_id is the resolved stable session id
+        - transcript_path is the Stop-payload transcript_path, or None (the beacon
+          may not carry it — the store owed-source needs neither it nor the replay)
+        - cwd is the Stop-payload cwd, or None (forwarded to read_hold_resilient so
+          a hold written under the session's worktree cwd is found — bug 1789f197)
 
     Ensures:
-        - Returns a ( hook_output, owed_unknown ) tuple.
-        - hook_output is {"decision":"block","reason": …} ONLY when the heartbeat
-          pokes (OUTCOME_POKE) — the caller emits it and skips the idle path;
-          else None on disabled / malformed config / honored hold / nothing
-          owed / cap reached — the caller falls through to the existing
-          idle-waiter / "Anything else?" path UNCHANGED.
-        - owed_unknown is True iff the store-owed source was ON and the store
-          read FAILED (count is unknowable) — the caller's idle beacon then
-          renders "owed status unknown" instead of "nothing owed". False on the
-          transcript-replay path and on every determinate store answer.
-        - Applies the counter increment (on poke) + cap FYI (at cap) +
-          fire-and-forget event emission side effects
-        - On a poke, ALSO fires the §4 low-pri breadcrumb to the user's card
-          (_announce_poke — failsafe, never blocks the poke)
+        - Returns a bundle dict carrying both the idle-consumer view AND every local
+          the _run_heartbeat side-effect tail needs: { config_error, enabled,
+          outcome, owed, owed_unknown, total_owed, result, verdict, settings, hold,
+          poke_count, task_state, owed_items, delegations, open_inbound,
+          stale_inbound, needs_verification, open_gates, due_gates }
+        - owed := outcome in { OUTCOME_POKE, OUTCOME_CAP_REACHED } — work IS owed
+          whether or not the poke-cap has halted the poking; HONORED / NOT_OWED ⇒
+          owed False. The hold-aware gate: a held in_progress row resolves to
+          HONORED ⇒ owed False on BOTH consumers.
+        - total_owed = owed_items + delegations + open_inbound (the SAME referent
+          count the §4 poke breadcrumb reports), so the beacon's "N owed" matches.
+        - owed_unknown True iff the store-owed source was ON and the store read
+          FAILED (UNKNOWN ≠ idle); the consumers then render a neutral message.
+        - SHORT-CIRCUITS to _empty_owed_state BEFORE any hold read / transcript
+          replay / store query on a malformed config (config_error) or a disabled
+          heartbeat (enabled False) — preserving the "no reads when disabled" Stop
+          contract. NEVER raises on well-formed input.
     """
     try:
         settings = load_heartbeat_settings()
@@ -1584,10 +1622,10 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
             "session_id" : session_id,
             "error"      : str( e ),
         } )
-        return None, False
+        return _empty_owed_state( config_error=True, enabled=False )
 
     if not settings[ "enabled" ]:
-        return None, False
+        return _empty_owed_state( config_error=False, enabled=False )
 
     # Resolve the hold resiliently across BOTH the session's OWN cwd (facet 3,
     # threaded from the Stop payload) AND the project root where write_hold
@@ -1732,6 +1770,77 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
         _bridge_role = None
     goal_line  = _heartbeat_goal_line( session_id, _bridge_role )
     result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ], goal_line=goal_line )
+
+    return {
+        "config_error"       : False,
+        "enabled"            : True,
+        "outcome"            : result[ "outcome" ],
+        "owed"               : result[ "outcome" ] in ( OUTCOME_POKE, OUTCOME_CAP_REACHED ),
+        "owed_unknown"       : owed_unknown,
+        "total_owed"         : len( owed_items ) + len( delegations ) + len( open_inbound ),
+        "result"             : result,
+        "verdict"            : verdict,
+        "settings"           : settings,
+        "hold"               : hold,
+        "poke_count"         : poke_count,
+        "task_state"         : task_state,
+        "owed_items"         : owed_items,
+        "delegations"        : delegations,
+        "open_inbound"       : open_inbound,
+        "stale_inbound"      : stale_inbound,
+        "needs_verification" : needs_verification,
+        "open_gates"         : open_gates,
+        "due_gates"          : due_gates,
+    }
+
+
+def _run_heartbeat( session_id, transcript_path, cwd=None, state=None ):
+    """
+    Branch-C heartbeat self-poke adapter — the side-effecting shell around
+    _resolve_owed_state (bug aa403e03 extraction). Resolves the shared HOLD-AWARE
+    owed verdict, then applies ONLY the poke side-effects (increment / cap-FYI /
+    emit_outcome / genuine-idle beacon / §4 breadcrumb + tmux poke-inject) and
+    returns the ( hook_output, owed_unknown ) tuple.
+
+    `state` is an OPTIONAL pre-resolved _resolve_owed_state bundle: when main()
+    has already resolved the verdict for the idle-announce (so the Stop poke and
+    the idle-beacon share ONE computation), it threads that bundle in; when None
+    (the default, and how the tests call it) the verdict is resolved internally —
+    behavior is identical either way.
+
+    Behavior is byte-identical to the pre-extraction adapter: hook_output is the
+    {"decision":"block","reason": …} dict ONLY on OUTCOME_POKE (the caller emits it
+    and skips the idle path); else None on disabled / malformed / honored / not-owed
+    / cap-reached. owed_unknown rides the store-unreachable §C fail-safe so the
+    caller's idle beacon renders "owed status unknown" rather than "nothing owed".
+
+    Requires:
+        - transcript_path is the Stop-hook payload's transcript_path (str/None)
+        - called DOWNSTREAM of the stop_hook_active loop guard, ONLY when no voice
+          input is pending (voice always wins; never poke on a re-fire)
+
+    Ensures:
+        - Returns ( hook_output, owed_unknown ); applies the increment (on poke) +
+          cap FYI (at cap) + fire-and-forget emit + §4 breadcrumb side effects
+        - Disabled / malformed config ⇒ ( None, False ) with NO reads (the bundle
+          short-circuits before any hold/transcript/store IO)
+    """
+    state = state if state is not None else _resolve_owed_state( session_id, transcript_path, cwd )
+    if state[ "config_error" ] or not state[ "enabled" ]:
+        return None, False
+    settings           = state[ "settings" ]
+    hold               = state[ "hold" ]
+    task_state         = state[ "task_state" ]
+    owed_items         = state[ "owed_items" ]
+    delegations        = state[ "delegations" ]
+    open_inbound       = state[ "open_inbound" ]
+    stale_inbound      = state[ "stale_inbound" ]
+    owed_unknown       = state[ "owed_unknown" ]
+    needs_verification = state[ "needs_verification" ]
+    open_gates         = state[ "open_gates" ]
+    due_gates          = state[ "due_gates" ]
+    verdict            = state[ "verdict" ]
+    result             = state[ "result" ]
 
     if result[ "should_increment" ]:
         increment_poke_count( session_id )
@@ -1899,9 +2008,13 @@ def main():
         #
         # Branch-C invariant (voice always wins): peek at the voice buffer
         # WITHOUT draining — pending voice ⇒ no poke, buffer left untouched.
-        owed_unknown = False
+        # bug aa403e03: resolve the shared hold-aware verdict ONCE and thread it
+        # into BOTH the poke decision and the idle-announce, so the Stop hook and
+        # the Notification idle-beacon never disagree on owed-vs-idle.
+        idle_state = None
         if not _has_pending_voice( session_id ):
-            heartbeat_output, owed_unknown = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+            idle_state = _resolve_owed_state( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+            heartbeat_output, _ = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ), state=idle_state )
             if heartbeat_output is not None:
                 log_to_stream( "stop", {}, extra={
                     "phase"      : "speakerphone_poke",
@@ -1936,7 +2049,10 @@ def main():
         if _stop_hook_idle_behavior() == "idle_announce":
             persona      = get_voice_persona( session_id )
             persona_name = persona.get( "name" ) if persona else None
-            _announce_idle( session_id, persona_name, owed_unknown=owed_unknown )
+            _announce_idle( session_id, persona_name,
+                            owed_unknown = idle_state[ "owed_unknown" ],
+                            owed         = idle_state[ "owed" ],
+                            total_owed   = idle_state[ "total_owed" ] )
 
         # Speakerphone/chorus sessions skip ONLY the blocking "Anything else?"
         # prompt path below (it would interrupt the user's live voice
@@ -1982,7 +2098,10 @@ def main():
         # fall through to the existing idle-waiter / "Anything else?" path.
         # transcript_path (Stop payload) feeds the v2 Task*-replay work-owed oracle.
         # cwd (Stop payload) resolves the per-session hold base (c121037b facet 3).
-        heartbeat_output, owed_unknown = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+        # bug aa403e03: resolve the shared hold-aware verdict ONCE and thread it into
+        # BOTH the poke decision and the idle-announce (consistency with the beacon).
+        idle_state = _resolve_owed_state( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ) )
+        heartbeat_output, _ = _run_heartbeat( session_id, payload.get( "transcript_path" ), payload.get( "cwd" ), state=idle_state )
         if heartbeat_output is not None:
             emit_json( heartbeat_output )
             return
@@ -2021,7 +2140,10 @@ def main():
         elif idle_behavior == "idle_announce":
             persona      = get_voice_persona( session_id )
             persona_name = persona.get( "name" ) if persona else None
-            _announce_idle( session_id, persona_name, owed_unknown=owed_unknown )
+            _announce_idle( session_id, persona_name,
+                            owed_unknown = idle_state[ "owed_unknown" ],
+                            owed         = idle_state[ "owed" ],
+                            total_owed   = idle_state[ "total_owed" ] )
             emit_json( {} )  # allow stop — v2.1 owns liveness; this is a courtesy ping
         else:   # "none": silent allow-stop
             emit_json( {} )

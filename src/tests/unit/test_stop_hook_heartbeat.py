@@ -74,6 +74,24 @@ _EMPTY_STATE = { }                        # no tasks → genuinely idle (empty s
 _DONE_STATE  = { "1": "completed" }       # not owed, but task set NON-empty
 
 
+def _owed_bundle( owed=False, owed_unknown=False, total_owed=0 ):
+    """
+    A minimal _resolve_owed_state return (bug aa403e03) for the main()-wiring tests.
+    main() resolves this shared verdict ONCE and threads it BOTH into _run_heartbeat
+    (state=) AND the owed-aware _announce_idle (owed=/total_owed=). Tests patch
+    _resolve_owed_state with a SENTINEL bundle and assert the SAME object reaches
+    _run_heartbeat and the owed values reach the announce.
+    """
+    return {
+        "config_error" : False, "enabled": True, "outcome": None,
+        "owed"         : owed, "owed_unknown": owed_unknown, "total_owed": total_owed,
+        "result"       : None, "verdict": None, "settings": None, "hold": None,
+        "poke_count"   : 0, "task_state": { }, "owed_items": [ ], "delegations": [ ],
+        "open_inbound" : [ ], "stale_inbound": [ ], "needs_verification": False,
+        "open_gates"   : [ ], "due_gates": [ ],
+    }
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # _run_heartbeat — v2 adapter shell over the REAL leaves
 # ═════════════════════════════════════════════════════════════════════════════
@@ -829,11 +847,15 @@ class TestMainBranchCWiring:
             "transcript_path": "/home/u/.claude/projects/p/abc.jsonl",
             "cwd": "/home/u/some/other-project",     # c121037b facet 3: threaded per-session
         }
-        main()
+        # bug aa403e03: main() resolves the shared verdict ONCE and threads it into
+        # _run_heartbeat as state=. Patch it with a SENTINEL bundle and assert the
+        # SAME object is threaded (single-compute), alongside transcript_path + cwd.
+        state = _owed_bundle()
+        with patch( "lupin_cli.claude_code.hooks.stop._resolve_owed_state", return_value=state ):
+            main()
         mock_emit.assert_called_once_with( { "decision": "block", "reason": "poke!" } )
-        # transcript_path AND cwd (Stop payload) are both threaded into _run_heartbeat.
         mock_hb.assert_called_once_with( "abc12345", "/home/u/.claude/projects/p/abc.jsonl",
-                                         "/home/u/some/other-project" )
+                                         "/home/u/some/other-project", state=state )
         mock_idle.assert_not_called()
 
     @patch( "lupin_cli.claude_code.hooks.stop._stop_hook_idle_behavior", return_value="ask" )
@@ -853,8 +875,11 @@ class TestMainBranchCWiring:
                                             mock_hb, mock_idle, mock_arm, mock_behavior ):
         """Idle behavior 'ask' + no poke + idle enabled → arm the deferred waiter, allow stop."""
         mock_read.return_value = { "stop_hook_active": False, "session_id": "abc12345" }   # no transcript_path/cwd keys
-        main()
-        mock_hb.assert_called_once_with( "abc12345", None, None )   # missing keys → None threaded (transcript, cwd)
+        # bug aa403e03: the shared verdict bundle is threaded into _run_heartbeat as state=.
+        state = _owed_bundle()
+        with patch( "lupin_cli.claude_code.hooks.stop._resolve_owed_state", return_value=state ):
+            main()
+        mock_hb.assert_called_once_with( "abc12345", None, None, state=state )   # missing keys → None threaded (transcript, cwd)
         mock_arm.assert_called_once()
         mock_emit.assert_called_once_with( {} )
 
@@ -872,9 +897,15 @@ class TestMainBranchCWiring:
 class TestMainSpeakerphonePokeMatrix:
 
     def _patches( self, *, payload, pending_voice=False, heartbeat_output=None,
-                  owed_unknown=False, idle_behavior="idle_announce", persona=None ):
+                  owed_unknown=False, idle_behavior="idle_announce", persona=None,
+                  state_bundle=None ):
         """One ExitStack-style patch bundle for the speakerphone matrix."""
         from contextlib import ExitStack
+        # bug aa403e03: main() resolves the shared verdict ONCE and threads it into
+        # both the poke (state=) and the idle-announce (owed/total_owed). Patch it
+        # with a SENTINEL bundle so the tests assert the SAME object + owed values.
+        if state_bundle is None:
+            state_bundle = _owed_bundle( owed_unknown=owed_unknown )
         stack = ExitStack()
         p     = lambda target, **kw: stack.enter_context(
                     patch( f"lupin_cli.claude_code.hooks.stop.{target}", **kw ) )
@@ -886,6 +917,7 @@ class TestMainSpeakerphonePokeMatrix:
             "speakerphone"  : p( "get_speakerphone", return_value=True ),
             "auto_narrate"  : p( "_try_auto_narrate" ),
             "voice_peek"    : p( "_has_pending_voice", return_value=pending_voice ),
+            "resolve_state" : p( "_resolve_owed_state", return_value=state_bundle ),
             "heartbeat"     : p( "_run_heartbeat", return_value=( heartbeat_output, owed_unknown ) ),
             "idle_behavior" : p( "_stop_hook_idle_behavior", return_value=idle_behavior ),
             "persona"       : p( "get_voice_persona", return_value=persona ),
@@ -897,6 +929,7 @@ class TestMainSpeakerphonePokeMatrix:
             "arm_waiter"    : p( "_arm_idle_waiter" ),
             "notify_sync"   : p( "notify_user_sync" ),
         }
+        mocks[ "state_bundle" ] = state_bundle
         return stack, mocks
 
     _POKE = { "decision": "block", "reason": "Do not stop yet — owed Task work." }
@@ -911,7 +944,9 @@ class TestMainSpeakerphonePokeMatrix:
         with stack:
             main()   # returns (no sys.exit) — the poke path mirrors Branch C
             # c121037b facet 3: cwd is threaded on the speakerphone poke path too.
-            m[ "heartbeat" ].assert_called_once_with( "abc12345", "/t.jsonl", "/work/proj" )
+            # bug aa403e03: the shared verdict bundle is threaded as state= (single-compute).
+            m[ "heartbeat" ].assert_called_once_with( "abc12345", "/t.jsonl", "/work/proj",
+                                                      state=m[ "state_bundle" ] )
             m[ "emit" ].assert_called_once_with( self._POKE )
             m[ "announce_idle" ].assert_not_called()
             # the split is observable in the log stream
@@ -932,8 +967,11 @@ class TestMainSpeakerphonePokeMatrix:
         with stack:
             with pytest.raises( SystemExit ):
                 main()
-            m[ "heartbeat" ].assert_called_once_with( "abc12345", None, None )   # no transcript/cwd keys
-            m[ "announce_idle" ].assert_called_once_with( "abc12345", "Rachel", owed_unknown=False )
+            # bug aa403e03: state= threaded into the poke; owed-aware args into the announce.
+            m[ "heartbeat" ].assert_called_once_with( "abc12345", None, None,
+                                                      state=m[ "state_bundle" ] )   # no transcript/cwd keys
+            m[ "announce_idle" ].assert_called_once_with( "abc12345", "Rachel",
+                                                          owed_unknown=False, owed=False, total_owed=0 )
             m[ "emit" ].assert_called_once_with( {} )
 
     def test_speakerphone_blocking_ask_still_suppressed( self ):

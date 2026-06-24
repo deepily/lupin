@@ -30,9 +30,41 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     deliver_pending_peer_dms
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
-    get_claude_session_id, resolve_stable_session_id, get_voice_persona
+    get_claude_session_id, resolve_stable_session_id, get_voice_persona,
+    get_session_metadata
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_events import emit_idle_prompt
+
+
+def beacon_idle_message( owed, owed_unknown, total_owed, idle_msg ):
+    """
+    Pure idle-beacon message selection (bug aa403e03). Shared by the idle_prompt
+    branch AND its tests so the test exercises the REAL logic — no hand-mirrored
+    copy that can drift (the SAME anti-duplication lesson as this very bug).
+
+    The owed flag / total_owed come from the shared HOLD-AWARE verdict
+    (stop._resolve_owed_state); the phrasing matches the Stop idle-announce
+    (_idle_sentence) for cross-hook consistency.
+
+    Requires:
+        - owed, owed_unknown are bools; total_owed is a non-negative int
+        - idle_msg is the neutral fallback string (e.g. "Claude is waiting for input")
+
+    Ensures:
+        - owed_unknown True  → idle_msg (UNKNOWN ≠ idle; make NO owed claim)
+        - owed True          → "Idle, but N item(s) owed" (or "Idle, but work owed"
+          when total_owed is 0 — owed via a referent-less signal)
+        - otherwise          → idle_msg (determinate not-owed, incl. an honored hold)
+        - precedence is UNKNOWN → OWED → idle; never raises
+    """
+    if owed_unknown:
+        return idle_msg
+    if owed:
+        if total_owed > 0:
+            plural = "" if total_owed == 1 else "s"
+            return f"Idle, but {total_owed} item{plural} owed"
+        return "Idle, but work owed"
+    return idle_msg
 
 
 def main():
@@ -70,30 +102,36 @@ def main():
         tts_msg      = message if message else "Permission prompt"
         tts_priority = "high"
     elif notification_type == "idle_prompt":
-        # Bug fix (idle-beacon false-idle): consult the SAME work-owed oracle the
-        # Stop hook uses BEFORE announcing idle. The old beacon emitted a bare
-        # "waiting for input" message that read as "nothing owed" even when the
-        # store knew work WAS owed (proven live: a session idle-announced while
-        # owning 5 owed items). Reuse stop._owed_count_from_store — do NOT
-        # reimplement; lazy import keeps the heavy stop module off the hot
-        # permission_prompt path (idle_prompt is a cold, sitting-at-prompt event).
-        from lupin_cli.claude_code.hooks.stop import _owed_count_from_store
-        owed_count, owed_ok = _owed_count_from_store( session_id )
+        # bug aa403e03 (idle-status desync): consult the SAME HOLD-AWARE verdict the
+        # Stop hook uses (_resolve_owed_state), NOT the raw store count. The prior
+        # beacon called _owed_count_from_store ALONE — hold-BLIND — so a HELD /
+        # blocked / hold-suppressed store row read N-owed HERE while the Stop hook
+        # (which honors the .heartbeat-hold via decide_heartbeat) read 0-owed and
+        # announced "Momentarily idle." ⇒ the two disagreed within ~60s. Routing
+        # BOTH through _resolve_owed_state makes them agree by construction.
+        # Resolve cwd + transcript_path from the bridge when the payload lacks them
+        # so the hold read matches the Stop hook's (bug 1789f197: a worktree-cwd
+        # hold is missed without the cwd). Lazy import keeps the heavy stop module
+        # off the hot permission_prompt path (idle_prompt is a cold event).
+        from lupin_cli.claude_code.hooks.stop import _resolve_owed_state
+        _meta      = get_session_metadata()
+        owed_state = _resolve_owed_state(
+            session_id,
+            transcript_path = payload.get( "transcript_path" ) or _meta.get( "transcript_path" ),
+            cwd             = payload.get( "cwd" ) or _meta.get( "cwd" ),
+        )
         idle_msg = message if message else "Claude is waiting for input"
-        if not owed_ok:
-            # owed_unknown (bad / timed-out store read) — FAIL-SAFE: never assert
-            # "nothing owed" on an uncertain read. Emit the neutral idle message,
-            # making no owed claim either way.
-            tts_msg = idle_msg
-        elif owed_count > 0:
-            # Work IS owed — do NOT emit the bare idle beacon; surface the truth
-            # so the fleet (and Rick) never see a false "idle, nothing owed".
-            plural  = "" if owed_count == 1 else "s"
-            tts_msg = f"Idle, but {owed_count} item{plural} owed"
-        else:
-            # owed_count == 0 (determinate) — the ONLY case that may announce a
-            # plain idle with no owed work.
-            tts_msg = idle_msg
+        # Message selection is the PURE beacon_idle_message helper (shared with the
+        # tests so they exercise the real logic, not a mirrored copy). Cases:
+        # owed_unknown → neutral idle_msg (UNKNOWN ≠ idle, fail-safe); owed → "Idle,
+        # but N owed" (hold-aware — cap reached / held obligation), matching the Stop
+        # idle-announce phrasing; else determinate not-owed → plain idle_msg.
+        tts_msg = beacon_idle_message(
+            owed         = owed_state[ "owed" ],
+            owed_unknown = owed_state[ "owed_unknown" ],
+            total_owed   = owed_state[ "total_owed" ],
+            idle_msg     = idle_msg,
+        )
         tts_priority = "low"
         # Fleet liveness 4th signal (arbiter liveness fix, Part 7 / Step 1.3):
         # emit a kind-tagged idle_prompt recency event so the arbiter counts
