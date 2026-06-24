@@ -441,6 +441,118 @@ def test_stale_hold_holders_inert_when_reader_none( tmp_path ):
     assert job._stale_hold_holders( view, now ) == set()
 
 
+# ── 7f9a8ee2 reconciliation (fresh hold awaiting contradicts stale holding_on) ─────
+
+def _fresh_hold( awaiting, now_iso=NOW_ISO ):
+    """A fresh+honored+work-owed hold with an explicit awaiting field."""
+    held = ( datetime.datetime.fromisoformat( now_iso ) - datetime.timedelta( seconds=10 ) ).isoformat()
+    return { "held_at": held, "ttl_seconds": 1800, "work_owed": True, "reason": "parked", "awaiting": awaiting }
+
+
+def test_stale_hold_holders_includes_dead_hold( tmp_path ):
+    """Directly exercises the hold_is_stale operand of the subtraction OR (dead hold
+    → added), at the unit level (not only via _poll_once)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _dead_hold() )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "Alice", "session_id": "s1", "holding_on": "peer:Bob" } }
+    assert job._stale_hold_holders( view, now ) == { "Alice" }
+
+
+def test_stale_hold_holders_includes_fresh_contradicting_hold( tmp_path ):
+    """7f9a8ee2: a FRESH hold whose awaiting='none' contradicts holding_on=peer:maria
+    → the holder joins the subtraction set (the reconciliation operand of the OR)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "none" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "mr radio", "session_id": "s1", "holding_on": "peer:maria" } }
+    assert job._stale_hold_holders( view, now ) == { "mr radio" }
+
+
+def test_stale_hold_holders_keeps_fresh_corroborating_hold( tmp_path ):
+    """A fresh hold whose awaiting MATCHES holding_on is a genuine wait → NOT added
+    (the both-False arm: not stale AND not contradicting)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "mr radio", "session_id": "s1", "holding_on": "peer:maria" } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
+def test_poll_once_fresh_hold_awaiting_none_drops_phantom_edge( tmp_path ):
+    """7f9a8ee2 DETERMINISTIC REPRO: mr radio's last_activity.awaiting is a STALE
+    'peer:maria', but its CURRENT hold is fresh with awaiting='none'. The phantom
+    'maria is blocking worker mr radio' edge must contribute ZERO edges → no cc DM,
+    no advisory. (Pre-fix: hold_is_stale is False for a fresh hold → edge survived.)"""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:maria", persona="mr radio" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "mr radio", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, hold_reader_fn=lambda sid: _fresh_hold( "none" ) )
+    summary = job._poll_once()
+    assert summary[ "edges" ]       == 0
+    assert summary[ "pings_fired" ] == 0
+    assert gw.sent == [ ]
+
+
+def test_poll_once_fresh_hold_awaiting_matches_keeps_ping( tmp_path ):
+    """7f9a8ee2 complement (no over-filter): a fresh hold whose awaiting MATCHES
+    holding_on is a GENUINE wait → its edge survives → the blocker is still pinged."""
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:maria", persona="mr radio" ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "mr radio", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    summary = job._poll_once()
+    assert summary[ "edges" ]       == 1
+    assert summary[ "pings_fired" ] == 1
+    assert gw.sent[ 0 ][ 0 ] == "maria"
+
+
+def test_poll_once_fresh_contradicting_hold_does_not_break_store_backed_deadlock( tmp_path ):
+    """7f9a8ee2 test #7: the new reconciliation feeds ONLY the FILTERED advisory graph
+    (build_graph); the deadlock ESCALATION reads the UNFILTERED build_wait_edges feed.
+    A real store-backed alice↔bob ring STILL escalates even when alice's fresh hold
+    contradicts (awaiting='none') and its advisory edge is dropped."""
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", awaiting="peer:bob",   persona="alice" ) )
+    _write_events( str( tmp_path ), "s2", _event( "s2", "honored", awaiting="peer:alice", persona="bob"   ) )
+    gw = FakeGateway( who_rows=[
+        { "session_id": "s1", "persona_name": "alice", "last_post_ts": NOW_ISO },
+        { "session_id": "s2", "persona_name": "bob",   "last_post_ts": NOW_ISO },
+    ] )
+    store_cycle = {
+        "alice": [ { "id": "a1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "bob" } ] } ],
+        "bob":   [ { "id": "b1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "alice" } ] } ],
+    }
+    escal = [ ]
+    job = _make_job( tmp_path, gateway=gw,
+                     # alice's hold is FRESH but awaiting='none' (contradicts peer:bob) → her
+                     # advisory edge is dropped; bob has no hold (edge kept either feed).
+                     hold_reader_fn         = lambda sid: _fresh_hold( "none" ) if sid == "s1" else None,
+                     owed_work_fn           = lambda names: store_cycle,
+                     deadlock_dwell_seconds = 0,
+                     notify_fn              = lambda msg, *a, **k: escal.append( msg ) )
+    summary = job._poll_once()
+    deadlock_msgs = [ m for m in escal if "DEADLOCK" in m and "store-corroborated" in m ]
+    assert deadlock_msgs, escal
+    assert "alice" in deadlock_msgs[ 0 ] and "bob" in deadlock_msgs[ 0 ]
+
+
+def test_poll_once_dead_session_no_hold_excluded_from_ping_feed_confirming( tmp_path ):
+    """7f9a8ee2 test #5 (CONFIRMING — NO new prod code): a DEAD/reaped session with a
+    lingering stale holding_on=peer:X but NO hold file is ALREADY excluded from the
+    symptom paths by the pre-existing alive-pruning — live_edges (@~1030, alive
+    holders only) for the ping/cc feed and _attention_workers (@~1854, alive views
+    only) for the advisory. Its edge still appears in the unfiltered graph, but no cc
+    ping fires. Proves the secondary gap needs no additional suppression code."""
+    old_ts = "2026-06-05T11:00:00+00:00"          # 1h before NOW → beyond alive_threshold(600s) → alive=False
+    _write_events( str( tmp_path ), "s1",
+                   _event( "s1", "honored", awaiting="peer:maria", persona="ghost", ts=old_ts ) )
+    gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "ghost", "last_post_ts": old_ts } ] )
+    job = _make_job( tmp_path, gateway=gw )        # NO hold_reader_fn → reconciliation inert (isolates the alive-prune)
+    summary = job._poll_once()
+    assert summary[ "edges" ]       == 1           # edge present in the (alive-unfiltered) graph
+    assert summary[ "pings_fired" ] == 0           # but the DEAD holder is pruned from the ping/cc feed
+    assert gw.sent == [ ]                           # no cc DM emitted on its behalf
+
+
 # ── _escalate_deadlocks ───────────────────────────────────────────────────────
 
 def test_escalate_deadlocks_notifies( tmp_path ):

@@ -164,6 +164,63 @@ def hold_is_stale( hold, now ):
     return False
 
 
+def hold_contradicts_peer_edge( hold, holding_on, now ):
+    """
+    Does a FRESH hold's declared `awaiting` CONTRADICT the derived `holding_on:
+    peer:X` edge (bug 7f9a8ee2)?
+
+    The PRIMARY phantom this kills: a holder whose CURRENT hold is fresh + honored
+    with `awaiting="none"` (or naming a DIFFERENT peer) while its `holding_on` edge
+    was minted from a STALE `last_activity.awaiting="peer:X"` (a heartbeat activity
+    record that out-lived the wait it described). `hold_is_stale` does NOT fire (the
+    hold is fresh), so the dead-hold filter leaves the edge in place → the arbiter
+    loop-fires a phantom "X is blocking worker Y". The hold's declared `awaiting` is
+    AUTHORITATIVE over the stale activity record, so a fresh hold that contradicts
+    the edge must contribute ZERO edges.
+
+    Complement to `hold_is_stale` (the two are OR'd in the arbiter's subtraction
+    set): `hold_is_stale` drops a DEAD-hold holder; THIS drops a FRESH-but-
+    contradicting holder. ADDITIVE and fail-SAFE.
+
+    Requires:
+        - hold is a dict or None; holding_on is the view's holding_on (any type);
+          now is an aware datetime
+
+    Ensures:
+        - returns True iff ALL hold:
+            * hold is a readable dict, AND
+            * holding_on is a `peer:` string naming a parseable peer (the only edge
+              kind that mints a wait-edge), AND
+            * the hold is FRESH (is_fresh — only a fresh hold's `awaiting` is
+              authoritative; a DEAD hold is hold_is_stale's axis, never double-
+              classified here), AND
+            * the hold carries an explicit string `awaiting` field, AND
+            * that `awaiting` does NOT (canonically) name the SAME peer as
+              holding_on — i.e. it is "none", a non-peer scheme, or a different peer
+        - returns False otherwise — in particular fail-SAFE (keep the edge) for a
+          missing/non-dict hold, a non-peer/unparseable holding_on, a non-fresh
+          hold, an absent/non-string `awaiting` (no authoritative declaration), or
+          an `awaiting` that canonically MATCHES the edge peer (a genuine wait)
+        - never raises (pure)
+    """
+    if not hold or not isinstance( hold, dict ):
+        return False
+    if not isinstance( holding_on, str ) or not holding_on.startswith( PEER_PREFIX ):
+        return False
+    edge_peer = _parse_peer_target( holding_on )
+    if edge_peer is None:
+        return False                                         # unparseable peer → no edge minted anyway
+    if not is_fresh( hold, now=now ):
+        return False                                         # only a FRESH hold's awaiting is authoritative
+    awaiting = hold.get( "awaiting" )
+    if not isinstance( awaiting, str ):
+        return False                                         # no authoritative declaration → fail-SAFE keep
+    declared = _parse_peer_target( awaiting ) if awaiting.startswith( PEER_PREFIX ) else None
+    if declared is not None and ( canonical_persona_key( declared ) or declared ) == ( canonical_persona_key( edge_peer ) or edge_peer ):
+        return False                                         # hold corroborates the edge → genuine wait
+    return True                                              # hold declares it is NOT awaiting edge_peer → phantom
+
+
 def build_wait_edges( fleet_view, stale_holders=None ):
     """
     Extract holder→awaited-peer edges from the fleet view.

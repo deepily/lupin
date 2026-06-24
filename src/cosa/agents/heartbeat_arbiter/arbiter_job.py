@@ -48,7 +48,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_state import (
 from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
     build_graph, build_store_wait_edges, cycle_is_store_backed, hold_is_stale,
-    build_wait_edges, find_deadlock_cycles,
+    hold_contradicts_peer_edge, build_wait_edges, find_deadlock_cycles,
 )
 from cosa.agents.heartbeat_arbiter.idle_roster import build_roster
 from cosa.agents.heartbeat_arbiter import ping_throttle
@@ -2209,27 +2209,42 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     def _stale_hold_holders( self, fleet_view, now ):
         """
-        Personas whose declared hold is DEAD (bug bc1bc373) — their `holding_on:
-        peer:X` edge must contribute ZERO inferred edges this poll, killing the
-        phantom "X is blocking worker Y" advisory a stale/expired/not-owed hold
-        otherwise feeds (Tiffany's empty store board produced no real blocked_by,
-        yet a lingering dead hold drove the edge).
+        Personas whose `holding_on: peer:X` edge must contribute ZERO inferred edges
+        this poll, killing the phantom "X is blocking worker Y" advisory + cc.
+
+        TWO subtraction axes (OR'd), both reading the authoritative HOLD artifact:
+          - DEAD hold (bug bc1bc373) — `hold_is_stale`: an expired / not-work-owed /
+            past-next-chase hold whose lingering `awaiting` drove a phantom edge
+            (Tiffany's empty store board produced no real blocked_by, yet a dead
+            hold drove the edge).
+          - FRESH hold that CONTRADICTS the edge (bug 7f9a8ee2) —
+            `hold_contradicts_peer_edge`: a holder whose CURRENT hold is fresh +
+            honored with `awaiting="none"` (or a DIFFERENT peer) while its
+            `holding_on` edge was minted from a STALE `last_activity.awaiting=peer:X`
+            (the activity record out-lived the wait). `hold_is_stale` does NOT fire
+            (the hold is fresh), so this complementary axis reconciles the hold's
+            AUTHORITATIVE declared `awaiting` against the stale activity-derived edge.
 
         IO seam: reads the hold artifact via the wired `_hold_reader_fn`
-        (heartbeat_hold.read_hold on :8001). The pure staleness verdict is
-        dependency_graph.hold_is_stale. Only PEER-edge holders are read (an edge
-        is only inferred from a `peer:` holding_on, so reading other holds is
-        wasted IO).
+        (heartbeat_hold.read_hold on :8001). The pure verdicts are
+        dependency_graph.hold_is_stale / hold_contradicts_peer_edge. Only PEER-edge
+        holders are read (an edge is only inferred from a `peer:` holding_on, so
+        reading other holds is wasted IO). The returned set feeds ONLY the FILTERED
+        advisory graph (build_graph @ _poll_once); the deadlock ESCALATION reads the
+        UNFILTERED build_wait_edges feed and is deliberately NOT touched here
+        (María's CHANGES-REQUESTED design — a real store-backed ring must still
+        escalate; the phantom is rejected there by cycle_is_store_backed).
 
         Requires:
             - fleet_view is the per-poll view dict; now is an aware datetime
 
         Ensures:
-            - returns the SET of holder personas with a readable DEAD hold
+            - returns the SET of holder personas whose readable hold is DEAD OR is
+              FRESH-but-contradicts its derived peer edge
             - INERT when the reader seam is unwired (None → empty set → today's
               behavior, every existing test + the deployed deadlock path unchanged)
             - a session with NO readable hold is NOT added (absence ≠ deadness — the
-              filter only SUBTRACTS an edge for a proven-dead hold; never over-filters)
+              filter only SUBTRACTS an edge for a readable hold; never over-filters)
             - swallow-safe: a raising reader degrades that session to "not stale"
               (its edge survives — fail toward the prior behavior); never raises
         """
@@ -2248,7 +2263,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 hold = self._hold_reader_fn( sid )
             except Exception:
                 hold = None
-            if hold is not None and hold_is_stale( hold, now ):
+            if hold is not None and ( hold_is_stale( hold, now )
+                                      or hold_contradicts_peer_edge( hold, holding_on, now ) ):
                 stale.add( persona )
         return stale
 

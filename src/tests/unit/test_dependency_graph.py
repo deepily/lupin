@@ -22,6 +22,7 @@ import pytest
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
     build_wait_edges, find_deadlock_cycles, build_graph,
     build_store_wait_edges, cycle_is_store_backed, hold_is_stale, quick_smoke_test,
+    hold_contradicts_peer_edge,
     _parse_peer_target,
 )
 
@@ -268,6 +269,64 @@ class TestHoldIsStale:
 
     def test_next_chase_non_string_skips_axis( self ):
         assert hold_is_stale( _hold( next_chase=12345 ), _NOW ) is False             # non-str → parse None
+
+
+# ── RECONCILIATION: fresh hold awaiting vs derived holding_on edge (bug 7f9a8ee2) ─
+#
+# The PRIMARY phantom: a holder whose CURRENT hold is fresh+honored with
+# awaiting="none" (or naming a DIFFERENT peer) but whose holding_on edge was minted
+# from a STALE last_activity.awaiting="peer:X". hold_is_stale does NOT fire (the hold
+# is fresh), so the edge survived → phantom "X is blocking worker Y". The hold's
+# declared awaiting is AUTHORITATIVE over the stale activity record → the edge dies.
+
+class TestHoldContradictsPeerEdge:
+    def test_missing_or_non_dict_hold_not_contradiction( self ):
+        assert hold_contradicts_peer_edge( None, "peer:maria", _NOW ) is False
+        assert hold_contradicts_peer_edge( { },  "peer:maria", _NOW ) is False   # falsy empty dict guarded
+        assert hold_contradicts_peer_edge( "x",  "peer:maria", _NOW ) is False   # non-dict truthy
+
+    def test_non_peer_or_non_string_holding_on_not_contradiction( self ):
+        assert hold_contradicts_peer_edge( _hold( awaiting="none" ), None,        _NOW ) is False
+        assert hold_contradicts_peer_edge( _hold( awaiting="none" ), "user:rick", _NOW ) is False
+
+    def test_unparseable_edge_peer_not_contradiction( self ):
+        # "peer:" → empty token; "peer:user:rick" → non-peer scheme → _parse → None
+        assert hold_contradicts_peer_edge( _hold( awaiting="none" ), "peer:",           _NOW ) is False
+        assert hold_contradicts_peer_edge( _hold( awaiting="none" ), "peer:user:rick",  _NOW ) is False
+
+    def test_expired_hold_deferred_to_staleness_axis( self ):
+        # only a FRESH hold's awaiting is authoritative; a dead hold is hold_is_stale's
+        # job (fail-SAFE — this predicate does not double-classify the staleness axes)
+        dead = _hold( seconds_ago_held=10_000, ttl=900, awaiting="none" )
+        assert hold_contradicts_peer_edge( dead, "peer:maria", _NOW ) is False
+
+    def test_awaiting_absent_or_non_string_not_contradiction( self ):
+        # no authoritative declaration → fail-SAFE keep the edge
+        assert hold_contradicts_peer_edge( _hold(),                "peer:maria", _NOW ) is False  # no awaiting key
+        assert hold_contradicts_peer_edge( _hold( awaiting=None ), "peer:maria", _NOW ) is False
+
+    def test_awaiting_matches_edge_peer_no_contradiction( self ):
+        # genuine wait — the hold corroborates the edge → it survives
+        assert hold_contradicts_peer_edge( _hold( awaiting="peer:maria" ), "peer:maria", _NOW ) is False
+
+    def test_awaiting_matches_case_insensitively( self ):
+        # canonical comparison: a spelling/case difference still corroborates
+        assert hold_contradicts_peer_edge( _hold( awaiting="peer:maria" ), "peer:Maria", _NOW ) is False
+
+    def test_awaiting_none_contradicts_peer_edge( self ):           # THE phantom (7f9a8ee2)
+        assert hold_contradicts_peer_edge( _hold( awaiting="none" ), "peer:maria", _NOW ) is True
+
+    def test_awaiting_different_peer_contradicts( self ):
+        assert hold_contradicts_peer_edge( _hold( awaiting="peer:bob" ), "peer:maria", _NOW ) is True
+
+    def test_falsy_canonical_token_falls_back_to_raw_on_both_sides( self ):
+        # canonical_persona_key("🌸") == "" (falsy: no [a-z0-9 ] chars) → the
+        # ( canonical_persona_key(x) or x ) short-circuit must FALL BACK to the raw
+        # token on BOTH the declared AND edge_peer sides — drives the else-arm of the
+        # `or` that the maria/bob cases never reach (genuine branch coverage, not just
+        # line). Equal raw emoji tokens corroborate; different raw tokens contradict.
+        assert hold_contradicts_peer_edge( _hold( awaiting="peer:🌸" ), "peer:🌸", _NOW ) is False
+        assert hold_contradicts_peer_edge( _hold( awaiting="peer:🌸" ), "peer:🌹", _NOW ) is True
 
 
 # ── STALENESS-FILTER: edge contribution (bug bc1bc373) ───────────────────────────
