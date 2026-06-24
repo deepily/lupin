@@ -28,6 +28,10 @@ Pure + never-raises. Design authority: lupin
 import datetime
 
 from cosa.agents.heartbeat_arbiter.manager_resolver import SOURCE_LINEAGE
+# bug 65d1247f: REUSE the edge gate's freshness predicate + peer prefix so the
+# rendered holding_on agrees with peer-EDGE inference (single source of truth —
+# do NOT re-implement a second staleness predicate).
+from cosa.agents.heartbeat_arbiter.dependency_graph import PEER_PREFIX, session_is_stale
 # F-B: THE one persona-equivalence normalizer (allocation/DM path's own).
 from lupin_mcp.persona_normalization import canonical_persona_key
 
@@ -258,7 +262,8 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     include_offline      = False,
                     declared_managers    = None,
                     count_dm_as_liveness = True,
-                    hold_mtimes          = None ):
+                    hold_mtimes          = None,
+                    alive_threshold_seconds = None ):
     """
     Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
     with per-session hierarchy (Fleet-Status P1, design §4) and live-only-by-default
@@ -301,6 +306,16 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
           Stop-refreshes its hold reads LIVE, not MANAGER-STALE). None / a missing
           sid ⇒ hold_age_s None for that row, byte-identical to the prior block.
           Hold-mtime feeds LIVENESS only, never STATE / the progress signature (C4)
+        - alive_threshold_seconds (default None) gates the bug-65d1247f DISPLAY
+          sanitization: a row whose HOLDER SESSION is beyond the alive threshold
+          (dependency_graph.session_is_stale — the SAME predicate the peer-EDGE gate
+          uses, threaded from the arbiter's self.alive_threshold_seconds) renders its
+          `peer:X` holding_on as the neutral "none", so the displayed hold AGREES with
+          edge inference (37511bfb). None (the default) ⇒ NO gate, byte-identical to
+          the prior render; peer-prefix-gated (user:/commons: holds untouched);
+          fail-SAFE (missing/unparseable last_activity_ts ⇒ NOT stale ⇒ raw value
+          kept — never hide a LIVE hold). DISPLAY ONLY — edge inference + the :1070
+          deadlock escalation are untouched
         - each row keeps STATE and LIVENESS as separate keys (C4) PLUS the two
           hierarchy keys (role, manager):
           { session_id, persona, state, holding_on, stuck, liveness{...},
@@ -387,11 +402,24 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     manager = res.get( "manager_persona" )
             except Exception:
                 manager = None
+        # bug 65d1247f (DISPLAY-only): make the rendered holding_on AGREE with the
+        # peer-EDGE gate. 37511bfb drops a STALE holder session's peer EDGE from
+        # inference; here we drop its peer DISPLAY too — a beyond-alive-threshold
+        # session shows a neutral "none" instead of a phantom-active "peer:X".
+        # Peer-prefix-gated (mirrors build_wait_edges: only peer holds were ever
+        # edges, so user:/commons: holds stay honest) and fail-SAFE (session_is_stale
+        # returns False for a missing/unparseable last_activity_ts, AND for the
+        # additive alive_threshold_seconds=None default ⇒ no gate, byte-identical to
+        # the prior render) — never hides a LIVE hold.
+        holding_on = view.get( "holding_on" )
+        if ( isinstance( holding_on, str ) and holding_on.startswith( PEER_PREFIX )
+             and session_is_stale( view, now, alive_threshold_seconds ) ):
+            holding_on = "none"
         rows.append( {
             "session_id" : sid,
             "persona"    : view.get( "persona" ),
             "state"      : view.get( "state" ),
-            "holding_on" : view.get( "holding_on" ),
+            "holding_on" : holding_on,
             "stuck"      : bool( view.get( "stuck" ) ),
             "liveness"   : liveness,
             "role"       : role,

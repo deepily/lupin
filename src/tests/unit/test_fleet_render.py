@@ -670,6 +670,64 @@ class TestPruneOfflineRows:
         assert out[ "sessions" ] == [ ] and out[ "session_count" ] == 0
 
 
+# ── stale holding_on display sanitization (bug 65d1247f) ───────────────────────
+# DISPLAY-only: a STALE holder session's raw `peer:X` hold must render as the
+# neutral "none" so the displayed holding_on AGREES with the edge logic
+# (37511bfb drops a stale session's peer EDGE; this drops its peer DISPLAY).
+# Fail-safe (consistent with 37511bfb): missing/unparseable last_activity → NOT
+# stale → show the raw value (never hide a LIVE hold). Single source of truth:
+# reuses dependency_graph.session_is_stale (the same predicate the edge gate uses).
+
+class TestStaleHoldingOnDisplaySanitization:
+    STALE_TS = NOW - datetime.timedelta( seconds=2000 )   # age 2000s > 600 threshold
+    FRESH_TS = NOW - datetime.timedelta( seconds=120 )    # age 120s  < 600 threshold
+
+    def _row( self, holding_on, last_activity_ts, **extra ):
+        view = { "s1": { "session_id": "s1", "persona": "mr radio", "state": "working",
+                         "holding_on": holding_on, "stuck": False } }
+        if last_activity_ts is not None:
+            view[ "s1" ][ "last_activity_ts" ] = last_activity_ts
+        view[ "s1" ].update( extra )
+        # include_offline=True keeps the stale row visible (focus is the hold value,
+        # not the offline prune); alive_threshold_seconds threaded as the edge path does.
+        return fr.build_snapshot( view, { }, NOW, include_offline=True,
+                                  alive_threshold_seconds=600 )[ "sessions" ][ 0 ]
+
+    def test_stale_session_peer_hold_sanitized_to_none( self ):
+        # Test 1 (RED-first): stale session + peer:maria → rendered "none" (NOT peer:maria).
+        assert self._row( "peer:maria", self.STALE_TS )[ "holding_on" ] == "none"
+
+    def test_fresh_session_peer_hold_preserved( self ):
+        # Test 2: fresh session keeps peer:maria — no over-sanitization.
+        assert self._row( "peer:maria", self.FRESH_TS )[ "holding_on" ] == "peer:maria"
+
+    def test_missing_last_activity_fail_safe_keeps_raw( self ):
+        # Test 3a: absent last_activity_ts → NOT stale → keep raw (never hide a live hold).
+        assert self._row( "peer:maria", None )[ "holding_on" ] == "peer:maria"
+
+    def test_unparseable_last_activity_fail_safe_keeps_raw( self ):
+        # Test 3b: unparseable ts → NOT stale → keep raw.
+        assert self._row( "peer:maria", "not-a-timestamp" )[ "holding_on" ] == "peer:maria"
+
+    def test_stale_session_non_peer_hold_unchanged( self ):
+        # peer-prefix gate: a stale user:/commons: hold was NEVER an edge → leave it
+        # honest (mirrors build_wait_edges, which only ever minted peer edges).
+        assert self._row( "user:Rick", self.STALE_TS )[ "holding_on" ] == "user:Rick"
+
+    def test_stale_session_none_hold_unchanged( self ):
+        # holding_on missing/None on a stale session → isinstance(str) gate → unchanged.
+        assert self._row( None, self.STALE_TS )[ "holding_on" ] is None
+
+    def test_default_threshold_none_disables_gate( self ):
+        # alive_threshold_seconds default None ⇒ NO gate (byte-identical to prior
+        # behavior): even a stale session keeps its raw peer hold.
+        view = { "s1": { "session_id": "s1", "persona": "mr radio", "state": "working",
+                         "holding_on": "peer:maria", "stuck": False,
+                         "last_activity_ts": self.STALE_TS } }
+        row = fr.build_snapshot( view, { }, NOW, include_offline=True )[ "sessions" ][ 0 ]
+        assert row[ "holding_on" ] == "peer:maria"
+
+
 def test_quick_smoke_test():
     assert fr.quick_smoke_test() is True
 

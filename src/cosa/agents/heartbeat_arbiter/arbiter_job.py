@@ -1247,6 +1247,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             include_offline      = True,        # FULL view for the post-game F2/F3 detectors
             count_dm_as_liveness = count_dm,    # DM-as-liveness toggle (read once in _poll_once)
             hold_mtimes          = hold_mtimes, # task 70be69f2 hold-as-liveness (unconditional fail-safe signal)
+            alive_threshold_seconds = self.alive_threshold_seconds,  # bug 65d1247f: same threshold the peer-EDGE gate uses (:1029-30) → display agrees with edge logic
         )
         # Fleet-Status offline-lineage carry (2026-06-10): a reaped worker loses both
         # lineage sources at once (bridge unlink + manifest drop), so its still-decaying
@@ -3007,8 +3008,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                                     outreach_id=outreach_id )
                 # no ack owed: the poke targets a DARK session (it may have no
                 # self-wake); the case-14 Rick advisory is the load-bearing output
-                self._emit_dm( outreach_id, "manager_stale_poke", persona, body,
-                               session_id=sid, expects_ack=False )
+                self._emit_dm( outreach_id, "manager_stale_poke", persona, body, session_id=sid, expects_ack=False )
                 self._mgr_poke_count[ sid ] += 1
                 fired += 1
             # else: poke-capped — the advisory already fired; silence (anti-storm)
