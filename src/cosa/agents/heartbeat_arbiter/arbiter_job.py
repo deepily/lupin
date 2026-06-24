@@ -32,6 +32,7 @@ Lane: Rachel (wiring). Pure leaves: Tiffany. Design owner: María. Manager: Tibe
 import asyncio
 import datetime
 import json
+import os
 import uuid
 import zoneinfo
 from typing import Callable, List, Optional, Protocol, runtime_checkable
@@ -89,7 +90,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
 from lupin_mcp.persona_normalization import canonical_persona_key
 # 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
 # arbiter resurfaces a dark session's aged user-gate to Rick.
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path
 from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates
 # Proactive-manager A2/A3 (fcb5dbc0): the PURE D4 operator-gate urgency router — the
 # arbiter is its single thin consumer (interrupt urgent / digest normal / queue low).
@@ -339,6 +340,35 @@ def _default_dm_activity_fn():   # pragma: no cover - production store-read IO b
     return out
 
 
+def _default_hold_mtime_fn( session_id ):   # pragma: no cover - production hold-file mtime IO boundary
+    """
+    Default hold-file mtime reader — the hold-as-liveness store source (task 70be69f2).
+
+    Returns the epoch-seconds mtime of the session's `.heartbeat-hold-<sid>.json`
+    artifact (project-root scoped via heartbeat_hold.hold_path), or None when no
+    hold file exists / the stat fails. The mtime bumps every time the session
+    re-stamps its hold (each Stop refreshes held_at → the file is rewritten), so a
+    fresh mtime is an unambiguous sign the session's process is ALIVE — the fix for
+    the MANAGER-STALE false-positive at an interactive, no-`/loop` manager that
+    refreshes its hold but posts nothing to commons (Tiberius's sess 6ec69a8c).
+
+    Mirrors session_bridge.get_bridge_mtime: a per-session epoch-float reader the
+    arbiter calls out-of-band (in _publish_fleet_snapshot) so compute_liveness
+    stays pure. Exercised at the :8000 integration tier like _default_bridge_mtime_fn;
+    the LOGIC that folds the mtime into the verdict is fully unit-tested via an
+    injected fake, so this IO boundary is no-cover (mirrors _default_dm_activity_fn).
+
+    Ensures:
+        - returns the hold-file mtime (epoch float) or None (no file / stat error)
+        - never raises — a missing hold or stat hiccup degrades to None (the other
+          5 signals carry liveness; ADDITIVE + fail-safe per the observer invariant)
+    """
+    try:
+        return os.path.getmtime( hold_path( session_id ) )
+    except OSError:
+        return None
+
+
 # Item A (2026.06.11 receipts design §2.3): the F1 default log seam now delegates
 # to arbiter_journal.make_log_fn — the ONE owner of the line shape (ts + ts_local).
 # In-pool arbiter events keep the historical "heartbeat-arbiter" service tag; the
@@ -493,6 +523,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         clock                    : Optional[ Clock ]    = None,
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
+        hold_mtime_fn            : Optional[ Callable ] = None,   # task 70be69f2: per-session hold-file mtime reader (None → real reader; hold-as-liveness)
         owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
         hold_reader_fn           : Optional[ Callable ] = None,   # 6929f4ac: per-session hold reader (session_id) -> hold|None (None → inert: classify-override + resurface tier never fire)
         user_gate_resurface_seconds : int               = 1800,  # 6929f4ac: aged-gate ceiling (30 min) — resurface a DARK session's open gate older than this to Rick
@@ -650,6 +681,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # server singleton), and the render sink (greppable log; default stdout,
         # captured by the container log). All injectable for 100% unit testing.
         self._bridge_mtime_fn = bridge_mtime_fn if bridge_mtime_fn is not None else _default_bridge_mtime_fn
+        # task 70be69f2 hold-as-liveness seam: per-session hold-file mtime reader.
+        # Defaults to the REAL reader (like bridge_mtime_fn, NOT None-inert) — a fresh
+        # hold mtime is an unconditional fail-safe sign of life that can only ADD
+        # liveness, never suppress a dark session, so it is safe live-by-default and
+        # needs no factory wiring. A non-existent hold (unit fake-id sessions) stats
+        # to None, so unit/in-pool construction stays clean without injection.
+        self._hold_mtime_fn   = hold_mtime_fn if hold_mtime_fn is not None else _default_hold_mtime_fn
         # L1 (2026-06-17) store-awareness seam: per-poll owed-work reader (the
         # arbiter as reader #2 of the one-store/three-readers design). Default
         # None keeps the seam INERT — every manager classifies UNKNOWN → the two
@@ -1117,8 +1155,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - reads each session's bridge-mtime (the wedge-resilient liveness
-              clock, §10.1) via the injected reader and builds the snapshot with
-              STATE and LIVENESS kept as orthogonal columns (C4)
+              clock, §10.1) AND hold-file mtime (task 70be69f2 hold-as-liveness)
+              via the injected readers and builds the snapshot with STATE and
+              LIVENESS kept as orthogonal columns (C4)
             - post-game split (2026-06-11): builds ONE FULL snapshot
               (include_offline=True) and stashes it on self._last_full_snapshot
               for the F2/F3 detectors, then derives the PUBLISHED live-only view
@@ -1133,6 +1172,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - returns "table" or "tick" (for the poll summary)
         """
         bridge_mtimes = { sid: self._bridge_mtime_fn( sid ) for sid in fleet_view }
+        # task 70be69f2 hold-as-liveness: each session's hold-file mtime (out-of-band
+        # IO here, so compute_liveness stays pure). A fresh hold mtime folds into the
+        # freshest-of union → an interactive manager that only Stop-refreshes its hold
+        # reads LIVE, not MANAGER-STALE. Per-session reader degrades to None (no file).
+        hold_mtimes   = { sid: self._hold_mtime_fn( sid ) for sid in fleet_view }
         # PID fast-death (kill-0): confirmed-dead sessions among the fleet view, so
         # a /exit'd worker is forced "offline" in ~1 poll instead of aging out over
         # ~1h. Host-PID-trust gated + bias-to-alive inside find_dead_sessions (empty
@@ -1150,6 +1194,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             declared_managers    = self.declared_managers,
             include_offline      = True,        # FULL view for the post-game F2/F3 detectors
             count_dm_as_liveness = count_dm,    # DM-as-liveness toggle (read once in _poll_once)
+            hold_mtimes          = hold_mtimes, # task 70be69f2 hold-as-liveness (unconditional fail-safe signal)
         )
         # Fleet-Status offline-lineage carry (2026-06-10): a reaped worker loses both
         # lineage sources at once (bridge unlink + manifest drop), so its still-decaying

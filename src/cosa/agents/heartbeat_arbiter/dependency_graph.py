@@ -59,6 +59,17 @@ PEER_PREFIX = "peer:"
 # while preserving a persona's own internal spaces and bare hyphens.
 _PEER_PROSE_DELIMITERS = re.compile( r"[,;(]|\s[—–-]\s" )
 
+# task 70be69f2 (b39562e4 follow-on): a MIS-PREFIXED awaiting like "peer:user:rick"
+# leaves a NON-peer scheme prefix on the first parsed token — its TRUE awaited
+# target is a user / gate / commons-topic, NOT a peer persona, so it must mint ZERO
+# blocking edge (else the arbiter pings a non-existent "user:rick" peer → a phantom
+# "X blocking Y" advisory + a 422 push_unavailable). NARROW by design (Tiberius's
+# fork-2 ruling): only a token that is ITSELF a non-peer scheme is dropped — a
+# legitimate MULTI-target peer wait ("peer:Tiberius,user:rick") still parses to its
+# genuine first peer (Tiberius) and keeps its edge. Schema schemes per
+# heartbeat_hold.awaiting: "user:" / "gate:" / "commons:".
+_NON_PEER_SCHEME_PREFIXES = ( "user:", "gate:", "commons:" )
+
 
 def _parse_peer_target( holding_on ):
     """
@@ -75,6 +86,12 @@ def _parse_peer_target( holding_on ):
           multi-peer list tail (after a comma/semicolon) and any prose tail (after
           an open-paren or a space-delimited em/en/hyphen dash) STRIPPED
         - returns None when no non-empty persona remains (pure prose / empty body)
+        - returns None when the first token is itself a NON-peer scheme reference
+          (task 70be69f2: a mis-prefixed "peer:user:rick" / "peer:gate:x" /
+          "peer:commons:t" — case-insensitive — names a user/gate/commons target,
+          not a peer persona, so it mints no blocking edge). A legitimate
+          multi-target peer wait ("peer:Tiberius,user:rick") is UNAFFECTED — its
+          first token "Tiberius" is a genuine peer and its edge survives.
         - never raises (pure string op)
 
     NOTE (documented v1 limitation): a holder awaiting MULTIPLE peers
@@ -85,7 +102,11 @@ def _parse_peer_target( holding_on ):
     """
     body  = holding_on[ len( PEER_PREFIX ): ]
     first = _PEER_PROSE_DELIMITERS.split( body, maxsplit=1 )[ 0 ].strip()
-    return first or None
+    if not first:
+        return None
+    if first.lower().startswith( _NON_PEER_SCHEME_PREFIXES ):   # task 70be69f2: user/gate/commons target → no peer edge
+        return None
+    return first
 
 
 def _parse_iso( value ):

@@ -111,15 +111,17 @@ def compute_liveness( view, bridge_mtime, now,
                       live_seconds  = DEFAULT_LIVE_SECONDS,
                       quiet_seconds = DEFAULT_QUIET_SECONDS,
                       stale_seconds = DEFAULT_STALE_SECONDS,
-                      count_dm      = True ):
+                      count_dm      = True,
+                      hold_mtime    = None ):
     """
-    Build the per-session LIVENESS block — FIVE distinct ages + verdict.
+    Build the per-session LIVENESS block — SIX distinct ages + verdict.
 
-    The verdict rides the FRESHEST of up-to-FIVE direct-signal ages (arbiter
-    liveness fix, Part 7 / Step 1.5 + DM-as-liveness toggle, 2026-06-17) — the
-    OLD code saw only {bridge, event}, so a worker live-by-commons or
-    live-by-idle_prompt (but with a stale stop-event) read `offline`: the false
-    WHOLE-FLEET-STALL bug. The ages stay DISTINCT columns (never collapsed):
+    The verdict rides the FRESHEST of up-to-SIX direct-signal ages (arbiter
+    liveness fix, Part 7 / Step 1.5 + DM-as-liveness toggle, 2026-06-17 +
+    hold-mtime, task 70be69f2) — the OLD code saw only {bridge, event}, so a
+    worker live-by-commons or live-by-idle_prompt (but with a stale stop-event)
+    read `offline`: the false WHOLE-FLEET-STALL bug. The ages stay DISTINCT
+    columns (never collapsed):
         - bridge_age_s      — bridge-file mtime (wedge-resilient PRIMARY, §10.1)
         - event_age_s       — last STOP/non-idle_prompt event ts (stop-event age)
         - commons_age_s     — last commons_who activity ts
@@ -136,6 +138,19 @@ def compute_liveness( view, bridge_mtime, now,
           reversibility guarantee). DM is a LIFE signal, never a PROGRESS or
           STATE signal (C4): dm_ts feeds liveness ONLY, never the progress
           signature.
+        - hold_age_s        — `.heartbeat-hold-<sid>.json` file mtime (task
+          70be69f2): an interactive, no-`/loop` MANAGER that refreshes its hold
+          every Stop (held_at re-stamped → file mtime bumps) is provably ALIVE
+          even when it never posts to commons / bumps the bridge — the canonical
+          MANAGER-STALE false-positive (Tiberius's sess 6ec69a8c: hold rewritten
+          every turn yet reported "silent 75m+" because the detector read only
+          commons last_post_ts). hold_age is UNCONDITIONAL (no toggle): a fresh
+          hold mtime is the Stop hook having run = the process is alive, an
+          unambiguous fail-safe sign of LIFE. ADDITIVE — it can only make a
+          session read MORE alive, NEVER suppress a genuinely-dark one (a dark
+          session's hold mtime ages out with everything else). LIFE signal only,
+          never STATE / the progress signature (C4). hold_mtime=None ⇒ hold_age_s
+          is None and the verdict is byte-identical to the prior 5-signal block.
     A session is LIVE if ANY counted signal is fresh (bias-to-alive); offline
     only when NONE is recent.
 
@@ -146,15 +161,21 @@ def compute_liveness( view, bridge_mtime, now,
         - bridge_mtime is an epoch-seconds float or None (get_bridge_mtime)
         - now is an aware datetime; thresholds are positive seconds
         - count_dm is a bool — whether dm_age joins the freshest-of union
+        - hold_mtime is an epoch-seconds float or None (the hold-file mtime;
+          the arbiter reads it out-of-band per session, mirroring bridge_mtime)
 
     Ensures:
         - returns { bridge_age_s, event_age_s, commons_age_s, idle_prompt_age_s,
-          dm_age_s, freshest_age_s, verdict } — ages are int seconds (or None),
-          verdict is the §10.2 label off `freshest_age_s = min(present counted
-          ages)`
+          dm_age_s, hold_age_s, freshest_age_s, verdict } — ages are int seconds
+          (or None), verdict is the §10.2 label off `freshest_age_s = min(present
+          counted ages)`
         - dm_age_s is ALWAYS present (auditable) regardless of count_dm; it joins
           the freshest-of union ONLY when count_dm is True. count_dm=False ⇒ the
           freshest_age_s + verdict are byte-identical to the prior 4-signal block
+        - hold_age_s is present iff hold_mtime is not None; when present it ALWAYS
+          joins the freshest-of union (unconditional fail-safe LIFE signal).
+          hold_mtime=None ⇒ hold_age_s is None and the verdict matches the prior
+          5-signal block (additive, reversible)
         - state is NOT consulted here (orthogonal columns, C4)
         - never raises
     """
@@ -167,10 +188,16 @@ def compute_liveness( view, bridge_mtime, now,
     # union ONLY when the toggle is on — so count_dm=False is byte-identical to
     # the prior 4-signal verdict (the reversibility guarantee).
     dm_age          = _event_age( view.get( "dm_ts" )          if is_view else None, now )
+    # hold_age (task 70be69f2): the hold-file mtime is an epoch float (same shape
+    # as bridge_mtime), so _bridge_age reads it. UNCONDITIONAL in the union — a
+    # fresh hold mtime is an unambiguous sign of life. None hold_mtime ⇒ None age.
+    hold_age        = _bridge_age( hold_mtime, now )
 
     candidates = [ a for a in ( bridge_age, event_age, commons_age, idle_prompt_age ) if a is not None ]
     if count_dm and dm_age is not None:
         candidates.append( dm_age )
+    if hold_age is not None:
+        candidates.append( hold_age )
     freshest   = min( candidates ) if candidates else None
 
     def _int( a ):
@@ -182,6 +209,7 @@ def compute_liveness( view, bridge_mtime, now,
         "commons_age_s"     : _int( commons_age ),
         "idle_prompt_age_s" : _int( idle_prompt_age ),
         "dm_age_s"          : _int( dm_age ),
+        "hold_age_s"        : _int( hold_age ),
         "freshest_age_s"    : _int( freshest ),
         "verdict"           : _verdict( freshest, live_seconds, quiet_seconds, stale_seconds ),
     }
@@ -229,7 +257,8 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     process_dead         = None,
                     include_offline      = False,
                     declared_managers    = None,
-                    count_dm_as_liveness = True ):
+                    count_dm_as_liveness = True,
+                    hold_mtimes          = None ):
     """
     Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
     with per-session hierarchy (Fleet-Status P1, design §4) and live-only-by-default
@@ -265,6 +294,13 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
           block is byte-identical to the prior 4-signal verdict (dm_age_s still
           present for audit, just excluded from the union). DM feeds LIVENESS
           only, never STATE / the progress signature (C4)
+        - hold_mtimes (default None, the task-70be69f2 hold-file-mtime liveness
+          source) is { session_id: epoch-float|None }; each row's hold mtime is
+          threaded to compute_liveness(hold_mtime=...) → its hold_age_s joins the
+          freshest-of union UNCONDITIONALLY (an interactive manager that only
+          Stop-refreshes its hold reads LIVE, not MANAGER-STALE). None / a missing
+          sid ⇒ hold_age_s None for that row, byte-identical to the prior block.
+          Hold-mtime feeds LIVENESS only, never STATE / the progress signature (C4)
         - each row keeps STATE and LIVENESS as separate keys (C4) PLUS the two
           hierarchy keys (role, manager):
           { session_id, persona, state, holding_on, stuck, liveness{...},
@@ -315,7 +351,8 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
         liveness = compute_liveness(
             view, ( bridge_mtimes or { } ).get( sid ), now,
             live_seconds, quiet_seconds, stale_seconds,
-            count_dm = count_dm_as_liveness,
+            count_dm   = count_dm_as_liveness,
+            hold_mtime = ( hold_mtimes or { } ).get( sid ),
         )
         # PID fast-death override (kill-0): a CONFIRMED-dead process forces
         # "offline" now, regardless of how recent its last signal was — so a

@@ -70,6 +70,20 @@ class TestBuildWaitEdges:
             "Sam"     : "cc-author-mr-radio-1",
         }
 
+    def test_mis_prefixed_user_gate_target_mints_no_edge( self ):
+        # task 70be69f2 fork-2(a): a `peer:`-prefixed holding whose parsed token is
+        # itself a user/gate/commons scheme reference (a mis-prefix) has its TRUE
+        # awaited target a user/gate — NOT a peer — so it mints ZERO blocking edge.
+        # A legitimate multi-target peer wait ("peer:Tiberius,user:rick") is
+        # UNAFFECTED: its first token is a genuine peer and its edge survives.
+        fleet = {
+            "s1": { "persona": "mr radio", "holding_on": "peer:user:rick" },        # user mis-prefix → dropped
+            "s2": { "persona": "tiffany",  "holding_on": "peer:gate:operator" },    # gate mis-prefix → dropped
+            "s3": { "persona": "krishna",  "holding_on": "peer:commons:fleet" },    # commons mis-prefix → dropped
+            "s4": { "persona": "mr radio", "holding_on": "peer:Tiberius,user:rick" },  # legit peer KEPT
+        }
+        assert build_wait_edges( fleet ) == { "mr radio": "Tiberius" }
+
 
 # ── peer-target parse (bug b39562e4) ────────────────────────────────────────────
 
@@ -87,6 +101,19 @@ class TestParsePeerTarget:
         ( "peer:  spacey  ",                            "spacey" ),                 # surrounding ws stripped
         ( "peer:",                                      None ),                     # empty body
         ( "peer: — pure prose",                         None ),                     # nothing before delimiter
+        # task 70be69f2 fork-2(a): a MIS-PREFIXED token that is itself a non-peer
+        # scheme (user/gate/commons) names a user/gate target, NOT a peer persona
+        # → no edge (else the arbiter pings a phantom "user:rick" peer + 422s).
+        ( "peer:user:rick",                             None ),                     # user mis-prefix dropped
+        ( "peer:gate:ricks-court",                      None ),                     # gate mis-prefix dropped
+        ( "peer:commons:fleet-arbiter",                 None ),                     # commons mis-prefix dropped
+        ( "peer:USER:Rick",                             None ),                     # scheme match is case-insensitive
+        ( "peer:user:rick,peer:bob",                    None ),                     # mis-prefix is the FIRST token → dropped before the list tail
+        # NON-REGRESSION (the narrow ruling): a LEGIT multi-target peer wait keeps
+        # its genuine first peer — the user-tail is dropped by the list split, not
+        # the scheme guard, so the peer edge survives.
+        ( "peer:Tiberius,user:rick",                    "Tiberius" ),               # legit peer kept (user tail dropped)
+        ( "peer:user",                                  "user" ),                   # bare "user" w/o colon is a (odd) persona, NOT a scheme → kept
     ] )
     def test_first_canonical_token_only( self, holding_on, expected ):
         assert _parse_peer_target( holding_on ) == expected

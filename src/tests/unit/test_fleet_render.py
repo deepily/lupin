@@ -99,6 +99,42 @@ class TestComputeLiveness:
         out = fr.compute_liveness( "not-a-dict", None, NOW )
         assert out[ "event_age_s" ] is None and out[ "verdict" ] == "offline"
 
+    # ── hold-mtime as liveness (task 70be69f2) ──────────────────────────────────
+    def test_hold_age_absent_by_default( self ):
+        # hold_mtime defaults to None → hold_age_s is None and the verdict is the
+        # prior 5-signal block (additive + reversible: byte-identical to today).
+        out = fr.compute_liveness( { "last_event_ts": None }, None, NOW )
+        assert out[ "hold_age_s" ] is None and out[ "verdict" ] == "offline"
+
+    def test_hold_mtime_makes_session_live_with_no_other_signal( self ):
+        # THE canonical repro (Tiberius sess 6ec69a8c): no bridge / event / commons /
+        # idle_prompt / dm — ONLY a fresh hold mtime → LIVE (not MANAGER-STALE).
+        out = fr.compute_liveness( { "last_event_ts": None }, None, NOW,
+                                   hold_mtime=NOW.timestamp() - 7 )
+        assert out[ "hold_age_s" ] == 7
+        assert out[ "freshest_age_s" ] == 7 and out[ "verdict" ] == "LIVE"
+
+    def test_hold_age_joins_freshest_union_unconditionally( self ):
+        # A 50m-old event with a fresh (5s) hold → hold wins the freshest-of union.
+        # hold is UNCONDITIONAL (no count_dm-style toggle): even count_dm=False keeps it.
+        view = { "last_event_ts": NOW - datetime.timedelta( minutes=50 ) }
+        out  = fr.compute_liveness( view, None, NOW, count_dm=False,
+                                    hold_mtime=NOW.timestamp() - 5 )
+        assert out[ "event_age_s" ] == 50 * 60 and out[ "hold_age_s" ] == 5
+        assert out[ "freshest_age_s" ] == 5 and out[ "verdict" ] == "LIVE"
+
+    def test_stale_hold_does_not_rescue_a_dark_session( self ):
+        # FAIL-SAFE: a hold mtime as old as everything else ages out too — hold can
+        # only ADD liveness, never falsely keep a genuinely-dark session alive.
+        out = fr.compute_liveness( { "last_event_ts": None }, None, NOW,
+                                   hold_mtime=NOW.timestamp() - 99999 )
+        assert out[ "hold_age_s" ] == 99999 and out[ "verdict" ] == "offline"
+
+    def test_hold_age_bad_value_swallowed( self ):
+        # a non-numeric hold mtime degrades to None (reuses _bridge_age's guard).
+        out = fr.compute_liveness( { "last_event_ts": None }, None, NOW, hold_mtime="nope" )
+        assert out[ "hold_age_s" ] is None and out[ "verdict" ] == "offline"
+
 
 # ── build_snapshot ────────────────────────────────────────────────────────────
 
@@ -130,6 +166,33 @@ class TestBuildSnapshot:
     def test_empty_fleet( self ):
         snap = fr.build_snapshot( { }, { }, NOW )
         assert snap[ "session_count" ] == 0 and snap[ "sessions" ] == [ ]
+
+    def test_hold_mtimes_threaded_into_liveness_union( self ):
+        # task 70be69f2: build_snapshot threads each sid's hold mtime to
+        # compute_liveness. s1 has ONLY a fresh hold mtime (no bridge/event) → LIVE;
+        # s2 has neither bridge nor hold → offline. hold_age_s is per-row.
+        view = {
+            "s1": { "session_id": "s1", "persona": "Ann", "state": "working",
+                    "holding_on": "none", "stuck": False, "last_event_ts": None },
+            "s2": { "session_id": "s2", "persona": "Bo", "state": "unknown",
+                    "holding_on": "none", "stuck": False, "last_event_ts": None },
+        }
+        snap = fr.build_snapshot( view, { }, NOW, include_offline=True,
+                                  hold_mtimes={ "s1": NOW.timestamp() - 6 } )
+        rows = { r[ "session_id" ]: r for r in snap[ "sessions" ] }
+        assert rows[ "s1" ][ "liveness" ][ "hold_age_s" ] == 6
+        assert rows[ "s1" ][ "liveness" ][ "verdict" ] == "LIVE"
+        assert rows[ "s2" ][ "liveness" ][ "hold_age_s" ] is None
+        assert rows[ "s2" ][ "liveness" ][ "verdict" ] == "offline"
+
+    def test_hold_mtimes_default_none_is_byte_identical( self ):
+        # default hold_mtimes=None → hold_age_s None for every row (additive,
+        # reversible: a session with no other signal stays offline).
+        view = { "s1": { "session_id": "s1", "persona": "Ann", "state": "unknown",
+                         "holding_on": "none", "stuck": False, "last_event_ts": None } }
+        row  = fr.build_snapshot( view, { }, NOW, include_offline=True )[ "sessions" ][ 0 ]
+        assert row[ "liveness" ][ "hold_age_s" ] is None
+        assert row[ "liveness" ][ "verdict" ] == "offline"
 
     def test_none_inputs( self ):
         snap = fr.build_snapshot( None, None, NOW )

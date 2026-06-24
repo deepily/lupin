@@ -101,6 +101,69 @@ def test_fresh_manager_gets_nothing():
     assert gw.sent == [ ] and escal == [ ]
 
 
+# ── task 70be69f2: hold-file mtime is a sign of life (the canonical repro) ────
+
+def test_fresh_hold_mtime_keeps_interactive_manager_off_staleness_tier():
+    """REPRO (Tiberius sess 6ec69a8c): an interactive, no-`/loop` MANAGER whose
+    stop-event aged to 45m (and no bridge / commons) but whose HOLD mtime is fresh
+    (re-stamped every Stop) must read LIVE, NOT MANAGER-STALE. Drives the REAL
+    _publish_fleet_snapshot (which now reads the injected hold_mtime_fn) and then
+    the staleness detector over its emitted snapshot — proving the full wiring."""
+    gw, escal   = _GW(), [ ]
+    stale_event = NOW - datetime.timedelta( seconds=2700 )            # 45m-old stop-event
+    view = { "m1": { "session_id": "m1", "persona": "Tiberius", "state": "working",
+                     "holding_on": "none", "stuck": False, "reaped": False,
+                     "last_event_ts": stale_event, "commons_ts": None,
+                     "idle_prompt_ts": None, "dm_ts": None } }
+    job = _job(
+        gw, notify=lambda m, *a, **k: escal.append( m ),
+        declared_managers   = [ "Tiberius" ],                          # badge m1 role=manager
+        bridge_mtime_fn     = lambda sid: None,                        # no bridge signal
+        hold_mtime_fn       = lambda sid: NOW.timestamp() - 5,         # FRESH hold (5s)
+        bridge_discovery_fn = lambda: { },
+        list_managers_fn    = lambda: set(),
+        resolve_manager_fn  = lambda sid, **k: { "manager_persona": None, "source": "unresolved" },
+        snapshot_sink       = lambda s: None,
+        render_sink         = lambda s: None,
+    )
+    job._publish_fleet_snapshot( view, NOW, True )
+    row = job._last_full_snapshot[ "sessions" ][ 0 ]
+    assert row[ "role" ] == "manager"
+    assert row[ "liveness" ][ "hold_age_s" ] == 5                      # hold mtime folded in
+    assert row[ "liveness" ][ "verdict" ] == "LIVE"                    # hold rescued it from "stale 45m"
+    # the staleness detector over the SAME snapshot fires NOTHING — the bug is dead.
+    assert job._check_manager_staleness( job._last_full_snapshot, NOW, [ ] ) == 0
+    assert _stale_pokes( gw ) == [ ] and escal == [ ]
+
+
+def test_stale_hold_does_not_rescue_a_truly_dark_manager():
+    """FAIL-SAFE counter-control: a manager with a stale stop-event AND a stale hold
+    mtime (everything aged out) still reads stale and IS poked — hold-mtime only
+    ADDS liveness, it never suppresses a genuinely-dark session."""
+    gw, escal   = _GW(), [ ]
+    stale_event = NOW - datetime.timedelta( seconds=3000 )            # 50m-old stop-event
+    view = { "m1": { "session_id": "m1", "persona": "Tiberius", "state": "working",
+                     "holding_on": "none", "stuck": False, "reaped": False,
+                     "last_event_ts": stale_event, "commons_ts": None,
+                     "idle_prompt_ts": None, "dm_ts": None } }
+    job = _job(
+        gw, notify=lambda m, *a, **k: escal.append( m ),
+        declared_managers   = [ "Tiberius" ],
+        bridge_mtime_fn     = lambda sid: None,
+        hold_mtime_fn       = lambda sid: NOW.timestamp() - 3000,      # hold ALSO 50m stale
+        bridge_discovery_fn = lambda: { },
+        list_managers_fn    = lambda: set(),
+        resolve_manager_fn  = lambda sid, **k: { "manager_persona": None, "source": "unresolved" },
+        snapshot_sink       = lambda s: None,
+        render_sink         = lambda s: None,
+    )
+    job._publish_fleet_snapshot( view, NOW, True )
+    row = job._last_full_snapshot[ "sessions" ][ 0 ]
+    assert row[ "liveness" ][ "hold_age_s" ] == 3000
+    assert job._check_manager_staleness( job._last_full_snapshot, NOW, active_managers=[ ] ) == 1
+    assert len( _stale_pokes( gw ) ) == 1                              # genuinely dark → poked
+
+
 # ── the headline: stale manager → poke + Rick advisory, same poll ────────────
 
 def test_stale_manager_poked_and_rick_advised_same_poll():
