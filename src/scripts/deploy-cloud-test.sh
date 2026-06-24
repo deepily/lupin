@@ -126,10 +126,14 @@ deploy_deps() {
 
 # ---- health-gate + rollback ----------------------------------------------
 health_gate() {
-    log "health-gate: polling $REST_CONTAINER"
+    log "health-gate: polling $REST_CONTAINER (up to ${HEALTH_GATE_POLLS:-72}x5s)"
     local h
+    # Window default 72x5s = 360s. Was 36 (180s) — the d8c699aa live E2E proved the
+    # cloud-test container's restart-to-healthy time sits NEAR/above 180s and is
+    # variable, so a 180s gate FALSE-rolled-back perfectly-good deploys. 360s gives
+    # ~2x headroom; override via HEALTH_GATE_POLLS for slower images.
     h="$( "${SSH[@]}" "
-        for i in \$(seq 1 36); do
+        for i in \$(seq 1 ${HEALTH_GATE_POLLS:-72}); do
             s=\$(sudo docker inspect --format '{{.State.Health.Status}}' $REST_CONTAINER 2>/dev/null || echo none)
             [ \"\$s\" = healthy ] && { echo healthy; exit 0; }
             sleep 5
