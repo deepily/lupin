@@ -10767,8 +10767,17 @@ class NotificationsUI {
         if ( existing ) existing.remove();
         if ( !managerPersona ) {
             icon.removeAttribute( "data-has-manager" );
+            // Worker-badge silencing (Rick 2026-06-24): managed-worker status is
+            // exactly "has a manager". Clear data-worker when lineage is removed so
+            // the count ::after re-enables (this is the single source that sets
+            // data-worker — covers both icon-creation and the live-patch path).
+            icon.removeAttribute( "data-worker" );
             return;
         }
+        // A sender WITH a manager is a managed worker → suppress its numeric
+        // unread-count badge (CSS hides the ::after for [data-worker][data-unread]);
+        // the faint pulse stays. See gap list §6 Decision A/B.
+        icon.setAttribute( "data-worker", "true" );
         const mgrBadge = document.createElement( "span" );
         mgrBadge.className   = "cc-strip-manager-badge";
         mgrBadge.textContent = managerPersona.initial || "";
@@ -10998,7 +11007,43 @@ class NotificationsUI {
             icon.removeAttribute( "data-unread" );
             void icon.offsetWidth;  // force reflow
             icon.setAttribute( "data-unread", "true" );
-            icon.setAttribute( "data-unread-count", String( next ) );
+            // Worker-badge silencing (Rick 2026-06-24): managed workers keep the
+            // pulse (data-unread above) for peripheral sign-of-life but NEVER get
+            // the numeric count — workers reach Rick through their manager, not via
+            // a count on the focus bar. Predicate: managerPersonaMap.get(id) truthy.
+            if ( this._isWorkerSender( senderId ) ) {
+                icon.removeAttribute( "data-unread-count" );
+            } else {
+                icon.setAttribute( "data-unread-count", String( next ) );
+            }
+        }
+    }
+
+    /**
+     * True when `senderId` is a MANAGED worker — i.e. its manager-lineage is
+     * known (managerPersonaMap holds a non-null persona). Managed workers have
+     * their numeric unread/new-count badges suppressed everywhere (strip icon
+     * ::after + per-card .sender-new-count); the faint activity pulse is kept.
+     * Single predicate so the strip path and the card path stay in lockstep.
+     * See gap list §1 keystone + §6 Decision A (Rick 2026-06-24).
+     */
+    _isWorkerSender( senderId ) {
+        return !!( this.managerPersonaMap && this.managerPersonaMap.get( senderId ) );
+    }
+
+    /**
+     * Set/clear `data-worker="true"` on a `.sender-card` element to reflect the
+     * sender's managed-worker status. The shared stylesheet keys its
+     * count-suppression + faint-pulse rule on `.sender-card[data-worker="true"]`
+     * (notifications-surface.css, shared by BOTH clients). Idempotent; clears the
+     * flag when lineage is absent so a re-parented session re-shows its count.
+     */
+    _applyCardWorkerFlag( card, senderId ) {
+        if ( !card ) return;
+        if ( this._isWorkerSender( senderId ) ) {
+            card.setAttribute( "data-worker", "true" );
+        } else {
+            card.removeAttribute( "data-worker" );
         }
     }
 
@@ -13488,6 +13533,11 @@ class NotificationsUI {
         card.setAttribute( 'data-project', parsed.project );
         card.setAttribute( 'data-session-id', sessionId || '' );
         card.setAttribute( 'data-sender-id', senderId );  // for focus-mode walker lookup
+        // Worker-badge silencing (Rick 2026-06-24): mark managed-worker cards so the
+        // shared sheet (notifications-surface.css) hides the .sender-new-count number
+        // and renders a faint activity dot via .sender-stats-group::after. Kept fresh
+        // by updateSenderCardHeader as manager lineage arrives post-creation.
+        this._applyCardWorkerFlag( card, senderId );
 
         // Foundation: set --persona-color + --persona-color-rgb on the card
         // root so Tier 1 (border + shadow) and Tier 2 (header gradient) CSS
@@ -13582,7 +13632,13 @@ class NotificationsUI {
                 if ( icon ) {
                     this.ccStripUnreadCounts[ senderId ] = 1;
                     icon.setAttribute( "data-unread", "true" );
-                    icon.setAttribute( "data-unread-count", "1" );
+                    // Worker-badge silencing (Rick 2026-06-24): keep the pulse but
+                    // never write the numeric count for managed workers (parity with
+                    // _markStripIconActivity). The CSS ::after carve is the belt;
+                    // this is the suspenders so the attribute is never even present.
+                    if ( !this._isWorkerSender( senderId ) ) {
+                        icon.setAttribute( "data-unread-count", "1" );
+                    }
                 }
             }
         }
@@ -14143,16 +14199,24 @@ class NotificationsUI {
         const card = document.getElementById( cardId );
         if ( !card ) return;
 
+        // Keep the worker flag current — manager lineage can arrive AFTER the card
+        // was first rendered (the icon-before-persona ordering), so re-evaluate on
+        // every header update (Rick 2026-06-24).
+        this._applyCardWorkerFlag( card, senderId );
+
         // Update total count
         const countEl = card.querySelector( '.sender-message-count' );
         if ( countEl ) {
             countEl.textContent = `(${group.totalCount})`;
         }
 
-        // Update new count badge
+        // Update new count badge. Worker-badge silencing (Rick 2026-06-24):
+        // managed workers never surface a "N new" count on their card — they
+        // reach Rick through their manager. The card otherwise renders intact
+        // (status, activity, persona); only the number is suppressed.
         const newCountEl = card.querySelector( '.sender-new-count' );
         if ( newCountEl ) {
-            if ( group.newCount > 0 ) {
+            if ( group.newCount > 0 && !this._isWorkerSender( senderId ) ) {
                 newCountEl.textContent = `${group.newCount} new`;
                 newCountEl.style.display = 'inline-block';
             } else {

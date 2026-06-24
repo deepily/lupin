@@ -2218,6 +2218,17 @@
             line-height: 1;
         }
 
+        /* Worker-badge silencing (Rick 2026-06-24, gap list §6 Decision A/B):
+         * a managed worker (data-worker="true", set by _applyManagerBadge when
+         * manager lineage is known) keeps its faint activity pulse (the
+         * [data-unread="true"] animation above stays) but NEVER shows the numeric
+         * count circle — hide the ::after. Workers reach Rick through their
+         * manager, so their per-session count is noise on the focus bar. Belt to
+         * the JS suspenders (the count attribute is also not written for workers). */
+        .cc-strip-icon[data-worker="true"][data-unread="true"]::after {
+            display: none;
+        }
+
         /* Manager-lineage badge (Rick 2026-06-08): the spawning manager's glyph +
          * initial, tinted with the manager's color, docked at the TOP-LEFT perimeter
          * (135°) — 180° opposite the bottom-right speaker ::before, and clear of the

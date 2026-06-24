@@ -107,6 +107,41 @@ test("senderCard: unread_count === 0 renders no .sender-new-count badge", () => 
   assert.equal(card.querySelector(".sender-new-count"), null);
 });
 
+// ---------------------------------------------------------------------------
+// Worker-badge silencing (Rick 2026-06-24, gap list §6 Decision A/B).
+// A managed worker (is_worker=true) sets data-worker on the card and suppresses
+// the numeric .sender-new-count (the shared sheet renders a faint pulse instead
+// via .sender-stats-group::after). Root / manager sessions keep their count.
+// ---------------------------------------------------------------------------
+
+test("senderCard: WORKER (is_worker) sets data-worker on the card AND suppresses .sender-new-count", () => {
+  const card = renderSenderCard(makeSender({ unread_count: 7, is_worker: true }), [], { appTimezone: "UTC" });
+  assert.equal(card.getAttribute("data-worker"), "true", "card flagged worker for the shared pulse rule");
+  assert.equal(card.querySelector(".sender-new-count"), null, "numeric count suppressed for worker");
+  // Number-only suppression — the stats container (pulse anchor) still renders.
+  assert.notEqual(card.querySelector(".sender-stats-group"), null);
+});
+
+test("senderCard: ROOT (is_worker false) keeps the count and carries NO data-worker", () => {
+  const card = renderSenderCard(makeSender({ unread_count: 7, is_worker: false }), [], { appTimezone: "UTC" });
+  assert.equal(card.getAttribute("data-worker"), null, "root card not flagged");
+  const badge = card.querySelector(".sender-new-count");
+  assert.notEqual(badge, null);
+  assert.equal(badge!.textContent, "7");
+});
+
+test("senderCard: is_worker undefined (no lineage signal) behaves like a non-worker — count shown", () => {
+  const card = renderSenderCard(makeSender({ unread_count: 4 }), [], { appTimezone: "UTC" });
+  assert.equal(card.getAttribute("data-worker"), null);
+  assert.equal(card.querySelector(".sender-new-count")!.textContent, "4");
+});
+
+test("senderCard: WORKER with zero unread still flags data-worker (pulse needs it) and shows no count", () => {
+  const card = renderSenderCard(makeSender({ unread_count: 0, is_worker: true }), [], { appTimezone: "UTC" });
+  assert.equal(card.getAttribute("data-worker"), "true");
+  assert.equal(card.querySelector(".sender-new-count"), null);
+});
+
 test("senderCard: borrowed persona gets the 'borrowed' class on .sender-persona-badge", () => {
   const card = renderSenderCard(
     makeSender({ voice_persona: makePersona({ borrowed: true }) }),

@@ -420,6 +420,12 @@ export interface SenderRecord {
   unread_count             : number;
   conversation_mode_active : boolean;
   voice_persona?           : VoicePersona;
+  // Lane A (2026-06-24): true when this sender is a MANAGED worker — i.e. its
+  // voice_persona_assigned payload (or cold-load row) carries a manager_persona,
+  // the same signal SessionStripStore reads. The render gate suppresses the
+  // numeric .sender-new-count for workers (faint sign-of-life pulse kept via the
+  // shared parity sheet's .sender-card[data-worker="true"] rule). Undefined ⇒ not a worker.
+  is_worker?               : boolean;
 }
 
 export type SenderChangeKind = "added" | "updated" | "removed" | "hydrated";

@@ -58,6 +58,14 @@ export function renderSenderCard(
   root.className = "sender-card";
   root.setAttribute("data-id-hash",  sender.sender_id);
   root.setAttribute("data-sender-id", sender.sender_id);
+  // Worker-badge silencing (Rick 2026-06-24, gap list §6 Decision A/B): mark
+  // managed-worker cards so the shared sheet (notifications-surface.css, linked
+  // by BOTH clients) hides the .sender-new-count number and renders a faint
+  // activity dot via `.sender-stats-group::after`. is_worker is set in
+  // SenderStore from the same manager_persona signal SessionStripStore reads.
+  if (sender.is_worker === true) {
+    root.setAttribute("data-worker", "true");
+  }
 
   const persona = sender.voice_persona;
   if (persona !== undefined) {
@@ -161,7 +169,7 @@ export function renderSenderCard(
       ${sessionBlock}
       <span class="sender-stats-group">
         ${personaBadge}
-        ${sender.unread_count > 0
+        ${sender.unread_count > 0 && sender.is_worker !== true
           ? html`<span class="sender-new-count">${sender.unread_count}</span>`
           : null}
         <span class="sender-message-count">(${notifications.length})</span>

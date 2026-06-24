@@ -288,3 +288,164 @@ test("session_reaped removes ONLY the named sender, leaving others intact", () =
   assert.ok(kept, "other sender untouched");
   assert.equal(kept!.unread_count, 1, "session_reaped does not bump another sender's unread");
 });
+
+// ---------------------------------------------------------------------------
+// Worker-badge silencing — is_worker from payload.manager_persona (Rick 2026-06-24)
+// A managed worker (manager lineage present on the voice_persona_assigned
+// payload) gets is_worker=true so renderSenderCard suppresses its numeric
+// .sender-new-count. Root / manager sessions (no manager) get is_worker=false.
+// Mirrors SessionStripStore's `payload.manager_persona` read. Gap list §6 Decision A.
+// ---------------------------------------------------------------------------
+
+// payload-aware emit (the shared `emitNotification` helper drops `payload`).
+function emitWithPayload(
+  bus: ReturnType<typeof createEventBusForTesting>,
+  fields: {
+    type           ?: string;
+    sender_id      : string;
+    timestamp      ?: string;
+    voice_persona  ?: Record<string, unknown> | null;
+    payload        ?: Record<string, unknown> | null;
+  },
+): void {
+  bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: fields },
+    source  : "test",
+    ts      : 0,
+  });
+}
+
+const ASSIGNED_PERSONA = { name: "Rio", voice_id: "v1", icon: "🎤", color: "#28a745", borrowed: false };
+
+test("voice_persona_assigned WITH payload.manager_persona → is_worker=true", () => {
+  const { bus, store } = setup();
+  emitWithPayload(bus, {
+    type          : "voice_persona_assigned",
+    sender_id     : "worker@x",
+    voice_persona : ASSIGNED_PERSONA,
+    payload       : { manager_persona: { name: "Tiberius", icon: "👑", color: "#3F51B5" } },
+  });
+  assert.equal(store.get("worker@x")!.is_worker, true);
+});
+
+test("voice_persona_assigned with NO manager_persona → is_worker=false (root/manager session)", () => {
+  const { bus, store } = setup();
+  emitWithPayload(bus, {
+    type          : "voice_persona_assigned",
+    sender_id     : "root@x",
+    voice_persona : ASSIGNED_PERSONA,
+    payload       : {},   // no manager_persona key
+  });
+  assert.equal(store.get("root@x")!.is_worker, false);
+});
+
+test("voice_persona_assigned with NO payload at all → is_worker=false (managerPresent guard)", () => {
+  const { bus, store } = setup();
+  emitWithPayload(bus, {
+    type          : "voice_persona_assigned",
+    sender_id     : "nopayload@x",
+    voice_persona : ASSIGNED_PERSONA,
+    // payload omitted entirely — managerPresent(undefined) must return false
+  });
+  assert.equal(store.get("nopayload@x")!.is_worker, false);
+});
+
+test("voice_persona_assigned with explicit null manager_persona → is_worker=false", () => {
+  const { bus, store } = setup();
+  emitWithPayload(bus, {
+    type          : "voice_persona_assigned",
+    sender_id     : "nullmgr@x",
+    voice_persona : ASSIGNED_PERSONA,
+    payload       : { manager_persona: null },
+  });
+  assert.equal(store.get("nullmgr@x")!.is_worker, false);
+});
+
+test("re-assignment from worker → no-manager flips is_worker back to false (authoritative)", () => {
+  const { bus, store } = setup();
+  emitWithPayload(bus, {
+    type          : "voice_persona_assigned",
+    sender_id     : "moved@x",
+    voice_persona : ASSIGNED_PERSONA,
+    payload       : { manager_persona: { name: "Tiberius", icon: "👑", color: "#3F51B5" } },
+  });
+  assert.equal(store.get("moved@x")!.is_worker, true, "precondition: worker");
+
+  emitWithPayload(bus, {
+    type          : "voice_persona_assigned",
+    sender_id     : "moved@x",
+    voice_persona : ASSIGNED_PERSONA,
+    payload       : {},   // re-parented to a root role — no manager
+  });
+  assert.equal(store.get("moved@x")!.is_worker, false, "re-assignment clears the worker flag");
+});
+
+test("a plain notification with NO manager_persona leaves is_worker unset (falsy → renders count)", () => {
+  const { bus, store } = setup();
+  emitNotification(bus, { type: "task", sender_id: "plain@x", timestamp: "2026-06-24T10:00:00Z" });
+  const rec = store.get("plain@x")!;
+  assert.equal(rec.is_worker, undefined, "no lineage signal → not a worker");
+  assert.equal(rec.unread_count, 1);
+});
+
+// Rachel hardening (2026-06-24): the server stamps manager_persona on EVERY
+// notification, so a worker whose FIRST event is a plain notification (e.g. a
+// silent WS reconnect with no fresh assigned/hydrate) must be silenced at once
+// — no count flash. Fill-forward on the regular path, set-true-only.
+
+test("a worker's FIRST event being a PLAIN notification (with manager_persona) sets is_worker=true", () => {
+  const { bus, store } = setup();
+  emitWithPayload(bus, {
+    type      : "task",
+    sender_id : "wkfirst@x",
+    timestamp : "2026-06-24T10:00:00Z",
+    payload   : { manager_persona: { name: "Tiberius", icon: "👑", color: "#3F51B5" } },
+  });
+  const rec = store.get("wkfirst@x")!;
+  assert.equal(rec.is_worker, true, "managed worker silenced from its very first plain notification");
+  assert.equal(rec.unread_count, 1, "still a real arrival — unread bumped");
+});
+
+test("a SECOND plain notification carrying manager_persona fills is_worker forward on an existing record", () => {
+  const { bus, store } = setup();
+  // First a plain notification with NO manager — is_worker stays unset.
+  emitNotification(bus, { type: "task", sender_id: "wklate@x", timestamp: "2026-06-24T10:00:00Z" });
+  assert.equal(store.get("wklate@x")!.is_worker, undefined, "precondition: not yet known as a worker");
+  // A later plain notification now carries the lineage → fill-forward to true.
+  emitWithPayload(bus, {
+    type      : "task",
+    sender_id : "wklate@x",
+    timestamp : "2026-06-24T10:01:00Z",
+    payload   : { manager_persona: { name: "Tiberius", icon: "👑", color: "#3F51B5" } },
+  });
+  const rec = store.get("wklate@x")!;
+  assert.equal(rec.is_worker, true, "fill-forward on the existing-record branch");
+  assert.equal(rec.unread_count, 2, "both arrivals counted");
+});
+
+test("a plain notification with explicit null manager_persona does NOT set is_worker (set-true-only)", () => {
+  const { bus, store } = setup();
+  emitWithPayload(bus, {
+    type      : "task",
+    sender_id : "nullmgrplain@x",
+    timestamp : "2026-06-24T10:00:00Z",
+    payload   : { manager_persona: null },
+  });
+  assert.equal(store.get("nullmgrplain@x")!.is_worker, undefined, "null lineage → not a worker");
+});
+
+test("never-regress on the hot path: a worker stays is_worker=true after a later no-manager plain notification", () => {
+  // Rachel nit (2026-06-24): set-true-only must never CLEAR on the regular path.
+  const { bus, store } = setup();
+  emitWithPayload(bus, {
+    type      : "task",
+    sender_id : "stayworker@x",
+    timestamp : "2026-06-24T10:00:00Z",
+    payload   : { manager_persona: { name: "Tiberius", icon: "👑", color: "#3F51B5" } },
+  });
+  assert.equal(store.get("stayworker@x")!.is_worker, true, "precondition: worker");
+  // A subsequent plain notification with NO manager must NOT regress the flag.
+  emitNotification(bus, { type: "task", sender_id: "stayworker@x", timestamp: "2026-06-24T10:05:00Z" });
+  assert.equal(store.get("stayworker@x")!.is_worker, true, "set-true-only never clears on the hot path");
+});

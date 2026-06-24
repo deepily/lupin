@@ -166,3 +166,52 @@ test("hydrate of an empty snapshot still emits the single hydrated change", () =
   assert.equal(events.length, 1);
   assert.equal(events[0]!.payload.changeKind, "hydrated");
 });
+
+// ===========================================================================
+// Worker-badge silencing — is_worker from rec.manager_persona (Rick 2026-06-24)
+// Cold-load rows carry the manager lineage at `rec.manager_persona` (same field
+// SessionStripStore hydrates from). Fill-forward only: set is_worker when the
+// snapshot says "managed"; never clobber a live-set true back to false.
+// ===========================================================================
+
+test("hydrate sets is_worker=true when the snapshot row carries manager_persona", () => {
+  const { store } = setup();
+  store.hydrate([makeRec({
+    sender_id       : "worker-cold",
+    manager_persona : { name: "Tiberius", icon: "👑", color: "#3F51B5" },
+  })]);
+  assert.equal(store.get("worker-cold")!.is_worker, true);
+});
+
+test("hydrate leaves is_worker unset for a row with no manager_persona (root session)", () => {
+  const { store } = setup();
+  store.hydrate([makeRec({ sender_id: "root-cold" })]);
+  assert.equal(store.get("root-cold")!.is_worker, undefined);
+});
+
+test("hydrate leaves is_worker unset when manager_persona is explicitly null", () => {
+  const { store } = setup();
+  store.hydrate([makeRec({ sender_id: "null-cold", manager_persona: null })]);
+  assert.equal(store.get("null-cold")!.is_worker, undefined);
+});
+
+test("hydrate fills is_worker forward — never clobbers a live-set worker back to false", () => {
+  const { bus, store } = setup();
+  // Live voice_persona_assigned arrives FIRST with a manager → is_worker true.
+  bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      type          : "voice_persona_assigned",
+      sender_id     : "race@x",
+      timestamp     : "2026-06-11T21:00:00Z",
+      voice_persona : { name: "Rio", voice_id: "v1", icon: "🎤", color: "#28a745" },
+      payload       : { manager_persona: { name: "Tiberius", icon: "👑", color: "#3F51B5" } },
+    } },
+    source : "test",
+    ts     : 0,
+  });
+  assert.equal(store.get("race@x")!.is_worker, true, "precondition: live-set worker");
+  // A stale snapshot WITHOUT manager_persona must NOT regress the flag.
+  store.hydrate([makeRec({ sender_id: "race@x" })]);
+  assert.equal(store.get("race@x")!.is_worker, true, "fill-forward: stale snapshot does not clear it");
+});

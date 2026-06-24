@@ -42,6 +42,7 @@ import {
   createSessionStripRenderer,
   createReadingPaneRenderer,
   createCommonsActivityRenderer,
+  createBroadcastCardRenderer,
   configureMetaDisplayCap,
   // Lane E full-parity quartet renderers.
   createTtsPreviewSliderRenderer,
@@ -460,6 +461,17 @@ function bootMultiplexer(): void {
   const commonsActivityMountEl = document.getElementById("commons-activity-pane");
   if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found");
   commonsActivityRenderer.mount(commonsActivityMountEl);
+  // Lane C (v0.1.9) — broadcast-to-all-CC compose card. Recipient auto-refresh
+  // rides the existing store_session_strip_changed event (no new EventBus event).
+  const broadcastCardRenderer = createBroadcastCardRenderer({
+    eventBus,
+    store        : stores.broadcast,
+    api          : apiClient,
+    getAuthToken : () => cachedAccessToken,
+  });
+  const broadcastCardMountEl = document.getElementById("broadcast-card-mount");
+  if (broadcastCardMountEl === null) throw new Error("multiplexer: #broadcast-card-mount not found");
+  broadcastCardRenderer.mount(broadcastCardMountEl);
   // Lane E WP13 — TTS preview-fraction slider. Storage-backed (no store): the
   // StorageService override is layered on the INI default seeded late via the
   // /api/multiplexer/config `.then` above (seedIniDefault).

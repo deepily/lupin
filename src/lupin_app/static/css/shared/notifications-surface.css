@@ -204,6 +204,41 @@ h1 {
 }
 
 /* ----------------------------------------------------------------------------
+   Worker count-badge silencing (Lane A, Rick ruling 2026-06-24). A MANAGED
+   worker (a session spawned/managed by a manager → manager_persona present)
+   does NOT surface its new-message COUNT to Rick — workers reach him only
+   through their managers. Decision B: keep a FAINT sign-of-life pulse, drop
+   only the number. Single-source in the shared sheet so BOTH clients render
+   identically (drift-proof — Pillar 1).
+
+   DOM CONTRACT (both clients' render gate sets this): on a worker card add
+   `data-worker="true"` to `.sender-card` AND suppress the numeric text in the
+   `.sender-new-count` element. This sheet guarantees the visual outcome
+   regardless of each client's JS path: it hides the count and renders a faint
+   pulsing dot in the stats group where the number used to be. Non-worker cards
+   (manager / root / unmanaged) are untouched and keep their green count. ---- */
+.sender-card[ data-worker="true" ] .sender-new-count {
+    display: none;  /* number suppressed for managed workers */
+}
+
+.sender-card[ data-worker="true" ] .sender-stats-group::after {
+    content: "";
+    display: inline-block;
+    inline-size: 7px;
+    block-size: 7px;
+    margin-left: 6px;
+    border-radius: 50%;
+    background-color: #adb5bd;  /* muted grey — faint, not the green count chip */
+    animation: worker-activity-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes worker-activity-pulse {
+    0%   { opacity: 0.25; }
+    50%  { opacity: 0.75; }
+    100% { opacity: 0.25; }
+}
+
+/* ----------------------------------------------------------------------------
    C2-a — persona-badge selector UNION (WS2). notifications.css:1879-1921.
    The monolith styles legacy's `<span.persona-badge>`; the multiplexer renders
    `<button.sender-persona-badge>` (glyph-only, popover — F-Arnold). This shared

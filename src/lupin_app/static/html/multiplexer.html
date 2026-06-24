@@ -27,6 +27,8 @@
     <link rel="stylesheet" href="/static/css/multiplexer/session-strip.css">
     <link rel="stylesheet" href="/static/css/multiplexer/reading-pane.css">
     <link rel="stylesheet" href="/static/css/multiplexer/commons-activity.css">
+    <!-- Lane C (v0.1.9): broadcast-to-all-CC compose card. -->
+    <link rel="stylesheet" href="/static/css/multiplexer/broadcast.css">
     <!-- Lane E full-parity quartet (WP12/13/14/15) -->
     <link rel="stylesheet" href="/static/css/multiplexer/tts-preview-slider.css">
     <link rel="stylesheet" href="/static/css/multiplexer/missed-badge.css">
@@ -123,6 +125,12 @@
             <div id="jobs-buckets-container"
                  data-testid="multiplexer-jobs-buckets"></div>
         </section>
+
+        <!-- Lane C (v0.1.9): broadcast-to-all-CC compose card mount. Placed above
+             Recent Activity (both cross-session surfaces; mirrors legacy order).
+             BroadcastCardRenderer mounts here; recipient auto-refresh rides the
+             existing store_session_strip_changed event. -->
+        <div id="broadcast-card-mount" data-testid="multiplexer-broadcast-card-mount"></div>
 
         <!-- Lane D (WP3 + WP11): commons "Recent Activity" panel. Mount root for
              CommonsActivityRenderer; boot wiring lands as Lane D's final step

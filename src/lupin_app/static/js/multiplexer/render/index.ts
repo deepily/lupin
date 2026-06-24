@@ -111,6 +111,14 @@ export {
   type SectionToolbarRendererStores,
   type ViewStateStoreLike,
 } from "./SectionToolbarRenderer";
+// Lane C (v0.1.9) — broadcast-to-all-CC compose card renderer.
+export {
+  createBroadcastCardRenderer,
+  type BroadcastCardRenderer,
+  type BroadcastCardRendererOptions,
+  type BroadcastCardApiClient,
+  type BroadcastRecorderLike,
+} from "./BroadcastCardRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";

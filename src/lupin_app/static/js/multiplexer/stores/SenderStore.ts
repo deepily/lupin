@@ -192,6 +192,15 @@ class SenderStoreImpl implements SenderStore {
       if (record.voice_persona === undefined && persona && persona.released !== true) {
         record.voice_persona = this.normalizeVoicePersona(persona);
       }
+
+      // Worker-badge silencing (Rick 2026-06-24): cold-load rows carry the
+      // manager lineage at `rec.manager_persona` (same field SessionStripStore
+      // hydrates from). Fill-forward only — set is_worker when the snapshot says
+      // "managed", never clobber a live-set true back to false (a live assigned
+      // event may have arrived before this snapshot resolved).
+      if (rec.manager_persona != null) {
+        record.is_worker = true;
+      }
     }
     // Single emission for the whole snapshot — consumers reconcile from list().
     this.emit("hydrated");
@@ -238,12 +247,19 @@ class SenderStoreImpl implements SenderStore {
       } else if (n.type === "conversation_mode_changed" || n.type === "speakerphone_changed") {
         this.handleConversationModeUpdate(senderId, n);
       } else {
-        this.handlePersonaUpdate(senderId, n.type, n.voice_persona ?? null);
+        this.handlePersonaUpdate(senderId, n.type, n.voice_persona ?? null, this.managerPresent(n.payload));
       }
       return;
     }
 
     // Regular-notification path — lookup-or-create + bump last_active + bump unread.
+    // Worker-badge silencing (Rachel hardening 2026-06-24): the server stamps
+    // manager_persona on EVERY notification's payload (legacy reads it from every
+    // notification — notifications.js:5685). Fill-forward is_worker here too
+    // (set-true-ONLY, never clear) so a worker whose FIRST event is a plain
+    // notification — e.g. a silent WS reconnect with no fresh assigned/hydrate —
+    // is silenced immediately, with no count flash before the persona event.
+    const isWorker = this.managerPresent(n.payload);
     const existing = this.senders.get(senderId);
     if (!existing) {
       const record: SenderRecord = {
@@ -253,6 +269,7 @@ class SenderStoreImpl implements SenderStore {
         unread_count             : 1,
         conversation_mode_active : false,           // Phase 6c Node D — default off; flipped by handleConversationModeUpdate
       };
+      if (isWorker) record.is_worker = true;
       this.senders.set(senderId, record);
       this.emit("added", senderId);
       return;
@@ -260,13 +277,15 @@ class SenderStoreImpl implements SenderStore {
 
     existing.last_active_ts = ts;
     existing.unread_count++;
+    if (isWorker) existing.is_worker = true;
     this.emit("updated", senderId);
   }
 
   private handlePersonaUpdate(
-    senderId : string,
-    type     : string,
-    persona  : ServerVoicePersona | null,
+    senderId  : string,
+    type      : string,
+    persona   : ServerVoicePersona | null,
+    isWorker  : boolean,
   ): void {
     let record = this.senders.get(senderId);
     if (!record) {
@@ -293,7 +312,21 @@ class SenderStoreImpl implements SenderStore {
     if (!persona || persona.released === true) return;
 
     record.voice_persona = this.normalizeVoicePersona(persona);
+    // Worker-badge silencing (Rick 2026-06-24): the assigned event carries the
+    // manager lineage at `payload.manager_persona` (same field SessionStripStore
+    // reads). A managed worker (manager present) gets is_worker=true so the
+    // renderer suppresses its numeric .sender-new-count; a root/manager session
+    // (no manager) gets is_worker=false. Authoritative on every (re-)assignment.
+    record.is_worker = isWorker;
     this.emit("updated", senderId);
+  }
+
+  // True when the notification payload carries a non-null `manager_persona` —
+  // i.e. this sender is a MANAGED worker. Mirrors SessionStripStore's
+  // `managerPersonaField` read so the card and strip agree on worker status.
+  private managerPresent(payload: Record<string, unknown> | null | undefined): boolean {
+    if (!payload) return false;
+    return payload["manager_persona"] != null;
   }
 
   // Server persona → client VoicePersona (5 canonical fields per D-E

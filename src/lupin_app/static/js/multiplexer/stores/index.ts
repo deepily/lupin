@@ -57,6 +57,9 @@ import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
 import type { ViewStateStore } from "./ViewStateStore";
 import { createViewStateStore } from "./ViewStateStore";
+// Lane C (v0.1.9) — broadcast-to-all-CC compose store.
+import type { BroadcastStore } from "./BroadcastStore";
+import { createBroadcastStore } from "./BroadcastStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -88,6 +91,9 @@ export interface StoreSet {
   // state (section visibility + accordion collapse), persisted. Order-neutral
   // (subscribes to no server frames), so it appends after the pinned five.
   viewState      : ViewStateStore;
+  // Lane C (v0.1.9) — broadcast-to-all-CC compose store. Order-neutral
+  // (subscribes to no server frames); persists only its card-open flag.
+  broadcast      : BroadcastStore;
 }
 
 export interface CreateStoresOptions {
@@ -151,8 +157,12 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
   // persisted section-visibility + accordion-collapse maps at construction.
   const viewState      = createViewStateStore     ({ bus: opts.eventBus, storage: opts.storage });
+  // Lane C (v0.1.9) — broadcast compose store; order-neutral (no server-frame
+  // subscription), persists only card-open. Recipient auto-refresh rides the
+  // existing store_session_strip_changed (handled in BroadcastCardRenderer).
+  const broadcast      = createBroadcastStore     ({ storage: opts.storage });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, viewState };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, viewState, broadcast };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -202,4 +212,8 @@ export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./T
 export { createTaskListStore } from "./TaskListStore";
 export type { ViewStateStore, ViewStateStoreOptions } from "./ViewStateStore";
 export { createViewStateStore } from "./ViewStateStore";
+// Lane C (v0.1.9) — broadcast compose store.
+export type { BroadcastStore, BroadcastStoreOptions, BroadcastRecipient,
+              BroadcastSessionsApiClient } from "./BroadcastStore";
+export { createBroadcastStore } from "./BroadcastStore";
 /* c8 ignore stop */
