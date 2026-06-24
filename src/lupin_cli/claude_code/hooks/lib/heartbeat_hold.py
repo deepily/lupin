@@ -370,11 +370,27 @@ def prune_stale_hold_files( base_dir=None, now=None,
     root (bug b39562e4 pt2 — the arbiter-side janitor seam).
 
     A file is PRUNABLE iff ALL of:
-      - its held_at parses AND (now - held_at) >= ttl_seconds + grace_seconds
-        (expired beyond the generous grace window — a live or long-single-turn
-        session refreshes well inside this, so it is never at risk), AND
       - its session_id is NOT in `live_session_ids` (belt-and-suspenders: never
-        reap a currently-live session's hold even if its clock looks ancient).
+        reap a currently-live session's hold even if its clock looks ancient), AND
+      - its held_at parses AND its age has passed the applicable threshold:
+          * NO authoritative live-set (`live_session_ids` is None) → the
+            CONSERVATIVE threshold `ttl_seconds + grace_seconds` (expired beyond
+            the generous grace window — a live or long-single-turn session
+            refreshes well inside this, so it is never at risk).
+          * an AUTHORITATIVE live-set was provided AND this hold carries a real
+            session_id ABSENT from it → POSITIVE-dead reading: prune as soon as
+            its own `ttl_seconds` has expired (NO +grace). This is the ping-storm
+            Fix 1 belt-and-suspenders (2026-06-24): an UNGRACEFUL death (crash /
+            /exit / tmux-kill) bypasses the reap-time hold-clear, leaving an orphan
+            hold the arbiter re-derives phantom edges from for TTL+6h — far too
+            long. Knowing the session is dead lets the janitor reclaim it at TTL.
+
+    BIAS-TO-KEEP — the +grace shortcut is dropped ONLY on a POSITIVE dead reading
+    (authoritative live-set provided AND session_id present AND absent from it). A
+    LIVE session can carry a stale hold, so an absent authoritative set or a hold
+    with no session_id keeps the conservative TTL+grace threshold. The CALLER is
+    responsible for passing a non-None `live_session_ids` ONLY when it has genuinely
+    enumerated live sessions — passing None (the default) keeps the legacy behavior.
 
     CONSERVATIVE BY CONSTRUCTION — a file that is unreadable, non-JSON, not a
     dict, missing/unparseable held_at, or carrying a non-numeric ttl is KEPT: the
@@ -383,15 +399,16 @@ def prune_stale_hold_files( base_dir=None, now=None,
     Requires:
         - base_dir is path-like / str / None; now is an aware datetime or None;
           grace_seconds >= 0; live_session_ids is an iterable of session-id
-          strings or None
+          strings (AUTHORITATIVE live-set) or None (no authoritative set)
 
     Ensures:
-        - deletes only provably-ancient hold files; returns the sorted list of
-          pruned file paths (as strings)
+        - deletes only provably-stale hold files (conservative TTL+grace, OR TTL on
+          a positive-dead reading); returns the sorted list of pruned paths (strings)
         - never raises (a per-file OSError / JSON error skips that file)
     """
     if now is None:
         now = _now()
+    authoritative = live_session_ids is not None           # a positive-dead source was supplied
     live   = set( live_session_ids or ( ) )
     base   = _resolve_base_dir( base_dir )
     pruned = [ ]
@@ -406,13 +423,17 @@ def prune_stale_hold_files( base_dir=None, now=None,
             continue                                       # unreadable/garbage → KEEP
         if not isinstance( hold, dict ):
             continue
-        if hold.get( "session_id" ) in live:
+        sid = hold.get( "session_id" )
+        if sid in live:
             continue                                       # live session → never reap
         held_dt = _parse_iso( hold.get( "held_at" ) )
         ttl     = hold.get( "ttl_seconds" )
         if held_dt is None or isinstance( ttl, bool ) or not isinstance( ttl, ( int, float ) ):
             continue                                       # can't prove age → KEEP
-        if ( now - held_dt ).total_seconds() >= ttl + grace_seconds:
+        # POSITIVE-dead reading (authoritative live-set + a real session_id absent
+        # from it) drops the +grace shortcut → prune at TTL; else stay conservative.
+        threshold = ttl if ( authoritative and sid ) else ttl + grace_seconds
+        if ( now - held_dt ).total_seconds() >= threshold:
             try:
                 path.unlink()
                 pruned.append( str( path ) )

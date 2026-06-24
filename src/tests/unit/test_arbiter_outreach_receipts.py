@@ -358,6 +358,106 @@ def test_gateway_read_blowup_degrades_to_window_governance():
     assert "oid1" in job._awaiting_ack
 
 
+# ── ping-storm durable Fix 3 (2026-06-24): suppress the one-shot resend when the
+# outreach target is CONFIRMED offline (no wasted -r2 to a dead pane). The resend
+# is otherwise an INTENTIONAL single retry gated on non-ACK — phantom advisories to
+# dead sessions never ACK, so every one resent, doubling the apparent volume. Strict
+# bias toward delivery: only a positively-offline target is suppressed; unknown /
+# alive / absent targets still get the resend. offline_personas default None →
+# byte-identical to the prior behavior (every existing test above exercises that).
+
+def test_window_elapsed_offline_target_suppresses_resend():
+    """Fix 3 RED-first: window elapsed, no ack, target CONFIRMED offline → the
+    one-shot resend is SUPPRESSED (no -r2). The loop closes terminal-unacked
+    (resends=0) and the fact still queues for Rick (milestone-must-land)."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "stall", "Tiberius", "body", expects_ack=True )
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    assert job._check_outreach_receipts( t1, offline_personas={ "Tiberius" } ) == 0
+    assert len( gw.sent ) == 1                                          # NO resend — still just the original
+    assert job._awaiting_ack == { }                                    # loop closed terminal
+    receipt = log.of( "arbiter_outreach_receipt" )[ 0 ]
+    assert receipt[ "outcome" ] == "unacked" and receipt[ "resends" ] == 0   # suppressed → 0 resends
+    assert any( "Tiberius" in note for note in job._unacked_notes )     # Rick still learns it went unacked
+
+
+def test_window_elapsed_non_offline_target_still_resends():
+    """Fix 3 fail-safe: a target NOT in the confirmed-offline set still gets its
+    one-shot resend — bias toward delivery, never suppress on uncertainty."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "stall", "Tiberius", "body", expects_ack=True )
+    t1 = NOW + datetime.timedelta( seconds=901 )
+    assert job._check_outreach_receipts( t1, offline_personas={ "SomeoneElse" } ) == 0
+    assert len( gw.sent ) == 2 and gw.sent[ 1 ][ 2 ][ "question_id" ] == "oid1-r2"   # resend fired
+    assert job._awaiting_ack[ "oid1" ][ "resends" ] == 1
+
+
+def test_offline_target_that_acks_closes_acked_not_suppressed():
+    """An ACK always wins: a confirmed-offline target whose reply arrives still
+    closes 'acked' (the ack branch precedes the resend/suppress gate)."""
+    gw, log = _GW(), _Log()
+    job = _job( gw, log=log, outreach_ack_window_seconds=900 )
+    job._emit_dm( "oid1", "stall", "Tiberius", "body", expects_ack=True )
+    gw.replies[ "dm-tiberius" ] = [ _ack_entry( "oid1" ) ]
+    assert job._check_outreach_receipts( NOW + datetime.timedelta( seconds=10 ),
+                                         offline_personas={ "Tiberius" } ) == 1
+    assert job._awaiting_ack == { }
+
+
+# ── _confirmed_offline_personas — the positive-offline reader (Fix 3) ──────────
+
+def _snap( *rows ):
+    return { "sessions": list( rows ) }
+
+def _row( persona, verdict ):
+    return { "persona": persona, "liveness": { "verdict": verdict } }
+
+
+def test_confirmed_offline_none_snapshot_is_empty():
+    job = _job()
+    job._last_full_snapshot = None
+    assert job._confirmed_offline_personas() == set()
+
+
+def test_confirmed_offline_non_dict_snapshot_is_empty():
+    job = _job()
+    job._last_full_snapshot = [ "not", "a", "dict" ]
+    assert job._confirmed_offline_personas() == set()
+
+
+def test_confirmed_offline_collects_all_offline_persona():
+    job = _job()
+    job._last_full_snapshot = _snap( _row( "Tiberius", "offline" ) )
+    assert job._confirmed_offline_personas() == { "Tiberius" }
+
+
+def test_confirmed_offline_persona_with_any_live_row_excluded():
+    """Persona-collapse-safe: a persona with ANY non-offline row is NOT confirmed
+    offline (a live session can read the dm-board) — bias toward delivery."""
+    job = _job()
+    job._last_full_snapshot = _snap(
+        { "persona": "Clayton", "liveness": { "verdict": "offline" } },
+        { "persona": "Clayton", "liveness": { "verdict": "live 3s" } },   # a live twin
+    )
+    assert job._confirmed_offline_personas() == set()
+
+
+def test_confirmed_offline_skips_malformed_rows():
+    """Non-dict row, missing persona, and missing/non-dict liveness are skipped
+    without poisoning a clean offline persona."""
+    job = _job()
+    job._last_full_snapshot = _snap(
+        "not-a-dict",
+        { "liveness": { "verdict": "offline" } },          # no persona → skip
+        { "persona": "Krishna", "liveness": "garbage" },   # non-dict liveness → verdict None → not offline
+        { "persona": "Rio", "verdict": "offline" },        # liveness key absent → not offline (verdict lives under liveness)
+        { "persona": "Tiberius", "liveness": { "verdict": "offline" } },
+    )
+    assert job._confirmed_offline_personas() == { "Tiberius" }
+
+
 # ── _check_pending_outreach: re-announce-on-return ───────────────────────────
 
 def _pending_job( tmp_path, retry_outcomes, log=None, **overrides ):

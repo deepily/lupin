@@ -519,6 +519,38 @@ def _default_emit_reaped_tombstone( identity: Dict[ str, Any ] ) -> None:
         pass  # producer must NEVER break the reap
 
 
+def _default_clear_hold( identity: Dict[ str, Any ] ) -> bool:
+    """
+    Default hold-clearer (ping-storm durable Fix 1, 2026-06-24): delete the
+    reaped session's `.heartbeat-hold-<sid>.json` so the arbiter stops
+    re-deriving phantom "X is blocking Y" edges from an ORPHANED hold every poll.
+
+    The reap already deletes the BRIDGE; the hold is a SEPARATE dotfile the
+    arbiter's `read_hold` polls, and it lingered until TTL+6h (the janitor's
+    grace) — long enough to seed phantom blocker pings every backoff window. The
+    hold lives in the project root `read_hold` resolves (base_dir default =
+    cu.get_project_root), so clearing by the captured session_id targets EXACTLY
+    the artifact the arbiter sees. Best-effort: a missing session_id or any error
+    NEVER breaks the reap. Override via `dismiss_sessions(clear_hold_fn=...)` —
+    tests inject a capture instead.
+
+    Ensures:
+        - returns True iff a session_id was present AND clear_hold was invoked
+        - returns False for a missing session_id (nothing to clear) or a
+          swallowed error
+        - never raises
+    """
+    session_id = identity.get( "session_id" )
+    if not session_id:
+        return False
+    try:
+        from lupin_cli.claude_code.hooks.lib.heartbeat_hold import clear_hold
+        clear_hold( session_id )
+        return True
+    except Exception:
+        return False
+
+
 def dismiss_sessions(
     manager_session_id : str,
     *,
@@ -528,7 +560,8 @@ def dismiss_sessions(
     runner             : Callable = default_runner,
     session_dir        : Path = SESSION_DIR,
     emit_reap_fn       : Optional[ Callable ] = None,
-    emit_reaped_fn     : Optional[ Callable ] = None
+    emit_reaped_fn     : Optional[ Callable ] = None,
+    clear_hold_fn      : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -601,7 +634,9 @@ def dismiss_sessions(
     # fail-safe — a bad unlink/emit NEVER breaks the reap.
     emit             = emit_reap_fn    if emit_reap_fn    is not None else _default_emit_reap
     emit_tombstone   = emit_reaped_fn  if emit_reaped_fn  is not None else _default_emit_reaped_tombstone
+    do_clear_hold    = clear_hold_fn   if clear_hold_fn   is not None else _default_clear_hold
     bridges_deleted  = 0
+    holds_cleared    = 0
     for name in reaped_names:
         ident = identities.get( name )
         if not ident:
@@ -624,6 +659,17 @@ def dismiss_sessions(
             emit_tombstone( ident )
         except Exception:
             pass  # producer must NEVER break the reap
+        # Hold-clear on reap (ping-storm durable Fix 1, 2026-06-24): delete the
+        # reaped session's `.heartbeat-hold-<sid>.json` so the arbiter stops
+        # re-deriving phantom blocker edges from an orphaned hold every poll. The
+        # bridge unlink above drops the session from liveness; the hold is a
+        # SEPARATE artifact that lingered until TTL+6h. Fail-safe — a raising
+        # clearer NEVER breaks the reap (same posture as the bridge unlink).
+        try:
+            if do_clear_hold( ident ):
+                holds_cleared += 1
+        except Exception:
+            pass  # producer must NEVER break the reap
 
     return {
         "dismissed"          : dismissed,
@@ -631,7 +677,8 @@ def dismiss_sessions(
         "reason"             : reason,
         "write_memento"      : write_memento,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
-        "bridges_deleted"    : bridges_deleted
+        "bridges_deleted"    : bridges_deleted,
+        "holds_cleared"      : holds_cleared
     }
 
 

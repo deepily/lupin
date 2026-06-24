@@ -48,7 +48,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_state import (
 from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
     build_graph, build_store_wait_edges, cycle_is_store_backed, hold_is_stale,
-    hold_contradicts_peer_edge, build_wait_edges, find_deadlock_cycles,
+    hold_contradicts_peer_edge, build_wait_edges, find_deadlock_cycles, session_is_stale,
 )
 from cosa.agents.heartbeat_arbiter.idle_roster import build_roster
 from cosa.agents.heartbeat_arbiter import ping_throttle
@@ -1095,7 +1095,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         }
         live_edges  = { h: a for h, a in graph[ "edges" ].items() if h in alive_personas }
         pings_fired = self._auto_ping( live_edges, now, persona_to_sid )  # #4 blocker + cc mgr
-        roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds )
+        roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds,
+                                     alive_threshold_seconds=self.alive_threshold_seconds )  # free-count fix: live-idle only (session_is_stale gate)
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
         taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers )  # #7 / #8
@@ -1124,7 +1125,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._emit_poke_gates( fleet_view, self._last_full_snapshot, now )
         # Item B (2026.06.11): close the delivery loops — manager threaded-ack
         # receipts (§3.4) + Rick re-announce of pending advisories (§3.5).
-        outreach_acks = self._check_outreach_receipts( now )
+        outreach_acks = self._check_outreach_receipts( now, offline_personas=self._confirmed_offline_personas() )
         reannounces   = self._check_pending_outreach( now )
         # eng#7 (2026-06-17): ONE follow-through aged-escalation sweep on the poll
         # path (build-plan §3b). Doubly inert — no watcher wired OR flag OFF — and
@@ -1691,7 +1692,40 @@ class ArbiterConsumerJob( AgenticJobBase ):
             self._emit_dm( outreach_id, kind, persona, body, case=case,
                            expects_ack=expects_ack, throttleable=throttleable )
 
-    def _check_outreach_receipts( self, now ):
+    def _confirmed_offline_personas( self ):
+        """
+        Ping-storm Fix 3: the personas whose session is POSITIVELY offline this
+        poll, read from the published full snapshot's liveness verdicts. A
+        confirmed-offline target won't ACK, so its one-shot outreach resend
+        (_check_outreach_receipts) is suppressed — no wasted -r2 to a dead pane.
+
+        STRICT positive reading + persona-collapse-safe (bias toward delivery):
+          - a persona qualifies ONLY if it appears in the snapshot AND EVERY row
+            for it has liveness verdict "offline" — a persona with ANY non-offline
+            row (a live twin session that could still read the dm-board) is EXCLUDED
+          - an absent / unknown persona is never included
+          - inert before the first publish (snapshot None / non-dict → empty set)
+
+        Ensures:
+            - returns the SET of personas all of whose published rows are "offline"
+            - empty when no snapshot has been published yet; never raises
+        """
+        snapshot = self._last_full_snapshot
+        if not isinstance( snapshot, dict ):
+            return set()
+        all_offline = { }                                    # persona -> (every row so far is offline)
+        for row in snapshot.get( "sessions", [ ] ):
+            if not isinstance( row, dict ):
+                continue
+            persona = row.get( "persona" )
+            if not persona:
+                continue
+            liveness = row.get( "liveness" ) if isinstance( row.get( "liveness" ), dict ) else { }
+            is_off   = liveness.get( "verdict" ) == "offline"
+            all_offline[ persona ] = is_off if persona not in all_offline else ( all_offline[ persona ] and is_off )
+        return { p for p, off in all_offline.items() if off }
+
+    def _check_outreach_receipts( self, now, offline_personas=None ):
         """
         §3.4 manager-side receipt polling — the acked-ledger principle (the
         receipt is an explicit, OWNER-WRITTEN mark, never an inference): an
@@ -1700,17 +1734,31 @@ class ArbiterConsumerJob( AgenticJobBase ):
         dm-<persona> board the durable write landed on. Filesystem read via the
         gateway — detection-path-safe (R4-clean).
 
+        Requires:
+            - now is an aware datetime
+            - offline_personas is a set/collection of CONFIRMED-offline personas
+              (ping-storm Fix 3) or None — the resend is SUPPRESSED for a target in
+              this set (no wasted -r2 to a dead pane); None ⇒ empty ⇒ no suppression,
+              byte-identical to the prior behavior
+
         Ensures:
             - an in_reply_to match (exact outreach_id or its "-rN" resend
               derivative) → receipt "acked" (+ latency_s) and the tracker clears
+              (an ACK always wins — checked BEFORE the resend/suppress gate)
             - no ack past outreach_ack_window_seconds → exactly ONE re-send
               (attempt=2, fresh window), then — still nothing — terminal receipt
               "unacked" + the fact queued to ride the NEXT Rick-bound advisory
               (§3.4: never an escalation recursion; at most 2 sends total)
+            - Fix 3: when the target persona is CONFIRMED offline, the one-shot
+              resend is SKIPPED and the loop closes terminal-unacked (resends=0) —
+              the un-ACK'd fact still queues for Rick (milestone-must-land), but no
+              -r2 ping is wasted on a dead pane. Bias toward delivery: only a
+              positively-offline target is suppressed (absent/unknown/alive → resend)
             - a gateway read hiccup degrades to "no ack seen this poll" (the
               window keeps governing); never raises
             - returns the count of acks confirmed this poll
         """
+        offline = offline_personas or set()
         acked = 0
         for outreach_id, state in list( self._awaiting_ack.items() ):
             topic = LupinArbiterGateway.dm_topic_for( state[ "persona" ] )
@@ -1740,7 +1788,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 continue
             if ( now - state[ "sent_at" ] ).total_seconds() < self.outreach_ack_window_seconds:
                 continue
-            if state[ "resends" ] == 0:
+            # Fix 3 (ping-storm durable): suppress the one-shot resend when the
+            # target is CONFIRMED offline — a -r2 to a dead pane is the doubling Rick
+            # flagged. Otherwise resend exactly once (the intentional non-ACK retry).
+            if state[ "resends" ] == 0 and state[ "persona" ] not in offline:
                 state[ "resends" ] = 1
                 state[ "sent_at" ] = now
                 self._emit_dm( outreach_id, state[ "kind" ], state[ "persona" ],
@@ -2366,7 +2417,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
         Personas whose `holding_on: peer:X` edge must contribute ZERO inferred edges
         this poll, killing the phantom "X is blocking worker Y" advisory + cc.
 
-        TWO subtraction axes (OR'd), both reading the authoritative HOLD artifact:
+        THREE subtraction axes (OR'd); the first two read the authoritative HOLD
+        artifact, the third reads the per-session liveness ts already on the view:
           - DEAD hold (bug bc1bc373) — `hold_is_stale`: an expired / not-work-owed /
             past-next-chase hold whose lingering `awaiting` drove a phantom edge
             (Tiffany's empty store board produced no real blocked_by, yet a dead
@@ -2378,6 +2430,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
             (the activity record out-lived the wait). `hold_is_stale` does NOT fire
             (the hold is fresh), so this complementary axis reconciles the hold's
             AUTHORITATIVE declared `awaiting` against the stale activity-derived edge.
+          - STALE SESSION (ping-storm durable Fix 2, 2026-06-24) — `session_is_stale`:
+            a holder WITH a readable hold whose hold is FRESH and CORROBORATING (both
+            axes above say keep) but whose SESSION is beyond the alive threshold
+            (last_activity_ts age > alive_threshold_seconds) contributes ZERO edges.
+            ADDITIVE defense-in-depth behind build_graph's own per-session gate
+            (8a450183) — kept INSIDE the `hold is not None` guard so the method's
+            contract is preserved (a session with NO readable hold is never added
+            here; build_graph drops a no-hold dead session). Fail-SAFE identical to
+            the bridge-edge gate: a missing / unparseable last_activity_ts → NOT
+            stale → no extra subtraction (never hide a live block).
 
         IO seam: reads the hold artifact via the wired `_hold_reader_fn`
         (heartbeat_hold.read_hold on :8001). The pure verdicts are
@@ -2394,7 +2456,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
         Ensures:
             - returns the SET of holder personas whose readable hold is DEAD OR is
-              FRESH-but-contradicts its derived peer edge
+              FRESH-but-contradicts its derived peer edge OR whose SESSION is stale
+              (last_activity_ts beyond alive_threshold_seconds — Fix 2)
             - INERT when the reader seam is unwired (None → empty set → today's
               behavior, every existing test + the deployed deadlock path unchanged)
             - a session with NO readable hold is NOT added (absence ≠ deadness — the
@@ -2418,7 +2481,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             except Exception:
                 hold = None
             if hold is not None and ( hold_is_stale( hold, now )
-                                      or hold_contradicts_peer_edge( hold, holding_on, now ) ):
+                                      or hold_contradicts_peer_edge( hold, holding_on, now )
+                                      or session_is_stale( view, now, self.alive_threshold_seconds ) ):
                 stale.add( persona )
         return stale
 

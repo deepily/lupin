@@ -520,6 +520,65 @@ def test_stale_hold_holders_keeps_fresh_corroborating_hold( tmp_path ):
     assert job._stale_hold_holders( view, now ) == set()
 
 
+# ── ping-storm durable Fix 2 (2026-06-24): session_is_stale as a 3rd ADDITIVE,
+# fail-safe subtraction axis in _stale_hold_holders. A holder whose hold is FRESH
+# and CORROBORATING (so hold_is_stale + hold_contradicts both say "keep") but whose
+# SESSION is beyond the alive threshold contributes ZERO edges. Defense-in-depth
+# behind build_graph's existing per-session gate (8a450183) — observable here at
+# the method level. Stays INSIDE the `hold is not None` guard so the method's
+# contract ("no readable hold → never added") is preserved. _STALE_TS = 1h before
+# NOW (> 600s threshold); _FRESH_TS = 60s before NOW (< 600s).
+
+_STALE_TS = "2026-06-05T11:00:00+00:00"          # 3600s before NOW → session_is_stale True
+_FRESH_TS = "2026-06-05T11:59:00+00:00"          #   60s before NOW → session_is_stale False
+
+
+def test_stale_hold_holders_includes_stale_session_fresh_corroborating_hold( tmp_path ):
+    """Fix 2 RED-first: a STALE session (last_activity_ts beyond alive_threshold)
+    with a FRESH+CORROBORATING hold (both other axes say keep) is now SUBTRACTED via
+    the session_is_stale axis. Pre-fix: returns set() (hold neither stale nor
+    contradicting); post-fix: { holder }."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "mr radio", "session_id": "s1",
+                     "holding_on": "peer:maria", "last_activity_ts": _STALE_TS } }
+    assert job._stale_hold_holders( view, now ) == { "mr radio" }
+
+
+def test_stale_hold_holders_fresh_session_keeps_corroborating_hold( tmp_path ):
+    """Fix 2 no-over-subtract: a FRESH session with a fresh corroborating hold is
+    NOT added (session_is_stale False, both other axes False)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "mr radio", "session_id": "s1",
+                     "holding_on": "peer:maria", "last_activity_ts": _FRESH_TS } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
+def test_stale_hold_holders_missing_ts_keeps_corroborating_hold( tmp_path ):
+    """Fix 2 fail-safe: a missing/unparseable last_activity_ts → session_is_stale
+    False → the corroborating-hold holder's edge is KEPT (never hide a live block)."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: _fresh_hold( "peer:maria" ) )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    missing = { "s1": { "persona": "mr radio", "session_id": "s1", "holding_on": "peer:maria" } }
+    garbage = { "s2": { "persona": "cal", "session_id": "s2",
+                        "holding_on": "peer:maria", "last_activity_ts": "not-a-ts" } }
+    assert job._stale_hold_holders( missing, now ) == set()
+    assert job._stale_hold_holders( garbage, now ) == set()
+
+
+def test_stale_hold_holders_no_readable_hold_stale_session_still_not_added( tmp_path ):
+    """Fix 2 contract preservation: session_is_stale stays INSIDE the `hold is not
+    None` guard — a STALE session with NO readable hold is STILL not added here
+    (absence ≠ deadness; build_graph's own per-session gate handles the no-hold dead
+    session). Guards against the axis leaking outside the hold-subtraction contract."""
+    job  = _make_job( tmp_path, hold_reader_fn=lambda sid: None )
+    now  = datetime.datetime.fromisoformat( NOW_ISO )
+    view = { "s1": { "persona": "ghost", "session_id": "s1",
+                     "holding_on": "peer:maria", "last_activity_ts": _STALE_TS } }
+    assert job._stale_hold_holders( view, now ) == set()
+
+
 def test_poll_once_fresh_hold_awaiting_none_drops_phantom_edge( tmp_path ):
     """7f9a8ee2 DETERMINISTIC REPRO: mr radio's last_activity.awaiting is a STALE
     'peer:maria', but its CURRENT hold is fresh with awaiting='none'. The phantom

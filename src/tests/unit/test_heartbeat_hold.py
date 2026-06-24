@@ -190,6 +190,54 @@ def test_prune_never_reaps_a_live_session_even_if_ancient( tmp_path ):
     assert ( tmp_path / ".heartbeat-hold-livesid.json" ).exists()
 
 
+def test_prune_authoritative_set_dead_session_reaped_at_ttl_within_grace( tmp_path ):
+    """Ping-storm Fix 1 belt-and-suspenders: with an AUTHORITATIVE live-set, a hold
+    whose session is ABSENT from it (provably dead) and EXPIRED past its own TTL — but
+    still WITHIN the +6h grace — is pruned SOONER (at TTL). Without the live-set this
+    same hold is KEPT (the conservative branch)."""
+    _hold_file( tmp_path, "deadsid", age_seconds=900 + 60 )           # expired 1m past TTL, < grace
+    # conservative (no authoritative set) → KEPT
+    assert hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW ) == [ ]
+    assert ( tmp_path / ".heartbeat-hold-deadsid.json" ).exists()
+    # authoritative set NOT containing deadsid → positive-dead → pruned at TTL
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW,
+                                        live_session_ids=[ "someone-else" ] )
+    assert pruned == [ str( tmp_path / ".heartbeat-hold-deadsid.json" ) ]
+    assert not ( tmp_path / ".heartbeat-hold-deadsid.json" ).exists()
+
+
+def test_prune_authoritative_set_dead_session_not_yet_expired_is_kept( tmp_path ):
+    """Positive-dead but NOT yet past its own TTL → KEPT (a dead session's hold is
+    only reclaimed once its TTL has actually elapsed — never before)."""
+    _hold_file( tmp_path, "deadsid", age_seconds=300 )                # ttl 900 → not expired
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW,
+                                        live_session_ids=[ "someone-else" ] )
+    assert pruned == [ ]
+    assert ( tmp_path / ".heartbeat-hold-deadsid.json" ).exists()
+
+
+def test_prune_authoritative_set_no_session_id_stays_conservative( tmp_path ):
+    """Bias-to-keep: even WITH an authoritative live-set, a hold with NO session_id
+    can't yield a positive-dead reading → conservative TTL+grace. Expired-within-grace
+    → KEPT."""
+    ( tmp_path / ".heartbeat-hold-nosid.json" ).write_text( json.dumps(
+        { "held_at": ( _PRUNE_NOW - datetime.timedelta( seconds=900 + 60 ) ).isoformat(),
+          "ttl_seconds": 900, "work_owed": True, "reason": "x" } ) )   # no session_id key
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW,
+                                        live_session_ids=[ "someone-else" ] )
+    assert pruned == [ ]
+    assert ( tmp_path / ".heartbeat-hold-nosid.json" ).exists()
+
+
+def test_prune_authoritative_set_still_reaps_ancient_dead_session( tmp_path ):
+    """No regression: an ancient (past TTL+grace) dead session is still reaped with an
+    authoritative set (the TTL threshold is ≤ the old TTL+grace, so ancient still goes)."""
+    _hold_file( tmp_path, "ancientdead", age_seconds=900 + 21600 + 100 )
+    pruned = hh.prune_stale_hold_files( base_dir=tmp_path, now=_PRUNE_NOW,
+                                        live_session_ids=[ "someone-else" ] )
+    assert pruned == [ str( tmp_path / ".heartbeat-hold-ancientdead.json" ) ]
+
+
 def test_prune_keeps_unprovable_files( tmp_path ):
     # garbage JSON / non-dict / missing held_at / non-numeric ttl / bool ttl → all KEPT
     ( tmp_path / ".heartbeat-hold-garbage.json" ).write_text( "{not json" )

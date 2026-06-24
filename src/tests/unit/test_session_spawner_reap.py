@@ -306,3 +306,123 @@ def test_default_tombstone_swallows_emit_failure( monkeypatch ):
                          lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "down" ) ) )
     # persona None exercises the non-dict (else) branch; must NOT raise
     ss._default_emit_reaped_tombstone( { "session_id": "sid-3", "persona": None } )
+
+
+# ── HOLD-CLEAR-ON-REAP seam (ping-storm durable Fix 1, 2026-06-24) ────────────
+# dismiss_sessions ALSO clears the reaped session's `.heartbeat-hold-<sid>.json`
+# so the arbiter stops re-deriving phantom "X is blocking Y" edges from an
+# orphaned hold every poll (the bridge was already deleted; the hold — a SEPARATE
+# dotfile the arbiter's read_hold polls — lingered until TTL+6h). Injectable seam
+# (clear_hold_fn) like emit_reap_fn/emit_reaped_fn; fail-safe — a raising clearer
+# never breaks the reap. The captured session_id (from the bridge, pre-unlink)
+# names the hold; base_dir default = cu.get_project_root = what read_hold sees.
+
+def test_reap_clears_hold_seam():
+    """The injected clear_hold_fn fires once per reaped session with the captured identity."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        cleared = []
+        res = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda ident, reason="": None,
+            emit_reaped_fn=lambda ident: None,
+            clear_hold_fn=lambda ident: cleared.append( ident ) or True,
+        )
+        assert res[ "holds_cleared" ] == 1
+        assert len( cleared ) == 1
+        assert cleared[ 0 ][ "session_id" ] == "abcd1234-aaaa-bbbb"   # captured pre-unlink, from the bridge
+
+
+def test_reap_hold_clear_failure_never_breaks_reap():
+    """A throwing clear_hold_fn is swallowed — the reap result is still well-formed."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        def boom( ident ):
+            raise RuntimeError( "hold dir read-only" )
+        res = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda ident, reason="": None, emit_reaped_fn=lambda ident: None,
+            clear_hold_fn=boom,
+        )
+        assert res[ "bridges_deleted" ] == 1            # bridge still deleted despite hold-clear blowup
+        assert res[ "holds_cleared" ]  == 0
+        assert bridge.exists() is False
+        assert res[ "dismissed" ][ 0 ][ "status" ] == "killed"
+
+
+def test_reap_clear_hold_returns_false_cleanly_counts_zero():
+    """Covers the FALSE branch of `if do_clear_hold( ident ):` (session_spawner:669):
+    a clearer that returns False WITHOUT raising (e.g. hold already absent / nothing
+    to clear) → holds_cleared stays 0, and the reap is still well-formed (bridge
+    deleted, dismissed list intact). Distinct from the throwing-clearer test (except
+    path) and the True-return test (increment path)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        calls = []
+        res = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda ident, reason="": None, emit_reaped_fn=lambda ident: None,
+            clear_hold_fn=lambda ident: calls.append( ident ) or False,   # clean False (no raise)
+        )
+        assert calls and len( calls ) == 1                   # the clearer WAS invoked (669 evaluated)
+        assert res[ "holds_cleared" ] == 0                   # ...but its False return did not increment
+        assert res[ "bridges_deleted" ] == 1                 # reap still well-formed: bridge deleted
+        assert bridge.exists() is False
+        assert res[ "dismissed" ][ 0 ] == { "session_name": "cc-author-x-1", "status": "killed" }
+
+
+def test_reap_no_bridge_clears_no_hold():
+    """No captured identity (no bridge) → no clear_hold seam call."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, _ = _setup( tmp, with_bridge=False )
+        cleared = []
+        res = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            clear_hold_fn=lambda ident: cleared.append( ident ) or True,
+        )
+        assert cleared == []
+        assert res[ "holds_cleared" ] == 0
+
+
+def test_reap_default_hold_clear_path_calls_clear_hold( monkeypatch ):
+    """With NO injected seam, the DEFAULT path fires the real clear_hold with the
+    captured session_id (covers the default-selection branch + _default_clear_hold)."""
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hh
+    calls = []
+    monkeypatch.setattr( hh, "clear_hold",
+                         lambda session_id, base_dir=None: calls.append( session_id ) )
+    with tempfile.TemporaryDirectory() as tmp:
+        sd, mgr, bridge = _setup( tmp )
+        res = ss.dismiss_sessions(
+            mgr, session_names=[ "cc-author-x-1" ], runner=_OK_RUNNER, session_dir=sd,
+            emit_reap_fn=lambda ident, reason="": None,
+            emit_reaped_fn=lambda ident: None,   # only the hold-clear path is default here
+        )
+        assert calls == [ "abcd1234-aaaa-bbbb" ]      # captured session_id, base_dir default
+        assert res[ "holds_cleared" ] == 1
+
+
+# ── _default_clear_hold — the real clearer, in isolation ──────────────────────
+
+def test_default_clear_hold_calls_clear_hold( monkeypatch ):
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hh
+    calls = []
+    monkeypatch.setattr( hh, "clear_hold", lambda session_id, base_dir=None: calls.append( session_id ) )
+    assert ss._default_clear_hold( { "session_id": "sid-9" } ) is True
+    assert calls == [ "sid-9" ]
+
+
+def test_default_clear_hold_no_session_id_is_noop( monkeypatch ):
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hh
+    calls = []
+    monkeypatch.setattr( hh, "clear_hold", lambda *a, **k: calls.append( 1 ) )
+    assert ss._default_clear_hold( { "session_id": None } ) is False   # nothing to clear
+    assert calls == []
+
+
+def test_default_clear_hold_swallows_failure( monkeypatch ):
+    import lupin_cli.claude_code.hooks.lib.heartbeat_hold as hh
+    monkeypatch.setattr( hh, "clear_hold",
+                         lambda *a, **k: ( _ for _ in () ).throw( RuntimeError( "down" ) ) )
+    # must NOT raise; returns False on a swallowed error
+    assert ss._default_clear_hold( { "session_id": "sid-3" } ) is False

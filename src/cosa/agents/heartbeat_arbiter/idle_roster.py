@@ -23,6 +23,7 @@ import datetime
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_decision import OUTCOME_POKE, OUTCOME_HONORED
 from lupin_cli.claude_code.hooks.lib.heartbeat_events import EVENT_IDLE
+from cosa.agents.heartbeat_arbiter.dependency_graph import session_is_stale
 
 
 IDLE_SOURCE_DECLARED  = "declared"
@@ -72,7 +73,7 @@ def classify_idle( view, now, quiet_threshold_seconds ):
     return None
 
 
-def build_roster( fleet_view, now, quiet_threshold_seconds ):
+def build_roster( fleet_view, now, quiet_threshold_seconds, alive_threshold_seconds=None ):
     """
     Build the trust-labeled fleet idle-roster (HYBRID: declared ∪ inferred).
 
@@ -80,10 +81,22 @@ def build_roster( fleet_view, now, quiet_threshold_seconds ):
         - fleet_view is a dict { session_id: VIEW } (build_fleet_view output)
         - now is an aware datetime
         - quiet_threshold_seconds is a positive number
+        - alive_threshold_seconds is a positive number (the staleness window) or
+          None (the additive default → NO staleness gate, byte-identical to the
+          pre-filter behavior; existing 3-arg callers/tests are unaffected)
 
     Ensures:
         - Returns a list of { session_id, persona, idle_source, trust_label,
           last_activity_ts } for ONLY the idle sessions (classify_idle non-None)
+          THAT ARE ALSO NOT STALE (free-count fix, 2026-06-24): an idle/quiet
+          entry is dropped when dependency_graph.session_is_stale (the SAME
+          predicate the peer-edge / ping-storm fixes use — one source of truth)
+          judges its SESSION beyond alive_threshold_seconds. Applied UNIFORMLY to
+          declared AND inferred entries, so a DEAD session's sticky EVENT_IDLE
+          beacon no longer inflates the "free fleet-wide" count.
+        - Fail-SAFE: session_is_stale returns False (KEEP) for a missing/None/
+          unparseable last_activity_ts or an un-threaded alive_threshold_seconds
+          (None) — the count never under-reports genuinely-live capacity.
         - Sorted by last_activity_ts descending (most-recent first; missing last)
         - Non-dict views are skipped; never raises
     """
@@ -93,6 +106,8 @@ def build_roster( fleet_view, now, quiet_threshold_seconds ):
             continue
         classified = classify_idle( view, now, quiet_threshold_seconds )
         if classified is None:
+            continue
+        if session_is_stale( view, now, alive_threshold_seconds ):       # free-count fix: live-idle only
             continue
         source, label = classified
         roster.append( {
