@@ -39,5 +39,36 @@ def test_under_global_cap():
     assert p.under_global_cap( 5, 5 ) is False
 
 
+# ── Item C (2026-06-24): trailing-window throttle primitives ────────────────────
+
+def test_in_window():
+    recent = [ NOW - datetime.timedelta( seconds=10 ), NOW - datetime.timedelta( seconds=59 ) ]
+    old    = NOW - datetime.timedelta( seconds=10_000 )
+    future = NOW + datetime.timedelta( seconds=5 )
+    assert p.in_window( recent, NOW, 60 )          == recent            # both within 60s
+    assert p.in_window( recent + [ old ], NOW, 60 ) == recent           # old pruned
+    assert p.in_window( [ future ], NOW, 60 )      == [ ]              # future ts dropped (fail-safe)
+    assert p.in_window( [ "bad-ts" ], NOW, 60 )    == [ ]              # unusable entry dropped
+    assert p.in_window( None, NOW, 60 )            == [ ]              # None → []
+    assert p.in_window( [ ], NOW, 60 )             == [ ]              # empty → []
+    # boundary: age exactly == window is INSIDE
+    assert p.in_window( [ NOW - datetime.timedelta( seconds=60 ) ], NOW, 60 ) == [ NOW - datetime.timedelta( seconds=60 ) ]
+
+
+def test_trailing_window_allows():
+    two = [ NOW - datetime.timedelta( seconds=10 ), NOW - datetime.timedelta( seconds=20 ) ]
+    assert p.trailing_window_allows( two, NOW, 3, 60 ) is True          # 2 < 3 → room
+    assert p.trailing_window_allows( two, NOW, 2, 60 ) is False         # 2 >= 2 → full
+    assert p.trailing_window_allows( [ ], NOW, 1, 60 ) is True          # none sent → room
+    # old sends drop out of the window → room again
+    old = two + [ NOW - datetime.timedelta( seconds=10_000 ) ]
+    assert p.trailing_window_allows( old, NOW, 3, 60 ) is True          # only 2 in window < 3
+    # DISABLED (fail-safe): max<=0 or window<=0 → always allowed
+    assert p.trailing_window_allows( two, NOW, 0, 60 )  is True
+    assert p.trailing_window_allows( two, NOW, -1, 60 ) is True
+    assert p.trailing_window_allows( two, NOW, 2, 0 )   is True
+    assert p.trailing_window_allows( two, NOW, 2, -5 )  is True
+
+
 def test_quick_smoke_test():
     assert p.quick_smoke_test() is True

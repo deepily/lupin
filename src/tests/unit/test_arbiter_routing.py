@@ -43,6 +43,21 @@ from lupin_mcp.session_spawner import _manifest_path
 
 NOW = datetime.datetime( 2026, 6, 9, 0, 0, 0, tzinfo=datetime.timezone.utc )
 
+# Item B (2026-06-24): every outreach message is prefixed with "[YYYY.MM.DD at
+# HH:MM:SS] ". These routing receipts assert WHO receives WHAT (routing), not the
+# stamp itself (covered by the dedicated Item-B tests), so they strip the prefix.
+import re as _re
+_STAMP_RE = _re.compile( r"^\[\d{4}\.\d{2}\.\d{2} at \d{2}:\d{2}:\d{2}\] " )
+
+def _unstamp( s ):
+    return _STAMP_RE.sub( "", s )
+
+def _unstamp_sent( sent ):
+    return [ ( r, _unstamp( b ) ) for r, b in sent ]
+
+def _unstamp_notes( notes ):
+    return [ _unstamp( n ) for n in notes ]
+
 
 class _GW:
     """Captures send_to + post; who/read inert."""
@@ -161,29 +176,29 @@ def test_route_rick_only_notifies_no_managers():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
     job._route( 1, "infra alert", active_managers=[ "M1", "M2" ] )   # RICK_ONLY ignores managers
-    assert notes == [ "infra alert" ] and gw.sent == [ ]
+    assert _unstamp_notes( notes ) == [ "infra alert" ] and gw.sent == [ ]
 
 
 def test_route_rick_and_managers_fans_out():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
     job._route( 5, "deadlock!", active_managers=[ "M1", "M2" ] )
-    assert notes == [ "deadlock!" ]                                  # Rick (notify)
-    assert gw.sent == [ ( "M1", "deadlock!" ), ( "M2", "deadlock!" ) ]   # + each manager
+    assert _unstamp_notes( notes ) == [ "deadlock!" ]                # Rick (notify)
+    assert _unstamp_sent( gw.sent ) == [ ( "M1", "deadlock!" ), ( "M2", "deadlock!" ) ]   # + each manager
 
 
 def test_route_rick_and_managers_empty_set_is_rick_only():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
     job._route( 11, "stall!", active_managers=[ ] )                  # no managers on duty
-    assert notes == [ "stall!" ] and gw.sent == [ ]                 # degrades to Rick-only
+    assert _unstamp_notes( notes ) == [ "stall!" ] and gw.sent == [ ]   # degrades to Rick-only
 
 
 def test_route_owning_manager_dm_only():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
     job._route( 7, "tap body", owning_manager="MgrX" )
-    assert gw.sent == [ ( "MgrX", "tap body" ) ] and notes == [ ]   # no Rick on the per-worker nudge
+    assert _unstamp_sent( gw.sent ) == [ ( "MgrX", "tap body" ) ] and notes == [ ]   # no Rick on the per-worker nudge
 
 
 def test_route_owning_manager_none_is_noop():
@@ -197,14 +212,14 @@ def test_route_blocker_and_manager_dms_both():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
     job._route( 4, "ping", blocker="Blk", owning_manager="MgrB", cc_message="cc" )
-    assert gw.sent == [ ( "Blk", "ping" ), ( "MgrB", "cc" ) ] and notes == [ ]
+    assert _unstamp_sent( gw.sent ) == [ ( "Blk", "ping" ), ( "MgrB", "cc" ) ] and notes == [ ]
 
 
 def test_route_blocker_only_when_no_manager():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
     job._route( 4, "ping", blocker="Blk", owning_manager=None, cc_message=None )
-    assert gw.sent == [ ( "Blk", "ping" ) ]
+    assert _unstamp_sent( gw.sent ) == [ ( "Blk", "ping" ) ]
 
 
 def test_route_blocker_and_manager_cc_only_when_no_blocker():
@@ -212,7 +227,7 @@ def test_route_blocker_and_manager_cc_only_when_no_blocker():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
     job._route( 4, "ping", blocker=None, owning_manager="MgrB", cc_message="cc" )
-    assert gw.sent == [ ( "MgrB", "cc" ) ] and notes == [ ]
+    assert _unstamp_sent( gw.sent ) == [ ( "MgrB", "cc" ) ] and notes == [ ]
 
 
 def test_route_drop_emits_nothing():

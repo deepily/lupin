@@ -27,6 +27,11 @@ from zoneinfo import ZoneInfo
 
 # Rick's ratified human format: "2026-06-11-at-17-28-46-(EDT)"
 TS_LOCAL_FORMAT     = "%Y-%m-%d-at-%H-%M-%S-(%Z)"
+# Rick's ratified OUTREACH-stamp format (2026-06-24): "2026.06.24 at 11:47:57"
+# — the human-facing leading prefix on every arbiter shoulder-tap/outreach message.
+# Distinct from TS_LOCAL_FORMAT (dashes + tz suffix, machine-greppable journal field);
+# this one is the readable inline stamp Rick reads in his DMs.
+OUTREACH_TS_FORMAT  = "%Y.%m.%d at %H:%M:%S"
 DEFAULT_TZ_NAME     = "America/New_York"
 DEFAULT_SERVICE     = "lupin-arbiter-app"
 
@@ -72,6 +77,23 @@ def format_ts_local( dt: datetime.datetime, tz: Any ) -> str:
           the same wall format yields "(EST)" in January)
     """
     return dt.astimezone( tz ).strftime( TS_LOCAL_FORMAT )
+
+
+def format_outreach_ts( dt: datetime.datetime, tz: Any ) -> str:
+    """
+    Render an aware datetime as Rick's outreach stamp "YYYY.MM.DD at HH:MM:SS"
+    (2026-06-24) in the given tz — the leading prefix on arbiter outreach messages.
+
+    Requires:
+        - dt is an AWARE datetime
+        - tz is a tzinfo (ZoneInfo) — REUSE resolve_tz to obtain it (the INI key
+          `arbiter journal local timezone`); this function builds NO tz infra
+
+    Ensures:
+        - returns the same instant as `dt` rendered "%Y.%m.%d at %H:%M:%S"
+          (e.g. "2026.06.24 at 11:47:57"); DST handled by the tz database
+    """
+    return dt.astimezone( tz ).strftime( OUTREACH_TS_FORMAT )
 
 
 def make_log_fn(

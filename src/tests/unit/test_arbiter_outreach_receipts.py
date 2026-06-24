@@ -195,7 +195,9 @@ def test_user_not_available_enters_pending_ledger( tmp_path ):
     assert len( entries ) == 1
     entry = next( iter( entries.values() ) )
     assert entry[ "kind" ] == "stall" and entry[ "case" ] == 11
-    assert entry[ "message" ] == "WHOLE-FLEET-STALL" and entry[ "attempts" ] == 1
+    # Item B (2026-06-24): the message now carries the "[YYYY.MM.DD at HH:MM:SS] " stamp
+    assert entry[ "message" ].endswith( "WHOLE-FLEET-STALL" ) and entry[ "attempts" ] == 1
+    assert entry[ "message" ].startswith( "[" )                          # stamp prefix present
     assert log.of( "arbiter_outreach_receipt" ) == [ ]                  # not terminal yet — pending
 
 

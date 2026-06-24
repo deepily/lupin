@@ -221,17 +221,70 @@ def hold_contradicts_peer_edge( hold, holding_on, now ):
     return True                                              # hold declares it is NOT awaiting edge_peer → phantom
 
 
-def build_wait_edges( fleet_view, stale_holders=None ):
+def session_is_stale( view, now, alive_threshold_seconds ):
+    """
+    Is this holder SESSION itself beyond the alive-threshold (bug 8a450183)?
+
+    The PERSONA-COLLAPSE phantom this kills: a DEAD session's lingering
+    `holding_on: peer:X` edge survives the consumer's per-PERSONA `alive` filter
+    because a LIVE session SHARING the persona keeps that persona "alive" — so a
+    dead session's stale wait is mis-attributed to the live persona ("maria is
+    blocking worker mr radio" from a 12h-dead `mr radio` session). The fix gates
+    peer-edge inference on the HOLDER SESSION's OWN freshness, decided per
+    session-id (this `view`), NEVER collapsed to persona-liveness.
+
+    Complement to `hold_is_stale` (DEAD-hold holder) and `hold_contradicts_peer_edge`
+    (FRESH-but-contradicting holder): those read the per-session HOLD artifact; THIS
+    reads the per-session LAST-ACTIVITY timestamp the view already carries. All three
+    only SUBTRACT edges and are ADDITIVE + fail-SAFE.
+
+    Requires:
+        - view is a fleet-view row dict (any type tolerated); now is an aware
+          datetime; alive_threshold_seconds is a positive number
+        - `view['last_activity_ts']` (when present) is the session's most-recent
+          LIVENESS ts (a datetime, or an ISO string — tolerated/parsed)
+
+    Ensures:
+        - returns True iff the view's `last_activity_ts` is PRESENT, parseable, and
+          its age (now − ts) is STRICTLY GREATER than alive_threshold_seconds
+        - returns False — fail-SAFE, KEEP the edge — for a non-dict view, a missing
+          now / alive_threshold (the additive default: no gate when un-threaded), a
+          missing / None / unparseable `last_activity_ts` (absence of a usable ts is
+          NOT evidence of deadness — never over-filter), or a future/within-window ts
+        - decided EXPLICITLY from the ts (NOT `view['alive']`, which reads False for
+          an unparseable ts and would over-filter — Krishna A3)
+        - never raises (pure)
+    """
+    if not isinstance( view, dict ) or now is None or alive_threshold_seconds is None:
+        return False
+    ts = view.get( "last_activity_ts" )
+    if isinstance( ts, str ):
+        ts = _parse_iso( ts )
+    if not isinstance( ts, datetime.datetime ):
+        return False                                         # no usable ts → fail-SAFE keep
+    try:
+        age = ( now - ts ).total_seconds()
+    except ( TypeError, AttributeError ):
+        return False                                         # unusable now/ts → fail-SAFE keep
+    return age > alive_threshold_seconds
+
+
+def build_wait_edges( fleet_view, stale_holders=None, now=None, alive_threshold_seconds=None ):
     """
     Extract holder→awaited-peer edges from the fleet view.
 
     Requires:
         - fleet_view is a dict { session_id: VIEW } (build_fleet_view output);
-          each VIEW carries "persona" and "holding_on" (e.g. "peer:Sam",
-          "user:Rick", "commons:foo", "none")
+          each VIEW carries "persona", "holding_on" (e.g. "peer:Sam", "user:Rick",
+          "commons:foo", "none") and "last_activity_ts"
         - stale_holders is a set/collection of holder PERSONAS whose hold is DEAD
           (bug bc1bc373) — their peer edge is dropped at ingestion — or None
-          (⇒ no filtering, byte-identical to the prior behavior)
+          (⇒ no persona filtering, byte-identical to the prior behavior)
+        - now / alive_threshold_seconds gate the per-SESSION freshness filter (bug
+          8a450183): both None (the default) ⇒ NO session-freshness gate,
+          byte-identical to the prior behavior — this is what keeps the UNFILTERED
+          :1018 escalation feed `find_deadlock_cycles( build_wait_edges( fleet_view ) )`
+          untouched (it passes neither, so no session is dropped)
 
     Ensures:
         - Returns dict { holder_persona: awaited_persona } for ONLY peer:* edges
@@ -240,6 +293,9 @@ def build_wait_edges( fleet_view, stale_holders=None ):
           (`_parse_peer_target` — bug b39562e4): a multi-peer list tail or free
           prose after the first persona is DROPPED, so a free-form `awaiting`
           field can no longer mint a garbage/phantom edge
+        - a beyond-threshold SESSION (`session_is_stale`) contributes ZERO edges —
+          dropped PER SESSION-ID at ingestion, BEFORE the holder→persona collapse,
+          so a dead session NEVER poisons a live same-persona session (bug 8a450183)
         - a holder in `stale_holders` contributes ZERO edges (its dead hold's
           phantom wait-edge is filtered out UPSTREAM of all edge inference)
         - LAST edge wins if a holder appears twice (functional graph)
@@ -249,6 +305,8 @@ def build_wait_edges( fleet_view, stale_holders=None ):
     edges = { }
     for view in fleet_view.values():
         if not isinstance( view, dict ):
+            continue
+        if session_is_stale( view, now, alive_threshold_seconds ):   # 8a450183: dead SESSION → zero edges (per session-id, pre-collapse)
             continue
         holder     = view.get( "persona" )
         holding_on = view.get( "holding_on" )
@@ -306,23 +364,28 @@ def find_deadlock_cycles( wait_edges ):
     return cycles
 
 
-def build_graph( fleet_view, stale_holders=None ):
+def build_graph( fleet_view, stale_holders=None, now=None, alive_threshold_seconds=None ):
     """
     Build the dependency graph + deadlock cycles from the fleet view.
 
     Requires:
         - fleet_view is a dict { session_id: VIEW }
         - stale_holders is a set of dead-hold holder personas (bug bc1bc373) whose
-          peer edge is dropped, or None (⇒ no filtering)
+          peer edge is dropped, or None (⇒ no persona filtering)
+        - now / alive_threshold_seconds gate the per-SESSION freshness filter (bug
+          8a450183) — passed straight through to build_wait_edges; both None
+          (the default) ⇒ no session-freshness gate (byte-identical prior behavior)
 
     Ensures:
         - Returns { "edges": {holder: awaited}, "cycles": [canonical cycles] }
-        - a holder in `stale_holders` is absent from BOTH edges and cycles (the
-          dead hold contributes ZERO inferred edges to every consumer); the
-          deadlock LOGIC downstream is unchanged — it simply sees fewer rings
+        - a holder in `stale_holders`, AND a beyond-threshold SESSION when
+          now/threshold are supplied, are absent from BOTH edges and cycles (each
+          contributes ZERO inferred edges to every consumer of THIS filtered graph);
+          the deadlock LOGIC downstream is unchanged — it simply sees fewer rings
         - Never raises
     """
-    edges = build_wait_edges( fleet_view, stale_holders=stale_holders )
+    edges = build_wait_edges( fleet_view, stale_holders=stale_holders,
+                              now=now, alive_threshold_seconds=alive_threshold_seconds )
     return { "edges": edges, "cycles": find_deadlock_cycles( edges ) }
 
 

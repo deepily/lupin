@@ -83,6 +83,13 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     # is wired to the real fleet-wide store reader below so the in-process arbiter, when
     # enabled, also routes operator gates by urgency — urgent interrupt / normal digest).
     operator_digest_cadence = int( config_mgr.get( "arbiter operator gate digest cadence seconds", default=1800, return_type="int" ) )
+    # Item B (2026.06.24): outreach-timestamp tz — REUSE the existing arbiter-journal
+    # tz key (one tz owner; default America/New_York, DST-aware EDT/EST).
+    local_timezone = config_mgr.get( "arbiter journal local timezone", default="America/New_York" ) or "America/New_York"
+    # Item C (2026.06.24): trailing-window outreach throttle (N msgs / Y min,
+    # PER-RECIPIENT, routine shoulder-taps only). Both runtime-tunable; <=0 disables.
+    throttle_max    = int( config_mgr.get( "arbiter outreach throttle max messages", default=5, return_type="int" ) )
+    throttle_window = int( config_mgr.get( "arbiter outreach throttle window minutes", default=15, return_type="int" ) )
 
     # §4b worktree janitor (Worktree Lifecycle Contract). DEFAULT-OFF: the flag is
     # False unless explicitly enabled in lupin-app.ini, so wiring it here is INERT
@@ -116,6 +123,9 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         operator_gates_fn          = _default_operator_gates_fn,   # A2/A3: real fleet-wide operator-gate store reader
         operator_digest_cadence_seconds = operator_digest_cadence, # A2/A3: normal-urgency digest cadence
         worktree_janitor_fn        = worktree_janitor_fn,    # §4b: None unless `arbiter worktree janitor enabled` (default-off → inert)
+        local_timezone_name        = local_timezone,         # Item B: outreach-stamp tz (reuses the journal tz key)
+        outreach_throttle_max_messages   = throttle_max,     # Item C: N (trailing-window cap, routine taps)
+        outreach_throttle_window_minutes = throttle_window,  # Item C: Y minutes
         user_id                  = "system",
         user_email               = "system@lupin.deepily.ai",
         session_id               = "heartbeat-arbiter",

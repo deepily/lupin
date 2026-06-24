@@ -405,6 +405,50 @@ def test_poll_once_stale_participant_store_backed_cycle_still_escalates( tmp_pat
     assert "alice" in deadlock_msgs[ 0 ] and "bob" in deadlock_msgs[ 0 ]
 
 
+def test_poll_once_dead_session_participant_store_backed_cycle_still_escalates( tmp_path ):
+    """8a450183 :1018 invariant — the SESSION-freshness AXIS twin of the hold-axis
+    test above (Krishna's veto domain). A REAL store-backed deadlock must STILL
+    escalate even when a ring participant is a beyond-alive-threshold (DEAD) SESSION.
+
+    alice is a ~12h-stale session (bridge-absent → offline) holding peer:bob; bob is
+    fresh holding peer:alice. The NEW per-session freshness gate drops alice's edge
+    from the FILTERED advisory graph (summary['cycles'] == 0 — the OLD graph['cycles']
+    feed would MISS the deadlock), but the store carries a real alice↔bob blocked_by
+    ring, so the UNFILTERED escalation feed at :1018
+    (find_deadlock_cycles(build_wait_edges(fleet_view)) — passes NO now/threshold)
+    STILL sees the ring and escalates. This LOCKS the invariant against the session
+    axis explicitly: if a future change ever threaded now/threshold into the :1018
+    feed, alice would drop there too → empty cycles → no escalation → this fails LOUD
+    (never silent), mirroring the hold-axis guard."""
+    old_ts = ( datetime.datetime.fromisoformat( NOW_ISO ) - datetime.timedelta( hours=12 ) ).isoformat()
+    _write_events( str( tmp_path ), "s1", _event( "s1", "honored", awaiting="peer:bob",   persona="alice", ts=old_ts ) )
+    _write_events( str( tmp_path ), "s2", _event( "s2", "honored", awaiting="peer:alice", persona="bob"   ) )
+    # alice bridge-absent → her commons echo (if any) is phantom-nulled → last_activity
+    # rests on the 12h-old event → session_is_stale fires for her in the FILTERED graph.
+    gw = FakeGateway( who_rows=[
+        { "session_id": "s2", "persona_name": "bob", "last_post_ts": NOW_ISO },
+    ] )
+    store_cycle = {
+        "alice": [ { "id": "a1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "bob" } ] } ],
+        "bob":   [ { "id": "b1", "status": "in_progress", "gate_class": "none",
+                     "blocked_by": [ { "kind": "persona", "id": "alice" } ] } ],
+    }
+    escal = [ ]
+    job = _make_job( tmp_path, gateway=gw,
+                     bridge_discovery_fn    = lambda: { "s2": "bob" },     # alice ABSENT → dead session
+                     owed_work_fn           = lambda names: store_cycle,
+                     deadlock_dwell_seconds = 0,                            # fire on first corroborated sight
+                     notify_fn              = lambda msg, *a, **k: escal.append( msg ) )
+    summary = job._poll_once()
+    # FILTERED advisory graph: alice's dead-SESSION edge dropped → ring dissolved → 0
+    assert summary[ "cycles" ] == 0
+    # UNFILTERED :1018 feed: store-backed alice↔bob ring STILL escalates
+    deadlock_msgs = [ m for m in escal if "DEADLOCK" in m and "store-corroborated" in m ]
+    assert deadlock_msgs, escal
+    assert "alice" in deadlock_msgs[ 0 ] and "bob" in deadlock_msgs[ 0 ]
+
+
 def test_stale_hold_holders_missing_hold_keeps_edge( tmp_path ):
     """A session with NO readable hold is NOT added to the stale set (absence ≠
     deadness) — the edge survives. Directly exercises _stale_hold_holders."""
@@ -536,20 +580,23 @@ def test_poll_once_fresh_contradicting_hold_does_not_break_store_backed_deadlock
 
 
 def test_poll_once_dead_session_no_hold_excluded_from_ping_feed_confirming( tmp_path ):
-    """7f9a8ee2 test #5 (CONFIRMING — NO new prod code): a DEAD/reaped session with a
-    lingering stale holding_on=peer:X but NO hold file is ALREADY excluded from the
-    symptom paths by the pre-existing alive-pruning — live_edges (@~1030, alive
-    holders only) for the ping/cc feed and _attention_workers (@~1854, alive views
-    only) for the advisory. Its edge still appears in the unfiltered graph, but no cc
-    ping fires. Proves the secondary gap needs no additional suppression code."""
+    """7f9a8ee2 test #5, UPDATED for 8a450183: a DEAD/reaped session with a lingering
+    stale holding_on=peer:X but NO hold file. Originally this proved the pre-existing
+    alive-prune (live_edges @~1038, alive holders only) suppressed the PING without
+    new code, while the dead edge still showed in summary["edges"]. The 8a450183
+    per-SESSION freshness gate now ALSO drops that dead session's edge from the
+    FILTERED advisory graph at ingestion (a strictly stronger fix that subsumes the
+    secondary gap), so summary["edges"] (the FILTERED graph count) is now 0 — while
+    the UNFILTERED :1018 escalation feed, which passes no now/threshold, is unchanged.
+    pings_fired stays 0 (the operator-observable invariant)."""
     old_ts = "2026-06-05T11:00:00+00:00"          # 1h before NOW → beyond alive_threshold(600s) → alive=False
     _write_events( str( tmp_path ), "s1",
                    _event( "s1", "honored", awaiting="peer:maria", persona="ghost", ts=old_ts ) )
     gw  = FakeGateway( who_rows=[ { "session_id": "s1", "persona_name": "ghost", "last_post_ts": old_ts } ] )
-    job = _make_job( tmp_path, gateway=gw )        # NO hold_reader_fn → reconciliation inert (isolates the alive-prune)
+    job = _make_job( tmp_path, gateway=gw )        # NO hold_reader_fn → hold-reconciliation inert (isolates the session-freshness gate)
     summary = job._poll_once()
-    assert summary[ "edges" ]       == 1           # edge present in the (alive-unfiltered) graph
-    assert summary[ "pings_fired" ] == 0           # but the DEAD holder is pruned from the ping/cc feed
+    assert summary[ "edges" ]       == 0           # 8a450183: dead SESSION dropped from the FILTERED graph at ingestion
+    assert summary[ "pings_fired" ] == 0           # and (as before) no phantom ping fires
     assert gw.sent == [ ]                           # no cc DM emitted on its behalf
 
 
@@ -899,3 +946,34 @@ def test_worktree_janitor_hiccup_is_swallowed( tmp_path ):
     def janitor(): raise RuntimeError( "reconcile boom" )
     summary = _make_job( tmp_path, worktree_janitor_fn=janitor )._poll_once()
     assert summary[ "worktrees_swept" ] == 0     # demoted to 0, poll completes
+
+
+# ── 8a450183 PERSONA-COLLAPSE: dead session's stale edge on a live persona ───────
+
+def test_poll_once_dead_session_same_persona_no_phantom_ping( tmp_path ):
+    """Bug 8a450183 (the committed gap-closer): a DEAD session and a LIVE session
+    SHARE persona 'mr radio'. The dead session's last activity is ~12h stale and its
+    `awaiting=peer:maria` lingers; the live session is fresh and awaiting nothing.
+
+    Pre-fix: the dead session's `mr radio→maria` edge survives the per-PERSONA
+    `alive_personas` filter (the persona is alive via the LIVE session — the
+    persona-collapse) → a phantom 'maria is blocking worker mr radio' ping fires
+    every poll. This dual-session-same-persona case had ZERO test coverage.
+
+    Post-fix: the per-SESSION freshness gate drops the dead session's edge at
+    INGESTION (keyed by session-id, before the holder→persona collapse), with NO
+    hold_reader wired — so this proves A1 (session-keyed) + A3 (explicit ts, not
+    view['alive']) INDEPENDENTLY of the bc1bc373/7f9a8ee2 hold filters."""
+    old_ts = ( datetime.datetime.fromisoformat( NOW_ISO ) - datetime.timedelta( hours=12 ) ).isoformat()
+    _write_events( str( tmp_path ), "s_dead",
+                   _event( "s_dead", "honored", awaiting="peer:maria", persona="mr radio", ts=old_ts ) )
+    _write_events( str( tmp_path ), "s_live",
+                   _event( "s_live", "honored", awaiting="none", persona="mr radio", ts=NOW_ISO ) )
+    # s_live is bridge-present + commons-fresh → alive; s_dead is bridge-ABSENT
+    # (its commons echo, if any, is phantom-nulled) → offline, ~12h stale.
+    gw  = FakeGateway( who_rows=[ { "session_id": "s_live", "persona_name": "mr radio", "last_post_ts": NOW_ISO } ] )
+    job = _make_job( tmp_path, gateway=gw, bridge_discovery_fn=lambda: { "s_live": "mr radio" } )
+    summary = job._poll_once()
+    assert summary[ "pings_fired" ] == 0          # no phantom 'maria blocking mr radio'
+    assert gw.sent == [ ]                         # nothing sent to maria
+    assert summary[ "edges" ] == 0               # live same-persona session not over-filtered into an edge

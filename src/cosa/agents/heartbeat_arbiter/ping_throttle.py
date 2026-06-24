@@ -92,6 +92,61 @@ def under_global_cap( recent_ping_count, cap ):
     return recent_ping_count < cap
 
 
+def in_window( sent_ts, now, window_seconds ):
+    """
+    The subset of `sent_ts` whose age (now − ts) is within the trailing window
+    [0, window_seconds] (Item C, 2026-06-24 outreach-DM throttle).
+
+    The PURE pruning primitive the consumer uses to bound its per-recipient
+    send-history list AND to count sends in the trailing window. Future-dated /
+    unusable entries are dropped (fail-safe: a junk ts can never inflate the count
+    and so never wrongly suppress an outreach).
+
+    Requires:
+        - sent_ts is an iterable of aware datetimes (or None); now is an aware
+          datetime; window_seconds is a number
+
+    Ensures:
+        - returns the list of entries with 0 <= (now − ts) <= window_seconds,
+          in input order
+        - None / empty / all-unusable → [ ]; never raises
+    """
+    kept = [ ]
+    for ts in ( sent_ts or [ ] ):
+        try:
+            age = ( now - ts ).total_seconds()
+        except ( TypeError, AttributeError ):
+            continue                                    # unusable ts → drop (fail-safe)
+        if 0 <= age <= window_seconds:
+            kept.append( ts )
+    return kept
+
+
+def trailing_window_allows( sent_ts, now, max_messages, window_seconds ):
+    """
+    Is a NEW outreach to this recipient allowed under the trailing-window rate
+    limit — N (`max_messages`) messages per Y (`window_seconds`) — (Item C)?
+
+    The per-recipient counterpart to the per-edge `should_ping` + the fleet-wide
+    `under_global_cap`: caps the COUNT of recent sends in a sliding window.
+
+    Requires:
+        - sent_ts is an iterable of aware datetimes (the recipient's prior sends)
+          or None; now is an aware datetime
+        - max_messages (N) and window_seconds (Y·60) are numbers
+
+    Ensures:
+        - returns True (DISABLED — never suppress, fail-safe) when max_messages <= 0
+          OR window_seconds <= 0
+        - otherwise returns True iff FEWER than max_messages of `sent_ts` fall in the
+          trailing window (in_window) — i.e. there is room for one more
+        - never raises
+    """
+    if max_messages <= 0 or window_seconds <= 0:
+        return True                                     # disabled → fail-safe allow
+    return len( in_window( sent_ts, now, window_seconds ) ) < max_messages
+
+
 def quick_smoke_test():
     """Self-contained smoke test. Returns True or raises AssertionError."""
     import datetime
@@ -111,6 +166,19 @@ def quick_smoke_test():
 
     assert under_global_cap( 4, 5 ) is True
     assert under_global_cap( 5, 5 ) is False
+
+    # Item C trailing-window throttle (N per Y)
+    recent = [ now - datetime.timedelta( seconds=10 ), now - datetime.timedelta( seconds=20 ) ]
+    old    = [ now - datetime.timedelta( seconds=10_000 ) ]
+    assert in_window( recent, now, 60 )            == recent           # both within 60s
+    assert in_window( recent + old, now, 60 )      == recent           # the 10_000s entry pruned
+    assert in_window( [ now + datetime.timedelta( seconds=5 ) ], now, 60 ) == [ ]   # future ts dropped
+    assert in_window( None, now, 60 )              == [ ]
+    assert trailing_window_allows( recent, now, 3, 60 ) is True        # 2 < 3 → room
+    assert trailing_window_allows( recent, now, 2, 60 ) is False       # 2 >= 2 → full
+    assert trailing_window_allows( recent + old, now, 2, 60 ) is False # old pruned → 2 in window → full
+    assert trailing_window_allows( recent, now, 0, 60 )  is True        # disabled (max<=0)
+    assert trailing_window_allows( recent, now, 2, 0 )   is True        # disabled (window<=0)
     return True
 
 

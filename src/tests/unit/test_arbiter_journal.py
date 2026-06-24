@@ -22,8 +22,8 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.agents.heartbeat_arbiter.arbiter_journal import (
-    DEFAULT_TZ_NAME, DELIVERED_OUTCOMES, TS_LOCAL_FORMAT,
-    format_ts_local, make_log_fn, quick_smoke_test, resolve_tz,
+    DEFAULT_TZ_NAME, DELIVERED_OUTCOMES, TS_LOCAL_FORMAT, OUTREACH_TS_FORMAT,
+    format_ts_local, format_outreach_ts, make_log_fn, quick_smoke_test, resolve_tz,
 )
 
 
@@ -67,6 +67,20 @@ def test_format_is_ricks_exact_shape():
 def test_format_dst_flip_winter_is_est():
     tz, _ = resolve_tz( "America/New_York" )
     assert format_ts_local( JAN, tz ) == "2026-01-11-at-16-28-46-(EST)"
+
+
+# ── format_outreach_ts: Rick's outreach stamp (Item B, 2026-06-24) ──────────────
+
+def test_format_outreach_ts_is_ricks_outreach_shape():
+    tz, _ = resolve_tz( "America/New_York" )
+    # 21:28:46 UTC → 17:28:46 EDT
+    assert format_outreach_ts( JUNE, tz ) == "2026.06.11 at 17:28:46"
+    assert OUTREACH_TS_FORMAT == "%Y.%m.%d at %H:%M:%S"
+
+
+def test_format_outreach_ts_dst_flip_winter():
+    tz, _ = resolve_tz( "America/New_York" )
+    assert format_outreach_ts( JAN, tz ) == "2026.01.11 at 16:28:46"   # EST (UTC-5)
 
 
 # ── make_log_fn: the canonical line shape ────────────────────────────────────

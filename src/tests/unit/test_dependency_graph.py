@@ -22,7 +22,7 @@ import pytest
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
     build_wait_edges, find_deadlock_cycles, build_graph,
     build_store_wait_edges, cycle_is_store_backed, hold_is_stale, quick_smoke_test,
-    hold_contradicts_peer_edge,
+    hold_contradicts_peer_edge, session_is_stale,
     _parse_peer_target,
 )
 
@@ -355,6 +355,84 @@ class TestStalenessEdgeFilter:
         # subtracts dead holders; a store-backed live ring is unaffected.
         g = build_graph( self.FLEET, stale_holders={ "Zed" } )      # Zed not in fleet → no-op
         assert g[ "cycles" ] == [ [ "Ann", "Bob" ] ]
+
+
+# ── SESSION-FRESHNESS GATE: dead SESSION → zero edges (bug 8a450183) ──────────────
+#
+# The PERSONA-COLLAPSE phantom: a DEAD session's stale `holding_on: peer:X` edge
+# survives the per-PERSONA alive filter because a LIVE same-persona session keeps
+# the persona "alive". The fix gates peer-edge inference on the HOLDER SESSION's
+# OWN freshness — decided per session-id (the view), NEVER collapsed to persona —
+# additive + fail-SAFE (missing/unparseable ts → KEEP the edge; never view['alive']).
+
+class TestSessionFreshnessGate:
+    _OLD   = _NOW - datetime.timedelta( hours=12 )      # far beyond a 600s threshold
+    _FRESH = _NOW - datetime.timedelta( seconds=30 )
+
+    def test_predicate_beyond_threshold_is_stale( self ):           # A: parseable + beyond → True
+        assert session_is_stale( { "last_activity_ts": self._OLD }, _NOW, 600 ) is True
+
+    def test_predicate_fresh_is_not_stale( self ):                  # A3: fresh session kept
+        assert session_is_stale( { "last_activity_ts": self._FRESH }, _NOW, 600 ) is False
+
+    def test_predicate_iso_string_ts_parsed( self ):               # tolerate a string ts (fail-safe parse)
+        assert session_is_stale( { "last_activity_ts": self._OLD.isoformat() }, _NOW, 600 ) is True
+        assert session_is_stale( { "last_activity_ts": self._FRESH.isoformat() }, _NOW, 600 ) is False
+
+    def test_predicate_missing_or_unparseable_ts_keeps_edge( self ):  # A3 fail-SAFE: missing → KEEP
+        assert session_is_stale( { }, _NOW, 600 )                              is False  # no ts key
+        assert session_is_stale( { "last_activity_ts": None }, _NOW, 600 )     is False  # explicit None
+        assert session_is_stale( { "last_activity_ts": "garbage" }, _NOW, 600 ) is False  # unparseable
+        assert session_is_stale( { "last_activity_ts": 12345 }, _NOW, 600 )    is False  # non-str/non-dt
+
+    def test_predicate_inert_without_now_or_threshold( self ):      # additive: defaults None → no gate
+        assert session_is_stale( { "last_activity_ts": self._OLD }, None, 600 )  is False
+        assert session_is_stale( { "last_activity_ts": self._OLD }, _NOW, None ) is False
+
+    def test_predicate_non_dict_view( self ):                       # fail-SAFE: junk view
+        assert session_is_stale( "not-a-dict", _NOW, 600 ) is False
+        assert session_is_stale( None, _NOW, 600 )         is False
+
+    def test_predicate_unusable_now_keeps_edge( self ):            # fail-SAFE: now non-datetime → except → keep
+        # a truthy-but-non-datetime `now` makes (now - ts) raise TypeError → KEEP edge
+        assert session_is_stale( { "last_activity_ts": self._OLD }, "not-a-datetime", 600 ) is False
+
+    def test_predicate_future_ts_is_not_stale( self ):             # negative age → recent → keep
+        future = _NOW + datetime.timedelta( hours=1 )
+        assert session_is_stale( { "last_activity_ts": future }, _NOW, 600 ) is False
+
+    # ── the PERSONA-COLLAPSE scenario at the pure leaf ──────────────────────────
+    # Two views, SAME persona "mr radio": a DEAD session (old ts, awaiting peer:maria)
+    # and a LIVE session (fresh, awaiting none). The dead session's edge must NOT
+    # survive when the session-freshness gate is engaged.
+    DUAL = {
+        "s_dead": { "persona": "mr radio", "holding_on": "peer:maria", "last_activity_ts": _OLD },
+        "s_live": { "persona": "mr radio", "holding_on": "none",       "last_activity_ts": _FRESH },
+    }
+
+    def test_dead_session_edge_dropped_with_gate( self ):           # A1: filtered path → no phantom
+        edges = build_wait_edges( self.DUAL, now=_NOW, alive_threshold_seconds=600 )
+        assert edges == { }                                        # dead "mr radio"→"maria" gone
+        g = build_graph( self.DUAL, now=_NOW, alive_threshold_seconds=600 )
+        assert g[ "edges" ] == { } and g[ "cycles" ] == [ ]
+
+    def test_dead_session_edge_survives_without_gate( self ):       # A2: :1018 unfiltered feed unchanged
+        # the UNFILTERED escalation feed passes NO now/threshold → byte-identical to
+        # the prior behavior: the dead session's edge is STILL present (the store gate
+        # downstream is what suppresses a non-store phantom, NOT this leaf).
+        assert build_wait_edges( self.DUAL ) == { "mr radio": "maria" }
+
+    def test_gate_composes_with_stale_holders( self ):             # both axes OR'd, no interference
+        # a LIVE-but-stale-hold holder (persona path) AND a dead session (session path)
+        fv = {
+            "s_dead": { "persona": "mr radio", "holding_on": "peer:maria", "last_activity_ts": self._OLD },
+            "s_live": { "persona": "Ann",      "holding_on": "peer:Bob",   "last_activity_ts": self._FRESH },
+        }
+        # session gate drops s_dead; stale_holders drops Ann → zero edges
+        assert build_wait_edges( fv, stale_holders={ "Ann" },
+                                 now=_NOW, alive_threshold_seconds=600 ) == { }
+        # without stale_holders, Ann's live edge survives; only the dead session drops
+        assert build_wait_edges( fv, now=_NOW, alive_threshold_seconds=600 ) == { "Ann": "Bob" }
 
 
 def test_module_smoke_passes():

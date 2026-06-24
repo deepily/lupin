@@ -58,7 +58,9 @@ from cosa.agents.heartbeat_arbiter.fleet_render import (
     build_snapshot, carry_forward_lineage, compute_liveness, frame_signature,
     prune_offline_rows, render_fleet_table, render_tick,
 )
-from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn, DELIVERED_OUTCOMES
+from cosa.agents.heartbeat_arbiter.arbiter_journal import (
+    make_log_fn, DELIVERED_OUTCOMES, resolve_tz, format_outreach_ts,
+)
 # Item B (§3.4/§3.5): the dm-topic slug (receipt polling reads the SAME board the
 # durable send_to wrote to) + the restart-surviving Rick re-announce ledger.
 from cosa.agents.heartbeat_arbiter.arbiter_gateway import LupinArbiterGateway
@@ -153,6 +155,18 @@ CASE_KINDS = {
     CASE_USER_GATE_RESURFACE    : "user_gate_resurface",     # 6929f4ac (2026-06-22)
     CASE_OPERATOR_GATE          : "operator_gate",           # A2/A3 (fcb5dbc0)
 }
+
+# Item C (2026.06.24) — the ROUTINE persona-bound shoulder-taps subject to the
+# trailing-window outreach throttle (the noise Rick is targeting: the phantom-prone
+# blocker-ping storm + the manager-tap cadence). DELIBERATELY EXCLUDES every
+# Rick-bound escalation (deadlock #5, manager-down #9, decision #10, orphan #8,
+# stall #11, fleet-dark, manager-stale-advisory, reap-rec, operator-gate): those are
+# TRACKED-but-NEVER-SUPPRESSED — capping a real alert to save noise is the failure we
+# must avoid (Rick-ratification-pending safety carve-out, Mr Radio 2026-06-24). The
+# DIRECT-send pokes (stuck_poke, manager_stale_poke) are EXCLUDED too — they carry
+# their OWN per-episode caps (poke_max_per_episode / mgr poke caps), so layering the
+# trailing-window cap there would double-throttle AND skew the episode counters.
+THROTTLEABLE_CASES = frozenset( { 4, 7 } )   # 4 = blocker ping · 7 = manager tap
 
 # ── L1 store-classification constants (2026-06-17, arbiter detector gaps) ────
 # Each tapped/owed-candidate manager is classified ONCE per poll from a
@@ -508,6 +522,18 @@ class ArbiterConsumerJob( AgenticJobBase ):
         poke_max_per_episode     : int                  = 3,
         manager_stale_poke_threshold_seconds : int      = 2700,   # post-game F2 (~45 min; 0 disables)
         manager_stale_poke_max_age_seconds : int        = 7200,   # corpse ceiling (~2h; must be > threshold)
+        # Item B (2026.06.24): outreach-timestamp tz. The stamp '[YYYY.MM.DD at HH:MM:SS]'
+        # prefixed to every human-facing outreach message is rendered in this tz
+        # (REUSES arbiter_journal.resolve_tz + the INI key `arbiter journal local
+        # timezone`; None → America/New_York, DST-aware EDT/EST, degrade-safe to UTC).
+        local_timezone_name      : Optional[ str ]      = None,
+        # Item C (2026.06.24): trailing-window outreach-DM throttle (N msgs / Y min),
+        # PER-RECIPIENT. Both default 0 → DISABLED (fail-safe: never suppress); the
+        # :8001 factory reads the two runtime-tunable INI keys. SAFETY carve-out:
+        # only routine persona-bound shoulder-taps are suppressed — Rick-bound
+        # deadlock/manager-down/decision escalations are TRACKED but NEVER suppressed.
+        outreach_throttle_max_messages   : int          = 0,      # N (0 → throttle disabled)
+        outreach_throttle_window_minutes : int          = 0,      # Y (0 → throttle disabled)
         # Item B (2026.06.11 receipts design): the delivery-receipt seams. All
         # default None/inert so legacy in-pool construction is unchanged; the
         # :8001 factory wires the real hops.
@@ -804,6 +830,19 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self.reannounce_interval_seconds = reannounce_interval_seconds
         self.reannounce_ttl_seconds      = reannounce_ttl_seconds
         self._pending_ledger_path        = pending_ledger_path
+        # Item B (2026.06.24): resolve the outreach-stamp tz ONCE (REUSE
+        # arbiter_journal.resolve_tz + the INI key `arbiter journal local timezone`;
+        # None → America/New_York, DST-aware). resolve_tz is degrade-safe (invalid
+        # name → UTC + an error string); we journal that error ONCE so a tz typo is
+        # visible, never a silent UTC fallback.
+        self._outreach_tz, _tz_err = resolve_tz( local_timezone_name )
+        if _tz_err is not None:
+            self._log_fn( "outreach_tz_invalid", detail=_tz_err )
+        # Item C (2026.06.24): trailing-window outreach throttle config (N msgs / Y
+        # min, PER-RECIPIENT). max <= 0 OR window <= 0 ⇒ DISABLED (fail-safe: never
+        # suppress). Window stored in seconds (Y minutes → seconds).
+        self._outreach_throttle_max            = outreach_throttle_max_messages
+        self._outreach_throttle_window_seconds = outreach_throttle_window_minutes * 60
 
         # --- consumer state (carried across polls) ---
         self._offsets       = { }                                  # sid -> byte offset
@@ -811,6 +850,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         self._ledger        = PingLedger()
         self._ping_attempts = { }                                  # edge_key -> attempt count
         self._recent_pings  = [ ]                                  # list of ping datetimes (global-cap window)
+        # Item C (2026.06.24) per-recipient outreach-DM throttle state: recipient
+        # persona -> [ sent datetime, ... ] (trailing-window; pruned to the window on
+        # each send). In-memory across polls (a restart resets the window — acceptable,
+        # mirrors _awaiting_ack / _recent_pings). Feeds ping_throttle.trailing_window_allows.
+        self._outreach_sent_ts = { }                               # recipient -> list[datetime]
         self._poll_count    = 0
         # v2.1 render state (§10.3 change-or-tick): the last rendered SEMANTIC
         # frame signature + when it last changed (for the tick's since-duration).
@@ -975,7 +1019,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # manager-blocking advisory). Inert when the hold-reader seam is unwired
         # (None → empty set → today's behavior); the deadlock LOGIC is untouched.
         stale_holders = self._stale_hold_holders( fleet_view, now )
-        graph = build_graph( fleet_view, stale_holders=stale_holders )
+        # 8a450183 PERSONA-COLLAPSE filter: gate peer-edge inference on each HOLDER
+        # SESSION's OWN freshness (per session-id, NOT persona) so a DEAD session's
+        # stale `holding_on: peer:X` edge cannot ride a LIVE same-persona session's
+        # liveness into the advisory/ping graph. Threaded ONLY here (the FILTERED
+        # path); the UNFILTERED :1018 escalation feed below passes neither now nor
+        # the threshold, so it stays BYTE-IDENTICAL (a real store-backed ring with a
+        # dead participant must still escalate — Krishna A2).
+        graph = build_graph( fleet_view, stale_holders=stale_holders,
+                             now=now, alive_threshold_seconds=self.alive_threshold_seconds )
 
         # 2b-2 Part-6 fanout inputs: the active-managers-on-duty set (phantom-
         # guarded) for the Rick+managers tier, and a persona→session_id map (off
@@ -1306,7 +1358,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             "outcome"     : outcome.get( "outcome" ),
             "attempt"     : attempt,
         }
-        for key in ( "http_status", "detail", "connection_count" ):
+        for key in ( "http_status", "detail", "connection_count",
+                     "window_count", "last_sent_local" ):   # Item C: throttle observability
             if key in outcome: fields[ key ] = outcome[ key ]
         self._log( "arbiter_outreach_result", **fields )
 
@@ -1346,6 +1399,61 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if isinstance( raw, dict ):
             return [ raw ]
         return list( raw )
+
+    def _stamp( self, message ):
+        """
+        Prefix a human-facing outreach message with Rick's timestamp (Item B,
+        2026-06-24): "[YYYY.MM.DD at HH:MM:SS] <message>", rendered in the configured
+        outreach tz from the SAME injectable poll clock (self._clock).
+
+        Applied at message CONSTRUCTION — `_route` (the routed choke point, covering
+        message + cc_message) and the four DIRECT-send literals that bypass `_route`
+        (decision_cc, stuck_poke, manager_stale_poke, poll_error_escalation). Because
+        the stamp lands at construction, a resend (_check_outreach_receipts reuses the
+        stored body) and a re-announce (the pending ledger reuses the stored message)
+        carry the ORIGINAL stamp and are never double-stamped.
+
+        Requires:
+            - message is a string
+
+        Ensures:
+            - returns "[<stamp>] <message>" with <stamp> = now() (self._clock, the
+              injectable seam → deterministic under a fake clock) rendered via
+              format_outreach_ts in self._outreach_tz
+            - never raises (clock + tz are construction-validated)
+        """
+        now = datetime.datetime.fromisoformat( self._clock.now_iso() )
+        return f"[{format_outreach_ts( now, self._outreach_tz )}] {message}"
+
+    def _outreach_throttle_allows( self, recipient ):
+        """
+        Item C: per-recipient trailing-window throttle decision for a ROUTINE
+        persona-bound outreach DM (N messages / Y minutes). Consumer-side state
+        (`self._outreach_sent_ts`) + the PURE ping_throttle predicates.
+
+        DISABLED (max <= 0 or window <= 0) ⇒ always allowed, NO state kept
+        (fail-safe: never suppress, zero overhead). When ENABLED, the recipient's
+        send-history is pruned to the trailing window; on an ALLOWED decision `now`
+        is appended (so the NEXT call counts this send); a SUPPRESSED decision does
+        NOT append (it was not sent).
+
+        Ensures:
+            - returns ( allowed:bool, count_in_window:int, last_sent:datetime|None )
+              where count_in_window is the post-decision window count and last_sent
+              is the most-recent PRIOR send (None if none) — both for the journal
+            - never raises (the clock is construction-validated)
+        """
+        if self._outreach_throttle_max <= 0 or self._outreach_throttle_window_seconds <= 0:
+            return True, 0, None
+        now    = datetime.datetime.fromisoformat( self._clock.now_iso() )
+        window = self._outreach_throttle_window_seconds
+        kept   = ping_throttle.in_window( self._outreach_sent_ts.get( recipient, [ ] ), now, window )
+        last_sent = kept[ -1 ] if kept else None
+        allowed   = ping_throttle.trailing_window_allows( kept, now, self._outreach_throttle_max, window )
+        if allowed:
+            kept = kept + [ now ]
+        self._outreach_sent_ts[ recipient ] = kept
+        return allowed, len( kept ), last_sent
 
     def _emit_to_rick( self, outreach_id, kind, message, case=None ):
         """
@@ -1389,10 +1497,21 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 self._log( "outreach_ledger_error", outreach_id=outreach_id, error=str( e ) )
 
     def _emit_dm( self, outreach_id, kind, persona, body, case=None,
-                  session_id=None, expects_ack=False, attempt=1 ):
+                  session_id=None, expects_ack=False, attempt=1, throttleable=False ):
         """
         Emit one persona-bound DM: the durable dm-<persona> board write PLUS the
         best-effort wake push hop. Journals one result per channel.
+
+        Item C (2026-06-24): when `throttleable=True` — set ONLY for the routine taps in
+        THROTTLEABLE_CASES (case 4 blocker ping, case 7 manager tap) — the per-recipient
+        trailing-window throttle (N msgs / Y min) gates the send: once N have been sent
+        to this recipient in the trailing window the DM is SUPPRESSED — no board write,
+        no push, no ack registration — and journaled as outcome `throttle_suppressed`
+        (carrying the window count + the last-sent EDT stamp). EVERYTHING ELSE passes the
+        default `throttleable=False` → TRACKED-but-never-suppressed: Rick-bound
+        escalations (deadlock/manager-down/decision) AND the direct-send pokes
+        (stuck_poke / manager_stale_poke — which carry their OWN per-episode caps, so the
+        trailing-window cap would double-throttle + skew those counters) AND resends.
 
         The wake push hop is mechanism-selected (Thread C+D, INI
         `arbiter poke wake mechanism`, default "tmux" — load-bearing, not a
@@ -1420,6 +1539,22 @@ class ArbiterConsumerJob( AgenticJobBase ):
               outreach in the awaiting-ack tracker for §3.4 receipt polling
             - never raises
         """
+        # Item C: routine-tap trailing-window throttle (persona-bound, per-recipient).
+        # Suppression short-circuits BEFORE the board write / push / ack registration
+        # so a suppressed tap costs nothing downstream; escalations (throttleable=False)
+        # never reach this branch (the carve-out).
+        if throttleable:
+            allowed, count, last_sent = self._outreach_throttle_allows( persona )
+            if not allowed:
+                # On suppression `last_sent` is provably non-None: suppression requires
+                # >= max >= 1 prior in-window sends, so a last-sent stamp always exists.
+                self._log_outreach_result(
+                    outreach_id, kind, persona,
+                    { "channel": "dm", "outcome": "throttle_suppressed",
+                      "window_count": count,
+                      "last_sent_local": format_outreach_ts( last_sent, self._outreach_tz ) },
+                    attempt=attempt )
+                return
         qid      = outreach_id if attempt == 1 else f"{outreach_id}-r{attempt}"
         metadata = { "kind": "arbiter-ping", "recipient_persona": persona,
                      "outreach_id": outreach_id, "question_id": qid,
@@ -1513,6 +1648,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
         """
         tier       = tier_for( case )
         kind       = CASE_KINDS.get( case, f"case_{case}" )
+        message    = self._stamp( message )                          # Item B: timestamp prefix (BEFORE dm_targets build)
+        if cc_message is not None:
+            cc_message = self._stamp( cc_message )
         rick_bound = tier in ( TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS )
         dm_targets = [ ]                          # ( persona, body, expects_ack )
         if tier == TIER_RICK_AND_MANAGERS:
@@ -1533,9 +1671,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                             case=case, tier=tier, outreach_id=outreach_id )
         if rick_bound:
             self._emit_to_rick( outreach_id, kind, message, case=case )
+        throttleable = case in THROTTLEABLE_CASES                    # Item C: only routine taps (4 ping / 7 tap)
         for persona, body, expects_ack in dm_targets:
             self._emit_dm( outreach_id, kind, persona, body, case=case,
-                           expects_ack=expects_ack )
+                           expects_ack=expects_ack, throttleable=throttleable )
 
     def _check_outreach_receipts( self, now ):
         """
@@ -2459,11 +2598,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         except Exception:
             manager = None
         if manager:
-            cc_body = ( f"Heartbeat arbiter (cc): your crew posted a decision-needed — "
-                        f"{entry.get( 'body', '' )}. Rick has it; weigh in if it's yours." )
+            cc_body = self._stamp(                                  # Item B: direct-send site (bypasses _route)
+                f"Heartbeat arbiter (cc): your crew posted a decision-needed — "
+                f"{entry.get( 'body', '' )}. Rick has it; weigh in if it's yours." )
             outreach_id = self._mint_outreach_id()
             self._log_outreach( "decision_cc", "send_to", [ manager ], cc_body,
                                 persona=manager, outreach_id=outreach_id )
+            # decision_cc is part of a DECISION escalation → NOT throttled (carve-out)
             self._emit_dm( outreach_id, "decision_cc", manager, cc_body, expects_ack=True )
 
     @staticmethod
@@ -2678,7 +2819,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 continue                                          # not stuck long enough yet
             if self._poke_count[ sid ] < self.poke_max_per_episode:
                 recipient   = view.get( "persona" ) or sid
-                body        = self._format_poke( view )
+                body        = self._stamp( self._format_poke( view ) )   # Item B: direct-send site (bypasses _route)
                 # post-game F1 — kind "stuck_poke", never the bare four-letter literal
                 # (the poked-rename one-name sweep bans quoted bare-poke literals on
                 # production surfaces; also symmetric with "manager_stale_poke")
@@ -2859,7 +3000,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     active_managers=active_managers,
                 )
             if self._mgr_poke_count[ sid ] < self.poke_max_per_episode:
-                body        = self._format_manager_stale_poke( row, age )
+                body        = self._stamp( self._format_manager_stale_poke( row, age ) )   # Item B: direct-send site
                 outreach_id = self._mint_outreach_id()
                 self._log_outreach( "manager_stale_poke", "send_to", [ persona ], body,
                                     session_id=sid, persona=persona,
@@ -3259,9 +3400,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if ( self._poll_error_streak >= self.poll_error_escalate_threshold
              and not self._poll_error_escalated ):
             self._poll_error_escalated = True
-            body = ( f"ARBITER POLL-ERROR persistent: {self._poll_error_streak} consecutive poll "
-                     f"failures (≥{self.poll_error_escalate_threshold}) — escalating to Rick "
-                     f"(arbiter effectively down): {error}" )
+            body = self._stamp(                                     # Item B: direct-send site (bypasses _route)
+                f"ARBITER POLL-ERROR persistent: {self._poll_error_streak} consecutive poll "
+                f"failures (≥{self.poll_error_escalate_threshold}) — escalating to Rick "
+                f"(arbiter effectively down): {error}" )
             outreach_id = self._mint_outreach_id()
             self._log_outreach( "poll_error_escalation", "notify", [ "rick" ], body,
                                 outreach_id=outreach_id )   # post-game F1
