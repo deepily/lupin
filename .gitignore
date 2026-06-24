@@ -93,6 +93,15 @@ io/**
 !io/test-suite/visual-baselines/
 !io/test-suite/visual-baselines/**
 
+# Same runtime-artifact class as io/** above, but written UNDER src/ when the
+# codebase-analysis tools (loc-delta / git-delta CSV+PNG) run with cwd=src or
+# cwd=src/cosa. src/io/ is pure output (no source) → ignore wholesale; for
+# src/cosa/io/ ignore ONLY the output subdirs so the dir stays available for the
+# io-helper source CLAUDE.md PROJECT STRUCTURE designates there.
+src/io/
+src/cosa/io/git-delta-analysis/
+src/cosa/io/git-loc-delta/
+
 # Omit Mail Map
 .mailmap
 
