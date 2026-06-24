@@ -142,6 +142,66 @@ class TestHoldAwareDesyncKiller( _Base ):
         assert state[ "total_owed" ] == 1
 
 
+class TestTotalOwedReferentClasses( _Base ):
+    """
+    E2E (Sam's non-blocking nit on aa403e03): total_owed must sum ALL THREE referent
+    classes — owed_items + delegations + open_inbound — not just the store owed-count
+    seam. Every OTHER test in this file leaves the _Base fixture's delegations + inbound
+    at EMPTY, so total_owed is exercised ONLY through owed_items (the store count). These
+    cases hold the store owed-count at ZERO and drive REAL non-empty delegations and/or
+    open_inbound, proving each NON-store referent class independently reaches total_owed
+    (and that a referent-bearing owed state with no hold resolves owed=True).
+    """
+
+    # The worker-inbound feed is gated behind count_inbound_questions_as_owed (DEFAULT
+    # False drops open_inbound, Thread B); the inbound cases need it ON for the inbound
+    # referent to survive into the verdict + total_owed.
+    _SETTINGS_INBOUND_ON = dict( _SETTINGS, count_inbound_questions_as_owed=True )
+
+    @pytest.mark.parametrize( "delegations,inbound_owed,expected_total", [
+        ( [ "w1" ],         [ ],            1 ),   # delegations ALONE → 1 (store owed-items 0)
+        ( [ ],              [ "q1" ],       1 ),   # open_inbound ALONE → 1 (store owed-items 0)
+        ( [ "w1", "w2" ],   [ "q1" ],       3 ),   # both, summed atop a 0 store count → 2 + 1
+    ] )
+    def test_total_owed_sums_delegations_and_inbound( self, delegations, inbound_owed, expected_total ):
+        # store owed-count held at 0 (owed_items == []), so the ENTIRE total_owed comes
+        # from the two referent classes the _Base fixture normally zeroes — re-patched
+        # here ON TOP of _Base (innermost patch wins for the with-block).
+        with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+                    return_value=dict( self._SETTINGS_INBOUND_ON ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop._gather_outstanding_delegations",
+                    return_value=list( delegations ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
+                    return_value={ "owed": list( inbound_owed ), "stale": [ ] } ):
+            state = _resolve_owed_state( "sid", "/t.jsonl", None )
+        # store owed-items contributed NOTHING — the total is purely delegations + inbound.
+        assert state[ "owed_items" ]            == [ ]
+        assert len( state[ "delegations" ] )    == len( delegations )
+        assert len( state[ "open_inbound" ] )   == len( inbound_owed )
+        assert state[ "total_owed" ]            == expected_total
+        # a referent-bearing owed state with no hold resolves owed=True on BOTH consumers.
+        assert state[ "owed" ] is True
+
+    def test_inbound_gated_off_drops_from_total_owed( self ):
+        # The COMPLEMENT: identical inbound, but count_inbound_questions_as_owed DEFAULT
+        # False (the _SETTINGS base) → open_inbound is dropped, so it must NOT inflate
+        # total_owed. Pins the gate that distinguishes this referent class from the
+        # always-counted delegations.
+        with patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings", return_value=dict( _SETTINGS ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient", return_value=None ), \
+             patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 ), \
+             patch( "lupin_cli.claude_code.hooks.stop._owed_count_from_store", return_value=( 0, True ) ), \
+             patch( "lupin_cli.claude_code.hooks.stop._gather_outstanding_delegations", return_value=[ ] ), \
+             patch( "lupin_cli.claude_code.hooks.stop._gather_unanswered_inbound_questions",
+                    return_value={ "owed": [ "q1" ], "stale": [ ] } ):
+            state = _resolve_owed_state( "sid", "/t.jsonl", None )
+        assert state[ "open_inbound" ] == [ ]
+        assert state[ "total_owed" ]   == 0
+
+
 class TestOwedUnknown( _Base ):
     """Store-owed source ON but unreachable → owed_unknown (UNKNOWN ≠ idle)."""
 
