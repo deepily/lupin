@@ -23,16 +23,19 @@ is journaled loudly once at build time (`journal_tz_invalid`).
 import datetime
 import json
 from typing import Any, Callable, Optional
-from zoneinfo import ZoneInfo
+
+# OUTREACH_TS_FORMAT + DEFAULT_TZ_NAME + resolve_tz + format_outreach_ts moved to the
+# neutral central module cosa.utils.edt_timestamp (2026-06-24) so the REST DM path can
+# reuse Rick's outreach stamp WITHOUT importing from this arbiter package (which would
+# be a bad dependency direction). Re-imported here and re-exported UNCHANGED → the
+# arbiter ping output stays BYTE-IDENTICAL and existing importers (arbiter_job,
+# test_arbiter_journal) keep importing these names from arbiter_journal with no change.
+from cosa.utils.edt_timestamp import (
+    DEFAULT_TZ_NAME, OUTREACH_TS_FORMAT, format_outreach_ts, resolve_tz,
+)
 
 # Rick's ratified human format: "2026-06-11-at-17-28-46-(EDT)"
 TS_LOCAL_FORMAT     = "%Y-%m-%d-at-%H-%M-%S-(%Z)"
-# Rick's ratified OUTREACH-stamp format (2026-06-24): "2026.06.24 at 11:47:57"
-# — the human-facing leading prefix on every arbiter shoulder-tap/outreach message.
-# Distinct from TS_LOCAL_FORMAT (dashes + tz suffix, machine-greppable journal field);
-# this one is the readable inline stamp Rick reads in his DMs.
-OUTREACH_TS_FORMAT  = "%Y.%m.%d at %H:%M:%S"
-DEFAULT_TZ_NAME     = "America/New_York"
 DEFAULT_SERVICE     = "lupin-arbiter-app"
 
 # Item B (§3.1/§3.5): live-channel outcomes that count as DELIVERED to Rick —
@@ -41,26 +44,6 @@ DEFAULT_SERVICE     = "lupin-arbiter-app"
 # vocabulary); arbiter_live_notify (dedup recording) and arbiter_job (Rick-side
 # receipts + re-announce resolution) both import it from here.
 DELIVERED_OUTCOMES  = frozenset( { "queued", "delivered_via_listener" } )
-
-
-def resolve_tz( tz_name: Optional[ str ] ):
-    """
-    Resolve a tz-database name to a ZoneInfo, degrade-safe.
-
-    Requires:
-        - tz_name is a string tz-database name (e.g. "America/New_York") or None
-
-    Ensures:
-        - returns ( ZoneInfo, None ) for a valid name (None → DEFAULT_TZ_NAME)
-        - returns ( ZoneInfo("UTC"), <error string> ) for an invalid/unknown
-          name — the caller journals the error ONCE; rendering falls back to UTC
-        - never raises
-    """
-    name = tz_name if tz_name else DEFAULT_TZ_NAME
-    try:
-        return ZoneInfo( name ), None
-    except Exception as e:
-        return ZoneInfo( "UTC" ), f"unknown timezone {name!r}: {e}"
 
 
 def format_ts_local( dt: datetime.datetime, tz: Any ) -> str:
@@ -77,23 +60,6 @@ def format_ts_local( dt: datetime.datetime, tz: Any ) -> str:
           the same wall format yields "(EST)" in January)
     """
     return dt.astimezone( tz ).strftime( TS_LOCAL_FORMAT )
-
-
-def format_outreach_ts( dt: datetime.datetime, tz: Any ) -> str:
-    """
-    Render an aware datetime as Rick's outreach stamp "YYYY.MM.DD at HH:MM:SS"
-    (2026-06-24) in the given tz — the leading prefix on arbiter outreach messages.
-
-    Requires:
-        - dt is an AWARE datetime
-        - tz is a tzinfo (ZoneInfo) — REUSE resolve_tz to obtain it (the INI key
-          `arbiter journal local timezone`); this function builds NO tz infra
-
-    Ensures:
-        - returns the same instant as `dt` rendered "%Y.%m.%d at %H:%M:%S"
-          (e.g. "2026.06.24 at 11:47:57"); DST handled by the tz database
-    """
-    return dt.astimezone( tz ).strftime( OUTREACH_TS_FORMAT )
 
 
 def make_log_fn(

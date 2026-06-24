@@ -29,6 +29,10 @@ from ..notification_fifo_queue import NotificationFifoQueue
 from ..middleware.api_key_auth import require_api_key_or_jwt
 from ..db.database import get_db
 from ..db.repositories.notification_repository import NotificationRepository
+# Central EDT-stamp formatter (2026-06-24): the ONE owner of Rick's bracketed
+# outreach prefix "[YYYY.MM.DD at HH:MM:SS]", shared with the arbiter ping path so a
+# reader cannot tell a DM's stamp from an arbiter ping's stamp.
+from cosa.utils.edt_timestamp import format_edt_timestamp
 # The notification queue dependency lives with the notifications router; reuse it
 # so /api/dm/send pushes onto the same FIFO queue as /api/notify.
 from .notifications import get_notification_queue
@@ -104,6 +108,7 @@ def execute_dm_send(
     build_sender_id,
     persist_fn,
     new_id_fn = None,
+    now_fn    = None,
 ):
     """
     Pure-logic core for POST /api/dm/send — notification-native AI↔AI DM.
@@ -113,6 +118,13 @@ def execute_dm_send(
     + threading), then pushes it to the recipient session's listener via job_id
     routing. No commons board, no claim-check, no watcher.
 
+    The outbound body is prefixed with Rick's central EDT stamp
+    "[YYYY.MM.DD at HH:MM:SS] " (2026-06-24) — the SAME bracketed prefix the arbiter
+    pings carry, sourced from the shared cosa.utils.edt_timestamp formatter. This is
+    the single server-side DM chokepoint (send AND respond reuse this core), so the
+    stamp lands on EVERY peer DM in every direction. The arbiter pings ride a
+    DISJOINT path (CommonsStore, not /api/dm/send) and are NOT re-stamped here.
+
     Requires:
         - body is a DmSendRequest
         - resolve_recipient_fn( recipient_session_id, recipient_persona,
@@ -120,12 +132,18 @@ def execute_dm_send(
           OR {"http_status":422,"detail"}
         - build_sender_id( sender_session_id ) -> sender_id str
         - persist_fn( ... ) -> db notification id str
+        - now_fn (if given) is a 0-arg callable returning an aware datetime — a
+          TEST-ONLY seam for a deterministic stamp; production leaves it None and
+          the central formatter stamps the real UTC-now instant
 
     Ensures:
         - 422 (recipient unresolved) is returned unchanged for AI self-correction
-        - 201 persists + pushes the ai_to_ai notification and returns
+        - 201 persists + pushes the ai_to_ai notification (body EDT-prefixed in BOTH
+          the persisted row and the pushed message) and returns
           {http_status, message_id, thread_id, recipient_session, recipient_persona, dispatched}
         - thread_id defaults to the fresh message_id when not supplied (new thread)
+        - threading / reply_to / sender persona+icon metadata are UNTOUCHED — only
+          the body string is prefixed
 
     Raises:
         - None (DB/push errors propagate to the route)
@@ -149,10 +167,14 @@ def execute_dm_send(
     message_id = new_id_fn()
     thread_id  = body.thread_id or message_id
 
+    # Central EDT prefix on the outbound body — identical bracketed shape to the
+    # arbiter pings (f"[{stamp}] {body}"). now_fn is the test-only deterministic seam.
+    stamped_body = f"{format_edt_timestamp( dt=now_fn() if now_fn is not None else None )} {body.body}"
+
     db_id = persist_fn(
         sender_id         = sender_id,
         recipient_user_id = authenticated_user_id,
-        message           = body.body,
+        message           = stamped_body,
         direction         = "ai_to_ai",
         sender_persona    = body.sender_persona,
         sender_icon       = body.sender_icon,
@@ -162,7 +184,7 @@ def execute_dm_send(
     )
 
     notification_queue.push_notification(
-        message        = body.body,
+        message        = stamped_body,
         type           = "user_initiated_message",
         priority       = "medium",
         id             = db_id or message_id,
