@@ -307,6 +307,11 @@ def assemble_app(
         poke_max_per_episode = int( cfg.get( "arbiter poke max per episode", default=3, return_type="int" ) ),
         manager_stale_poke_threshold = int( cfg.get( "arbiter manager stale poke threshold seconds", default=2700, return_type="int" ) ),
         manager_stale_poke_max_age   = int( cfg.get( "arbiter manager stale poke max age seconds", default=7200, return_type="int" ) ),
+        # role-goals Phase 2-3 (D1): role-selected north-star goal echoes appended to
+        # the stuck-poke + manager-staleness poke bodies. Runtime-tunable; "" leaves
+        # the poke body unchanged. Canonical: planning-is-prompting -> workflow/role-goals.md.
+        manager_goal_line    = cfg.get( "heartbeat manager goal line", default="" ) or "",
+        worker_goal_line     = cfg.get( "heartbeat worker goal line",  default="" ) or "",
         # 6929f4ac outward-twin backstop: the aged-gate resurface ceiling (hold_reader_fn
         # itself defaults to the real read_hold inside the factory, mirroring owed_work_fn).
         user_gate_resurface_seconds = int( cfg.get( "arbiter user gate resurface seconds", default=1800, return_type="int" ) ),

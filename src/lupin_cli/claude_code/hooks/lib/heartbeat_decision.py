@@ -81,7 +81,7 @@ def _result( outcome, hook_output, should_increment=False, should_notify_cap=Fal
     }
 
 
-def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None ):
+def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None, goal_line="" ):
     """
     Pure §0 decision over fetched leaf state.
 
@@ -92,6 +92,12 @@ def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None ):
         - poke_count is the current heartbeat poke count (int >= 0)
         - cap is the per-session poke cap (int > 0)
         - now is an aware datetime or None (forwarded to freshness check)
+        - goal_line is the role-selected north-star goal echo (role-goals Phase
+          2-3) or "" — an INJECTED string the IO shell reads from config; when
+          non-empty it is appended as a trailing blank-line-separated block to the
+          poke reason (BOTH the oracle-owed and the self-declared paths). Empty ⇒
+          the reason is byte-identical to the pre-role-goals output. Canonical
+          goal text: planning-is-prompting -> workflow/role-goals.md.
 
     Ensures:
         - Returns the _result(...) structure; NO I/O, NO side effects
@@ -146,7 +152,13 @@ def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None ):
     if poke_count >= cap:
         return _result( OUTCOME_CAP_REACHED, { "continue": True }, should_notify_cap=True )
 
-    reason = build_poke_reason( oracle_verdict ) if oracle_owed else DECLARED_OWED_REASON
+    # The role-selected goal echo is appended on BOTH reason paths: build_poke_reason
+    # threads it for the oracle-owed reason; the self-declared DECLARED_OWED_REASON
+    # gets the same trailing block here. Empty goal_line ⇒ unchanged output.
+    if oracle_owed:
+        reason = build_poke_reason( oracle_verdict, goal_line=goal_line )
+    else:
+        reason = DECLARED_OWED_REASON + ( "\n\n" + goal_line if goal_line else "" )
     return _result( OUTCOME_POKE, { "decision": "block", "reason": reason }, should_increment=True )
 
 

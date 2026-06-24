@@ -90,6 +90,12 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
     # PER-RECIPIENT, routine shoulder-taps only). Both runtime-tunable; <=0 disables.
     throttle_max    = int( config_mgr.get( "arbiter outreach throttle max messages", default=5, return_type="int" ) )
     throttle_window = int( config_mgr.get( "arbiter outreach throttle window minutes", default=15, return_type="int" ) )
+    # Role-goal poke echoes (role-goals Phase 2-3): the role-selected north-star goal
+    # lines appended to the stuck-poke + manager-staleness poke bodies. Runtime-tunable
+    # (no redeploy — D1); "" leaves the poke body unchanged. Canonical human-readable
+    # source: planning-is-prompting -> workflow/role-goals.md §"Injection: the poke echo".
+    manager_goal_line = config_mgr.get( "heartbeat manager goal line", default="" ) or ""
+    worker_goal_line  = config_mgr.get( "heartbeat worker goal line",  default="" ) or ""
 
     # §4b worktree janitor (Worktree Lifecycle Contract). DEFAULT-OFF: the flag is
     # False unless explicitly enabled in lupin-app.ini, so wiring it here is INERT
@@ -126,6 +132,8 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
         local_timezone_name        = local_timezone,         # Item B: outreach-stamp tz (reuses the journal tz key)
         outreach_throttle_max_messages   = throttle_max,     # Item C: N (trailing-window cap, routine taps)
         outreach_throttle_window_minutes = throttle_window,  # Item C: Y minutes
+        manager_goal_line          = manager_goal_line,      # role-goals Phase 2-3: stuck/manager-stale poke echo
+        worker_goal_line           = worker_goal_line,       # role-goals Phase 2-3: stuck-poke worker echo
         user_id                  = "system",
         user_email               = "system@lupin.deepily.ai",
         session_id               = "heartbeat-arbiter",

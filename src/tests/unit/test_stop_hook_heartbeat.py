@@ -170,7 +170,12 @@ class TestRunHeartbeat:
         mock_read.return_value       = _stale_owed_hold()
         self.mock_replay.return_value = _EMPTY_STATE
         out, _ = _run_heartbeat( "sid", "/t.jsonl" )
-        assert out == { "decision": "block", "reason": DECLARED_OWED_REASON }
+        # role-goals Phase 2-3: the self-declared poke still OPENS with the v1
+        # DECLARED_OWED_REASON (intent preserved); the role-selected goal echo is
+        # APPENDED as a trailing blank-line-separated block. The "\n\n" suffix proves
+        # the append happened WITHOUT pinning the goal-line wording (D4 protection).
+        assert out[ "decision" ] == "block"
+        assert out[ "reason" ].startswith( DECLARED_OWED_REASON + "\n\n" )
         mock_incr.assert_called_once_with( "sid" )
         # §4 breadcrumb: declared-owed poke has no Task* count → self-declared text
         self.mock_notify.assert_called_once()

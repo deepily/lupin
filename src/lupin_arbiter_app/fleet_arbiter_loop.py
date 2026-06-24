@@ -227,6 +227,10 @@ def build_fleet_arbiter_job_factory(
     poke_max_per_episode : int                  = 3,
     manager_stale_poke_threshold : int          = 2700,
     manager_stale_poke_max_age : int            = 7200,
+    # role-goals Phase 2-3: role-selected north-star goal echoes appended to the
+    # stuck-poke + manager-staleness poke bodies. "" → inert (poke body unchanged).
+    manager_goal_line    : str                  = "",
+    worker_goal_line     : str                  = "",
     start_period_seconds : int                  = 120,
     # Item B (2026.06.11 receipts design): the delivery-receipt seams + knobs,
     # threaded verbatim to the job. None seams keep their tier inert.
@@ -328,6 +332,8 @@ def build_fleet_arbiter_job_factory(
             poke_max_per_episode         = poke_max_per_episode,
             manager_stale_poke_threshold_seconds = manager_stale_poke_threshold,   # post-game F2
             manager_stale_poke_max_age_seconds   = manager_stale_poke_max_age,     # corpse ceiling
+            manager_goal_line          = manager_goal_line,                        # role-goals Phase 2-3
+            worker_goal_line           = worker_goal_line,                         # role-goals Phase 2-3
             dm_push_fn                  = dm_push_fn,                              # Item B §3.3
             tmux_push_fn                = tmux_push_fn,                            # Thread C+D host-side tmux wake
             poke_wake_mechanism         = poke_wake_mechanism,                     # Thread C+D wake selector

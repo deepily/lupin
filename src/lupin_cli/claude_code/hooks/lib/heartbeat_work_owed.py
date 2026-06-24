@@ -492,18 +492,32 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
     }
 
 
-def build_poke_reason( verdict ):
+def build_poke_reason( verdict, goal_line="" ):
     """
     Compose the self-poke `reason` string from a work-owed verdict.
 
+    The role-selected north-star goal line (role-goals Phase 2-3) is an INJECTED
+    string — the IO shell (stop.py) reads it from the `heartbeat <role> goal line`
+    configuration-manager key and passes it in; this pure core only APPENDS it
+    (the config read is IO and stays in the shell). Canonical source of the goal
+    text: planning-is-prompting -> workflow/role-goals.md §"Injection: the poke
+    echo".
+
     Requires:
         - verdict is the dict returned by evaluate_work_owed (has "specifics")
+        - goal_line is a string (the role-selected goal echo) or "" — empty ⇒
+          nothing appended (output byte-identical to the pre-role-goals reason)
 
     Ensures:
-        - Returns the POKE_REASON_TEMPLATE filled with verdict["specifics"]
+        - Returns the POKE_REASON_TEMPLATE filled with verdict["specifics"], with
+          goal_line appended as a trailing blank-line-separated block when
+          goal_line is non-empty
         - Rides the top-level Stop-hook `reason` field — NEVER systemMessage
     """
-    return POKE_REASON_TEMPLATE.format( specifics=verdict[ "specifics" ] )
+    reason = POKE_REASON_TEMPLATE.format( specifics=verdict[ "specifics" ] )
+    if goal_line:
+        reason = reason + "\n\n" + goal_line
+    return reason
 
 
 def quick_smoke_test():

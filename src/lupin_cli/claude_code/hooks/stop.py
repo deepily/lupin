@@ -293,6 +293,94 @@ def _stop_hook_idle_behavior() -> str:
         return DEFAULT_IDLE_BEHAVIOR
 
 
+# ── Role-goal poke echo (role-goals Phase 2-3) ───────────────────────────────
+# The compressed, role-selected "north-star goal" line APPENDED to the heartbeat
+# self-poke reason so a session re-anchors on what it is ultimately trying to
+# achieve, fresh every tick. The text lives as runtime config (retune live, no
+# redeploy — D1); CANONICAL human-readable source: planning-is-prompting ->
+# workflow/role-goals.md §"Injection: the poke echo". The config READ is IO and
+# stays in this shell; the pure decision module only appends the injected string.
+_GOAL_LINE_KEYS = {
+    "manager"  : "heartbeat manager goal line",
+    "worker"   : "heartbeat worker goal line",
+    "agnostic" : "heartbeat role-agnostic goal line",
+}
+
+
+def _select_goal_role( session_id, bridge_role ):
+    """
+    3-way role selector for the Stop-hook self-poke goal line (role-goals Phase
+    2-3; María/Rick refinement 2026-06-24).
+
+    Resolution order:
+        1. bridge_role present → a spawned session stamped its role at spawn
+           (COSA_VOICE_ROLE → register_session.py); role=="manager" is a
+           DEFENSIVE branch (the spawner only ever spawns WORKER roles today —
+           author/reviewer/tester/worker — so in practice a present role lands
+           on the worker line; the manager arm is reachable only if a session is
+           ever spawned with COSA_VOICE_ROLE=manager, kept as belt-and-suspenders).
+        2. else _is_manager_persona(session_id) → a declared fleet-roster manager
+           (COSA_VOICE_MANAGERS__<PROJECT>) gets the Manager line at its OWN
+           self-poke, not only via the arbiter (sites #2/#3). Reuses the tested,
+           fail-open governance helper — no hand-rolled roster/canon logic.
+        3. else → "agnostic" (D2 graceful fallback when role can't be determined).
+
+    Requires:
+        - session_id is a string
+        - bridge_role is the bridge meta "role" value (str) or None
+
+    Ensures:
+        - returns one of "manager" | "worker" | "agnostic"; never raises
+    """
+    role = ( bridge_role or "" ).strip().lower()
+    if role == "manager":
+        return "manager"
+    if role:
+        return "worker"
+    try:
+        from lupin_cli.claude_code.hooks.lib.subagent_governance import _is_manager_persona
+        if _is_manager_persona( session_id ):
+            return "manager"
+    except Exception:
+        pass
+    return "agnostic"
+
+
+def _heartbeat_goal_line( session_id, bridge_role ):
+    """
+    Read the role-selected heartbeat goal echo from the configuration_manager
+    (role-goals Phase 2-3, D1 — runtime-tunable). The ConfigurationManager
+    banners would corrupt the hook's stdout JSON protocol channel, so the read is
+    wrapped in redirect_stdout exactly like _stop_hook_idle_behavior().
+
+    Requires:
+        - session_id is a string
+        - bridge_role is the bridge meta "role" value (str) or None
+
+    Ensures:
+        - returns the goal-echo string for the role _select_goal_role resolves, or
+          "" on any error / missing key — an empty goal_line makes the poke reason
+          byte-identical to the pre-role-goals output (degrade-safe; never breaks
+          the poke)
+        - never raises; never writes to stdout
+    """
+    import contextlib
+    import io
+    role_kind = _select_goal_role( session_id, bridge_role )
+    key       = _GOAL_LINE_KEYS[ role_kind ]
+    try:
+        with contextlib.redirect_stdout( io.StringIO() ):
+            mgr   = ConfigurationManager(
+                env_var_name  = "LUPIN_CONFIG_MGR_CLI_ARGS",
+                silent        = True,
+                mute_splainer = True,
+            )
+            value = mgr.get( key, default="", silent=True )
+        return str( value or "" ).strip()
+    except Exception:
+        return ""
+
+
 def _idle_sentence( persona_name, owed_unknown=False ) -> str:
     """
     The first-person idle status sentence for the `idle_announce` behavior
@@ -1631,7 +1719,19 @@ def _run_heartbeat( session_id, transcript_path, cwd=None ):
         needs_question_surface       = needs_question_surface,
         needs_spinup_check           = needs_spinup_check,
     )
-    result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ] )
+    # Role-selected north-star goal echo (role-goals Phase 2-3) — APPENDED to the
+    # poke reason so the session re-anchors on its goal every tick. Role comes from
+    # the bridge (spawned workers stamp it at spawn); a declared fleet-roster
+    # manager is detected via _is_manager_persona so it gets the Manager line at
+    # its OWN self-poke too; otherwise the role-agnostic fallback (D2). The config
+    # read (runtime-tunable) lives here in the IO shell; decide_heartbeat only
+    # appends the injected string. Degrade-safe: "" ⇒ pre-role-goals reason.
+    try:
+        _bridge_role = get_session_metadata().get( "role" )
+    except Exception:
+        _bridge_role = None
+    goal_line  = _heartbeat_goal_line( session_id, _bridge_role )
+    result     = decide_heartbeat( hold, verdict, poke_count, settings[ "poke_cap" ], goal_line=goal_line )
 
     if result[ "should_increment" ]:
         increment_poke_count( session_id )

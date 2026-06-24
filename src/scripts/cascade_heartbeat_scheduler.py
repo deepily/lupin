@@ -63,6 +63,31 @@ def load_api_key( key_path: Path ) -> str:
     return key_path.read_text().strip()
 
 
+def load_manager_goal_line() -> str:
+    """
+    Read the Manager north-star goal echo (`heartbeat manager goal line`) from the
+    configuration_manager once at startup (role-goals Phase 2-3, D1 — runtime-
+    tunable, no redeploy). Canonical text: planning-is-prompting ->
+    workflow/role-goals.md §"Injection: the poke echo".
+
+    Ensures:
+        - returns the configured goal-echo string, or "" on any error / missing
+          key — an empty value leaves the heartbeat body unchanged (degrade-safe)
+        - never raises (the scheduler must start even if config is unavailable)
+    """
+    try:
+        from cosa.config.configuration_manager import ConfigurationManager
+        mgr   = ConfigurationManager(
+            env_var_name  = "LUPIN_CONFIG_MGR_CLI_ARGS",
+            silent        = True,
+            mute_splainer = True,
+        )
+        value = mgr.get( "heartbeat manager goal line", default="", silent=True )
+        return str( value or "" ).strip()
+    except Exception:
+        return ""
+
+
 def dm_topic_for( manager: str ) -> str:
     """
     Build a server-pattern-safe DM topic from a manager persona name.
@@ -92,19 +117,28 @@ def dm_topic_for( manager: str ) -> str:
 
 
 def fire_heartbeat(
-    api_base_url : str,
-    api_key      : str,
-    manager      : str,
-    store        : CommonsStore,
-    tick_num     : int,
+    api_base_url      : str,
+    api_key           : str,
+    manager           : str,
+    store             : CommonsStore,
+    tick_num          : int,
+    manager_goal_line : str = "",
 ) -> dict:
-    """Write a heartbeat entry to dm-<manager>.md + /api/dm/send notification-native push."""
+    """Write a heartbeat entry to dm-<manager>.md + /api/dm/send notification-native push.
+
+    role-goals Phase 2-3: this poke targets a MANAGER (manager-only by construction),
+    so the Manager north-star goal echo (`heartbeat manager goal line`, read once in
+    main()) is APPENDED to the body when non-empty. "" leaves the body unchanged
+    (degrade-safe). Canonical text: planning-is-prompting -> workflow/role-goals.md.
+    """
     qid   = str( uuid.uuid4() )
     topic = dm_topic_for( manager )
     body  = (
         f"heartbeat-{tick_num} from cascade-scheduler — universal-step-zero: "
         f"disk-read all active topics + dispatch any pending stages"
     )
+    if manager_goal_line:
+        body = body + "\n\n" + manager_goal_line
 
     # Step 1: write to disk via CommonsStore (uses NEW entry separator post-fix)
     try:
@@ -344,6 +378,9 @@ def main():
     api_base_url = args.api_base_url or os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
     api_key      = load_api_key( Path( args.api_key_path ) )
     store        = CommonsStore( root=LUPIN_ROOT )
+    # role-goals Phase 2-3: read the Manager goal echo ONCE at startup; appended to
+    # each manager-targeted heartbeat body. "" → bodies unchanged (degrade-safe).
+    manager_goal_line = load_manager_goal_line()
 
     # Capture initial input-plan topic file size — cascade_complete detection
     # only fires on content added AFTER this point (ignores prior-run posts).
@@ -390,7 +427,8 @@ def main():
         )
 
         # Fire heartbeat
-        result = fire_heartbeat( api_base_url, api_key, args.manager, store, tick_num )
+        result = fire_heartbeat( api_base_url, api_key, args.manager, store, tick_num,
+                                 manager_goal_line=manager_goal_line )
         print( f"[cascade-heartbeat] tick {tick_num}: {json.dumps( result )}" )
 
         # Wait one cadence then check manager liveness

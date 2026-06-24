@@ -522,6 +522,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         poke_max_per_episode     : int                  = 3,
         manager_stale_poke_threshold_seconds : int      = 2700,   # post-game F2 (~45 min; 0 disables)
         manager_stale_poke_max_age_seconds : int        = 7200,   # corpse ceiling (~2h; must be > threshold)
+        # Role-goal poke echoes (role-goals Phase 2-3, 2026-06-24). The role-selected
+        # north-star goal lines APPENDED to the stuck-poke + manager-staleness poke
+        # bodies. Default None = inert (legacy in-pool construction unchanged); the
+        # :8001 factory reads the `heartbeat manager/worker goal line` INI keys and
+        # passes them. Canonical text: planning-is-prompting -> workflow/role-goals.md.
+        manager_goal_line        : Optional[ str ]      = None,
+        worker_goal_line         : Optional[ str ]      = None,
         # Item B (2026.06.24): outreach-timestamp tz. The stamp '[YYYY.MM.DD at HH:MM:SS]'
         # prefixed to every human-facing outreach message is rendered in this tz
         # (REUSES arbiter_journal.resolve_tz + the INI key `arbiter journal local
@@ -796,6 +803,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # yesterday's dead manager session poked with a bogus 1134m age on every
         # process start), never a live manager going dark — NOT eligible.
         self.manager_stale_poke_max_age_seconds   = manager_stale_poke_max_age_seconds
+        # Role-goal poke echoes (role-goals Phase 2-3): the role-selected north-star
+        # goal lines appended to the stuck-poke (_format_poke, via view["role"]) and
+        # the manager-staleness poke (_format_manager_stale_poke, always Manager).
+        # None/"" ⇒ nothing appended (legacy body unchanged). Canonical text:
+        # planning-is-prompting -> workflow/role-goals.md.
+        self.manager_goal_line = manager_goal_line or ""
+        self.worker_goal_line  = worker_goal_line  or ""
         # post-game F1: the structured-log seam — every outreach + gate evaluation
         # lands in the journal so silence is diagnosable (Rick's verbatim ask).
         self._log_fn           = log_fn           if log_fn           is not None else _default_log_fn
@@ -2754,14 +2768,32 @@ class ArbiterConsumerJob( AgenticJobBase ):
             and v.get( "alive" ) is True and v.get( "stuck" ) is True
         }
 
+    def _append_goal_line( self, body, role ):
+        """
+        Append the role-selected north-star goal echo (role-goals Phase 2-3) to a
+        poke body. role=="manager" → the Manager line; any other non-empty role →
+        the Worker line. The goal strings are injected at construction (the :8001
+        factory reads the `heartbeat <role> goal line` INI keys); when the selected
+        line is None/"" the body is byte-identical to the pre-role-goals output.
+        Canonical text: planning-is-prompting -> workflow/role-goals.md.
+        """
+        is_manager = ( role or "" ).strip().lower() == "manager"
+        line       = self.manager_goal_line if is_manager else self.worker_goal_line
+        if line:
+            return body + "\n\n" + line
+        return body
+
     def _format_poke( self, view ):
         """The non-destructive wake-nudge body sent to a stuck LIVE session."""
-        who = view.get( "persona" ) or view.get( "session_id" )
-        return (
+        who  = view.get( "persona" ) or view.get( "session_id" )
+        body = (
             f"Heartbeat arbiter (auto-poke): {who}, you appear STUCK — repeated "
             f"cap-reached with work owed and no progress. Are you blocked or wedged? "
             f"Post your status, ask for help, or resume. (Non-destructive nudge.)"
         )
+        # role-goals Phase 2-3: append the role-selected goal echo (view["role"] is
+        # "manager" | "worker", set by fleet_render); inert when unconfigured.
+        return self._append_goal_line( body, view.get( "role" ) )
 
     def _format_reap_recommendation( self, view, pokes ):
         """The reap-RECOMMENDATION body — a recommendation to a HUMAN/manager; the
@@ -2846,13 +2878,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
 
     def _format_manager_stale_poke( self, row, age ):
         """The bounded, non-destructive staleness nudge sent to a dark MANAGER session."""
-        who = row.get( "persona" ) or row.get( "session_id" )
-        return (
+        who  = row.get( "persona" ) or row.get( "session_id" )
+        body = (
             f"Heartbeat arbiter (manager-staleness poke): {who}, no signal from your "
             f"session for {_fmt_minutes( age )} (threshold "
             f"{self.manager_stale_poke_threshold_seconds}s). Are you wedged or idle-dark? "
             f"Post your status or resume. Rick has been advised. (Non-destructive nudge.)"
         )
+        # role-goals Phase 2-3: this tier is manager-gated by construction → always
+        # the Manager goal echo (inert when unconfigured).
+        return self._append_goal_line( body, "manager" )
 
     def _check_manager_staleness( self, snapshot, now, active_managers, owed_class=None ):
         """
