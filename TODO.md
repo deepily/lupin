@@ -1,5 +1,15 @@
 # TODO
 
+## ▶ 2026-06-25 — LanceDB Phase A REBUILD EXECUTED (session d6b35eb3, MCP off)
+
+**DONE**: `input_and_output_tbl` **90.46GB → 1.07GB** (~89GB reclaimed; 176,877 rows preserved; clean chain @ v1; DATA01 100%/16G → 94%/107G free). In-container staged rebuild (transient `docker compose run` one-offs, lance 0.36.0 V2 core); both servers healthy post-bounce. Execution log: `src/rnd/v0.1.9/2026.06.24-lancedb-88gb-optimize-incident-remediation.md` §8. `rebuild_lancedb_table.py` modified (`--keep-rebuilt` + `drop-rebuilt`) — **committed-held, push stays Rick's word**. Supersedes the gated `5daf94a0`/`db1acda7` REBUILD-impl items.
+
+**OWED next (Bucket 3, post-restart)**:
+- [ ] **[LUPIN] Phase B standing compaction** — ⚠️ **Decision 4 (2026-06-24 "Phase A only, defer Phase B") OVERTURNED by Rick 2026-06-25** ("I want you to both restore AND compact"). Premise correction: **NO auto-compaction exists today** — that absence is why the table regrew 43→82→88→90GB; "compaction running as it normally does" must be BUILT. Scope: shared preflight-guard module (gate on `list_versions()` clean-walk, not just `*.manifest#N`) + FastAPI lifespan ENQUEUER (must ENQUEUE a `--require-stopped` quiesced job, NEVER inline `optimize()`) + INI keys/splainer + 100% line/branch/function tests. (Discharges TODO 461/462/1668/1745.)
+- [ ] **[LUPIN] Decision #6 amendments** to `src/scripts/lancedb_incident_recovery_2026_06_23.py` — header skew-reconciled/prefer-`docker exec` note + missing-manifest preflight in phase guards. Non-destructive; still owed.
+
+---
+
 ## ▶ NEXT SESSION (Mr. Radio 🦉 session f33b0f62 end — 2026-06-16) — cosa-voice CUTOVER landed + reap-tombstone fix shipped
 
 **Pending (cosa-voice token-reduction engagement):**

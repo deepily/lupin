@@ -2,6 +2,14 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.25 - Session d6b35eb3 (MCP off — no voice) | LanceDB 88GB rebuild EXECUTED — Phase A complete (90.46GB → 1.07GB, ~89GB reclaimed)
+
+**Accomplishments**:
+- **LanceDB `input_and_output_tbl` Phase A REBUILD — EXECUTED & verified green**: the 88GB had grown to **90.46GB** with a *broken* version chain (38,704 manifests; the table at v75,361 referenced ancestors below ~v36,659 that were missing → `list_versions()` hung >2min, in-place `optimize()` non-executable — same failure CLASS as 2026-05-29, confirmed at P0 preflight). Ran the staged rebuild **in-container** via transient `docker compose run --rm --no-deps` one-offs on the lupin-rest-test image (lance 0.36.0 / lancedb 0.30.2 V2 core, never the host venv — sidesteps the 6/23 V1/V2 trap): P0 preflight → P1 build `__rebuilt` (176,877 rows, clean chain) → P3 clean DATA02 outer-net copy → P4 swap `--keep-rebuilt` (drop broken 90GB in place + recreate fresh, **clean chain @ v1**) → P5 canary (`list_versions()` **0.00s**, queryable) → P6 bounce dev+test (both **healthy ~30s**, "Opened input_and_output_tbl w/ 176,877 rows", no crash-loop) → drop-rebuilt. Also cleared a runaway probe container (timed-out `list_versions` left it holding `_versions/`) before the swap. **Result: 90.46GB → 1.07GB (~89GB reclaimed); DATA01 100%/16G → 94%/107G free; all 176,877 rows preserved; both servers serving the clean table.**
+- **`rebuild_lancedb_table.py` (modified)**: added `--keep-rebuilt` (retain `__rebuilt` rollback net through the server bounce) + a `drop-rebuilt` phase. Documented the canonical-swap discrepancy (it does drop+create / reclaims in place, NOT the rename→`__corrupt_bak` the runbook §3 narrative described). Execution log appended to runbook §8.
+
+**Owed next (Bucket 3, post-restart)**: Phase B standing compaction (⚠️ Decision 4 OVERTURNED — Rick wants compaction stood up; NO auto-compaction exists today, that absence is why it regrew); Decision #6 forensic-script amendments (header skew note + missing-manifest preflight).
+
 ### 2026.06.24 - Session 0c427c02 (Mr. Radio 🦉) | Arbiter DM double-stamp fix (committed-held) · storm mitigation · session-end orphan cleanup + push + backup
 
 **Accomplishments**:
