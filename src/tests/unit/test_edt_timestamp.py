@@ -24,7 +24,7 @@ if _src_path not in sys.path:
 
 from cosa.utils.edt_timestamp import (
     DEFAULT_TZ_NAME, OUTREACH_TS_FORMAT,
-    format_edt_timestamp, format_outreach_ts, quick_smoke_test, resolve_tz,
+    format_edt_timestamp, format_outreach_ts, is_already_stamped, quick_smoke_test, resolve_tz,
 )
 
 
@@ -99,6 +99,45 @@ def test_format_edt_timestamp_drift_lock_matches_arbiter_wrap():
     # of the SAME instant — locks the two render sites together so they cannot drift.
     tz, _ = resolve_tz( "America/New_York" )
     assert format_edt_timestamp( JUNE ) + " " == f"[{format_outreach_ts( JUNE, tz )}] "
+
+
+# ── is_already_stamped — DM-chokepoint idempotency guard (bug f49a8b34) ───────
+
+def test_is_already_stamped_true_for_its_own_output():
+    # The predicate recognizes EXACTLY what format_edt_timestamp emits as a leading prefix.
+    assert is_already_stamped( f"{format_edt_timestamp( JUNE )} maria is blocking bob" ) is True
+
+
+def test_is_already_stamped_true_with_one_leading_space():
+    # Anchored at start, tolerates ONE optional leading space.
+    assert is_already_stamped( " [2026.06.11 at 17:28:46] MANAGER-DOWN: bob" ) is True
+
+
+def test_is_already_stamped_false_for_unstamped_body():
+    assert is_already_stamped( "plain text, no stamp" ) is False
+    assert is_already_stamped( "" ) is False
+
+
+def test_is_already_stamped_false_when_stamp_is_mid_string():
+    # A stamp must LEAD — one buried mid-body is not a leading double-stamp risk.
+    assert is_already_stamped( "re: [2026.06.11 at 17:28:46] earlier" ) is False
+
+
+def test_is_already_stamped_false_for_two_leading_spaces():
+    # Only ONE leading space is tolerated; two means it does not lead cleanly.
+    assert is_already_stamped( "  [2026.06.11 at 17:28:46] x" ) is False
+
+
+def test_is_already_stamped_false_for_wrong_shape():
+    # Wrong delimiters / partial stamp → not recognized (won't suppress a real stamp).
+    assert is_already_stamped( "[2026-06-11 17:28:46] x" ) is False   # dashes + colon date, no " at "
+    assert is_already_stamped( "[2026.06.11 at 17:28] x" )  is False   # missing seconds
+
+
+def test_is_already_stamped_false_for_non_string():
+    assert is_already_stamped( None ) is False
+    assert is_already_stamped( 12345 ) is False
+    assert is_already_stamped( [ "[2026.06.11 at 17:28:46]" ] ) is False
 
 
 # ── quick_smoke_test ─────────────────────────────────────────────────────────

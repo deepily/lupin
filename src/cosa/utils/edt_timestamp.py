@@ -31,6 +31,7 @@ the caller may journal once).
 Design: src/rnd/v0.1.9/2026.06.24-central-edt-timestamp-on-all-dms.md
 """
 import datetime
+import re
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -39,6 +40,13 @@ from zoneinfo import ZoneInfo
 # AND (as of this milestone) every peer DM.
 OUTREACH_TS_FORMAT  = "%Y.%m.%d at %H:%M:%S"
 DEFAULT_TZ_NAME     = "America/New_York"
+
+# A body that ALREADY leads with a bracketed EDT stamp of the exact shape this
+# module emits — "[YYYY.MM.DD at HH:MM:SS]" — anchored at string start, tolerating
+# one optional leading space. Used by the DM chokepoint to stay IDEMPOTENT (bug
+# f49a8b34 / bc8d9d82): a body the arbiter (or any caller) already stamped must NOT
+# be re-wrapped into a "[outer] [inner]" double-stamp.
+_LEADING_EDT_STAMP_RE = re.compile( r"^ ?\[\d{4}\.\d{2}\.\d{2} at \d{2}:\d{2}:\d{2}\]" )
 
 
 def resolve_tz( tz_name: Optional[ str ] ):
@@ -100,6 +108,30 @@ def format_edt_timestamp( dt: Optional[ datetime.datetime ] = None, tz_name: Opt
         dt = datetime.datetime.now( datetime.timezone.utc )
     tz, _error = resolve_tz( tz_name )
     return f"[{format_outreach_ts( dt, tz )}]"
+
+
+def is_already_stamped( text: Any ) -> bool:
+    """
+    True iff `text` ALREADY begins with a bracketed EDT stamp of the exact shape
+    `format_edt_timestamp` emits — "[YYYY.MM.DD at HH:MM:SS]" — anchored at string
+    start (tolerating one optional leading space).
+
+    The DM chokepoint (`rest/routers/dm.py`) calls this to stay IDEMPOTENT: a body
+    an upstream caller already stamped (an arbiter ping pre-stamped via _route, then
+    pushed through /api/dm/send) is passed through UNCHANGED instead of being
+    re-wrapped into a "[push-ts] [compose-ts]" double-stamp (bug f49a8b34 / bc8d9d82).
+
+    Requires:
+        - text is any value (defensive — a non-string is never "stamped")
+
+    Ensures:
+        - returns True iff text is a str whose start matches
+          "^ ?\\[YYYY.MM.DD at HH:MM:SS\\]" (the exact format_edt_timestamp shape)
+        - returns False for a non-string, an empty string, an unstamped body, or a
+          stamp that appears only MID-string (must lead)
+        - never raises (pure)
+    """
+    return isinstance( text, str ) and _LEADING_EDT_STAMP_RE.match( text ) is not None
 
 
 def quick_smoke_test():

@@ -32,7 +32,7 @@ from ..db.repositories.notification_repository import NotificationRepository
 # Central EDT-stamp formatter (2026-06-24): the ONE owner of Rick's bracketed
 # outreach prefix "[YYYY.MM.DD at HH:MM:SS]", shared with the arbiter ping path so a
 # reader cannot tell a DM's stamp from an arbiter ping's stamp.
-from cosa.utils.edt_timestamp import format_edt_timestamp
+from cosa.utils.edt_timestamp import format_edt_timestamp, is_already_stamped
 # The notification queue dependency lives with the notifications router; reuse it
 # so /api/dm/send pushes onto the same FIFO queue as /api/notify.
 from .notifications import get_notification_queue
@@ -169,7 +169,12 @@ def execute_dm_send(
 
     # Central EDT prefix on the outbound body — identical bracketed shape to the
     # arbiter pings (f"[{stamp}] {body}"). now_fn is the test-only deterministic seam.
-    stamped_body = f"{format_edt_timestamp( dt=now_fn() if now_fn is not None else None )} {body.body}"
+    # IDEMPOTENT (bug f49a8b34 / bc8d9d82): skip the prepend when the body ALREADY
+    # leads with a bracketed stamp (an arbiter ping pre-stamped via _route, then
+    # pushed through this chokepoint) — else we'd produce a "[push-ts] [compose-ts]"
+    # double. An un-stamped body (human dm_send) still gets the central stamp.
+    stamped_body = body.body if is_already_stamped( body.body ) else \
+        f"{format_edt_timestamp( dt=now_fn() if now_fn is not None else None )} {body.body}"
 
     db_id = persist_fn(
         sender_id         = sender_id,

@@ -128,6 +128,50 @@ class TestExecuteDmSend( unittest.TestCase ):
         self.assertEqual( sent.count( "] " ), 1 )
         self.assertTrue( sent.startswith( "[" ) )
 
+    def test_already_stamped_body_is_not_re_stamped( self ):
+        """Idempotency (bug f49a8b34 / bc8d9d82): an arbiter ping arrives at
+        /api/dm/send ALREADY carrying its own "[YYYY.MM.DD at HH:MM:SS]" stamp (the
+        arbiter pre-stamps via _route, then pushes through this chokepoint). The DM
+        stamp must NOT re-wrap it — no "[push-ts] [compose-ts]" double. The body
+        passes through verbatim; persist + push stay identical."""
+        already = "[2026.06.11 at 17:28:46] maria is blocking worker bob"
+        self._run(
+            { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" },
+            body   = _make_body( body=already ),
+            now_fn = lambda: _JUNE_UTC,
+        )
+        sent = self.queue.push_notification.call_args.kwargs[ "message" ]
+        persisted = self.persist.call_args.kwargs[ "message" ]
+        self.assertEqual( sent, already )                  # verbatim — no second stamp prepended
+        self.assertEqual( persisted, already )             # persist + push identical
+        self.assertNotIn( "] [", sent )                    # no double-bracket
+        self.assertEqual( sent.count( " at " ), 1 )        # exactly ONE stamp
+
+    def test_already_stamped_body_with_one_leading_space_is_not_re_stamped( self ):
+        """Tolerate one optional leading space before the bracket (anchored at start)
+        — still recognized as already-stamped → passed through, not re-wrapped."""
+        already = " [2026.06.11 at 17:28:46] MANAGER-DOWN: bob"
+        self._run(
+            { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" },
+            body   = _make_body( body=already ),
+            now_fn = lambda: _JUNE_UTC,
+        )
+        sent = self.queue.push_notification.call_args.kwargs[ "message" ]
+        self.assertEqual( sent, already )
+        self.assertNotIn( "] [", sent )
+
+    def test_unstamped_body_still_gets_stamped( self ):
+        """No over-correction: a body with NO leading stamp is stamped exactly once
+        (preserves f35d37a1's central-stamp intent for human dm_send)."""
+        self._run(
+            { "http_status": 200, "session_id": "abcdef1234567890", "persona_name": "María" },
+            body   = _make_body( body="plain text, no stamp" ),
+            now_fn = lambda: _JUNE_UTC,
+        )
+        sent = self.queue.push_notification.call_args.kwargs[ "message" ]
+        self.assertEqual( sent, f"{_EXPECTED_EDT_STAMP} plain text, no stamp" )
+        self.assertEqual( sent.count( " at " ), 1 )
+
     def test_real_now_default_when_now_fn_omitted( self ):
         """Production path: now_fn omitted → a real bracketed EDT stamp is produced."""
         import re
