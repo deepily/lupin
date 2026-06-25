@@ -2,6 +2,15 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.24 - Session 0c427c02 (Mr. Radio 🦉) | Arbiter DM double-stamp fix (committed-held) · storm mitigation · session-end orphan cleanup + push + backup
+
+**Accomplishments**:
+- **Arbiter DM double-stamp fix (bug `f49a8b34`/`bc8d9d82`) — DONE, committed-held `23887b6c`**: root-caused by worker Rachel 🕊️ (primary artifacts) to `dm.py:172` re-stamping an already-arbiter-stamped body — my own held `f35d37a1` (central DM stamp) auto-deployed via `:7999 --reload`, so arbiter pings picked up a 2nd `[push-ts] [compose-ts]`. Fix: new `edt_timestamp.is_already_stamped()` makes the chokepoint idempotent (skip prepend when body already leads with a stamp); `f35d37a1` intent preserved, arbiter untouched, no revert. Adversarially reviewed + **independently re-run by me**: 9/9 predicate edge cases, edt 19 pass/100% L+B, dm_send 11 pass (RED-first idempotent + leading-space + un-stamped-still-stamped), arbiter outreach/receipt/throttle 98 pass. Store row `2f3770c7` closed with receipts; Rachel reaped clean (orphan hold cleared).
+- **Arbiter storm mitigation**: cleared the stale `awaiting=peer:rachel` wait-edge in my hold (the source of the false "mr radio blocking Rachel" pings) + ACK'd MANAGER-DOWN. The detection-storm cure (`b63a4a56`) is committed-held; arbiter-service restart deferred (Rick declined tonight — `:7999` already serves the single-stamp dm.py via `--reload`).
+- **Session-end orphan cleanup + push + backup (Rick-directed)**: committed the 4 orphaned tree files (LanceDB 88GB incident decisions-log + rebuild runbook + recovery-script playbook; Tiberius's focus-bar `ENGAGEMENT COMPLETE` note for `4b33ceb7`); pushed the `wip-v0.1.9-2026.06.21` stack to origin (Rick's word); ran backup; pinged María 🌸 to run the cross-repo LoC roll-up with lupin settled.
+
+**Owed next (gated)**: LanceDB REBUILD impl (`5daf94a0` blocked-on-rick, `db1acda7` queued — off-peak tomorrow AM); recovery-script preflight-guard amendment (decision #6 (b)).
+
 ### 2026.06.23 - Session 3d7c4c2e (Tiberius 👑) | FCM live-standup deployed + verified · VM docker relocate · task-board cleanup · MEMORY.md recompact · GCP code-sync script (committed-held)
 
 **Accomplishments**:
