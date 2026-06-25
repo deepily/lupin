@@ -70,10 +70,12 @@ interface ApiOpts {
   sessions?   : BroadcastRecipient[] | Error;
   sendResult? : BroadcastResult | Error | string;   // string → non-Error rejection
 }
-function makeApi(opts: ApiOpts): { api: BroadcastCardApiClient; sent: BroadcastRequest[] } {
+function makeApi(opts: ApiOpts): { api: BroadcastCardApiClient; sent: BroadcastRequest[]; getCalls: () => number } {
   const sent: BroadcastRequest[] = [];
+  let getCount = 0;
   const api: BroadcastCardApiClient = {
     get<T>(_path: string): Promise<T> {
+      getCount++;
       const s = opts.sessions;
       if (s instanceof Error) return Promise.reject(s);
       return Promise.resolve({ sessions: s ?? [] } as T);
@@ -86,7 +88,26 @@ function makeApi(opts: ApiOpts): { api: BroadcastCardApiClient; sent: BroadcastR
       return Promise.resolve(r ?? RESULT_OK);
     },
   };
-  return { api, sent };
+  return { api, sent, getCalls: () => getCount };
+}
+
+// A controllable fake scheduler — captures pending timers without firing them so
+// debounce coalescing + teardown-clear are deterministic (no real 250ms waits).
+interface FakeScheduler {
+  setTimeoutFn   : ( cb: () => void, ms: number ) => unknown;
+  clearTimeoutFn : ( id: unknown ) => void;
+  pending        : Array<{ id: number; cb: () => void; ms: number; cleared: boolean }>;
+  flushTimers    : () => void;   // run every not-yet-cleared pending timer
+}
+function makeScheduler(): FakeScheduler {
+  const pending: Array<{ id: number; cb: () => void; ms: number; cleared: boolean }> = [];
+  let nextId = 1;
+  return {
+    pending,
+    setTimeoutFn   : ( cb, ms ) => { const id = nextId++; pending.push( { id, cb, ms, cleared: false } ); return id; },
+    clearTimeoutFn : ( id ) => { const e = pending.find( ( p ) => p.id === id ); if ( e !== undefined ) e.cleared = true; },
+    flushTimers    : () => { for ( const e of pending ) { if ( !e.cleared ) { e.cleared = true; e.cb(); } } },
+  };
 }
 
 interface Harness {
@@ -96,20 +117,31 @@ interface Harness {
   bus      : EventBus;
   recorder : FakeRecorder;
   sent     : BroadcastRequest[];
+  getCalls : () => number;
 }
 
-async function setup(apiOpts: ApiOpts = { sessions: RECIPIENTS }): Promise<Harness> {
+interface SetupExtra {
+  debounceMs? : number;        // default 0 → event-driven refresh fires within flush()
+  sched?      : FakeScheduler; // inject a controllable scheduler (else real globalThis timers)
+}
+
+async function setup(apiOpts: ApiOpts = { sessions: RECIPIENTS }, extra: SetupExtra = {}): Promise<Harness> {
   const bus      = createEventBusForTesting();
   const storage  = createStorageServiceForTesting();
   const store    = createBroadcastStore({ storage });
   const recorder = new FakeRecorder();
-  const { api, sent } = makeApi(apiOpts);
-  const renderer = createBroadcastCardRenderer({ eventBus: bus, store, api, recorder, getAuthToken: () => "tok" });
+  const { api, sent, getCalls } = makeApi(apiOpts);
+  const renderer = createBroadcastCardRenderer( {
+    eventBus: bus, store, api, recorder, getAuthToken: () => "tok",
+    recipientsRefreshDebounceMs : extra.debounceMs ?? 0,
+    setTimeoutFn                : extra.sched?.setTimeoutFn,
+    clearTimeoutFn              : extra.sched?.clearTimeoutFn,
+  } );
   const root = document.createElement("div");
   document.body.appendChild(root);
   renderer.mount(root);
-  await flush();   // let the initial refreshRecipients() hydrate resolve
-  return { renderer, root, store, bus, recorder, sent };
+  await flush();   // let the initial performRefresh() hydrate resolve
+  return { renderer, root, store, bus, recorder, sent, getCalls };
 }
 
 // Convenience element getters.
@@ -190,14 +222,137 @@ test("↻ refresh re-fetches the recipient list", async () => {
   assert.equal(chips(root).length, 3);
 });
 
-test("store_session_strip_changed triggers a recipient refresh", async () => {
-  const { root, bus } = await setup({ sessions: [] });
+test("store_session_strip_changed triggers a (debounced) recipient refresh", async () => {
+  const { root, bus, getCalls } = await setup({ sessions: [] });   // debounceMs 0 → fires within flush()
   assert.notEqual(root.querySelector(".broadcast-chip.no-recipients"), null);
-  // Now a peer appears; the next hydrate (same stub) still returns [] but the
-  // refresh path runs — assert it re-renders without error.
+  const before = getCalls();   // 1 from the initial mount hydrate
+  // A peer appears; the burst-path scheduleRefresh runs its trailing fetch.
   bus.emit({ type: "store_session_strip_changed", payload: { changeKind: "added" }, source: "test", ts: 0 });
+  // Two macrotask ticks: the first lets the real setTimeout(0) debounce fire
+  // (→ performRefresh + the hydrate GET), the second lets the hydrate .then
+  // repaint the chips.
   await flush();
+  await flush();
+  assert.equal(getCalls(), before + 1);
   assert.notEqual(root.querySelector(".broadcast-chip.no-recipients"), null);
+});
+
+test("a burst of store_session_strip_changed events coalesces into ONE refresh", async () => {
+  const sched = makeScheduler();
+  const { bus, getCalls } = await setup({ sessions: RECIPIENTS }, { debounceMs: 250, sched });
+  const before = getCalls();   // 1 from the initial mount hydrate (immediate, not scheduled)
+  // Five lifecycle events in one tick — first schedules a timer, each subsequent
+  // one clears the prior + reschedules (the debounce coalesce).
+  for (let i = 0; i < 5; i++) {
+    bus.emit({ type: "store_session_strip_changed", payload: { changeKind: "added" }, source: "test", ts: i });
+  }
+  // Four of the five timers were cleared; exactly one survives.
+  assert.equal(sched.pending.filter((p) => !p.cleared).length, 1);
+  assert.equal(getCalls(), before);          // nothing fetched yet (still debouncing)
+  sched.flushTimers();
+  await flush();
+  assert.equal(getCalls(), before + 1);      // the burst collapsed to a single GET
+});
+
+test("unmount cancels a pending debounce timer (no fetch after teardown)", async () => {
+  const sched = makeScheduler();
+  const { renderer, bus, getCalls } = await setup({ sessions: RECIPIENTS }, { debounceMs: 250, sched });
+  const before = getCalls();
+  bus.emit({ type: "store_session_strip_changed", payload: { changeKind: "added" }, source: "test", ts: 0 });
+  assert.equal(sched.pending.filter((p) => !p.cleared).length, 1);   // one armed
+  renderer.unmount();
+  assert.equal(sched.pending.filter((p) => !p.cleared).length, 0);   // cleared by unmount
+  sched.flushTimers();   // even if something fired, the renderer is gone
+  await flush();
+  assert.equal(getCalls(), before);   // no post-teardown fetch
+});
+
+test("production defaults: a rapid burst clears the prior real timer (default timer wiring)", async () => {
+  const bus   = createEventBusForTesting();
+  const store = createBroadcastStore({ storage: createStorageServiceForTesting() });
+  const { api, getCalls } = makeApi({ sessions: RECIPIENTS });
+  // Construct with NO recipientsRefreshDebounceMs / setTimeoutFn / clearTimeoutFn
+  // overrides → exercises the production defaults (250 ms window +
+  // globalThis.setTimeout / globalThis.clearTimeout closures).
+  const renderer = createBroadcastCardRenderer( { eventBus: bus, store, api, recorder: new FakeRecorder(), getAuthToken: () => "tok" } );
+  const root = document.createElement("div");
+  document.body.appendChild(root);
+  renderer.mount(root);
+  await flush();
+  const before = getCalls();   // 1 from the mount hydrate
+  // Two events in one tick: the 2nd clears the 1st's real timer (default
+  // clearTimeoutFn). Neither fires within a single flush (the 250 ms window
+  // has not elapsed) — so the burst is still pending, no trailing fetch yet.
+  bus.emit({ type: "store_session_strip_changed", payload: {}, source: "test", ts: 0 });
+  bus.emit({ type: "store_session_strip_changed", payload: {}, source: "test", ts: 1 });
+  await flush();
+  assert.equal(getCalls(), before);   // still debouncing
+  renderer.unmount();                 // cancels the pending real timer (clean teardown)
+});
+
+// --- Out-of-order response guard (last-request-wins token) ------------------
+
+// Build an api whose GETs resolve/reject on demand so we can force out-of-order
+// completion. gets[0] is the mount hydrate; gets[1] the next refresh, etc.
+function makeDeferredApi(): {
+  api  : BroadcastCardApiClient;
+  gets : Array<{ resolve: (s: BroadcastRecipient[]) => void; reject: (e: unknown) => void }>;
+} {
+  const gets: Array<{ resolve: (s: BroadcastRecipient[]) => void; reject: (e: unknown) => void }> = [];
+  const api: BroadcastCardApiClient = {
+    get<T>(_path: string): Promise<T> {
+      return new Promise<T>((res, rej) => {
+        gets.push({ resolve: (s) => res({ sessions: s } as T), reject: (e) => rej(e) });
+      });
+    },
+    broadcastToCcSessions(): Promise<BroadcastResult> { return Promise.resolve(RESULT_OK); },
+  };
+  return { api, gets };
+}
+
+async function deferredHarness(): Promise<{ root: HTMLElement; bus: EventBus; gets: ReturnType<typeof makeDeferredApi>["gets"] }> {
+  const bus     = createEventBusForTesting();
+  const storage = createStorageServiceForTesting();
+  const store   = createBroadcastStore({ storage });
+  const { api, gets } = makeDeferredApi();
+  const renderer = createBroadcastCardRenderer({
+    eventBus: bus, store, api, recorder: new FakeRecorder(), getAuthToken: () => "tok",
+    recipientsRefreshDebounceMs: 0,
+  });
+  const root = document.createElement("div");
+  document.body.appendChild(root);
+  renderer.mount(root);   // performRefresh #1 → gets[0] pending (NOT awaited)
+  return { root, bus, gets };
+}
+
+test("a stale (out-of-order) hydrate resolve does NOT clobber the freshest render", async () => {
+  const { root, bus, gets } = await deferredHarness();
+  // Refresh #2 (the ↻ button) starts while #1 is still in flight.
+  $(root, "#broadcast-recipients-refresh").click();   // performRefresh #2 → gets[1] pending
+  assert.equal(gets.length, 2);
+  // Resolve the NEWER request first → it paints 2 recipients (3 chips w/ @all).
+  gets[1].resolve(RECIPIENTS);
+  await flush();
+  assert.equal(chips(root).length, 3);
+  // Now the OLDER request resolves with a DIFFERENT (1-recipient) list — its
+  // paint must be dropped by the refresh-token guard.
+  gets[0].resolve([{ session_id: "stale-only" }]);
+  await flush();
+  assert.equal(chips(root).length, 3);   // unchanged — stale resolve was guarded out
+  assert.equal(root.querySelector(".broadcast-chip")?.textContent?.includes("stale-only"), false);
+});
+
+test("a stale (out-of-order) hydrate REJECTION does NOT paint an error over the fresh list", async () => {
+  const { root, bus, gets } = await deferredHarness();
+  $(root, "#broadcast-recipients-refresh").click();   // performRefresh #2 → gets[1]
+  assert.equal(gets.length, 2);
+  gets[1].resolve(RECIPIENTS);   // newer succeeds → list painted
+  await flush();
+  assert.equal(chips(root).length, 3);
+  gets[0].reject(new Error("late failure"));   // older rejects AFTER → must be guarded
+  await flush();
+  assert.equal(root.querySelector(".broadcast-chip.no-recipients"), null);   // no error pill
+  assert.equal(chips(root).length, 3);
 });
 
 // ---------------------------------------------------------------------------
@@ -327,6 +482,18 @@ test("onError surfaces a status message + clears the recording class", async () 
   recorder.lastStart?.onError?.({ type: "permission_denied", message: "mic blocked", originalError: null });
   assert.ok($(root, "#broadcast-submit-status").textContent?.includes("recording failed: mic blocked"));
   assert.equal($(root, "#broadcast-stt-button").classList.contains("recording"), false);
+});
+
+test("onCancel (ESC) resets the stuck mic state, leaving the textarea untouched", async () => {
+  const { root, recorder } = await setup({ sessions: RECIPIENTS });
+  typeMessage(root, "draft");
+  $(root, "#broadcast-stt-button").click();
+  assert.equal($(root, "#broadcast-stt-button").classList.contains("recording"), true);
+  // AudioRecorder.cancel() fires neither onComplete nor onError — the new
+  // onCancel hook must clear the recording class so the mic doesn't stay red.
+  recorder.lastStart?.onCancel?.();
+  assert.equal($(root, "#broadcast-stt-button").classList.contains("recording"), false);
+  assert.equal(ta(root).value, "draft");   // cancel discards only the in-flight take
 });
 
 // ---------------------------------------------------------------------------

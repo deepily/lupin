@@ -61,9 +61,18 @@ export interface BroadcastCardRendererOptions {
   getAuthToken? : () => string | null;
   /** Optional recorder override — production uses the recordingManager singleton. */
   recorder?     : BroadcastRecorderLike;
+  /** Trailing-debounce window for the persona-lifecycle recipient refresh
+   *  (store_session_strip_changed bursts). Production default 250 ms; tests
+   *  override to 0 for single-tick scheduling. */
+  recipientsRefreshDebounceMs? : number;
+  /** Injection points for deterministic test scheduling. Production wiring
+   *  uses `globalThis.setTimeout` / `globalThis.clearTimeout`. */
+  setTimeoutFn?   : ( cb: () => void, ms: number ) => unknown;
+  clearTimeoutFn? : ( id: unknown ) => void;
 }
 
 const STT_CONTEXT_ID = "broadcast";
+const DEFAULT_RECIPIENTS_REFRESH_DEBOUNCE_MS = 250;
 
 // The text-input snapshot captured when a record starts (mirrors the
 // SenderCardRecorderRenderer F5 caret-splice stash).
@@ -84,6 +93,15 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
   private readonly api          : BroadcastCardApiClient;
   private readonly getAuthToken : () => string | null;
   private readonly recorder     : BroadcastRecorderLike;
+  private readonly debounceMs     : number;
+  private readonly setTimeoutFn   : ( cb: () => void, ms: number ) => unknown;
+  private readonly clearTimeoutFn : ( id: unknown ) => void;
+
+  // Monotonic refresh token — only the freshest refresh is allowed to paint
+  // (last-request-wins; drops stale out-of-order hydrate resolves).
+  private refreshSeq    = 0;
+  // Pending trailing-debounce handle for the burst-driven recipient refresh.
+  private debounceTimer : unknown = null;
 
   private mounted = false;
   private root         : HTMLElement | null = null;
@@ -113,6 +131,9 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
     this.getAuthToken = opts.getAuthToken ?? ( () => null );
     /* c8 ignore next */ // production-default fallback: the recordingManager singleton is the runtime recorder; tests always inject a deterministic fake.
     this.recorder = opts.recorder ?? recordingManager;
+    this.debounceMs     = opts.recipientsRefreshDebounceMs ?? DEFAULT_RECIPIENTS_REFRESH_DEBOUNCE_MS;
+    this.setTimeoutFn   = opts.setTimeoutFn   ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) );
+    this.clearTimeoutFn = opts.clearTimeoutFn ?? ( ( id )     => globalThis.clearTimeout( id as ReturnType<typeof globalThis.setTimeout> ) );
   }
 
   // -------------------------------------------------------------------------
@@ -140,11 +161,17 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
 
     this.renderChips( { kind: "loading" } );
     this.updateSendButton();
-    this.refreshRecipients();
+    this.performRefresh();   // immediate first paint (no debounce — initial mount)
   }
 
   unmount(): void {
     if ( !this.mounted ) return;   // idempotent
+
+    // Cancel any in-flight trailing-debounce so it can't fire after teardown.
+    if ( this.debounceTimer !== null ) {
+      this.clearTimeoutFn( this.debounceTimer );
+      this.debounceTimer = null;
+    }
 
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
@@ -182,9 +209,12 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
   private subscribe(): void {
     // Recipient auto-refresh on the persona-lifecycle signal (legacy
     // refreshSessions()). SessionStripStore emits this for
-    // voice_persona_assigned/released + session_reaped.
+    // voice_persona_assigned/released + session_reaped. This signal can BURST
+    // (a fleet reap/respawn fires many in quick succession), so it rides the
+    // trailing-debounced scheduleRefresh — coalescing the burst into ONE
+    // active-sessions GET instead of one per event (nit-2).
     this.unsubscribers.push(
-      this.bus.on( "store_session_strip_changed", () => this.refreshRecipients() ),
+      this.bus.on( "store_session_strip_changed", () => this.scheduleRefresh() ),
     );
   }
 
@@ -197,9 +227,10 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
       /* c8 ignore next */ // defensive: a fired click event always carries a target Element.
       if ( target === null ) return;
 
-      // ↻ refresh (inside the recipients row, NOT the header).
+      // ↻ refresh (inside the recipients row, NOT the header). A user click is
+      // an explicit gesture — refresh IMMEDIATELY (no debounce lag).
       if ( target.closest( "#broadcast-recipients-refresh" ) !== null ) {
-        this.refreshRecipients();
+        this.performRefresh();
         return;
       }
       // A recipient chip — inject its @mention token.
@@ -251,14 +282,33 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
   // Recipients
   // -------------------------------------------------------------------------
 
-  private refreshRecipients(): void {
+  // Trailing-debounce the burst-driven refresh: coalesce a flurry of
+  // store_session_strip_changed events into a single active-sessions GET. The
+  // chips keep showing the current list until the trailing fetch resolves (no
+  // per-event "loading…" flicker). Handles are injected for deterministic tests.
+  private scheduleRefresh(): void {
+    if ( this.debounceTimer !== null ) this.clearTimeoutFn( this.debounceTimer );
+    this.debounceTimer = this.setTimeoutFn( () => {
+      this.debounceTimer = null;
+      this.performRefresh();
+    }, this.debounceMs );
+  }
+
+  // Fetch the active-session list NOW and repaint. A monotonic refresh token
+  // makes the paint last-request-wins: if a newer refresh started while this
+  // hydrate was in flight, this resolve is stale and drops its paint, so an
+  // out-of-order response can't clobber the freshest render.
+  private performRefresh(): void {
     this.renderChips( { kind: "loading" } );
+    const seq = ++this.refreshSeq;
     this.store.hydrate( this.api )
       .then( () => {
+        if ( seq !== this.refreshSeq ) return;   // superseded by a newer refresh — drop the stale paint
         this.renderChips( { kind: "list" } );
         this.updateSendButton();
       } )
       .catch( ( err: unknown ) => {
+        if ( seq !== this.refreshSeq ) return;   // superseded by a newer refresh — drop the stale error paint
         this.renderChips( { kind: "error", message: errorMessage( err ) } );
         this.updateSendButton();
       } );
@@ -385,6 +435,14 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
         this.stash = undefined;
         this.setMicRecordingClass( false );
         this.setStatus( "recording failed: " + err.message, true );
+      },
+      // ESC (or auto-cancel by a new recording) fires neither onComplete nor
+      // onError — reset the mic UI so it doesn't stay stuck red. The stashed
+      // textarea value is left untouched (cancel ≠ transcription).
+      onCancel : () => {
+        this.recording = false;
+        this.stash = undefined;
+        this.setMicRecordingClass( false );
       },
     } );
   }

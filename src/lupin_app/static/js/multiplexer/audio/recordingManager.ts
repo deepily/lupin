@@ -28,6 +28,12 @@ export interface RecordingManagerStartOptions {
   onError?          : (err: { type: string; message: string; originalError: unknown }) => void;
   /** Called when the recording starts (UI can flip to "recording" state). */
   onRecordingStart? : () => void;
+  /** Called when the recording is CANCELLED (ESC, or auto-cancel of a prior
+   *  recording when a new one starts). AudioRecorder.cancel() fires NEITHER
+   *  onComplete nor onError, so without this hook every consumer is left with
+   *  its mic UI stuck in the "recording" state. Each consumer wires this to
+   *  reset its own mic UI back to idle. */
+  onCancel?         : () => void;
 }
 
 interface ActiveRecording {
@@ -102,7 +108,7 @@ class RecordingManager {
     await recorder.start();
   }
 
-  /* c8 ignore start */ // stop/cancel-with-active paths require a successful start (microphone access). Tests cover the no-active early-return; the active-cancel branch requires real recording state and is exercised at smoke tier.
+  /* c8 ignore start */ // stop-with-active path requires a successful start (microphone access + an upload round-trip); exercised at smoke tier. The no-active early-return is unit-covered.
   /** Stop the active recording (uploads + transcribes). */
   async stopRecording( contextId: string ): Promise<void> {
     if (this.active === null || this.active.contextId !== contextId) return;
@@ -111,16 +117,24 @@ class RecordingManager {
     this.detachEscListener();
     this.active = null;
   }
+  /* c8 ignore stop */
 
-  /** Cancel the active recording without uploading. */
+  /**
+   * Cancel the active recording without uploading. AudioRecorder.cancel()
+   * fires no onComplete/onError, so we invoke the consumer's onCancel here so
+   * its mic UI can reset (capture the callback BEFORE nulling `active`). Also
+   * called internally by startRecording to enforce the single-active invariant
+   * — in which case the PRIOR recording's consumer is correctly notified.
+   */
   cancelRecording( contextId: string ): void {
     if (this.active === null || this.active.contextId !== contextId) return;
+    const onCancel = this.active.options.onCancel;
     this.active.recorder.cancel();
     this.scheduleTtsResume();
     this.detachEscListener();
     this.active = null;
+    if (onCancel !== undefined) onCancel();
   }
-  /* c8 ignore stop */
 
   /** Test seam — returns the contextId of the active recording, or null. */
   getActiveContextId(): string | null {
@@ -155,4 +169,5 @@ class RecordingManager {
 }
 
 // Singleton (matches legacy this.recordingManager pattern).
+/* c8 ignore next */ // tsx phantom-branch artifact on the top-level singleton instantiation (executed on every import; no real branch).
 export const recordingManager = new RecordingManager();

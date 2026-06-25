@@ -73,7 +73,7 @@ function send( vi: Element ): HTMLButtonElement  { return vi.querySelector(".cc-
 function conv( vi: Element ): HTMLButtonElement  { return vi.querySelector(".sender-conversation-mode-btn") as HTMLButtonElement; }
 function input( vi: Element ): HTMLInputElement  { return vi.querySelector(".cc-session-msg-input") as HTMLInputElement; }
 
-type StartStub = ( o: { onComplete?: ( t: string, b: Blob ) => void; onError?: ( e: { type: string; message: string; originalError: unknown } ) => void } ) => Promise<void>;
+type StartStub = ( o: { onComplete?: ( t: string, b: Blob ) => void; onError?: ( e: { type: string; message: string; originalError: unknown } ) => void; onCancel?: () => void } ) => Promise<void>;
 
 function stubStart( fn: StartStub ): () => void {
   const original = recordingManager.startRecording.bind(recordingManager);
@@ -247,6 +247,36 @@ test("mic click → onError reverts to idle and renders the error", () => {
   const err = vi.querySelector(".cc-voice-input-error");
   assert.notEqual(err, null);
   assert.match(err!.textContent ?? "", /mic blocked/);
+});
+
+test("recordingManager onCancel resets the mic row to idle and preserves the pre-record text", () => {
+  const bus  = createEventBusForTesting();
+  const root = makeRootWithCards([ "user@x#abc" ]);
+  const r = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  r.mount(root);
+  const vi = root.querySelector(".cc-voice-input")!;
+
+  // The user has a draft in the input, starts a record (stash captures it), then
+  // cancels (ESC) — AudioRecorder.cancel() fires neither onComplete nor onError,
+  // so without the onCancel hook the mic would stay stuck red. Capture the opts
+  // and drive onCancel directly (the real cancel path is the smoke tier).
+  input(vi).value = "draft note";
+  let captured: { onCancel?: () => void } | null = null;
+  const restore = stubStart( async (opts) => { captured = opts; } );
+  try { mic(vi).click(); } finally { restore(); }
+  assert.equal(vi.getAttribute("data-recorder-state"), "recording");
+  assert.equal(mic(vi).classList.contains("recording"), true);
+
+  captured!.onCancel!();
+  assert.equal(vi.getAttribute("data-recorder-state"), "idle");
+  assert.equal(mic(vi).classList.contains("recording"), false);
+  assert.equal(input(vi).value, "draft note");   // DOM input untouched by cancel
+
+  // The draft survives a card re-paint: reapplyVoiceInput restores states.value
+  // (set from the pre-record stash) onto the row.
+  input(vi).value = "clobbered";
+  bus.emit({ type: "store_senders_changed", payload: {}, source: "test", ts: 3 });
+  assert.equal(input(vi).value, "draft note");
 });
 
 test("recording state persists across a re-paint (store_senders_changed) — mic stays 'recording'", () => {

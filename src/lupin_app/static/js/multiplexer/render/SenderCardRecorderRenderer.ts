@@ -258,6 +258,17 @@ class SenderCardRecorderRendererImpl implements SenderCardRecorderRenderer {
         this.setMicRecordingClass(voiceInput, false);
         this.renderError(voiceInput, err.message);
       },
+      // ESC (or auto-cancel by a new recording) fires neither onComplete nor
+      // onError — reset this row's mic UI back to idle so it doesn't stay stuck
+      // red. Cancel discards only the in-flight take: the pre-record text
+      // (stashed at record start) is preserved as the row's value so it
+      // survives a subsequent card re-create+replace (reapplyVoiceInput).
+      onCancel  : () => {
+        const preRecord = this.states.get(sessionHash)?.stash?.text;
+        this.states.set(sessionHash, { recording: false, value: preRecord });
+        voiceInput.setAttribute("data-recorder-state", "idle");
+        this.setMicRecordingClass(voiceInput, false);
+      },
     });
   }
 

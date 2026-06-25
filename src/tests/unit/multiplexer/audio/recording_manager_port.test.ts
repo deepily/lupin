@@ -103,6 +103,48 @@ test("cancelRecording for an unknown contextId is a safe no-op", () => {
   assert.doesNotThrow(() => recordingManager.cancelRecording("nonexistent"));
 });
 
+// --- onCancel hook (stuck-mic fix) -----------------------------------------
+
+test("cancelRecording fires the consumer's onCancel callback then clears active", async () => {
+  mockMediaRecorder();
+  let cancelled = false;
+  await recordingManager.startRecording({
+    contextId : "ctx-cancel",
+    onCancel  : () => { cancelled = true; },
+  }).catch(() => {});
+  recordingManager.cancelRecording("ctx-cancel");
+  assert.equal(cancelled, true);
+  assert.equal(recordingManager.getActiveContextId(), null);
+});
+
+test("cancelRecording with a mismatched contextId leaves the active recording (no onCancel)", async () => {
+  mockMediaRecorder();
+  let cancelled = false;
+  await recordingManager.startRecording({
+    contextId : "ctx-keep",
+    onCancel  : () => { cancelled = true; },
+  }).catch(() => {});
+  recordingManager.cancelRecording("ctx-other");   // wrong id → early return, untouched
+  assert.equal(cancelled, false);
+  assert.equal(recordingManager.getActiveContextId(), "ctx-keep");
+  recordingManager.cancelRecording("ctx-keep");    // cleanup (fires onCancel)
+  assert.equal(cancelled, true);
+});
+
+test("ESC keydown fires the consumer's onCancel", async () => {
+  mockMediaRecorder();
+  let cancelled = false;
+  await recordingManager.startRecording({
+    contextId : "ctx-esc-cb",
+    onCancel  : () => { cancelled = true; },
+  }).catch(() => {});
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  }
+  assert.equal(cancelled, true);
+  assert.equal(recordingManager.getActiveContextId(), null);
+});
+
 test("stopRecording for an unknown contextId is a safe no-op", async () => {
   await assert.doesNotReject(() => recordingManager.stopRecording("nonexistent"));
 });
