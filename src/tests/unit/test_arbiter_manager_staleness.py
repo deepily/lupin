@@ -481,5 +481,98 @@ def test_cross_detector_dedup_blocked_advised_already_set():
     assert "m1" not in job._mgr_stale_suppressed           # staleness didn't claim the flag
 
 
+# ── bug b9911943: the named subject is excluded from its OWN advisory fan-out ──
+#    The double-delivery repro the original fixtures missed: every prior test put
+#    OTHER managers (or none) in active_managers, never the stale subject itself.
+#    With the subject IN active_managers, the case-14 advisory used to fan out to
+#    the subject too — so a dark manager got BOTH the about-itself MANAGER-STALE
+#    advisory AND its own staleness poke ~1s apart. The fix drops the subject from
+#    the TIER_RICK_AND_MANAGERS fan-out; the poke (addressed TO it) is unchanged.
+
+def _subject_advisories( gw, subject, marker ):
+    """Messages addressed to `subject` in the manager fan-out carrying `marker`."""
+    return [ s for s in gw.sent if s[ 0 ] == subject and marker in s[ 1 ] ]
+
+
+def test_case14_stale_subject_gets_poke_not_self_advisory():
+    """THE b9911943 REPRO: the stale subject is itself an active manager. It
+    receives the POKE (addressed to it) but NOT the about-itself MANAGER-STALE
+    advisory; a PEER manager and Rick both still get the advisory."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 2700, persona="Tiberius" ) )
+    fired = job._check_manager_staleness( snap, NOW,
+                                          active_managers=[ "Tiberius", "OtherMgr" ] )
+    assert fired == 1
+    # subject DID get the poke (addressed TO the dark manager — correct)
+    pokes = _stale_pokes( gw )
+    assert len( pokes ) == 1 and pokes[ 0 ][ 0 ] == "Tiberius"
+    # ...but NOT the about-itself advisory (the b9911943 double-delivery)
+    assert _subject_advisories( gw, "Tiberius", "MANAGER-STALE:" ) == [ ]
+    # the PEER manager DID get the advisory
+    advisory = [ m for m in escal if "MANAGER-STALE" in m ][ 0 ]
+    assert ( "OtherMgr", advisory ) in gw.sent
+    # Rick got it exactly once
+    assert len( [ m for m in escal if "MANAGER-STALE" in m ] ) == 1
+
+
+def test_case14_subject_exclusion_is_canonical_key_tolerant():
+    """The exclusion matches by canonical persona key: a lowercase 'tiberius' in
+    active_managers is still recognized as the 'Tiberius' subject and dropped from
+    the fan-out (the poke still goes out on the real-id direct-send path)."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 2700, persona="Tiberius" ) )
+    job._check_manager_staleness( snap, NOW, active_managers=[ "tiberius", "OtherMgr" ] )
+    assert _subject_advisories( gw, "tiberius", "MANAGER-STALE:" ) == [ ]   # case-variant dropped
+    advisory = [ m for m in escal if "MANAGER-STALE" in m ][ 0 ]
+    assert ( "OtherMgr", advisory ) in gw.sent                             # peer still served
+
+
+def test_case16_blocked_subject_excluded_from_own_advisory():
+    """b9911943 sibling (case 16, NO poke): a BLOCKED_ON_USER subject in
+    active_managers does NOT receive its own MANAGER-AWAITING-RICK advisory; a peer
+    manager and Rick do."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Tiberius" ) )
+    fired = job._check_manager_staleness( snap, NOW,
+                                          active_managers=[ "Tiberius", "OtherMgr" ],
+                                          owed_class={ "Tiberius": CLASS_BLOCKED_ON_USER } )
+    assert fired == 0                                          # case 16 emits no poke
+    assert [ s for s in gw.sent if s[ 0 ] == "Tiberius" ] == [ ]   # subject gets NOTHING
+    awaiting = _awaiting( escal )
+    assert len( awaiting ) == 1                                # one Rick advisory
+    assert ( "OtherMgr", awaiting[ 0 ] ) in gw.sent           # peer served
+
+
+def test_case17_done_subject_excluded_from_own_advisory():
+    """b9911943 sibling (case 17, NO poke): a DONE subject in active_managers does
+    NOT receive its own MANAGER-DONE advisory; a peer manager and Rick do."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000, persona="Rachel" ) )
+    fired = job._check_manager_staleness( snap, NOW,
+                                          active_managers=[ "Rachel", "OtherMgr" ],
+                                          owed_class={ "Rachel": CLASS_DONE } )
+    assert fired == 0
+    assert [ s for s in gw.sent if s[ 0 ] == "Rachel" ] == [ ]    # subject gets NOTHING
+    done = _done_adv( escal )
+    assert len( done ) == 1
+    assert ( "OtherMgr", done[ 0 ] ) in gw.sent
+
+
+def test_case14_no_regression_when_subject_absent_everyone_served():
+    """No-regression: when the subject is NOT among active_managers (the only shape
+    the old fixtures exercised), the default exclusion drops nobody — both listed
+    peers + Rick still receive the advisory exactly as before."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 2700, persona="Tiberius" ) )
+    job._check_manager_staleness( snap, NOW, active_managers=[ "PeerA", "PeerB" ] )
+    advisory = [ m for m in escal if "MANAGER-STALE" in m ][ 0 ]
+    assert ( "PeerA", advisory ) in gw.sent and ( "PeerB", advisory ) in gw.sent
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

@@ -1633,7 +1633,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return [ ]
 
     def _route( self, case, message, *, active_managers=None, owning_manager=None,
-                blocker=None, cc_message=None ):
+                blocker=None, cc_message=None, exclude_persona=None ):
         """
         Dispatch an arbiter output to its Part-6 recipient tier — CASE_TIERS
         (arbiter_routing) is the contract; `tier_for(case)` selects the tier.
@@ -1650,8 +1650,21 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - TIER_DROP               → no push (pull-state; #6)
           (TIER_LOG_THEN_RICK #12 is handled by _on_poll_error's streak logic, not here.)
 
+        Requires:
+            - exclude_persona is None OR a persona name (bug b9911943): a manager
+              advisory that NAMES a specific subject (the stale/blocked/done manager
+              itself — cases 14/16/17) must NOT fan out to that subject, only to its
+              PEER managers + Rick. When truthy, the subject is dropped from the
+              TIER_RICK_AND_MANAGERS active-managers fan-out, matched by canonical
+              persona key (so "Mr. Radio" == "mr radio" == "mr_radio"). A falsy
+              exclude_persona (None / empty) excludes nothing — byte-identical to
+              every pre-existing caller. ONLY the TIER_RICK_AND_MANAGERS fan-out is
+              filtered; Rick (rick_bound), owning_manager, blocker and cc targets
+              are NEVER touched by this filter.
+
         Ensures (2026.06.11 receipts design — the R4 kill):
-            - emits exactly the recipients its tier prescribes; absent optional
+            - emits exactly the recipients its tier prescribes (minus exclude_persona
+              from the TIER_RICK_AND_MANAGERS fan-out when supplied); absent optional
               recipients (no manager resolved, empty active set) degrade silently
             - ONE `arbiter_outreach` intent event (recipients = the PLANNED set,
               stamped with a fresh outreach_id), then one `arbiter_outreach_result`
@@ -1670,7 +1683,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         rick_bound = tier in ( TIER_RICK_ONLY, TIER_RICK_AND_MANAGERS )
         dm_targets = [ ]                          # ( persona, body, expects_ack )
         if tier == TIER_RICK_AND_MANAGERS:
-            dm_targets = [ ( m, message, True ) for m in active_managers or [ ] ]
+            # bug b9911943: drop the named subject from its OWN advisory fan-out
+            # (a stale/blocked/done manager must not be told about itself). Matched
+            # by canonical persona key; falsy exclude_persona / falsy key → no drop.
+            excluded_key = canonical_persona_key( exclude_persona ) if exclude_persona else None
+            dm_targets   = [ ( m, message, True ) for m in active_managers or [ ]
+                             if not ( excluded_key and canonical_persona_key( m ) == excluded_key ) ]
         elif tier == TIER_OWNING_MANAGER and owning_manager:
             dm_targets = [ ( owning_manager, message, True ) ]
         elif tier == TIER_BLOCKER_AND_MANAGER:
@@ -3067,6 +3085,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                         f"owed item is Rick-gated. The silence IS the expected state, not a "
                         f"stall; one-time notice, no poke.",
                         active_managers=active_managers,
+                        exclude_persona=persona,                     # b9911943: not to the subject itself
                     )
                 continue
             if cls == CLASS_DONE:
@@ -3080,6 +3099,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                         f"finished/idle. Consider reaping it (the arbiter never reaps). "
                         f"One-time notice, no poke.",
                         active_managers=active_managers,
+                        exclude_persona=persona,                     # b9911943: not to the subject itself
                     )
                 continue
             # ACTIVE / UNKNOWN → today's case-14 poke + Rick advisory (UNKNOWN = fail-SAFE)
@@ -3098,6 +3118,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     f"{self.manager_stale_poke_threshold_seconds}s) — poking (bounded, "
                     f"≤{self.poke_max_per_episode}/episode); outreach only, no action taken.",
                     active_managers=active_managers,
+                    exclude_persona=persona,                         # b9911943: not to the subject itself
                 )
             if self._mgr_poke_count[ sid ] < self.poke_max_per_episode:
                 body        = self._stamp( self._format_manager_stale_poke( row, age ) )   # Item B: direct-send site

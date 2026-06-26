@@ -194,6 +194,50 @@ def test_route_rick_and_managers_empty_set_is_rick_only():
     assert _unstamp_notes( notes ) == [ "stall!" ] and gw.sent == [ ]   # degrades to Rick-only
 
 
+# ── bug b9911943: exclude_persona drops the named subject from its OWN fan-out ──
+
+def test_route_exclude_persona_drops_named_subject():
+    """bug b9911943: a manager advisory ABOUT a manager (cases 14/16/17) must NOT
+    fan out to that subject. exclude_persona removes it from the
+    TIER_RICK_AND_MANAGERS active-managers set; Rick + every PEER manager keep it."""
+    gw, notes = _GW(), [ ]
+    job = _job( gw, notify=notes.append )
+    job._route( 5, "deadlock!", active_managers=[ "M1", "M2" ], exclude_persona="M1" )
+    assert _unstamp_notes( notes ) == [ "deadlock!" ]                # Rick unaffected
+    assert _unstamp_sent( gw.sent ) == [ ( "M2", "deadlock!" ) ]     # M1 dropped, M2 kept
+
+
+def test_route_exclude_persona_matches_by_canonical_key():
+    """The subject match is by canonical persona key — case + punctuation tolerant:
+    a display 'Mr. Radio' in the fan-out is dropped by exclude_persona='mr radio'."""
+    gw, notes = _GW(), [ ]
+    job = _job( gw, notify=notes.append )
+    job._route( 5, "deadlock!", active_managers=[ "Mr. Radio", "OtherMgr" ],
+                exclude_persona="mr radio" )
+    assert _unstamp_sent( gw.sent ) == [ ( "OtherMgr", "deadlock!" ) ]   # punct/case-variant dropped
+
+
+def test_route_exclude_persona_falsy_excludes_nothing():
+    """Default (None) AND any falsy-key exclude_persona leave the fan-out
+    byte-identical — every pre-existing caller is unaffected (the b9911943 guard)."""
+    # default None → no filter
+    gw, notes = _GW(), [ ]
+    job = _job( gw, notify=notes.append )
+    job._route( 5, "x", active_managers=[ "M1", "M2" ] )
+    assert _unstamp_sent( gw.sent ) == [ ( "M1", "x" ), ( "M2", "x" ) ]
+    # explicit empty string (falsy) → excluded_key None → no filter
+    gw2, notes2 = _GW(), [ ]
+    job2 = _job( gw2, notify=notes2.append )
+    job2._route( 5, "x", active_managers=[ "M1", "M2" ], exclude_persona="" )
+    assert _unstamp_sent( gw2.sent ) == [ ( "M1", "x" ), ( "M2", "x" ) ]
+    # punctuation-only subject → canonical key "" → the `excluded_key and` guard
+    # short-circuits → no filter (never accidentally drops a real manager)
+    gw3, notes3 = _GW(), [ ]
+    job3 = _job( gw3, notify=notes3.append )
+    job3._route( 5, "x", active_managers=[ "M1", "M2" ], exclude_persona="!!!" )
+    assert _unstamp_sent( gw3.sent ) == [ ( "M1", "x" ), ( "M2", "x" ) ]
+
+
 def test_route_owning_manager_dm_only():
     gw, notes = _GW(), [ ]
     job = _job( gw, notify=notes.append )
