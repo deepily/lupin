@@ -1,12 +1,43 @@
 # TODO
 
+## 🔝 #1 PRIORITY for the `wip-v0.1.9` bug-fix branch (Rick, 2026-06-26) — Multiplexer → notifications-client LAYOUT-LEVEL parity
+
+**Directive**: get the multiplexer's CC-notifications surface to *real layout-level parity* with the legacy notifications client. This is the **#1 priority for the current bug-fix development branch** (Rick, voice, 2026-06-26).
+
+**Holder (all discrepancies live here)**: `src/rnd/v0.1.9/2026.06.25-notifications-to-multiplexer-migration-discrepancies/` — index `00-index.md`; the section-layout gap analysis is `01-mux-vs-legacy-notifications-section-gap-analysis.md`. New discrepancy docs (CSS/visual, behavior, event-wiring) land in this folder as found.
+
+**Substrate — verified gap analysis** (doc 01 in the holder). Confirmed section-level reorder:
+- **Intended (legacy)**: broadcast card *(with nested Recent-Activity history)* → focus bar *(TTS preview above it)* → sessions container.
+- **Mux actual**: focus bar hoisted to top → TTS preview orphaned as a sibling below it → sessions → jobs → **broadcast exiled to the bottom** → Recent-Activity **de-nested** as a separate pane.
+- Plus per-message regressions: pause/stop/proxy-ratify dropped.
+
+**Remediation buckets (gap doc §6)**: B1 restore section order (broadcast **+ re-nested Recent-Activity** → focus-bar → sessions); B2 relocate TTS preview into/above the focus bar; B3 restore section-header controls (count/filter/history/clear-all); B4 restore per-message pause/stop; B5 CSS pass LAST.
+
+**Open design calls gating the plan (need Rick)**: (a) focus-bar-at-top + broadcast-at-bottom — intentional mux redesign or drift? (b) re-nest Recent-Activity inside broadcast, or standalone pane OK? (c) per-message pause/stop still wanted?
+
+**Next step**: draft the parity remediation/implementation plan on top of the gap doc, with (a)/(b)/(c) as decision points. Tracked as a P1 store task.
+
+### Possible future enhancement (NOT a priority — Rick de-prioritized 2026-06-26; store task `69edd619` dropped)
+- [ ] **[LUPIN] `reason` discriminator on `voice_persona_released`** — add `reason={exit|reassigned|borrowed_return|clear}` to the WS payload (emit `voice_persona.py:~570`; catalog passthrough `notifications.py:~609`; consumers: web notifications.js + mux + mobile). Retires the client-side debounce-guess for true-exit vs benign-release. Mobile ships fine on its 3-5s debounce without it. Revisit only when convenient.
+
+---
+
 ## ▶ 2026-06-25 — LanceDB Phase A REBUILD EXECUTED (session d6b35eb3, MCP off)
 
 **DONE**: `input_and_output_tbl` **90.46GB → 1.07GB** (~89GB reclaimed; 176,877 rows preserved; clean chain @ v1; DATA01 100%/16G → 94%/107G free). In-container staged rebuild (transient `docker compose run` one-offs, lance 0.36.0 V2 core); both servers healthy post-bounce. Execution log: `src/rnd/v0.1.9/2026.06.24-lancedb-88gb-optimize-incident-remediation.md` §8. `rebuild_lancedb_table.py` modified (`--keep-rebuilt` + `drop-rebuilt`) — **committed-held, push stays Rick's word**. Supersedes the gated `5daf94a0`/`db1acda7` REBUILD-impl items.
 
-**OWED next (Bucket 3, post-restart)**:
-- [ ] **[LUPIN] Phase B standing compaction** — ⚠️ **Decision 4 (2026-06-24 "Phase A only, defer Phase B") OVERTURNED by Rick 2026-06-25** ("I want you to both restore AND compact"). Premise correction: **NO auto-compaction exists today** — that absence is why the table regrew 43→82→88→90GB; "compaction running as it normally does" must be BUILT. Scope: shared preflight-guard module (gate on `list_versions()` clean-walk, not just `*.manifest#N`) + FastAPI lifespan ENQUEUER (must ENQUEUE a `--require-stopped` quiesced job, NEVER inline `optimize()`) + INI keys/splainer + 100% line/branch/function tests. (Discharges TODO 461/462/1668/1745.)
-- [ ] **[LUPIN] Decision #6 amendments** to `src/scripts/lancedb_incident_recovery_2026_06_23.py` — header skew-reconciled/prefer-`docker exec` note + missing-manifest preflight in phase guards. Non-destructive; still owed.
+**~~OWED next (Bucket 3)~~ — CANCELLED 2026-06-26 (Rick strategic decision, see below)**:
+- [x] ~~Phase B standing compaction~~ — **CANCELLED**: Rick 2026-06-26 — "No need for any nightly compaction." LanceDB being abandoned; the entire compaction class is moot.
+- [x] ~~Decision #6 amendments to the recovery script~~ — **CANCELLED**: LanceDB recovery tooling no longer maintained; superseded by the Postgres migration.
+
+---
+
+## ▶ DECISION (2026-06-26, Rick voice ruling) — ABANDON LanceDB → PostgreSQL + pgvector (v0.2.0)
+
+**Ruling**: Move off LanceDB entirely. Adopt **PostgreSQL + an embeddings / similarity-search extension (pgvector)** as the vector store. **No nightly/standing compaction** — the whole incident class that drove Bucket 3 disappears with LanceDB. Rick: "I don't want to put any more effort into it." The 88GB-incident remediation items (`5daf94a0` + Phase B compaction) are **CLOSED as superseded** — Phase A rebuild already reclaimed ~89GB (commit `63bfb1b4`, 90.46GB→1.07GB), more than enough runway to coast until the migration lands.
+
+### v0.2.0 backlog (new dev branch)
+- [ ] **[LUPIN] v0.2.0: LanceDB → PostgreSQL + pgvector migration** — stand up a Postgres-backed vector store (pgvector embeddings + similarity search) replacing LanceDB for `input_and_output_tbl` (and any other LanceDB-backed tables). Encompasses: schema design, embedding column + index strategy (HNSW vs IVFFlat), data backfill from the current LanceDB store, repo/DAO swap, config keys + splainer, 100% line/branch/function tests, and a cutover + rollback plan. Targets the **v0.2.0 dev branch**. Supersedes ALL LanceDB compaction/rebuild work (Bucket 3, TODO 461/462/1668/1745).
 
 ---
 

@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.25 - Session 6c59295b (Mr. Radio 🦉) | LanceDB→Postgres DECISION · mux↔notifications layout gap analysis (REVISED) + discrepancies holder (#1 priority) · Tiffany assist · reason-field ticket filed→dropped
+
+**Accomplishments**:
+- **LanceDB remediation CLOSED by decision (Rick voice)**: abandon LanceDB → **PostgreSQL + pgvector for v0.2.0**, NO nightly compaction. Closed store tasks `5daf94a0` + `db1acda7` as superseded (Phase A rebuild already reclaimed ~89GB, `63bfb1b4`); cancelled Bucket 3 / Phase B compaction; logged the decision + a v0.2.0 migration backlog entry in TODO.md.
+- **Multiplexer ↔ notifications LAYOUT gap analysis — now #1 priority**: produced, then **REVISED** after Rick corrected my framing (I'd wrongly scoped "accordion" to the per-sender card + called it "faithful"). Verified vs `multiplexer.html`: the CC-notifications **section order is wholesale-reordered** — broadcast exiled to the bottom + Recent-Activity **de-nested** from it, focus bar hoisted to the top, TTS preview orphaned outside the focus bar; per-message pause/stop/proxy-ratify dropped. Owned a grep error (legacy id `commons-recent-activity` → mux renamed it `commons-activity-*`, so it was present-but-de-nested, not "missing"). Created a **discrepancies holder** `src/rnd/v0.1.9/2026.06.25-notifications-to-multiplexer-migration-discrepancies/` (`00-index.md` + `01-…gap-analysis.md`); pinned **#1 priority for the `wip-v0.1.9` bug-fix branch** in TODO.md; tracked P1 store task `d0a057b3`.
+- **Peer assist (Tiffany / lupin-mobile, 4 DMs)**: how web+mux compute "active" sessions (1h/24h recency on `last_activity`, pure client-side, no server liveness — file:line for both) + session-exit semantics (NO dedicated exit frame; `voice_persona_released` carries no discriminator; both web clients REMOVE-not-grey the glyph; host-side prune + 12h TTL only). Filed a server-side `reason`-discriminator ticket on Rick's relayed greenlight, then **dropped it** (`69edd619`) on Rick's later de-prioritization → demoted to a TODO future-enhancement note.
+- **Housekeeping**: recompacted MEMORY.md 160→130 lines (all 112 slugs preserved, diff-verified); +1 feedback memory (answer-the-scope-asked-not-a-narrower-one).
+
+**Files changed**: `TODO.md`, `src/rnd/README.md`, new `src/rnd/v0.1.9/2026.06.25-notifications-to-multiplexer-migration-discrepancies/` (`00-index.md`, `01-mux-vs-legacy-notifications-section-gap-analysis.md`). Store: tasks `5daf94a0`/`db1acda7` → done, `69edd619` → dropped, `d0a057b3` (P1, mux parity) created. **Committed-held — push stays Rick's word.** Resuming first thing in the morning on the mux-parity remediation plan (3 open design calls await Rick: focus-bar-top intentional?, re-nest Recent-Activity?, keep per-message pause/stop?).
+
 ### 2026.06.25 - Session d6b35eb3 (MCP off — no voice) | LanceDB 88GB rebuild EXECUTED — Phase A complete (90.46GB → 1.07GB, ~89GB reclaimed)
 
 **Accomplishments**:
