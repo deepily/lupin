@@ -322,6 +322,36 @@ class TestGroupPCLoopClosure:
         # Part-6 #4 rewrite: names the blocked worker + the ask (not "where are we?")
         assert "Alice" in body and "blocking worker" in body
 
+    def test_pc4b_awaiting_edge_without_store_backing_suppresses_ping( self, fleet ):
+        """B3 (bug d44b7068): a real awaiting:peer edge whose store has NO backing
+        obligation (the awaited peer owes the holder nothing — the Maria/Tiberius
+        and Krishna/Mr-Radio phantom) → the blocking ping is SUPPRESSED. The
+        single-edge analog of pc5b's deadlock store-corroboration."""
+        _emit( fleet, "s-hold", "honored", awaiting="peer:Bob", persona="Alice" )
+        arb     = _make_arbiter( fleet, owed_work_fn=lambda names: { "Alice": [ ], "Bob": [ ] } )
+        summary = arb._poll_once()
+        assert summary[ "edges" ] == 1                            # the derived edge still EXISTS
+        assert summary[ "pings_fired" ] == 0                      # but no store backing → no phantom ping
+        # Bob (the awaited peer) is NEVER pinged as a blocker (an incidental
+        # owning-manager tap may still fire — that is a different outreach).
+        assert all( recipient != "Bob" for recipient, _ in arb._commons.sent )
+
+    def test_pc4c_awaiting_edge_with_store_backing_fires_ping( self, fleet ):
+        """B3 (bug d44b7068): the SAME awaiting edge, now corroborated by a real
+        store blocked_by (Alice's item is blocked_by Bob's) → the ping FIRES (the
+        true-positive blocker is preserved)."""
+        _emit( fleet, "s-hold", "honored", awaiting="peer:Bob", persona="Alice" )
+        owed = {
+            "Alice": [ { "id": "tA", "status": "blocked", "gate_class": "none",
+                         "blocked_by": [ { "kind": "item", "id": "tB" } ] } ],
+            "Bob"  : [ { "id": "tB", "status": "running", "gate_class": "none", "blocked_by": [ ] } ],
+        }
+        arb     = _make_arbiter( fleet, owed_work_fn=lambda names: owed )
+        summary = arb._poll_once()
+        assert summary[ "edges" ] == 1 and summary[ "pings_fired" ] == 1
+        recipient, body = arb._commons.sent[ 0 ]
+        assert recipient == "Bob" and "Alice" in body and "blocking worker" in body
+
     def test_pc5_mutual_await_is_deadlock_escalated_not_broken( self, fleet ):
         """Two real sessions awaiting each other AND a corroborating STORE
         dependency ring (Alice's task blocked_by Bob's, and vice versa) → deadlock

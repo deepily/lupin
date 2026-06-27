@@ -204,16 +204,26 @@ class _Chain:
 
     def seed_hold( self, session_id, *, reason, work_owed, fresh=True,
                    awaiting="none", ttl_seconds=900 ):
-        """Write a REAL .heartbeat-hold-<sid>.json into the isolated project root."""
+        """Write a REAL .heartbeat-hold-<sid>.json into the isolated project root.
+
+        B1 (d44b7068): hold freshness is anchored on the FILE mtime, not held_at.
+        A STALE hold (fresh=False) is therefore produced by BACKDATING the written
+        file's mtime past the ttl — backdating held_at alone no longer expires a
+        just-written file."""
         if fresh:
             held_at = _iso( datetime.datetime.now( UTC ) )
         else:
             held_at = _iso( datetime.datetime.now( UTC ) - datetime.timedelta( seconds=10_000 ) )
-        return heartbeat_hold.write_hold(
+        hold = heartbeat_hold.write_hold(
             session_id, "María 🌸", reason, work_owed=work_owed,
             ttl_seconds=ttl_seconds, awaiting=awaiting, held_at=held_at,
             base_dir=self.hold_dir,
         )
+        if not fresh:
+            path = self.hold_dir / f".heartbeat-hold-{session_id}.json"
+            old  = ( datetime.datetime.now( UTC ) - datetime.timedelta( seconds=10_000 ) ).timestamp()
+            os.utime( path, ( old, old ) )
+        return hold
 
     # ── settings control ──
 

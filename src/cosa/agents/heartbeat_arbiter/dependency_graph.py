@@ -486,6 +486,44 @@ def cycle_is_store_backed( cycle, store_edges ):
     return True
 
 
+def edge_is_store_backed( holder, awaited, store_edges ):
+    """
+    Is a SINGLE derived holder→awaited blocking edge corroborated by an
+    authoritative store owner-edge (build_store_wait_edges)? The single-edge
+    analog of `cycle_is_store_backed` — the B3 backing-obligation gate (bug
+    d44b7068).
+
+    WHY (B3): the "You're blocking worker Y" advisory ping is minted from the
+    WAITER's self-reported `holding_on: peer:X` — it asserts "X is blocking Y"
+    purely because Y says it awaits X, with NO check that X actually OWES Y
+    anything. A holder whose wait is already discharged (the awaited peer
+    delivered / owes nothing) keeps pinging the innocent peer every poll
+    (Maria/Tiberius 2026-06-27; Krishna/Mr-Radio in the post-mortem). The store
+    `blocked_by` graph is the authoritative "who really owes whom"; gating the
+    advisory on it makes the edge truthful — fire ONLY when Y's store item is
+    really blocked_by X.
+
+    Requires:
+        - holder / awaited are view-persona strings (any type tolerated)
+        - store_edges is build_store_wait_edges output { holder: set(awaited) }
+
+    Ensures:
+        - returns True iff canonical(awaited) is in store_edges[ canonical(holder) ]
+          (personas compared canonically, mirroring cycle_is_store_backed — both
+          sides share the view-persona spelling, so this is consistent)
+        - returns False for a falsy holder/awaited or a non-dict store_edges
+          (fail-SUPPRESS: no authoritative backing ⇒ not a real blocker). The
+          CALLER decides the store-UNKNOWN (read-failed) fail-SAFE separately — it
+          only consults this gate when it HAS an authoritative store read
+        - never raises (pure)
+    """
+    if not holder or not awaited or not isinstance( store_edges, dict ):
+        return False
+    h = canonical_persona_key( holder )  or holder
+    a = canonical_persona_key( awaited ) or awaited
+    return a in store_edges.get( h, set() )
+
+
 def quick_smoke_test():
     """Self-contained smoke test. Returns True or raises AssertionError."""
     fleet_view = {
@@ -512,6 +550,11 @@ def quick_smoke_test():
     assert cycle_is_store_backed( [ "Ann", "Bob" ], store ) is True       # corroborated ring fires
     assert cycle_is_store_backed( [ "Dan", "Eve" ], store ) is False      # NOT in store → suppressed
     assert cycle_is_store_backed( [ "X" ], store )          is False      # self-cycle never store-backed
+    # B3 backing-obligation gate (d44b7068): single-edge store corroboration.
+    assert edge_is_store_backed( "Ann", "Bob", store ) is True            # canonical match → real blocker
+    assert edge_is_store_backed( "Ann", "Eve", store ) is False           # not backed → phantom
+    assert edge_is_store_backed( "",    "Bob", store ) is False           # falsy holder
+    assert edge_is_store_backed( "Ann", "Bob", None )  is False           # non-dict store_edges
     # persona-kind ref → direct edge; unresolvable item ref → omitted.
     owed2 = {
         "Sam": [ { "id": "s1", "blocked_by": [ { "kind": "persona", "id": "Dot" },

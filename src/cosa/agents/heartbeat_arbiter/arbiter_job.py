@@ -49,6 +49,7 @@ from cosa.agents.heartbeat_arbiter.fleet_data_model import build_fleet_view
 from cosa.agents.heartbeat_arbiter.dependency_graph import (
     build_graph, build_store_wait_edges, cycle_is_store_backed, hold_is_stale,
     hold_contradicts_peer_edge, build_wait_edges, find_deadlock_cycles, session_is_stale,
+    edge_is_store_backed,
 )
 from cosa.agents.heartbeat_arbiter.idle_roster import build_roster
 from cosa.agents.heartbeat_arbiter import ping_throttle
@@ -1094,7 +1095,24 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if isinstance( v, dict ) and v.get( "alive" ) is True and v.get( "persona" )
         }
         live_edges  = { h: a for h, a in graph[ "edges" ].items() if h in alive_personas }
-        pings_fired = self._auto_ping( live_edges, now, persona_to_sid )  # #4 blocker + cc mgr
+        # B3 BACKING-OBLIGATION GATE (bug d44b7068): the "You're blocking worker Y"
+        # ping is minted from the WAITER's self-reported `holding_on: peer:X` with NO
+        # check that X actually OWES Y. A holder whose wait is already discharged (the
+        # awaited peer delivered / owes nothing) re-pinged the innocent peer every
+        # poll (Maria/Tiberius 2026-06-27; Krishna/Mr-Radio in the post-mortem). Gate
+        # the ping on the AUTHORITATIVE store `blocked_by` graph (the single-edge
+        # analog of the deadlock cycle_is_store_backed): fire ONLY when Y's store item
+        # is really blocked_by X. FAIL-SAFE: when the owed read FAILED/unwired
+        # (owed_items is None → store-backing UNKNOWN) keep today's behavior so a
+        # store outage never silences a genuine blocker; a SUCCESSFUL read with no
+        # backing edge SUPPRESSES the phantom. Mirrors the deadlock gate's
+        # fail-SUPPRESS-on-no-backing / observer-invariant discipline.
+        if owed_items is None:
+            ping_edges = live_edges                                       # store UNKNOWN → fail-SAFE (today's behavior)
+        else:
+            ping_edges = { h: a for h, a in live_edges.items()
+                           if edge_is_store_backed( h, a, store_edges ) }
+        pings_fired = self._auto_ping( ping_edges, now, persona_to_sid )  # #4 blocker + cc mgr (store-backed only)
         roster      = build_roster( fleet_view, now, self.quiet_threshold_seconds,
                                      alive_threshold_seconds=self.alive_threshold_seconds )  # free-count fix: live-idle only (session_is_stale gate)
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,

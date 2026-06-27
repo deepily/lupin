@@ -74,6 +74,20 @@ DEFAULT_PRUNE_GRACE_SECONDS = 21600
 PENDING_USER_GATES_FIELD = "pending_user_gates"
 LAST_LOOKED_IN_FIELD     = "last_looked_in_on_workers_ts"
 
+# B1 mtime-anchored freshness (2026-06-27, bug d44b7068) — read-time annotation
+# key. The READER (read_hold) stats the resolved hold file and stamps its
+# host-real mtime (epoch seconds) into the returned dict under THIS key, so
+# is_fresh can anchor the freshness window on when the file was actually written
+# (host truth) rather than the agent-supplied `held_at`. Agents have no reliable
+# wall-clock, so `held_at` (anchored to a stale past receipt) can make a
+# JUST-WRITTEN hold read stale → relentless false re-pokes. The mtime cannot lie
+# about when the agent last refreshed its hold. This is an IN-MEMORY annotation
+# only — it is NEVER persisted (write_hold writes EXACTLY HOLD_SCHEMA_FIELDS); the
+# leading underscore marks it as non-schema. is_fresh falls back to the legacy
+# `held_at` path when the annotation is absent (a hand-built hold dict / a
+# write_hold return value), preserving back-compat for every existing caller.
+HOLD_MTIME_ANNOTATION = "_hold_file_mtime_epoch"
+
 # Proactive-manager debounce clocks (fcb5dbc0, Lane A1) — the per-manager Face A /
 # Face B stamps the agent writes after it acts. Persisted in the hold artifact so
 # they SURVIVE /clear (the hold file outlives a context reset), exactly like the
@@ -150,6 +164,27 @@ def _now():
         - Returns a timezone-aware (UTC) datetime for "now".
     """
     return datetime.datetime.now( datetime.timezone.utc )
+
+
+def _file_mtime( path ):
+    """
+    Host-real modification time (epoch seconds) of a hold file — the B1 freshness
+    anchor (bug d44b7068). Best-effort + degrade-safe: a clean testable seam for
+    the stat-failure branch so read_hold need not inline the try/except.
+
+    Requires:
+        - path is a pathlib.Path (or any object with a .stat() → st_mtime)
+
+    Ensures:
+        - Returns float st_mtime on success
+        - Returns None when the file cannot be stat'd (OSError) — read_hold then
+          omits the annotation and is_fresh falls back to held_at
+        - Never raises
+    """
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None
 
 
 def _parse_iso( value ):
@@ -286,6 +321,11 @@ def read_hold( session_id, base_dir=None ):
         - Returns the hold dict if the file exists and parses to a JSON object
         - Falls back across short/full id forms when the exact file is absent
           (c121037b facet 2 — see _read_hold_path)
+        - Stamps the resolved file's host-real mtime (epoch seconds) into the
+          returned dict under HOLD_MTIME_ANNOTATION so is_fresh can anchor
+          freshness on when the hold was actually written, not the agent-supplied
+          held_at (B1, bug d44b7068). The stamp is best-effort: a stat failure
+          simply omits it (is_fresh then falls back to the held_at path)
         - Returns None if no hold is found, unreadable, malformed, or parses to a
           non-object JSON value
         - Never raises
@@ -299,6 +339,12 @@ def read_hold( session_id, base_dir=None ):
         return None
     if not isinstance( data, dict ):
         return None
+    # B1 — annotate with the host-real file mtime (the freshness anchor). The
+    # write path persists only HOLD_SCHEMA_FIELDS, so this in-memory key never
+    # round-trips to disk. Best-effort: a stat failure leaves it absent.
+    mtime = _file_mtime( path )
+    if mtime is not None:
+        data[ HOLD_MTIME_ANNOTATION ] = mtime
     return data
 
 
@@ -446,26 +492,48 @@ def is_fresh( hold, now=None ):
     """
     Is this hold still within its freshness window?
 
+    B1 mtime-anchoring (2026-06-27, bug d44b7068): the freshness window is
+    measured from the hold FILE's host-real mtime (the HOLD_MTIME_ANNOTATION the
+    reader stamps) when present, NOT the agent-supplied `held_at`. Agents have no
+    reliable wall-clock — the no-reliable-clock rule forces anchoring `held_at` to
+    a stale past receipt, so a JUST-WRITTEN hold could read stale and the session
+    was re-poked forever despite a fresh hold. The host's mtime cannot lie about
+    when the agent last refreshed its hold. `held_at` remains the fallback anchor
+    for a hold dict carrying no mtime annotation (a hand-built dict, a write_hold
+    return value, or a stat failure) — preserving every existing caller's behavior.
+
     Requires:
         - hold is a dict or None
         - now is an aware datetime or None (defaults to current UTC)
 
     Ensures:
-        - Returns False for a missing hold, an unparseable/absent held_at,
-          or a non-numeric ttl_seconds (bool is explicitly rejected)
-        - Otherwise returns (now - held_at) < ttl_seconds  (§0 freshness rule)
+        - Returns False for a missing hold or a non-numeric ttl_seconds (bool is
+          explicitly rejected)
+        - When the hold carries a numeric HOLD_MTIME_ANNOTATION: returns
+          (now - mtime) < ttl_seconds — the host-real freshness rule (B1)
+        - Otherwise (no usable mtime): returns (now - held_at) < ttl_seconds for a
+          parseable held_at; False when held_at is absent/unparseable (legacy rule)
         - Never raises
     """
     if not hold:
-        return False
-    held_dt = _parse_iso( hold.get( "held_at" ) )
-    if held_dt is None:
         return False
     ttl = hold.get( "ttl_seconds" )
     if isinstance( ttl, bool ) or not isinstance( ttl, ( int, float ) ):
         return False
     if now is None:
         now = _now()
+
+    # B1 — prefer the host-real file mtime (when the reader stamped one) over the
+    # agent's unreliable held_at. bool is rejected (True must not read as 1.0).
+    mtime = hold.get( HOLD_MTIME_ANNOTATION )
+    if not isinstance( mtime, bool ) and isinstance( mtime, ( int, float ) ):
+        elapsed_seconds = now.timestamp() - mtime
+        return elapsed_seconds < ttl
+
+    # Legacy fallback — no mtime annotation: anchor on the supplied held_at.
+    held_dt = _parse_iso( hold.get( "held_at" ) )
+    if held_dt is None:
+        return False
     elapsed_seconds = ( now - held_dt ).total_seconds()
     return elapsed_seconds < ttl
 
@@ -624,7 +692,11 @@ def quick_smoke_test():
                     last_surfaced_questions_ts="2026-06-23T11:00:00+00:00" )
         hold = read_hold( sid, base_dir=tmp )
         assert hold is not None,                      "round-trip read failed"
-        assert tuple( hold.keys() ) == HOLD_SCHEMA_FIELDS, "schema field set/order drift"
+        # Schema check excludes the `_`-prefixed read-time mtime annotation (B1) —
+        # only the persisted (non-underscore) fields define the schema.
+        persisted = tuple( k for k in hold.keys() if not k.startswith( "_" ) )
+        assert persisted == HOLD_SCHEMA_FIELDS,       "schema field set/order drift"
+        assert HOLD_MTIME_ANNOTATION in hold,         "reader must stamp the mtime annotation (B1)"
         assert is_fresh( hold ),                      "fresh hold reported stale"
         assert is_honored( hold ),                    "reasoned fresh hold not honored"
         assert declared_work_owed( hold ) is True,    "work_owed not read back"
@@ -638,10 +710,29 @@ def quick_smoke_test():
         assert get_pending_user_gates( plain ) == [ ] and get_last_looked_in_ts( plain ) is None
         assert get_last_spinup_check_ts( plain ) is None and get_last_surfaced_questions_ts( plain ) is None
 
-        # Expired hold → undeclared ⇒ pokeable (not honored)
-        old = ( _now() - datetime.timedelta( seconds=10_000 ) ).isoformat( timespec="seconds" )
-        write_hold( sid, "Tiffany 💍", "stale", ttl_seconds=900, held_at=old, base_dir=tmp )
-        assert not is_honored( read_hold( sid, base_dir=tmp ) ), "expired hold still honored"
+        # B1 — a hold with an ANCIENT held_at but a FRESH file mtime is HONORED:
+        # the host-real mtime is the freshness anchor, immune to the agent's
+        # unreliable clock (the core d44b7068 repro). Reading right after the write
+        # gives a now-ish mtime regardless of the 10000s-old held_at.
+        ancient = ( _now() - datetime.timedelta( seconds=10_000 ) ).isoformat( timespec="seconds" )
+        write_hold( sid, "Tiffany 💍", "stale held_at, fresh file", ttl_seconds=900,
+                    held_at=ancient, base_dir=tmp )
+        assert is_honored( read_hold( sid, base_dir=tmp ) ), \
+            "fresh-mtime hold with old held_at must be honored (B1)"
+
+        # Expired hold → not honored: drive expiry via the FILE mtime (host truth),
+        # not held_at — push the mtime well past the ttl into the past.
+        stale_path = hold_path( sid, base_dir=tmp )
+        old_epoch  = ( _now() - datetime.timedelta( seconds=10_000 ) ).timestamp()
+        os.utime( stale_path, ( old_epoch, old_epoch ) )
+        assert not is_honored( read_hold( sid, base_dir=tmp ) ), "mtime-expired hold still honored"
+
+        # Legacy fallback — a hold dict with NO mtime annotation anchors on held_at:
+        # old held_at ⇒ stale, recent held_at ⇒ fresh (back-compat preserved).
+        assert not is_fresh( { "held_at": ancient, "ttl_seconds": 900, "reason": "x" } ), \
+            "legacy held_at fallback must still expire"
+        assert is_fresh( { "held_at": _now().isoformat(), "ttl_seconds": 900, "reason": "x" } ), \
+            "legacy held_at fallback must read fresh when recent"
 
         # Cleared hold → absent
         clear_hold( sid, base_dir=tmp )

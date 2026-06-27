@@ -21,6 +21,13 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_hold as hh
 UTC = datetime.timezone.utc
 
 
+def _persisted( hold ):
+    """A read_hold result minus the in-memory `_`-prefixed annotations (B1 mtime
+    stamp). write_hold returns ONLY the persisted schema fields, so comparing a
+    read result against a write return must drop the read-time annotation."""
+    return { k: v for k, v in hold.items() if not k.startswith( "_" ) }
+
+
 # ── hold_path / _resolve_base_dir ─────────────────────────────────────────────
 
 def test_hold_path_with_base_dir( tmp_path ):
@@ -118,7 +125,7 @@ def test_read_hold_absent_returns_none( tmp_path ):
 
 def test_read_hold_roundtrip( tmp_path ):
     written = hh.write_hold( "sid4", "P", "r", base_dir=tmp_path )
-    assert hh.read_hold( "sid4", base_dir=tmp_path ) == written
+    assert _persisted( hh.read_hold( "sid4", base_dir=tmp_path ) ) == written
 
 
 def test_read_hold_corrupt_json_returns_none( tmp_path ):
@@ -326,6 +333,98 @@ def test_is_fresh_default_now_branch( tmp_path ):
     assert hh.is_fresh( hold ) is True
 
 
+# ── B1 mtime-anchored freshness (bug d44b7068) ────────────────────────────────
+#
+# Freshness is measured from the hold FILE's host-real mtime (the annotation the
+# reader stamps), NOT the agent-supplied held_at — agents have no reliable clock,
+# so an old/anchored held_at must NOT make a freshly-written hold read stale.
+
+def _hold_mtime( mtime_epoch, ttl_seconds=900, held_at="garbage", reason="r" ):
+    """A hold dict carrying the B1 mtime annotation (held_at deliberately bad by
+    default, to prove the mtime anchor wins over the agent's clock)."""
+    h = _hold( held_at, ttl_seconds=ttl_seconds, reason=reason )
+    h[ hh.HOLD_MTIME_ANNOTATION ] = mtime_epoch
+    return h
+
+
+def test_file_mtime_success( tmp_path ):
+    p = tmp_path / "f.json"
+    p.write_text( "{}" )
+    assert hh._file_mtime( p ) == p.stat().st_mtime
+
+
+def test_file_mtime_oserror_returns_none( tmp_path ):
+    # A non-existent path → stat raises OSError → None (the degrade-safe branch).
+    assert hh._file_mtime( tmp_path / "does-not-exist.json" ) is None
+
+
+def test_read_hold_stamps_mtime_annotation( tmp_path ):
+    hh.write_hold( "sidm", "P", "r", base_dir=tmp_path )
+    hold = hh.read_hold( "sidm", base_dir=tmp_path )
+    path = tmp_path / ".heartbeat-hold-sidm.json"
+    assert hold[ hh.HOLD_MTIME_ANNOTATION ] == path.stat().st_mtime
+
+
+def test_read_hold_omits_annotation_when_mtime_unavailable( tmp_path, monkeypatch ):
+    # _file_mtime returns None (stat failure) → annotation absent → legacy path.
+    hh.write_hold( "sidm2", "P", "r", base_dir=tmp_path )
+    monkeypatch.setattr( hh, "_file_mtime", lambda p: None )
+    hold = hh.read_hold( "sidm2", base_dir=tmp_path )
+    assert hold is not None
+    assert hh.HOLD_MTIME_ANNOTATION not in hold
+
+
+def test_is_fresh_mtime_overrides_bad_held_at():
+    # The core B1 repro: held_at is garbage, but a fresh file mtime → FRESH.
+    now = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
+    assert hh.is_fresh( _hold_mtime( now.timestamp() - 100, ttl_seconds=900 ), now=now ) is True
+
+
+def test_is_fresh_mtime_expired():
+    now = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
+    assert hh.is_fresh( _hold_mtime( now.timestamp() - 1000, ttl_seconds=900 ), now=now ) is False
+
+
+def test_is_fresh_mtime_boundary_excludes_equal():
+    # elapsed == ttl is NOT fresh (strict <), mirroring the held_at rule.
+    now = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
+    assert hh.is_fresh( _hold_mtime( now.timestamp() - 900, ttl_seconds=900 ), now=now ) is False
+
+
+def test_is_fresh_mtime_bool_falls_back_to_held_at():
+    # A bool annotation must NOT read as 1.0 — fall back to held_at.
+    now   = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
+    fresh = _hold_mtime( True, held_at=now.isoformat() )            # bool mtime, fresh held_at
+    stale = _hold_mtime( True, held_at="garbage" )                  # bool mtime, bad held_at
+    assert hh.is_fresh( fresh, now=now ) is True
+    assert hh.is_fresh( stale, now=now ) is False
+
+
+def test_is_fresh_mtime_non_numeric_falls_back_to_held_at():
+    now = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
+    h   = _hold_mtime( "not-a-number", held_at=now.isoformat() )
+    assert hh.is_fresh( h, now=now ) is True
+
+
+def test_is_fresh_mtime_present_but_ttl_bad_rejected():
+    # ttl validation precedes the mtime path — a bad ttl is False regardless.
+    now = datetime.datetime( 2026, 6, 4, 12, 0, 0, tzinfo=UTC )
+    assert hh.is_fresh( _hold_mtime( now.timestamp(), ttl_seconds=True ), now=now ) is False
+
+
+def test_is_honored_uses_mtime_anchor( tmp_path ):
+    # End-to-end: a hold whose held_at is ancient but file just written is honored;
+    # backdating the file mtime past the ttl flips it to not-honored.
+    hh.write_hold( "sidh", "P", "holding on peer",
+                   held_at="2000-01-01T00:00:00Z", ttl_seconds=900, base_dir=tmp_path )
+    assert hh.is_honored( hh.read_hold( "sidh", base_dir=tmp_path ) ) is True
+    import os
+    path      = tmp_path / ".heartbeat-hold-sidh.json"
+    old_epoch = ( hh._now() - datetime.timedelta( seconds=10_000 ) ).timestamp()
+    os.utime( path, ( old_epoch, old_epoch ) )
+    assert hh.is_honored( hh.read_hold( "sidh", base_dir=tmp_path ) ) is False
+
+
 # ── is_honored ────────────────────────────────────────────────────────────────
 
 def test_is_honored_not_fresh():
@@ -381,21 +480,21 @@ _SHORT = "f6292818"
 
 def test_read_hold_exact_match_takes_precedence( tmp_path ):
     written = hh.write_hold( _FULL, "P", "exact wins", base_dir=tmp_path )
-    assert hh.read_hold( _FULL, base_dir=tmp_path ) == written          # exact path, no glob
+    assert _persisted( hh.read_hold( _FULL, base_dir=tmp_path ) ) == written   # exact path, no glob
 
 
 def test_read_hold_full_id_finds_hold_written_at_short_id( tmp_path ):
     """The live FM: agent wrote at the SHORT id, hook reads at the FULL id."""
     written = hh.write_hold( _SHORT, "P", "short-id hold", awaiting="peer:tiffany", base_dir=tmp_path )
     got = hh.read_hold( _FULL, base_dir=tmp_path )
-    assert got == written
+    assert _persisted( got ) == written
     assert got[ "awaiting" ] == "peer:tiffany"
 
 
 def test_read_hold_short_id_finds_hold_written_at_full_id( tmp_path ):
     """Symmetric: hook reads at the SHORT id, hold was written at the FULL id."""
     written = hh.write_hold( _FULL, "P", "full-id hold", base_dir=tmp_path )
-    assert hh.read_hold( _SHORT, base_dir=tmp_path ) == written
+    assert _persisted( hh.read_hold( _SHORT, base_dir=tmp_path ) ) == written
 
 
 def test_read_hold_no_prefix_match_returns_none( tmp_path ):
@@ -420,7 +519,7 @@ def test_read_hold_fallback_prefers_longest_suffix( tmp_path ):
     full_hold = hh.write_hold( _FULL, "P", "full form", base_dir=tmp_path )
     # Reading at a THIRD prefix-sharing id must resolve to the longest-suffix file.
     got = hh.read_hold( "f6292818-9999", base_dir=tmp_path )
-    assert got == full_hold and got[ "reason" ] == "full form"
+    assert _persisted( got ) == full_hold and got[ "reason" ] == "full form"
 
 
 def test_read_hold_fallback_glob_oserror_returns_none( tmp_path, monkeypatch ):
@@ -448,7 +547,7 @@ def test_resolve_hold_base_dir_non_lupin_session_isolated( tmp_path ):
     assert base == other_project
     # And a hold written there is read back from there (round-trip via the base).
     written = hh.write_hold( "s9", "P", "non-lupin hold", base_dir=base )
-    assert hh.read_hold( "s9", base_dir=base ) == written
+    assert _persisted( hh.read_hold( "s9", base_dir=base ) ) == written
 
 
 def test_resolve_hold_base_dir_none_falls_back_to_project_root( monkeypatch, tmp_path ):
@@ -515,7 +614,7 @@ def test_write_hold_includes_6929f4ac_fields_in_schema( tmp_path ):
                    pending_user_gates=[ gate ],
                    last_looked_in_on_workers_ts="2026-06-22T12:00:00+00:00" )
     hold = hh.read_hold( "sid12345", base_dir=tmp_path )
-    assert tuple( hold.keys() ) == hh.HOLD_SCHEMA_FIELDS
+    assert tuple( k for k in hold.keys() if not k.startswith( "_" ) ) == hh.HOLD_SCHEMA_FIELDS
     assert hold[ "pending_user_gates" ] == [ gate ]
     assert hold[ "last_looked_in_on_workers_ts" ] == "2026-06-22T12:00:00+00:00"
 

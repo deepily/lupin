@@ -24,6 +24,7 @@ Venue: :7999-eligible / local — pure module composition, tmp-dir only, no
 persistent state, no server, sub-second.
 """
 import datetime
+import os
 
 from lupin_cli.claude_code.hooks.lib import heartbeat_hold as hold_mod
 from lupin_cli.claude_code.hooks.lib import heartbeat_poke_cap as cap_mod
@@ -32,6 +33,15 @@ from lupin_cli.claude_code.hooks.lib import heartbeat_decision as decision_mod
 
 UTC = datetime.timezone.utc
 CAP = 3
+
+
+def _backdate_hold_mtime( base_dir, session_id, now, seconds=10_000 ):
+    """B1 (d44b7068): hold freshness is anchored on the FILE mtime, not held_at.
+    A test that wants a STALE hold must backdate the written file's mtime to
+    `seconds` before the (fixed) `now` — write_hold alone stamps a real-now mtime."""
+    path = base_dir / f".heartbeat-hold-{session_id}.json"
+    old  = ( now - datetime.timedelta( seconds=seconds ) ).timestamp()
+    os.utime( path, ( old, old ) )
 
 
 def _v1_adapter_step( session_id, base_dir, now=None ):
@@ -96,6 +106,7 @@ def test_v1_stale_owed_hold_pokes_to_cap_then_stops( tmp_path ):
         "s_stale", "Tiffany 💍", "was holding on Rachel", work_owed=True,
         ttl_seconds=900, held_at=stale, base_dir=tmp_path
     )
+    _backdate_hold_mtime( tmp_path, "s_stale", now )   # B1: stale via file mtime
 
     # Pokes 1..CAP — each a block carrying the declared-owed reason
     for expected_count in range( 1, CAP + 1 ):
@@ -124,6 +135,7 @@ def test_v1_reset_reopens_poke_budget( tmp_path ):
         "s_reset", "Tiffany 💍", "stale owed", work_owed=True,
         ttl_seconds=900, held_at=stale, base_dir=tmp_path
     )
+    _backdate_hold_mtime( tmp_path, "s_reset", now )   # B1: stale via file mtime
 
     # Burn the budget to the cap
     for _ in range( CAP ):
