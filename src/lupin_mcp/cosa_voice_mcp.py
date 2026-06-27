@@ -76,7 +76,11 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     clear_cached_session_id, _find_session_file, _read_session_file,
     get_speakerphone, set_speakerphone
 )
-from lupin_cli.claude_code.hooks.lib.hook_common import log_to_stream
+from lupin_cli.claude_code.hooks.lib.hook_common import (
+    log_to_stream,
+    _brevity_rules,
+    _routing_reminder,
+)
 
 
 # ============================================================================
@@ -559,6 +563,29 @@ def _wait_for_sender_id( timeout: float = 12.0 ) -> str:
 
 
 # ============================================================================
+# Speakerphone TTS Contract (once-stated, single-sourced)
+# ============================================================================
+#
+# Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md §4: the full standing
+# TTS contract is stated ONCE here in the session-init `instructions` payload.
+# The per-turn `<system-reminder>` rider (hook_common._speakerphone_reminder_body)
+# is now slim and only points at this section. The brevity + routing prose is
+# single-sourced from hook_common._brevity_rules() + _routing_reminder() — the
+# SAME functions the rider historically composed from and the same
+# cu.get_spoken_char_cap() source the caller-side enforcement guard reads — so
+# the spoken-char cap never drifts between the rider, this contract, and the
+# server reject boundary.
+
+_TTS_CONTRACT_SECTION = (
+    "## Speakerphone TTS Contract (applies on every turn — speakerphone is the standing default)\n\n"
+    "CLOSING TURN: after your user-facing reply, call "
+    "notify(message=<full reply, recrafted for speech>, suppress_ding=True, priority='high').\n\n"
+    + _brevity_rules() + "\n\n"
+    + _routing_reminder() + "\n\n"
+)
+
+
+# ============================================================================
 # MCP Server
 # ============================================================================
 
@@ -577,10 +604,21 @@ mcp = FastMCP(
         f"this cosa-voice MCP server IS and how to use it — it is injected into "
         f"your system prompt ONCE per session at the `initialize` handshake. "
         f"In contrast, the per-turn `<system-reminder>` rider you'll see on every "
-        f"inbound user message tells you what to DO this turn under the CURRENT "
-        f"state of `speakerphone_on` + `tts_interaction_mode`. The two are "
-        f"complementary: `instructions` is the contract; the rider is the "
-        f"per-turn obligation under that contract.\n\n"
+        f"inbound user message is now SLIM: it carries only the live turn-state "
+        f"(the input modality — voice-from-a-distance vs typed) plus a pointer to "
+        f"the standing TTS contract. It does NOT repeat the full contract each "
+        f"turn — the complete obligations live ONCE in the § Speakerphone TTS "
+        f"Contract section below. The two are complementary: `instructions` "
+        f"(this payload, including that contract section) is the standing "
+        f"contract; the slim rider is the per-turn 'contract is ACTIVE — here is "
+        f"what changed' marker under it.\n\n"
+
+        # =====================================================================
+        # The once-stated TTS contract (rider-slim §4). Single-sourced from
+        # hook_common._brevity_rules() + _routing_reminder() so the spoken-char
+        # cap never drifts between this contract and the per-turn rider.
+        # =====================================================================
+        f"{_TTS_CONTRACT_SECTION}"
 
         f"## Your Toolkit at a Glance\n\n"
         f"This server exposes 18+ tools grouped by function. Scan this map "
