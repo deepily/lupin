@@ -11,10 +11,25 @@ mechanism), doc `04` §Resolved (d/e/f/g), TODO Decisions Log 2026-06-26. Reconc
 > These are DRAFTS — intentionally not yet ratified. Cascaded review is the gate before any
 > implementation (mirrors the 06.22 full-parity build's process: plan → cascaded review → execute).
 
+## 🔴 Switchover-critical foundations (2026-06-27 — review FIRST, before Plan 01)
+
+Rick ratified **switchover-first** (retire the legacy client ASAP). Two foundations were drafted + walked-through 2026-06-27 and are switchover-MANDATORY:
+
+| # | Plan | Nature | Status |
+|---|------|--------|--------|
+| 00b | [F0 — AudioStore / TtsQueueStore foundation](00b-f0-audiostore-foundation.md) | dedicated `TtsQueueStore` + active-id (Q1 ratified); visual-control data for plans 01/02/03/05 | DRAFT (decisions in §0) |
+| 00c | [Phase-6 TTS playback engine](00c-phase6-tts-playback.md) | 🔴 **switchover blocker** — mux is decode-only/SILENT; port `playPCMChunk` Web-Audio scheduler so the mux audibly speaks | DRAFT |
+
+**Why mandatory**: Rick confirmed cosa-voice/MCP notifications are spoken by the **browser client's** in-browser PCM player; the mux decodes but doesn't play → switching now would silence him. **Good news**: the decode half is already done (`pcm-decoder.ts`); Phase-6 is porting ~40 lines of the gapless scheduler, not building an audio core. `SequentialAudioManager` is the *superseded* approach (legacy replaced it) — not the substrate.
+
+**Revised minimum-viable switchover set**: 00b (F0) → 00c (Phase-6) → 01 (Notifications) → Fleet #6 + Task List #7 (live-render verify). Cascade-review order matches.
+
 ## The corpus (build sequence = review order)
 
 | # | Plan | Accordion | Nature | Status |
 |---|------|-----------|--------|--------|
+| 00b | [F0 foundation](00b-f0-audiostore-foundation.md) | (cross-cutting) | switchover foundation | DRAFT |
+| 00c | [Phase-6 TTS playback](00c-phase6-tts-playback.md) | (cross-cutting) | switchover blocker | DRAFT |
 | 01 | [CC-session B1–B5](01-cc-session-B1-B5.md) | Notifications (#5) | keystone — #1 priority | DRAFT |
 | 02 | [Action Required funnel restore](02-action-required-funnel.md) | #3 | partial → full restore | DRAFT |
 | 03 | [TTS Queue full restore](03-tts-queue-full-restore.md) | #4 | partial → full restore | DRAFT |
@@ -48,6 +63,7 @@ accepted superset per ruling (f); only the read-only-contract doc note + a live-
    Rachel section-toolbar branch `mux-section-toolbar-accordion-toggle` (commit-held); focus-bar work
    committed `4b33ceb7` (**push held for Rick**). Plan 01's B1 restructures `4b33ceb7` — coordinate.
 7. **Doc touchpoints** (CLAUDE.md §DOCUMENTATION TOUCHPOINTS) — name any docs each plan must update.
+8. **🌐 Chrome-only — ZERO Firefox support (Rick, 2026-06-27, STANDING — applies to ALL multiplexer work henceforth):** the multiplexer targets **100% Chrome compatibility with zero Firefox detection/hacks/filtering**. When porting from the legacy notifications codebase, **strip every Firefox/Chrome detection branch** (e.g. the `isFirefox` "Firefox hack" forcing RELIABLE TTS mode, `notifications.js:570-586`; the Firefox `preload`/`volume` branch in `SequentialAudioManager`; any `navigator.userAgent` Gecko sniffing). No `userAgent` sniffing, no per-browser code paths, no "reliable-mode" fallbacks. If a non-Chrome target is ever reintroduced, it becomes a separate, explicitly-scoped plan — never an inline hack.
 
 ## Shared plan template (every NN-*.md follows this section order)
 

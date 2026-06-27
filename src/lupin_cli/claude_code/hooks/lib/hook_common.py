@@ -1154,12 +1154,21 @@ def build_permission_decision( behavior, message=None, interrupt=False ):
 
 # ── Speakerphone Wrap (per-turn rider) ────────────────────────────────────────
 #
-# Per src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md
-# (predecessor: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md)
-# Phase 5b: wrap inbound text with a <system-reminder> rider on every turn.
-# Body varies by (tts_interaction_mode, speakerphone_on) per a 4-variant
-# matrix (solo+speaker / solo+phone / chorus+speaker / chorus+phone).
-# Sanitization at the boundary closes the prompt-injection escape vector
+# Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md (Rick-approved
+# 2026-06-27; predecessors: .../2026.05.11-tts-interaction-mode-solo-chorus/
+# 14-phase5-hook-rider-design.md + .../2026.04.30-conv-mode-three-layer-
+# enforcement/01-design.md).
+#
+# The per-turn rider is now SLIM and UNCONDITIONAL: it carries only what is
+# true-now-and-changed (the live input modality + the one catastrophic rule,
+# the spoken-char reject cap) and points at the standing TTS contract that
+# lives once in the cosa-voice MCP server's `instructions` payload. The
+# predecessor 4-variant matrix — solo/chorus framing and speakerphone-state
+# branching — is dropped: speakerphone is assumed ON unconditionally (the
+# get_session_info speakerphone flag is unreliable; decision §0.3). No flag
+# reads, no branching.
+#
+# Sanitization at the boundary still closes the prompt-injection escape vector
 # (§2.4a of the predecessor design doc).
 
 # Markers stripped by sanitize_for_wrap to prevent user content from escaping
@@ -1168,9 +1177,8 @@ def build_permission_decision( behavior, message=None, interrupt=False ):
 _SANITIZE_MARKERS = ( "</voice-message", "<system-reminder" )
 
 # Sentinel substring used to detect already-wrapped strings for idempotency.
-# Appears in BOTH on-variant and off-variant rider bodies so the check is
-# universal across the 4-variant matrix.
-_SPEAKERPHONE_WRAP_SENTINEL = "This session has speakerphone mode"
+# The slim rider always contains this phrase, so the check is universal.
+_SPEAKERPHONE_WRAP_SENTINEL = "TTS contract ACTIVE"
 
 
 def sanitize_for_wrap( text ):
@@ -1205,40 +1213,14 @@ def sanitize_for_wrap( text ):
     return text[ :min( indices ) ]
 
 
-def _source_preamble( source ):
-    """
-    Build the source-attribution preamble for the rider — one sentence that
-    names where the input came from. Helpful for Claude's framing and for
-    transcript readability.
-
-    Requires:
-        - source is a string
-
-    Ensures:
-        - Returns a single-sentence string for known sources
-        - Returns empty string for unknown sources (defensive)
-
-    Args:
-        source: Which injection point the text came from
-
-    Returns:
-        str: Preamble sentence or empty string
-    """
-    if source == "voice":
-        return "The user spoke the above as a voice message from a distance."
-    if source == "terminal-typed":
-        return "The user typed the above at the terminal."
-    if source == "hook-idle-prompt":
-        return "The Stop hook fired the above as an idle-aware re-prompt."
-    if source == "hook-permission-prompt":
-        return "A permission-request hook synthesized the above prompt."
-    return ""
-
-
 def _brevity_rules():
     """
     The TTS brevity-rules block migrated from CLAUDE.md per Phase 5 of the
-    speakerphone refactor. Fires only when speakerphone_on=True (live TTS).
+    speakerphone refactor. Post rider-slim (2026-06-27) this is single-sourced
+    into the cosa-voice MCP server's `instructions` payload (the once-stated
+    § Speakerphone TTS Contract); it is no longer composed into the per-turn
+    rider, which now only points at that contract. Kept here so the rider, the
+    contract, and the caller-side enforcement guard all read ONE definition.
 
     Per ratified PIP S110 (Rick-approved, 2026-06-15): the spoken target is
     SENTENCE-based (max 3), NOT word/char COUNTING — LLMs count sentences
@@ -1277,8 +1259,10 @@ def _brevity_rules():
 def _routing_reminder():
     """
     The cosa-voice routing-reminder block migrated from CLAUDE.md per Phase 5
-    of the speakerphone refactor. Fires when speakerphone_on=True so the model
-    uses voice tools rather than the terminal-only AskUserQuestion fallback.
+    of the speakerphone refactor. Post rider-slim (2026-06-27) this is
+    single-sourced into the cosa-voice MCP server's `instructions` payload (the
+    once-stated § Speakerphone TTS Contract); it is no longer composed into the
+    per-turn rider. Kept here so the contract reads ONE definition.
 
     Ensures:
         - Returns a non-empty paragraph mapping interaction types to cosa-voice
@@ -1296,111 +1280,64 @@ def _routing_reminder():
     )
 
 
-def _speakerphone_reminder_body( source, mode, speakerphone_on ):
+def _speakerphone_reminder_body( source ):
     """
-    Build the per-turn rider body for the given (source, mode, speakerphone_on)
-    triple. The body is plain text — no wrapping <system-reminder> tags
-    (those are added by the caller).
+    Build the slim per-turn rider body for the given input source. The body is
+    plain text — no wrapping <system-reminder> tags (those are added by the
+    caller).
 
-    Per the Phase 5 design, the rider fires on every turn; content varies by
-    state, not whether it fires. Composition by variant:
+    Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md (Rick-approved
+    2026-06-27): the rider carries ONLY what is true-now-and-changed — the live
+    input modality plus the one catastrophic rule (the spoken-char reject cap).
+    The full standing TTS contract lives once in the cosa-voice MCP server's
+    `instructions` payload, not repeated turn-to-turn. The predecessor
+    4-variant matrix (solo/chorus framing + speakerphone-state branching) is
+    dropped: speakerphone is assumed ON unconditionally (decision §0.2/§0.3 —
+    the get_session_info speakerphone flag is currently unreliable). No flag
+    reads, no branching — only the input-modality token is dynamic.
 
-    - Source preamble (1 sentence) — always
-    - Speakerphone state notice — always (ON: notify-after; OFF: no notify)
-    - Brevity rules — speakerphone_on=True only
-    - Routing reminder — speakerphone_on=True only
-    - Mode-specific monopoly notice — mode="solo" only
-    - Multi-voice notice — mode="chorus" and speakerphone_on=True only
+    The named char cap is single-sourced from cu.get_spoken_char_cap() — the
+    SAME source the caller-side enforcement guard and the `instructions`
+    contract read — so the rider's number can never drift between surfaces.
 
     Requires:
         - source is one of: "voice", "terminal-typed",
           "hook-idle-prompt", "hook-permission-prompt"
-        - mode is "solo" or "chorus"
-        - speakerphone_on is a bool
 
     Ensures:
         - Returns a non-empty string body
         - Always contains the _SPEAKERPHONE_WRAP_SENTINEL substring
           (idempotency check rides on this invariant)
+        - The input-modality token is "voice(distance)" for source=="voice",
+          "typed" for every other source
 
     Args:
-        source:          Which injection point the text came from
-        mode:            Global TTS interaction mode
-        speakerphone_on: Per-session speakerphone state
+        source: Which injection point the text came from
 
     Returns:
-        str: System-reminder body text
+        str: System-reminder body text (the slim per-turn rider)
     """
-    parts = []
-
-    preamble = _source_preamble( source )
-    if preamble: parts.append( preamble )
-
-    if speakerphone_on:
-        parts.append(
-            "This session has speakerphone mode ON. After your response, call "
-            "`notify(message=<full text of your reply>, suppress_ding=True, "
-            "priority='high')` so the response is spoken aloud."
-        )
-        parts.append( _brevity_rules() )
-        parts.append( _routing_reminder() )
-    else:
-        # 2026-05-14 evening — reframed from "no notify required" (silent) to
-        # quiet-mode (demoted priority). User wants the historical record
-        # preserved with a small ding on arrival; TTS playback is suppressed.
-        # See src/rnd/v0.1.7/2026.05.14-per-session-dnd-toggle-and-slider-move.md
-        #
-        # 2026-05-15 PM — restored the `_SPEAKERPHONE_WRAP_SENTINEL` invariant.
-        # The OFF-variant body now leads with "This session has speakerphone
-        # mode OFF" so the sentinel ("This session has speakerphone mode")
-        # appears in both ON and OFF variants. Without this, the idempotency
-        # check in `speakerphone_wrap` mis-fired on OFF-wrapped strings and
-        # could double-wrap. Per session c1cbcd11 (Rio ⚡) post-doc-viewer
-        # regression-fix sweep.
-        parts.append(
-            "This session has speakerphone mode OFF — operating in QUIET mode "
-            "(per-session DND). The historical record matters — keep calling "
-            "`notify()` for milestones, errors, action-required prompts, and "
-            "the closing-turn summary — BUT use `priority='medium'` and "
-            "`suppress_ding=False` (NOT the standard `priority='high', "
-            "suppress_ding=True`). The user wants the small arrival ding "
-            "without full TTS playback. Detail still goes in the `abstract` "
-            "parameter (UI card rendering is unaffected by the priority "
-            "demotion). Blocking `ask_*` tools remain available — use them "
-            "with `priority='medium'` as well."
-        )
-
-    if mode == "solo":
-        if speakerphone_on:
-            parts.append(
-                "Solo mode: speakerphone is currently held by THIS session. If "
-                "another session activates speakerphone, you will be displaced "
-                "(the bridge flips and the next assistant turn should NOT "
-                "auto-narrate)."
-            )
-        else:
-            parts.append(
-                "Solo mode: speakerphone is held by another session, or by "
-                "none. Activating speakerphone here will displace any current "
-                "holder. Do NOT call `enable_speakerphone` on your own "
-                "initiative — USER-ONLY initiation rule."
-            )
-    elif mode == "chorus" and speakerphone_on:
-        parts.append(
-            "Chorus mode: other sessions may also be in speakerphone mode "
-            "simultaneously. Persona voices disambiguate at the listener's "
-            "ear; the TTS queue serializes playback."
-        )
-
-    return "\n\n".join( parts )
+    cap      = cu.get_spoken_char_cap()
+    modality = "voice(distance)" if source == "voice" else "typed"
+    return (
+        f"[turn-state] input={modality}\n"
+        "TTS contract ACTIVE — full rules in session instructions. This turn:\n"
+        "• after replying, call notify(message=<reply>, suppress_ding=True, priority='high')\n"
+        "• recraft for speech — no markdown/paths/JSON/URLs\n"
+        f"• spoken ≤3 sentences AND ≤{cap} chars — OVER = whole call REJECTED (silent fail); cut to a headline\n"
+        "• rich detail → abstract (not length-capped)\n"
+        "• questions → cosa-voice ask_yes_no / ask_multiple_choice / converse / ask_open_ended_batch — never AskUserQuestion\n"
+        "• ack receipt in 1 line before tool calls"
+    )
 
 
 def speakerphone_wrap( text, *, source, session_id=None ):
     """
-    Wrap inbound text with the per-turn speakerphone rider. The rider fires
-    on every turn — content varies by (tts_interaction_mode, speakerphone_on)
-    per the Phase 5 4-variant matrix (solo+speaker / solo+phone /
-    chorus+speaker / chorus+phone).
+    Wrap inbound text with the slim per-turn speakerphone rider. The rider
+    fires on every turn and is now UNCONDITIONAL — it no longer reads the
+    speakerphone flag or the interaction mode (decision §0.3 of the rider-slim
+    doc: the flag is unreliable, so speakerphone is assumed ON; only the input
+    modality is dynamic). See _speakerphone_reminder_body for the body.
 
     For source="voice", the output also includes a <voice-message> envelope
     describing voice INPUT properties (from-distance, priority, suppress-ding).
@@ -1413,7 +1350,7 @@ def speakerphone_wrap( text, *, source, session_id=None ):
     Idempotency: if the input already contains the wrapper sentinel, it is
     returned unchanged (safe to call multiple times on the same string).
 
-    Per src/rnd/v0.1.7/2026.05.11-tts-interaction-mode-solo-chorus/14-phase5-hook-rider-design.md.
+    Per src/rnd/v0.1.9/2026.06.27-cosa-voice-rider-slim.md.
 
     Requires:
         - text is a string
@@ -1426,14 +1363,13 @@ def speakerphone_wrap( text, *, source, session_id=None ):
 
     Ensures:
         - Returns text unchanged if text is empty, OR session_id is None or
-          empty (can't resolve session state → fail-closed pass-through)
+          empty (fail-closed pass-through)
         - Returns text unchanged if input already contains the wrapper
           sentinel (idempotency)
-        - Returns text unchanged if any error occurs reading the bridge or
-          the mode config (fail-closed — safer than wrapping on stale state)
+        - Returns text unchanged if any error occurs building the rider body
+          (fail-closed — safer than injecting a half-built rider)
         - Otherwise returns wrapped output: <voice-message> envelope (voice
-          source only) + sanitized content + <system-reminder> rider body
-          appropriate to the current (mode, speakerphone_on) tuple
+          source only) + sanitized content + <system-reminder> slim rider body
 
     Args:
         text:       Raw text being injected into Claude's input stream
@@ -1449,16 +1385,13 @@ def speakerphone_wrap( text, *, source, session_id=None ):
     if _SPEAKERPHONE_WRAP_SENTINEL in text: return text
 
     try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
-        speakerphone_on = get_speakerphone( session_id )
-        mode            = cu.get_tts_interaction_mode()
+        reminder_body = _speakerphone_reminder_body( source )
     except Exception:
-        # Fail-closed — any error reading bridge or mode config means pass
-        # through unwrapped (safer than wrapping based on possibly-stale state).
+        # Fail-closed — any error building the rider body means pass through
+        # unwrapped (safer than injecting a half-built rider).
         return text
 
-    clean         = sanitize_for_wrap( text )
-    reminder_body = _speakerphone_reminder_body( source, mode, speakerphone_on )
+    clean = sanitize_for_wrap( text )
 
     if source == "voice":
         return (
@@ -1563,11 +1496,10 @@ def speakerphone_reminder_block( source, session_id ):
     for callers that can only emit additionalContext rather than transform
     the user's input — e.g., the user_prompt_submit hook.
 
-    Per the Phase 5 design, the rider fires on every turn (when session_id
-    is resolvable); content varies by (mode, speakerphone_on) per the
-    4-variant matrix. This is NOT a gate on speakerphone_on=True any more
-    — that gating belonged to the predecessor three-layer-enforcement
-    design and has been superseded.
+    The rider fires on every turn (when session_id is resolvable) and is now
+    UNCONDITIONAL — it no longer reads the speakerphone flag or the interaction
+    mode (decision §0.3 of the rider-slim doc: speakerphone is assumed ON; only
+    the input modality is dynamic). See _speakerphone_reminder_body.
 
     Requires:
         - source is one of: "voice", "terminal-typed",
@@ -1575,10 +1507,10 @@ def speakerphone_reminder_block( source, session_id ):
         - session_id is a non-empty string OR None
 
     Ensures:
-        - Returns empty string if session_id missing or any error reading
-          bridge/mode config (fail-closed)
+        - Returns empty string if session_id missing or any error building the
+          rider body (fail-closed)
         - Returns formatted <system-reminder>…</system-reminder> block
-          otherwise — body chosen per the (mode, speakerphone_on) tuple
+          otherwise — the slim rider body for the given source
 
     Args:
         source:     Which injection point's reminder body to use
@@ -1590,13 +1522,10 @@ def speakerphone_reminder_block( source, session_id ):
     if not session_id: return ""
 
     try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import get_speakerphone
-        speakerphone_on = get_speakerphone( session_id )
-        mode            = cu.get_tts_interaction_mode()
+        body = _speakerphone_reminder_body( source )
     except Exception:
         return ""
 
-    body = _speakerphone_reminder_body( source, mode, speakerphone_on )
     return f'<system-reminder>\n{body}\n</system-reminder>'
 
 

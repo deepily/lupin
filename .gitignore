@@ -165,3 +165,4 @@ coverage/
 .task-store-map-*.json
 .task-store-spool-*.jsonl
 .claude-session.md
+.claude-memento.md
