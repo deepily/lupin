@@ -3033,6 +3033,37 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return 0
 
         owed_class = owed_class or { }
+
+        # PERSONA-TWIN SUPPRESSION (Tiberius 2026-06-27, bug 7c931b3a — the INVERSE
+        # sibling of 8a450183's persona-collapse filter). A RE-SPUN manager keeps its
+        # OLD (reaped/superseded) session row in the include_offline detection
+        # snapshot until that row ages past the corpse ceiling. For the whole ~45-min
+        # span between "went dark" and "aged out", the ghost row's freshest_age_s
+        # climbs ~1/poll and lands inside [threshold, max_age] — so this tier flags
+        # it. But the poke is PERSONA-ADDRESSED (_emit_dm targets the persona, not the
+        # session_id), so a dead incarnation's "silent 47m" nudge is delivered to the
+        # LIVE twin (a NEW session_id, same persona) that is actively working — false
+        # MANAGER-STALE spam + a Rick advisory per episode (the 2026-06-27 mr radio
+        # cd637762/54622550 case: the render table showed 'mr radio LIVE 3s/1m' on the
+        # SAME poll the poke fired for the dead 54622550 row). The discriminator: the
+        # persona is demonstrably ALIVE on a DIFFERENT session_id. Build the set of
+        # personas with ≥1 FRESH (sub-threshold) row and suppress a stale row whose
+        # persona is live elsewhere — the row is a superseded ghost, never a dark
+        # manager. A persona with NO live incarnation anywhere is UNTOUCHED (the
+        # genuine-darkness true-positive — incl. the all-stale quota-freeze — is
+        # preserved). 8a450183 gates by SESSION-id freshness for peer-EDGE inference;
+        # this is the outreach-side dual: a live twin under any session_id mutes the
+        # ghost's persona-addressed poke.
+        live_personas = set()
+        for row in ( snapshot or { } ).get( "sessions", [ ] ):
+            if not isinstance( row, dict ):
+                continue
+            persona  = row.get( "persona" )
+            liveness = row.get( "liveness" )
+            fa       = liveness.get( "freshest_age_s" ) if isinstance( liveness, dict ) else None
+            if persona and fa is not None and fa < self.manager_stale_poke_threshold_seconds:
+                live_personas.add( persona )
+
         eligible   = { }
         for row in ( snapshot or { } ).get( "sessions", [ ] ):
             if not isinstance( row, dict ) or row.get( "role" ) != "manager":
@@ -3044,9 +3075,20 @@ class ArbiterConsumerJob( AgenticJobBase ):
             age      = liveness.get( "freshest_age_s" ) if isinstance( liveness, dict ) else None
             # corpse ceiling: eligible iff the age lands inside [threshold, max_age];
             # None (no signal ever) is a corpse/malformed row, never a dark manager.
-            if age is not None and \
-               self.manager_stale_poke_threshold_seconds <= age <= self.manager_stale_poke_max_age_seconds:
-                eligible[ sid ] = ( row, age )
+            # Checked BEFORE the twin guard so a FRESH twin row (age < threshold)
+            # falls through silently — only an otherwise-pokeable row is suppressed.
+            if age is None or not (
+               self.manager_stale_poke_threshold_seconds <= age <= self.manager_stale_poke_max_age_seconds ):
+                continue
+            # persona-twin guard: this stale row's persona is LIVE on another
+            # incarnation → superseded ghost; poking it persona-addresses the live
+            # twin. Skip + log (so the suppression is auditable on the next re-spin).
+            persona = row.get( "persona" )
+            if persona is not None and persona in live_personas:
+                self._log( "arbiter_manager_stale_twin_suppressed",
+                           session_id=sid, persona=persona, freshest_age_s=age )
+                continue
+            eligible[ sid ] = ( row, age )
 
         # episode end: a manager freshened (or left the roster) → clear state so
         # the cap + advisory re-arm for any future episode (mirrors _auto_poke).
@@ -3121,6 +3163,19 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     exclude_persona=persona,                         # b9911943: not to the subject itself
                 )
             if self._mgr_poke_count[ sid ] < self.poke_max_per_episode:
+                # observability (Mr Radio's handoff ask): log the FULL per-component
+                # liveness breakdown of every row we actually poke, so a future
+                # false-positive is self-diagnosing (the dead component is visible
+                # without re-deriving it from raw event logs).
+                _liv = row.get( "liveness" ) if isinstance( row.get( "liveness" ), dict ) else { }
+                self._log( "arbiter_manager_stale_poke_components",
+                           session_id=sid, persona=persona, age_s=age,
+                           bridge_age_s=_liv.get( "bridge_age_s" ),
+                           event_age_s=_liv.get( "event_age_s" ),
+                           commons_age_s=_liv.get( "commons_age_s" ),
+                           idle_prompt_age_s=_liv.get( "idle_prompt_age_s" ),
+                           dm_age_s=_liv.get( "dm_age_s" ),
+                           hold_age_s=_liv.get( "hold_age_s" ) )
                 body        = self._stamp( self._format_manager_stale_poke( row, age ) )   # Item B: direct-send site
                 outreach_id = self._mint_outreach_id()
                 self._log_outreach( "manager_stale_poke", "send_to", [ persona ], body,

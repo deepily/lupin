@@ -574,5 +574,96 @@ def test_case14_no_regression_when_subject_absent_everyone_served():
     assert ( "PeerA", advisory ) in gw.sent and ( "PeerB", advisory ) in gw.sent
 
 
+# ── persona-twin suppression (bug 7c931b3a, 2026-06-27) ──────────────────────
+# A RE-SPUN manager leaves its OLD (dead) session row in the include_offline
+# snapshot; for ~45 min that ghost's freshest_age sits in [threshold, max_age].
+# The poke is PERSONA-addressed, so the ghost's "silent 47m" lands on the LIVE
+# twin. Suppress a stale row whose persona is alive on another session_id; a
+# persona dark across ALL incarnations is still poked (true-positive preserved).
+
+
+def _stale_twin_suppressed( logs ):
+    return [ r for r in logs if r[ 0 ] == "arbiter_manager_stale_twin_suppressed" ]
+
+
+def _poke_components( logs ):
+    return [ r for r in logs if r[ 0 ] == "arbiter_manager_stale_poke_components" ]
+
+
+def test_persona_twin_live_suppresses_stale_ghost():
+    """The 2026-06-27 mr radio case: a stale DEAD-incarnation manager row whose
+    persona is LIVE on a fresh session_id draws NEITHER a poke NOR an advisory —
+    the ghost is suppressed and the suppression is logged."""
+    gw, escal, logs = _GW(), [ ], [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                 log_fn=lambda e, **k: logs.append( ( e, k ) ) )
+    snap = _snap(
+        _row( "dead-54622550", "manager", 2820, persona="mr radio" ),   # ghost (stale)
+        _row( "live-cd637762", "manager",   10, persona="mr radio" ),   # live twin (fresh)
+    )
+    fired = job._check_manager_staleness( snap, NOW, active_managers=[ "mr radio" ] )
+    assert fired == 0                                              # no poke fired
+    assert _stale_pokes( gw ) == [ ]                               # nothing sent to the persona
+    assert [ m for m in escal if "MANAGER-STALE" in m ] == [ ]     # no Rick advisory
+    sup = _stale_twin_suppressed( logs )
+    assert len( sup ) == 1 and sup[ 0 ][ 1 ][ "session_id" ] == "dead-54622550"
+
+
+def test_persona_twin_live_row_may_be_worker_role():
+    """The live-twin liveness scan is ROLE-AGNOSTIC: a fresh row of the same
+    persona suppresses the stale ghost even if that fresh row is a worker (a
+    re-spun session may surface under either role mid-transition)."""
+    gw, logs = _GW(), [ ]
+    job  = _job( gw, log_fn=lambda e, **k: logs.append( ( e, k ) ) )
+    snap = _snap(
+        _row( "ghost", "manager", 3600, persona="Hal" ),     # stale ghost manager
+        _row( "live",  "worker",   30, persona="Hal" ),      # fresh same-persona worker
+    )
+    assert job._check_manager_staleness( snap, NOW, [ ] ) == 0
+    assert len( _stale_twin_suppressed( logs ) ) == 1
+
+
+def test_genuinely_dark_persona_still_poked_no_twin():
+    """TRUE-POSITIVE preserved: a stale manager with NO live incarnation anywhere
+    is poked exactly as before — suppression only fires for a live twin."""
+    gw, logs = _GW(), [ ]
+    job  = _job( gw, log_fn=lambda e, **k: logs.append( ( e, k ) ) )
+    snap = _snap( _row( "lonely", "manager", 2820, persona="Dot" ) )
+    assert job._check_manager_staleness( snap, NOW, [ ] ) == 1     # poked
+    assert _stale_twin_suppressed( logs ) == [ ]                   # nothing suppressed
+
+
+def test_stale_ghost_with_other_persona_live_not_suppressed():
+    """Cross-persona safety: a DIFFERENT persona being live does NOT mute an
+    unrelated stale manager — suppression is keyed on the SAME persona only."""
+    gw = _GW()
+    job  = _job( gw )
+    snap = _snap(
+        _row( "ghost", "manager", 2820, persona="Tiberius" ),   # stale, no live twin
+        _row( "live",  "manager",   10, persona="Krishna" ),    # live, UNRELATED persona
+    )
+    assert job._check_manager_staleness( snap, NOW, [ ] ) == 1    # still poked
+
+
+def test_real_poke_logs_component_age_breakdown():
+    """Observability (Mr Radio's handoff ask): every row we actually poke logs its
+    full per-component liveness breakdown so a future false-positive is
+    self-diagnosing without re-deriving ages from raw event logs."""
+    gw, logs = _GW(), [ ]
+    job  = _job( gw, log_fn=lambda e, **k: logs.append( ( e, k ) ) )
+    row  = { "session_id": "m1", "persona": "Pat", "state": "working",
+             "holding_on": "none", "stuck": False, "role": "manager",
+             "liveness": { "freshest_age_s": 2820, "verdict": "stale 47m",
+                           "bridge_age_s": 2820, "event_age_s": None,
+                           "commons_age_s": 3000, "idle_prompt_age_s": None,
+                           "dm_age_s": None, "hold_age_s": 2820 } }
+    assert job._check_manager_staleness( _snap( row ), NOW, [ ] ) == 1
+    comp = _poke_components( logs )
+    assert len( comp ) == 1
+    fields = comp[ 0 ][ 1 ]
+    assert fields[ "session_id" ] == "m1" and fields[ "event_age_s" ] is None
+    assert fields[ "bridge_age_s" ] == 2820 and fields[ "dm_age_s" ] is None
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
