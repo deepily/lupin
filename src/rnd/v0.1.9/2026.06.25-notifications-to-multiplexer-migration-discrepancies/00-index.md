@@ -12,8 +12,10 @@ A single holder for **every discrepancy** found between the legacy notifications
 
 | # | Doc | Scope |
 |---|-----|-------|
-| 00 | this index | holder purpose + running discrepancy ledger |
+| 00 | this index | holder purpose + running discrepancy ledger + master accordion inventory |
 | 01 | [Section-layout gap analysis + comparison methodology](01-mux-vs-legacy-notifications-section-gap-analysis.md) | section-level order divergence (broadcast / focus-bar / TTS-preview / Recent-Activity / per-message controls) + an 8-step scrupulous-comparison methodology |
+| 02 | [Reconciliation with in-flight parity work](02-reconciliation-with-in-flight-parity-work.md) | B1–B5 vs the 06.22/06.24 builds: what's already done (`4b33ceb7`), what's net-new, and the **B1 ↔ `4b33ceb7` sibling-mount conflict** |
+| 04 | [Remaining-accordions audit](04-remaining-accordions-audit.md) | source-level verdicts for the **other 12 accordions** (2 faithful ports · 3 partial/remapped · 7 absent) + new design calls (d)–(g) |
 
 ## Running discrepancy ledger
 
@@ -27,17 +29,69 @@ Tracked in detail in doc 01 (§0.2 + §2 + §4). Headline items:
 | Section-header controls | count · filter-badge · history-dropdown · clear-all | appear absent (confirm not renamed) | ❓ likely missing |
 | Per-message TTS controls | ⏸ pause / ⏹ stop / proxy-ratify | dropped (0 in mux) | ❌ missing |
 
-## Open design calls (need Rick) — gate the remediation plan
+## Resolved design calls (Rick, 2026-06-26) — remediation now UNBLOCKED
 
-- **(a)** Is the focus-bar-at-top + broadcast-at-bottom layout an **intentional** mux redesign, or accidental drift to undo?
-- **(b)** Re-nest Recent-Activity **inside** the broadcast card, or is a standalone pane acceptable?
-- **(c)** Are the per-message **pause/stop** TTS controls still wanted?
+- **(a) RESTORE legacy order.** Focus-bar-at-top / broadcast-at-bottom is **accidental drift to undo**.
+  Target top→bottom: **Broadcast card → Focus bar → Sessions**. → drives **B1**.
+- **(b) RE-NEST Recent-Activity INSIDE the Broadcast card.** Standalone `#commons-activity-pane` is
+  **not** acceptable; restore the legacy nesting. → drives **B1**.
+- **(c) RESTORE per-message ⏸/⏹ + proxy-ratify-link** (→ **B4**) — with a **critical behavioral
+  constraint from Rick**: *only the single bubble currently being spoken shows the controls.* The
+  overwhelming majority of bubbles keep them hidden; exactly one is visible at a time, surfaced when
+  TTS reaches that message. Legacy already works this way — it renders ⏸/⏹ on **every** message but
+  **CSS-gates visibility to `li.is-playing-current`** (and `.is-paused-current` flips pause↔resume).
+  The mux port **MUST** replicate this active-TTS-driven show/hide; a static per-bubble render is the
+  **wrong** implementation. Verified mechanism: `notifications.js:14696` (render) + `:14733-14744`
+  (click → pause/resume by `is-paused-current` class) + the `is-playing-current` CSS visibility gate.
+
+## Master accordion inventory — the FULL per-accordion audit scope (2026-06-26)
+
+Rick (2026-06-26): the left-hand vertical toolbar (`#section-toolbar`) is the **accordion selector** —
+each icon shows/hides one top-level section. Only **Notifications** (the CC-session accordion) is
+visible by default. **Parity is not one accordion — it is all of them**, stepped through one at a
+time, verifying **functionality + layout** for each.
+
+**Authoritative legacy inventory — 13 sections** (`notifications.html` toolbar `data-section`):
+
+**Verdicts confirmed by source audit 2026-06-26 (doc 04).**
+
+| # | Legacy `data-section` | Title | Mux equivalent | Verdict |
+|---|---|---|---|---|
+| 1 | `section-qa` | Q&A Interface | none | ❌ **TRULY ABSENT** (moderate port) |
+| 2 | `section-job-submit` | Submit Agentic Jobs | none (jobs-pane can't submit) | ❌ **TRULY ABSENT** (highest build — 7 cards) |
+| 3 | `action-required-section` | Action Required | folded into `notifications-pane` | ⚠️ **PARTIAL + RELOCATED** (lost active/pending model, count, kbd-nav, toolbar toggle) |
+| 4 | `tts-queue-section` | TTS Queue | `tts-pane` (stub) | ⚠️ **REMAPPED/PARTIAL** (transport-only; lost per-item queue, clear-all, focus resume) |
+| 5 | `section-notifications` | **Notifications (CC sessions)** | `notifications-pane` | 🔬 **ANALYZED** (docs 01/02) — B1–B5, plan `03-` pending |
+| 6 | `section-fleet-status` | Fleet Status | `fleet-status-pane` | ✅ **FAITHFUL PORT** (live-check owed) |
+| 7 | `section-task-list` | Task List | `task-list-pane` | ✅ **PORT + SUPERSET** (mux adds edit/drop vs legacy read-only) |
+| 8 | `filter-settings-section` | Filter Settings (Admin) | none | ❌ **TRULY ABSENT** (coupled to #9 filter) |
+| 9 | `section-queues` | Job Queues | `jobs-pane` | ⚠️ **PARTIAL** (display ok; delete/retry/time-window/pagination missing — "Phase 6b") |
+| 10 | `section-time-saved` | Time Saved | none | ❌ **TRULY ABSENT** (APIs exist; moderate) |
+| 11 | `section-status` | System Status | none (`fleet-status-pane`≠this) | ❌ **TRULY ABSENT** (high) |
+| 12 | `section-direct-tts` | Direct TTS Test | none (`tts-pane`≠this) | ❌ **TRULY ABSENT** (low; likely intentional dev drop) |
+| 13 | `section-debug` | Debug Info | none | ❌ **TRULY ABSENT** (very low; likely intentional) |
+
+**Tally** (doc 04): 2 faithful ports · 3 partial/remapped with real regressions · **7 truly absent**
+(3 likely-intentional dev/diagnostic drops; 4 user-facing needing a port decision).
+
+**Design calls (d)–(g) RESOLVED** (Rick, 2026-06-26 `/plan-decide`; doc 04 §Resolved) — through-line
+**TOTAL 13/13 PARITY**: (d) Action Required → **full funnel restore + rich responder** · (e) TTS Queue →
+**full restore (chrome + per-item queue)**, prereq `AudioStore` multi-item extension · (f) Task List →
+**keep edit/drop as documented superset** · (g) **port ALL 7 absent** (no obsolete drops).
+
+**Build sequence (ratified):**
+1. **CC-session (#5)** `03-` plan — B1–B5 (#1 priority).
+2. **The 3 partials** — Action Required (funnel restore), TTS Queue (full restore), Job Queues (mutation gaps: delete/delete-all/retry/time-window/pagination/filter-badge).
+3. **The 7 absent** — Q&A · Submit-Jobs · Time-Saved · Filter-Settings · Direct-TTS · Debug · System-Status.
+(Fleet Status + Task List already at parity — Task List as an accepted superset.)
 
 ## Next steps
 
-1. (this folder) Land additional discrepancy docs as found (CSS/visual, behavior, event-wiring, etc.).
-2. Resolve design calls (a)/(b)/(c).
-3. Draft the **remediation/implementation plan** (numbered `02-…`) on top of doc 01 §6 buckets B1–B5.
-4. Execute under manage-don't-build; 100% L/B/F + visual rebaseline per mandates.
+1. ✅ Resolve design calls (a)/(b)/(c) — **done** (Rick, 2026-06-26; see Resolved design calls above).
+2. ✅ Reconcile B1–B5 vs in-flight work — **done** (doc 02). Net-new = B1/B2/B3/B4; B1 restructures `4b33ceb7`.
+3. Draft the **CC-session remediation plan** (numbered `03-…`) on doc 01 §6 buckets B1–B5, now unblocked.
+4. Step through the remaining 12 accordions (master inventory above); land a discrepancy doc per accordion (`04-…`).
+4. (this folder) Land additional discrepancy docs as found (CSS/visual, behavior, event-wiring, etc.).
+5. Execute under manage-don't-build; 100% L/B/F + visual rebaseline per mandates.
 
 **Tracking**: P1 store task `d0a057b3`. Pinned in `TODO.md` (#1 priority).
