@@ -113,6 +113,12 @@ PERSONA_ENV_FLAGS=(
     -e "COSA_VOICE_PREFERRED_PERSONA__LUPIN_MOBILE=Tiffany,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__PLAN=María,*"
     -e "COSA_VOICE_PREFERRED_PERSONA__LOOKML=Sam,*"
+    # Disable Claude Code's terminal mouse capture inside tmux panes (Rick,
+    # 2026-06-26). Forwarded via -e so it crosses the tmux boundary regardless of
+    # the tmux server's frozen env (a bare parent export would NOT reach `claude`).
+    # Static always-on for every session this script launches (interactive +
+    # headless/spawned).
+    -e "CLAUDE_CODE_DISABLE_MOUSE=1"
 )
 
 # Forward manager-spawn lineage env (set by session_spawner on the spawning

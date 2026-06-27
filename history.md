@@ -2,6 +2,16 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.26 - Session bbda1986 (Mr. Radio 🦉) | Arbiter MANAGER-STALE double-delivery fix (committed-held + LIVE) · tmux mouse-disable env · d0a057b3 dropped · two Rick-corrected process lessons
+
+**Accomplishments**:
+- **Arbiter MANAGER-STALE double-delivery fix (bug `b9911943`) — DONE, committed-held `91657df8`, deployed LIVE**: Rick flagged the arbiter sending a stale manager TWO DMs ~1s apart. Root cause: the MANAGER-STALE advisory (case 14, `TIER_RICK_AND_MANAGERS`) + siblings 16/17 fan out to ALL active managers via `_route`, and `resolve_active_managers` includes the stale subject itself → it gets the about-itself advisory PLUS its dedicated poke. Tests missed it (fixtures always used a recipient set disjoint from the subject). Fix (built by worker **Cheech 🌿**, manager-verified): `exclude_persona=` on `_route()` drops the subject from the active-managers fan-out (canonical-key match); wired at the 3 call sites; default `None` byte-identical for all other callers. 8 new tests (subject ∈ `active_managers` ⇒ poke-only, no self-advisory); 107 arbiter tests green, touched lines 100% L/B/F. Independently re-verified (full diff + 107-test re-run), committed-held, then **bounced `lupin-arbiter-app.service`** (PID 1344→127630, clean boot) → fix is LIVE.
+- **`start-cc-with-tmux.sh`: `CLAUDE_CODE_DISABLE_MOUSE=1`** added to `PERSONA_ENV_FLAGS` (the `-e` cross-tmux-boundary forward — a bare export wouldn't reach `claude` since tmux freezes its server env). Static always-on for interactive + spawned sessions; `--dry-run` + `bash -n` verified.
+- **`d0a057b3` (mux layout-parity P1) DROPPED** per Rick's voice ("not pursuing as such; comprehensive list later"); gap-analysis substrate preserved.
+- **Two process lessons (Rick-corrected)**: (1) an "SWE team" = real persona'd fleet workers via `spawn_sessions`, NOT an opaque in-process background `Agent` (killed + reverted my first attempt, re-did it with Cheech); (2) bouncing the arbiter to deploy an arbiter bugfix is my STANDING authority — act-then-announce, NO ask. Hardened `feedback_arbiter_bounce_manager_authority` (logged as 3rd fleet-wide recurrence).
+
+**Files changed**: `src/cosa/agents/heartbeat_arbiter/arbiter_job.py` + `src/tests/unit/test_arbiter_manager_staleness.py` + `src/tests/unit/test_arbiter_routing.py` (→ `91657df8`, held); `src/scripts/start-cc-with-tmux.sh` + `history.md` (this checkpoint, held). Store: `b9911943` (bug) done; `d0a057b3` dropped. **All committed-held — push stays Rick's word.** ⚠️ A staged-but-uncommitted mux-parity build-plan corpus (`05-build-plans/`, 11 files, authored 16:18–18:30 by another/parallel session AFTER d0a057b3's drop) was left UNTOUCHED + flagged to Rick — NOT mine to commit.
+
 ### 2026.06.25 - Session 6c59295b (Mr. Radio 🦉) | LanceDB→Postgres DECISION · mux↔notifications layout gap analysis (REVISED) + discrepancies holder (#1 priority) · Tiffany assist · reason-field ticket filed→dropped
 
 **Accomplishments**:
