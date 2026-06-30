@@ -1,0 +1,203 @@
+{
+  "meta": {
+    "legacy_url": "http://localhost:7999/app/notifications?classic=1",
+    "mux_url": "http://localhost:7999/app/multiplexer",
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "geom_tol_px": 1.0,
+    "sender_last_activity_bumped_to": "2026-06-30T18:08:29.380010+00:00",
+    "harness_notes": [
+      "Sender meta `last_activity` bumped to NOW (both clients identically) so the mux boot 48h rolling-window gate (hydrateHistory) does not drop the canonical fixture (dated 2026-06-20). Conversation rows keep canonical dates \u2192 card layout unchanged.",
+      "Mux filter set to mode='all' before capture. The B3 default mode='own' (matchesNotificationFilter) HIDES outgoing sent-reply bubbles, which would make the mux render 4 messages vs legacy's 5 and poison positional alignment. The filter AXIS is frozen pending Rick's ruling \u2014 neutralized here so the comparison is layout-on-equal-content, not a filter-content difference."
+    ]
+  },
+  "summary": {
+    "structural": 0,
+    "b5_candidate": 13,
+    "genuine_drift": 0,
+    "width_context": 0,
+    "style_deltas": 0,
+    "geom_b5": 13,
+    "geom_genuine": 0,
+    "corner_gate": 5
+  },
+  "diff": {
+    "node_counts": {
+      "legacy": 28,
+      "mux": 28,
+      "common": 28
+    },
+    "structural": [],
+    "style_deltas": [],
+    "geom_drift": [
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01",
+        "axis": "h",
+        "legacy": 335.2,
+        "mux": 337.3,
+        "delta": 2.1,
+        "cause": "corner-gate-cascade",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>acc[0]>messages",
+        "axis": "h",
+        "legacy": 193.7,
+        "mux": 195.8,
+        "delta": 2.1,
+        "cause": "corner-gate-cascade",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[1]>text",
+        "axis": "w",
+        "legacy": 787,
+        "mux": 729.7,
+        "delta": 57.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[2]>text",
+        "axis": "w",
+        "legacy": 787,
+        "mux": 729.7,
+        "delta": 57.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[3]",
+        "axis": "dy",
+        "legacy": 253.4,
+        "mux": 254.7,
+        "delta": 1.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[3]>text",
+        "axis": "dy",
+        "legacy": 259.4,
+        "mux": 260.7,
+        "delta": 1.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[3]>text",
+        "axis": "w",
+        "legacy": 787,
+        "mux": 729.7,
+        "delta": 57.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[3]>time",
+        "axis": "dy",
+        "legacy": 259.4,
+        "mux": 260.7,
+        "delta": 1.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[4]",
+        "axis": "dy",
+        "legacy": 291,
+        "mux": 292.3,
+        "delta": 1.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[4]>text",
+        "axis": "dy",
+        "legacy": 297,
+        "mux": 298.3,
+        "delta": 1.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[4]>text",
+        "axis": "w",
+        "legacy": 787,
+        "mux": 729.7,
+        "delta": 57.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[4]>time",
+        "axis": "dy",
+        "legacy": 297,
+        "mux": 298.3,
+        "delta": 1.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      },
+      {
+        "key": "card:lupin-arbiter-app-8001>msg[0]>text",
+        "axis": "w",
+        "legacy": 787,
+        "mux": 729.7,
+        "delta": 57.3,
+        "cause": "corner-gate",
+        "classification": "B5-CANDIDATE"
+      }
+    ],
+    "width_ctx": [],
+    "corner_gate": [
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[1]",
+        "legacy_visible": 0,
+        "mux_visible": 2,
+        "legacy_px": 0,
+        "mux_px": 41.3
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[2]",
+        "legacy_visible": 0,
+        "mux_visible": 2,
+        "legacy_px": 0,
+        "mux_px": 41.3
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[3]",
+        "legacy_visible": 0,
+        "mux_visible": 2,
+        "legacy_px": 0,
+        "mux_px": 41.3
+      },
+      {
+        "key": "card:claude.code@lupin.deepily.ai#parity01>msg[4]",
+        "legacy_visible": 0,
+        "mux_visible": 2,
+        "legacy_px": 0,
+        "mux_px": 41.3
+      },
+      {
+        "key": "card:lupin-arbiter-app-8001>msg[0]",
+        "legacy_visible": 0,
+        "mux_visible": 2,
+        "legacy_px": 0,
+        "mux_px": 41.3
+      }
+    ],
+    "corner_gate_affected_count": 5
+  },
+  "screenshots": {
+    "legacy": {
+      "cards": "legacy-cards.png",
+      "full": "legacy-full.png"
+    },
+    "mux": {
+      "cards": "mux-cards.png",
+      "full": "mux-full.png"
+    }
+  }
+}

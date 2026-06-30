@@ -1,0 +1,88 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Mux ↔ Legacy A/B visual-parity report</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; color: #1a1a1a; }
+  h1 { font-size: 22px; } h2 { font-size: 17px; margin-top: 28px; border-bottom: 2px solid #eee; padding-bottom: 4px; }
+  .meta { color: #555; font-size: 13px; }
+  .cards { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .cards figure { margin: 0; flex: 1 1 380px; }
+  .cards img { width: 100%; border: 1px solid #ccc; border-radius: 6px; }
+  figcaption { font-weight: 600; margin-bottom: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; } code { font-size: 11px; }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 11px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+  .p-struct { background: #ffe0e0; color: #a00; }
+  .p-b5 { background: #fff3cd; color: #8a6d00; }
+  .p-drift { background: #ffd9b3; color: #a04000; }
+  .p-ok { background: #d6f5d6; color: #0a6b0a; }
+  .p-ctx { background: #e6e6e6; color: #444; }
+  .legend { font-size: 12.5px; line-height: 1.7; }
+</style></head><body>
+
+<h1>Multiplexer ↔ Legacy — A/B visual-parity snapshot</h1>
+<p class="meta">
+  Generated for Rick's "how far we've come" review (Phase-2, v0.1.9).<br>
+  legacy: <code>http://localhost:7999/app/notifications?classic=1</code> &nbsp;·&nbsp; mux: <code>http://localhost:7999/app/multiplexer</code><br>
+  one canonical scenario via <code>parityFixture.ts</code> · viewport 1280×720
+  · deterministic-font · geometry tol ±1px · mux cards normalized to legacy width.<br>
+  <strong>This is a MEASUREMENT snapshot, not a pass/fail gate.</strong> B5 has not yet single-sourced the CSS.
+</p>
+
+<h2>Harness adaptations (read first)</h2>
+<ul class="legend">
+  <li>Sender meta `last_activity` bumped to NOW (both clients identically) so the mux boot 48h rolling-window gate (hydrateHistory) does not drop the canonical fixture (dated 2026-06-20). Conversation rows keep canonical dates → card layout unchanged.</li><li>Mux filter set to mode=&#x27;all&#x27; before capture. The B3 default mode=&#x27;own&#x27; (matchesNotificationFilter) HIDES outgoing sent-reply bubbles, which would make the mux render 4 messages vs legacy&#x27;s 5 and poison positional alignment. The filter AXIS is frozen pending Rick&#x27;s ruling — neutralized here so the comparison is layout-on-equal-content, not a filter-content difference.</li>
+</ul>
+
+<h2>Summary</h2>
+<p>
+  <span class="pill p-struct">0 structural</span>
+  <span class="pill p-b5">13 B5-candidate</span>
+  <span class="pill p-drift">0 genuine-drift</span>
+  <span class="pill p-ctx">0 width-context</span>
+</p>
+<p class="legend">
+  <span class="pill p-struct">STRUCTURAL</span> contract node present on one side only — DOM, not CSS; B5 will NOT close it; needs eyes.<br>
+  <span class="pill p-b5">B5-CANDIDATE</span> computed-style divergence (and geometry that follows from it) — a CSS-cascade gap B5's single-source MOVE is expected to close; re-run post-B5 to confirm.<br>
+  <span class="pill p-drift">GENUINE-DRIFT</span> intra-card geometry &gt;1px with NO style delta on the node — declared styles agree but the box renders differently; not a pure rule-location issue.<br>
+  <span class="pill p-ctx">WIDTH-CONTEXT</span> top-level card width delta — pane-width context (mux normalized to legacy); informational, not a parity defect.
+</p>
+
+<h2>Side-by-side — notification card stack</h2>
+<div class="cards">
+  <figure><figcaption>Legacy (#notifications-list)</figcaption><img src="legacy-cards.png" alt="legacy cards"></figure>
+  <figure><figcaption>Multiplexer (#sender-cards-container)</figcaption><img src="mux-cards.png" alt="mux cards"></figure>
+</div>
+
+<h2>Full-page context</h2>
+<div class="cards">
+  <figure><figcaption>Legacy — full notifications page</figcaption><img src="legacy-full.png" alt="legacy full"></figure>
+  <figure><figcaption>Multiplexer — full page</figcaption><img src="mux-full.png" alt="mux full"></figure>
+</div>
+
+<h2><span class="pill p-struct">STRUCTURAL</span> node presence (0)</h2>
+<table><tr><th>node key</th><th>present on</th></tr><tr><td colspan='2'><em>none — every contract node aligns</em></td></tr></table>
+
+<h2><span class="pill p-b5">B5-CANDIDATE</span> computed-style divergence (0)</h2>
+<table><tr><th>node key</th><th>property</th><th>legacy</th><th>mux</th></tr><tr><td colspan='4'><em>none — full computed-style isomorphism</em></td></tr></table>
+
+<h2><span class="pill p-b5">B5-CANDIDATE</span> corner-control gate gap (5)</h2>
+<p class="legend">B4 renders ⏸/⏹ corner controls into every message; the gate that hides them by
+default (<code>.notification-corner-pause-btn{display:none}</code> + the <code>.tts-playing</code> reveal)
+lives in <code>notifications.css:381-501</code> — the legacy monolith ONLY. Legacy links it (buttons hidden);
+the mux links only the shared sheet (no gate → buttons visible, reserving flex width → <code>.message-text</code>
+shrinks → vertical cascade). <strong>B5 MOVES this gate into the shared sheet → the mux hides them too and
+every geometry delta below closes.</strong></p>
+<table><tr><th>message</th><th>corner controls visible</th><th>verdict</th></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[1]</code></td><td>legacy 0 vis (0px) · mux 2 vis (41.3px)</td><td>mux un-gated → B5 MOVE closes</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[2]</code></td><td>legacy 0 vis (0px) · mux 2 vis (41.3px)</td><td>mux un-gated → B5 MOVE closes</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[3]</code></td><td>legacy 0 vis (0px) · mux 2 vis (41.3px)</td><td>mux un-gated → B5 MOVE closes</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[4]</code></td><td>legacy 0 vis (0px) · mux 2 vis (41.3px)</td><td>mux un-gated → B5 MOVE closes</td></tr><tr><td><code>card:lupin-arbiter-app-8001&gt;msg[0]</code></td><td>legacy 0 vis (0px) · mux 2 vis (41.3px)</td><td>mux un-gated → B5 MOVE closes</td></tr></table>
+
+<h2><span class="pill p-b5">B5-CANDIDATE</span> geometry caused by a style / corner-gate delta (13)</h2>
+<table><tr><th>node key</th><th>axis</th><th>values</th><th>Δ</th><th>cause</th></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01</code></td><td>h</td><td>legacy 335.2 · mux 337.3</td><td>Δ2.1px</td><td>corner-gate-cascade</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;acc[0]&gt;messages</code></td><td>h</td><td>legacy 193.7 · mux 195.8</td><td>Δ2.1px</td><td>corner-gate-cascade</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[1]&gt;text</code></td><td>w</td><td>legacy 787 · mux 729.7</td><td>Δ57.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[2]&gt;text</code></td><td>w</td><td>legacy 787 · mux 729.7</td><td>Δ57.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[3]</code></td><td>dy</td><td>legacy 253.4 · mux 254.7</td><td>Δ1.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[3]&gt;text</code></td><td>dy</td><td>legacy 259.4 · mux 260.7</td><td>Δ1.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[3]&gt;text</code></td><td>w</td><td>legacy 787 · mux 729.7</td><td>Δ57.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[3]&gt;time</code></td><td>dy</td><td>legacy 259.4 · mux 260.7</td><td>Δ1.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[4]</code></td><td>dy</td><td>legacy 291 · mux 292.3</td><td>Δ1.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[4]&gt;text</code></td><td>dy</td><td>legacy 297 · mux 298.3</td><td>Δ1.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[4]&gt;text</code></td><td>w</td><td>legacy 787 · mux 729.7</td><td>Δ57.3px</td><td>corner-gate</td></tr><tr><td><code>card:claude.code@lupin.deepily.ai#parity01&gt;msg[4]&gt;time</code></td><td>dy</td><td>legacy 297 · mux 298.3</td><td>Δ1.3px</td><td>corner-gate</td></tr><tr><td><code>card:lupin-arbiter-app-8001&gt;msg[0]&gt;text</code></td><td>w</td><td>legacy 787 · mux 729.7</td><td>Δ57.3px</td><td>corner-gate</td></tr></table>
+
+<h2><span class="pill p-drift">GENUINE-DRIFT</span> geometry without a style or corner-gate cause (0)</h2>
+<table><tr><th>node key</th><th>axis</th><th>values</th><th>Δ</th><th>cause</th></tr><tr><td colspan='5'><em>none</em></td></tr></table>
+
+<h2><span class="pill p-ctx">WIDTH-CONTEXT</span> card-width delta (0)</h2>
+<table><tr><th>node key</th><th>values</th><th>Δ</th></tr><tr><td colspan='3'><em>none — card widths matched after normalization</em></td></tr></table>
+
+<p class="meta">Node counts — legacy 28 · mux 28 · aligned 28.</p>
+</body></html>

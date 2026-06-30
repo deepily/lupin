@@ -1,0 +1,49 @@
+{
+  "meta": {
+    "legacy_url": "http://localhost:7999/app/notifications?classic=1",
+    "mux_url": "http://localhost:7999/app/multiplexer",
+    "viewport": {
+      "width": 1280,
+      "height": 720
+    },
+    "geom_tol_px": 1.0,
+    "sender_last_activity_bumped_to": "2026-06-30T18:15:54.554148+00:00",
+    "harness_notes": [
+      "Sender meta `last_activity` bumped to NOW (both clients identically) so the mux boot 48h rolling-window gate (hydrateHistory) does not drop the canonical fixture (dated 2026-06-20). Conversation rows keep canonical dates \u2192 card layout unchanged.",
+      "Mux filter set to mode='all' before capture. The B3 default mode='own' (matchesNotificationFilter) HIDES outgoing sent-reply bubbles, which would make the mux render 4 messages vs legacy's 5 and poison positional alignment. The filter AXIS is frozen pending Rick's ruling \u2014 neutralized here so the comparison is layout-on-equal-content, not a filter-content difference."
+    ]
+  },
+  "summary": {
+    "structural": 0,
+    "b5_candidate": 0,
+    "genuine_drift": 0,
+    "width_context": 0,
+    "style_deltas": 0,
+    "geom_b5": 0,
+    "geom_genuine": 0,
+    "corner_gate": 0
+  },
+  "diff": {
+    "node_counts": {
+      "legacy": 28,
+      "mux": 28,
+      "common": 28
+    },
+    "structural": [],
+    "style_deltas": [],
+    "geom_drift": [],
+    "width_ctx": [],
+    "corner_gate": [],
+    "corner_gate_affected_count": 0
+  },
+  "screenshots": {
+    "legacy": {
+      "cards": "legacy-cards.png",
+      "full": "legacy-full.png"
+    },
+    "mux": {
+      "cards": "mux-cards.png",
+      "full": "mux-full.png"
+    }
+  }
+}

@@ -734,3 +734,189 @@ h1 {
     background: #dee2e6;
     transform: scale( 1.1 );
 }
+
+/* ===================================================================
+   B5 single-source MOVE (2026-06-30, Krishna) — Phase-2 mux-parity.
+   These two blocks were relocated VERBATIM from the notifications.css
+   monolith so BOTH clients consume one definition (mandate 3). The
+   corner-control gate is the block the A/B visual report proved the mux
+   was missing (un-gated pause/stop shrank .message-text ~57px). Legacy
+   `li.is-*` selectors + the mux-friendly `.sender-message.*` hooks both
+   live here. Deleted from notifications.css:375-503 + :2403-2445
+   (grep-no-residual AC).
+   =================================================================== */
+
+/* ========================================
+   CORNER PAUSE BUTTON (Conversation Mode)
+   Hidden by default; shown only on the <li> that is currently
+   playing or paused. Lets the user pause/resume from a distance
+   without targeting the small inline 4-button panel.
+   ======================================== */
+.notification-corner-pause-btn {
+    display: none;
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid rgba( 25, 135, 84, 0.5 );
+    border-radius: 50%;
+    background: rgba( 25, 135, 84, 0.15 );
+    color: #155724;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    text-align: center;
+    transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+    z-index: 2;
+}
+
+li.is-playing-current .notification-corner-pause-btn,
+.sender-message.tts-playing .notification-corner-pause-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.notification-corner-pause-btn:hover {
+    background: rgba( 25, 135, 84, 0.3 );
+    transform: scale( 1.1 );
+}
+
+.notification-corner-pause-btn:active {
+    transform: scale( 0.95 );
+}
+
+/* Paused: subtle visual cue separate from the icon swap */
+li.is-paused-current .notification-corner-pause-btn,
+.sender-message.is-paused-current .notification-corner-pause-btn {
+    background: rgba( 255, 193, 7, 0.2 );
+    border-color: rgba( 255, 193, 7, 0.6 );
+    color: #856404;
+}
+
+li.is-paused-current .notification-corner-pause-btn:hover,
+.sender-message.is-paused-current .notification-corner-pause-btn:hover {
+    background: rgba( 255, 193, 7, 0.35 );
+}
+
+/* Pending TTS rendering — applied 2026-05-14 by the decouple fix so high/urgent
+ * notifications can appear in the visible list immediately on WebSocket arrival,
+ * BEFORE the TTS queue actually engages playback (which may be paused mid-queue
+ * due to the preview-and-pause feature). The pending state is cleared by
+ * activateNextTTS when the item reaches the active playback slot.
+ *
+ * Treatment: subtle desaturation + left border stripe (amber to match the paused
+ * palette but lighter) + small ⏳ glyph in the corner that flips to ⏸/▶ when audio
+ * engages. The corner-pause button stays hidden (gated by .is-playing-current). */
+li.is-tts-pending {
+    opacity: 0.78;
+    border-left: 3px solid rgba( 255, 193, 7, 0.55 );
+    transition: opacity 0.2s ease, border-left-color 0.2s ease;
+}
+
+li.is-tts-pending::after {
+    content: "⏳";
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+/* When the queued item engages playback, .is-tts-pending is removed and
+ * .is-playing-current is added — the hourglass disappears and the pause
+ * button takes over the same corner via .notification-corner-pause-btn. */
+
+/* Corner STOP button — sibling to pause/resume. Sits to the LEFT
+ * of the pause button (right: 32 = 4 + 24 + 4). Clicking stops
+ * the active TTS playback and advances the queue (dismisses this
+ * notification's rendering). */
+.notification-corner-stop-btn {
+    display: none;
+    position: absolute;
+    top: 4px;
+    right: 32px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid rgba( 220, 53, 69, 0.5 );
+    border-radius: 50%;
+    background: rgba( 220, 53, 69, 0.15 );
+    color: #842029;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    text-align: center;
+    transition: transform 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+    z-index: 2;
+}
+
+/* Visibility rule mirrors .notification-corner-pause-btn exactly:
+ * gated by .tts-playing only. .is-paused-current persists across
+ * pause→stop and would strand this button if included here. The
+ * pause button hides correctly when stopTTSPlayingIndicator
+ * removes .tts-playing; we want the stop button to follow suit. */
+li.is-playing-current .notification-corner-stop-btn,
+.sender-message.tts-playing .notification-corner-stop-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.notification-corner-stop-btn:hover {
+    background: rgba( 220, 53, 69, 0.30 );
+    transform: scale( 1.1 );
+}
+
+.notification-corner-stop-btn:active {
+    transform: scale( 0.95 );
+}
+
+/* TTS preview-fraction slider — added 2026-05-14 evening alongside the
+ * preview-and-pause → preview-and-advance refactor. Runtime control
+ * over the fraction of each high-priority notification that gets
+ * synthesized as TTS audio. Five stops: 0 / 25 / 50 / 75 / 100. State
+ * persists in localStorage under `notifications_tts_preview_fraction_runtime`.
+ * Lives inside #cc-session-strip between the persona-icon tray and the
+ * Focus/All toggles, sharing the strip's flex layout. */
+.cc-tts-fraction-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid #ced4da;
+    border-radius: 12px;
+    background: #f8f9fa;
+    color: #495057;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.cc-tts-fraction-label {
+    font-weight: 600;
+    opacity: 0.7;
+}
+
+.cc-tts-fraction-slider {
+    width: 80px;
+    cursor: pointer;
+    accent-color: rgba( 25, 135, 84, 0.85 );  /* matches existing is-active green */
+}
+
+.cc-tts-fraction-slider:focus-visible {
+    outline: 2px solid rgba( 25, 135, 84, 0.6 );
+    outline-offset: 2px;
+}
+
+.cc-tts-fraction-value {
+    min-width: 32px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: #198754;  /* green to match the slider accent */
+}
+
