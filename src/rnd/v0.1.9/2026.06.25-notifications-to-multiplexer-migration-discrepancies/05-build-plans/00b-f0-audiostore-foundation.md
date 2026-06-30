@@ -1,7 +1,7 @@
 # F0 — Shared AudioStore / TTS-Queue Foundation — Build Plan
 
 **Date**: 2026-06-27
-**Status**: 🟡 **REVISED per cascade-review (APPROVE-WITH-CHANGES — Cheech 🌿 + María 🌸)** — 8 conditions folded in by Krishna 🦚 (reviser), 2026-06-27; pending condition-verification re-review. Keystone shared dependency; reviewed FIRST, before Plan 01.
+**Status**: 🟡 **REVISED per cascade-review (APPROVE-WITH-CHANGES — Cheech 🌿 + María 🌸)** — 8 conditions folded in by Krishna 🦚 (reviser), 2026-06-27; pending condition-verification re-review. Keystone shared dependency; reviewed FIRST, before Plan 01. · F0-f back-fold added (store_audio_ended subscribe + self-advance; task 2605dca5, 2026-06-29)
 **Author**: Mr. Radio 🦉 (for Rick)
 **Foundation for**: Plans **01** (B4 active-TTS gate), **02** (Action-Required live countdown), **03** (TTS-Queue multi-item restore), **05** (Q&A submit→answer→playing correlation). See `00-plans-index.md` §F0.
 **Source audit refs**: `00-plans-index.md` §"F0 — Shared AudioStore foundation"; Plan `01-cc-session-B1-B5.md` §8 OQ-1 (load-bearing).
@@ -120,10 +120,21 @@ Each bucket: **what · files · ACs · gate**.
 **Files**: `boot.ts` (mount + seam wiring, convergence); the speak-initiation call site (gesture/auto-play handlers). **Sizing: net-new build, NOT a field re-home** — the dominant code-volume bucket of F0 (see §9).
 **ACs**: the active id observed at `TtsQueueStore.current()` matches the notification the user/system chose to speak, set *before* TTS audio begins; the `/ws/audio` binary path stays id-blind; AC9 `binaryHandler` Function.name invariant (`AudioStore.ts:126-127,207`) preserved (the handler is unchanged).
 
+### F0-f — Completion-driven advance + stop-clear (00c COND-2 seam back-fold)
+**What**: The F0-side of the 00b↔00c ownership boundary (00c COND-2, event-emit form). `TtsQueueStore` SUBSCRIBES to two inbound signals and self-drives its queue — id-blind on F0's side (F0 owns `advance()` + the `current()` id-roll; 00c never calls them):
+- **`store_audio_ended`** (00c-introduced; emitted by the Phase-6 engine on NATURAL utterance completion, signal-OUT only — `00c` §P6-c) → `TtsQueueStore.advance()`: pop the spoken head, roll `current()` to the next pending item (or `null`), fire `store_tts_queue_changed`. How the queue progresses item-to-item without 00c ever touching `current()`.
+- **`store_audio_state_change {state: idle}`** (AudioStore stop signal; 00c emits idle-only on `stop()`, NOT `store_audio_ended`) → clear `current()`→`null` (de-light), WITHOUT advancing. (Cheech 01-D obligation: stop = halt + de-light, distinct from natural-ended = advance.)
+**Why a back-fold**: `store_audio_ended` is a 00c-introduced event postdating 00b's approval, so this F0-side subscription was unscoped at 00b close — steward-caught cross-plan seam (María, 00c steward-verify; store task 2605dca5). 00c's emit side is clean/unaffected.
+**Files**: `TtsQueueStore.ts` (two subscriptions + advance/clear self-drive); `boot.ts` (subscription wiring at mount, convergence).
+**ACs**:
+- Functional: a `store_audio_ended` advances exactly one item (head popped, next head is `current()`, `store_tts_queue_changed` fired); empty queue after advance → `current()===null`. A `store_audio_state_change{idle}` clears `current()`→`null` WITHOUT a head pop.
+- Structural (COND-2 ownership): F0 owns advance + id-roll; subscriptions inbound-only; F0 never calls into 00c; AudioStore stays id-blind.
+- Negative: `store_audio_state_change{idle}` does NOT advance (stop ≠ ended); a duplicate/late `store_audio_ended` on an empty queue is a no-op (no negative index, no stale id).
+
 ### F0-e — Tests (100% L/B/F)
-**What**: Unit suite for F0-a..d, including the new `TtsQueueStore` and the ported speak-initiation seam.
+**What**: Unit suite for F0-a..f, including the new `TtsQueueStore` and the ported speak-initiation seam.
 **Files**: `multiplexer/stores/__tests__/TtsQueueStore.test.ts` (+ boot-seam coverage), mirroring the existing store test layout.
-**ACs**: `c8 --100` **lines/branches/functions** on every F0-touched file (`TtsQueueStore.ts`, the boot seam, `shared/types.ts` additions, the `burstLength()` rename); injected stubs (`audioContextFactory`, `nowFn`, decoder fns already injectable) drive all transitions; queue edge cases (empty, absent-id, current-removed) + the speak-initiation id-capture covered. `# c8 ignore` only for genuinely-unreachable defensive arms with a same-line reason (mandate 1).
+**ACs**: `c8 --100` **lines/branches/functions** on every F0-touched file (`TtsQueueStore.ts`, the boot seam, `shared/types.ts` additions, the `burstLength()` rename); injected stubs (`audioContextFactory`, `nowFn`, decoder fns already injectable) drive all transitions; queue edge cases (empty, absent-id, current-removed) + the speak-initiation id-capture covered. **F0-f paths in scope**: the `store_audio_ended` subscription → `advance()` (head-pop + `current()` roll + `store_tts_queue_changed` fire + empty-after-advance → `null`), the `store_audio_state_change{idle}` subscription → `current()`-clear-WITHOUT-advance, and the negatives (idle does NOT advance; duplicate/late `store_audio_ended` on an empty queue is a no-op) all exercised at `c8 --100`. `# c8 ignore` only for genuinely-unreachable defensive arms with a same-line reason (mandate 1).
 
 ## 6. Test strategy & venue routing
 
@@ -149,7 +160,7 @@ Each bucket: **what · files · ACs · gate**.
 
 | Lane | Buckets | Files (lane-owned vs convergence) | Rough size |
 |---|---|---|---|
-| **F0 (single foundational lane)** | F0-a..e | **`TtsQueueStore.ts` (NEW)**, `stores/index.ts`; `shared/types.ts`*, `boot.ts`*; `AudioStore.ts` (`burstLength()` rename); `SequentialAudioManager.ts` (strip Firefox/delete) | **M** — bumped from S–M: **F0-d is net-new build** (porting the client-side `playNotificationAudio` speak-initiation seam + `Notification.id_hash` capture — NOT a field re-home, OQ-F0.3), plus the new `TtsQueueStore` (factory + barrel) and its 100% L/B/F suite. Code volume — not just the seam decision — now drives the size. |
+| **F0 (single foundational lane)** | F0-a..f | **`TtsQueueStore.ts` (NEW)**, `stores/index.ts`; `shared/types.ts`*, `boot.ts`*; `AudioStore.ts` (`burstLength()` rename); `SequentialAudioManager.ts` (strip Firefox/delete) | **M** — bumped from S–M: **F0-d is net-new build** (porting the client-side `playNotificationAudio` speak-initiation seam + `Notification.id_hash` capture — NOT a field re-home, OQ-F0.3), plus the new `TtsQueueStore` (factory + barrel) and its 100% L/B/F suite. Code volume — not just the seam decision — now drives the size. |
 
 **Sequencing**: F0 lands **before** any of 01-B4 / 02-countdown / 03-queue / 05-correlation begins. It is the first artifact into cascaded review and the first lane to merge.
 
