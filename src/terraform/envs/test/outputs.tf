@@ -24,3 +24,13 @@ output "vpn_gateway_ip" {
   value       = module.onprem_vpn.vpn_gateway_ip
   description = "GCP VPN gateway IP for on-prem peer config (empty unless enable_vpn)."
 }
+
+output "model_server_url" {
+  value       = module.cloud_run_model_server.service_url
+  description = "→ LUPIN_MODEL_SERVER_URL on the app VM (the local→cloud switch for STT + embeddings + router)."
+}
+
+output "model_server_name" {
+  value       = module.cloud_run_model_server.service_name
+  description = "Cloud Run model-server service name (deploy script + scheduler PATCH target)."
+}

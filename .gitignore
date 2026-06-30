@@ -68,6 +68,7 @@ src/conf/keys/**
 
 # Per-developer GCP deploy config (copied from cloud-run.env.example)
 src/scripts/cloud-run.env
+src/scripts/cloud-run-model-server.env
 
 # Terraform — local state, provider cache, and secret-bearing tfvars.
 # (.terraform.lock.hcl IS committed — it pins provider versions.)

@@ -1,0 +1,137 @@
+# ============================================================================
+# Lupin — GCP cloud-GPU deployment (model server on Cloud Run, scale-to-zero).
+#
+# This is the cloud-GPU variant of docker-compose.cloud-test.yml. It is
+# IDENTICAL to that file EXCEPT it OMITS the local `lupin-model-server` GPU
+# container and instead points the app at a Cloud Run GPU service via the
+# LUPIN_MODEL_SERVER_URL env override (the resolver in
+# cosa/memory/{speech_to_text,embedding}_provider.py:_resolve_model_server_url()
+# reads that env var FIRST — no lupin-app.ini edit is needed for the switch).
+#
+# Use this on a CPU-ONLY VM (no L4 attached) once the model server has been
+# deployed to Cloud Run via src/scripts/cloud-run-model-server-deploy.sh.
+#
+# Design of record:
+#   src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+#   (the "Local → cloud transmogrification" section — env switch, not rewrite)
+#
+# Required env on the VM (e.g. a git-ignored cloud-gpu.env, or `--env-file`):
+#   LUPIN_MODEL_SERVER_URL=https://lupin-model-server-XXXX.run.app   # Cloud Run output
+#   CLOUD_SQL_CONNECTION_NAME=hello-world-foo-423219:us-central1:lupin-pg16-test
+#   DB_PASSWORD=<from Secret Manager `lupin-db-password` at deploy>
+#   LUPIN_IMAGE=<AR path>/lupin:1.1.0      (or local `lupin:1.1.0`)
+# Optional (defaults shown):
+#   DB_USER=lupin_app  DB_NAME=lupin_db_test
+#
+# Launch:
+#   docker compose -f docker-compose.cloud-gpu.yml --env-file cloud-gpu.env up -d
+# ============================================================================
+
+services:
+  # --- Socket-volume init (one-shot) -----------------------------------------
+  # The proxy image runs as nonroot uid 65532 and cannot mkdir inside a fresh
+  # (root-owned) named volume; chown it first so both the proxy and lupin-rest
+  # (uid 1001) can use the shared socket dir.
+  cloudsql-socket-init:
+    image: busybox:1.36
+    container_name: lupin-cloudsql-socket-init
+    command: ["sh", "-c", "chown 65532:65532 /cloudsql && chmod 0777 /cloudsql"]
+    restart: "no"
+    volumes:
+      - cloudsql-socket:/cloudsql
+
+  # --- Cloud SQL Auth Proxy (sidecar) ---------------------------------------
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+    container_name: lupin-cloudsql-proxy
+    restart: unless-stopped
+    depends_on:
+      cloudsql-socket-init:
+        condition: service_completed_successfully
+    command:
+      - "--unix-socket=/cloudsql"
+      - "--private-ip"
+      - "--health-check"                    # serves /startup,/readiness,/liveness on localhost:9090
+      - "${CLOUD_SQL_CONNECTION_NAME:?set CLOUD_SQL_CONNECTION_NAME}"
+    volumes:
+      - cloudsql-socket:/cloudsql
+    healthcheck:
+      # Distroless image — no /bin/sh, so probe via the proxy binary's own
+      # `wait` subcommand against the --health-check endpoint on :9090.
+      test: ["CMD", "/cloud-sql-proxy", "wait", "--max=5s"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - lupin-cloud-network
+
+  # --- Lupin REST API (cloud-backed, mount model) ---------------------------
+  # NOTE vs docker-compose.cloud-test.yml: NO depends_on lupin-model-server
+  # (that service is on Cloud Run now), and LUPIN_MODEL_SERVER_URL points at
+  # the Cloud Run https URL instead of the local :7998 container.
+  lupin-rest:
+    image: ${LUPIN_IMAGE:-lupin:1.1.0}
+    container_name: lupin-rest-cloud-gpu
+    restart: unless-stopped
+    user: "1001:1001"                       # matches the image's rruiz UID/GID (Dockerfile:37-38)
+    ports:
+      - "7999:7999"
+    # host.docker.internal → host gateway so the in-container :7999 reverse-proxy
+    # can PULL /state from the HOST-side arbiter on :8001 (mirrors cloud-test).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./src:/var/lupin/src                # mount model — code from the on-VM checkout
+      - ./io:/var/lupin/io
+      - ./src/conf/keys:/var/lupin/src/conf/keys:ro   # provider keys, out-of-band
+      - cloudsql-socket:/cloudsql           # shared Auth-Proxy socket
+      - claude-creds:/home/rruiz/.claude    # persistent CC OAuth login
+    environment:
+      LUPIN_ROOT: /var/lupin
+      LUPIN_ENV: testing
+      # The ONLY cloud-backing trigger — is_cloud_backed() gates solely on this.
+      LUPIN_CLOUD_BACKED: "true"
+      CLOUD_SQL_CONNECTION_NAME: ${CLOUD_SQL_CONNECTION_NAME:?set CLOUD_SQL_CONNECTION_NAME}
+      DB_USER: ${DB_USER:-lupin_app}
+      DB_NAME: ${DB_NAME:-lupin_db_test}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD (from Secret Manager lupin-db-password)}
+      LUPIN_CONFIG_MGR_CLI_ARGS: "config_path=/src/conf/lupin-app.ini splainer_path=/src/conf/lupin-app-splainer.ini config_block_id=Lupin:+Testing-GCS"
+      LUPIN_API_URL: http://localhost:7999
+      # ── THE ENV SWITCH ─────────────────────────────────────────────────────
+      # Cloud Run model-server URL. The provider resolvers read this env var
+      # FIRST (before the INI `model server url` key), so flipping local→cloud
+      # is purely this one value — no INI change, no image rebuild. Required:
+      # fail-loud if unset so a CPU-only VM never silently self-routes to a
+      # non-existent local :7998 GPU container.
+      LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:?set LUPIN_MODEL_SERVER_URL to the Cloud Run service URL (https://lupin-model-server-XXXX.run.app)}
+      LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
+      LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:7999/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    depends_on:
+      cloud-sql-proxy:
+        condition: service_healthy
+    networks:
+      - lupin-cloud-network
+
+  # --- Lupin Model Server (GPU) — INTENTIONALLY OMITTED ---------------------
+  # On this cloud-GPU topology the model server runs on Cloud Run (L4,
+  # scale-to-zero), NOT as a local container. Deploy it with
+  # src/scripts/cloud-run-model-server-deploy.sh and wire its URL into
+  # LUPIN_MODEL_SERVER_URL above. (See docker-compose.cloud-test.yml for the
+  # local single-VM GPU-container variant.)
+
+volumes:
+  cloudsql-socket:                          # shared Auth-Proxy ↔ app unix-socket dir
+  claude-creds:                             # CC OAuth login store for lupin-rest
+
+networks:
+  lupin-cloud-network:
+    driver: bridge

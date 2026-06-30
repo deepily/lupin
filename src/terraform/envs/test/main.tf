@@ -79,3 +79,36 @@ module "onprem_vpn" {
   network    = var.app_vpc_self_link
   # enable_vpn defaults false — provisions the tunnel once the on-prem peer is coordinated.
 }
+
+# --- GPU inference plane (Set B): the carve-out model server on Cloud Run GPU,
+#     scale-to-zero. Image pulled from the artifact-registry module's repo; the
+#     X-API-Key is mounted from the secret-manager module's inventory. Direct VPC
+#     egress attaches to the app VPC only once both the VPC self-link and a
+#     subnetwork are supplied (else the block is omitted → validate stays clean).
+#     See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+module "cloud_run_model_server" {
+  source     = "../../modules/cloud-run-model-server"
+  project_id = var.project_id
+  region     = var.region
+
+  image = "${module.artifact_registry.image_path_prefix}/lupin-model-server:${var.model_server_image_tag}"
+
+  min_instances         = var.model_server_min_instances
+  ingress               = var.model_server_ingress
+  allow_unauthenticated = var.model_server_allow_unauthenticated
+
+  # The api-key secret lives in the secret-manager inventory (lupin-notification-api-key default).
+  api_key_secret_id = "lupin-notification-api-key"
+
+  # Direct VPC egress: network = app VPC, subnetwork supplied separately. Both
+  # empty by default → no VPC access block until the terraforming-vms net exists.
+  vpc_network    = var.app_vpc_self_link
+  vpc_subnetwork = var.model_server_vpc_subnetwork
+
+  # Optional scheduled warm/cool toggle (default OFF).
+  enable_scale_schedule           = var.model_server_enable_scale_schedule
+  scheduler_service_account_email = var.model_server_scheduler_sa_email
+
+  # The secret container must exist before the service mounts it.
+  depends_on = [module.secret_manager]
+}

@@ -261,6 +261,26 @@ def test_url_returns_env_value_even_when_ini_set( monkeypatch ):
     assert SpeechToTextProvider._resolve_model_server_url() == "http://env-wins:9999"
 
 
+def test_url_resolves_cloud_run_https_and_env_wins_over_ini( monkeypatch ):
+    """
+    Local → Cloud Run 'transmogrification': a Cloud Run https URL supplied via
+    the LUPIN_MODEL_SERVER_URL env override resolves verbatim AND wins over a
+    local `model server url` INI value — the entire env-switch from a local
+    GPU container to the scale-to-zero Cloud Run service is this one value.
+
+    See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+    """
+    from cosa.memory.speech_to_text_provider import SpeechToTextProvider
+    cloud_url = "https://lupin-model-server-abcd1234-uc.a.run.app"
+    monkeypatch.setenv( "LUPIN_MODEL_SERVER_URL", cloud_url )
+    cfg = _make_mock_config_mgr( provider="model-server", url="http://lupin-model-server:7998" )
+    monkeypatch.setattr(
+        "cosa.memory.speech_to_text_provider.ConfigurationManager",
+        lambda **kwargs: cfg,
+    )
+    assert SpeechToTextProvider._resolve_model_server_url() == cloud_url
+
+
 # ── §3.4 API-key resolution ─────────────────────────────────────────────────
 
 
