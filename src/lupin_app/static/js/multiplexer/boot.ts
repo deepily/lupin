@@ -30,7 +30,7 @@ import { redirectToLoginIfUnauthenticated } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
-import type { ServerSenderHydrationRecord } from "./stores";
+import type { ServerSenderHydrationRecord, SchedulableAudioContext } from "./stores";
 import {
   createNotificationsListRenderer,
   createNotificationsHeaderRenderer,
@@ -211,16 +211,15 @@ function bootMultiplexer(): void {
     // user's identity (Q1). AuthManager is constructed above; its email claim is
     // stable across refresh, so reading it lazily per-edit is correct.
     actorProvider       : () => authManager.getCurrentUserEmail(),
-    audioContextFactory : () => {
+    audioContextFactory : (): SchedulableAudioContext => {
       // Production AudioContext factory. Browser autoplay policy may throw
       // if no user gesture preceded — AudioStore catches and emits
       // store_audio_state_change { state: "error", reason: "audiocontext-blocked" }.
+      // Chrome-only mux (Rick 2026-06-27) — no `webkitAudioContext` vendor
+      // prefix (Krishna-C2: the vestigial fallback was dead under Chrome-only).
       const Ctor = (window as unknown as {
-        AudioContext       ?: { new (opts?: { sampleRate?: number }): AudioContext };
-        webkitAudioContext ?: { new (opts?: { sampleRate?: number }): AudioContext };
-      }).AudioContext ?? (window as unknown as {
-        webkitAudioContext ?: { new (opts?: { sampleRate?: number }): AudioContext };
-      }).webkitAudioContext;
+        AudioContext ?: { new (opts?: { sampleRate?: number }): SchedulableAudioContext };
+      }).AudioContext;
       if (!Ctor) throw new Error("AudioContext is not available");
       return new Ctor({ sampleRate: 24000 });
     },

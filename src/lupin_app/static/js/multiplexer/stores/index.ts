@@ -196,7 +196,7 @@ export type {
   ActionRequiredApiClient,
 } from "./ActionRequiredStore";
 export { createActionRequiredStore } from "./ActionRequiredStore";
-export type { AudioStore, AudioStoreOptions } from "./AudioStore";
+export type { AudioStore, AudioStoreOptions, SchedulableAudioContext } from "./AudioStore";
 export { createAudioStore } from "./AudioStore";
 // WP2 (parity bridge) — SessionStripStore IS part of the canonical store set
 // built by createStores() (folded at the boot-integration step per Lane A's

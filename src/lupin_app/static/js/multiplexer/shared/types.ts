@@ -68,6 +68,13 @@ export type LupinEventType =
   | "job_state_transition"
   | "job_removed"
   | "sys_time_update"
+  // 00c (Phase-6 TTS playback) — server end-of-utterance marker on /ws/audio
+  // (`speech.py:818-822` OpenAI / `:1115-1119` ElevenLabs). AudioTransport
+  // already subscribes (`AudioTransport.ts:24`) and re-emits it on the bus via
+  // the inherited `BaseTransportImpl.onMessage`; AudioStore subscribes in P6-c
+  // to set its stream-complete flag. Registered here (F-Krishna-B1) so the
+  // subscribe is type-checked rather than an `as LupinEventType` cast.
+  | "audio_streaming_complete"
   // Phase 4 store emissions — each store emits exactly one type per state
   // mutation; renderers subscribe by store. Payloads carry a `changeKind`
   // discriminator so renderers can fast-path-decide what to repaint.

@@ -16,13 +16,18 @@
 // verification reads this name via `boot_complete` payload to confirm the
 // production handler is wired (not the Phase 3 default debug logger).
 //
-// Phase 4 scope clarification: AudioStore decodes chunks via pcm-decoder
-// (per D-A) and emits `store_audio_chunk_decoded` with the AudioBuffer.
-// **Actual playback scheduling (createBufferSource + source.start) is
-// Phase 6 territory** (TTSEngine). Phase 4 tracks state + decodes + emits;
-// Phase 6 wires the AudioBuffer into a playback graph. The state names
-// "playing"/"paused"/"ended" in Phase 4 reflect *intended* playback state
-// driven by the chunk stream, not actual audible output.
+// Phase 6 (00c) — TTS playback engine LANDED here. AudioStore decodes chunks
+// via pcm-decoder (per D-A) AND now schedules the decoded AudioBuffer onto a
+// gapless Web-Audio graph (P6-a, ported from legacy `notifications.js`
+// `playPCMChunk` :4627-4664): createBufferSource → connect(destination) →
+// start(max(nextStartTime, currentTime)) → advance nextStartTime. pause()/
+// resume()/stop() back onto AudioContext.suspend()/resume() + source halt
+// (P6-b). On the server `audio_streaming_complete` frame AudioStore sets a
+// stream-complete flag that gates the last source's onended → emits
+// `store_audio_ended` (P6-c, signal-OUT only — F0's TtsQueueStore subscribes
+// and self-advances; P6 NEVER mutates id/queue state). So the state names
+// "playing"/"paused"/"ended" now reflect ACTUAL audible output, resolving the
+// former Phase-4 "intended vs actual" caveat.
 
 import { setup, createActor, type ActorRefFrom } from "xstate";
 
@@ -31,9 +36,45 @@ import type {
   AudioPlaybackState,
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
+  StoreAudioEndedPayload,
 } from "../shared/types";
 import type { AudioContextLike, AudioBufferLike } from "../audio/pcm-decoder";
 import { pcm16ToAudioBuffer, pcm16ToAudioBufferFromBlob } from "../audio/pcm-decoder";
+
+// ---------------------------------------------------------------------------
+// Scheduler-side AudioContext surface (COND-4 / F-Krishna-A4).
+//
+// The DECODE contract `AudioContextLike` (pcm-decoder) stays minimal —
+// `createBuffer` only. The PLAYBACK scheduler needs the wider Web-Audio
+// surface (buffer-source creation, the running clock, the destination node,
+// suspend/resume). That superset is declared HERE, in the scheduler module, so
+// the decode interface is not polluted by playback concerns. One injected test
+// stub implements this superset, satisfying both decode + schedule, keeping
+// every scheduler method inside `c8` scope.
+// ---------------------------------------------------------------------------
+
+export type AudioContextStateLike = "suspended" | "running" | "closed";
+
+// The destination node is an opaque connect() target — the scheduler never
+// reads members off it, only passes it to `source.connect(...)`.
+export type AudioDestinationNodeLike = object;
+
+export interface AudioBufferSourceLike {
+  buffer  : AudioBufferLike | null;
+  onended : ( () => void ) | null;
+  connect( destination: AudioDestinationNodeLike ): void;
+  start( when?: number ): void;
+  stop(): void;
+}
+
+export interface SchedulableAudioContext extends AudioContextLike {
+  readonly currentTime : number;
+  readonly destination : AudioDestinationNodeLike;
+  readonly state       : AudioContextStateLike;
+  createBufferSource(): AudioBufferSourceLike;
+  suspend(): Promise<void>;
+  resume(): Promise<void>;
+}
 
 // ---------------------------------------------------------------------------
 // XState machine — pure state graph; tracker pattern per Q5.
@@ -135,9 +176,9 @@ export interface AudioStore {
 export interface AudioStoreOptions {
   bus                : EventBus;
   // Factory for the production AudioContext. Production code defaults to a
-  // function returning `new AudioContext({sampleRate: 24000})`. Tests inject
-  // a stub returning AudioContextLike (mirrors pcm-decoder's interface).
-  audioContextFactory?: () => AudioContextLike;
+  // function returning `new AudioContext({sampleRate: 24000})`. Tests inject a
+  // stub returning the SchedulableAudioContext superset (decode + schedule).
+  audioContextFactory?: () => SchedulableAudioContext;
   // Decoder injection (defaults to the canonical pcm-decoder exports). Tests
   // can override to assert specific failure paths.
   decodeArrayBufferFn ?: (buf: ArrayBuffer, ctx: AudioContextLike, sampleRate?: number) => AudioBufferLike;
@@ -153,7 +194,7 @@ export interface AudioStoreOptions {
 
 class AudioStoreImpl implements AudioStore {
   private readonly bus                 : EventBus;
-  private readonly audioContextFactory : () => AudioContextLike;
+  private readonly audioContextFactory : () => SchedulableAudioContext;
   private readonly decodeArrayBufferFn : (buf: ArrayBuffer, ctx: AudioContextLike, sampleRate?: number) => AudioBufferLike;
   private readonly decodeBlobFn        : (blob: Blob, ctx: AudioContextLike, sampleRate?: number) => Promise<AudioBufferLike>;
   private readonly sampleRate          : number;
@@ -162,10 +203,32 @@ class AudioStoreImpl implements AudioStore {
   private readonly actor: ActorRefFrom<typeof audioMachine>;
 
   // Lazy-instantiated on first chunk_arrived per Q6.
-  private audioContext: AudioContextLike | null = null;
-  // Number of chunks queued in the current playing-burst (Phase 4 tracks
-  // arrivals only; actual queueing/scheduling is Phase 6).
+  private audioContext: SchedulableAudioContext | null = null;
+  // Number of chunks queued in the current playing-burst.
   private chunksInBurst = 0;
+
+  // ── P6 scheduler state ────────────────────────────────────────────────────
+  // Gapless schedule cursor: the absolute context-clock time the NEXT chunk
+  // starts at. Inits to 0 (F-Sam-A1, load-bearing) so the FIRST chunk starts at
+  // `Math.max(0, currentTime) === currentTime`; an uninitialized value would
+  // give `Math.max(undefined, currentTime) === NaN` → silent `start(NaN)`.
+  // stop() resets it to 0 (NOT undefined) so a fresh burst's first chunk is
+  // likewise `currentTime`.
+  private nextStartTime = 0;
+  // Buffer sources scheduled but not yet ended. Used by stop() (halt all) and
+  // by the completion gate (utterance ends when this drains AND the stream-
+  // complete flag is set). A source removes itself here in its onended.
+  private activeSources: AudioBufferSourceLike[] = [];
+  // Set true on the server `audio_streaming_complete` frame (all chunks sent);
+  // gates utterance completion. Inits false; reset to false on new-stream-start
+  // AND on stop() (F-Sam-B1) so utterance N+1 is never completed prematurely by
+  // a flag carried over from utterance N.
+  private streamComplete = false;
+  // True once ≥1 source has been scheduled for the CURRENT utterance and it has
+  // not yet completed. Makes completion strictly one-shot: a duplicate/late
+  // `audio_streaming_complete` frame on an already-drained (or audio-less)
+  // stream is a no-op, never a second `store_audio_ended` emit.
+  private utterancePending = false;
 
   // The bound binary handler. Named via `function audioStoreBinaryHandler` so
   // `Function.name === "audioStoreBinaryHandler"` — AC9 verification reads
@@ -200,6 +263,11 @@ class AudioStoreImpl implements AudioStore {
       }
     });
 
+    // P6-c — subscribe to the server end-of-utterance marker. The subscription
+    // lives HERE (in AudioStore, not boot — F-Sam-B3) with the flag + handler it
+    // drives, so the completion seam is self-contained + unit-testable.
+    this.bus.on("audio_streaming_complete", () => this.handleStreamComplete());
+
     // Closure-captured instance so the named function expression keeps its
     // identifier — `.bind(this)` would yield `"bound audioStoreBinaryHandler"`,
     // breaking the AC9 Function.name === "audioStoreBinaryHandler" invariant.
@@ -221,11 +289,22 @@ class AudioStoreImpl implements AudioStore {
   }
 
   pause(): void {
-    if (this.state() === "playing") this.actor.send({ type: "PAUSE_REQUESTED" });
+    // P6-b — suspend() freezes the context clock, so currentTime and every
+    // already-scheduled start(when) offset stay coherent; resume() does NOT
+    // rebase nextStartTime (F-Sam-A2) — that no-fixup is what keeps playback
+    // gapless across a pause. Invariant: state "playing" ⇒ a chunk flowed
+    // through handleBinary, so audioContext is constructed (non-null).
+    if (this.state() !== "playing") return;
+    this.actor.send({ type: "PAUSE_REQUESTED" });
+    void this.audioContext!.suspend();
   }
 
   resume(): void {
-    if (this.state() === "paused") this.actor.send({ type: "RESUME_REQUESTED" });
+    // P6-b — resume the (paused → suspended) context; same non-rebase invariant
+    // as pause(). Invariant: state "paused" ⇒ audioContext is non-null.
+    if (this.state() !== "paused") return;
+    this.actor.send({ type: "RESUME_REQUESTED" });
+    void this.audioContext!.resume();
   }
 
   skip(): void {
@@ -244,6 +323,20 @@ class AudioStoreImpl implements AudioStore {
     if (s === "idle" || s === "decoding") return;
     this.actor.send({ type: "STOP_REQUESTED" });
     this.chunksInBurst = 0;
+    this.haltSources();              // P6-b — silence immediately + reset scheduling
+  }
+
+  // P6-b — halt all scheduled sources and reset the gapless scheduler so a
+  // subsequent burst starts clean. nextStartTime → 0 (NOT undefined, F-Sam-A1);
+  // stream-complete flag → false (F-Sam-B1). A stopped source's onended may
+  // still fire in the browser, but handleSourceEnded is a safe no-op once
+  // activeSources is cleared + the flag is false.
+  private haltSources(): void {
+    for (const source of this.activeSources) source.stop();
+    this.activeSources    = [];
+    this.nextStartTime    = 0;
+    this.streamComplete   = false;
+    this.utterancePending = false;
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
@@ -268,6 +361,26 @@ class AudioStoreImpl implements AudioStore {
         return;
       }
     }
+    // Construction succeeded (the catch returns), so audioContext is non-null.
+    const ctx = this.audioContext;
+
+    // P6-d/P6-e — resume a suspended context (browser autoplay policy) so the
+    // sources scheduled below actually play. No-op when already running.
+    this.resumeIfSuspended(ctx);
+
+    // F-Sam-B1 — new-stream-start flag reset. A fresh burst begins from a
+    // terminal/idle state; clear any stale stream-complete flag so utterance
+    // N+1 is not completed prematurely by a flag carried over from utterance N.
+    // SERIALIZATION DEPENDENCY (Cheech Stage-2): this reset assumes utterance
+    // N+1 is not requested until N's `store_audio_ended` has fired — i.e. TTS is
+    // strictly serial, one utterance at a time (the legacy + current server
+    // contract). If TTS is ever pipelined / pre-streamed (overlapping
+    // utterances), this single shared flag is insufficient: harden the reset to
+    // a per-utterance token (see F-1) so each utterance gates its own completion.
+    const preState = this.state();
+    if (preState === "idle" || preState === "ended" || preState === "error") {
+      this.streamComplete = false;
+    }
 
     // Step 2: signal the machine that a chunk arrived (idle → decoding).
     this.chunksInBurst++;
@@ -276,8 +389,8 @@ class AudioStoreImpl implements AudioStore {
     // Step 3: decode. ArrayBuffer is sync; Blob is async.
     if (data instanceof ArrayBuffer) {
       try {
-        const buf = this.decodeArrayBufferFn(data, this.audioContext, this.sampleRate);
-        this.onDecoded(buf);
+        const buf = this.decodeArrayBufferFn(data, ctx, this.sampleRate);
+        this.onDecoded(buf, ctx);
       } catch (err) {
         /* c8 ignore next */ // defensive: decodeArrayBufferFn exceptions are wrapped Error instances per the pcm16ToAudioBuffer contract (and test stubs); the `: String(err)` arm is unreachable in practice.
         const msg = err instanceof Error ? err.message : String(err);
@@ -291,8 +404,8 @@ class AudioStoreImpl implements AudioStore {
     }
 
     // Blob path — async.
-    this.decodeBlobFn(data, this.audioContext, this.sampleRate)
-      .then((buf) => this.onDecoded(buf))
+    this.decodeBlobFn(data, ctx, this.sampleRate)
+      .then((buf) => this.onDecoded(buf, ctx))
       /* c8 ignore start */ // Async decode failure — exercised in production when blob malformed; covered indirectly by ArrayBuffer decode-failed test (same code path post the .then/.catch boundary).
       .catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
@@ -302,8 +415,9 @@ class AudioStoreImpl implements AudioStore {
       /* c8 ignore stop */
   }
 
-  private onDecoded(buf: AudioBufferLike): void {
+  private onDecoded(buf: AudioBufferLike, ctx: SchedulableAudioContext): void {
     this.actor.send({ type: "CHUNK_DECODED" });
+    this.scheduleDecodedBuffer(buf, ctx);          // P6-a — port the gapless scheduler
     this.bus.emit<StoreAudioChunkDecodedPayload>({
       type    : "store_audio_chunk_decoded",
       payload : {
@@ -311,6 +425,92 @@ class AudioStoreImpl implements AudioStore {
         sampleRate : buf.sampleRate,
         frameCount : buf.length,
       },
+      source  : "AudioStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // P6-a — gapless scheduler (ported from notifications.js:4627-4664)
+  // -------------------------------------------------------------------------
+
+  private scheduleDecodedBuffer(buf: AudioBufferLike, ctx: SchedulableAudioContext): void {
+    // F-Sam-A3 race guard: only schedule while actively playing. A straggler
+    // chunk whose async decode resolves AFTER stop() lands here with the machine
+    // in idle — its CHUNK_DECODED was a no-op (idle has no such transition) — so
+    // drop it BEFORE createBufferSource (mux equivalent of legacy's
+    // currentTTSMode-null race-drop, notifications.js:4613).
+    if (this.state() !== "playing") return;
+
+    const source  = ctx.createBufferSource();
+    source.buffer = buf;
+    source.connect(ctx.destination);
+
+    // Gapless schedule (legacy :4634-4636): start at the later of the running
+    // schedule cursor and the live clock, so a slow chunk never schedules in the
+    // past. First chunk: nextStartTime is 0 → Math.max(0, currentTime) ===
+    // currentTime (F-Sam-A1).
+    const startTime = Math.max(this.nextStartTime, ctx.currentTime);
+    source.start(startTime);
+    this.nextStartTime = startTime + buf.duration;   // advance cursor (legacy :4664)
+
+    this.activeSources.push(source);
+    this.utterancePending = true;                    // an utterance is now in flight
+    source.onended = () => this.handleSourceEnded(source);
+  }
+
+  // P6-d/P6-e — autoplay recovery. A context built without a prior user gesture
+  // may start "suspended" (Chrome autoplay policy); resume it so scheduled
+  // sources play. If a prior page activation already unlocked it (state
+  // "running"), this is a no-op — no gesture listener needed (F-Sam-C3). On
+  // rejection (the autoplay-BLOCKED arm) reuse the audiocontext-blocked error.
+  private resumeIfSuspended(ctx: SchedulableAudioContext): void {
+    if (ctx.state !== "suspended") return;
+    ctx.resume().catch((err) => {
+      /* c8 ignore next */ // defensive: the rejection carries an Error per the autoplay contract (and the rejection-capable test stub); the `: String(err)` arm is unreachable in practice.
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emitErrorState(`audiocontext-blocked: ${msg}`);
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // P6-c — completion-signal seam (signal-OUT only)
+  // -------------------------------------------------------------------------
+
+  // A scheduled source finished playing. Drop it from the live set, then test
+  // for utterance completion.
+  private handleSourceEnded(source: AudioBufferSourceLike): void {
+    const idx = this.activeSources.indexOf(source);
+    if (idx !== -1) this.activeSources.splice(idx, 1);
+    this.maybeComplete();
+  }
+
+  // The server signalled all chunks sent (audio_streaming_complete). Set the
+  // flag, then test for completion — covering the F-Sam-B2 drop-race where the
+  // last onended already fired (no live source) and we must emit immediately
+  // rather than wait for an onended that already passed.
+  private handleStreamComplete(): void {
+    this.streamComplete = true;
+    this.maybeComplete();
+  }
+
+  // Fire end-of-utterance EXACTLY ONCE: the stream-complete flag is set AND no
+  // scheduled source is still playing. Resetting the flag makes it one-shot, so
+  // neither the last onended nor a late complete-frame can double-fire
+  // (F-Sam-B1 multi-utterance + F-Sam-B2 symmetric drop-race). P6 emits
+  // store_audio_ended ONLY — it makes ZERO calls into TtsQueueStore and never
+  // touches the active id (COND-2 ownership boundary); F0's TtsQueueStore
+  // subscribes to store_audio_ended and self-advances.
+  private maybeComplete(): void {
+    if (!this.streamComplete) return;
+    if (!this.utterancePending) return;              // nothing to complete (already done / audio-less)
+    if (this.activeSources.length > 0) return;
+    this.utterancePending = false;
+    this.streamComplete   = false;
+    this.actor.send({ type: "PLAYBACK_ENDED" });     // drive XState → ended
+    this.bus.emit<StoreAudioEndedPayload>({
+      type    : "store_audio_ended",
+      payload : {},
       source  : "AudioStore",
       ts      : this.nowFn(),
     });
@@ -353,17 +553,15 @@ class AudioStoreImpl implements AudioStore {
 }
 
 // ---------------------------------------------------------------------------
-// Default factory — tries `globalThis.AudioContext` then `webkitAudioContext`.
+// Default factory — `globalThis.AudioContext` (Chrome-only; no vendor prefix).
 // ---------------------------------------------------------------------------
 
 /* c8 ignore start */ // Browser-only fallback; tests inject `audioContextFactory` directly.
-function defaultAudioContextFactory(): AudioContextLike {
+function defaultAudioContextFactory(): SchedulableAudioContext {
+  // Chrome-only mux (Rick 2026-06-27) — no `webkitAudioContext` vendor prefix.
   const Ctor = (globalThis as unknown as {
-    AudioContext       ?: { new (opts?: { sampleRate?: number }): AudioContextLike };
-    webkitAudioContext ?: { new (opts?: { sampleRate?: number }): AudioContextLike };
-  }).AudioContext ?? (globalThis as unknown as {
-    webkitAudioContext ?: { new (opts?: { sampleRate?: number }): AudioContextLike };
-  }).webkitAudioContext;
+    AudioContext ?: { new (opts?: { sampleRate?: number }): SchedulableAudioContext };
+  }).AudioContext;
   if (!Ctor) {
     throw new Error("AudioContext is not available in this environment");
   }
