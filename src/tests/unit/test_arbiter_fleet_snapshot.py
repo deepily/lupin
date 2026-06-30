@@ -159,6 +159,32 @@ class TestOfflineLineageCarry:
         job = _make_job( bridge_mtime_fn=lambda sid: None, render_sink=lambda s: None, snapshot_sink=lambda s: None )
         assert job._manager_lineage == { }
 
+    def test_lineage_carry_write_oserror_is_journaled_not_raised( self, tmp_path, monkeypatch ):
+        """F-A degrade-safety: a write_carry OSError while persisting the post-prune
+        lineage mapping is JOURNALED (`lineage_carry_error`) and SWALLOWED — never
+        raised (worst case = pre-fix volatility, not a dead poll). Covers the
+        `except OSError` branch in _publish_fleet_snapshot."""
+        logs = [ ]
+        def _boom( path, mapping ):
+            raise OSError( "disk full" )
+        monkeypatch.setattr( aj, "write_carry", _boom )
+        carry_path = str( tmp_path / "lineage-carry.json" )       # absent → read_carry → {} at init
+        job = _make_job(
+            bridge_mtime_fn    = lambda sid: None,
+            resolve_manager_fn = lambda sid, **_kw: { "manager_persona": "Tiberius", "source": "lineage" },
+            render_sink        = lambda s: None,
+            snapshot_sink      = lambda s: None,
+            lineage_carry_path = carry_path,
+            log_fn             = lambda e, **k: logs.append( ( e, k ) ),
+        )
+        # poll 1: prior_lineage {} → new {"s1":"Tiberius"} (changed) → write_carry
+        # invoked → raises OSError → caught + journaled, poll still completes.
+        result = job._publish_fleet_snapshot( _view(), NOW )
+        assert result == "table"                                  # poll completed (NOT a dead poll)
+        errs = [ r for r in logs if r[ 0 ] == "lineage_carry_error" ]
+        assert len( errs ) == 1 and errs[ 0 ][ 1 ][ "error" ] == "disk full"
+        assert job._manager_lineage == { "s1": "Tiberius" }       # in-memory carry updated regardless
+
 
 # ── _poll_once integration (the "rendered" key + real push) ───────────────────
 

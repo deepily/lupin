@@ -665,5 +665,119 @@ def test_real_poke_logs_component_age_breakdown():
     assert fields[ "bridge_age_s" ] == 2820 and fields[ "dm_age_s" ] is None
 
 
+# ── work_owed=false → DONE suppression (bug 25ba173e, 2026-06-29) ─────────────
+#    A manager that self-declares work_owed=false in its heartbeat hold is DONE-
+#    equivalent even when the STORE still shows a non-terminal ACTIVE item (or
+#    reads UNKNOWN) — the 45-min poke-spam repro. _classify_owed folds the hold's
+#    declared_work_owed=false into a CLASS_DONE override, in the SAME hold-read
+#    loop as the 6929f4ac open-gate override and applied BEFORE it, so an open
+#    user-gate (owes a re-ask) still wins. Fail-safe: an unwired seam, a raising
+#    reader, or an absent/non-bool work_owed field never suppresses (preserves
+#    today's escalation). Spec: src/rnd/v0.1.9/2026.06.29-arbiter-staleness-
+#    work-owed-false-fix-plan.md.
+
+from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates as _ug
+
+
+def _active_item():
+    """A non-terminal, NON-Rick-gated owed item → classifies CLASS_ACTIVE from the store alone."""
+    return { "id": "i1", "status": "in_progress", "gate_class": "none", "blocked_by": None }
+
+
+def _work_owed_false_hold( **extra ):
+    """A heartbeat hold self-declaring work_owed=false (DONE-equivalent), plus any override."""
+    hold = { "work_owed": False, "pending_user_gates": [ ] }
+    hold.update( extra )
+    return hold
+
+
+def _active_reader( names ):
+    return { n: [ _active_item() ] for n in names }
+
+
+class TestWorkOwedFalseSuppression:
+
+    _FV = { "m1": { "persona": "Krishna" } }       # fleet_view: sid m1 ↔ persona Krishna
+
+    # ── AC1 (RED-first): work_owed=false hold + store ACTIVE → DONE, no case-14 poke ──
+
+    def test_classify_owed_work_owed_false_overrides_active_to_done( self ):
+        """CORE FIX: store says ACTIVE (≥1 non-Rick-gated owed item) but the hold
+        self-declares work_owed=false ⇒ CLASS_DONE. FAILS on main (store-only ⇒
+        ACTIVE — declared_work_owed is never read)."""
+        job = _job( hold_reader_fn=lambda sid: _work_owed_false_hold(), owed_work_fn=_active_reader )
+        assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_DONE }
+
+    def test_work_owed_false_hold_no_case14_poke_one_done_advisory( self ):
+        """THE POKE-PATH AC1: a stale manager whose hold says work_owed=false, with a
+        STORE showing a live ACTIVE item, draws NO case-14 poke and AT MOST ONE
+        case-17 DONE advisory. FAILS on main (store-only ⇒ ACTIVE ⇒ poke fires)."""
+        gw, escal = _GW(), [ ]
+        job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                    hold_reader_fn=lambda sid: _work_owed_false_hold(), owed_work_fn=_active_reader )
+        snap       = _snap( _row( "m1", "manager", 3000, persona="Krishna" ) )
+        owed_class = job._classify_owed( [ "Krishna" ], self._FV )
+        fired = job._check_manager_staleness( snap, NOW, active_managers=[ ], owed_class=owed_class )
+        assert fired == 0                                            # no staleness poke
+        assert _stale_pokes( gw ) == [ ]                            # nothing sent to the manager
+        assert len( _done_adv( escal ) ) == 1                      # exactly ONE case-17 advisory
+        assert [ m for m in escal if "MANAGER-STALE" in m ] == [ ]  # NOT the case-14 advisory
+        assert "m1" not in job._mgr_stale_since                    # no staleness episode opened
+        assert "Krishna" in job._manager_done_advised
+
+    # ── AC2: open-gate precedence — work_owed=false BUT an open user-gate ⇒ ACTIVE ──
+
+    def test_open_gate_beats_work_owed_false( self ):
+        """6929f4ac PRESERVED: a work_owed=false hold that ALSO holds an OPEN user-gate
+        owes Rick a re-ask → CLASS_ACTIVE. The open-gate override is applied AFTER the
+        work_owed→DONE override, so it wins."""
+        gate = _ug.make_gate( "g1", "Proceed?", "ask_yes_no", last_asked_ts=NOW.isoformat() )
+        job  = _job( hold_reader_fn=lambda sid: _work_owed_false_hold( pending_user_gates=[ gate ] ),
+                     owed_work_fn=_active_reader )
+        assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_ACTIVE }
+
+    def test_open_gate_beats_work_owed_false_over_store_done( self ):
+        """Same precedence with the store ALSO DONE (zero owed): work_owed=false →
+        DONE, then the open gate re-promotes to ACTIVE."""
+        gate = _ug.make_gate( "g1", "Proceed?", "ask_yes_no", last_asked_ts=NOW.isoformat() )
+        job  = _job( hold_reader_fn=lambda sid: _work_owed_false_hold( pending_user_gates=[ gate ] ),
+                     owed_work_fn=lambda names: { n: [ ] for n in names } )
+        assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_ACTIVE }
+
+    # ── AC3: fail-safe — never silence a real escalation ──────────────────────────
+
+    def test_unwired_seam_no_suppression( self ):
+        """No hold-reader wired (default None) → the work_owed override is inert →
+        store class (ACTIVE) stands. Byte-identical to today's store-only behavior."""
+        job = _job( owed_work_fn=_active_reader )                   # hold_reader_fn defaults to None
+        assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_ACTIVE }
+
+    def test_raising_reader_swallowed_no_suppression( self ):
+        """A hold-read hiccup (reader raises) is swallowed → hold None →
+        declared_work_owed(None) is None → no override → store class (ACTIVE) stands."""
+        def _boom( sid ): raise RuntimeError( "hold read failed" )
+        job = _job( hold_reader_fn=_boom, owed_work_fn=_active_reader )
+        assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_ACTIVE }
+
+    def test_absent_work_owed_no_suppression( self ):
+        """A hold with NO work_owed key → declared_work_owed None (not False) → no
+        suppression (the field is absent, not a finished-declaration)."""
+        job = _job( hold_reader_fn=lambda sid: { "pending_user_gates": [ ] }, owed_work_fn=_active_reader )
+        assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_ACTIVE }
+
+    def test_non_bool_work_owed_no_suppression( self ):
+        """A non-bool work_owed value → declared_work_owed None → no suppression."""
+        job = _job( hold_reader_fn=lambda sid: { "work_owed": "yes", "pending_user_gates": [ ] },
+                    owed_work_fn=_active_reader )
+        assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_ACTIVE }
+
+    def test_work_owed_true_no_suppression( self ):
+        """Only work_owed=false suppresses — an explicit work_owed=true never flips a
+        store-ACTIVE classification to DONE."""
+        job = _job( hold_reader_fn=lambda sid: _work_owed_false_hold( work_owed=True ),
+                    owed_work_fn=_active_reader )
+        assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_ACTIVE }
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

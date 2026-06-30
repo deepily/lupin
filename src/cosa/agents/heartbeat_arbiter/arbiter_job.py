@@ -93,7 +93,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
 from lupin_mcp.persona_normalization import canonical_persona_key
 # 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
 # arbiter resurfaces a dark session's aged user-gate to Rick.
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path, declared_work_owed
 from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates
 # Proactive-manager A2/A3 (fcb5dbc0): the PURE D4 operator-gate urgency router — the
 # arbiter is its single thin consumer (interrupt urgent / digest normal / queue low).
@@ -2417,6 +2417,21 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     hold = self._hold_reader_fn( sid )
                 except Exception:
                     hold = None
+                # 25ba173e (2026-06-29): a hold that SELF-DECLARES work_owed=false is
+                # DONE-equivalent — a finished session owes nothing, regardless of any
+                # lingering non-terminal STORE row (or an UNKNOWN store read). This is
+                # the work_owed axis of the consolidated signal-of-life direction; like
+                # the open-gate override it reads the hold (the ONLY place the flag
+                # lives), and like it, it is INERT when the seam is unwired (None →
+                # today's store-only behavior). declared_work_owed returns the bool ONLY
+                # for a present boolean field; an absent / non-bool field → None (NOT
+                # False) → no override → never silences a real escalation (fail-SAFE).
+                # ORDER MATTERS: apply work_owed=false → DONE BEFORE the open-gate →
+                # ACTIVE override, so a session that owes Rick a re-ask (open user-gate)
+                # is re-promoted to ACTIVE and still escalates (6929f4ac preserved), even
+                # if it sloppily set work_owed=false.
+                if declared_work_owed( hold ) is False:
+                    result[ persona ] = CLASS_DONE
                 if open_gates( get_pending_user_gates( hold ) ):
                     result[ persona ] = CLASS_ACTIVE
         return result
