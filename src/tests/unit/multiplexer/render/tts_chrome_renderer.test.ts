@@ -47,7 +47,7 @@ function makeAudioStore(initialState: AudioPlaybackState = "playing", initialQue
   const calls: FakeAudioCalls = { pause: 0, resume: 0, stop: 0, skip: 0, queueAtStop: -1 };
   const store: AudioStoreLike = {
     state       : (): AudioPlaybackState => state,
-    queueLength : (): number             => queue,
+    burstLength : (): number             => queue,   // OQ-F0.4 rename
     pause       : (): void => { calls.pause  += 1; },
     resume      : (): void => { calls.resume += 1; },
     stop        : (): void => {

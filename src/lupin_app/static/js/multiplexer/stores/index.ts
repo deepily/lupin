@@ -60,6 +60,9 @@ import { createViewStateStore } from "./ViewStateStore";
 // Lane C (v0.1.9) — broadcast-to-all-CC compose store.
 import type { BroadcastStore } from "./BroadcastStore";
 import { createBroadcastStore } from "./BroadcastStore";
+// F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity store.
+import type { TtsQueueStore } from "./TtsQueueStore";
+import { createTtsQueueStore } from "./TtsQueueStore";
 
 export interface StoreSet {
   notifications  : NotificationStore;
@@ -94,6 +97,12 @@ export interface StoreSet {
   // Lane C (v0.1.9) — broadcast-to-all-CC compose store. Order-neutral
   // (subscribes to no server frames); persists only its card-open flag.
   broadcast      : BroadcastStore;
+  // F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity.
+  // Order-neutral: subscribes to AUDIO-store emissions (store_audio_ended /
+  // store_audio_state_change), NOT server frames, so it appends after the
+  // pinned five. The active id it owns (current()) is the F0 seam Plan 01 B4 /
+  // 02 / 03 / 05 consume; logic-level, no DOM surface of its own.
+  ttsQueue       : TtsQueueStore;
 }
 
 export interface CreateStoresOptions {
@@ -161,8 +170,12 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // subscription), persists only card-open. Recipient auto-refresh rides the
   // existing store_session_strip_changed (handled in BroadcastCardRenderer).
   const broadcast      = createBroadcastStore     ({ storage: opts.storage });
+  // F0 (00b) — TTS item-queue store. Order-neutral (subscribes to AudioStore
+  // emissions, not server frames). Its active id (current()) is set by the
+  // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
+  const ttsQueue       = createTtsQueueStore      ({ bus: opts.eventBus });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, viewState, broadcast };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, viewState, broadcast, ttsQueue };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -216,4 +229,7 @@ export { createViewStateStore } from "./ViewStateStore";
 export type { BroadcastStore, BroadcastStoreOptions, BroadcastRecipient,
               BroadcastSessionsApiClient } from "./BroadcastStore";
 export { createBroadcastStore } from "./BroadcastStore";
+// F0 (00b, v0.1.9) — TTS item-queue + active-id store.
+export type { TtsQueueStore, TtsQueueStoreOptions } from "./TtsQueueStore";
+export { createTtsQueueStore } from "./TtsQueueStore";
 /* c8 ignore stop */

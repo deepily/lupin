@@ -132,7 +132,25 @@ export type LupinEventType =
   // silently (the owning renderer applies the DOM directly), so they do NOT
   // emit — only the toolbar → NotificationsListRenderer bulk signal rides the
   // bus. NotificationsListRenderer subscribes and flips every accordion.
-  | "store_view_state_changed";
+  | "store_view_state_changed"
+  // ── F0 (00b) — TtsQueueStore cross-plan seams ──────────────────────────────
+  // store_tts_queue_changed — F0's OWN event. TtsQueueStore emits it on every
+  // notification-item-queue mutation (enqueue / advance / removeById / clear /
+  // completion-driven self-advance / stop-clear). Declared canonically HERE by
+  // F0, its architectural owner. CROSS-PLAN SEAM: Rio's B4 lane (01-D) landed an
+  // early duplicate of this member so its NotificationsListRenderer could consume
+  // the F0 seam (`TtsQueueStoreLike.current()`) before F0 existed; the serial-
+  // merge dedups the two identical-semantic lines to this single canonical
+  // declaration (manager-owned reconcile). See 00b §2 F0-c.
+  | "store_tts_queue_changed"
+  // store_audio_ended — 00c (Phase-6 playback engine) emits this signal-OUT-only
+  // on NATURAL utterance completion. F0's TtsQueueStore SUBSCRIBES and self-
+  // advances (COND-2 ownership boundary: P6 never calls advance() / touches the
+  // active id). CROSS-PLAN SEAM: 00c introduces the event, but F0 lands FIRST in
+  // the cascade (F0 → P6 → 01), so F0 declares the union member + its minimal
+  // payload here and 00c CONSUMES it rather than re-declaring (manager-reconciled
+  // at merge). See 00b §5 F0-f + 00c §3.
+  | "store_audio_ended";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -570,6 +588,50 @@ export interface StoreAudioChunkDecodedPayload {
   sampleRate : number;
   // frame count in the decoded buffer.
   frameCount : number;
+}
+
+// ---------------------------------------------------------------------------
+// F0 (00b) — Notification-level TTS queue (TtsQueueStore).
+//
+// The notification-item TTS queue is distinct from AudioStore's PCM-chunk
+// burst counter (`burstLength()`): this models the NOTIFICATIONS waiting to be
+// spoken (one item per notification), not the raw audio frames of a single
+// utterance. Ported from the legacy client-side `ttsQueue` item shape
+// (`notifications.js:308` — `{id, type, notification, ttsText, addedAt}`) +
+// the active-item field `this.activeTTSItem` (`:309`), which maps 1:1 to
+// `TtsQueueStore.current()`.
+// ---------------------------------------------------------------------------
+
+// One queued TTS notification item. `id_hash` is the canonical key — it equals
+// `Notification.id_hash` (the field Plan 01 B4 gates the active bubble on, and
+// the value `current()` returns). The remaining fields are optional carry-
+// through context for the renderer + the Phase-6 playback engine; F0's queue
+// logic keys ONLY on `id_hash`.
+export interface TtsQueueItem {
+  id_hash       : string;
+  notification ?: Notification;   // the source notification (renderer context)
+  ttsText      ?: string;         // the text submitted to /ws/audio (legacy `ttsText`)
+  addedAt      ?: number;         // ms epoch the item was enqueued (legacy `addedAt`)
+}
+
+// store_tts_queue_changed payload (F0-c). Emitted by TtsQueueStore on every
+// queue mutation. `activeNotificationId` is the id_hash of the notification
+// whose TTS is currently being spoken (the F0-a active id) — null when nothing
+// plays, never a stale id. `pending` is the FIFO tail of items waiting to be
+// spoken (does NOT include the active head). Plan 01 B4 gates exactly one
+// bubble on `activeNotificationId`; Plan 03 renders `pending`.
+export interface StoreTtsQueueChangedPayload {
+  activeNotificationId : string | null;
+  pending              : ReadonlyArray<TtsQueueItem>;
+}
+
+// store_audio_ended payload (F0-f / 00c seam). 00c's Phase-6 playback engine
+// emits this signal-OUT-only on natural utterance completion; F0's TtsQueueStore
+// subscribes and self-advances. It is a SIGNAL — F0 reads NO fields from it
+// (it just calls advance()), so the payload is a minimal marker. `reason` is an
+// optional free-text emit-side annotation 00c may set; F0 ignores it.
+export interface StoreAudioEndedPayload {
+  reason ?: string;
 }
 
 // ---------------------------------------------------------------------------
