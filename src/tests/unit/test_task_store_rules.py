@@ -556,5 +556,73 @@ class TestNormalizePatchFields:
         assert rules.normalize_patch_fields( { } ) == { }
 
 
+# ---------------------------------------------------------------------------
+# soft_guard_title (design 2026.06.29 task-list row redesign §4.3 / handoff #1)
+# The non-destructive soft title guard: an over-long title is NEVER rejected —
+# it is trimmed to the cap, with the overflow moved into an EMPTY body so
+# nothing is lost; a NON-empty body is never clobbered.
+# ---------------------------------------------------------------------------
+
+class TestSoftGuardTitle:
+
+    def test_under_cap_is_strict_no_op( self ):
+        # A title at/under the cap is returned verbatim with NO advisory.
+        title = "Harden Face B manager language"
+        out   = rules.soft_guard_title( title, None )
+        assert out == ( title, None, None )
+
+    def test_exactly_at_cap_is_no_op( self ):
+        # The boundary is inclusive — exactly cap chars is NOT over the cap.
+        title = "x" * rules.TITLE_SOFT_CAP
+        new_title, new_body, advisory = rules.soft_guard_title( title, "existing" )
+        assert new_title == title and new_body == "existing" and advisory is None
+
+    def test_over_cap_empty_body_moves_overflow_to_body( self ):
+        # Over-cap + empty body: title trimmed to cap, overflow lands in body,
+        # and trimmed-title + body reconstructs the original (nothing lost).
+        title = "A" * 50 + "B" * 40                              # 90 chars, cap 60
+        new_title, new_body, advisory = rules.soft_guard_title( title, None )
+        assert len( new_title ) == rules.TITLE_SOFT_CAP
+        assert new_title == title[ :rules.TITLE_SOFT_CAP ]
+        assert new_body  == title[ rules.TITLE_SOFT_CAP: ]
+        assert new_title + new_body == title                    # round-trips — nothing lost
+        assert advisory == {
+            "trimmed"               : True,
+            "original_length"       : 90,
+            "cap"                   : rules.TITLE_SOFT_CAP,
+            "overflow_moved_to_body": True,
+        }
+
+    @pytest.mark.parametrize( "blank_body", [ None, "", "   ", "\n\t " ] )
+    def test_over_cap_treats_whitespace_only_body_as_empty( self, blank_body ):
+        # None AND whitespace-only bodies both count as "empty" → overflow moves.
+        title = "z" * 80
+        new_title, new_body, advisory = rules.soft_guard_title( title, blank_body )
+        assert new_title == title[ :rules.TITLE_SOFT_CAP ]
+        assert new_body  == title[ rules.TITLE_SOFT_CAP: ]
+        assert advisory[ "overflow_moved_to_body" ] is True
+
+    def test_over_cap_nonempty_body_trims_title_only( self ):
+        # Over-cap + NON-empty body: title trimmed, body left UNTOUCHED (the
+        # ruled tradeoff — an existing body always wins; overflow is dropped).
+        title = "Q" * 75
+        body  = "important pre-existing detail"
+        new_title, new_body, advisory = rules.soft_guard_title( title, body )
+        assert new_title == title[ :rules.TITLE_SOFT_CAP ]
+        assert new_body == body                                 # never clobbered
+        assert advisory == {
+            "trimmed"               : True,
+            "original_length"       : 75,
+            "cap"                   : rules.TITLE_SOFT_CAP,
+            "overflow_moved_to_body": False,
+        }
+
+    def test_custom_cap_is_honored( self ):
+        # The cap is parameterizable — proves the guard is not hard-wired to 60.
+        new_title, new_body, advisory = rules.soft_guard_title( "abcdefghij", None, cap=4 )
+        assert new_title == "abcd" and new_body == "efghij"
+        assert advisory[ "cap" ] == 4 and advisory[ "original_length" ] == 10
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

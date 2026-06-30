@@ -129,6 +129,41 @@ def test_create_defaults_flow_to_repository( client, repo ):
     assert kwargs[ "priority" ] == "P2" and kwargs[ "owner_persona" ] is None
 
 
+def test_create_under_cap_title_guard_is_none( client, repo ):
+    # Soft title guard (design 2026.06.29 §4.3): an under-cap title flows through
+    # untouched and the response carries title_guard = None (the no-op advisory).
+    repo.create_item.return_value = make_item()
+    r = client.post( "/api/tasks", json=_CREATE_BODY )           # "build the store" — under cap
+    assert r.status_code == 201
+    assert r.json()[ "title_guard" ] is None
+    assert repo.create_item.call_args.kwargs[ "title" ] == "build the store"
+
+
+def test_create_over_cap_title_trimmed_overflow_to_empty_body( client, repo ):
+    # Over-cap title + no body: the SERVER trims the stored title to the cap and
+    # moves the overflow into body (non-destructive) BEFORE the repo write.
+    long_title = "T" * 90
+    repo.create_item.return_value = make_item()
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title=long_title ) )
+    assert r.status_code == 201
+    guard = r.json()[ "title_guard" ]
+    assert guard[ "trimmed" ] is True and guard[ "overflow_moved_to_body" ] is True
+    assert guard[ "original_length" ] == 90
+    kwargs = repo.create_item.call_args.kwargs
+    assert kwargs[ "title" ] == "T" * 60 and kwargs[ "body" ] == "T" * 30   # overflow → body
+
+
+def test_create_over_cap_title_with_body_trims_only( client, repo ):
+    # Over-cap title + existing body: title trimmed, body left UNTOUCHED.
+    repo.create_item.return_value = make_item()
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, title="W" * 80, body="keep me" ) )
+    assert r.status_code == 201
+    guard = r.json()[ "title_guard" ]
+    assert guard[ "overflow_moved_to_body" ] is False
+    kwargs = repo.create_item.call_args.kwargs
+    assert kwargs[ "title" ] == "W" * 60 and kwargs[ "body" ] == "keep me"   # body never clobbered
+
+
 def test_create_rejects_bad_enums_with_all_violations( client, repo ):
     bad = dict( _CREATE_BODY, item_class="chore", gate_class="side-gate", priority="P9", authority="by-fiat" )
     r = client.post( "/api/tasks", json=bad )

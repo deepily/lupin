@@ -257,6 +257,65 @@ def validate_create( item_class: str, gate_class: str, priority: str, authority:
     return errors
 
 
+# ---------------------------------------------------------------------------
+# Soft title guard (design 2026.06.29 task-list row redesign — §4.3 / handoff #1)
+# ---------------------------------------------------------------------------
+
+# The soft title-length cap (handoff #5 / D4): ~60 chars, applied IDENTICALLY to
+# this store-side guard AND each client's render-truncation backstop (one number
+# at every layer). Tune later if real rows warrant.
+TITLE_SOFT_CAP = 60
+
+
+def soft_guard_title( title, body, cap=TITLE_SOFT_CAP ):
+    """
+    Non-destructively soft-guard an over-long item title on write (design
+    2026.06.29 task-list row redesign §4.3, handoff ruling #1).
+
+    Workers stuff whole paragraphs into the `title` field; the row clients can
+    only show ~60 chars and the store's `body` field (the proper home for
+    detail) sits underused. This guard fixes the data at its SOURCE — the one
+    server-side write path EVERY caller (MCP wrapper, hook, raw POST) flows
+    through — so a paragraph-title never lands in the store unguarded. It is
+    FAIL-OPEN by ruling: an over-long title is NEVER a rejected write.
+
+    Requires:
+        - title is a non-empty string (the column is NOT NULL; the wire model
+          already rejects an empty title)
+        - body is the candidate body value — a string or None
+        - cap is a positive int (the shared ~60 char limit)
+
+    Ensures:
+        - title length <= cap -> returns ( title, body, None ): a strict no-op,
+          nothing trimmed, no advisory
+        - title length  > cap -> returns ( title[:cap], new_body, advisory ):
+            * the stored title is trimmed to EXACTLY cap chars
+            * when body is empty (None / whitespace-only): the overflow
+              (title[cap:]) is moved into body, so trimmed-title + body
+              reconstructs the original — NOTHING is lost
+            * when body is non-empty: body is left UNTOUCHED (never clobbered);
+              the overflow is dropped from the title only (the ruled tradeoff —
+              an existing body always wins)
+            * advisory is a dict { trimmed, original_length, cap,
+              overflow_moved_to_body } describing what happened
+        - never raises; never returns a title longer than cap
+    """
+    if len( title ) <= cap:
+        return title, body, None
+
+    trimmed       = title[ :cap ]
+    overflow      = title[ cap: ]
+    body_is_empty = body is None or not body.strip()
+
+    advisory = {
+        "trimmed"               : True,
+        "original_length"       : len( title ),
+        "cap"                   : cap,
+        "overflow_moved_to_body": body_is_empty,
+    }
+    return ( trimmed, overflow, advisory ) if body_is_empty else ( trimmed, body, advisory )
+
+
 def validate_transition(
     from_status   : str,
     to_status     : str,

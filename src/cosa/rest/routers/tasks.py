@@ -350,20 +350,30 @@ def create_task(
 
     Ensures:
         - enum fields validated via rules.validate_create (422 on violation)
+        - an over-long title is SOFT-guarded (non-destructive, never rejected):
+          trimmed to the cap, with the overflow moved into an empty body
+          (rules.soft_guard_title, design 2026.06.29 §4.3 / handoff #1)
         - item + creation event written atomically (one get_db() transaction)
-        - returns the serialized item (201)
+        - returns the serialized item (201) plus a `title_guard` advisory field
+          (None when the title was under the cap)
     """
     _reject_if_errors( rules.validate_create( payload.item_class, payload.gate_class, payload.priority, payload.authority, payload.urgency ) )
+
+    # Soft title guard (design 2026.06.29 §4.3 / handoff #1): trim an over-long
+    # title to the shared cap and move the overflow into an empty body — at the
+    # SERVER write path so EVERY caller (MCP wrapper, hook, raw POST) is covered.
+    # Fail-open: the write is never rejected for title length.
+    guarded_title, guarded_body, title_guard = rules.soft_guard_title( payload.title, payload.body )
 
     with get_db() as session:
         repo = TaskRepository( session )
         item = repo.create_item(
             item_class          = payload.item_class,
-            title               = payload.title,
+            title               = guarded_title,
             project             = _canon_project( payload.project ),
             created_by          = payload.created_by,
             authority           = payload.authority,
-            body                = payload.body,
+            body                = guarded_body,
             owner_persona       = _canon_persona( payload.owner_persona ),
             accountable_manager = _canon_persona( payload.accountable_manager ),
             gate_class          = payload.gate_class,
@@ -372,7 +382,9 @@ def create_task(
             source_qid          = payload.source_qid,
             correlation_key     = payload.correlation_key,
         )
-        return _serialize_item( item )
+        result = _serialize_item( item )
+        result[ "title_guard" ] = title_guard
+        return result
 
 
 @router.post(
