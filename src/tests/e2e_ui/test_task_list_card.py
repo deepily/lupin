@@ -183,6 +183,27 @@ def _goto_notifications( page ):
     page.wait_for_load_state( "networkidle" )
 
 
+# Measures the open #task-body-overlay's computed position + geometry vs the
+# viewport (used by the f7486a9d fixed-centered-modal regression guard).
+_OVERLAY_METRICS_JS = """() => {
+    const o = document.getElementById( "task-body-overlay" );
+    const p = o.querySelector( ".task-body-overlay-content" );
+    const cs = getComputedStyle( o );
+    const orect = o.getBoundingClientRect();
+    const prect = p.getBoundingClientRect();
+    return {
+        position : cs.position,
+        vw       : window.innerWidth,
+        vh       : window.innerHeight,
+        o_left   : orect.left,
+        o_top    : orect.top,
+        o_width  : orect.width,
+        o_height : orect.height,
+        panel_cx : prect.left + prect.width / 2,
+    };
+}"""
+
+
 # ---------------------------------------------------------------------------
 # Mount
 # ---------------------------------------------------------------------------
@@ -702,6 +723,48 @@ class TestTaskListRowRedesign:
         dimmed = logged_in_page.locator( "#task-list-container .task-detail-emoji.task-detail-empty" )
         assert dimmed.count() >= 1
         assert dimmed.first.get_attribute( "data-task-body" ) is None
+
+    def test_live_body_overlay_computes_fixed_centered_modal( self, logged_in_page ):
+        """
+        REGRESSION GUARD (bug f7486a9d): the opened 📄 overlay must COMPUTE
+        position:fixed and cover the full viewport, centering its content — NOT
+        flow to the page foot as a position:static block (the symptom a stale
+        task-list.css cache-bust token produced: the overlay div attached fine
+        but rendered static because the cached CSS lacked the .task-body-overlay
+        rule). This is the computed-style assertion the open/dismiss tests above
+        do not make — they would pass even with the overlay dumped at page-foot.
+
+        Requires:
+            - Authenticated session; the t-blocked row carries a live 📄
+        Ensures:
+            - getComputedStyle(#task-body-overlay).position == "fixed"
+            - the overlay rect anchors at the viewport origin and spans it (inset:0)
+            - the content panel is horizontally centered in the viewport
+        """
+        _route_tasks( logged_in_page, { "mode": "ok" } )
+        _goto_notifications( logged_in_page )
+        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
+
+        logged_in_page.locator(
+            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
+        ).first.click()
+        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+
+        metrics = logged_in_page.evaluate( _OVERLAY_METRICS_JS )
+
+        assert metrics[ "position" ] == "fixed", \
+            f"overlay must be position:fixed (regression: stale CSS → static); got {metrics[ 'position' ]!r}"
+        # inset:0 → the fixed overlay anchors at the origin (NOT below page content)
+        assert abs( metrics[ "o_left" ] ) <= 1 and abs( metrics[ "o_top" ] ) <= 1, \
+            f"fixed overlay must anchor at viewport origin, not page-foot; got left={metrics[ 'o_left' ]} top={metrics[ 'o_top' ]}"
+        assert abs( metrics[ "o_width" ] - metrics[ "vw" ] ) <= 2 and abs( metrics[ "o_height" ] - metrics[ "vh" ] ) <= 2, \
+            "fixed overlay must span the full viewport (inset:0)"
+        # flex centering → the content panel sits at the horizontal center
+        assert abs( metrics[ "panel_cx" ] - metrics[ "vw" ] / 2 ) <= 2, \
+            "overlay content panel must be horizontally centered"
+
+        logged_in_page.keyboard.press( "Escape" )
+        logged_in_page.wait_for_selector( "#task-body-overlay", state="detached" )
 
 
 # ---------------------------------------------------------------------------

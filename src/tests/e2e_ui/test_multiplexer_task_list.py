@@ -278,3 +278,56 @@ def test_mux_empty_body_emoji_is_dimmed_in_place( page ):
     dimmed = page.locator( ".task-detail-emoji.task-detail-empty" )
     assert dimmed.count() >= 1
     assert dimmed.first.get_attribute( "data-task-body" ) is None
+
+
+# Measures the open #task-body-overlay's computed position + geometry vs the
+# viewport (the f7486a9d fixed-centered-modal regression guard — mux parity).
+_OVERLAY_METRICS_JS = """() => {
+    const o = document.getElementById( "task-body-overlay" );
+    const p = o.querySelector( ".task-body-overlay-content" );
+    const cs = getComputedStyle( o );
+    const orect = o.getBoundingClientRect();
+    const prect = p.getBoundingClientRect();
+    return {
+        position : cs.position,
+        vw       : window.innerWidth,
+        vh       : window.innerHeight,
+        o_left   : orect.left,
+        o_top    : orect.top,
+        o_width  : orect.width,
+        o_height : orect.height,
+        panel_cx : prect.left + prect.width / 2,
+    };
+}"""
+
+
+def test_mux_body_overlay_computes_fixed_centered_modal( page ):
+    """
+    REGRESSION GUARD (bug f7486a9d), MUX PARITY: the opened 📄 overlay must
+    COMPUTE position:fixed, cover the full viewport, and center its content
+    panel — NOT flow to the page foot as a position:static block. This is the
+    computed-style assertion the open/dismiss tests above omit (they pass even
+    when the overlay is dumped at page-foot). Locks the mux to the same
+    centered-modal contract Rick wants for both clients.
+    """
+    _open_with_tasks( page, _POPULATED )
+    page.wait_for_selector( ".task-list-table", timeout=3000 )
+
+    page.locator( ".task-detail-emoji:not(.task-detail-empty)" ).first.click()
+    page.wait_for_selector( "#task-body-overlay", state="attached", timeout=3000 )
+
+    metrics = page.evaluate( _OVERLAY_METRICS_JS )
+
+    assert metrics[ "position" ] == "fixed", \
+        f"mux overlay must be position:fixed (regression: stale CSS → static); got {metrics[ 'position' ]!r}"
+    # inset:0 → the fixed overlay anchors at the origin (NOT below page content)
+    assert abs( metrics[ "o_left" ] ) <= 1 and abs( metrics[ "o_top" ] ) <= 1, \
+        f"mux fixed overlay must anchor at viewport origin, not page-foot; got left={metrics[ 'o_left' ]} top={metrics[ 'o_top' ]}"
+    assert abs( metrics[ "o_width" ] - metrics[ "vw" ] ) <= 2 and abs( metrics[ "o_height" ] - metrics[ "vh" ] ) <= 2, \
+        "mux fixed overlay must span the full viewport (inset:0)"
+    # flex centering → the content panel sits at the horizontal center
+    assert abs( metrics[ "panel_cx" ] - metrics[ "vw" ] / 2 ) <= 2, \
+        "mux overlay content panel must be horizontally centered"
+
+    page.keyboard.press( "Escape" )
+    page.wait_for_selector( "#task-body-overlay", state="detached", timeout=3000 )
