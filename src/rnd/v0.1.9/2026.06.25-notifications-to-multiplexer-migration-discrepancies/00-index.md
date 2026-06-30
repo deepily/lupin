@@ -62,8 +62,8 @@ time, verifying **functionality + layout** for each.
 | 3 | `action-required-section` | Action Required | folded into `notifications-pane` | ⚠️ **PARTIAL + RELOCATED** (lost active/pending model, count, kbd-nav, toolbar toggle) |
 | 4 | `tts-queue-section` | TTS Queue | `tts-pane` (stub) | ⚠️ **REMAPPED/PARTIAL** (transport-only; lost per-item queue, clear-all, focus resume) |
 | 5 | `section-notifications` | **Notifications (CC sessions)** | `notifications-pane` | 🔬 **ANALYZED** (docs 01/02) — B1–B5, plan `03-` pending |
-| 6 | `section-fleet-status` | Fleet Status | `fleet-status-pane` | ✅ **FAITHFUL PORT** (live-check owed) |
-| 7 | `section-task-list` | Task List | `task-list-pane` | ✅ **PORT + SUPERSET** (mux adds edit/drop vs legacy read-only) |
+| 6 | `section-fleet-status` | Fleet Status | `fleet-status-pane` | ✅ **FAITHFUL PORT — VERIFIED** (`93-` closure; 191/191 tests) |
+| 7 | `section-task-list` | Task List | `task-list-pane` | ✅ **PORT + SUPERSET — VERIFIED** (read-only-contract superset ratified, ruling (d); `93-` closure) |
 | 8 | `filter-settings-section` | Filter Settings (Admin) | none | ❌ **TRULY ABSENT** (coupled to #9 filter) |
 | 9 | `section-queues` | Job Queues | `jobs-pane` | ⚠️ **PARTIAL** (display ok; delete/retry/time-window/pagination missing — "Phase 6b") |
 | 10 | `section-time-saved` | Time Saved | none | ❌ **TRULY ABSENT** (APIs exist; moderate) |
