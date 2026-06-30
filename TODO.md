@@ -1,5 +1,10 @@
 # TODO
 
+## ☀️ FIRST THING — 2026-06-30 AM (Rick, voice, 2026-06-29 night)
+**Revisit decision `d1bdb7ca` — the mux TTS architecture gate** (non-blocking; parked from tonight's mux-parity build). **The question**: should the multiplexer flip from **server-push** TTS (receive-only today) to **client-initiate** TTS, so F0-d's call-site can set `TtsQueueStore.current()` before a speak request fires? The mux currently has NO client→server TTS path (verified: `AudioTransport` receive-only, no `POST /api/tts`, server speak-signals dead). This gates **F0-d's enqueue call-site + the mux speak path**; pairs with the 00c / Plan-01 speak-gesture lane. F0 foundation already shipped complete without it; B4's identity half is mock-verified until this lands. **→ Bring it to Rick first thing as a framed decision** (server-push vs client-initiate · pros/cons + a recommendation). Store item: `d1bdb7ca` (operator-gate, owner mr radio).
+
+---
+
 ## 🔝 #1 PRIORITY for the `wip-v0.1.9` bug-fix branch (Rick, 2026-06-26) — Multiplexer → notifications-client LAYOUT-LEVEL parity
 
 **Directive**: get the multiplexer's CC-notifications surface to *real layout-level parity* with the legacy notifications client. This is the **#1 priority for the current bug-fix development branch** (Rick, voice, 2026-06-26).
