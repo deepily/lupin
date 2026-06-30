@@ -2,6 +2,23 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.29 - Session 2f4feb0a (Mr. Radio 🦉) | Mux-parity Plan-01 chain DRIVEN to completion (B3·B2·B4·F0 + 2 reds) · 4 workers spawned+reaped clean · serial-merge + PUSH + backup · architecture gate filed · post-game defer-bias lesson
+
+**Accomplishments**:
+- **Drove the ratified mux-parity Plan-01 bucket chain to completion as fleet manager** — every lane reviewed against LIVE code (not summaries), committed-held, then merged + pushed:
+  - **B3** own-only notification filter + section-header controls (count/history/clear-all) — worker **Sam 🎙️**, `0f6d9ba0`, task `a84552cc`. Ruled the filter axis Option A (`direction`, since the mux payload has no addressee); verified the partial-failure clear-all + ownership boundary against live code.
+  - **B4 KEYSTONE** per-message active-TTS ⏸/⏹ + proxy-ratify link — worker **Rio ⚡** (own worktree), `24298595`, task `6c092ed0`. Ruled the F0-unbuilt blocker → **injected `TtsQueueStoreLike{current()}` seam** making the load-bearing COND-2 read-only invariant **provable by interface shape**; grep-verified zero queue-mutators + the non-vacuous one-bubble transition test.
+  - **B2** TTS-preview slider relocation into the B3 header region — worker **Clayton 😎**, `f86efef3`, task `2446d2e1`. Ruled Option A (sibling-not-child placement, avoiding the `replaceChildren` wipe-trap Sam pre-flagged); verified moved-not-duplicated.
+  - **F0** AudioStore/TtsQueueStore foundation (00b a/b/c/e/f) — worker **Cheech 🌿**, `f2204db1`, task `12d8492b`. Verified COND-2 wiring + canonical cross-plan union decls.
+  - **2 pre-existing reds** (governance-test hermeticity `b0397874`, C2-b premise `414e6957`) — Clayton, `e0b3be32`/`d3b668d3`. Independently confirmed his deviation (delete-would-regress) was correct.
+- **Key rulings**: F0-d call-site **deferred on a VERIFIED architecture gate** (mux is receive-only for TTS — no client-initiate path; building one = server-push→client-initiate flip = Rick's call) → filed **decision `d1bdb7ca`** (non-blocking). Distinguished a real hard-blocker from a feasibility dodge.
+- **Serial-merge + PUSH + backup** (Rick directive `563747ef`): `--no-ff` merged Rio's B4 + Cheech's F0 into `wip-v0.1.9` (`c2cfa731`/`d89e3e20`), deduped `store_tts_queue_changed` to F0's canonical decl; **green gate** `tsc --noEmit` 0 + full TS suite **1993/1993** pass; **PUSHED** `wip-v0.1.9` → origin (`b9865eb9..f333b6c2`, 23 commits incl Tiberius's 7); **BACKED UP** DATA01→DATA02 (1.54G, clean). LoC rollup (María): cross-repo **+5,196 net**, lupin **+4,750** (TS-heavy).
+- **Fleet**: spawned + reaped 4 worker-sessions clean (Sam, Rio, Clayton, Cheech) — no zombies, verified clean trees + commits, holds refreshed every turn.
+- **Post-game**: retro to `post-game` commons; **3/3 fleet convergence** (with Tiberius + María) on ONE drive-vs-hold root cause. Added auto-memory `feedback_defer_bias_check_mechanism_and_intent` (before defer/checkpoint/narrow: does a mechanism let me proceed? am I narrowing intent?).
+- **Process lesson (one root, Rick-surfaced)**: deferred F0-staffing on a wrong "types.ts hotspot" rationale (worktree isolation already solves it) + misread the wind-down "finish" as "checkpoint/park" — both = **defer-bias under perceived complexity** when a mechanism to proceed exists or the instruction is plainly "finish."
+
+**Files changed** (this session's doc commit): `history.md` + `TODO.md`. Code rode the worker commits + 2 merge commits, all PUSHED in the 23-commit bundle. Store: `a84552cc`/`6c092ed0`/`2446d2e1`/`12d8492b`/`b0397874`/`414e6957` done; `d1bdb7ca` (decision, mux TTS architecture gate) filed. **Pushed + backed up per Rick directive — Mr Radio owns push/backup; Tiberius = no-push.**
+
 ### 2026.06.29 - Session 8d3af389 (Tiberius 👑) | 3 tasks DONE (cascade-retirement · Face-B wording · task-list row redesign) · 3 workers spawned+reaped clean · post-game retro · 3 Rick-corrected drive-vs-defer lessons
 
 **Accomplishments**:
