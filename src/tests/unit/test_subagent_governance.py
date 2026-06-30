@@ -48,9 +48,12 @@ def test_governance_disabled_other_values( val ):
 
 # ── decision logic (enabled forced True via kwarg) ───────────────────────────────
 
-def test_disabled_allows_even_a_manager( tmp_path ):
+def test_disabled_allows_even_a_manager( tmp_path, monkeypatch ):
+    # Hermetic: force the enable-toggle OFF so the disabled-path assertion holds
+    # regardless of the ambient launch env (which may export the flag truthy).
+    monkeypatch.delenv( "LUPIN_SUBAGENT_GOVERNANCE", raising=False )
     _write_manifest( tmp_path, "mgr-1", [ { "session_id": "w1" } ] )
-    # enabled defaults to the (unset) env → False → allow
+    # enabled defaults to the (now-unset) env → False → allow
     assert subagent_deny_reason( "Task", "mgr-1", session_dir=tmp_path ) is None
 
 def test_non_subagent_tool_is_allowed( tmp_path ):
