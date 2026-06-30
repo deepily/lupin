@@ -61,3 +61,37 @@ test("send button starts disabled", () => {
   const send = host.querySelector("#broadcast-send-button") as HTMLButtonElement;
   assert.equal(send.disabled, true);
 });
+
+// B1 (01-A) — commons "Recent Activity" chrome re-nested INSIDE the broadcast card.
+test("B1: renders the re-nested commons Recent-Activity chrome inside the card", () => {
+  const host = mountFragment(true);
+  // The full chrome CommonsActivityRenderer.mount() querySelects must be present.
+  assert.notEqual(host.querySelector("#commons-activity-pane"), null);
+  assert.notEqual(host.querySelector("#commons-activity-header"), null);
+  assert.notEqual(host.querySelector("#commons-activity-window"), null);
+  assert.notEqual(host.querySelector("#commons-activity-filter-direction"), null);
+  assert.notEqual(host.querySelector("#commons-activity-filter-kind"), null);
+  assert.notEqual(host.querySelector("#commons-activity-filter-persona"), null);
+  assert.notEqual(host.querySelector("#commons-activity-refresh"), null);
+  assert.notEqual(host.querySelector("#commons-activity-body"), null);
+  assert.notEqual(host.querySelector("#commons-activity-entries"), null);
+  assert.notEqual(host.querySelector("#commons-activity-empty"), null);
+});
+
+test("B1: the commons chrome is a DESCENDANT of the broadcast card (not a sibling)", () => {
+  const host = mountFragment(true);
+  const card    = host.querySelector("#broadcast-submit-card") as HTMLElement;
+  const commons = host.querySelector("#commons-activity-pane") as HTMLElement;
+  assert.notEqual(card, null);
+  assert.notEqual(commons, null);
+  assert.equal(card.contains(commons), true);
+});
+
+test("B1: the commons chrome is placed OUTSIDE #broadcast-recipients-row (F-Sam-BA1 survival)", () => {
+  const host    = mountFragment(true);
+  const row     = host.querySelector("#broadcast-recipients-row") as HTMLElement;
+  const commons = host.querySelector("#commons-activity-pane") as HTMLElement;
+  // It must NOT be inside the recipients-row — that row is replaceChildren()'d on
+  // every recipient refresh, which would wipe a nested commons subtree.
+  assert.equal(row.contains(commons), false);
+});

@@ -448,21 +448,11 @@ function bootMultiplexer(): void {
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
   readingPaneRenderer.mount(readingPaneMountEl);
-  // Lane D WP3 — commons "Recent Activity" panel. Carries `api` (third field,
-  // Tiberius-approved — JobsPaneRenderer precedent) for REST hydrate
-  // (/api/commons/broadcast-history) + the persona-pool filter dropdown. The
-  // renderer also subscribes to store_session_strip_changed (WP7) to refresh
-  // its persona filter when Lane B's strip changes.
-  const commonsActivityRenderer = createCommonsActivityRenderer({
-    eventBus,
-    stores : { commons: stores.commons },
-    api    : apiClient,
-  });
-  const commonsActivityMountEl = document.getElementById("commons-activity-pane");
-  if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found");
-  commonsActivityRenderer.mount(commonsActivityMountEl);
   // Lane C (v0.1.9) — broadcast-to-all-CC compose card. Recipient auto-refresh
   // rides the existing store_session_strip_changed event (no new EventBus event).
+  // B1 (01-A): mounted FIRST so its rendered subtree hosts the re-nested commons
+  // "Recent Activity" chrome (broadcastCard.ts) BEFORE CommonsActivityRenderer
+  // mounts onto it.
   const broadcastCardRenderer = createBroadcastCardRenderer({
     eventBus,
     store        : stores.broadcast,
@@ -472,6 +462,23 @@ function bootMultiplexer(): void {
   const broadcastCardMountEl = document.getElementById("broadcast-card-mount");
   if (broadcastCardMountEl === null) throw new Error("multiplexer: #broadcast-card-mount not found");
   broadcastCardRenderer.mount(broadcastCardMountEl);
+  // Lane D WP3 — commons "Recent Activity" panel. Carries `api` (third field,
+  // Tiberius-approved — JobsPaneRenderer precedent) for REST hydrate
+  // (/api/commons/broadcast-history) + the persona-pool filter dropdown. The
+  // renderer also subscribes to store_session_strip_changed (WP7) to refresh
+  // its persona filter when Lane B's strip changes.
+  // B1 (01-A): the commons chrome is now renderer-PRODUCED inside the broadcast
+  // card, so its mount root is acquired by a DYNAMIC post-mount querySelector on
+  // the LIVE rendered broadcast subtree (a page-load getElementById would resolve
+  // null → throw). broadcastCardRenderer.mount() above has already rendered it.
+  const commonsActivityRenderer = createCommonsActivityRenderer({
+    eventBus,
+    stores : { commons: stores.commons },
+    api    : apiClient,
+  });
+  const commonsActivityMountEl = broadcastCardMountEl.querySelector<HTMLElement>("#commons-activity-pane");
+  if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found inside rendered broadcast card");
+  commonsActivityRenderer.mount(commonsActivityMountEl);
   // Lane E WP13 — TTS preview-fraction slider. Storage-backed (no store): the
   // StorageService override is layered on the INI default seeded late via the
   // /api/multiplexer/config `.then` above (seedIniDefault).

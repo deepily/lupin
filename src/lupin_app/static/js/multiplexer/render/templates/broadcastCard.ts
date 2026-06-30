@@ -42,7 +42,7 @@ export function renderBroadcastCard( cardOpen: boolean ): DocumentFragment {
   // template) so their branches are normal, fully-coverable lines.
   const openAttr = cardOpen ? "true" : "false";
   const glyph    = cardOpen ? "▼" : "▶";
-  /* c8 ignore next 46 */ // tagged-template literal: c8 reports phantom branches on each $-interpolation position (commonsActivityEntry.ts:74 pattern); the runtime path is straight-line and exercised by both (open + closed) template-test fixtures.
+  /* c8 ignore next 98 */ // tagged-template literal: c8 reports phantom branches on each $-interpolation position (commonsActivityEntry.ts:74 pattern); the runtime path is straight-line and exercised by both (open + closed) template-test fixtures. (B1 01-A: +52 static-markup lines for the re-nested commons "Recent Activity" chrome — no interpolations; presence asserted by templates_broadcast_card.test.ts.)
   return html`
     <div class="job-submit-card broadcast-submit-card"
          id="broadcast-submit-card"
@@ -85,6 +85,58 @@ export function renderBroadcastCard( cardOpen: boolean ): DocumentFragment {
           </div>
           <div id="broadcast-submit-status"
                data-testid="multiplexer-broadcast-status"></div>
+          <!-- B1 (01-A): commons "Recent Activity" chrome re-nested INSIDE the
+               broadcast card (was a standalone #commons-activity-pane sibling).
+               Placed OUTSIDE #broadcast-recipients-row so it survives the
+               recipientsRow.replaceChildren() recipient refresh (F-Sam-BA1).
+               CommonsActivityRenderer mounts onto this subtree (boot.ts does a
+               post-mount querySelector for #commons-activity-pane). -->
+          <section id="commons-activity-pane"
+                   data-testid="multiplexer-commons-activity-pane">
+            <div id="commons-activity-header"
+                 data-testid="multiplexer-commons-activity-header"
+                 role="button" tabindex="0">
+              <h5>🛰️ Recent Activity</h5>
+              <div class="commons-activity-controls">
+                <select id="commons-activity-window"
+                        data-testid="multiplexer-commons-activity-window"
+                        aria-label="Activity time window">
+                  <option value="today">Today</option>
+                  <option value="1">Last hour</option>
+                  <option value="6">Last 6h</option>
+                  <option value="24">Last 24h</option>
+                  <option value="all">All</option>
+                </select>
+                <select id="commons-activity-filter-direction"
+                        class="commons-activity-filter-select"
+                        aria-label="Filter by direction">
+                  <option value="">Any direction</option>
+                  <option value="sender">From persona</option>
+                  <option value="recipient">To persona</option>
+                </select>
+                <select id="commons-activity-filter-kind"
+                        class="commons-activity-filter-select"
+                        aria-label="Filter by kind">
+                  <option value="all">All kinds</option>
+                  <option value="heartbeats">Heartbeats</option>
+                  <option value="personas">Persona DMs</option>
+                  <option value="broadcasts">Broadcasts</option>
+                </select>
+                <select id="commons-activity-filter-persona"
+                        class="commons-activity-filter-select"
+                        aria-label="Filter by persona"></select>
+                <button id="commons-activity-refresh" type="button"
+                        data-testid="multiplexer-commons-activity-refresh"
+                        aria-label="Refresh activity">⟳</button>
+              </div>
+            </div>
+            <div id="commons-activity-body"
+                 data-testid="multiplexer-commons-activity-body">
+              <div id="commons-activity-entries"
+                   data-testid="multiplexer-commons-activity-entries"></div>
+              <div id="commons-activity-empty" hidden></div>
+            </div>
+          </section>
         </div>
       </div>
     </div>

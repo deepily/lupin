@@ -189,6 +189,27 @@ test("forceRenderForTesting re-renders chips + send state", async () => {
   assert.equal(chips(root).length, 3);
 });
 
+// B1 (01-A, F-Sam-BA1) — the re-nested commons "Recent Activity" chrome is a
+// SIBLING of #broadcast-recipients-row (not a child), so it survives the
+// recipientsRow.replaceChildren() that runs on every recipient refresh.
+test("B1: nested commons chrome survives a recipient-row refresh (F-Sam-BA1)", async () => {
+  const { root } = await setup();
+  // Present after the initial mount + first performRefresh().
+  assert.notEqual(root.querySelector("#commons-activity-pane"), null);
+  assert.notEqual(root.querySelector("#commons-activity-entries"), null);
+
+  // Trigger an explicit recipient refresh → renderChips → recipientsRow.replaceChildren().
+  $(root, "#broadcast-recipients-refresh").click();
+  await flush();
+
+  // The recipients row was wiped + rebuilt, but the commons subtree is untouched.
+  const commons = root.querySelector("#commons-activity-pane");
+  assert.notEqual(commons, null);
+  assert.notEqual(root.querySelector("#commons-activity-entries"), null);
+  // And it genuinely lives OUTSIDE the recipients row.
+  assert.equal($(root, "#broadcast-recipients-row").contains(commons), false);
+});
+
 // ---------------------------------------------------------------------------
 // Recipients
 // ---------------------------------------------------------------------------
