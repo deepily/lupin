@@ -2,6 +2,19 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.29 - Session 8d3af389 (Tiberius 👑) | 3 tasks DONE (cascade-retirement · Face-B wording · task-list row redesign) · 3 workers spawned+reaped clean · post-game retro · 3 Rick-corrected drive-vs-defer lessons
+
+**Accomplishments**:
+- **`e62d5edc` DONE — retired the legacy cascade-heartbeat crutch scripts** (worker Rachel 🕊️, manager-verified): deleted `cascade_heartbeat_scheduler.py` + `start-cascade-heartbeat.sh` + `test_cascade_budget_tracker.py`, retargeted 6 comment-refs, closed the moot tmux-race bug-queue item. Greenlit by USER BROADCAST `ddaa2882` (scheduler waived; liveness = Arbiter :8001 + Stop-hook) + the I8 retirement spec. Budget functions retired with the scripts (no surviving consumer). Commits `46d72786` + `e812416e`; touched tests 101/101.
+- **`96d1b8ca` DONE — Face B operator-gate "action-required" wording** (worker Rachel, manager-verified): applied María's Rick-locked frozen verbatim string to the two open-gate signals in `heartbeat_work_owed.py`. **Caught a wording DIVERGENCE pre-edit** — the stale task-body paraphrase had dropped the load-bearing "AND mint the typed operator gate" clause; redirected Rachel to María's canonical text before it shipped wrong. Commit `eb991d46`; `test_heartbeat_work_owed.py` 77/77, 100% L/B.
+- **`3b85863e` DONE — task-list row redesign, 3 surfaces** (worker Krishna 🦚, manager-verified): store-side `task_create` soft title-guard (auto-trim + overflow→body, non-rejecting) + notifications-client row + multiplexer-client row (8-char id column + ~60-char title truncation/tooltip + 📄 body-overlay + dim-empty-emoji). **Ruled the A/B row-shape fork AUGMENT** (keep existing columns + accordion, add the 3 new elements) within Rick's ratified plan + invite-objection. Commits `ad1541fd` + `59e381af` + `80ef5e1b`; re-verified S1 222 / S2 106 / S3 135-targeted PASS + `tsc` clean. Residual (rides Rick's push/merge): scheduled :8000 e2e needs a mux dist rebuild.
+- **`5832bb6f` filed** (P3): sync stale ini `heartbeat manager goal line` to role-goals v1.2 Face-B clause (Rachel's adjacent finding).
+- **Fleet**: spawned + reaped 3 worker-sessions (Rachel; Krishna re-spawned after the wind-down correction) clean — no zombies, verified clean trees, honored holds refreshed every turn.
+- **Post-game**: posted retro to the `post-game` commons topic; 3/3 fleet convergence (with María 🌸 + Mr Radio 🦉) on ONE drive-vs-defer root cause. Added auto-memory `feedback_winddown_finish_means_complete_not_park`.
+- **3 Rick-corrected process lessons (one root)**: asked permission to start a task · called a self-imposed `next_chase_ts` "Rick's deadline" · misread the wind-down "finish" as "stop + park" — all = **park-and-defer instead of drive-and-own** (strong on craft, weak on agency).
+
+**Files changed** (all worker commits HELD for Rick's push): cascade scripts deleted + test fallout (`46d72786`/`e812416e`); `heartbeat_work_owed.py` (`eb991d46`); `task_store_rules.py` + `routers/tasks.py` + `notifications.js` + mux `render/*` + `task-list.css` (`ad1541fd`/`59e381af`/`80ef5e1b`). Store: `e62d5edc`/`96d1b8ca`/`3b85863e` done, `5832bb6f` filed. `history.md` + memento (this checkpoint, held). **Tiberius session = NO push, NO backup per Rick directive `563747ef`** (Mr Radio + María own push/backup + loc rollups).
+
 ### 2026.06.26 - Session bbda1986 (Mr. Radio 🦉) | Arbiter MANAGER-STALE double-delivery fix (committed-held + LIVE) · tmux mouse-disable env · d0a057b3 dropped · two Rick-corrected process lessons
 
 **Accomplishments**:
