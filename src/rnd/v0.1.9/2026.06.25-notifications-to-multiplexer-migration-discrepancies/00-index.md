@@ -15,6 +15,7 @@ A single holder for **every discrepancy** found between the legacy notifications
 | 00 | this index | holder purpose + running discrepancy ledger + master accordion inventory |
 | 01 | [Section-layout gap analysis + comparison methodology](01-mux-vs-legacy-notifications-section-gap-analysis.md) | section-level order divergence (broadcast / focus-bar / TTS-preview / Recent-Activity / per-message controls) + an 8-step scrupulous-comparison methodology |
 | 02 | [Reconciliation with in-flight parity work](02-reconciliation-with-in-flight-parity-work.md) | B1–B5 vs the 06.22/06.24 builds: what's already done (`4b33ceb7`), what's net-new, and the **B1 ↔ `4b33ceb7` sibling-mount conflict** |
+| 03 | [Interactive defects + visual-parity checklist](03-interactive-defects-progress-group-and-reading-pane.md) | **SWE remediation brief** (2026-06-30 A/B drill-down): 🐞 progress-group head rendered 176× per card (`notificationItem.ts:85`) + 🐞 Reading-Pane `URIError` on `%`-bearing abstracts (`ReadingPaneRenderer.ts:428`); **§5 15-row visual-parity checklist** — mux reads as unstyled scaffolding; **Action-Required (blue) + Playing (green) panels MVP-mandatory**, cramped headers / orphaned controls / missing CC-card chrome. Toggles + accordions verified GREEN. |
 | 04 | [Remaining-accordions audit](04-remaining-accordions-audit.md) | source-level verdicts for the **other 12 accordions** (2 faithful ports · 3 partial/remapped · 7 absent) + new design calls (d)–(g) |
 
 ## Running discrepancy ledger
