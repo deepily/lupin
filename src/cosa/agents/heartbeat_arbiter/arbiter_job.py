@@ -2786,16 +2786,25 @@ class ArbiterConsumerJob( AgenticJobBase ):
         is a REAL stall and STILL fires (commons chatter is liveness, not
         progress; it never reaches the signature).
 
-        L1 STORE-AWARENESS (2026-06-17, build-plan §3.1): a session whose persona
-        classifies BLOCKED_ON_USER (every owed item Rick-gated) is EXCLUDED from
-        the live-owed set — a fleet whose ONLY live owed work is parked on Rick is
-        NOT a stall (the manager-in-`holding`-on-Rick false-fire). owed_class is
-        the per-poll store classification; when it is None/empty (seam unwired,
-        store UNKNOWN), NO session is excluded → TODAY'S behavior (fail SAFE).
+        L1 STORE-AWARENESS (2026-06-17, build-plan §3.1): a session whose persona's
+        owed work is "not owed" — entirely Rick-gated (BLOCKED_ON_USER) OR zero
+        (DONE) — is EXCLUDED from the live-owed set. A fleet whose ONLY live owed
+        work is parked on Rick is NOT a stall (the manager-in-`holding`-on-Rick
+        false-fire); a fleet that is DONE-but-alive-and-frozen owes NOTHING, so it
+        is NOT a stall either (bug d2a4c040 false-positive). The exclusion routes
+        through the shared `owed_class_suppresses` predicate (NOT_OWED_CLASSES) —
+        the SAME suppression set #9 (acks) and #F2 (staleness) honor and the
+        sibling `session_is_not_owed` seam composes — so the hand-roll, the
+        predicate, and its docstring no longer drift. owed_class is the per-poll
+        store classification; when it is None/empty (seam unwired) or a persona
+        classifies UNKNOWN (store hiccup), the predicate does NOT suppress → NO
+        session is excluded → TODAY'S behavior (fail SAFE — never silence a real
+        stall).
 
         Ensures:
             - returns True iff some view is alive AND state ∈ {working, stuck,
-              holding} AND its persona is NOT classified BLOCKED_ON_USER; never raises
+              holding} AND its persona's owed-class does NOT suppress (i.e. is
+              neither BLOCKED_ON_USER nor DONE); never raises
         """
         owed_class = owed_class or { }
         for v in fleet_view.values():
@@ -2803,8 +2812,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
                      and v.get( "state" ) in ( "working", "stuck", "holding" ) ):
                 continue
             persona = v.get( "persona" )
-            if persona is not None and owed_class.get( persona ) == CLASS_BLOCKED_ON_USER:
-                continue                                # Rick-gated owed work is not a stall
+            if persona is not None and owed_class_suppresses( owed_class.get( persona ) ):
+                continue                                # not-owed (Rick-gated OR done) is not a stall
             return True
         return False
 
@@ -2834,8 +2843,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
               ≥ the window AND a LIVE session owes work; re-arms on the next
               progress
             - a dead/offline roster (no LIVE owed work) never escalates
-            - a fleet whose only live owed work is BLOCKED_ON_USER never escalates
-              (L1 §3.1; owed_class None/empty → today's behavior, fail SAFE)
+            - a fleet whose only live owed work is "not owed" — BLOCKED_ON_USER
+              (Rick-gated) or DONE (zero owed) — never escalates (L1 §3.1 +
+              d2a4c040; owed_class None/empty/UNKNOWN → today's behavior, fail SAFE)
             - returns 1 on a new escalation else 0; never raises
         """
         sig = self._fleet_progress_signature( fleet_view )
