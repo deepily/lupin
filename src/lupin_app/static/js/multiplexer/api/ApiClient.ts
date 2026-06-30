@@ -54,6 +54,21 @@ export interface BroadcastResult {
   status            : string;
 }
 
+// ---------------------------------------------------------------------------
+// Proxy-ratify acknowledge (B4 / 01-D, 2026-06-29). Typed shape for
+// POST /api/proxy/acknowledge (`decision_proxy.py:72 acknowledge_proxy_batch`
+// → 200 body). The legacy proxy-ratify-link (notifications.js:7176) POSTs this
+// body-less to retire the current proxy batch; the wrapper does the acknowledge
+// call ONLY — the page-open (window.open('/app/admin/proxy-ratify')) stays
+// renderer-side (F-Krishna-BD3 / F-Sam-BD3 / OSQ-B4.1).
+// ---------------------------------------------------------------------------
+
+export interface ProxyAcknowledgeResult {
+  status        : string;     // "success"
+  retired_batch : string;     // pr-{8hex}-{N}
+  new_batch     : string;     // pr-{8hex}-{N+1}
+}
+
 export interface ApiClient {
   get<T>(path: string, opts?: ApiCallOptions): Promise<T>;
   post<T>(path: string, body: unknown, opts?: ApiCallOptions): Promise<T>;
@@ -62,6 +77,8 @@ export interface ApiClient {
   delete<T>(path: string, opts?: ApiCallOptions): Promise<T>;
   /** Fan out a broadcast to the caller's active CC sessions (Lane C). */
   broadcastToCcSessions(req: BroadcastRequest, opts?: ApiCallOptions): Promise<BroadcastResult>;
+  /** Retire the current proxy notification batch (proxy-ratify-link acknowledge, B4). */
+  acknowledgeProxy(opts?: ApiCallOptions): Promise<ProxyAcknowledgeResult>;
 }
 
 export class ApiError extends Error {
@@ -119,6 +136,12 @@ class ApiClientImpl implements ApiClient {
     };
     if (req.broadcast_id !== undefined) body["broadcast_id"] = req.broadcast_id;
     return this.post<BroadcastResult>("/api/commons/broadcast-to-cc-sessions", body, opts);
+  }
+
+  acknowledgeProxy(opts?: ApiCallOptions): Promise<ProxyAcknowledgeResult> {
+    // Body-less POST — legacy parity (notifications.js:7176 sends only auth
+    // headers). The server retires the current batch + mints the next.
+    return this.post<ProxyAcknowledgeResult>("/api/proxy/acknowledge", undefined, opts);
   }
 
   private async request<T>(

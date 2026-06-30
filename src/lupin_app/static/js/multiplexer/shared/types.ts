@@ -140,8 +140,8 @@ export type LupinEventType =
   // F0, its architectural owner. CROSS-PLAN SEAM: Rio's B4 lane (01-D) landed an
   // early duplicate of this member so its NotificationsListRenderer could consume
   // the F0 seam (`TtsQueueStoreLike.current()`) before F0 existed; the serial-
-  // merge dedups the two identical-semantic lines to this single canonical
-  // declaration (manager-owned reconcile). See 00b §2 F0-c.
+  // merge deduped the two identical-semantic lines to this single canonical
+  // declaration (manager-owned reconcile — Mr. Radio, 2026-06-29). See 00b §2 F0-c.
   | "store_tts_queue_changed"
   // store_audio_ended — 00c (Phase-6 playback engine) emits this signal-OUT-only
   // on NATURAL utterance completion. F0's TtsQueueStore SUBSCRIBES and self-

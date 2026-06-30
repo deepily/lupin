@@ -33,6 +33,7 @@ import type {
   StoreActionRequiredChangedPayload,
   StorePredictionVoteChangedPayload,
   StoreViewStateChangedPayload,
+  AudioPlaybackState,
 } from "../shared/types";
 import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
@@ -74,6 +75,31 @@ interface ViewStateStoreLike {
   isAccordionCollapsed( accordionId: string ): boolean;
   setAccordionCollapsed( accordionId: string, collapsed: boolean ): void;
 }
+// B4 (01-D) — per-message active-TTS controls. THE F0 SEAM (Mr. Radio ruling,
+// Option A refined): identity comes from this READ-ONLY, mutator-less interface.
+// COND-2 (B4 makes ZERO TtsQueueStore mutator calls) is PROVABLE BY SHAPE — the
+// renderer holds no handle to a queue mutator, so it structurally cannot call
+// one. Real F0's TtsQueueStore (00b) satisfies this interface → zero driver
+// change when it lands. `current()` = the actively-spoken message's id_hash, or
+// null when nothing is playing.
+interface TtsQueueStoreLike {
+  current(): string | null;
+}
+// Narrow AudioStore surface this renderer consumes: the play/pause glyph + the
+// mutators the corner ⏸/⏹ click branches drive. The production AudioStore
+// satisfies it structurally. stop() = halt only (de-light happens when F0 clears
+// current() reacting to store_audio_state_change{idle}; B4 never advances).
+interface AudioControlsLike {
+  state(): AudioPlaybackState;
+  pause(): void;
+  resume(): void;
+  stop(): void;
+}
+// Narrow apiClient surface for the proxy-ratify-link acknowledge call (the
+// page-open is a separate injected opener). The production ApiClient satisfies it.
+interface ProxyRatifierLike {
+  acknowledgeProxy(): Promise<unknown>;
+}
 
 export interface NotificationsListRendererStores {
   notifications  : NotificationStoreLike;
@@ -87,6 +113,11 @@ export interface NotificationsListRendererStores {
   // Section-toolbar / accordion-collapse parity (2026-06-23). Optional — see
   // ViewStateStoreLike. Boot always wires it (stores.viewState).
   viewState?     : ViewStateStoreLike;
+  // B4 (01-D) — active-TTS identity (the F0 seam) + audio controls. Both
+  // optional: some unit harnesses omit them (the driver then clears + the click
+  // branches no-op). Boot wires ttsQueue=F0 TtsQueueStore + audio=AudioStore.
+  ttsQueue?      : TtsQueueStoreLike;
+  audio?         : AudioControlsLike;
 }
 
 export interface NotificationsListRenderer {
@@ -108,6 +139,11 @@ export interface NotificationsListRendererOptions {
   // senders above activity-based ordering. Per F-Arnold-D3: signature is
   // sender-level, NOT entry-level.
   senderSortComparator? : SenderSortComparator;
+  // B4 (01-D) — proxy-ratify-link wiring. `proxyRatifier` is the apiClient
+  // acknowledge surface (optional — harness may omit); `proxyRatifyOpener` opens
+  // the ratify admin page renderer-side (F-Sam-BD3), defaulted to window.open.
+  proxyRatifier?        : ProxyRatifierLike;
+  proxyRatifyOpener?    : () => void;
 }
 
 // Default sender sort: most-recent-activity-first. Preserves the Phase 5
@@ -139,6 +175,11 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private readonly predictionVoteIntegration : PredictionVoteIntegration | undefined;
   // Section-toolbar / accordion-collapse parity (2026-06-23).
   private readonly viewState                 : ViewStateStoreLike | undefined;
+  // B4 (01-D) — active-TTS seam + audio controls + proxy-ratify wiring.
+  private readonly ttsQueue                  : TtsQueueStoreLike | undefined;
+  private readonly audio                     : AudioControlsLike | undefined;
+  private readonly proxyRatifier             : ProxyRatifierLike | undefined;
+  private readonly proxyRatifyOpener         : () => void;
 
   constructor(opts: NotificationsListRendererOptions) {
     this.bus                  = opts.eventBus;
@@ -147,6 +188,10 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.senderSortComparator = opts.senderSortComparator ?? DEFAULT_SENDER_SORT;
     this.predictionVoteStore  = opts.stores.predictionVote;
     this.viewState            = opts.stores.viewState;
+    this.ttsQueue             = opts.stores.ttsQueue;
+    this.audio                = opts.stores.audio;
+    this.proxyRatifier        = opts.proxyRatifier;
+    this.proxyRatifyOpener    = opts.proxyRatifyOpener ?? defaultProxyRatifyOpener;
     this.predictionVoteIntegration = this.predictionVoteStore === undefined
       ? undefined
       : {
@@ -242,6 +287,17 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         (e) => this.applyBulkAccordionCollapse(e.payload.changeKind === "collapse-all"),
       ),
     );
+    // B4 (01-D) — active-TTS class driver, TWO subscriptions reconciled by ONE
+    // pass (F-Sam-BD2): store_tts_queue_changed = IDENTITY (which bubble, from
+    // the F0 seam current()); store_audio_state_change = id-blind GLYPH authority
+    // (playing/paused), so a pause/resume that does NOT move current() (e.g. the
+    // global TTS-chrome-bar pause) still refreshes the current bubble's glyph.
+    this.unsubscribers.push(
+      this.bus.on("store_tts_queue_changed", () => this.refreshActiveTts()),
+    );
+    this.unsubscribers.push(
+      this.bus.on("store_audio_state_change", () => this.refreshActiveTts()),
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -326,6 +382,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // accordions) so a user's collapse survives keyed re-renders + reloads
     // (2026-06-23 section-toolbar/accordion parity).
     this.reapplyAccordionCollapse();
+    // B4 (01-D) — re-light the actively-spoken bubble after a keyed re-render
+    // rebuilds the DOM (the active classes/glyph live on freshly-created nodes).
+    this.refreshActiveTts();
   }
 
   // -------------------------------------------------------------------------
@@ -444,6 +503,39 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.clickHandler = (e: Event) => {
       const target = e.target as Element | null;
       if (target === null) return;  // covered by null-target click test
+
+      // 0. B4 (01-D) — per-message active-TTS corner controls + proxy-ratify-link.
+      //    The corner buttons live in the .sender-message BODY, so the collapse
+      //    closest() lookups below resolve null for these clicks — NO
+      //    stopPropagation needed (F-Krishna-BD4). All early-return.
+      const pauseBtn = target.closest(".notification-corner-pause-btn");
+      if (pauseBtn !== null) {
+        // Toggle via AudioStore; the active-TTS driver (store_audio_state_change
+        // subscription) owns the resulting class/glyph flip (single authority).
+        if (this.audio !== undefined) {
+          if (this.audio.state() === "paused") this.audio.resume();
+          else this.audio.pause();
+        }
+        return;
+      }
+      const stopBtn = target.closest(".notification-corner-stop-btn");
+      if (stopBtn !== null) {
+        // Halt only — de-light happens when F0 clears current() reacting to
+        // store_audio_state_change{idle} (COND-2: NO advance, NO queue mutator).
+        this.audio?.stop();
+        return;
+      }
+      const ratifyLink = target.closest(".proxy-ratify-link");
+      if (ratifyLink !== null) {
+        e.preventDefault();   // <a href="#"> — suppress hash navigation
+        // Acknowledge call (apiClient) + page-open (renderer-side), per
+        // F-Krishna-BD3 / F-Sam-BD3. Fire-and-forget; legacy swallows errors too.
+        if (this.proxyRatifier !== undefined) {
+          void this.proxyRatifier.acknowledgeProxy().catch(() => { /* swallow — non-blocking acknowledge */ });
+        }
+        this.proxyRatifyOpener();
+        return;
+      }
 
       // 1. Progress-group lazy-expand toggle (Q-G + F14).
       const toggle = target.closest(".progress-group-toggle") as HTMLElement | null;
@@ -635,6 +727,52 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   }
 
   // -------------------------------------------------------------------------
+  // B4 (01-D) — active-TTS class driver. CLEAR-PRIOR-THEN-SET (F-Sam-BD1) so
+  // EXACTLY ONE bubble ever lights. Identity (which bubble) comes from the F0
+  // seam `ttsQueue.current()` (READ-ONLY — COND-2 provable by shape); the
+  // playing/paused glyph comes from the id-blind `audio.state()`. Legacy analog:
+  // notifications.js:14903-14971.
+  // -------------------------------------------------------------------------
+
+  private refreshActiveTts(): void {
+    /* c8 ignore next */ // defensive: senderCardsMount set post-mount; subscriptions detach before it is nulled in unmount.
+    if (this.senderCardsMount === null) return;
+    // CLEAR-PRIOR — strip the active classes from EVERY lit bubble + reset its
+    // pause glyph, so a stale bubble never lingers across a current() transition.
+    const lit = this.senderCardsMount.querySelectorAll<HTMLElement>(
+      ".sender-message.tts-playing, .sender-message.is-playing-current, .sender-message.is-paused-current",
+    );
+    for (const el of Array.from(lit)) {
+      el.classList.remove("tts-playing", "is-playing-current", "is-paused-current");
+      this.setPauseGlyph(el, false);
+    }
+    // SET — light exactly the bubble whose id_hash === current(). current()===null
+    // (or no ttsQueue wired) leaves everything cleared.
+    const activeId = this.ttsQueue?.current() ?? null;
+    if (activeId === null) return;
+    const bubble = this.senderCardsMount.querySelector<HTMLElement>(
+      `.sender-message[data-id-hash="${cssEscape(activeId)}"]`,
+    );
+    if (bubble === null) return;   // active message not currently in the DOM (collapsed/filtered/not-yet-rendered)
+    bubble.classList.add("tts-playing", "is-playing-current");
+    const paused = this.audio?.state() === "paused";
+    if (paused) bubble.classList.add("is-paused-current");
+    this.setPauseGlyph(bubble, paused);
+  }
+
+  // Flip a bubble's corner pause button between ⏸ (playing) and ▶ (paused),
+  // keeping data-paused + title + aria-label in sync. No-op when the bubble has
+  // no pause button (e.g. an outgoing/response bubble).
+  private setPauseGlyph(bubble: Element, paused: boolean): void {
+    const btn = bubble.querySelector<HTMLButtonElement>(".notification-corner-pause-btn");
+    if (btn === null) return;
+    btn.dataset.paused = paused ? "true" : "false";
+    btn.textContent    = paused ? "▶" : "⏸";
+    btn.title          = paused ? "Resume this notification's playback" : "Pause this notification's playback";
+    btn.setAttribute("aria-label", paused ? "Resume notification audio" : "Pause notification audio");
+  }
+
+  // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
 
@@ -663,6 +801,14 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       conversation_mode_active : false,
     };
   }
+}
+
+// B4 (01-D) — default proxy-ratify page opener. Opens (or focuses) the single
+// ratify admin tab, verbatim to legacy notifications.js:7203. Tests inject a
+// recording opener via options.proxyRatifyOpener (mirrors ApiClient.fetcher).
+/* c8 ignore next 3 */ // production-default browser page-open; never exercised under node:test (a recording opener is injected).
+function defaultProxyRatifyOpener(): void {
+  window.open("/app/admin/proxy-ratify", "lupin-proxy-ratify");
 }
 
 // CSS.escape polyfill for selectors in legacy / Node / older browser contexts.
