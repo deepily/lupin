@@ -434,11 +434,18 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
         - outstanding_user_gate fires iff ≥1 truthy open-gate entry is injected —
           the outward twin (6929f4ac §9): an open direct user-gate is owed work
           that must be RE-SURFACED (re-asked), never parked. The IO shell filters
-          to the OPEN (unanswered) gates; an answered gate clears it
+          to the OPEN (unanswered) gates; an answered gate clears it. Its
+          specifics carries the canonical Face-B obligation VERBATIM (manager-
+          autonomy.md §9.2 Face B v1.7 / role-goals.md v1.2, Rick-locked): the
+          manager MUST fire a dedicated HIGH-PRIORITY action-required ask the
+          moment a user-blocker is raised — never buried — AND mint the typed
+          operator gate
         - surface_operator_gates fires iff the injected bool is truthy — Face B
           (proactive-manager D3): the per-manager re-surface debounce has elapsed
           while ≥1 operator gate is open. The IO shell computes the bool via
-          manager_needs_question_surface; this oracle only routes it to a signal
+          manager_needs_question_surface; this oracle only routes it to a signal.
+          Its specifics carries the same Rick-locked Face-B obligation wording
+          (manager-autonomy.md §9.2 Face B v1.7 / role-goals.md v1.2)
         - spinup_nudge fires iff the injected bool is truthy — Face A (proactive-
           manager D2): a backlog ≥ N with idle crew capacity AND the spin-up-check
           debounce elapsed. The IO shell computes the bool via
@@ -481,10 +488,10 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
         specifics.append( "worker-verification overdue — look in on your workers (stamp last_looked_in_on_workers_ts)" )
     if open_gates:
         signals.append( "outstanding_user_gate" )
-        specifics.append( f"{len( open_gates )} open user-gate(s) awaiting Rick — re-ask now (stamp last_asked_ts)" )
+        specifics.append( f"{len( open_gates )} open user-gate(s) awaiting Rick — the manager MUST fire a dedicated HIGH-PRIORITY 'action-required' notification (a targeted ask_*) to the user the moment it's raised — NOT a line buried in a status notify — AND mint the typed operator gate (re-ask now, stamp last_asked_ts)" )
     if needs_question_surface:
         signals.append( "surface_operator_gates" )
-        specifics.append( "operator-gate re-surface overdue — re-fire your open operator-gate asks (stamp last_surfaced_questions_ts)" )
+        specifics.append( "operator-gate re-surface overdue — the manager MUST fire a dedicated HIGH-PRIORITY 'action-required' notification (a targeted ask_*) to the user the moment it's raised — NOT a line buried in a status notify — AND mint the typed operator gate (re-surface your open operator-gate asks now, stamp last_surfaced_questions_ts)" )
     if needs_spinup_check:
         signals.append( "spinup_nudge" )
         specifics.append( "more open tasks than active workers (or idle crew capacity) — you OWE a staff-up THIS tick: spawn/assign the next worker now. Waiting to be told to staff is a redline. (stamp last_spinup_check_ts)" )

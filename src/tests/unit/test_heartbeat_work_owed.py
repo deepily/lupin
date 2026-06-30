@@ -155,6 +155,10 @@ def test_open_user_gate_owes_work():
     assert v[ "signals" ] == [ "outstanding_user_gate" ]
     assert "awaiting Rick" in v[ "specifics" ]
     assert "last_asked_ts" in v[ "specifics" ]                  # guard: stamp instruction present
+    # Face-B canonical wording (manager-autonomy.md §9.2 v1.7 / role-goals.md v1.2,
+    # Rick-locked) — applied VERBATIM, must not drift. The "AND mint the typed
+    # operator gate" clause in particular must never be dropped (96d1b8ca).
+    assert "the manager MUST fire a dedicated HIGH-PRIORITY 'action-required' notification (a targeted ask_*) to the user the moment it's raised — NOT a line buried in a status notify — AND mint the typed operator gate" in v[ "specifics" ]
 
 
 def test_open_user_gate_counts_multiple():
@@ -320,6 +324,11 @@ def test_surface_operator_gates_signal_routes():
     v = o.evaluate_work_owed( needs_question_surface=True )
     assert v[ "work_owed" ] is True and v[ "signals" ] == [ "surface_operator_gates" ]
     assert o.evaluate_work_owed( needs_question_surface=False )[ "work_owed" ] is False
+    # Face-B canonical wording, applied VERBATIM (Rick-locked; manager-autonomy.md
+    # §9.2 v1.7 / role-goals.md v1.2) — the mint-the-typed-gate clause must persist
+    # (96d1b8ca). Distinct from outstanding_user_gate: this is the re-surface site.
+    assert "the manager MUST fire a dedicated HIGH-PRIORITY 'action-required' notification (a targeted ask_*) to the user the moment it's raised — NOT a line buried in a status notify — AND mint the typed operator gate" in v[ "specifics" ]
+    assert "last_surfaced_questions_ts" in v[ "specifics" ]      # guard: stamp instruction present
 
 
 # ── ordering + composition ────────────────────────────────────────────────────
