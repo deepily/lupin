@@ -177,7 +177,10 @@
    data-attr (parallel to the date-accordion `[data-collapsed]` idiom) instead
    of inline style; only the dates region collapses (header + any CC voice-input
    row stay visible), matching legacy. This is a MUX MECHANISM — legacy carries
-   no equivalent CSS class, so the rule is mux-only (not in the shared sheet). */
+   NO equivalent CSS-class selector (it collapsed via inline style), so there is
+   nothing to UNION into the shared C2-b collapse rule: this stays mux-only, by
+   design. (C2-b single-sources only the date-accordion collapse, which DOES have
+   a legacy `.collapsed` counterpart — see test_c2b_collapse_union_in_shared.) */
 .sender-card[ data-collapsed="true" ] .sender-card-dates {
     display: none;
 }

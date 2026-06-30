@@ -162,14 +162,26 @@ def test_c2a_persona_badge_union_in_shared():
 
 def test_c2b_collapse_union_in_shared():
     """C2-b: the shared sheet's collapse rule fires for BOTH the legacy `.collapsed`
-    class AND the mux `[data-collapsed]` attribute (one contract, both clients).
-    The mux sheet no longer carries a private collapse mechanism rule."""
+    class AND the mux `[data-collapsed]` attribute on the DATE-ACCORDION (one
+    contract, both clients). The mux sheet no longer carries a private
+    date-accordion collapse rule.
+
+    SCOPE NOTE (premise corrected 2026-06-29): C2-b single-sources ONLY the
+    date-accordion collapse — the mechanism that HAS a legacy `.collapsed`
+    counterpart to union with. The `.sender-card[data-collapsed]` rule is a
+    SEPARATE, legitimately mux-only collapse mechanism: legacy collapsed the
+    sender-card dates via inline `style.display` (no CSS-class selector), so there
+    is nothing to union into the shared sheet. It stays in the mux sheet by design
+    (notifications-list.css), so this test forbids only the date-accordion residual,
+    not every `[data-collapsed]` token."""
     shared = _strip_css_comments( _read( SHARED_CSS ) )
     assert ".date-accordion-messages.collapsed" in shared, "C2-b union missing the legacy .collapsed selector"
     assert 'data-collapsed="true"' in shared, "C2-b union missing the mux [data-collapsed] selector"
     mux = _strip_css_comments( _read( MUX_CSS ) )
-    assert "data-collapsed" not in mux, \
-        "mux sheet must NOT keep a private [data-collapsed] collapse rule (moved to shared union)"
+    assert ".date-accordion-messages.collapsed" not in mux, \
+        "mux must NOT keep a private legacy-class date-accordion collapse rule (single-sourced into the shared C2-b union)"
+    assert ".date-accordion[ data-collapsed" not in mux, \
+        "mux must NOT keep a private date-accordion [data-collapsed] collapse rule (single-sourced into the shared C2-b union)"
 
 
 # ---------------------------------------------------------------------------
