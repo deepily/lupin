@@ -106,15 +106,27 @@
              empty (badge hidden) otherwise. -->
         <div id="missed-badge-mount" data-testid="multiplexer-missed-badge-mount"></div>
 
-        <!-- Lane E WP13 mount point: TTS preview-fraction slider control.
-             TtsPreviewSliderRenderer owns this subtree. -->
-        <div id="tts-preview-slider-mount" data-testid="multiplexer-tts-preview-slider-mount"></div>
+        <!-- B2 (01-B): section-header REGION — groups Sam's B3 header chrome with
+             the relocated TTS-preview slider. The slider is a SIBLING of (NOT a
+             child of) #notifications-header-mount: NotificationsHeaderRenderer owns
+             that mount wholesale via root.replaceChildren(header, historyPanel), so
+             a nested slider would be wiped on every header render. Both ids stay
+             byte-stable → boot.ts mounts each by getElementById (position-
+             independent) → zero renderer/boot change. Right-alignment (flex +
+             margin-left:auto) is B5's CSS pass — B2 is structure-only. -->
+        <div class="notifications-header-region" data-testid="multiplexer-notifications-header-region">
+            <!-- B3 (01-C) section-header mount point: count · history-dropdown ·
+                 clear-all. NotificationsHeaderRenderer builds the header here, ABOVE
+                 the notifications-list pane (legacy order). Filter-badge/toggle are
+                 DEFERRED per Rick's own-only scope (67fc18f0/a767e1ae). -->
+            <div id="notifications-header-mount" data-testid="multiplexer-notifications-header-mount"></div>
 
-        <!-- B3 (01-C) section-header mount point: count · history-dropdown ·
-             clear-all. NotificationsHeaderRenderer builds the header here, ABOVE
-             the notifications-list pane (legacy order). Filter-badge/toggle are
-             DEFERRED per Rick's own-only scope (67fc18f0/a767e1ae). -->
-        <div id="notifications-header-mount" data-testid="multiplexer-notifications-header-mount"></div>
+            <!-- Lane E WP13: TTS preview-fraction slider, relocated here (B2 01-B)
+                 from its former orphan-sibling spot above. TtsPreviewSliderRenderer
+                 owns this subtree; it sits AFTER the header-mount (rightmost once B5
+                 flexes the region). -->
+            <div id="tts-preview-slider-mount" data-testid="multiplexer-tts-preview-slider-mount"></div>
+        </div>
 
         <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
         <section id="notifications-pane" class="notifications-pane"
