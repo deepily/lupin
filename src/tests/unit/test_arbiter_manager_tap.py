@@ -101,6 +101,68 @@ class TestAttentionWorkers:
         out   = job._attention_workers( fleet, graph )
         assert { v[ "persona" ] for v in out } == { "Holder" }
 
+    # ── bug bbce7e2f: live-peer waits are a legit dependency, not a stall ────────
+
+    def test_holder_awaiting_live_peer_excluded( self ):
+        # REPRODUCTION (bug bbce7e2f): a non-stuck holder awaiting a peer that is
+        # ITSELF alive (Rio actively building) is a legit in-flight dependency —
+        # EXCLUDED from the attention roster (no spurious "blocked" → no -r2 echo).
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":   _working( "h", "MrRadio" ),       # awaiting peer:Rio
+            "rio": _working( "rio", "Rio" ),         # the awaited peer — ALIVE, building
+        }
+        graph = { "edges": { "MrRadio": "Rio" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert out == [ ]                            # live-peer wait → nobody needs attention
+
+    def test_holder_awaiting_dead_peer_kept( self ):
+        # the awaited peer is in the fleet but NON-alive (reaped) → genuine block
+        # on a dead blocker → the holder is KEPT (fail-safe: never hide a block).
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":     _working( "h", "Waiter" ),                  # awaiting peer:Ghost
+            "ghost": _working( "ghost", "Ghost", alive=False ), # awaited peer — DEAD
+        }
+        graph = { "edges": { "Waiter": "Ghost" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Waiter" }
+
+    def test_holder_awaiting_absent_peer_kept( self ):
+        # the awaited peer is not in the fleet at all (unknown) → treated as NOT
+        # alive → the holder is KEPT (fail-safe).
+        job   = _job( _Gateway(), { } )
+        fleet = { "h": _working( "h", "Waiter" ) }              # awaiting an absent peer
+        graph = { "edges": { "Waiter": "Nobody" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Waiter" }
+
+    def test_deadlock_cycle_member_kept_even_with_live_peer( self ):
+        # a mutual deadlock (A↔B, both alive) is a REAL stall — both members are
+        # KEPT even though each awaits a LIVE peer (the cycle guard wins). The
+        # store-backed :1018 escalation owns the cycle byte-identically; this
+        # only ensures the manager-tap roster still surfaces it.
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "a": _working( "a", "Ann" ),
+            "b": _working( "b", "Bob" ),
+        }
+        graph = { "edges": { "Ann": "Bob", "Bob": "Ann" }, "cycles": [ [ "Ann", "Bob" ] ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Ann", "Bob" }
+
+    def test_stuck_holder_awaiting_live_peer_still_kept( self ):
+        # a STUCK session that also happens to await a live peer is KEPT — stuck
+        # always needs attention regardless of the peer's liveness.
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "s":   _stuck( "s", "Stuckie" ),         # stuck AND awaiting peer:Rio
+            "rio": _working( "rio", "Rio" ),
+        }
+        graph = { "edges": { "Stuckie": "Rio" }, "cycles": [ ] }
+        out   = job._attention_workers( fleet, graph )
+        assert { v[ "persona" ] for v in out } == { "Stuckie" }
+
 
 # ── tap firing / throttle ──────────────────────────────────────────────────────
 
@@ -149,6 +211,21 @@ class TestTapThrottle:
         fired = job._tap_managers( fleet, graph, [ ], NOW )
         assert fired == 1
         assert "Blocked: Holder" in gw.sent[ 0 ][ 1 ]
+
+    def test_live_peer_waiters_produce_no_tap( self ):
+        # END-TO-END repro (bug bbce7e2f): MrRadio and Cheech both awaiting a LIVE
+        # Rio (actively building) must NOT generate a "N blocked / cajole" tap —
+        # the spurious advisory that was re-sent as a stale-ts -r2 never fires.
+        gw  = _Gateway()
+        job = _job( gw, { "s1": "MgrA", "s2": "MgrA" } )
+        fleet = {
+            "s1":  _working( "s1", "MrRadio" ),     # awaiting peer:Rio
+            "s2":  _working( "s2", "Cheech" ),      # awaiting peer:Rio
+            "rio": _working( "rio", "Rio" ),        # ALIVE, building
+        }
+        graph = { "edges": { "MrRadio": "Rio", "Cheech": "Rio" }, "cycles": [ ] }
+        fired = job._tap_managers( fleet, graph, [ "rio" ], NOW )
+        assert fired == 0 and gw.sent == [ ]
 
     def test_no_attention_no_tap( self ):
         gw  = _Gateway()

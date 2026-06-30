@@ -2083,18 +2083,47 @@ class ArbiterConsumerJob( AgenticJobBase ):
         process); a re-activated worker re-enters the roster the very next poll.
         This also stabilizes `_tap_signature`, so the tap fires far less often.
 
+        LIVE-PEER EXCLUSION (bug bbce7e2f, 2026-06-30): a non-stuck holder whose
+        awaited peer is ITSELF alive is a LEGITIMATE in-flight dependency (e.g. a
+        worker awaiting a peer that is actively building), NOT a stall — it is
+        EXCLUDED from the attention roster. Without this, the manager-tap emitted
+        a spurious "N blocked / cajole the blockers" advisory for a healthy
+        sequencing wait (mr radio→peer:rio, Cheech→peer:rio while Rio builds);
+        that advisory is `expects_ack=True`, so when the busy manager doesn't ACK
+        it the receipt poller re-sends it ONCE as a stale-timestamped `-r2` — the
+        observed duplicate. The exclusion is NARROW so no real stall is hidden:
+        a holder still in a deadlock CYCLE is KEPT (mutual stall — the `:1018`
+        store-backed escalation still owns it byte-identically), and a holder
+        awaiting a NON-alive / absent peer is KEPT (a genuine block on a
+        dead/unknown blocker). Fail-safe: an awaited peer absent from the fleet
+        is treated as NOT alive → the holder is kept (never hide a live block).
+
         Ensures:
-            - returns a list of ALIVE view dicts (stuck OR a blocked-edge holder by
-              persona); reaped/offline views are excluded; never raises
+            - returns a list of ALIVE view dicts: every stuck session, plus every
+              blocked-edge holder whose awaited peer is NOT alive OR that sits in
+              a deadlock cycle; reaped/offline views and holders waiting only on a
+              live peer are excluded; never raises
         """
-        holders = set( graph[ "edges" ].keys() )
-        out     = [ ]
+        holders        = set( graph[ "edges" ].keys() )
+        alive_personas = { v.get( "persona" ) for v in fleet_view.values()
+                           if isinstance( v, dict ) and v.get( "alive" ) is True and v.get( "persona" ) }
+        cycle_personas = { p for cycle in graph[ "cycles" ] for p in cycle }
+        out            = [ ]
         for view in fleet_view.values():
             if not isinstance( view, dict ):
                 continue
             if view.get( "alive" ) is not True:
                 continue                                  # reaped/offline-prune (lane 4)
-            if view.get( "stuck" ) or view.get( "persona" ) in holders:
+            if view.get( "stuck" ):
+                out.append( view )                        # a stuck session always needs attention
+                continue
+            persona = view.get( "persona" )
+            if persona not in holders:
+                continue                                  # neither stuck nor a blocked-edge holder
+            # blocked-edge holder: KEEP only on a real stall — the holder is in a
+            # deadlock cycle, OR its awaited peer is not alive. A wait on a LIVE
+            # peer is a legit in-flight dependency → EXCLUDE (bug bbce7e2f).
+            if persona in cycle_personas or graph[ "edges" ].get( persona ) not in alive_personas:
                 out.append( view )
         return out
 
