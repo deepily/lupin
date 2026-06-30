@@ -35,6 +35,7 @@ import type {
   LupinEvent,
   Notification,
   NotificationChangeKind,
+  NotificationFilterMode,
   PredictionHint,
   StoreNotificationsChangedPayload,
   VoicePersona,
@@ -55,6 +56,31 @@ interface UnreadCountEnvelope {
 const STORAGE_KEY            = "notifications:unread-count";
 const STORAGE_SCHEMA_VERSION = 1;
 const PERSIST_DEBOUNCE_MS    = 250;
+
+// B3 (01-C) — own-only notification filter persistence (mirrors CommonsStore's
+// activity-filter envelope). The mode persists across reload via StorageService.
+const FILTER_STORAGE_KEY     = "notifications:filter-mode";
+const FILTER_SCHEMA_VERSION  = 1;
+const DEFAULT_FILTER_MODE: NotificationFilterMode = "own";
+
+interface FilterModeEnvelope {
+  mode : NotificationFilterMode;
+}
+
+// B3 (01-C) — the filter predicate, keyed on the ONE client-available axis
+// (`direction`), per the Mr. Radio 2026-06-29 axis ruling. PURE + exported so
+// every mode branch is directly unit-coverable (only "own" is UI-wired today).
+//   - own    : inbound persona messages — direction absent/"incoming"
+//   - others : the user's own sent replies — direction === "outgoing"
+//   - all    : pass everything
+// (Single-user mux ⇒ recipient-based own/others is vacuous; `direction` is the
+// non-vacuous axis. A future real axis swaps in here with zero plumbing rework.)
+export function matchesNotificationFilter( n: Notification, mode: NotificationFilterMode ): boolean {
+  if ( mode === "all" )    return true;
+  if ( mode === "others" ) return n.direction === "outgoing";
+  // mode === "own"
+  return n.direction !== "outgoing";
+}
 
 // ---------------------------------------------------------------------------
 // Cold-load history hydration (2026-06-11) — supporting types + window helper.
@@ -119,6 +145,32 @@ export interface NotificationStore {
   markRead(idHash: string): void;
   /** Mark every active notification as read in one shot (e.g. inbox open). */
   markAllRead(): void;
+  /**
+   * B3 (01-C) — active notifications passing the current filter mode (the
+   * render source for the sender section). `list()` stays the raw total.
+   */
+  visibleEntries(): ReadonlyArray<Notification>;
+  /** B3 (01-C) — the active filter mode. */
+  filterMode(): NotificationFilterMode;
+  /**
+   * B3 (01-C) — set the filter mode, persist it (StorageService), and emit
+   * `store_notifications_changed { changeKind: "filtered" }` so the renderer
+   * re-renders from `visibleEntries()`. (UI to call this is DEFERRED per Rick's
+   * scope — the mechanism is wired, only "own" is reachable today.)
+   */
+  setFilterMode( mode: NotificationFilterMode ): void;
+  /** B3 (01-C) — true when the mode is off its "own" default (drives empty-state copy). */
+  isFilterActive(): boolean;
+  /**
+   * B3 (01-C) — remove the given notifications from the active list (the
+   * clear-all primitive). The header renderer deletes each id server-side
+   * (DELETE /api/notifications/{id_hash}) over `visibleEntries()` THEN calls
+   * this with the SUCCESSFULLY-deleted ids only (partial-failure safe — failed
+   * ids stay in the store). Emits one `store_notifications_changed { "removed" }`.
+   * Unknown ids are skipped. (Realizes F-Krishna-BC3's clearAll() as the
+   * filter-scoped, partial-failure-correct removal Rick's ruling requires.)
+   */
+  removeByIdHashes( idHashes: ReadonlyArray<string> ): void;
   /**
    * Cold-load history hydration (2026-06-11) — fetch each in-window sender's
    * conversation-by-date history and bulk-seed the active list, then emit a
@@ -214,6 +266,8 @@ class NotificationStoreImpl implements NotificationStore {
   // Tracks read state per id_hash so unread_count is recomputed deterministically.
   private readSet  : Set<string>                   = new Set();
   private unread   : number                        = 0;
+  // B3 (01-C) — active notification-filter mode (StorageService-persisted).
+  private filterModeState : NotificationFilterMode = DEFAULT_FILTER_MODE;
 
   // Debounced persistence state.
   private persistTimer : unknown = null;
@@ -235,6 +289,7 @@ class NotificationStoreImpl implements NotificationStore {
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn          = opts.nowFn          ?? (() => Date.now());
 
+    this.filterModeState = this.hydrateFilterMode();
     this.hydrate();
     this.subscribe();
   }
@@ -271,6 +326,57 @@ class NotificationStoreImpl implements NotificationStore {
     this.bus.emit<StoreNotificationsChangedPayload>({
       type    : "store_notifications_changed",
       payload : { changeKind: "updated" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // B3 (01-C) — own-only notification filter + clear-all primitive
+  // -------------------------------------------------------------------------
+
+  visibleEntries(): ReadonlyArray<Notification> {
+    return this.active.filter(n => matchesNotificationFilter(n, this.filterModeState));
+  }
+
+  filterMode(): NotificationFilterMode {
+    return this.filterModeState;
+  }
+
+  setFilterMode(mode: NotificationFilterMode): void {
+    this.filterModeState = mode;
+    this.persistFilterMode();
+    // Full re-render signal — the renderer's store_notifications_changed
+    // subscription re-reads visibleEntries() (F-Sam-BC2: no stale cards).
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "filtered" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  isFilterActive(): boolean {
+    return this.filterModeState !== DEFAULT_FILTER_MODE;
+  }
+
+  removeByIdHashes(idHashes: ReadonlyArray<string>): void {
+    let removedAny = false;
+    for (const idHash of idHashes) {
+      const idx = this.active.findIndex(n => n.id_hash === idHash);
+      if (idx < 0) continue;   // unknown / already-gone id — skip (partial-failure safe)
+      this.active.splice(idx, 1);
+      this.byId.delete(idHash);
+      // Unread bookkeeping: a removed item that was never read stops counting.
+      if (!this.readSet.has(idHash) && this.unread > 0) this.unread--;
+      this.readSet.delete(idHash);
+      removedAny = true;
+    }
+    if (!removedAny) return;   // nothing matched — no persist, no emit
+    this.schedulePersist();
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "removed" },
       source  : "NotificationStore",
       ts      : this.nowFn(),
     });
@@ -610,6 +716,23 @@ class NotificationStoreImpl implements NotificationStore {
       lastSeenTs : this.nowFn(),
     };
     this.storage.setJSON<UnreadCountEnvelope>(STORAGE_KEY, env, STORAGE_SCHEMA_VERSION);
+  }
+
+  // B3 (01-C) — filter-mode persistence (mirrors CommonsStore.hydrateFilter /
+  // persistFilter). A missing/corrupt/invalid envelope degrades to the "own"
+  // default rather than throwing.
+  private hydrateFilterMode(): NotificationFilterMode {
+    const env = this.storage.getJSON<FilterModeEnvelope>(FILTER_STORAGE_KEY, FILTER_SCHEMA_VERSION);
+    if (env !== null && (env.mode === "own" || env.mode === "others" || env.mode === "all")) {
+      return env.mode;
+    }
+    return DEFAULT_FILTER_MODE;
+  }
+
+  private persistFilterMode(): void {
+    this.storage.setJSON<FilterModeEnvelope>(
+      FILTER_STORAGE_KEY, { mode: this.filterModeState }, FILTER_SCHEMA_VERSION,
+    );
   }
 
   // -------------------------------------------------------------------------

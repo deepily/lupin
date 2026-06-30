@@ -364,7 +364,18 @@ export type NotificationChangeKind =
   | "updated"
   | "expired"
   | "removed"
-  | "hydrated";
+  | "hydrated"
+  | "filtered";   // B3 (01-C): setFilterMode changed the active filter — renderer re-renders from visibleEntries()
+
+// B3 (01-C, Rick OWN-ONLY ruling 67fc18f0/a767e1ae; axis ruling Mr. Radio 2026-06-29):
+// the notification-list filter axis. The mux Notification payload carries NO
+// owner/recipient discriminator (NotificationStore.ts:436-437), so the legacy
+// multi-user "own vs others" is vacuous; the one client-available axis is
+// `direction` (incoming/outgoing). own = inbound (direction !== "outgoing"),
+// others = the user's own sent replies (direction === "outgoing"), all = pass.
+// Default + only-wired mode is "own"; the toggle/badge/admin-gating UI is
+// DEFERRED per Rick's scope, so a future real axis swaps in with zero rework.
+export type NotificationFilterMode = "own" | "others" | "all";
 
 export interface StoreNotificationsChangedPayload {
   changeKind : NotificationChangeKind;

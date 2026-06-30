@@ -44,6 +44,12 @@ import type { PredictionVoteIntegration } from "./templates/predictionVoteContro
 
 interface NotificationStoreLike {
   list(): ReadonlyArray<Notification>;
+  // B3 (01-C): the sender section renders from the FILTERED view; `list()` stays
+  // the raw total (the header count reads it). `isFilterActive()` drives the
+  // filter-aware empty-state copy. Both optional so pre-B3 unit harnesses (that
+  // stub only `list()`) keep compiling — the renderer falls back to `list()`.
+  visibleEntries?(): ReadonlyArray<Notification>;
+  isFilterActive?(): boolean;
 }
 interface SenderStoreLike {
   list(): ReadonlyArray<SenderRecord>;
@@ -255,13 +261,20 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // (legacy `processNewNotification` routes action-required to its own
     // pane, not to the notifications-list). Sender section shows only
     // regular notifications.
-    const allNotifications  = this.stores.notifications.list();
+    // B3 (01-C): render from the FILTERED view (visibleEntries) so the active
+    // filter mode scopes the sender section. Pre-B3 harnesses that stub only
+    // list() fall back to the raw list (filter inert).
+    const store             = this.stores.notifications;
+    const allNotifications  = store.visibleEntries ? store.visibleEntries() : store.list();
     const notifications     = allNotifications.filter(n => !n.action_required);
     const senders           = this.stores.senders.list();
 
-    // Empty-state (Q-K): paint when active (non-action-required) list is empty.
+    // Empty-state (Q-K): paint when the active (non-action-required) view is
+    // empty. B3: when a filter is active AND the filtered view is empty, the
+    // copy distinguishes "nothing matches the filter" from the unfiltered empty.
     if (notifications.length === 0) {
-      this.paintEmptyState();
+      const filterActive = store.isFilterActive ? store.isFilterActive() : false;
+      this.paintEmptyState(filterActive);
       return;
     }
     this.removeEmptyState();
@@ -398,14 +411,17 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   //   (c) post-expired-to-zero, (d) post-added-from-zero
   // -------------------------------------------------------------------------
 
-  private paintEmptyState(): void {
+  private paintEmptyState(filterActive: boolean): void {
     /* c8 ignore next */ // defensive: senderCardsMount post-mount is always set; renderSenderSection's null-guard would have already returned.
     if (this.senderCardsMount === null) return;
     /* c8 ignore next */ // defensive: idempotency check — empty-state is only painted from renderSenderSection's notifications.length === 0 branch which calls paintEmptyState exactly once before bailing out. Re-entry from a re-render with the same empty-state already painted is the case this guards against, but renderSenderSection's flow ensures the existing element is removed via removeEmptyState before re-paint in the non-empty branch.
     if (this.senderCardsMount.querySelector(`[data-testid="multiplexer-empty-state"]`) !== null) return;
+    // B3 (01-C): filter-aware copy — keyed on isFilterActive() so it works for
+    // whatever axis the filter uses (currently the "own" default vs others/all).
+    const message = filterActive ? "No notifications match this filter." : "No notifications yet.";
     const frag = html`
       <div data-testid="multiplexer-empty-state" class="notifications-empty-state">
-        No notifications yet.
+        ${message}
       </div>
     ` as DocumentFragment;
     this.senderCardsMount.replaceChildren(frag);

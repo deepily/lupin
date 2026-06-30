@@ -110,6 +110,12 @@
              TtsPreviewSliderRenderer owns this subtree. -->
         <div id="tts-preview-slider-mount" data-testid="multiplexer-tts-preview-slider-mount"></div>
 
+        <!-- B3 (01-C) section-header mount point: count · history-dropdown ·
+             clear-all. NotificationsHeaderRenderer builds the header here, ABOVE
+             the notifications-list pane (legacy order). Filter-badge/toggle are
+             DEFERRED per Rick's own-only scope (67fc18f0/a767e1ae). -->
+        <div id="notifications-header-mount" data-testid="multiplexer-notifications-header-mount"></div>
+
         <!-- Phase 5 notifications-list pane (per D-L two-child structure) -->
         <section id="notifications-pane" class="notifications-pane"
                  data-testid="multiplexer-notifications-pane">

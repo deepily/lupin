@@ -17,6 +17,11 @@ export {
   type NotificationsListRendererStores,
 } from "./NotificationsListRenderer";
 export {
+  createNotificationsHeaderRenderer,
+  type NotificationsHeaderRenderer,
+  type NotificationsHeaderRendererOptions,
+} from "./NotificationsHeaderRenderer";
+export {
   createJobsPaneRenderer,
   type JobsPaneRenderer,
   type JobsPaneRendererOptions,

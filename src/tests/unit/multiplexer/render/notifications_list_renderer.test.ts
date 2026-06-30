@@ -1040,3 +1040,76 @@ test("F8: store absent → controls still render (pure-data) and clicks are iner
   assert.doesNotThrow(() => root.querySelector<HTMLButtonElement>(".prediction-vote-up")!.click());
   renderer.unmount();
 });
+
+// ===========================================================================
+// B3 (01-C) — filtered render source (visibleEntries) + filter-aware empty-state
+// ===========================================================================
+
+// A NotificationStore-like stub exposing the B3 surface (visibleEntries +
+// isFilterActive) so the renderer's filtered-render branch + filter-aware
+// empty-state copy are exercised (the other tests stub only list() → fallback).
+function setupFilterableRenderer(opts: {
+  list           : Notification[];
+  visible        : Notification[];
+  isFilterActive : boolean;
+}): { renderer: NotificationsListRenderer; root: HTMLElement; bus: ReturnType<typeof createEventBusForTesting> } {
+  const bus = createEventBusForTesting();
+  const renderer = createNotificationsListRenderer({
+    eventBus: bus,
+    stores  : {
+      notifications  : {
+        list           : () => opts.list,
+        visibleEntries : () => opts.visible,
+        isFilterActive : () => opts.isFilterActive,
+      },
+      senders        : { list: () => [] as SenderRecord[] },
+      actionRequired : { list: () => [] as ActionRequiredItem[] },
+    },
+    appTimezone: "UTC",
+  });
+  const root = document.createElement("section");
+  root.id = "notifications-pane";
+  const arSection = document.createElement("div");
+  arSection.id = "action-required-section";
+  const sCards = document.createElement("div");
+  sCards.id = "sender-cards-container";
+  root.appendChild(arSection);
+  root.appendChild(sCards);
+  return { renderer, root, bus };
+}
+
+test("B3: sender section renders from visibleEntries(), not the raw list()", () => {
+  const shown   = makeNotification({ id_hash: "vis", sender_id: "sA", message: "shown" });
+  const hidden  = makeNotification({ id_hash: "hid", sender_id: "sB", message: "filtered-out" });
+  const { renderer, root } = setupFilterableRenderer({
+    list: [shown, hidden], visible: [shown], isFilterActive: true,
+  });
+  renderer.mount(root);
+  // Only the visible notification's sender card is rendered (1 of 2).
+  const cards = root.querySelectorAll(".sender-card");
+  assert.equal(cards.length, 1);
+  assert.equal(root.querySelector('[data-testid="multiplexer-empty-state"]'), null);
+  renderer.unmount();
+});
+
+test("B3: filter-active + empty visible view → filter-specific empty-state copy", () => {
+  const { renderer, root } = setupFilterableRenderer({
+    list: [makeNotification()], visible: [], isFilterActive: true,
+  });
+  renderer.mount(root);
+  const empty = root.querySelector('[data-testid="multiplexer-empty-state"]');
+  assert.notEqual(empty, null);
+  assert.match(empty!.textContent ?? "", /match this filter/);
+  renderer.unmount();
+});
+
+test("B3: no filter active + empty view → the unfiltered empty-state copy", () => {
+  const { renderer, root } = setupFilterableRenderer({
+    list: [], visible: [], isFilterActive: false,
+  });
+  renderer.mount(root);
+  const empty = root.querySelector('[data-testid="multiplexer-empty-state"]');
+  assert.notEqual(empty, null);
+  assert.match(empty!.textContent ?? "", /No notifications yet/);
+  renderer.unmount();
+});

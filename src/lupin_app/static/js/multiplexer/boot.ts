@@ -33,6 +33,7 @@ import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
 import type { ServerSenderHydrationRecord } from "./stores";
 import {
   createNotificationsListRenderer,
+  createNotificationsHeaderRenderer,
   createJobsPaneRenderer,
   createActionRequiredRenderer,
   createTtsChromeRenderer,
@@ -282,6 +283,19 @@ function bootMultiplexer(): void {
   const mountEl = document.getElementById("notifications-pane");
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
   renderer.mount(mountEl);
+
+  // B3 (01-C) — notifications section-header (count · history-dropdown · clear-all).
+  // Mounts ABOVE the notifications-list pane. Owns the clear-all orchestration
+  // (confirm → per-id DELETE /api/notifications/{id_hash} over visibleEntries()
+  // → store.removeByIdHashes(successes)); reuses the generic ApiClient.delete<T>.
+  const notificationsHeaderRenderer = createNotificationsHeaderRenderer({
+    eventBus,
+    store : stores.notifications,
+    api   : apiClient,
+  });
+  const notificationsHeaderMountEl = document.getElementById("notifications-header-mount");
+  if (notificationsHeaderMountEl === null) throw new Error("multiplexer: #notifications-header-mount not found");
+  notificationsHeaderRenderer.mount(notificationsHeaderMountEl);
 
   // Phase 6a — jobs-pane renderer mounts AFTER the Phase 5 renderer mount,
   // BEFORE transports.queue.start (per F13 ordering invariant). Same factory
