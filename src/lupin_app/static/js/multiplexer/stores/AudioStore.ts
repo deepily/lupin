@@ -113,7 +113,10 @@ const audioMachine = setup({
 
 export interface AudioStore {
   state(): AudioPlaybackState;
-  queueLength(): number;
+  // OQ-F0.4 (Rick 2026-06-27): renamed from queueLength() — this counts PCM
+  // chunks in the current playing-burst, NOT notification items. The
+  // notification-item count lives on TtsQueueStore.itemQueueLength().
+  burstLength(): number;
   pause(): void;
   resume(): void;
   skip(): void;
@@ -213,7 +216,7 @@ class AudioStoreImpl implements AudioStore {
     return this.actor.getSnapshot().value as AudioPlaybackState;
   }
 
-  queueLength(): number {
+  burstLength(): number {
     return this.chunksInBurst;
   }
 

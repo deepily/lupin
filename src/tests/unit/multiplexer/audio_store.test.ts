@@ -92,10 +92,10 @@ function setup(opts: {
 // 1-3 : Initial state + Function.name + binaryHandler signature
 // ===========================================================================
 
-test("initial state: idle; queueLength=0", () => {
+test("initial state: idle; burstLength=0", () => {
   const { store } = setup();
   assert.equal(store.state(), "idle");
-  assert.equal(store.queueLength(), 0);
+  assert.equal(store.burstLength(), 0);
 });
 
 test("binaryHandler.name === 'audioStoreBinaryHandler' (AC9 invariant)", () => {
@@ -212,12 +212,12 @@ test("after error, subsequent chunk attempts a fresh decoding cycle (recovery)",
   assert.equal(ctx.store.state(), "error");
 });
 
-test("queueLength tracks chunks-in-burst", () => {
+test("burstLength tracks chunks-in-burst", () => {
   const { store } = setup();
   store.binaryHandler(makePCM16(100));
   store.binaryHandler(makePCM16(100));
   store.binaryHandler(makePCM16(100));
-  assert.equal(store.queueLength(), 3);
+  assert.equal(store.burstLength(), 3);
 });
 
 // ===========================================================================
@@ -242,13 +242,13 @@ test("resume(): paused → playing transition", () => {
   assert.equal(store.state(), "playing");
 });
 
-test("skip() from playing: → ended; queueLength reset", () => {
+test("skip() from playing: → ended; burstLength reset", () => {
   const { store } = setup();
   store.binaryHandler(makePCM16(100));
   store.binaryHandler(makePCM16(100));
   store.skip();
   assert.equal(store.state(), "ended");
-  assert.equal(store.queueLength(), 0);
+  assert.equal(store.burstLength(), 0);
 });
 
 test("pause() in idle is a no-op (state machine has no transition)", () => {
@@ -329,29 +329,29 @@ test("emit count: each state mutation emits exactly one state_change (via subscr
 // distinct from skip() (which goes to ended).
 // ===========================================================================
 
-test("stop() from playing: → idle; queueLength=0; emits state-change to idle", () => {
+test("stop() from playing: → idle; burstLength=0; emits state-change to idle", () => {
   const { store, stateEvents } = setup();
   store.binaryHandler(makePCM16(100));
   store.binaryHandler(makePCM16(100));
   assert.equal(store.state(), "playing");
-  assert.equal(store.queueLength(), 2);
+  assert.equal(store.burstLength(), 2);
   const before = stateEvents.length;
   store.stop();
   assert.equal(store.state(),       "idle");
-  assert.equal(store.queueLength(), 0);
+  assert.equal(store.burstLength(), 0);
   const idleTransition = stateEvents.slice(before).find(e => e.payload.state === "idle");
   assert.ok(idleTransition, "stop() emits a state-change to idle");
   assert.equal(idleTransition!.payload.prev, "playing");
 });
 
-test("stop() from paused: → idle; queueLength=0", () => {
+test("stop() from paused: → idle; burstLength=0", () => {
   const { store } = setup();
   store.binaryHandler(makePCM16(100));
   store.pause();
   assert.equal(store.state(), "paused");
   store.stop();
   assert.equal(store.state(),       "idle");
-  assert.equal(store.queueLength(), 0);
+  assert.equal(store.burstLength(), 0);
 });
 
 test("stop() from ended: → idle (explicit reset, distinct from skip's terminal-ended)", () => {

@@ -40,7 +40,7 @@ import { renderTtsChrome } from "./templates/ttsChrome";
 
 export interface AudioStoreLike {
   state(): AudioPlaybackState;
-  queueLength(): number;
+  burstLength(): number;   // OQ-F0.4: AudioStore PCM burst counter (renamed from queueLength)
   pause(): void;
   resume(): void;
   stop(): void;
@@ -168,7 +168,7 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     const chrome = renderTtsChrome(
       {
         state       : this.stores.audio.state(),
-        queueLength : this.stores.audio.queueLength(),
+        queueLength : this.stores.audio.burstLength(),   // OQ-F0.4 rename; render-field name (template contract) unchanged
         // currentTrackName intentionally omitted — Phase 0 prereq #3 pending.
       },
       {
