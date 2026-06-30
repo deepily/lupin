@@ -176,6 +176,58 @@ class TestArbiterPokeGoalLine:
         assert "GOAL" not in b and b.rstrip().endswith( "nudge.)" )
 
 
+# ── 3b. Arbiter — MANAGE-not-BUILD poke-body wording (revision 2026-06-29) ────
+#
+# The §3 apply-spec forks the poke BODY by role: a stuck WORKER is still told to
+# "resume" the work; a stuck MANAGER is told to tap/assign its crew and NOT resume
+# the work itself. These pin the hardcoded body text (NOT a config goal line, so
+# the D4 "don't pin live-retunable wording" rule does not apply here).
+
+class TestManageNotBuildPokeWording:
+
+    def _job( self ):
+        from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+        j = ArbiterConsumerJob.__new__( ArbiterConsumerJob )
+        j.manager_goal_line = ""        # isolate the body fork from the goal echo
+        j.worker_goal_line  = ""
+        j.manager_stale_poke_threshold_seconds = 2700
+        return j
+
+    def test_stuck_worker_body_still_says_resume( self ):
+        b = self._job()._format_poke( { "persona": "Rio", "role": "worker", "session_id": "s1" } )
+        assert "ask for help, or resume. (Non-destructive nudge.)" in b
+        assert "don't resume the work yourself" not in b
+        assert "tap/assign your crew" not in b
+
+    def test_stuck_worker_body_when_role_absent( self ):
+        # role absent ⇒ non-manager branch (worker phrasing), never the manager fork.
+        b = self._job()._format_poke( { "persona": "Rio", "session_id": "s1" } )
+        assert "or resume. (Non-destructive nudge.)" in b
+        assert "don't resume the work yourself" not in b
+
+    def test_stuck_manager_body_says_tap_crew_not_resume( self ):
+        b = self._job()._format_poke( { "persona": "Mr. Radio", "role": "manager", "session_id": "s2" } )
+        assert "tap/assign your crew" in b
+        assert "staff up if you have more tasks than workers" in b
+        assert "don't resume the work yourself" in b
+        assert "ask for help, or resume. (Non-destructive nudge.)" not in b
+
+    def test_manager_stale_poke_taps_crew_and_preserves_rick_advised( self ):
+        b = self._job()._format_manager_stale_poke( { "persona": "Tiberius", "session_id": "s3" }, 3000 )
+        assert "tap/assign your crew" in b
+        assert "don't resume the work yourself" in b
+        assert "Rick has been advised." in b                 # §3.4 PRESERVE clause
+
+    def test_manager_tap_recommends_staff_and_never_absorb( self ):
+        members = [ { "persona": "W1", "stuck": True }, { "persona": "W2", "stuck": False } ]
+        graph   = { "cycles": [ ] }
+        b = self._job()._format_manager_tap( "M1", members, graph, free_n=2 )
+        assert "spawn/assign" in b
+        assert "NEVER absorb the work yourself" in b
+        assert "reap+replace a dark worker" in b
+        assert "(Recommendation only — I do not assign.)" in b   # advisory framing preserved
+
+
 # ── 4. Cascade scheduler — manager-only goal append ──────────────────────────
 
 def _load_cascade_module():

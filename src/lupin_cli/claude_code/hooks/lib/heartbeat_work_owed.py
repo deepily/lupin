@@ -104,11 +104,15 @@ POKE_PROMPT_SENTINEL = "Do not stop yet — you stopped with work owed"
 POKE_REASON_TEMPLATE = (
     POKE_PROMPT_SENTINEL + " ({specifics}) and no fresh hold. "
     "Pick one and act before you stop:\n"
-    "1. Owe work? Resume and finish it now.\n"
+    "1. Owe work? Resume and drive it now — but if you manage a crew: assign/delegate it to a worker "
+    "(spawn one if you have more open tasks than workers); do NOT build it yourself.\n"
     '2. Blocked on someone? DM them for status ("where are we on X?"), then declare a fresh hold — '
     "write .heartbeat-hold-<your-FULL-session-id>.json (use the full hyphenated session id, "
     "NOT the short 8-char form) with a reason and awaiting: peer:<name>.\n"
-    "3. Truly nothing to do? Declare it — write a hold with work_owed: false."
+    "3. Blocked on the USER (a decision only they can make)? Fire a dedicated ask_* "
+    "(ask_yes_no / ask_multiple_choice / converse) to them THIS turn — do NOT bury it in a status notify "
+    "or sit in a hold. A user-gate is owed work; surface it directly and re-ask until answered.\n"
+    "4. Truly nothing to do? Declare it — write a hold with work_owed: false."
 )
 
 NO_WORK_SPECIFICS = "no owed work detected"
@@ -483,7 +487,7 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
         specifics.append( "operator-gate re-surface overdue — re-fire your open operator-gate asks (stamp last_surfaced_questions_ts)" )
     if needs_spinup_check:
         signals.append( "spinup_nudge" )
-        specifics.append( "big backlog, idle crew capacity — consider spinning up a crew of your own accord (stamp last_spinup_check_ts)" )
+        specifics.append( "more open tasks than active workers (or idle crew capacity) — you OWE a staff-up THIS tick: spawn/assign the next worker now. Waiting to be told to staff is a redline. (stamp last_spinup_check_ts)" )
 
     return {
         "work_owed" : bool( signals ),

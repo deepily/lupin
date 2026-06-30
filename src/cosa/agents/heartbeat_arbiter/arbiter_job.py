@@ -2141,7 +2141,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
             lines.append( "Blocked: " + ", ".join( blocked ) )
         lines.append(
             "I recommend: pull a free worker to unblock the stuck, or cajole the "
-            "blockers. (Recommendation only — I do not assign.)"
+            "blockers — and if there's unassigned work or idle capacity, spawn/assign "
+            "THIS tick. Task a worker; NEVER absorb the work yourself — reap+replace a "
+            "dark worker, don't take their lane. (Recommendation only — I do not assign.)"
         )
         return "\n".join( lines )
 
@@ -2909,13 +2911,28 @@ class ArbiterConsumerJob( AgenticJobBase ):
         return body
 
     def _format_poke( self, view ):
-        """The non-destructive wake-nudge body sent to a stuck LIVE session."""
-        who  = view.get( "persona" ) or view.get( "session_id" )
-        body = (
+        """The non-destructive wake-nudge body sent to a stuck LIVE session.
+
+        ROLE-SELECTED (MANAGE-not-BUILD revision 2026-06-29): the closing clause
+        forks on view["role"]. A stuck WORKER is still told to "resume" the work
+        itself; a stuck MANAGER is told to tap/assign its crew (staff up if it has
+        more tasks than workers) and NOT resume the work itself.
+        """
+        who        = view.get( "persona" ) or view.get( "session_id" )
+        is_manager = ( view.get( "role" ) or "" ).strip().lower() == "manager"
+        prefix     = (
             f"Heartbeat arbiter (auto-poke): {who}, you appear STUCK — repeated "
             f"cap-reached with work owed and no progress. Are you blocked or wedged? "
-            f"Post your status, ask for help, or resume. (Non-destructive nudge.)"
+            f"Post your status, ask for help, "
         )
+        if is_manager:
+            body = prefix + (
+                "or — if you manage a crew — tap/assign your crew (staff up if you "
+                "have more tasks than workers); don't resume the work yourself. "
+                "(Non-destructive nudge.)"
+            )
+        else:
+            body = prefix + "or resume. (Non-destructive nudge.)"
         # role-goals Phase 2-3: append the role-selected goal echo (view["role"] is
         # "manager" | "worker", set by fleet_render); inert when unconfigured.
         return self._append_goal_line( body, view.get( "role" ) )
@@ -3008,7 +3025,9 @@ class ArbiterConsumerJob( AgenticJobBase ):
             f"Heartbeat arbiter (manager-staleness poke): {who}, no signal from your "
             f"session for {_fmt_minutes( age )} (threshold "
             f"{self.manager_stale_poke_threshold_seconds}s). Are you wedged or idle-dark? "
-            f"Post your status or resume. Rick has been advised. (Non-destructive nudge.)"
+            f"Post your status, or — you manage a crew — tap/assign your crew (staff up if "
+            f"more tasks than workers); don't resume the work yourself. Rick has been advised. "
+            f"(Non-destructive nudge.)"
         )
         # role-goals Phase 2-3: this tier is manager-gated by construction → always
         # the Manager goal echo (inert when unconfigured).

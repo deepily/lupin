@@ -174,8 +174,12 @@ class TestAdvisoryFraming:
                            { "edges": { }, "cycles": [ [ "A", "B" ] ] }, [ "free1" ], NOW )
         body = gw.sent[ 0 ][ 1 ].lower()
         assert "advisory" in body and "recommend" in body and "do not assign" in body
-        # zero actuation verbs in the recommendation body
-        for verb in ( "assigned", "spawned", "reassigned", "dismissed", "i assigned", "i spawned" ):
+        # zero CLAIMED-actuation verbs in the recommendation body. The MANAGE-not-BUILD
+        # revision (2026-06-29) RECOMMENDS the manager "spawn/assign" and names
+        # "unassigned work" — both advisory, allowed — so the redline is pinned on the
+        # first-person completed-action claim (what the arbiter must NEVER say it did),
+        # not the bare verb stem (which legitimately appears inside "unassigned").
+        for verb in ( "i assigned", "i spawned", "i reassigned", "i dismissed", "i reaped" ):
             assert verb not in body
         assert "free" in body and "deadlock" in body   # carries the actionable counts
 

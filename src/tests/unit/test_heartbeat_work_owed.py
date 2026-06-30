@@ -388,6 +388,47 @@ def test_build_poke_reason_with_no_work_uses_placeholder():
     assert o.NO_WORK_SPECIFICS in reason
 
 
+# ── MANAGE-not-BUILD owed-work message wording (apply-spec §2, 2026-06-29) ─────
+#
+# §2.2 forks step 1 (managers delegate, don't build); §2-NEW inserts a
+# blocked-on-USER option 3 (fire an ask_* directly, never bury it in a hold);
+# the old "nothing to do" option renumbers to 4. These pin the new POKE_REASON
+# template text so a silent regression is caught.
+
+def test_poke_reason_step1_tells_managers_to_delegate_not_build():
+    v      = o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] )
+    reason = o.build_poke_reason( v )
+    assert "1. Owe work? Resume and drive it now" in reason
+    assert "assign/delegate it to a worker" in reason
+    assert "do NOT build it yourself" in reason
+
+
+def test_poke_reason_has_blocked_on_user_option_three():
+    v      = o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] )
+    reason = o.build_poke_reason( v )
+    assert "3. Blocked on the USER" in reason
+    assert "ask_yes_no" in reason and "ask_multiple_choice" in reason and "converse" in reason
+    assert "re-ask until answered" in reason
+    # the old nothing-to-do branch renumbered to 4
+    assert "4. Truly nothing to do? Declare it — write a hold with work_owed: false." in reason
+    assert "3. Truly nothing to do" not in reason
+
+
+def test_poke_reason_options_numbered_one_through_four():
+    v      = o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] )
+    reason = o.build_poke_reason( v )
+    for n in ( "1. ", "2. ", "3. ", "4. " ):
+        assert "\n" + n in reason or reason.lstrip().startswith( n )
+
+
+def test_spinup_nudge_specifics_owes_a_staff_up_this_tick():
+    v = o.evaluate_work_owed( needs_spinup_check=True )
+    assert "more open tasks than active workers" in v[ "specifics" ]
+    assert "OWE a staff-up THIS tick" in v[ "specifics" ]
+    assert "redline" in v[ "specifics" ]
+    assert "last_spinup_check_ts" in v[ "specifics" ]        # stamp instruction preserved
+
+
 # ── v2 — Task*-replay shape contract (María §0.3 / doc 04 §4) ──────────────────
 
 def test_v2_task_replay_shape_maps_1to1():
