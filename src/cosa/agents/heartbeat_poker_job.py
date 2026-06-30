@@ -16,9 +16,9 @@ TASK SCOPE — this module is tasks I1 + I2:
        terminates (design doc §4).
 
 I1-followup: the production CommonsGateway implementation (CommonsStore-backed)
-is bound separately — see the d1d4 spec §9. Reference pattern: `fire_heartbeat()`
-in src/scripts/cascade_heartbeat_scheduler.py (CommonsStore.post() + a
-/api/commons/register-question Phase-3 push). For now `commons` is a required
+is bound separately — see the d1d4 spec §9. The reference pattern (CommonsStore
+.post() + a commons push) was the legacy cascade scheduler's `fire_heartbeat()`,
+retired 2026-06-29 under the ddaa2882 waiver + design-doc I8. For now `commons` is a required
 injected dependency (the agentic-job factory supplies the real gateway in
 production; tests supply a fake).
 

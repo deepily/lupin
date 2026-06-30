@@ -7,8 +7,8 @@ first-class: a ->done transition without valid receipt_refs is REJECTED
 (design T3 / §4.1 AC1 — the mechanical no-confabulation enforcement).
 
 Endpoints (all authenticated via require_api_key_or_jwt — X-API-Key OR Bearer
-JWT, §4.1 AC2; hook writers use the host API-key file, same lane as
-cascade_heartbeat_scheduler):
+JWT, §4.1 AC2; hook writers use the host API-key file, same lane as the
+Arbiter + Stop-hook liveness path):
     - POST /api/tasks                  — create item (always status=queued)
     - POST /api/tasks/{id}/transition  — state change; structural rules enforced
     - GET  /api/tasks                  — filtered query (owner/status/gate/manager/project/class)

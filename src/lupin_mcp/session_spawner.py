@@ -318,7 +318,7 @@ def spawn_sessions(
     #
     #   • collection_topic → persona_slug( sep="_" ) → "dm-mr_radio" — THE canonical
     #     DM-topic form shared by _derive_dm_topic / _dm_topic_for / every
-    #     *_gateway.dm_topic_for / cascade_heartbeat_scheduler.dm_topic_for. The
+    #     *_gateway.dm_topic_for. The
     #     old sep="-" emitted "dm-mr-radio", a DIVERGENT topic string for
     #     MULTI-WORD personas (single-word personas have no internal space, so
     #     "dm-tiberius"/"dm-maria" are identical under either separator).
@@ -1070,7 +1070,7 @@ def _slug( text: str ) -> str:
     """
     Lowercase, keep alnum/-/_, collapse other runs to a single '-'. For session
     names + DM topics — matches the dm-{persona} convention (e.g. "Mr. Radio" →
-    "mr-radio") used by cascade_heartbeat_scheduler.dm_topic_for / PG-6 slug.
+    "mr-radio") used by the PG-6 slug.
     """
     out = "".join( c if c.isalnum() or c in "-_" else "-" for c in text.strip().lower() )
     while "--" in out:

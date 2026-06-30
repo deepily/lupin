@@ -4,8 +4,8 @@ LupinCommonsGateway — production CommonsGateway for HeartbeatPokerJob.
 Implements the `CommonsGateway` protocol (defined in `heartbeat_poker_job.py`)
 over the server-side `CommonsStore` plus the `/api/dm/send` notification-native
 push (migrated off the deleted `/api/commons/register-question` route,
-cosa-voice token-reduction Phase 4, 2026-06-15). Reference pattern:
-`fire_heartbeat()` in `src/scripts/cascade_heartbeat_scheduler.py`.
+cosa-voice token-reduction Phase 4, 2026-06-15). The reference pattern was the
+legacy cascade scheduler's `fire_heartbeat()`, retired 2026-06-29 (I8 / ddaa2882).
 
 ARCHITECTURE — every external dependency (the `CommonsStore`, the HTTP-post
 callable, the API key, the base URL, the sender persona) is constructor-

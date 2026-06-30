@@ -281,8 +281,7 @@ class TestSpawnSessions:
         topic and the tmux SESSION name use DIFFERENT separators and each MUST be the
         canonical form of its own convention:
           • collection_topic → "dm-mr_radio"  (persona_slug sep="_" — byte-identical
-            to _derive_dm_topic / _dm_topic_for / every *_gateway.dm_topic_for /
-            cascade_heartbeat_scheduler.dm_topic_for).
+            to _derive_dm_topic / _dm_topic_for / every *_gateway.dm_topic_for).
           • session_name     → "cc-author-mr-radio-1"  (persona_slug sep="-" — the
             tmux cc-<role>-<persona>-<n> convention the sweep's scan_tmux_mismatches
             validates with sep="-").
