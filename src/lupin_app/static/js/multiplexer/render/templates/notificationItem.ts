@@ -102,6 +102,26 @@ export function renderNotificationItem(
     root.appendChild(flat);
   }
 
+  // B4 (01-D) — per-message active-TTS corner controls (⏸/⏹) + proxy-ratify-link.
+  // Rendered on EVERY incoming bubble (flat + progress-group) but CSS-gated to
+  // display:none by default; the active-TTS class driver (NotificationsListRenderer)
+  // lights exactly the actively-spoken bubble via `.sender-message.tts-playing`
+  // (gate selectors ported in B5). PURE DOM — clicks ride the renderer's DELEGATED
+  // handler, NO inline listener / NO stopPropagation (F-Krishna-BD4). Gated to
+  // incoming, mirroring legacy `!isResponse` (notifications.js:13866). The id is
+  // carried on `data-notification-id` so the delegated handler can route the click.
+  if (direction !== "outgoing") {
+    root.appendChild(cornerPauseButton(notification.id_hash));
+    root.appendChild(cornerStopButton(notification.id_hash));
+  }
+  // Proxy-ratify-link — ONLY for proxy batches (progress_group_id starts with
+  // `pr-`; legacy createProxyRatifyLink gate notifications.js:7168). The click
+  // (delegated, renderer-side) calls apiClient.acknowledgeProxy() + opens the
+  // ratify page via window.open (F-Krishna-BD3 / F-Sam-BD3).
+  if (inProgressGrp && (notification.progress_group_id as string).startsWith("pr-")) {
+    root.appendChild(proxyRatifyLink(notification.progress_group_id as string));
+  }
+
   // WP14 (F8) — prediction-hint thumbs vote. Presence is PURE-DATA: a
   // notification carrying a `prediction_hint` whose confidence clears the gate
   // (≥ PREDICTION_VOTE_MIN_PCT, enforced inside renderPredictionVoteControls)
@@ -129,6 +149,44 @@ export function renderNotificationItem(
 
 function expiredBadge(): Value {
   return html`<span class="expired-badge">EXPIRED</span>` as DocumentFragment;
+}
+
+// B4 (01-D) corner controls — built via DOM ops (not the html`` helper) so the
+// returned elements carry typed button/anchor semantics + dataset attrs the
+// delegated click handler reads, verbatim to legacy notifications.js:13869/:13919.
+
+function cornerPauseButton(idHash: string): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type                     = "button";
+  btn.className                = "notification-corner-pause-btn";
+  btn.dataset.notificationId   = idHash;
+  btn.dataset.paused           = "false";
+  btn.title                    = "Pause this notification's playback";
+  btn.textContent              = "⏸";
+  btn.setAttribute("aria-label", "Pause notification audio");
+  return btn;
+}
+
+function cornerStopButton(idHash: string): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type                     = "button";
+  btn.className                = "notification-corner-stop-btn";
+  btn.dataset.notificationId   = idHash;
+  // mux stop = halt + de-light via the F0 current()-clear, NOT advance
+  // (F-Cheech-BD1) — so the title intentionally drops legacy's "and advance".
+  btn.title                    = "Stop this notification's playback";
+  btn.textContent              = "⏹";
+  btn.setAttribute("aria-label", "Stop notification audio");
+  return btn;
+}
+
+function proxyRatifyLink(groupId: string): HTMLAnchorElement {
+  const link = document.createElement("a");
+  link.className       = "proxy-ratify-link";
+  link.href            = "#";
+  link.textContent     = "Open Ratification →";
+  link.dataset.batchId = groupId;
+  return link;
 }
 
 /* c8 ignore start */ // tsx phantom-branch artifact on function declaration line + tagged-template literal interpolation phantom.

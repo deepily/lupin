@@ -132,7 +132,9 @@ export type LupinEventType =
   // silently (the owning renderer applies the DOM directly), so they do NOT
   // emit — only the toolbar → NotificationsListRenderer bulk signal rides the
   // bus. NotificationsListRenderer subscribes and flips every accordion.
-  | "store_view_state_changed";
+  | "store_view_state_changed"
+  // EXECUTOR:AI — F0 SEAM (00b contract, landed early in B4 lane; F0 builder MUST NOT re-declare)
+  | "store_tts_queue_changed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
