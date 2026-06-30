@@ -164,6 +164,76 @@ def test_stale_hold_does_not_rescue_a_truly_dark_manager():
     assert len( _stale_pokes( gw ) ) == 1                              # genuinely dark → poked
 
 
+# ── bug fb332fcd: transcript mtime is a sign of life (plan-mode repro) ────────
+
+def test_fresh_transcript_mtime_keeps_planmode_manager_off_staleness_tier():
+    """REPRO (bug fb332fcd, Tiberius 2026-06-30): a MANAGER deep in an APPROVED
+    PLAN emits no Stop for the whole plan turn, so its stop-event aged to 45m and
+    it posts no commons / bumps no bridge / refreshes no hold — yet it is actively
+    appending its transcript .jsonl on every tool call. The fresh transcript mtime
+    must read LIVE, NOT MANAGER-STALE. Drives the REAL _publish_fleet_snapshot
+    (which now reads the injected transcript_mtime_fn) then the staleness detector
+    over its emitted snapshot — the full end-to-end wiring (non-negotiable #2)."""
+    gw, escal   = _GW(), [ ]
+    stale_event = NOW - datetime.timedelta( seconds=2700 )            # 45m-old stop-event
+    view = { "m1": { "session_id": "m1", "persona": "Tiberius", "state": "working",
+                     "holding_on": "none", "stuck": False, "reaped": False,
+                     "last_event_ts": stale_event, "commons_ts": None,
+                     "idle_prompt_ts": None, "dm_ts": None } }
+    job = _job(
+        gw, notify=lambda m, *a, **k: escal.append( m ),
+        declared_managers   = [ "Tiberius" ],                          # badge m1 role=manager
+        bridge_mtime_fn     = lambda sid: None,                        # no bridge signal
+        hold_mtime_fn       = lambda sid: None,                        # no hold signal either
+        transcript_mtime_fn = lambda sid: NOW.timestamp() - 5,         # FRESH transcript (5s)
+        bridge_discovery_fn = lambda: { },
+        list_managers_fn    = lambda: set(),
+        resolve_manager_fn  = lambda sid, **k: { "manager_persona": None, "source": "unresolved" },
+        snapshot_sink       = lambda s: None,
+        render_sink         = lambda s: None,
+    )
+    job._publish_fleet_snapshot( view, NOW, True )
+    row = job._last_full_snapshot[ "sessions" ][ 0 ]
+    assert row[ "role" ] == "manager"
+    assert row[ "liveness" ][ "transcript_age_s" ] == 5               # transcript mtime folded in
+    assert row[ "liveness" ][ "verdict" ] == "LIVE"                   # transcript rescued it from "stale 45m"
+    # the staleness detector over the SAME snapshot fires NOTHING — the bug is dead.
+    assert job._check_manager_staleness( job._last_full_snapshot, NOW, [ ] ) == 0
+    assert _stale_pokes( gw ) == [ ] and escal == [ ]
+
+
+def test_stale_transcript_does_not_rescue_a_truly_dark_manager():
+    """FAIL-SAFE counter-control (non-negotiable #1): a manager whose stop-event
+    AND transcript mtime are BOTH stale (a genuinely-dark / exited session — its
+    transcript stopped appending) still reads stale and IS poked. Transcript-mtime
+    only ADDS liveness, it NEVER suppresses a dark session. A MISSING transcript
+    (transcript_mtime_fn → None) is exercised by every other test in this file
+    that does not inject the fn, so the no-signal path is covered too."""
+    gw, escal   = _GW(), [ ]
+    stale_event = NOW - datetime.timedelta( seconds=3000 )            # 50m-old stop-event
+    view = { "m1": { "session_id": "m1", "persona": "Tiberius", "state": "working",
+                     "holding_on": "none", "stuck": False, "reaped": False,
+                     "last_event_ts": stale_event, "commons_ts": None,
+                     "idle_prompt_ts": None, "dm_ts": None } }
+    job = _job(
+        gw, notify=lambda m, *a, **k: escal.append( m ),
+        declared_managers   = [ "Tiberius" ],
+        bridge_mtime_fn     = lambda sid: None,
+        hold_mtime_fn       = lambda sid: None,
+        transcript_mtime_fn = lambda sid: NOW.timestamp() - 3000,      # transcript ALSO 50m stale
+        bridge_discovery_fn = lambda: { },
+        list_managers_fn    = lambda: set(),
+        resolve_manager_fn  = lambda sid, **k: { "manager_persona": None, "source": "unresolved" },
+        snapshot_sink       = lambda s: None,
+        render_sink         = lambda s: None,
+    )
+    job._publish_fleet_snapshot( view, NOW, True )
+    row = job._last_full_snapshot[ "sessions" ][ 0 ]
+    assert row[ "liveness" ][ "transcript_age_s" ] == 3000
+    assert job._check_manager_staleness( job._last_full_snapshot, NOW, active_managers=[ ] ) == 1
+    assert len( _stale_pokes( gw ) ) == 1                              # genuinely dark → poked
+
+
 # ── the headline: stale manager → poke + Rick advisory, same poll ────────────
 
 def test_stale_manager_poked_and_rick_advised_same_poll():

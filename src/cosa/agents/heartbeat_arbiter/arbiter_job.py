@@ -75,6 +75,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_bridge_mtime as _default_bridge_mtime_fn,
     find_active_voice_persona_sessions as _find_active_voice_persona_sessions,
     find_dead_sessions as _find_dead_sessions,
+    find_session_by_id as _find_session_by_id,
 )
 from cosa.agents.heartbeat_arbiter.manager_resolver import (
     resolve_manager as _default_resolve_manager,
@@ -384,6 +385,47 @@ def _default_hold_mtime_fn( session_id ):   # pragma: no cover - production hold
         return None
 
 
+def _default_transcript_mtime_fn( session_id ):   # pragma: no cover - production transcript-file mtime IO boundary
+    """
+    Default transcript-file mtime reader — the transcript-as-liveness store
+    source (bug fb332fcd, the 7th liveness signal).
+
+    Resolves the session's bridge dict via session_bridge.find_session_by_id
+    (full-uuid or 8-char-prefix match, dead-PID-aware) and returns the
+    epoch-seconds mtime of its `transcript_path` `.jsonl` artifact. The harness
+    appends a turn to that file on every assistant/tool event, so a fresh mtime
+    is an unambiguous sign the session's process is ALIVE — including mid-plan,
+    when no `Stop` fires and the other six signals (bridge/event/commons/
+    idle_prompt/dm/hold) all age past STALE → the MANAGER-STALE false-positive
+    at a manager deep in an approved plan (the fb332fcd live hit, 2026-06-30).
+
+    Mirrors _default_hold_mtime_fn: a per-session epoch-float reader the arbiter
+    calls out-of-band (in _publish_fleet_snapshot) so compute_liveness stays
+    pure. Exercised at the :8000 integration tier like the other mtime readers;
+    the LOGIC that folds the mtime into the verdict is fully unit-tested via an
+    injected fake, so this IO boundary is no-cover (mirrors _default_hold_mtime_fn).
+
+    FAIL-SAFE (fb332fcd non-negotiable #1): a missing bridge, an absent/empty
+    transcript_path, or a stat failure all degrade to None — NO signal, never a
+    spurious-fresh mtime. A genuinely-dark session (transcript stops appending,
+    or the path is gone) therefore STILL ages to STALE; the other 6 signals
+    carry liveness (ADDITIVE + fail-safe per the observer invariant).
+
+    Ensures:
+        - returns the transcript-file mtime (epoch float) when resolvable
+        - returns None on any failure (no bridge / no transcript_path / stat error)
+        - never raises
+    """
+    try:
+        data = _find_session_by_id( session_id )
+        transcript_path = data.get( "transcript_path" ) if isinstance( data, dict ) else None
+        if not transcript_path:
+            return None
+        return os.path.getmtime( transcript_path )
+    except OSError:
+        return None
+
+
 # Item A (2026.06.11 receipts design §2.3): the F1 default log seam now delegates
 # to arbiter_journal.make_log_fn — the ONE owner of the line shape (ts + ts_local).
 # In-pool arbiter events keep the historical "heartbeat-arbiter" service tag; the
@@ -558,6 +600,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         notify_fn                : Optional[ Callable ] = None,
         bridge_mtime_fn          : Optional[ Callable ] = None,
         hold_mtime_fn            : Optional[ Callable ] = None,   # task 70be69f2: per-session hold-file mtime reader (None → real reader; hold-as-liveness)
+        transcript_mtime_fn      : Optional[ Callable ] = None,   # bug fb332fcd: per-session transcript-file mtime reader (None → real reader; transcript-as-liveness, 7th signal)
         owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
         hold_reader_fn           : Optional[ Callable ] = None,   # 6929f4ac: per-session hold reader (session_id) -> hold|None (None → inert: classify-override + resurface tier never fire)
         user_gate_resurface_seconds : int               = 1800,  # 6929f4ac: aged-gate ceiling (30 min) — resurface a DARK session's open gate older than this to Rick
@@ -722,6 +765,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # needs no factory wiring. A non-existent hold (unit fake-id sessions) stats
         # to None, so unit/in-pool construction stays clean without injection.
         self._hold_mtime_fn   = hold_mtime_fn if hold_mtime_fn is not None else _default_hold_mtime_fn
+        self._transcript_mtime_fn = transcript_mtime_fn if transcript_mtime_fn is not None else _default_transcript_mtime_fn
         # L1 (2026-06-17) store-awareness seam: per-poll owed-work reader (the
         # arbiter as reader #2 of the one-store/three-readers design). Default
         # None keeps the seam INERT — every manager classifies UNKNOWN → the two
@@ -1262,6 +1306,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # freshest-of union → an interactive manager that only Stop-refreshes its hold
         # reads LIVE, not MANAGER-STALE. Per-session reader degrades to None (no file).
         hold_mtimes   = { sid: self._hold_mtime_fn( sid ) for sid in fleet_view }
+        # bug fb332fcd transcript-as-liveness: each session's transcript .jsonl
+        # mtime (out-of-band IO here, so compute_liveness stays pure). A fresh
+        # transcript mtime folds into the freshest-of union → a manager mid-plan
+        # (appending its transcript every tool call but emitting no Stop) reads
+        # LIVE, not MANAGER-STALE. Per-session reader degrades to None (no bridge
+        # / no transcript_path / stat error) — fail-safe, never masks a dark one.
+        transcript_mtimes = { sid: self._transcript_mtime_fn( sid ) for sid in fleet_view }
         # PID fast-death (kill-0): confirmed-dead sessions among the fleet view, so
         # a /exit'd worker is forced "offline" in ~1 poll instead of aging out over
         # ~1h. Host-PID-trust gated + bias-to-alive inside find_dead_sessions (empty
@@ -1280,6 +1331,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             include_offline      = True,        # FULL view for the post-game F2/F3 detectors
             count_dm_as_liveness = count_dm,    # DM-as-liveness toggle (read once in _poll_once)
             hold_mtimes          = hold_mtimes, # task 70be69f2 hold-as-liveness (unconditional fail-safe signal)
+            transcript_mtimes    = transcript_mtimes, # bug fb332fcd transcript-as-liveness (7th unconditional fail-safe signal)
             alive_threshold_seconds = self.alive_threshold_seconds,  # bug 65d1247f: same threshold the peer-EDGE gate uses (:1029-30) → display agrees with edge logic
         )
         # Fleet-Status offline-lineage carry (2026-06-10): a reaped worker loses both

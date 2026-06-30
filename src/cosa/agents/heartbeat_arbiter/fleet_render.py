@@ -116,7 +116,8 @@ def compute_liveness( view, bridge_mtime, now,
                       quiet_seconds = DEFAULT_QUIET_SECONDS,
                       stale_seconds = DEFAULT_STALE_SECONDS,
                       count_dm      = True,
-                      hold_mtime    = None ):
+                      hold_mtime    = None,
+                      transcript_mtime = None ):
     """
     Build the per-session LIVENESS block — SIX distinct ages + verdict.
 
@@ -155,6 +156,24 @@ def compute_liveness( view, bridge_mtime, now,
           session's hold mtime ages out with everything else). LIFE signal only,
           never STATE / the progress signature (C4). hold_mtime=None ⇒ hold_age_s
           is None and the verdict is byte-identical to the prior 5-signal block.
+        - transcript_age_s  — the session's transcript `.jsonl` file mtime (bug
+          fb332fcd): the harness appends to the transcript on EVERY assistant /
+          tool event, so its mtime bumps DURING a long single-turn tool sequence
+          (plan-mode drafting, a big multi-Read/Edit run) — exactly when NO Stop
+          fires and the other six signals all age past STALE. The canonical
+          MANAGER-STALE false-positive this closes: a manager deep in an APPROVED
+          PLAN emits no Stop for the whole plan turn, so bridge/event/commons/
+          idle_prompt/dm/hold all age out and the detector poked an actively-
+          working manager. transcript_age is UNCONDITIONAL (no toggle, like
+          hold_age): a fresh transcript mtime is the process actively doing work
+          = an unambiguous fail-safe sign of LIFE. ADDITIVE — it can only make a
+          session read MORE alive, NEVER suppress a genuinely-dark one (a
+          dark/exited session's transcript stops appending → its mtime ages out
+          with everything else, and a MISSING/unreadable transcript_path
+          contributes NO signal at all — None, never a spurious-fresh value).
+          LIFE signal only, never STATE / the progress signature (C4).
+          transcript_mtime=None ⇒ transcript_age_s is None and the verdict is
+          byte-identical to the prior 6-signal block.
     A session is LIVE if ANY counted signal is fresh (bias-to-alive); offline
     only when NONE is recent.
 
@@ -180,6 +199,12 @@ def compute_liveness( view, bridge_mtime, now,
           joins the freshest-of union (unconditional fail-safe LIFE signal).
           hold_mtime=None ⇒ hold_age_s is None and the verdict matches the prior
           5-signal block (additive, reversible)
+        - transcript_age_s is present iff transcript_mtime is not None; when
+          present it ALWAYS joins the freshest-of union (unconditional fail-safe
+          LIFE signal, like hold_age_s). transcript_mtime=None ⇒ transcript_age_s
+          is None and the verdict matches the prior 6-signal block (additive,
+          reversible) — a missing/unreadable transcript is NO signal, so a
+          genuinely-dark session is never masked (bug fb332fcd non-negotiable #1)
         - state is NOT consulted here (orthogonal columns, C4)
         - never raises
     """
@@ -196,12 +221,21 @@ def compute_liveness( view, bridge_mtime, now,
     # as bridge_mtime), so _bridge_age reads it. UNCONDITIONAL in the union — a
     # fresh hold mtime is an unambiguous sign of life. None hold_mtime ⇒ None age.
     hold_age        = _bridge_age( hold_mtime, now )
+    # transcript_age (bug fb332fcd): the transcript .jsonl mtime is an epoch float
+    # (same shape as bridge_mtime), so _bridge_age reads it. UNCONDITIONAL in the
+    # union — a fresh transcript mtime means the process is actively appending
+    # turns (incl. mid-plan, when NO Stop fires and the other 6 signals age out).
+    # None transcript_mtime ⇒ None age (fail-safe: a missing/unreadable transcript
+    # adds NO life, so a genuinely-dark session still ages to STALE).
+    transcript_age  = _bridge_age( transcript_mtime, now )
 
     candidates = [ a for a in ( bridge_age, event_age, commons_age, idle_prompt_age ) if a is not None ]
     if count_dm and dm_age is not None:
         candidates.append( dm_age )
     if hold_age is not None:
         candidates.append( hold_age )
+    if transcript_age is not None:
+        candidates.append( transcript_age )
     freshest   = min( candidates ) if candidates else None
 
     def _int( a ):
@@ -214,6 +248,7 @@ def compute_liveness( view, bridge_mtime, now,
         "idle_prompt_age_s" : _int( idle_prompt_age ),
         "dm_age_s"          : _int( dm_age ),
         "hold_age_s"        : _int( hold_age ),
+        "transcript_age_s"  : _int( transcript_age ),
         "freshest_age_s"    : _int( freshest ),
         "verdict"           : _verdict( freshest, live_seconds, quiet_seconds, stale_seconds ),
     }
@@ -263,6 +298,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
                     declared_managers    = None,
                     count_dm_as_liveness = True,
                     hold_mtimes          = None,
+                    transcript_mtimes    = None,
                     alive_threshold_seconds = None ):
     """
     Build the JSON-able full-fleet snapshot for the GET endpoint (§10.4), enriched
@@ -306,6 +342,16 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
           Stop-refreshes its hold reads LIVE, not MANAGER-STALE). None / a missing
           sid ⇒ hold_age_s None for that row, byte-identical to the prior block.
           Hold-mtime feeds LIVENESS only, never STATE / the progress signature (C4)
+        - transcript_mtimes (default None, the bug-fb332fcd transcript-file-mtime
+          liveness source) is { session_id: epoch-float|None }; each row's
+          transcript mtime is threaded to compute_liveness(transcript_mtime=...) →
+          its transcript_age_s joins the freshest-of union UNCONDITIONALLY (a
+          manager mid-plan, appending its transcript every tool call but emitting
+          no Stop, reads LIVE not MANAGER-STALE). None / a missing sid ⇒
+          transcript_age_s None for that row, byte-identical to the prior block —
+          a missing/unreadable transcript is NO signal, so a genuinely-dark
+          session is never masked. Transcript-mtime feeds LIVENESS only, never
+          STATE / the progress signature (C4)
         - alive_threshold_seconds (default None) gates the bug-65d1247f DISPLAY
           sanitization: a row whose HOLDER SESSION is beyond the alive threshold
           (dependency_graph.session_is_stale — the SAME predicate the peer-EDGE gate
@@ -368,6 +414,7 @@ def build_snapshot( fleet_view, bridge_mtimes, now,
             live_seconds, quiet_seconds, stale_seconds,
             count_dm   = count_dm_as_liveness,
             hold_mtime = ( hold_mtimes or { } ).get( sid ),
+            transcript_mtime = ( transcript_mtimes or { } ).get( sid ),
         )
         # PID fast-death override (kill-0): a CONFIRMED-dead process forces
         # "offline" now, regardless of how recent its last signal was — so a
