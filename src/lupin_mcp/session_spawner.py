@@ -551,6 +551,164 @@ def _default_clear_hold( identity: Dict[ str, Any ] ) -> bool:
         return False
 
 
+def _identity_persona_name( identity ):
+    """
+    Extract the persona NAME from a captured reap identity. `voice_persona` may be
+    a dict ({name, ...}) or a bare string; returns the name string, or None when
+    absent. Mirrors the dict-or-string handling in `_default_emit_reaped_tombstone`.
+    """
+    persona = identity.get( "persona" ) if identity else None
+    if isinstance( persona, dict ):
+        return persona.get( "name" )
+    return persona
+
+
+def _resolve_session_persona_name( session_dir, session_id ):
+    """
+    Resolve the voice_persona NAME for a `session_id` by scanning `session_dir`
+    bridges — the SAME identity surface as `_capture_reap_identity`, but matched on
+    stable_session_id/session_id instead of tmux_session. Used to learn the REAPING
+    MANAGER's persona for the reap-reconcile orphan guard, since the MCP wrapper
+    threads only `manager_session_id` (not the persona).
+
+    Best-effort: returns None on a missing id, no match, an unreadable/non-JSON
+    bridge, or a glob error. Never raises.
+    """
+    if not session_id:
+        return None
+    try:
+        candidates = list( session_dir.glob( "cc-*.json" ) )
+    except OSError:
+        return None
+    for path in candidates:
+        if "buffer" in path.name or "listener" in path.name:
+            continue
+        try:
+            data = json.loads( path.read_text() )
+        except ( json.JSONDecodeError, OSError ):
+            continue
+        if data.get( "stable_session_id" ) == session_id or data.get( "session_id" ) == session_id:
+            persona = data.get( "voice_persona" )
+            return persona.get( "name" ) if isinstance( persona, dict ) else persona
+    return None
+
+
+def _is_store_error( resp ):
+    """
+    True if a `task_store_tools` response is a transport/HTTP error envelope (the
+    `{ "status": "error", ... }` shape `task_store_request` returns on a non-2xx)
+    OR not a dict at all. A successful 200 body ({item, event} / {tasks, count})
+    carries no "status":"error", so this distinguishes a real mutation from a 422.
+    """
+    return ( not isinstance( resp, dict ) ) or resp.get( "status" ) == "error"
+
+
+def _latest_event_receipt( tst, api_url, api_key, item_id ):
+    """
+    Return the receipt_refs carried by an item's LATEST audit event (GET
+    /api/tasks/{id}/events, ordered ascending), or None.
+
+    Fail-safe-toward-reassign: a missing/empty trail, a store-error read, a
+    non-dict body, or a raising read ALL yield None — treated as "no receipt", so
+    the caller reassigns rather than auto-closing. Auto-close fires ONLY on a
+    POSITIVE receipt, so a read failure can NEVER cause a wrong close.
+    """
+    try:
+        resp = tst.task_store_request( "GET", f"/api/tasks/{item_id}/events", api_url, api_key )
+    except Exception:
+        return None
+    events = ( resp.get( "events" ) if isinstance( resp, dict ) else None ) or []
+    if not events:
+        return None
+    refs = events[ -1 ].get( "receipt_refs" )
+    return refs if refs else None
+
+
+def _default_reconcile_store_items( identity, dead_owner_slugs, reaping_manager, reason="" ):
+    """
+    Default reap-RECONCILE producer (d647b531): on reap, reconcile the reaped
+    worker's NON-TERMINAL store items so an orphaned "outstanding" task never
+    survives the reap for the user to catch. Three arms:
+
+      (a) AUTO-CLOSE — ONLY when the item's LATEST audit event already carries
+          receipt_refs (a `->done` that produced a receipt but never persisted the
+          status flip). Machine-checkable, zero inference. No receipt → never close.
+      (b) REASSIGN — every other non-terminal item, with the orphan-guard
+          precedence: accountable_manager IF ALIVE (its slug NOT in
+          `dead_owner_slugs` — the set of every persona reaped in THIS batch,
+          which INCLUDES the reaped owner itself) → else the REAPING MANAGER
+          (`reaping_manager`) → else unclassifiable. This kills the self-owned-stub
+          re-orphan (harness TaskCreate hardcodes owner==accountable_manager==self)
+          AND the same-batch case.
+      (c) SURFACE — ALWAYS returns { closed, reassigned, unclassifiable } (lists of
+          item ids); any per-item store error lands the item in unclassifiable.
+
+    Reaches the store via the SAME `task_store_tools` client cosa_voice_mcp uses
+    for its task verbs, with api_url/api_key resolved exactly as the sibling
+    `_default_emit_reap` producer does. Best-effort throughout: a missing owner,
+    unreachable config, or a raising query yields an empty summary and NEVER raises
+    (dismiss_sessions also swallows, but this stays self-contained). Override via
+    `dismiss_sessions(reconcile_items_fn=...)` — tests inject a fake.
+
+    Requires:
+        - identity is a captured reap identity ({persona, session_id, ...}) or None
+        - dead_owner_slugs is a set of persona slugs reaped in this batch
+        - reaping_manager is the reaping manager's persona NAME, or None
+
+    Ensures:
+        - returns { "closed": [...], "reassigned": [...], "unclassifiable": [...] }
+        - auto-closes ONLY on a positive latest-event receipt; otherwise reassigns
+          per the alive→reaping-manager→unclassifiable precedence
+        - never raises
+    """
+    summary    = { "closed": [], "reassigned": [], "unclassifiable": [] }
+    owner_name = _identity_persona_name( identity )
+    if not owner_name:
+        return summary                          # no owner key → nothing to query
+    owner_key  = persona_slug( owner_name )
+    try:
+        from lupin_mcp import task_store_tools as tst
+        from cosa.utils.config_loader import get_api_config, load_api_key
+        env     = os.getenv( "LUPIN_ENV", "local" )
+        cfg     = get_api_config( env )
+        api_url = cfg[ "api_url" ]
+        api_key = load_api_key( cfg[ "api_key_file" ] )
+    except Exception:
+        return summary                          # can't reach store config → best-effort no-op
+    actor = f"reap-reconcile {owner_name}"
+    try:
+        resp = tst.task_query_impl( api_url, api_key, owner_persona=owner_key )
+    except Exception:
+        return summary                          # query transport blew up → best-effort no-op
+    items = ( resp.get( "tasks" ) if isinstance( resp, dict ) else None ) or []
+    for item in items:
+        item_id = item.get( "id" )
+        if item.get( "status" ) in ( "done", "dropped" ):
+            continue                            # terminal — nothing to reconcile
+        try:
+            receipt = _latest_event_receipt( tst, api_url, api_key, item_id )
+            if receipt:
+                resp_t = tst.task_transition_impl( api_url, api_key, actor, item_id, "done", receipt_refs=receipt )
+                ( summary[ "unclassifiable" ] if _is_store_error( resp_t ) else summary[ "closed" ] ).append( item_id )
+                continue
+            target      = item.get( "accountable_manager" )
+            target_slug = persona_slug( target ) if target else None
+            if target_slug and target_slug not in dead_owner_slugs:
+                reassign_to = target                # accountable_manager is alive
+            elif reaping_manager:
+                reassign_to = reaping_manager       # dead/empty target → escalate to the reaping manager
+            else:
+                summary[ "unclassifiable" ].append( item_id )   # no live target → never re-orphan
+                continue
+            resp_r = tst.task_reassign_impl(
+                api_url, api_key, actor, item_id, reassign_to,
+                f"owner {owner_name} reaped; auto-reassigned to {reassign_to} ({reason or 'reap'})" )
+            ( summary[ "unclassifiable" ] if _is_store_error( resp_r ) else summary[ "reassigned" ] ).append( item_id )
+        except Exception:
+            summary[ "unclassifiable" ].append( item_id )   # any per-item error → surface, never break
+    return summary
+
+
 def dismiss_sessions(
     manager_session_id : str,
     *,
@@ -561,7 +719,8 @@ def dismiss_sessions(
     session_dir        : Path = SESSION_DIR,
     emit_reap_fn       : Optional[ Callable ] = None,
     emit_reaped_fn     : Optional[ Callable ] = None,
-    clear_hold_fn      : Optional[ Callable ] = None
+    clear_hold_fn      : Optional[ Callable ] = None,
+    reconcile_items_fn : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -583,7 +742,15 @@ def dismiss_sessions(
           kill — is handled by the MCP wrapper's pre-kill DM; this function does
           the teardown)
         - Returns { dismissed: [ {session_name, status} ], manager_session_id,
-                    reason, write_memento, remaining }
+                    reason, write_memento, remaining, reconciliation }
+        - reap-RECONCILE (d647b531): when `reconcile_items_fn` is provided, each
+          reaped session's NON-TERMINAL store items are reconciled (close-if-
+          receipt / reassign-to-live-manager / surface) and the per-session
+          summaries are aggregated into the result's `reconciliation` block. The
+          reconciler is FAIL-SAFE — a raising reconciler NEVER breaks the reap.
+          DEFAULT is None (skip) so unit reaps pointed at a live :7999 stay
+          hermetic; the real `_default_reconcile_store_items` is wired by the MCP
+          wrapper (the live reap entrypoint). See the seam comment below.
         - Never raises
 
     Args:
@@ -593,6 +760,9 @@ def dismiss_sessions(
         write_memento: echoed; the wrapper gives the child a chance to write one
         runner: injected subprocess runner
         session_dir: injected session/manifest directory
+        reconcile_items_fn: per-reaped-session store reconciler
+            (identity, dead_owner_slugs, reaping_manager, reason) -> summary dict;
+            None = skip reconcile (hermetic default)
 
     Returns:
         dict: dismissal result
@@ -637,6 +807,29 @@ def dismiss_sessions(
     do_clear_hold    = clear_hold_fn   if clear_hold_fn   is not None else _default_clear_hold
     bridges_deleted  = 0
     holds_cleared    = 0
+
+    # reap-RECONCILE seam (d647b531): when a reconciler is wired, reconcile each
+    # reaped worker's NON-TERMINAL store items so an orphaned "outstanding" task
+    # never survives the reap. INVARIANT — TWO reap paths exist:
+    #   • the MCP wrapper (cosa_voice_mcp.dismiss_sessions) → LIVE-reconcile: it
+    #     passes the real `_default_reconcile_store_items`.
+    #   • `reap_stale_spawned` (idle-TTL backstop) → forwards reconcile_items_fn
+    #     (None until that path is wired live).
+    # ANY NEW reap path MUST thread `reconcile_items_fn` — adding a third path that
+    # calls dismiss_sessions WITHOUT it silently re-introduces the orphan this seam
+    # exists to kill. The default is None (skip) so unit reaps stay hermetic against
+    # a live :7999; the reconciler resolves the reaping-manager persona + the
+    # dead-owner slug set (every persona reaped in THIS batch, incl. the reaped
+    # owner) so a self-owned stub is escalated to the manager, never re-orphaned.
+    reconciliation   = { "closed": [], "reassigned": [], "unclassifiable": [] }
+    reaping_manager  = _resolve_session_persona_name( session_dir, manager_session_id ) if reconcile_items_fn is not None else None
+    dead_owner_slugs = set()
+    if reconcile_items_fn is not None:
+        for name in reaped_names:
+            name_persona = _identity_persona_name( identities.get( name ) )
+            if name_persona:
+                dead_owner_slugs.add( persona_slug( name_persona ) )
+
     for name in reaped_names:
         ident = identities.get( name )
         if not ident:
@@ -670,6 +863,17 @@ def dismiss_sessions(
                 holds_cleared += 1
         except Exception:
             pass  # producer must NEVER break the reap
+        # Reap-reconcile (d647b531): reconcile this worker's non-terminal store
+        # items, aggregating the summary. Fail-safe — a raising reconciler NEVER
+        # breaks the reap (same posture as the bridge unlink / emit / hold-clear).
+        if reconcile_items_fn is not None:
+            try:
+                summary = reconcile_items_fn( ident, dead_owner_slugs, reaping_manager, reason )
+                if isinstance( summary, dict ):
+                    for category in ( "closed", "reassigned", "unclassifiable" ):
+                        reconciliation[ category ].extend( summary.get( category ) or [] )
+            except Exception:
+                pass  # producer must NEVER break the reap
 
     return {
         "dismissed"          : dismissed,
@@ -678,7 +882,8 @@ def dismiss_sessions(
         "write_memento"      : write_memento,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
         "bridges_deleted"    : bridges_deleted,
-        "holds_cleared"      : holds_cleared
+        "holds_cleared"      : holds_cleared,
+        "reconciliation"     : reconciliation
     }
 
 
@@ -738,7 +943,8 @@ def reap_stale_spawned(
     is_stale           : Callable,
     reason             : str = "idle-ttl auto-reap",
     runner             : Callable = default_runner,
-    session_dir        : Path = SESSION_DIR
+    session_dir        : Path = SESSION_DIR,
+    reconcile_items_fn : Optional[ Callable ] = None
 ) -> Dict[ str, Any ]:
     """
     Idle-TTL auto-reap backstop (decision #3): reap spawned sessions the
@@ -769,6 +975,11 @@ def reap_stale_spawned(
         reason: teardown reason recorded on the reap
         runner: injected subprocess runner
         session_dir: injected session/manifest directory
+        reconcile_items_fn: forwarded to dismiss_sessions' reap-RECONCILE seam.
+            None by default (this path has NO live caller yet — dormant). When a
+            LIVE caller is wired, it MUST pass `_default_reconcile_store_items`
+            here (as the MCP wrapper does), else a stale-reaped worker's store
+            items silently orphan — the exact failure d647b531 closes, one level up.
 
     Returns:
         dict: reap result
@@ -782,7 +993,8 @@ def reap_stale_spawned(
 
     result = dismiss_sessions(
         manager_session_id, session_names=stale, reason=reason,
-        write_memento=False, runner=runner, session_dir=session_dir
+        write_memento=False, runner=runner, session_dir=session_dir,
+        reconcile_items_fn=reconcile_items_fn   # forward — a LIVE wiring MUST pass _default_reconcile_store_items
     )
     result[ "reaped" ] = stale
     return result

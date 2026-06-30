@@ -759,3 +759,25 @@ class TestDismissSessionsWrapperCoercion:
         asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
         assert captured[ "session_names" ] is None
         assert captured[ "write_memento" ] is True                  # came from cfg default, not "false"
+
+    def test_wrapper_threads_default_reconciler( self, cv_mcp, monkeypatch ):
+        """d647b531: the LIVE reap entrypoint MUST wire the real reap-RECONCILE
+        producer, so a reaped worker's non-terminal store items get reconciled
+        instead of orphaning. session_spawner defaults reconcile_items_fn=None
+        (hermetic); the wrapper is the production opt-in to the mutation."""
+        import lupin_mcp.session_spawner as ss
+        captured = {}
+        def _spy_dismiss( manager_session_id, *, reconcile_items_fn=None, **_kw ):
+            captured[ "reconcile_items_fn" ] = reconcile_items_fn
+            return { "dismissed": [], "remaining": [], "manager_session_id": manager_session_id }
+        monkeypatch.setattr( cv_mcp, "_wait_for_sender_id", lambda: "sender" )
+        monkeypatch.setattr( cv_mcp, "_get_cc_metadata",   lambda: { "session_id": "abc12345" } )
+        monkeypatch.setattr( cv_mcp, "_spawn_config_mgr",  lambda: None )
+        monkeypatch.setattr( ss, "resolve_manager_identity",
+                             lambda meta, fallback_session_id=None: ( "mgr-sid", "Krishna" ) )
+        monkeypatch.setattr( ss, "resolve_spawn_config",
+                             lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
+                                           "write_memento_default": True } )
+        monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
+        asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
+        assert captured[ "reconcile_items_fn" ] is ss._default_reconcile_store_items

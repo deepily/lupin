@@ -2349,7 +2349,14 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     sid, _ = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
     cfg    = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
     wm     = cfg[ "write_memento_default" ] if write_memento is None else write_memento
-    return session_spawner.dismiss_sessions( sid, session_names=session_names, reason=reason, write_memento=wm )
+    # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
+    # worker's non-terminal store items are auto-reconciled (close-if-receipt /
+    # reassign-to-live-manager / surface) instead of orphaning. session_spawner
+    # defaults reconcile_items_fn=None (hermetic for unit reaps against live :7999);
+    # THIS is the production entrypoint that opts into the mutation.
+    return session_spawner.dismiss_sessions(
+        sid, session_names=session_names, reason=reason, write_memento=wm,
+        reconcile_items_fn=session_spawner._default_reconcile_store_items )
 
 
 @mcp.tool
