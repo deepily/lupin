@@ -402,6 +402,10 @@ class NotificationsUI {
         this.TASK_LIST_COLLAPSED_KEY    = 'lupin.taskList.collapsedOwners'; // localStorage key: JSON array of collapsed owner keys
         this.TASK_LIST_UNASSIGNED_KEY   = '__unassigned__';                 // sentinel owner key for the ownerless bucket
         this._taskListAccordionWired    = false;                            // event-delegation guard (wire the container listener once)
+        // Task-list row redesign (design 2026.06.29): the client title-truncation
+        // backstop length — IDENTICAL to the server-side store-guard cap (60 chars,
+        // handoff #5 / D4). Catches LEGACY rows written before the store guard.
+        this.TASK_TITLE_TRUNCATE_LEN    = 60;                               // truncate-with-ellipsis length; full title on hover-tooltip
 
         // STT for Q&A input
         this.qaAudioRecorder = null;
@@ -9304,12 +9308,65 @@ class NotificationsUI {
         return { totalCount: rows.length, groups };
     }
 
+    _taskIdLabel( task ) {
+        /**
+         * The compact row identifier: the first 8 chars of the item's id (the
+         * store serializes its UUID as `id`; first-8 is the "id_hash" the design
+         * 2026.06.29 row redesign places in the new leftmost column).
+         *
+         * Ensures:
+         *     - non-empty id → its first 8 chars; absent/empty → "—"
+         *     - Pure: no DOM, no side effects
+         */
+        const id = ( task && task.id != null ) ? String( task.id ) : "";
+        return id ? id.slice( 0, 8 ) : "—";
+    }
+
+    _truncateTaskTitle( label ) {
+        /**
+         * Client-side title-truncation backstop (design 2026.06.29 §4.4 / D1):
+         * trim a wall-of-text title to TASK_TITLE_TRUNCATE_LEN chars + an ellipsis.
+         * Backstops LEGACY rows written before the server store-guard; the full
+         * title rides the cell's hover-tooltip (title attr) so nothing is hidden.
+         *
+         * Requires:
+         *     - label is the (already fallback-resolved) title string
+         *
+         * Ensures:
+         *     - label.length > cap → label.slice( 0, cap ) + "…"; else label verbatim
+         *     - Pure: no DOM, no side effects
+         */
+        const cap = this.TASK_TITLE_TRUNCATE_LEN;
+        const s   = String( label );
+        return s.length > cap ? s.slice( 0, cap ) + "…" : s;
+    }
+
+    _taskBodyIsEmpty( task ) {
+        /**
+         * Whether the task has no detail `body` to show in the overlay — drives
+         * the dim-in-place 📄 (handoff ruling #3): an empty body keeps the emoji
+         * in its column for layout uniformity but disabled / non-clickable.
+         *
+         * Ensures:
+         *     - body null / undefined / whitespace-only → true; else false
+         *     - Pure: no DOM, no side effects
+         */
+        const body = task ? task.body : null;
+        return body == null || String( body ).trim() === "";
+    }
+
     _renderTaskRow( task, ianaZone ) {
         /**
-         * Render a single task row (one <tr>) with the eight columns: Title · Class ·
-         * Status · Blocked by · Next chase · Accountable · Priority · Project. The
-         * owner_persona is the GROUP HEADER (not a per-row column), so a row never
-         * repeats its owner.
+         * Render a single task row (one <tr>) with TEN columns: ID · Title · Class ·
+         * Status · Blocked by · Next chase · Accountable · Priority · Project ·
+         * Detail. The owner_persona is the GROUP HEADER (not a per-row column), so a
+         * row never repeats its owner.
+         *
+         * Row redesign (design 2026.06.29, AUGMENT ruling): the NEW leftmost ID
+         * column carries the 8-char id; the Title cell is truncated to ~60 chars +
+         * ellipsis with the FULL title on a hover-tooltip; the NEW rightmost Detail
+         * column carries a 📄 affordance opening the body overlay (dimmed in place
+         * when the body is empty).
          *
          * EVERY store-sourced value is escapeHtml'd (the in-service card writes via
          * innerHTML, so unlike the TS createElement card it must escape explicitly).
@@ -9321,16 +9378,23 @@ class NotificationsUI {
          * Ensures:
          *     - the <tr> carries a `task-status-*` class (status→accent); the Priority
          *       cell carries a `task-prio-*` heat class when recognized
+         *     - ID cell: monospace, first 8 chars of id (absent → "—")
+         *     - Title cell: truncated text + `title=` tooltip carrying the FULL title
          *     - Status cell leads with a `.task-status-dot` span + the status word
          *     - Blocked-by / Accountable / Project: falsy/"none" → "—"
          *     - Next-chase: ISO → "MM-DD HH:MM" in zone; absent → "—"
+         *     - Detail cell: 📄 — clickable (carries data-task-body/-id) when body
+         *       present; `.task-detail-empty` (disabled, non-clickable) when empty
          *     - Pure: no DOM access, no side effects (string in → string out)
          */
         const statusWord  = this.escapeHtml( task.status || "unknown" );
         const statusClass = this._taskStatusClass( task.status );
         const prioClass   = this._taskPriorityClass( task.priority );
 
-        const title       = this.escapeHtml( this._taskTitleLabel( task ) );
+        const idLabel     = this.escapeHtml( this._taskIdLabel( task ) );
+        const fullTitle   = this._taskTitleLabel( task );
+        const titleText   = this.escapeHtml( this._truncateTaskTitle( fullTitle ) );
+        const titleAttr   = this._escapeTaskAttr( fullTitle );
         const itemClass   = task.item_class || "task";
         const classBadge  = this.escapeHtml( itemClass );
         const classSlug   = this.escapeHtml( String( itemClass ).replace( /[^a-zA-Z0-9_-]/g, "" ) );
@@ -9343,9 +9407,14 @@ class NotificationsUI {
         const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
         const project     = this.escapeHtml( this._taskCellOrDash( task.project ) );
 
+        const detailCell  = this._taskBodyIsEmpty( task )
+            ? `<span class="task-detail-emoji task-detail-empty" aria-disabled="true" title="No detail">📄</span>`
+            : `<span class="task-detail-emoji" role="button" tabindex="0" title="View detail" data-task-id="${this._escapeTaskAttr( this._taskIdLabel( task ) )}" data-task-body="${this._escapeTaskAttr( task.body )}">📄</span>`;
+
         return `
             <tr class="task-row ${statusClass}">
-                <td class="task-col-title">${title}</td>
+                <td class="task-col-id">${idLabel}</td>
+                <td class="task-col-title" title="${titleAttr}">${titleText}</td>
                 <td class="task-col-class"><span class="task-class-badge task-class-${classSlug}">${classBadge}</span></td>
                 <td class="task-col-status"><span class="task-status-dot"></span>${statusWord}</td>
                 <td class="task-col-blocked">${blocked}</td>
@@ -9353,6 +9422,7 @@ class NotificationsUI {
                 <td class="task-col-accountable">${accountable}</td>
                 <td class="task-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
                 <td class="task-col-project">${project}</td>
+                <td class="task-col-detail">${detailCell}</td>
             </tr>`;
     }
 
@@ -9407,8 +9477,9 @@ class NotificationsUI {
          * "owner · N" label) followed by that owner's task rows; the Unassigned group
          * renders last.
          *
-         * Eight columns: Title · Class · Status · Blocked by · Next chase ·
-         * Accountable · Priority · Project.
+         * Ten columns: ID · Title · Class · Status · Blocked by · Next chase ·
+         * Accountable · Priority · Project · Detail (design 2026.06.29 row redesign:
+         * the leading ID column + trailing Detail 📄 column augment the original 8).
          *
          * Requires:
          *     - model is the { totalCount, groups } shape from groupTasksByOwner
@@ -9430,6 +9501,7 @@ class NotificationsUI {
         const headerRow = `
             <thead>
                 <tr>
+                    <th class="task-col-id">ID</th>
                     <th class="task-col-title">Title</th>
                     <th class="task-col-class">Class</th>
                     <th class="task-col-status">Status</th>
@@ -9438,6 +9510,7 @@ class NotificationsUI {
                     <th class="task-col-accountable">Accountable</th>
                     <th class="task-col-priority">Priority</th>
                     <th class="task-col-project">Project</th>
+                    <th class="task-col-detail">Detail</th>
                 </tr>
             </thead>`;
 
@@ -9455,7 +9528,7 @@ class NotificationsUI {
 
             const groupHeaderHtml = `
                 <tr class="task-group-header${group.isUnassigned ? " task-group-unassigned" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
-                    <td colspan="8">${chevron}${headerLabel}</td>
+                    <td colspan="10">${chevron}${headerLabel}</td>
                 </tr>`;
 
             const rows = group.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
@@ -9728,6 +9801,103 @@ class NotificationsUI {
         this._applyTaskGroupCollapseState( tbody, isCollapsed );
     }
 
+    _handleTaskListClick( target ) {
+        /**
+         * Single delegated dispatcher for the task-list container (design 2026.06.29
+         * row redesign): a click/activation on a LIVE detail 📄 opens the body
+         * overlay; anything else falls through to the accordion toggle.
+         *
+         * Requires:
+         *     - target is the activated DOM node (or a descendant)
+         *
+         * Ensures:
+         *     - target within a `.task-detail-emoji` that is NOT `.task-detail-empty`
+         *       → open the body overlay with that row's body (and return — no toggle)
+         *     - a DIMMED (empty-body) emoji is inert: neither opens an overlay nor
+         *       toggles the group (the dim-in-place ruling #3)
+         *     - otherwise → delegate to the accordion toggle (unchanged behavior)
+         */
+        const emoji = target.closest ? target.closest( ".task-detail-emoji" ) : null;
+        if ( emoji ) {
+            if ( !emoji.classList.contains( "task-detail-empty" ) ) {
+                this.openTaskBodyOverlay( emoji.dataset.taskBody || "", emoji.dataset.taskId || "" );
+            }
+            return;   // a detail-emoji click is never also an accordion toggle
+        }
+        this._handleTaskAccordionToggle( target );
+    }
+
+    openTaskBodyOverlay( bodyText, idLabel ) {
+        /**
+         * Show a small dismissible overlay rendering the task-store `body` (design
+         * 2026.06.29 / D2 — the BODY field, NOT the notification abstract). Dismiss
+         * on click-away (backdrop click) or Esc.
+         *
+         * Requires:
+         *     - bodyText is the task's body string (already attribute-decoded by the
+         *       browser when read from data-task-body)
+         *     - idLabel is the 8-char id shown in the overlay header (may be "")
+         *
+         * Ensures:
+         *     - any prior overlay is removed first (single instance)
+         *     - the overlay carries the id header + the body in a <pre> (whitespace
+         *       preserved); the body is textContent-set, never innerHTML (no XSS)
+         *     - a backdrop click OR Escape removes the overlay AND its keydown listener
+         *     - no-op-safe if document.body is absent (degrade-safe)
+         */
+        this._dismissTaskBodyOverlay();
+        if ( !document.body ) return;
+
+        const overlay = document.createElement( "div" );
+        overlay.id        = "task-body-overlay";
+        overlay.className = "task-body-overlay";
+
+        const panel = document.createElement( "div" );
+        panel.className = "task-body-overlay-content";
+
+        const header = document.createElement( "div" );
+        header.className = "task-body-overlay-header";
+        header.textContent = idLabel ? `Task ${idLabel}` : "Task detail";
+
+        const pre = document.createElement( "pre" );
+        pre.className = "task-body-overlay-body";
+        pre.textContent = bodyText;   // textContent → no HTML injection from body
+
+        panel.appendChild( header );
+        panel.appendChild( pre );
+        overlay.appendChild( panel );
+
+        // Backdrop click dismisses; a click INSIDE the panel does not (stopPropagation).
+        overlay.addEventListener( "click", () => this._dismissTaskBodyOverlay() );
+        panel.addEventListener( "click", ( e ) => e.stopPropagation() );
+
+        // Esc dismisses — listener stored so _dismissTaskBodyOverlay can remove it.
+        this._taskBodyOverlayKeyListener = ( e ) => {
+            if ( e.key === "Escape" ) this._dismissTaskBodyOverlay();
+        };
+        document.addEventListener( "keydown", this._taskBodyOverlayKeyListener );
+
+        document.body.appendChild( overlay );
+    }
+
+    _dismissTaskBodyOverlay() {
+        /**
+         * Tear down the body overlay if present: remove the element and the
+         * document-level Esc keydown listener. Idempotent (safe to call when no
+         * overlay is open — the open path calls it first to enforce single-instance).
+         *
+         * Ensures:
+         *     - #task-body-overlay removed if present
+         *     - the stored keydown listener is detached + cleared if present
+         */
+        if ( this._taskBodyOverlayKeyListener ) {
+            document.removeEventListener( "keydown", this._taskBodyOverlayKeyListener );
+            this._taskBodyOverlayKeyListener = null;
+        }
+        const existing = document.getElementById( "task-body-overlay" );
+        if ( existing ) existing.remove();
+    }
+
     _wireTaskListAccordion() {
         /**
          * Install the single delegated click+keyboard listener for the accordion.
@@ -9744,15 +9914,16 @@ class NotificationsUI {
         const container = document.getElementById( "task-list-container" );
         if ( !container ) return;
 
-        container.addEventListener( "click", ( e ) => this._handleTaskAccordionToggle( e.target ) );
+        container.addEventListener( "click", ( e ) => this._handleTaskListClick( e.target ) );
         container.addEventListener( "keydown", ( e ) => {
-            // Enter / Space activate the focused header (a11y). " " is the modern
-            // key value; "Spacebar" is the legacy IE/Edge spelling.
+            // Enter / Space activate the focused header OR the focused detail 📄
+            // (a11y). " " is the modern key value; "Spacebar" the legacy spelling.
             if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
+            const emoji  = e.target.closest( ".task-detail-emoji" );
             const header = e.target.closest( ".task-group-header" );
-            if ( !header ) return;
-            e.preventDefault();   // Space must toggle the group, not scroll the page
-            this._handleTaskAccordionToggle( e.target );
+            if ( !emoji && !header ) return;
+            e.preventDefault();   // Space must act, not scroll the page
+            this._handleTaskListClick( e.target );
         } );
 
         this._taskListAccordionWired = true;

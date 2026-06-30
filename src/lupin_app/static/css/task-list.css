@@ -151,8 +151,101 @@ tbody.task-group.collapsed .task-row {
     vertical-align: middle;
 }
 
+/* ---- ID column (design 2026.06.29 row redesign — leftmost) ----
+   The compact 8-char row identifier: monospace + tabular nums, no wrap. */
+.task-list-table .task-col-id,
+.task-list-table th.task-col-id {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #868e96;
+    white-space: nowrap;
+}
+
 .task-row .task-col-title {
     font-weight: 600;
+    /* Truncated to ~60 chars in JS (full title rides the hover-tooltip); keep
+       the cell on one line so an over-long legacy title can't wrap the row. */
+    white-space: nowrap;
+    max-width: 30ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ---- */
+.task-list-table .task-col-detail,
+.task-list-table th.task-col-detail {
+    text-align: center;
+    white-space: nowrap;
+    width: 1%;
+}
+
+.task-detail-emoji {
+    cursor: pointer;
+    user-select: none;
+    border-radius: 4px;
+    padding: 1px 3px;
+    transition: background 0.15s, transform 0.15s;
+}
+
+.task-detail-emoji:hover,
+.task-detail-emoji:focus-visible {
+    background: #e9ecef;
+    transform: scale( 1.12 );
+    outline: none;
+}
+
+/* Empty-body 📄: dimmed IN PLACE — stays in the column for layout uniformity but
+   is disabled / non-clickable (handoff ruling #3). */
+.task-detail-emoji.task-detail-empty {
+    opacity: 0.28;
+    cursor: default;
+    filter: grayscale( 1 );
+}
+
+.task-detail-emoji.task-detail-empty:hover {
+    background: none;
+    transform: none;
+}
+
+/* ---- Body overlay (design 2026.06.29 / D2 — shows the task-store `body`) ---- */
+.task-body-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb( 0, 0, 0, 0.45 );
+}
+
+.task-body-overlay-content {
+    max-width: min( 680px, 92vw );
+    max-height: 80vh;
+    overflow: auto;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 8px 30px rgb( 0, 0, 0, 0.3 );
+    padding: 16px 18px;
+}
+
+.task-body-overlay-header {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: #495057;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.task-body-overlay-body {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #343a40;
 }
 
 /* Class badge */

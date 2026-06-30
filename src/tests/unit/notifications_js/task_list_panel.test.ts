@@ -54,6 +54,15 @@ type TaskUI = Record<string, unknown> & {
   groupTasksByOwner: ( tasks: unknown ) => { totalCount: number; groups: TaskGroupModel[] };
   _renderTaskRow: ( task: Record<string, unknown>, ianaZone?: unknown ) => string;
   renderTaskListTable: ( model: { groups: TaskGroupModel[] }, ianaZone?: unknown, collapsedOwners?: Set<string> ) => string;
+  // Row redesign (2026.06.29): id column + title truncation + 📄 body overlay
+  _taskIdLabel: ( task: unknown ) => string;
+  _truncateTaskTitle: ( label: unknown ) => string;
+  _taskBodyIsEmpty: ( task: unknown ) => boolean;
+  _handleTaskListClick: ( target: unknown ) => void;
+  openTaskBodyOverlay: ( bodyText: string, idLabel: string ) => void;
+  _dismissTaskBodyOverlay: () => void;
+  TASK_TITLE_TRUNCATE_LEN: number;
+  _taskBodyOverlayKeyListener: ( ( e: KeyboardEvent ) => void ) | null;
   // Per-persona accordion (2026-06-17)
   _taskGroupOwnerKey: ( group: TaskGroupModel ) => string | null;
   _taskGroupIdSlug: ( ownerKey: unknown ) => string;
@@ -103,6 +112,7 @@ function newUI(): TaskUI {
   ui.TASK_LIST_COLLAPSED_KEY    = "lupin.taskList.collapsedOwners";
   ui.TASK_LIST_UNASSIGNED_KEY   = "__unassigned__";
   ui._taskListAccordionWired    = false;
+  ui.TASK_TITLE_TRUNCATE_LEN    = 60;
   return ui;
 }
 
@@ -340,10 +350,11 @@ test( "groupTasksByOwner: all-owned input → no Unassigned bucket", () => {
 
 // ─────────────────────────── _renderTaskRow / renderTaskListTable (pure) ───────────────────────────
 
-test( "_renderTaskRow: status class on <tr>, status dot, all eight cells, blocked_by shown", () => {
+test( "_renderTaskRow: status class on <tr>, status dot, all ten cells, blocked_by shown", () => {
   const ui = newUI();
   const html = ui._renderTaskRow( T_BLOCKED, "America/New_York" );
   assert.match( html, /<tr class="task-row task-status-blocked">/ );
+  assert.match( html, /<td class="task-col-id">t1<\/td>/ );    // NEW leftmost ID col (first 8 of id)
   assert.match( html, /<td class="task-col-status"><span class="task-status-dot"><\/span>blocked<\/td>/ );
   assert.match( html, /Wire the seam/ );
   assert.match( html, /decision:abc/ );                 // blocked_by rendered
@@ -351,6 +362,7 @@ test( "_renderTaskRow: status class on <tr>, status dot, all eight cells, blocke
   assert.match( html, /task-col-priority task-prio-high/ );   // P1 → high tint
   assert.match( html, />lupin</ );                      // project
   assert.match( html, /task-class-badge task-class-task/ );
+  assert.match( html, /<td class="task-col-detail">/ );       // NEW rightmost Detail col
 } );
 
 test( "_renderTaskRow: 'none' blocked_by → em-dash; null next_chase → em-dash; no prio tint for missing", () => {
@@ -385,7 +397,7 @@ test( "_renderTaskRow: item_class is slug-sanitized in the class attr (no attrib
   assert.match( html, /task-class-taskonmouseoverx/ );   // stripped to alnum/_/-
 } );
 
-test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, eight columns, colspan 8", () => {
+test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, ten columns, colspan 10", () => {
   const ui = newUI();
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED, T_ORPHAN ] );
   const html = ui.renderTaskListTable( model, undefined );
@@ -394,11 +406,244 @@ test( "renderTaskListTable: owner group header (owner · count) + Unassigned lab
   assert.match( html, /Krishna · 1/ );
   assert.match( html, /\(Unassigned\)/ );
   assert.match( html, /task-group-unassigned/ );
-  for ( const col of [ "Title", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Priority", "Project" ] ) {
+  for ( const col of [ "ID", "Title", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Priority", "Project", "Detail" ] ) {
     assert.ok( html.includes( col ), `header "${col}" present` );
   }
-  assert.match( html, /colspan="8"/ );
+  assert.match( html, /colspan="10"/ );                 // augmented 8 → 10 columns
   assert.ok( html.indexOf( "Krishna" ) < html.indexOf( "(Unassigned)" ), "Unassigned renders last" );
+} );
+
+// ─────────────── Row redesign 2026.06.29: id col + title truncation + 📄 body overlay ───────────────
+
+test( "_taskIdLabel: first 8 chars of id; long UUID truncated; absent/null → em-dash", () => {
+  const ui = newUI();
+  assert.equal( ui._taskIdLabel( { id: "3b85863e-ccb9-4948-948c-627e3922850e" } ), "3b85863e" );
+  assert.equal( ui._taskIdLabel( { id: "abc" } ), "abc" );      // shorter than 8 → verbatim
+  assert.equal( ui._taskIdLabel( { id: "" } ), "—" );
+  assert.equal( ui._taskIdLabel( { } ), "—" );                  // id absent
+  assert.equal( ui._taskIdLabel( { id: null } ), "—" );
+  assert.equal( ui._taskIdLabel( null ), "—" );                 // no task object
+} );
+
+test( "_truncateTaskTitle: under/at cap verbatim; over cap → slice(60)+ellipsis", () => {
+  const ui = newUI();
+  assert.equal( ui._truncateTaskTitle( "short title" ), "short title" );
+  const at = "x".repeat( 60 );
+  assert.equal( ui._truncateTaskTitle( at ), at );              // exactly at cap → no ellipsis
+  const over = "y".repeat( 90 );
+  assert.equal( ui._truncateTaskTitle( over ), "y".repeat( 60 ) + "…" );
+} );
+
+test( "_taskBodyIsEmpty: null/undefined/blank → true; non-blank → false", () => {
+  const ui = newUI();
+  assert.equal( ui._taskBodyIsEmpty( { body: null } ), true );
+  assert.equal( ui._taskBodyIsEmpty( { } ), true );             // body absent
+  assert.equal( ui._taskBodyIsEmpty( { body: "" } ), true );
+  assert.equal( ui._taskBodyIsEmpty( { body: "   \n\t " } ), true );
+  assert.equal( ui._taskBodyIsEmpty( null ), true );            // no task object
+  assert.equal( ui._taskBodyIsEmpty( { body: "detail here" } ), false );
+} );
+
+test( "_renderTaskRow: long title truncated in cell, FULL title in title= tooltip", () => {
+  const ui = newUI();
+  const longTitle = "Z".repeat( 90 );
+  const html = ui._renderTaskRow( { id: "abcdef12", title: longTitle, status: "queued" }, undefined );
+  assert.match( html, /<td class="task-col-id">abcdef12<\/td>/ );
+  assert.ok( html.includes( "Z".repeat( 60 ) + "…" ), "cell text truncated + ellipsis" );
+  assert.ok( html.includes( `title="${longTitle}"` ), "full title rides the tooltip attr" );
+} );
+
+test( "_renderTaskRow: body present → live clickable 📄 carrying data-task-body/-id", () => {
+  const ui = newUI();
+  const html = ui._renderTaskRow( { id: "feedface", title: "t", status: "queued", body: "the detail" }, undefined );
+  assert.match( html, /class="task-detail-emoji" role="button" tabindex="0"/ );
+  assert.match( html, /data-task-id="feedface"/ );
+  assert.match( html, /data-task-body="the detail"/ );
+  assert.ok( !html.includes( "task-detail-empty" ), "a live emoji is not dimmed" );
+} );
+
+test( "_renderTaskRow: empty body → DIMMED 📄 in place (disabled, no data-body)", () => {
+  const ui = newUI();
+  const html = ui._renderTaskRow( { id: "x", title: "t", status: "queued", body: "" }, undefined );
+  assert.match( html, /class="task-detail-emoji task-detail-empty" aria-disabled="true"/ );
+  assert.ok( !html.includes( "data-task-body=" ), "dimmed emoji carries no body payload" );
+} );
+
+test( "_renderTaskRow: a body containing quotes/markup is attribute-escaped (no injection)", () => {
+  const ui = newUI();
+  const html = ui._renderTaskRow( { id: "x", title: "t", status: "queued", body: '"><img onerror=alert(1)>' }, undefined );
+  assert.ok( !html.includes( '"><img' ), "raw quote+markup must not break out of the attribute" );
+  assert.match( html, /&quot;&gt;&lt;img/ );
+} );
+
+test( "_renderTaskRow: array blocked_by — typed ref, kind-less ref, and raw entry all rendered", () => {
+  const ui = newUI();
+  const html = ui._renderTaskRow(
+    { id: "x", title: "t", status: "blocked",
+      blocked_by: [ { kind: "persona", id: "rio" }, { id: "bare" }, "raw-str" ] }, undefined );
+  assert.match( html, /persona:rio/ );      // typed ref → kind:id
+  assert.match( html, /bare/ );             // object w/o kind → id only
+  assert.match( html, /raw-str/ );          // non-object entry → String(b)
+} );
+
+test( "_handleTaskListClick: a target lacking .closest is safely ignored (defensive guard)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui._handleTaskListClick( {} );            // no .closest → emoji null → accordion toggle no-ops
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
+} );
+
+test( "_handleTaskListClick: a LIVE 📄 with NO dataset opens overlay with empty body/id (|| '' fallback)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const emoji = document.createElement( "span" );
+  emoji.className = "task-detail-emoji";    // live (not dimmed) but carries no data-task-* attrs
+  document.getElementById( "task-list-container" )!.appendChild( emoji );
+  ui._handleTaskListClick( emoji );
+  const overlay = document.getElementById( "task-body-overlay" )!;
+  assert.ok( overlay, "overlay opened even with no dataset" );
+  assert.equal( overlay.querySelector( ".task-body-overlay-body" )!.textContent, "" );
+  assert.match( overlay.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "_handleTaskListClick: clicking a LIVE 📄 opens the body overlay", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const container = document.getElementById( "task-list-container" )!;
+  container.innerHTML = ui._renderTaskRow( { id: "abcd1234", title: "t", status: "queued", body: "overlay body text" }, undefined );
+  const emoji = container.querySelector( ".task-detail-emoji" )!;
+  ui._handleTaskListClick( emoji );
+  const overlay = document.getElementById( "task-body-overlay" );
+  assert.ok( overlay, "overlay opened" );
+  assert.match( overlay!.querySelector( ".task-body-overlay-body" )!.textContent!, /overlay body text/ );
+  assert.match( overlay!.querySelector( ".task-body-overlay-header" )!.textContent!, /abcd1234/ );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "_handleTaskListClick: a DIMMED 📄 is inert — no overlay, no accordion toggle", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  const container = document.getElementById( "task-list-container" )!;
+  // Inject a dimmed emoji and click it: must neither open an overlay nor toggle a group.
+  const dimmed = document.createElement( "span" );
+  dimmed.className = "task-detail-emoji task-detail-empty";
+  container.appendChild( dimmed );
+  const before = container.innerHTML;
+  ui._handleTaskListClick( dimmed );
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "no overlay for dimmed emoji" );
+  assert.equal( container.innerHTML, before, "no accordion toggle for dimmed emoji" );
+} );
+
+test( "_handleTaskListClick: a non-emoji target delegates to the accordion toggle", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  const header = document.querySelector( ".task-group-header" ) as HTMLElement;
+  const tbody  = header.closest( "tbody.task-group" ) as HTMLElement;
+  assert.ok( !tbody.classList.contains( "collapsed" ) );
+  ui._handleTaskListClick( header );
+  assert.ok( tbody.classList.contains( "collapsed" ), "non-emoji click toggled the group (delegation intact)" );
+} );
+
+test( "openTaskBodyOverlay: backdrop click dismisses; inner panel click does NOT", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "body", "id8" );
+  const overlay = document.getElementById( "task-body-overlay" )!;
+  const panel   = overlay.querySelector( ".task-body-overlay-content" ) as HTMLElement;
+  panel.dispatchEvent( new Event( "click", { bubbles: true } ) );   // inner click bubbles to overlay but is stopped
+  assert.ok( document.getElementById( "task-body-overlay" ), "inner-panel click keeps overlay open" );
+  overlay.dispatchEvent( new Event( "click", { bubbles: true } ) ); // backdrop click
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "backdrop click dismissed" );
+} );
+
+test( "openTaskBodyOverlay: Escape dismisses + detaches its keydown listener", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "body", "id8" );
+  assert.ok( ui._taskBodyOverlayKeyListener, "Esc listener stored while open" );
+  document.dispatchEvent( new KeyboardEvent( "keydown", { key: "Escape" } ) );
+  assert.equal( document.getElementById( "task-body-overlay" ), null, "Esc dismissed" );
+  assert.equal( ui._taskBodyOverlayKeyListener, null, "Esc listener detached on dismiss" );
+} );
+
+test( "openTaskBodyOverlay: a non-Escape key does NOT dismiss", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "body", "id8" );
+  document.dispatchEvent( new KeyboardEvent( "keydown", { key: "a" } ) );
+  assert.ok( document.getElementById( "task-body-overlay" ), "non-Esc key keeps overlay open" );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "openTaskBodyOverlay: opening twice replaces the prior overlay (single instance)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "first", "id1" );
+  ui.openTaskBodyOverlay( "second", "id2" );
+  assert.equal( document.querySelectorAll( "#task-body-overlay" ).length, 1, "only one overlay at a time" );
+  assert.match( document.querySelector( ".task-body-overlay-body" )!.textContent!, /second/ );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "openTaskBodyOverlay: empty idLabel → generic 'Task detail' header", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui.openTaskBodyOverlay( "body", "" );
+  assert.match( document.querySelector( ".task-body-overlay-header" )!.textContent!, /Task detail/ );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "openTaskBodyOverlay: no document.body → no-op (degrade-safe, no throw)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const body = document.body;
+  body.remove();                                        // document.body becomes null
+  assert.equal( document.body, null );
+  ui.openTaskBodyOverlay( "body", "id" );               // must not throw, must not create
+  document.documentElement.appendChild( body );         // restore for subsequent tests
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
+} );
+
+test( "_dismissTaskBodyOverlay: idempotent when no overlay is open (no throw)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  ui._dismissTaskBodyOverlay();                         // nothing open
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
+} );
+
+test( "_wireTaskListAccordion: a delegated 📄 click through the wired listener opens the overlay", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const container = document.getElementById( "task-list-container" )!;
+  container.innerHTML = ui._renderTaskRow( { id: "wired123", title: "t", status: "queued", body: "delegated body" }, undefined );
+  ui._wireTaskListAccordion();
+  const emoji = container.querySelector( ".task-detail-emoji" ) as HTMLElement;
+  emoji.dispatchEvent( new Event( "click", { bubbles: true } ) );
+  assert.ok( document.getElementById( "task-body-overlay" ), "wired delegation opened the overlay" );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "_wireTaskListAccordion: Enter on a focused 📄 opens the overlay (keyboard a11y)", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  const container = document.getElementById( "task-list-container" )!;
+  container.innerHTML = ui._renderTaskRow( { id: "kbd12345", title: "t", status: "queued", body: "kbd body" }, undefined );
+  ui._wireTaskListAccordion();
+  const emoji = container.querySelector( ".task-detail-emoji" ) as HTMLElement;
+  emoji.dispatchEvent( new KeyboardEvent( "keydown", { key: "Enter", bubbles: true } ) );
+  assert.ok( document.getElementById( "task-body-overlay" ), "Enter on emoji opened the overlay" );
+  ui._dismissTaskBodyOverlay();
+} );
+
+test( "_wireTaskListAccordion: a keydown that is neither emoji nor header is ignored", () => {
+  const ui = newUI();
+  buildAccordionDOM( ui );
+  ui._wireTaskListAccordion();
+  const container = document.getElementById( "task-list-container" )!;
+  // Enter on the container itself (not on an emoji or header) → early return, no overlay/toggle.
+  container.dispatchEvent( new KeyboardEvent( "keydown", { key: "Enter", bubbles: true } ) );
+  assert.equal( document.getElementById( "task-body-overlay" ), null );
 } );
 
 // ─────────────────────────── renderTaskList (DOM dispatch) ───────────────────────────
@@ -672,7 +917,7 @@ test( "renderTaskListTable: collapsed owner → collapsed class + ▸ + aria-exp
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED ] );           // Rio, Krishna
   const html  = ui.renderTaskListTable( model, undefined, new Set( [ "Rio" ] ) );
   assert.match( html, /<tbody class="task-group collapsed" id="task-group-Rio" data-owner="Rio">/ );
-  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="8"><span class="task-group-chevron" aria-hidden="true">▸/ );
+  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="10"><span class="task-group-chevron" aria-hidden="true">▸/ );
   // Krishna (not in the set) stays expanded
   assert.match( html, /<tbody class="task-group" id="task-group-Krishna"/ );
 } );
