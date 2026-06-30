@@ -7,33 +7,71 @@
 // fragment is parsed outside a <table> ancestor, AND createElement is inherently
 // safe-write (no markup-injection surface for store-sourced strings).
 //
-// Eight columns: Title · Class · Status · Blocked by · Next chase · Accountable
-// · Priority · Project. The owner_persona is the GROUP HEADER (not a per-row
-// column), so a row never repeats its owner.
+// Columns (row redesign 2026.06.29, AUGMENT): ID · Title · Class · Status ·
+// Blocked by · Next chase · Accountable · Priority · Project · Detail · Actions.
+// The leading ID column + the Detail 📄 column (body-overlay affordance) augment
+// the original eight; Actions stays the trailing edit column. The owner_persona
+// is the GROUP HEADER (not a per-row column), so a row never repeats its owner.
 
 import {
   EDITABLE_PRIORITIES,
   formatChaseTime,
   formatTaskBlockedBy,
+  taskBodyIsEmpty,
   taskCellOrDash,
+  taskIdLabel,
   taskPriorityClass,
   taskStatusClass,
   taskTitleLabel,
+  truncateTaskTitle,
   type TaskGroup,
   type TaskItem,
   type TaskListModel,
 } from "../taskListModel";
 import { ownerKeyForGroup, taskGroupIdSlug } from "../taskListCollapse";
 
-// Nine columns post-Phase-2: the eight read-only data columns + an Actions
-// column carrying the per-row editing controls (priority select · owner-reassign
+// Eleven columns post-row-redesign: ID + the eight read-only data columns +
+// Detail (📄 body overlay) + the Actions column (priority select · owner-reassign
 // select · drop button + inline reason input).
-const TASK_COLSPAN = 9;
+const TASK_COLSPAN = 11;
 
 function td( className: string, text: string ): HTMLTableCellElement {
   const cell = document.createElement( "td" );
   cell.className = className;
   cell.textContent = text;
+  return cell;
+}
+
+/**
+ * Build the Detail cell (row redesign 2026.06.29): a 📄 affordance opening the
+ * body overlay. createElement + dataset (NO innerHTML — safe-write for the
+ * store-sourced body). When the body is empty the emoji is DIMMED in place
+ * (disabled / non-clickable, ruling #3) and carries no body payload.
+ *
+ * Ensures:
+ *   - body present → `.task-detail-emoji` (role=button, tabindex=0) carrying
+ *     data-task-body (the full body) + data-task-id (the 8-char id)
+ *   - body empty → `.task-detail-emoji.task-detail-empty` (aria-disabled), no dataset
+ */
+function renderDetailCell( task: TaskItem ): HTMLTableCellElement {
+  const cell = document.createElement( "td" );
+  cell.className = "task-col-detail";
+  const emoji = document.createElement( "span" );
+  emoji.textContent = "📄";
+  if ( taskBodyIsEmpty( task ) ) {
+    emoji.className = "task-detail-emoji task-detail-empty";
+    emoji.setAttribute( "aria-disabled", "true" );
+    emoji.setAttribute( "title", "No detail" );
+  } else {
+    emoji.className = "task-detail-emoji";
+    emoji.setAttribute( "role", "button" );
+    emoji.setAttribute( "tabindex", "0" );
+    emoji.setAttribute( "title", "View detail" );
+    // In this branch taskBodyIsEmpty(task) is false → body is a non-empty string.
+    emoji.dataset.taskBody = task.body as string;
+    emoji.dataset.taskId   = taskIdLabel( task );
+  }
+  cell.appendChild( emoji );
   return cell;
 }
 
@@ -151,7 +189,16 @@ export function renderTaskRow(
   tr.className = `task-row ${statusClass}`;
   tr.setAttribute( "data-task-id", task.id ?? "" );
 
-  tr.appendChild( td( "task-col-title", taskTitleLabel( task ) ) );
+  // NEW leftmost ID column — first 8 chars of the id, monospace (via CSS).
+  tr.appendChild( td( "task-col-id", taskIdLabel( task ) ) );
+
+  // Title cell: truncated text + the FULL title on a hover-tooltip (title attr).
+  const titleCell = document.createElement( "td" );
+  titleCell.className = "task-col-title";
+  const fullTitle = taskTitleLabel( task );
+  titleCell.textContent = truncateTaskTitle( fullTitle );
+  titleCell.setAttribute( "title", fullTitle );
+  tr.appendChild( titleCell );
 
   const classCell = document.createElement( "td" );
   classCell.className = "task-col-class";
@@ -180,6 +227,9 @@ export function renderTaskRow(
     taskCellOrDash( task.priority ),
   ) );
   tr.appendChild( td( "task-col-project", taskCellOrDash( task.project ) ) );
+
+  // NEW Detail column (before Actions): 📄 body-overlay affordance.
+  tr.appendChild( renderDetailCell( task ) );
 
   tr.appendChild( renderActionsCell( task, reassignTargets ) );
 
@@ -244,6 +294,7 @@ export function renderTaskListTable(
   const thead = document.createElement( "thead" );
   const headRow = document.createElement( "tr" );
   const headers: ReadonlyArray<[string, string]> = [
+    [ "task-col-id", "ID" ],
     [ "task-col-title", "Title" ],
     [ "task-col-class", "Class" ],
     [ "task-col-status", "Status" ],
@@ -252,6 +303,7 @@ export function renderTaskListTable(
     [ "task-col-accountable", "Accountable" ],
     [ "task-col-priority", "Priority" ],
     [ "task-col-project", "Project" ],
+    [ "task-col-detail", "Detail" ],
     [ "task-col-actions", "Actions" ],
   ];
   for ( const [ cls, label ] of headers ) {

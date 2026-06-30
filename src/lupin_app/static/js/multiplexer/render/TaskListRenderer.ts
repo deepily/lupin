@@ -97,6 +97,10 @@ class TaskListRendererImpl implements TaskListRenderer {
   // JobsPaneRenderer.deleteInFlight.
   private readonly editInFlight: Set<string> = new Set();
 
+  // Row redesign 2026.06.29 — the document-level Esc listener for the body
+  // overlay, stored so dismissTaskBodyOverlay can detach it (null when closed).
+  private taskBodyOverlayKeyListener: ( ( e: KeyboardEvent ) => void ) | null = null;
+
   constructor( opts: TaskListRendererOptions ) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
@@ -176,10 +180,12 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.container.addEventListener( "keydown", ( e ) => {
       const ke = e as KeyboardEvent;
       if ( ke.key !== "Enter" && ke.key !== " " && ke.key !== "Spacebar" ) return;
+      // Enter/Space activates a focused detail 📄 OR an accordion header (a11y).
+      const emoji  = ( e.target as Element ).closest( ".task-detail-emoji" );
       const header = ( e.target as Element ).closest( ".task-group-header" );
-      if ( !header ) return;
-      e.preventDefault();   // Space must toggle the group, not scroll the page
-      this.handleAccordionToggle( e.target );
+      if ( !emoji && !header ) return;
+      e.preventDefault();   // Space must act, not scroll the page
+      this.handleContainerClick( e.target );
     } );
 
     root.replaceChildren( header, this.container );
@@ -196,6 +202,7 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 
   unmount(): void {
+    this.dismissTaskBodyOverlay();   // tear down any open body overlay + its Esc listener
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
     if ( this.root !== null ) {
@@ -294,6 +301,16 @@ class TaskListRendererImpl implements TaskListRenderer {
    * control first). A non-drop click falls through to the accordion toggle.
    */
   private handleContainerClick( target: EventTarget | null ): void {
+    // Detail 📄 (row redesign 2026.06.29) dispatches FIRST: a LIVE emoji opens the
+    // body overlay; a DIMMED (empty-body) emoji is inert (no overlay, no toggle).
+    const emoji = ( target as Element ).closest( ".task-detail-emoji" );
+    if ( emoji !== null ) {
+      if ( !emoji.classList.contains( "task-detail-empty" ) ) {
+        const el = emoji as HTMLElement;
+        this.openTaskBodyOverlay( el.dataset.taskBody ?? "", el.dataset.taskId ?? "" );
+      }
+      return;   // a detail-emoji click is never also a drop/accordion action
+    }
     const dropButton = ( target as Element ).closest( ".task-drop-button" );
     if ( dropButton !== null ) {
       this.handleDropClick( dropButton );
@@ -439,6 +456,69 @@ class TaskListRendererImpl implements TaskListRenderer {
   private expandAll(): void {
     saveCollapsedOwners( new Set() );
     this.renderFromStore( false );
+  }
+
+  // -------------------------------------------------------------------------
+  // Body overlay (row redesign 2026.06.29 / D2 — renders the task `body`)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Show a small dismissible overlay rendering the task-store `body` (D2 — the
+   * BODY field, NOT the notification abstract). All DOM via createElement +
+   * textContent (no innerHTML — safe-write for the store-sourced body). Dismiss
+   * on backdrop click or Escape.
+   *
+   * Ensures:
+   *   - any prior overlay is removed first (single instance)
+   *   - the overlay carries an id header + the body in a <pre> (whitespace kept)
+   *   - a backdrop click OR Escape removes the overlay AND detaches its keydown listener
+   */
+  private openTaskBodyOverlay( bodyText: string, idLabel: string ): void {
+    this.dismissTaskBodyOverlay();
+
+    const overlay = document.createElement( "div" );
+    overlay.id        = "task-body-overlay";
+    overlay.className = "task-body-overlay";
+
+    const panel = document.createElement( "div" );
+    panel.className = "task-body-overlay-content";
+
+    const header = document.createElement( "div" );
+    header.className = "task-body-overlay-header";
+    header.textContent = idLabel ? `Task ${idLabel}` : "Task detail";
+
+    const pre = document.createElement( "pre" );
+    pre.className = "task-body-overlay-body";
+    pre.textContent = bodyText;   // textContent → no HTML injection from body
+
+    panel.appendChild( header );
+    panel.appendChild( pre );
+    overlay.appendChild( panel );
+
+    // Backdrop click dismisses; a click INSIDE the panel does not (stopPropagation).
+    overlay.addEventListener( "click", () => this.dismissTaskBodyOverlay() );
+    panel.addEventListener( "click", ( e ) => e.stopPropagation() );
+
+    this.taskBodyOverlayKeyListener = ( e: KeyboardEvent ): void => {
+      if ( e.key === "Escape" ) this.dismissTaskBodyOverlay();
+    };
+    document.addEventListener( "keydown", this.taskBodyOverlayKeyListener );
+
+    document.body.appendChild( overlay );
+  }
+
+  /**
+   * Tear down the body overlay if present: remove the element + the document
+   * Esc listener. Idempotent (the open path calls it first to enforce a single
+   * instance; unmount calls it to clean up).
+   */
+  private dismissTaskBodyOverlay(): void {
+    if ( this.taskBodyOverlayKeyListener !== null ) {
+      document.removeEventListener( "keydown", this.taskBodyOverlayKeyListener );
+      this.taskBodyOverlayKeyListener = null;
+    }
+    const existing = document.getElementById( "task-body-overlay" );
+    if ( existing !== null ) existing.remove();
   }
 }
 

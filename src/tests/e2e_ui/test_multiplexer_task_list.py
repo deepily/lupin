@@ -107,7 +107,10 @@ _POPULATED = {
     "tasks" : [
         { "id": "1", "item_class": "task", "title": "Live task", "status": "in_progress",
           "owner_persona": "amy", "accountable_manager": "tiberius", "priority": "P1",
-          "project": "lupin", "blocked_by": None, "next_chase_ts": None },
+          "project": "lupin", "blocked_by": None, "next_chase_ts": None,
+          # A non-empty body drives the LIVE (clickable) 📄 detail affordance
+          # (row redesign 2026.06.29 — the overlay renders THIS field).
+          "body": "Full detail for the live task lives here." },
         { "id": "2", "item_class": "bug", "title": "Blocked bug", "status": "blocked",
           "owner_persona": "amy", "accountable_manager": "tiberius", "priority": "P0",
           "project": "lupin", "blocked_by": "task-1", "next_chase_ts": "2026-06-16T14:30:00-04:00" },
@@ -221,3 +224,57 @@ def test_task_list_degrades_to_last_known_on_unreachable( page ):
     time.sleep( 0.2 )
     assert page.locator( ".task-list-table" ).count() == 1, "last-known rows still rendered"
     assert page.locator( ".task-list-count" ).text_content() == "3", "count holds at last-known"
+
+
+# ---------------------------------------------------------------------------
+# Row redesign 2026.06.29 — leading ID column + title truncation/tooltip +
+# 📄 body-overlay (AUGMENT: added alongside the existing columns + Actions).
+# ---------------------------------------------------------------------------
+
+def test_mux_id_column_shows_first_8_chars( page ):
+    """The NEW leftmost ID column renders the first 8 chars of the row id."""
+    _open_with_tasks( page, _POPULATED )
+    page.wait_for_selector( ".task-list-table", timeout=3000 )
+    ids = [ t.strip() for t in page.locator( ".task-row .task-col-id" ).all_text_contents() ]
+    assert "1" in ids, f"id column missing first-8 id; got {ids}"   # id '1' → '1'
+
+
+def test_mux_title_cell_carries_full_title_tooltip( page ):
+    """The Title cell carries the FULL title in a `title=` hover-tooltip attr."""
+    _open_with_tasks( page, _POPULATED )
+    page.wait_for_selector( ".task-list-table", timeout=3000 )
+    cell = page.locator( ".task-row .task-col-title", has_text="Live task" ).first
+    assert cell.get_attribute( "title" ) == "Live task"
+
+
+def test_mux_live_detail_emoji_opens_body_overlay( page ):
+    """Clicking a LIVE 📄 opens an overlay rendering the task `body`; Esc dismisses."""
+    _open_with_tasks( page, _POPULATED )
+    page.wait_for_selector( ".task-list-table", timeout=3000 )
+
+    page.locator( ".task-detail-emoji:not(.task-detail-empty)" ).first.click()
+    page.wait_for_selector( "#task-body-overlay", state="attached", timeout=3000 )
+    body = page.locator( "#task-body-overlay .task-body-overlay-body" ).text_content()
+    assert "Full detail for the live task" in body
+
+    page.keyboard.press( "Escape" )
+    page.wait_for_selector( "#task-body-overlay", state="detached", timeout=3000 )
+
+
+def test_mux_body_overlay_dismisses_on_backdrop_click( page ):
+    """A click on the overlay backdrop (outside the panel) dismisses it."""
+    _open_with_tasks( page, _POPULATED )
+    page.wait_for_selector( ".task-list-table", timeout=3000 )
+    page.locator( ".task-detail-emoji:not(.task-detail-empty)" ).first.click()
+    page.wait_for_selector( "#task-body-overlay", state="attached", timeout=3000 )
+    page.locator( "#task-body-overlay" ).click( position={ "x": 5, "y": 5 } )
+    page.wait_for_selector( "#task-body-overlay", state="detached", timeout=3000 )
+
+
+def test_mux_empty_body_emoji_is_dimmed_in_place( page ):
+    """A row with no body keeps its 📄 in the column but DIMMED (disabled)."""
+    _open_with_tasks( page, _POPULATED )
+    page.wait_for_selector( ".task-list-table", timeout=3000 )
+    dimmed = page.locator( ".task-detail-emoji.task-detail-empty" )
+    assert dimmed.count() >= 1
+    assert dimmed.first.get_attribute( "data-task-body" ) is None

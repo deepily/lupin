@@ -112,7 +112,7 @@ test("renderTaskRow: empty blocked_by array → em-dash cell", () => {
 // renderTaskListTable
 // ---------------------------------------------------------------------------
 
-test("renderTaskListTable: 9 headers (incl. Actions); owner + Unassigned group headers; rows render", () => {
+test("renderTaskListTable: 11 headers (ID + Detail augment Actions); owner + Unassigned group headers; rows render", () => {
   const tasks: TaskItem[] = [
     { owner_persona: "amy", title: "a1", status: "queued" },
     { title: "orphan", status: "blocked" },   // → Unassigned
@@ -120,7 +120,9 @@ test("renderTaskListTable: 9 headers (incl. Actions); owner + Unassigned group h
   const table = renderTaskListTable(groupTasksByOwner(tasks), "America/New_York");
 
   assert.ok(table.classList.contains("task-list-table"));
-  assert.equal(table.querySelectorAll("thead th").length, 9);
+  assert.equal(table.querySelectorAll("thead th").length, 11);   // ID + 8 data + Detail + Actions
+  assert.equal(table.querySelector("thead th.task-col-id")?.textContent, "ID");
+  assert.equal(table.querySelector("thead th.task-col-detail")?.textContent, "Detail");
   assert.equal(table.querySelector("thead th.task-col-actions")?.textContent, "Actions");
 
   const groupHeaders = table.querySelectorAll(".task-group-header");
@@ -312,4 +314,59 @@ test("renderTaskRow: Actions cell — inline drop reason input + Drop button", (
   assert.equal(input?.getAttribute("placeholder"), "drop reason…");
   assert.equal(btn?.type, "button");
   assert.equal(btn?.textContent, "Drop");
+});
+
+// ---------------------------------------------------------------------------
+// Row redesign 2026.06.29 — ID cell + title truncation/tooltip + Detail 📄
+// ---------------------------------------------------------------------------
+
+test("renderTaskRow: leading ID cell shows first 8 chars of id; absent → em-dash", () => {
+  const tr = renderTaskRow({ id: "3b85863e-ccb9-49", title: "t", status: "queued" }, undefined);
+  assert.equal(tr.querySelector(".task-col-id")?.textContent, "3b85863e");
+  const tr2 = renderTaskRow({ title: "t", status: "queued" }, undefined);
+  assert.equal(tr2.querySelector(".task-col-id")?.textContent, "—");
+});
+
+test("renderTaskRow: long title truncated in cell, FULL title in title= tooltip", () => {
+  const long = "Z".repeat(90);
+  const tr = renderTaskRow({ id: "x", title: long, status: "queued" }, undefined);
+  const cell = tr.querySelector(".task-col-title")!;
+  assert.equal(cell.textContent, "Z".repeat(60) + "…");
+  assert.equal(cell.getAttribute("title"), long);
+});
+
+test("renderTaskRow: short title not truncated; tooltip carries the full title", () => {
+  const tr = renderTaskRow({ id: "x", title: "short", status: "queued" }, undefined);
+  const cell = tr.querySelector(".task-col-title")!;
+  assert.equal(cell.textContent, "short");
+  assert.equal(cell.getAttribute("title"), "short");
+});
+
+test("renderTaskRow: body present → LIVE 📄 carrying data-task-body/-id", () => {
+  const tr = renderTaskRow({ id: "feedface-1", title: "t", status: "queued", body: "detail" }, undefined);
+  const emoji = tr.querySelector<HTMLElement>(".task-col-detail .task-detail-emoji")!;
+  assert.ok(!emoji.classList.contains("task-detail-empty"));
+  assert.equal(emoji.getAttribute("role"), "button");
+  assert.equal(emoji.dataset.taskBody, "detail");
+  assert.equal(emoji.dataset.taskId, "feedface");   // first 8 of "feedface-1"
+});
+
+test("renderTaskRow: empty-string body → DIMMED 📄 in place (disabled, no dataset)", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", body: "" }, undefined);
+  const emoji = tr.querySelector<HTMLElement>(".task-col-detail .task-detail-emoji")!;
+  assert.ok(emoji.classList.contains("task-detail-empty"));
+  assert.equal(emoji.getAttribute("aria-disabled"), "true");
+  assert.equal(emoji.dataset.taskBody, undefined);
+});
+
+test("renderTaskRow: null body → DIMMED 📄 (taskBodyIsEmpty true)", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", body: null }, undefined);
+  assert.ok(tr.querySelector(".task-detail-emoji")!.classList.contains("task-detail-empty"));
+});
+
+test("renderTaskRow: Detail cell sits BEFORE the Actions cell (read affordance, then edit)", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", body: "d" }, undefined, ["amy"]);
+  const cells = Array.from(tr.children).map((c) => (c as HTMLElement).className.split(" ")[0]);
+  assert.ok(cells.indexOf("task-col-detail") < cells.indexOf("task-col-actions"));
+  assert.equal(cells[0], "task-col-id");   // ID is leftmost
 });

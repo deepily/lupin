@@ -143,6 +143,59 @@ export function taskTitleLabel( task: TaskItem | null | undefined ): string {
 }
 
 // ---------------------------------------------------------------------------
+// Row redesign 2026.06.29 — id column + title truncation + body-overlay helpers
+// (pure; MIRRORS the in-service JS card's notifications.js helpers VERBATIM so
+// the two cards render the row identically. Drift accepted per D5/throwaway.)
+// ---------------------------------------------------------------------------
+
+// Client title-truncation cap — IDENTICAL to the server-side store-guard cap
+// (task_store_rules.TITLE_SOFT_CAP = 60, handoff #5 / D4). Backstops LEGACY rows
+// written before the store guard.
+export const TASK_TITLE_TRUNCATE_LEN = 60;
+
+/**
+ * The compact row identifier: the first 8 chars of the item's id (the store
+ * serializes its UUID as `id`; first-8 is the "id_hash" the design 2026.06.29
+ * row redesign places in the new leftmost column). Pure.
+ *
+ * Ensures:
+ *   - non-empty id → its first 8 chars; absent/empty → "—"
+ *   - never throws
+ */
+export function taskIdLabel( task: TaskItem | null | undefined ): string {
+  const id = ( task && task.id != null ) ? String( task.id ) : "";
+  return id ? id.slice( 0, 8 ) : "—";
+}
+
+/**
+ * Client title-truncation backstop (design 2026.06.29 §4.4 / D1): trim a
+ * wall-of-text title to TASK_TITLE_TRUNCATE_LEN chars + an ellipsis. The full
+ * title rides the cell's hover-tooltip so nothing is hidden. Pure.
+ *
+ * Ensures:
+ *   - label.length > cap → label.slice( 0, cap ) + "…"; else label verbatim
+ *   - never throws
+ */
+export function truncateTaskTitle( label: string ): string {
+  const s = String( label );
+  return s.length > TASK_TITLE_TRUNCATE_LEN ? s.slice( 0, TASK_TITLE_TRUNCATE_LEN ) + "…" : s;
+}
+
+/**
+ * Whether the task has no detail `body` to show in the overlay — drives the
+ * dim-in-place 📄 (handoff ruling #3): an empty body keeps the emoji in its
+ * column but disabled / non-clickable. Pure.
+ *
+ * Ensures:
+ *   - body null / undefined / whitespace-only → true; else false
+ *   - never throws
+ */
+export function taskBodyIsEmpty( task: TaskItem | null | undefined ): boolean {
+  const body = task ? task.body : null;
+  return body == null || String( body ).trim() === "";
+}
+
+// ---------------------------------------------------------------------------
 // Grouping
 // ---------------------------------------------------------------------------
 

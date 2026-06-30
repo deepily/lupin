@@ -509,3 +509,95 @@ test("mutation non-Api Error → rollback + generic error stripe", async () => {
   const stripe = root.querySelector(".task-row-error-stripe");
   assert.match(stripe?.textContent ?? "", /Edit failed: network down/);
 });
+
+// ---------------------------------------------------------------------------
+// Row redesign 2026.06.29 — detail 📄 body overlay (D2: renders the task body)
+// ---------------------------------------------------------------------------
+
+const withBody = (): TaskListComposite =>
+  okComposite([{ id: "abcd1234-ef", title: "has detail", status: "queued", owner_persona: "amy", body: "the full body" }]);
+
+const liveEmoji = (root: HTMLElement): HTMLElement =>
+  root.querySelector<HTMLElement>(".task-detail-emoji:not(.task-detail-empty)")!;
+
+test("detail 📄: clicking a live emoji opens the body overlay (D2 body); Escape dismisses + detaches", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(withBody());
+  emit(true);
+  liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
+  const overlay = document.getElementById("task-body-overlay");
+  assert.ok(overlay, "overlay opened");
+  assert.equal(overlay!.querySelector(".task-body-overlay-body")?.textContent, "the full body");
+  assert.match(overlay!.querySelector(".task-body-overlay-header")?.textContent ?? "", /abcd1234/);
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  assert.equal(document.getElementById("task-body-overlay"), null, "Escape dismissed");
+});
+
+test("detail 📄: a non-Escape key does NOT dismiss the overlay", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(withBody());
+  emit(true);
+  liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "x" }));
+  assert.ok(document.getElementById("task-body-overlay"), "non-Esc keeps it open");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));   // cleanup
+});
+
+test("detail 📄: backdrop click dismisses; inner panel click does NOT", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(withBody());
+  emit(true);
+  liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
+  const overlay = document.getElementById("task-body-overlay")!;
+  overlay.querySelector<HTMLElement>(".task-body-overlay-content")!
+    .dispatchEvent(new Event("click", { bubbles: true }));   // inner — stopPropagation
+  assert.ok(document.getElementById("task-body-overlay"), "inner-panel click keeps it open");
+  overlay.dispatchEvent(new Event("click", { bubbles: true }));   // backdrop
+  assert.equal(document.getElementById("task-body-overlay"), null, "backdrop click dismissed");
+});
+
+test("detail 📄: Enter on a focused live emoji opens the overlay (keyboard a11y)", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(withBody());
+  emit(true);
+  liveEmoji(root).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  assert.ok(document.getElementById("task-body-overlay"), "Enter on emoji opened the overlay");
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));   // cleanup
+});
+
+test("detail 📄: a DIMMED (empty-body) emoji click is inert — no overlay", () => {
+  const { store, emit, root } = setup();
+  store.setComposite(okComposite([{ id: "x", title: "no body", status: "queued", owner_persona: "amy" }]));
+  emit(true);
+  const dimmed = root.querySelector<HTMLElement>(".task-detail-emoji.task-detail-empty");
+  assert.ok(dimmed, "dimmed emoji rendered for the body-less row");
+  dimmed!.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(document.getElementById("task-body-overlay"), null, "dimmed emoji opens nothing");
+});
+
+test("detail 📄: a live emoji with NO dataset opens overlay with empty body/id (?? '' fallback)", () => {
+  const { root } = setup();
+  const container = root.querySelector<HTMLElement>(".task-list-container")!;
+  const emoji = document.createElement("span");
+  emoji.className = "task-detail-emoji";   // live (not dimmed), carries no data-task-* attrs
+  container.appendChild(emoji);
+  emoji.dispatchEvent(new Event("click", { bubbles: true }));
+  const overlay = document.getElementById("task-body-overlay")!;
+  assert.equal(overlay.querySelector(".task-body-overlay-body")?.textContent, "");
+  assert.match(overlay.querySelector(".task-body-overlay-header")?.textContent ?? "", /Task detail/);
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));   // cleanup
+});
+
+test("detail 📄: unmount dismisses an open overlay + detaches its Esc listener", () => {
+  const bus = createEventBusForTesting();
+  const store = makeStore();
+  const r = createTaskListRenderer({ eventBus: bus, stores: { taskList: store }, nowDateFn: FIXED_DATE });
+  const root = document.createElement("div");
+  r.mount(root);
+  store.setComposite(withBody());
+  bus.emit<StoreTaskListChangedPayload>({ type: "store_task_list_changed", payload: { stampUpdated: true }, source: "test", ts: 0 });
+  liveEmoji(root).dispatchEvent(new Event("click", { bubbles: true }));
+  assert.ok(document.getElementById("task-body-overlay"), "overlay open before unmount");
+  r.unmount();
+  assert.equal(document.getElementById("task-body-overlay"), null, "unmount tore the overlay down");
+});
