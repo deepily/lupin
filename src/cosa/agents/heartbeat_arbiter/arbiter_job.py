@@ -3179,6 +3179,59 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return True
         return False
 
+    def _fleet_has_recent_build_liveness( self, fleet_view, now ):
+        """
+        Facet-2 of bug 423f04a5: does ANY alive session show recent BUILD / DM /
+        HOLD-REFRESH activity within the stall window? — the liveness the frozen
+        progress signature deliberately cannot see.
+
+        The whole-fleet-stall signature keys ONLY on the semantic state + the last
+        task-transition ts (Fix 2), so an actively-BUILDING fleet holding its
+        commits (Read/Edit/Bash bumping the bridge-mtime, DMs coordinating, holds
+        re-stamped every Stop — but ZERO task-store writes in the window) reads as
+        "no progress" and false-escalates WHOLE-FLEET-STALL to Rick (the 2026-07-01
+        13:46 false-fire: Mr Radio's mux-parity crew was demonstrably building/DMing).
+        This gate credits exactly the three NON-chatter liveness signals the bug
+        names — bridge (build), dm (coordination), hold (defended-quiescence
+        refresh) — as fleet progress BEFORE declaring a stall.
+
+        DELIBERATELY NARROWER than compute_liveness's freshest-of union: it reads
+        ONLY bridge_age_s / dm_age_s / hold_age_s and EXCLUDES commons_age_s +
+        idle_prompt_age_s + event_age_s. Commons chatter is liveness, not progress
+        (the arbiter's own per-poll posts surface in who()), so crediting it would
+        RE-OPEN the chatty-but-stuck blind spot — a LIVE fleet posting "still
+        blocked" while nothing builds MUST still stall. dm_age_s is read from the
+        always-present auditable column, so it is credited regardless of the
+        `arbiter count dm as liveness` toggle (a sent DM is coordination work here).
+
+        Requires:
+            - fleet_view is the build_fleet_view dict { session_id: VIEW } or None
+            - now is an aware datetime
+
+        Ensures:
+            - returns True iff some ALIVE view with a session_id has a bridge/dm/hold
+              age that is present AND ≤ fleet_stall_window_seconds (recent build /
+              DM / hold-refresh)
+            - a dead/offline session's stale-or-fresh mtime never credits (the alive
+              gate blocks it); a session without a session_id is skipped
+            - reads bridge/hold mtime via the injected never-raise seams and folds
+              them through compute_liveness (itself never-raises); never raises
+        """
+        window = self.fleet_stall_window_seconds
+        for view in ( fleet_view or { } ).values():
+            if not ( isinstance( view, dict ) and view.get( "alive" ) is True ):
+                continue
+            sid = view.get( "session_id" )
+            if not sid:
+                continue
+            bridge_mtime = self._bridge_mtime_fn( sid )
+            hold_mtime   = self._hold_mtime_fn( sid )
+            liveness     = compute_liveness( view, bridge_mtime, now, hold_mtime=hold_mtime )
+            for age in ( liveness[ "bridge_age_s" ], liveness[ "dm_age_s" ], liveness[ "hold_age_s" ] ):
+                if age is not None and age <= window:
+                    return True                                 # recent build/DM/hold-refresh = progress
+        return False
+
     def _check_fleet_stall( self, fleet_view, now, active_managers=None, owed_class=None ):
         """
         D3 catch-all: no FLEET PROGRESS for ≥ fleet_stall_window_seconds while
@@ -3208,6 +3261,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - a fleet whose only live owed work is "not owed" — BLOCKED_ON_USER
               (Rick-gated) or DONE (zero owed) — never escalates (L1 §3.1 +
               d2a4c040; owed_class None/empty/UNKNOWN → today's behavior, fail SAFE)
+            - a session on a DEFENDED awaiting-user hold is excluded from the owed
+              set — it is correctly PARKED on Rick, not stalled (423f04a5 facet-1)
+            - an actively-BUILDING fleet (recent bridge/DM/hold-refresh liveness) is
+              PROGRESSING → never escalates, even with a frozen signature (423f04a5
+              facet-2); commons/idle_prompt chatter still does NOT credit progress
             - returns 1 on a new escalation else 0; never raises
         """
         sig = self._fleet_progress_signature( fleet_view )
@@ -3216,10 +3274,27 @@ class ArbiterConsumerJob( AgenticJobBase ):
             self._last_progress_at  = now
             self._stall_escalated   = False
             return 0
-        has_owed = self._has_live_owed_work( fleet_view, owed_class )
+        # 423f04a5 facet-1: a session on a DEFENDED awaiting-user hold is correctly
+        # PARKED on Rick, NOT stalled — exclude it from the owed/stalled set. This
+        # mirrors the not-owed suppression #9/#F2/_has_live_owed_work already apply,
+        # but keys on the HOLD: the 6929f4ac open-gate override reclassifies an
+        # awaiting-user session as CLASS_ACTIVE in owed_class (it owes Rick a RE-ASK),
+        # so the store classification CANNOT see this state — the truth lives only in
+        # the hold artifact. Inert when the hold-reader seam is unwired (returns False
+        # → owed_view == fleet_view → today's behavior). _session_awaiting_user is
+        # never-raise and None-sid-safe, so malformed views degrade to NOT-excluded.
+        owed_view = { sid: v for sid, v in fleet_view.items()
+                      if not ( isinstance( v, dict )
+                               and self._session_awaiting_user( v.get( "session_id" ), now ) ) }
+        has_owed = self._has_live_owed_work( owed_view, owed_class )
         if ( has_owed and self._last_progress_at is not None
              and ( now - self._last_progress_at ).total_seconds() >= self.fleet_stall_window_seconds
-             and not self._stall_escalated ):
+             and not self._stall_escalated
+             # 423f04a5 facet-2: don't escalate while the fleet is demonstrably
+             # BUILDING — recent bridge(build)/DM/hold-refresh liveness IS progress
+             # the frozen semantic signature can't see (commons chatter excluded, so
+             # the chatty-but-stuck blind spot stays closed).
+             and not self._fleet_has_recent_build_liveness( fleet_view, now ) ):
             self._stall_escalated = True
             self._route(                                   # Part-6 #11 Rick + all mgrs
                 11,
