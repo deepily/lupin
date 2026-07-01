@@ -16,8 +16,32 @@
 
 /* ── Card shell + CSS-driven collapse ─────────────────────────────────────── */
 
+/* V7 — header row: h4 title left, ▼/▶ collapse toggle inline-RIGHT. The shared
+   .job-submit-card-header carries no layout in the mux, so the block-level h4 +
+   button stacked and the glyph orphaned onto its own line. Scoped to the
+   broadcast card → the jobs-pane header is untouched. */
 .broadcast-submit-card .job-submit-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     cursor: pointer;
+}
+
+.broadcast-submit-card .job-submit-card-header h4 {
+    margin: 0;
+    flex: 1 1 auto;
+}
+
+.broadcast-submit-card .job-submit-card-header .toggle-button {
+    flex: 0 0 auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 2px 6px;
 }
 
 #broadcast-submit-card[data-card-open="false"] #broadcast-submit-section {

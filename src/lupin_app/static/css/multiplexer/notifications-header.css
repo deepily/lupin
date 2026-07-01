@@ -1,0 +1,141 @@
+/* ============================================================================
+   notifications-header.css — V5 — mux-only Notifications header cluster.
+
+   The header DOM (NotificationsHeaderRenderer.ts) shipped in B3, but its six
+   cluster classes carried ZERO CSS rules repo-wide — so the header rendered
+   cramped ("🔔 Notifications 3662History▾Clear all", everything jammed). This
+   sheet is the bounded, mux-only styling for that cluster.
+
+   Kept deliberately OFF the shared static/css/shared/notifications-surface.css
+   (no cascade collision): these classes are mux-only, so nothing to
+   single-source byte-faithful against the legacy monolith. Theme matches the
+   mux dark-surface idiom (session-strip.css et al.): translucent-white pills +
+   borders on the dark pane background. Exact geometry is Oracle Tier-2/3-tuned
+   + Rick's subjective visual pass.
+   ============================================================================ */
+
+.notifications-header {
+  display     : flex;
+  align-items : center;
+  gap         : 0.6rem;
+  flex-wrap   : wrap;
+  padding     : 0.5rem 0.75rem;
+}
+
+.notifications-header-title {
+  margin      : 0;
+  font-size   : 1rem;
+  font-weight : 700;
+  color       : #e8e8ec;
+  white-space : nowrap;
+}
+
+.notifications-count {
+  display         : inline-flex;
+  align-items     : center;
+  justify-content : center;
+  min-inline-size : 1.5rem;
+  padding         : 0.1rem 0.45rem;
+  border-radius   : 999px;
+  background      : rgb(80, 160, 255, 0.28);
+  color           : #fff;
+  font-size       : 0.8125rem;
+  font-weight     : 600;
+  line-height     : 1;
+}
+
+.notifications-history-toggle,
+.notifications-clear-all {
+  border        : 1px solid rgb(255, 255, 255, 0.18);
+  border-radius : 999px;
+  background    : rgb(255, 255, 255, 0.06);
+  color         : #e8e8ec;
+  font-size     : 0.8125rem;
+  padding       : 0.25rem 0.7rem;
+  cursor        : pointer;
+  white-space   : nowrap;
+  transition    : background 0.12s ease-out, border-color 0.12s ease-out;
+}
+
+.notifications-history-toggle:hover,
+.notifications-clear-all:hover:not( :disabled ) {
+  background   : rgb(255, 255, 255, 0.12);
+  border-color : rgb(255, 255, 255, 0.4);
+}
+
+.notifications-clear-all:disabled {
+  opacity : 0.4;
+  cursor  : not-allowed;
+}
+
+.notifications-header-status {
+  margin-inline-start : auto;
+  font-size           : 0.75rem;
+  color               : #9aa0a6;
+  white-space         : nowrap;
+}
+
+/* History dropdown panel (toggled via the [hidden] attribute by the renderer —
+   no `display` rule here so the browser default [hidden]{display:none} wins). */
+.notifications-history-panel {
+  margin         : 0.25rem 0.75rem 0;
+  padding        : 0.4rem;
+  border         : 1px solid rgb(255, 255, 255, 0.12);
+  border-radius  : 8px;
+  background     : rgb(0, 0, 0, 0.25);
+  max-block-size : 40vh;
+  overflow-y     : auto;
+}
+
+.notifications-history-empty {
+  padding    : 0.5rem;
+  color      : #9aa0a6;
+  font-size  : 0.8125rem;
+  text-align : center;
+}
+
+.notifications-history-row {
+  display       : flex;
+  gap           : 0.5rem;
+  padding       : 0.3rem 0.4rem;
+  border-radius : 6px;
+  font-size     : 0.8125rem;
+  color         : #d0d3d7;
+}
+
+.notifications-history-row:hover {
+  background : rgb(255, 255, 255, 0.05);
+}
+
+.notifications-history-time {
+  color       : #9aa0a6;
+  white-space : nowrap;
+  flex        : 0 0 auto;
+}
+
+.notifications-history-message {
+  flex          : 1 1 auto;
+  overflow      : hidden;
+  text-overflow : ellipsis;
+  white-space   : nowrap;
+}
+
+/* V6 — header-region row: the header cluster (#notifications-header-mount) and
+   the TTS-fraction preview pill (#tts-preview-slider-mount) share ONE inline
+   row. Without this the two mounts stacked, orphaning the pill on its own line
+   below the header — the "rightmost once the region flexes" state the
+   multiplexer.html comment (:127) anticipated but no sheet delivered. */
+.notifications-header-region {
+  display     : flex;
+  align-items : center;
+  gap         : 0.6rem;
+  flex-wrap   : wrap;
+}
+
+.notifications-header-region > #notifications-header-mount {
+  flex : 1 1 auto;
+}
+
+.notifications-header-region > #tts-preview-slider-mount {
+  flex : 0 0 auto;
+}

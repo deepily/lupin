@@ -12,6 +12,8 @@ import {
   applyManagerBadge,
   renderSessionStripIcon,
   updateSessionStripIcon,
+  stripAllocStatus,
+  applyAllocStatus,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/sessionStripIcon";
 import type { ManagerPersona, StripSession, VoicePersona } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
@@ -175,4 +177,53 @@ test("updateSessionStripIcon: tolerates a button missing the initial span", () =
   // No .cc-strip-initial child — exercise the null-guard branch.
   assert.doesNotThrow(() => updateSessionStripIcon(bare, session()));
   assert.equal(bare.getAttribute("data-active"), "true");
+});
+
+// ===========================================================================
+// V9 — allocation-status indicator (stripAllocStatus / applyAllocStatus)
+// ===========================================================================
+
+test("stripAllocStatus: borrowed persona → 'borrowed' (precedence over active)", () => {
+  assert.equal(stripAllocStatus(session({ voice_persona: vp({ borrowed: true }), active: true  })), "borrowed");
+  assert.equal(stripAllocStatus(session({ voice_persona: vp({ borrowed: true }), active: false })), "borrowed");
+});
+
+test("stripAllocStatus: not borrowed + inactive → 'inactive'", () => {
+  assert.equal(stripAllocStatus(session({ active: false })), "inactive");
+});
+
+test("stripAllocStatus: not borrowed + active → null (no indicator, the negative case)", () => {
+  assert.equal(stripAllocStatus(session({ active: true })), null);
+});
+
+test("renderSessionStripIcon: borrowed → data-alloc-status='borrowed'", () => {
+  const el = renderSessionStripIcon(session({ voice_persona: vp({ borrowed: true }) }));
+  assert.equal(el.getAttribute("data-alloc-status"), "borrowed");
+});
+
+test("renderSessionStripIcon: inactive → data-alloc-status='inactive'", () => {
+  const el = renderSessionStripIcon(session({ active: false }));
+  assert.equal(el.getAttribute("data-alloc-status"), "inactive");
+});
+
+test("renderSessionStripIcon: normal active own-persona → no data-alloc-status attr", () => {
+  const el = renderSessionStripIcon(session());
+  assert.equal(el.getAttribute("data-alloc-status"), null);
+});
+
+test("applyAllocStatus: set then clear across re-application", () => {
+  const el = renderSessionStripIcon(session({ voice_persona: vp({ borrowed: true }) }));
+  assert.equal(el.getAttribute("data-alloc-status"), "borrowed");
+  // Re-apply with a normal session → attribute removed (the removeAttribute branch).
+  applyAllocStatus(el, session());
+  assert.equal(el.getAttribute("data-alloc-status"), null);
+});
+
+test("updateSessionStripIcon: refreshes data-alloc-status on re-assignment", () => {
+  const el = renderSessionStripIcon(session());
+  assert.equal(el.getAttribute("data-alloc-status"), null);
+  updateSessionStripIcon(el, session({ voice_persona: vp({ borrowed: true }) }));
+  assert.equal(el.getAttribute("data-alloc-status"), "borrowed");
+  updateSessionStripIcon(el, session());
+  assert.equal(el.getAttribute("data-alloc-status"), null);
 });

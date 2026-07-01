@@ -108,6 +108,23 @@
   pointer-events  : none;
 }
 
+/* V9 — allocation-status indicator (🔉): docked bottom-right (opposite the
+   top-left manager badge). Present when the persona is borrowed OR the session
+   is inactive/released — `data-alloc-status` is set by sessionStripIcon.ts's
+   applyAllocStatus(); a normal active own-persona session has no attribute, so
+   no indicator. Ported from legacy's data-attribute-driven strip-icon
+   sub-badge ::before (notifications.js:5087-5106, :10930-10973). */
+.cc-strip-icon[data-alloc-status]::before {
+  content          : "🔉";
+  position         : absolute;
+  bottom           : -4px;
+  inset-inline-end : -4px;
+  font-size        : 0.6875rem;
+  line-height      : 1;
+  pointer-events   : none;
+  text-shadow      : 0 1px 2px rgb(0, 0, 0, 0.5);
+}
+
 /* Strip toggle pills (focus + hide-inactive). */
 .cc-strip-toggle {
   flex            : 0 0 auto;

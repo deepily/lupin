@@ -213,9 +213,9 @@ test("senderCard: CC session (sender_id with '#') emits the session block", () =
     [],
     { appTimezone: "UTC" },
   );
-  const id = card.querySelector(".sender-session-id");
-  assert.notEqual(id, null);
-  assert.equal(id!.textContent, "#parity01", "session id derived from sender_id, content from the typed record");
+  // V10a: the redundant `#<sessionHash>` span (.sender-session-id) was dropped —
+  // the copy button still exposes the session id; the visible duplicate is gone.
+  assert.equal(card.querySelector(".sender-session-id"), null, ".sender-session-id dropped (V10a redundant #id)");
   assert.notEqual(card.querySelector(".sender-session-copy"), null, ".sender-session-copy present");
   assert.notEqual(card.querySelector(".sender-gist-btn"), null, ".sender-gist-btn present");
   assert.notEqual(card.querySelector(".sender-session-name"), null, ".sender-session-name present (empty until rename lands)");
@@ -227,7 +227,6 @@ test("senderCard: non-CC sender (no '#') omits the session block (legacy parity)
     [],
     { appTimezone: "UTC" },
   );
-  assert.equal(card.querySelector(".sender-session-id"), null);
   assert.equal(card.querySelector(".sender-session-copy"), null);
   assert.equal(card.querySelector(".sender-gist-btn"), null);
   assert.equal(card.querySelector(".sender-session-name"), null);
