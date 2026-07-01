@@ -237,3 +237,236 @@ def compare_pngs_structure_only(
         mismatch_pixels = 0,
         tolerated_delta = height_delta,
     )
+
+
+# ---------------------------------------------------------------------------
+# Spatially-aware anti-aliasing-scatter-tolerant comparator (bug 660d02b4, P3
+# follow-on to resolution D — task d90dcfc2).
+#
+# GOAL: RESTORE per-pixel coverage on `test_task_editing_controls_visual`
+# WITHOUT touching the 37 shared baselines and WITHOUT any browser-flag change.
+# Resolution D dropped the exact-pixel assertion because a blunt maxDiffPixels
+# COUNT budget cannot separate the card's benign glyph-AA scatter (up to ~3800
+# SCATTERED single-px glyph-edge diffs) from a genuine contiguous regression of
+# similar px count (e.g. a recolored ~20x20=400px pill). The insight this
+# comparator exploits: those two failure modes differ in SHAPE, not just count.
+#   - Benign font-AA rasterization jitter  -> spatially ISOLATED single pixels
+#     (each connected diff cluster is 1-2px; NOTHING survives a 3x3 erosion).
+#   - A real regression (recolored pill, wrong heat-tint, a content/width shift)
+#     -> a CONTIGUOUS block or a glyph-height run: a connected diff cluster with
+#     real 2D/1D extent that erosion cannot dissolve.
+# So we forgive ONLY diff clusters whose connected-component AREA is <= a small
+# tunable floor AND that leave NO survivor under morphological erosion, and we
+# FAIL the instant either signal shows contiguity. numpy + scipy are imported
+# LAZILY inside the function so this module stays dependency-light — the other
+# 36 visual tests import it through conftest and must not gain a hard scipy dep.
+#
+# EMPIRICAL VERDICT for THIS card (task d90dcfc2, measured 2026-07-01 — see
+# src/rnd/v0.1.9/2026.07.01-spatial-aa-comparator-feasibility-verdict-sam.md):
+# this comparator is PROVEN (28 tests, 100% line+branch, RED-first: it fails a
+# 400px block a count-budget would false-green) BUT it CANNOT safely restore
+# pixel coverage on `test_task_editing_controls_visual`. The card's real
+# matched-code cross-process AA jitter is NOT isolated single-px scatter — it
+# forms 2px-tall solid bars up to 145px (98 clusters ≥10px; 41 erosion
+# survivors), geometrically indistinguishable from a plausible small regression
+# (a 12x12=144px pill sits at area ≤145; a thin recolored 73x2 row-border is the
+# same shape as the benign bars). No floor holds never-false-green there, so
+# resolution D stands for that card. This function is retained as a proven,
+# reusable primitive for a less-glyph-dense card or a future stronger-
+# determinism harness — it is NOT wired into the task_editing gate.
+# ---------------------------------------------------------------------------
+
+
+@dataclass( frozen=True )
+class AaScatterResult:
+    """
+    Outcome of a spatially-aware anti-aliasing-scatter-tolerant comparison.
+
+    Attributes:
+        matched:            True iff the only diffs are spatially-isolated
+                            sub-floor AA scatter (never True when any cluster
+                            shows contiguity).
+        reason:             Human-readable explanation (always populated).
+        total_diff_pixels:  Total counted mismatched px on the compared region
+                            (pre-spatial-filter; the count a blunt budget sees).
+        component_count:    Number of connected diff clusters (8-connectivity).
+        largest_cluster_area: Area (px) of the LARGEST connected diff cluster —
+                            the primary contiguity discriminator. This is the
+                            key measurement for tuning the isolated-AA floor.
+        erosion_survivors:  Px surviving morphological erosion — the independent
+                            solid-block tripwire (>0 ⇒ a thick contiguous blob).
+        tolerated_delta:    Height delta forgiven (0 when same size / refused).
+    """
+    matched              : bool
+    reason               : str
+    total_diff_pixels    : int
+    component_count      : int
+    largest_cluster_area : int
+    erosion_survivors    : int
+    tolerated_delta      : int
+
+
+def compare_pngs_aa_scatter_tolerant(
+    actual_png          : bytes,
+    baseline_png        : bytes,
+    *,
+    threshold           : float = 0.1,
+    max_height_delta    : int   = 1,
+    max_isolated_cluster: int   = 2,
+    erode_iterations    : int   = 1,
+    max_total_scatter   : int | None = None,
+) -> AaScatterResult:
+    """
+    Compare two PNG byte strings, forgiving ONLY spatially-isolated single-pixel
+    glyph anti-aliasing scatter and FAILING the instant diffs form a contiguous
+    block. Restores per-pixel coverage lost to resolution D without a baseline or
+    browser-flag change.
+
+    Requires:
+        - actual_png and baseline_png are valid PNG byte strings
+        - threshold is the per-pixel color-distance threshold (0.0–1.0), same
+          meaning as pixelmatch / the stock visual comparator
+        - max_height_delta is a non-negative pixel budget for the height-only
+          tolerance (identical mechanism to compare_pngs_height_tolerant)
+        - max_isolated_cluster is a non-negative area (px): a connected diff
+          cluster of area <= this is treated as forgivable AA scatter. Tune it
+          JUST above the empirically-observed benign AA cluster max, and only if
+          that stays well below the smallest meaningful regression cluster.
+        - erode_iterations is a positive count of 3x3 morphological erosion
+          passes (higher ⇒ a block must be thicker to trip the solid-block guard)
+        - max_total_scatter, if not None, is a generous sanity ceiling on the
+          TOTAL forgiven scatter (defense-in-depth; the spatial filter is the
+          primary guard — this only ever makes the comparator STRICTER)
+
+    Ensures:
+        - width is never negotiable: a width delta ⇒ matched=False (bug 99326963)
+        - a height delta > max_height_delta ⇒ matched=False; otherwise BOTH images
+          are top-anchored-cropped to the shorter height and the overlap compared
+        - matched=True iff, on the overlap, EITHER there are zero diff pixels, OR
+          every connected diff cluster has area <= max_isolated_cluster AND no
+          pixel survives erosion AND (when set) total diff <= max_total_scatter
+        - matched=False the instant ANY connected diff cluster exceeds the floor,
+          OR any pixel survives erosion (a contiguous ≥erode-thick blob), OR the
+          total scatter exceeds max_total_scatter — this is the never-false-green
+          line: a 20x20 recolored block, a width/size change, and a content shift
+          all fail even when their px count is below the benign AA scatter count
+        - largest_cluster_area / erosion_survivors / component_count / total_diff
+          are always populated for measurement (0 when no compare ran)
+        - never raises on a size mismatch (returns matched=False instead)
+
+    Raises:
+        - PIL.UnidentifiedImageError if either byte string is not a valid image
+    """
+    # Lazy, function-local imports — keep the module import dependency-light so
+    # the other 36 visual tests (which import this module via conftest) never
+    # gain a hard numpy/scipy dependency at collection time.
+    import numpy as np
+    from scipy import ndimage
+
+    img_a = Image.open( BytesIO( actual_png ) ).convert( "RGBA" )
+    img_b = Image.open( BytesIO( baseline_png ) ).convert( "RGBA" )
+
+    w_a, h_a = img_a.size
+    w_b, h_b = img_b.size
+
+    # Width is never negotiable (bug 99326963) — a width flip is a real regression.
+    if w_a != w_b:
+        return AaScatterResult(
+            matched              = False,
+            reason               = f"width mismatch: actual {w_a}px vs baseline {w_b}px (not tolerated)",
+            total_diff_pixels    = 0,
+            component_count      = 0,
+            largest_cluster_area = 0,
+            erosion_survivors    = 0,
+            tolerated_delta      = 0,
+        )
+
+    height_delta = abs( h_a - h_b )
+    if height_delta > max_height_delta:
+        return AaScatterResult(
+            matched              = False,
+            reason               = f"height delta {height_delta}px exceeds tolerance {max_height_delta}px "
+                                   f"(actual {h_a}px vs baseline {h_b}px)",
+            total_diff_pixels    = 0,
+            component_count      = 0,
+            largest_cluster_area = 0,
+            erosion_survivors    = 0,
+            tolerated_delta      = 0,
+        )
+
+    # Same width; height delta within budget. Top-anchor crop BOTH to the shorter
+    # height so the compared region is the pixel-identical overlap (identical
+    # mechanism to compare_pngs_height_tolerant).
+    common_h = min( h_a, h_b )
+    crop_a   = img_a.crop( ( 0, 0, w_a, common_h ) )
+    crop_b   = img_b.crop( ( 0, 0, w_b, common_h ) )
+
+    # diff_mask=True paints ONLY the counted-diff pixels (rest transparent), so a
+    # content-independent boolean mask is just "alpha > 0" — no color-guessing.
+    diff_img = Image.new( "RGBA", ( w_a, common_h ) )
+    pixelmatch( crop_a, crop_b, diff_img, threshold=threshold, diff_mask=True )
+    mask     = ( np.array( diff_img )[ :, :, 3 ] > 0 )
+
+    total_diff = int( mask.sum() )
+
+    if total_diff == 0:
+        reason = ( "exact size; zero mismatched pixels" if height_delta == 0
+                   else f"tolerated {height_delta}px bottom-edge height delta; overlapping region identical" )
+        return AaScatterResult(
+            matched              = True,
+            reason               = reason,
+            total_diff_pixels    = 0,
+            component_count      = 0,
+            largest_cluster_area = 0,
+            erosion_survivors    = 0,
+            tolerated_delta      = height_delta,
+        )
+
+    # Spatial analysis on the diff mask.
+    #  - 8-connectivity labeling (full 3x3 structure) MERGES diagonally-touching
+    #    specks into one cluster — deliberately conservative (bigger clusters ⇒
+    #    more likely to trip the floor ⇒ safer / stricter).
+    #  - 3x3 binary erosion: a pixel survives only if fully surrounded, so ONLY a
+    #    solid contiguous blob (≥ erode-thick in both dims) leaves a survivor;
+    #    isolated specks and 1px-thin lines dissolve to nothing.
+    structure       = np.ones( ( 3, 3 ), dtype=bool )
+    labels, n_comp  = ndimage.label( mask, structure=structure )
+    if n_comp > 0:
+        comp_sizes    = ndimage.sum( mask, labels, index=np.arange( 1, n_comp + 1 ) )
+        largest       = int( comp_sizes.max() )
+    else:                                                # pragma: no cover - total_diff>0 guarantees ≥1 component
+        largest       = 0
+    eroded          = ndimage.binary_erosion( mask, structure=structure, iterations=erode_iterations )
+    survivors       = int( eroded.sum() )
+
+    # Never-false-green decision — each condition is computed explicitly (not a
+    # short-circuit that hides a branch) so every contiguity signal is testable.
+    area_fail    = largest > max_isolated_cluster
+    block_fail   = survivors > 0
+    scatter_fail = ( max_total_scatter is not None ) and ( total_diff > max_total_scatter )
+
+    if area_fail or block_fail or scatter_fail:
+        causes = []
+        if area_fail:    causes.append( f"largest cluster {largest}px > isolated-AA floor {max_isolated_cluster}px" )
+        if block_fail:   causes.append( f"{survivors}px survived {erode_iterations}x erosion (contiguous block)" )
+        if scatter_fail: causes.append( f"total scatter {total_diff}px > ceiling {max_total_scatter}px" )
+        return AaScatterResult(
+            matched              = False,
+            reason               = "contiguous-regression signal: " + "; ".join( causes ),
+            total_diff_pixels    = total_diff,
+            component_count      = n_comp,
+            largest_cluster_area = largest,
+            erosion_survivors    = survivors,
+            tolerated_delta      = 0,
+        )
+
+    return AaScatterResult(
+        matched              = True,
+        reason               = f"forgave {total_diff}px of isolated AA scatter across {n_comp} cluster(s) "
+                               f"(largest {largest}px ≤ floor {max_isolated_cluster}px; 0 erosion survivors)",
+        total_diff_pixels    = total_diff,
+        component_count      = n_comp,
+        largest_cluster_area = largest,
+        erosion_survivors    = survivors,
+        tolerated_delta      = height_delta,
+    )
