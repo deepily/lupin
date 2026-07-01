@@ -40,7 +40,7 @@ import { html } from "./html";
 import { keyedListMerge } from "./dom";
 import { formatCountdown } from "./time";
 import { renderSenderCard } from "./templates/senderCard";
-import { renderActionRequiredReadOnly } from "./templates/actionRequiredReadOnly";
+import { renderActionRequiredReadOnly, renderActionRequiredEmpty } from "./templates/actionRequiredReadOnly";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 
 interface NotificationStoreLike {
@@ -428,6 +428,13 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // its own DOM updates via store_action_required_changed subscriptions.
     if (this.actionRequiredMount.dataset.phase6bOwner === "true") return;
     const items = this.stores.actionRequired.list();
+    // L2 (mux MVP-finish): Phase-5 read-only owner-branch for the empty state.
+    // When Phase-6b is NOT mounted and the section is empty, paint the shared
+    // `✓ No pending actions` panel via the same helper Phase-6b uses (anti-drift).
+    if (items.length === 0) {
+      this.actionRequiredMount.replaceChildren(renderActionRequiredEmpty());
+      return;
+    }
     keyedListMerge({
       parent  : this.actionRequiredMount,
       entries : items.map(item => ({ idHash: item.id_hash, item })),

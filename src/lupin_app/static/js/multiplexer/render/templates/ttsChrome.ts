@@ -47,7 +47,13 @@ interface ControlState {
   skipEnabled   : boolean;
 }
 
-function deriveControlState(state: AudioPlaybackState): ControlState {
+// L2 (mux MVP-finish): `idle` short-circuits to the empty-state BEFORE these
+// helpers, so both take the idle-excluded state. Narrowing (not a runtime
+// guard) keeps c8 branch-coverage honest — there is no dead `idle` arm to
+// leave uncovered once idle renders the `🔇 Nothing in the queue` panel.
+type ActiveState = Exclude<AudioPlaybackState, "idle">;
+
+function deriveControlState(state: ActiveState): ControlState {
   switch (state) {
     case "playing":
       return { toggleEnabled: true,  toggleLabel: "Pause",  toggleAction: "pause",  stopEnabled: true,  skipEnabled: true  };
@@ -57,18 +63,33 @@ function deriveControlState(state: AudioPlaybackState): ControlState {
       return { toggleEnabled: false, toggleLabel: "—",      toggleAction: "noop",   stopEnabled: true,  skipEnabled: false };
     case "error":
       return { toggleEnabled: false, toggleLabel: "—",      toggleAction: "noop",   stopEnabled: true,  skipEnabled: false };
-    case "idle":
     case "decoding":
       return { toggleEnabled: false, toggleLabel: "—",      toggleAction: "noop",   stopEnabled: false, skipEnabled: false };
   }
 }
 
-function rootClass(state: AudioPlaybackState): string {
+function rootClass(state: ActiveState): string {
   // Per Q-B8 — port .is-playing-current / .is-paused-current verbatim.
   const base = "tts-chrome";
   if (state === "playing") return `${base} is-playing-current`;
   if (state === "paused")  return `${base} is-paused-current`;
   return base;
+}
+
+/**
+ * L2 (mux MVP-finish): the idle empty-state panel — legacy parity for
+ * `🔇 Nothing in the queue` (`notifications.html:589+`, class
+ * `.tts-queue-empty-state`). STATE-driven (`audio.state() === "idle"`), NOT
+ * count-driven. Carries the same `data-testid` + `data-state` as the active
+ * chrome so E2E observability is uniform across all six states.
+ */
+function renderTtsEmpty(): HTMLElement {
+  const root = document.createElement("div");
+  root.className = "tts-chrome tts-chrome-empty";
+  root.setAttribute("data-testid", "multiplexer-tts-chrome");
+  root.setAttribute("data-state", "idle");
+  root.appendChild(html`<div class="tts-queue-empty-state">🔇 Nothing in the queue</div>` as DocumentFragment);
+  return root;
 }
 
 /**
@@ -89,6 +110,11 @@ export function renderTtsChrome(
   opts     : TtsChromeOpts,
   handlers : TtsChromeHandlers,
 ): HTMLElement {
+  // L2 (mux MVP-finish): idle → the `🔇 Nothing in the queue` empty panel.
+  // STATE-driven, not count-driven — the burst counter is irrelevant when idle.
+  if (opts.state === "idle") return renderTtsEmpty();
+
+  // opts.state is now narrowed to ActiveState (idle excluded above).
   const ctl = deriveControlState(opts.state);
   const root = document.createElement("div");
   root.className = rootClass(opts.state);
@@ -102,8 +128,9 @@ export function renderTtsChrome(
     : html``;
 
   const queueStr = String(opts.queueLength);
-  /* c8 ignore next 9 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every test that renders the chrome (Phase 6a jobCard.ts:251 precedent).
+  /* c8 ignore next 10 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every test that renders the chrome (Phase 6a jobCard.ts:251 precedent).
   const frag = html`
+    <div class="tts-playing-header">🔊 Playing: ${queueStr}</div>
     ${trackBlock}
     <div class="tts-controls">
       <button type="button" class="tts-btn tts-btn-toggle" data-action="${ctl.toggleAction}">${ctl.toggleLabel}</button>

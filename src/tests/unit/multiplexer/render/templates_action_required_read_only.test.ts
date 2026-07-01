@@ -5,7 +5,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { renderActionRequiredReadOnly } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredReadOnly";
+import { renderActionRequiredReadOnly, renderActionRequiredEmpty } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredReadOnly";
 import type { ActionRequiredItem } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
@@ -86,4 +86,13 @@ test("actionRequiredReadOnly: data-id-hash on root matches item.id_hash (F12)", 
   const el = renderActionRequiredReadOnly(makeItem({ id_hash: "ar_special" }), 0);
   assert.equal(el.getAttribute("data-id-hash"), "ar_special");
   assert.equal(el.getAttribute("data-testid"), "multiplexer-action-required");
+});
+
+// L2 (mux MVP-finish): the shared `✓ No pending actions` empty-state helper.
+test("renderActionRequiredEmpty: id #action-required-empty + parity class + testid + ✓ text", () => {
+  const el = renderActionRequiredEmpty();
+  assert.equal(el.id, "action-required-empty");
+  assert.ok(el.classList.contains("action-required-empty-state"), "carries legacy-parity class");
+  assert.equal(el.getAttribute("data-testid"), "multiplexer-action-required-empty");
+  assert.match(el.textContent ?? "", /✓ No pending actions/);
 });

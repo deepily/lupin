@@ -39,6 +39,7 @@ import type {
   StoreActionRequiredChangedPayload,
 } from "../shared/types";
 import { renderActionRequiredInteractive } from "./templates/actionRequiredInteractive";
+import { renderActionRequiredEmpty } from "./templates/actionRequiredReadOnly";
 import { formatCountdown } from "./time";
 
 // ---------------------------------------------------------------------------
@@ -118,7 +119,15 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.unsubscribers.length = 0;
     if (this.root !== null) {
       delete this.root.dataset.phase6bOwner;
-      this.root.replaceChildren();
+      // L2 (mux MVP-finish): unmount-at-0 boundary edge. Once ownership is
+      // released, Phase-5 read-only will NOT repaint until the next AR event,
+      // so if the section is empty at teardown the outgoing Phase-6b path owns
+      // painting `#action-required-empty` — never leave a blank panel.
+      if (this.stores.actionRequired.list().length === 0) {
+        this.root.replaceChildren(renderActionRequiredEmpty());
+      } else {
+        this.root.replaceChildren();
+      }
       this.root = null;
     }
     this.mounted = false;
@@ -136,14 +145,29 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     /* c8 ignore next */ // defensive: renderAll is only called after mount() sets root; null only after unmount, which detaches the subscription first.
     if (this.root === null) return;
     const items = this.stores.actionRequired.list();
+    // L2 (mux MVP-finish): count===0 → the shared `✓ No pending actions` panel.
+    if (items.length === 0) {
+      this.root.replaceChildren(renderActionRequiredEmpty());
+      return;
+    }
     for (const item of items) {
       this.renderOrReplaceWidget(item);
     }
   }
 
+  // L2: remove the empty-state element (if present) before a widget paints, so
+  // the `✓ No pending actions` panel never lingers beside a live widget.
+  private clearEmpty(): void {
+    /* c8 ignore next */ // defensive: caller guards null root before reaching here.
+    if (this.root === null) return;
+    const empty = this.root.querySelector("#action-required-empty");
+    if (empty !== null) empty.remove();
+  }
+
   private renderOrReplaceWidget(item: ActionRequiredItem): void {
     /* c8 ignore next */ // defensive: caller flow always guards against null root before reaching here.
     if (this.root === null) return;
+    this.clearEmpty();
     const widget = this.buildWidgetFor(item);
     const existing = this.root.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(item.id_hash)}"]`);
     if (existing !== null) {
@@ -297,6 +321,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       // Item gone (post-cancellation cleanup or store-level eviction) — drop
       // the widget if still present in the DOM.
       this.removeWidget(id_hash);
+      // L2 (mux MVP-finish): if that was the last widget, repaint the shared
+      // `✓ No pending actions` panel rather than leave the section blank.
+      if (this.stores.actionRequired.list().length === 0) {
+        this.root.replaceChildren(renderActionRequiredEmpty());
+      }
       return;
     }
     this.renderOrReplaceWidget(item);

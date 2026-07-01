@@ -40,21 +40,44 @@
    Pane scope + widget container
    ============================================================================ */
 
+/* L2 (mux MVP-finish): the full-width BLUE colored accordion — legacy parity
+   for `#action-required-section` (notifications.css:509-512). Retunes the panel
+   from amber to blue: a blue-bordered, light-blue-filled section container. */
 #action-required-section {
-    display        : flex;
-    flex-direction : column;
-    gap            : 8px;
-    margin         : 8px 0 12px;
+    display          : flex;
+    flex-direction   : column;
+    gap              : 8px;
+    margin           : 8px 0 12px;
+    padding          : 10px 12px;
+    border           : 2px solid #0d6efd;
+    border-radius   : 6px;
+    background-color : #e7f1ff;
 }
 
+/* L2: widget default retuned amber→neutral so the blue section accordion is the
+   panel's dominant color; the STATE variants below (submitting=blue,
+   responded=green, expired/cancelled=gray) remain the meaningful per-item
+   signals. */
 .action-required-widget {
-    border           : 1px solid #fbbf24;
+    border           : 1px solid #d1d5db;
     border-radius   : 6px;
-    background-color : #fffbeb;
+    background-color : #fff;
     padding          : 12px 14px;
     color            : #1f2937;
     font-size        : 14px;
     line-height      : 1.4;
+}
+
+/* L2: `✓ No pending actions` empty-state — legacy parity for
+   `.action-required-empty-state` (notifications.css:523-529): centered italic
+   muted, shown when the section has zero items. */
+#action-required-empty,
+.action-required-empty-state {
+    padding     : 10px;
+    text-align  : center;
+    color       : #6c757d;
+    font-size   : 14px;
+    font-style  : italic;
 }
 
 .action-required-widget-submitting {

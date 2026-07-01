@@ -45,17 +45,23 @@ function makeOpts(over: Partial<TtsChromeOpts> = {}): TtsChromeOpts {
 // State-driven render (6 cases, one per AudioPlaybackState)
 // ---------------------------------------------------------------------------
 
-test("idle: all 3 controls disabled; no state-class on root", () => {
+test("idle: renders the 🔇 empty panel (no controls, no state-class); data-state=idle", () => {
+  // L2 (mux MVP-finish): idle is STATE-driven empty — the `🔇 Nothing in the
+  // queue` panel, NOT a disabled control row.
   const el = renderTtsChrome(makeOpts({ state: "idle" }), makeHandlers().handlers);
-  const toggle = el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!;
-  const stop   = el.querySelector<HTMLButtonElement>(".tts-btn-stop")!;
-  const skip   = el.querySelector<HTMLButtonElement>(".tts-btn-skip")!;
-  assert.equal(toggle.disabled, true);
-  assert.equal(stop.disabled,   true);
-  assert.equal(skip.disabled,   true);
+  const empty = el.querySelector(".tts-queue-empty-state");
+  assert.notEqual(empty, null, "idle renders .tts-queue-empty-state");
+  assert.match(empty!.textContent ?? "", /Nothing in the queue/);
+  // No controls in the empty panel.
+  assert.equal(el.querySelector(".tts-btn-toggle"), null);
+  assert.equal(el.querySelector(".tts-btn-stop"),   null);
+  assert.equal(el.querySelector(".tts-btn-skip"),   null);
+  assert.equal(el.querySelector(".tts-playing-header"), null, "no playing-header when idle");
+  assert.ok(el.classList.contains("tts-chrome-empty"), "idle root carries .tts-chrome-empty");
   assert.equal(el.classList.contains("is-playing-current"), false);
   assert.equal(el.classList.contains("is-paused-current"),  false);
   assert.equal(el.dataset.state, "idle");
+  assert.equal(el.getAttribute("data-testid"), "multiplexer-tts-chrome");
 });
 
 test("decoding: all 3 controls disabled (transient)", () => {
@@ -187,9 +193,12 @@ test("multi-instance independence: two chrome instances dispatch to their own ha
   assert.equal(b.calls.pause,  0);
 });
 
-test("disabled controls are non-interactive (clicks on disabled stop in idle state are no-ops)", () => {
+test("disabled controls are non-interactive (clicks on disabled stop in decoding state are no-ops)", () => {
+  // L2: idle now renders the empty panel (no controls), so the disabled-control
+  // no-op invariant is exercised on `decoding` — a transient state that still
+  // renders the control row with all three disabled.
   const { handlers, calls } = makeHandlers();
-  const el = renderTtsChrome(makeOpts({ state: "idle" }), handlers);
+  const el = renderTtsChrome(makeOpts({ state: "decoding" }), handlers);
   // Force the click anyway; disabled buttons in browsers don't fire listeners,
   // and our renderer attaches listeners conditionally on enabled-state, so calls stay 0.
   el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.click();
@@ -199,6 +208,16 @@ test("disabled controls are non-interactive (clicks on disabled stop in idle sta
   assert.equal(calls.skip,   0);
   assert.equal(calls.pause,  0);
   assert.equal(calls.resume, 0);
+});
+
+test("playing/paused render the 🔊 Playing: N accordion header; idle does not", () => {
+  // L2 (mux MVP-finish): the green colored-accordion header shows the count.
+  const playing = renderTtsChrome(makeOpts({ state: "playing", queueLength: 3 }), makeHandlers().handlers);
+  const header = playing.querySelector(".tts-playing-header");
+  assert.notEqual(header, null, "playing renders .tts-playing-header");
+  assert.match(header!.textContent ?? "", /🔊 Playing: 3/);
+  const paused = renderTtsChrome(makeOpts({ state: "paused", queueLength: 0 }), makeHandlers().handlers);
+  assert.match(paused.querySelector(".tts-playing-header")!.textContent ?? "", /🔊 Playing: 0/);
 });
 
 test("data-testid + data-state always set for E2E observability", () => {

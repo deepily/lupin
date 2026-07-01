@@ -328,6 +328,30 @@ test("action-required: non-tick changeKind triggers section re-render via keyedL
   renderer.unmount();
 });
 
+test("action-required: Phase-5 read-only paints #action-required-empty when the section is empty (L2)", () => {
+  // L2 (mux MVP-finish): the Phase-5 read-only owner-branch. With Phase-6b NOT
+  // mounted (no phase6bOwner flag) and zero items, renderActionRequiredSection
+  // paints the shared `✓ No pending actions` empty-state via renderActionRequiredEmpty.
+  const { renderer, root, bus, arList } = setupRenderer();   // arList empty
+  renderer.mount(root);
+  const empty = root.querySelector("#action-required-empty");
+  assert.notEqual(empty, null, "empty panel painted on the read-only path at count 0");
+  assert.match(empty!.textContent ?? "", /No pending actions/);
+  assert.equal(root.querySelector(".action-required-widget"), null);
+
+  // An item arrives → the empty panel gives way to a widget.
+  arList.push(makeAR());
+  bus.emit({ type: "store_action_required_changed", payload: { changeKind: "added", id_hash: "ar1" }, source: "test", ts: 0 });
+  assert.equal(root.querySelector("#action-required-empty"), null, "empty cleared once a widget paints");
+  assert.equal(root.querySelectorAll(".action-required-widget").length, 1);
+
+  // Last item cancelled → the read-only re-render repaints the empty panel.
+  arList.shift();
+  bus.emit({ type: "store_action_required_changed", payload: { changeKind: "cancelled", id_hash: "ar1" }, source: "test", ts: 0 });
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty repainted after last item removed");
+  renderer.unmount();
+});
+
 // ===========================================================================
 // 12-13 : Multi-sender + sender ordering
 // ===========================================================================

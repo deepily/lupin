@@ -53,8 +53,14 @@
    Idle / playing / paused state shading
    ============================================================================ */
 
+/* L2 (mux MVP-finish): the green `🔊 Playing` colored accordion — legacy
+   parity for the active TTS panel (notifications.html:589+). Playing shades
+   green; paused shades amber. */
 .tts-chrome.is-playing-current {
-    background-color : transparent;
+    padding          : 8px 10px;
+    border           : 1px solid #34d399;
+    border-radius   : 6px;
+    background-color : #ecfdf5;
     color            : #065f46;
 }
 
@@ -63,12 +69,36 @@
 }
 
 .tts-chrome.is-paused-current {
-    background-color : transparent;
+    padding          : 8px 10px;
+    border           : 1px solid #fbbf24;
+    border-radius   : 6px;
+    background-color : #fffbeb;
     color            : #92400e;
 }
 
 .tts-chrome.is-paused-current .tts-current-track {
     color : #92400e;
+}
+
+/* L2: `🔊 Playing: N` accordion header — green title line on the active panel. */
+.tts-chrome .tts-playing-header {
+    font-weight : 600;
+    font-size   : 13px;
+    color       : #065f46;
+}
+
+.tts-chrome.is-paused-current .tts-playing-header {
+    color : #92400e;
+}
+
+/* L2: `🔇 Nothing in the queue` idle empty-state — legacy parity for
+   `.tts-queue-empty-state` (notifications.css:531-537): centered italic muted. */
+.tts-chrome-empty .tts-queue-empty-state {
+    padding     : 10px;
+    text-align  : center;
+    color       : #6c757d;
+    font-size   : 14px;
+    font-style  : italic;
 }
 
 /* ============================================================================

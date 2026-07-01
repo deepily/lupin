@@ -280,9 +280,11 @@ test("stop semantics: clicking Stop clears queue to 0 + transitions state to idl
   // Simulate the AudioStore-emitted state_change(idle, prev: playing) that fires after stop().
   emitState(bus, { state: "idle", prev: "playing" });
   raf.flush();
-  // Re-render reflects: state=idle + queue=0.
+  // Re-render reflects: state=idle → the 🔇 empty panel (L2: idle is
+  // STATE-driven empty, so there is no queue-length element to show "0").
   assert.equal(root.querySelector<HTMLElement>(".tts-chrome")!.dataset.state, "idle");
-  assert.match(root.querySelector(".tts-queue-length")!.textContent ?? "", /Queued: 0/);
+  assert.equal(root.querySelector(".tts-queue-length"), null, "idle empty panel has no queue-length");
+  assert.match(root.querySelector(".tts-queue-empty-state")!.textContent ?? "", /Nothing in the queue/);
   renderer.unmount();
 });
 

@@ -572,3 +572,89 @@ test("forceRenderForTesting before mount is a no-op (no throw)", () => {
   // Not mounted → forceRenderForTesting bails.
   renderer.forceRenderForTesting();
 });
+
+// ===========================================================================
+// L2 (mux MVP-finish): `✓ No pending actions` empty-state — Phase-6b branches
+//   (renderAll count===0, first-widget clears empty, last-remove repaints,
+//    unmount-at-0 edge + unmount-with-items blank)
+// ===========================================================================
+
+test("empty: mount with zero items paints #action-required-empty (renderAll count===0)", () => {
+  const { renderer, root } = setupRenderer();   // store empty by default
+  renderer.mount(root);
+  const empty = root.querySelector("#action-required-empty");
+  assert.notEqual(empty, null, "empty panel painted on mount-at-0");
+  assert.ok(empty!.classList.contains("action-required-empty-state"));
+  assert.match(empty!.textContent ?? "", /No pending actions/);
+  assert.equal(root.querySelector(".action-required-widget"), null, "no widgets when empty");
+  renderer.unmount();
+});
+
+test("empty: first widget added clears the empty panel (clearEmpty removes it)", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  renderer.mount(root);
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty present before first item");
+  // A new AR item arrives.
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  emitChange(bus, { changeKind: "added", id_hash: "ar1" });
+  assert.equal(root.querySelector("#action-required-empty"), null, "empty removed once a widget paints");
+  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget painted");
+  renderer.unmount();
+});
+
+test("empty: removing the last widget repaints the empty panel (onChange list→0)", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  renderer.mount(root);
+  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget present");
+  assert.equal(root.querySelector("#action-required-empty"), null, "no empty while a widget exists");
+  // Item evicted from the store → onChange sees getById undefined.
+  state.items.delete("ar1");
+  emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
+  assert.equal(root.querySelector<HTMLElement>('[data-id-hash="ar1"]'), null, "widget removed");
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty repainted after last removal");
+  renderer.unmount();
+});
+
+test("empty: removing one of two widgets does NOT paint empty (list still non-empty)", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  state.items.set("ar2", makeItem({ id_hash: "ar2" }));
+  renderer.mount(root);
+  state.items.delete("ar1");
+  emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
+  assert.equal(root.querySelector("#action-required-empty"), null, "no empty while ar2 remains");
+  assert.notEqual(root.querySelector<HTMLElement>('[data-id-hash="ar2"]'), null, "ar2 still present");
+  renderer.unmount();
+});
+
+test("empty: unmount-at-0 paints #action-required-empty (boundary owner edge)", () => {
+  const { renderer, root } = setupRenderer();   // store empty
+  renderer.mount(root);
+  renderer.unmount();
+  // Phase-6b owns painting the empty-state on teardown so the panel is not blank
+  // until the next AR event reaches Phase-5.
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty painted on unmount-at-0");
+  assert.equal(root.dataset.phase6bOwner, undefined, "ownership released");
+});
+
+test("empty: unmount WITH items leaves a blank panel, not the empty-state (unmount else branch)", () => {
+  const { renderer, root, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  renderer.mount(root);
+  renderer.unmount();
+  assert.equal(root.querySelector("#action-required-empty"), null, "no empty-state when items remained");
+  assert.equal(root.querySelector(".action-required-widget"), null, "children cleared on unmount");
+});
+
+test("empty: forceRenderForTesting with zero items paints the empty panel", () => {
+  const { renderer, root, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  renderer.mount(root);
+  assert.equal(root.querySelector("#action-required-empty"), null, "widget present after mount");
+  // Store drained, then a full re-render is forced.
+  state.items.clear();
+  renderer.forceRenderForTesting();
+  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty painted on force-render at 0");
+  renderer.unmount();
+});
