@@ -65,6 +65,10 @@ module "cloud_sql" {
   environment       = var.environment
   network_self_link = var.app_vpc_self_link
 
+  # Default-paused (Rick 2026-07-01, Option A): seed ALWAYS at create; the module's
+  # lifecycle ignore_changes lets the one-time gcloud stop be the paused steady state.
+  activation_policy = var.cloud_sql_activation_policy
+
   # Private IP needs the peering first; the db-password version needs the secret container.
   depends_on = [
     google_service_networking_connection.private_services,

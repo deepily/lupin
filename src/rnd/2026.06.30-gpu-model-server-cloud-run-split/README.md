@@ -15,6 +15,9 @@ single env var — no app rewrite.
 |---|---|
 | [01-design.md](./01-design.md) | Architecture, Terraform 2-set split, local→cloud "transmogrification", cold-start/dial-to-zero, security, cost, the 3 execution lanes, verification. |
 | [02-vm-downgrade-handoff.md](./02-vm-downgrade-handoff.md) | Cross-repo handoff (Lane 3) for `terraforming-vms`: VM `machine_type` `g2-standard-8` → CPU-only, drop L4/`guest_accelerator` + driver bits, with trade-off table, verification, rollback, sequencing, seed TODOs. |
+| [03-cost-reprice.md](./03-cost-reprice.md) | Monthly cost re-price of the ruled config (weekday-warm + VM suspend ≈ $527/mo) vs the on-demand baseline ($623) — the CLEAN-WIN verdict. |
+| [04-cost-all-paused-floor.md](./04-cost-all-paused-floor.md) | CONTRAST "all-paused floor": Cloud Run scale-to-zero + VM STOPPED 24/7/30d. Floor ≈ $125/mo (Cloud SQL-dominated); NO L4 reservation exists → GPU floor $0; ~$30/mo if Cloud SQL is also stopped. |
+| [05-default-paused-terraform-plan.md](./05-default-paused-terraform-plan.md) | Default-paused terraform (PLAN-ONLY): 3 `envs/test` default flips (min=0, both schedulers off), plan = 2 add/0 change/0 destroy, both cost caveats (Cloud SQL 24/7, Cloud NAT) verified clear, + the Cloud SQL `activation_policy` decision. |
 
 ## Lupin-repo artifacts (dry prep, Lanes 2+3)
 

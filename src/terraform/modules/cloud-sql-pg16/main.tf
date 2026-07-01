@@ -30,10 +30,21 @@ resource "google_sql_database_instance" "pg16" {
   database_version    = "POSTGRES_16"
   deletion_protection = var.deletion_protection
 
+  # Operator owns the live power state (Option A, Rick 2026-07-01): terraform seeds
+  # activation_policy at create (must be ALWAYS so the DB/user/schema can be
+  # provisioned), then ignore_changes below hands the field to the operator so a
+  # one-time `gcloud sql instances patch --activation-policy=NEVER` (the paused
+  # default) is never reverted by a later apply. Mirrors the Cloud Run
+  # min_instance_count lifecycle pattern.
+  lifecycle {
+    ignore_changes = [settings[0].activation_policy]
+  }
+
   settings {
     tier              = var.tier
     edition           = "ENTERPRISE" # db-custom-* tiers require ENTERPRISE; ENTERPRISE_PLUS only allows db-perf-optimized-*
     availability_type = var.availability_type
+    activation_policy = var.activation_policy
 
     ip_configuration {
       ipv4_enabled    = false

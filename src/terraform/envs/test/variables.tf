@@ -51,8 +51,8 @@ variable "model_server_image_tag" {
 
 variable "model_server_min_instances" {
   type        = number
-  description = "Cloud Run model-server min instances — the SEED value Terraform sets at create. Decision #2 RULED SCHEDULED-WARM, so 1 = warm baseline (a daytime apply lands warm; the 11pm Cloud Scheduler job dials it to 0). Cloud Scheduler is the LIVE authority thereafter — the service ignores drift on min_instance_count (see module lifecycle block), so re-applies never fight the scheduler."
-  default     = 1
+  description = "Cloud Run model-server min instances — the SEED value Terraform sets at create. DEFAULT-PAUSED (Rick 2026-07-01): 0 = scale-to-zero so a plain `terraform apply` lands the service COLD (no warm baseline, zero GPU cost at rest). Rick toggles warmth MANUALLY when he wants the service running — set this to 1 (or re-enable the scheduler via model_server_enable_scale_schedule). NB: the service ignores drift on min_instance_count (module lifecycle block), so if the scheduler is later enabled it remains the live authority and re-applies never fight it."
+  default     = 0
 }
 
 variable "model_server_ingress" {
@@ -75,8 +75,8 @@ variable "model_server_vpc_subnetwork" {
 
 variable "model_server_enable_scale_schedule" {
   type        = bool
-  description = "Provision the 2 Cloud Scheduler jobs toggling model-server min_instances 1↔0. Decision #2 RULED SCHEDULED-WARM → default TRUE (min=1 09:00–23:00, min=0 23:00–09:00, America/New_York — the module's scale_up_cron/scale_down_cron/scheduler_time_zone defaults match). The service treats the scheduler as the live authority over min_instance_count."
-  default     = true
+  description = "Provision the 2 Cloud Scheduler jobs toggling model-server min_instances 1↔0. DEFAULT-PAUSED (Rick 2026-07-01): FALSE so a plain apply provisions NO auto-warm scheduler — the service stays cold until Rick warms it manually (nothing dials it to 1 on a weekday morning). Set TRUE to restore the weekday-warm window (min=1 09:00–23:00 / min=0 23:00–09:00 America/New_York, the module's cron defaults); when true, model_server_scheduler_sa_email is REQUIRED at apply."
+  default     = false
 }
 
 variable "model_server_scheduler_sa_email" {
@@ -91,14 +91,25 @@ variable "model_server_scheduler_sa_email" {
 #     Compute Engine API (instances.suspend/resume) mechanism. ------------------
 variable "vm_power_schedule_enable" {
   type        = bool
-  description = "Provision the weekday VM suspend/resume scheduler jobs. Default TRUE per the ruled weekday-suspend profile (Mon–Fri resume 09:00 / suspend 23:00, weekends stay suspended)."
-  default     = true
+  description = "Provision the weekday VM suspend/resume scheduler jobs. DEFAULT-PAUSED (Rick 2026-07-01): FALSE so a plain apply provisions NO auto-resume scheduler — nothing here brings the VM back up on a weekday morning, keeping it paused until Rick resumes it manually. (This repo can only stop AUTO-resuming the VM; the VM's actual power state + STOPPED default live in the standalone terraforming-vms repo.) Set TRUE to restore the weekday resume 09:00 / suspend 23:00 profile; when true, vm_power_scheduler_sa_email is REQUIRED at apply."
+  default     = false
 }
 
 variable "vm_power_scheduler_sa_email" {
   type        = string
   description = "SA email for the VM suspend/resume OAuth token (needs compute.instances.suspend + compute.instances.resume on lupin-host-test). REQUIRED at apply when vm_power_schedule_enable=true — Rick supplies alongside project_id. Empty is validate-clean but fails apply."
   default     = ""
+}
+
+variable "cloud_sql_activation_policy" {
+  type        = string
+  description = "Cloud SQL power state for the data-plane Postgres. DEFAULT-PAUSED design (Rick 2026-07-01, Option A): seed \"ALWAYS\" so a greenfield apply can provision the DB/user/schema (a STOPPED instance rejects those). The paused steady state (~$30/mo all-paused floor) is reached operationally — the module's lifecycle ignore_changes on activation_policy lets Rick's one-time `gcloud sql instances patch lupin-pg16-test --activation-policy=NEVER` stop the DB with NO future apply re-starting it. Mirrors the Cloud Run min_instance_count operator-authority pattern + the VM-stop model."
+  default     = "ALWAYS"
+
+  validation {
+    condition     = contains(["ALWAYS", "NEVER"], var.cloud_sql_activation_policy)
+    error_message = "cloud_sql_activation_policy must be ALWAYS or NEVER."
+  }
 }
 
 variable "vm_power_instance_name" {
