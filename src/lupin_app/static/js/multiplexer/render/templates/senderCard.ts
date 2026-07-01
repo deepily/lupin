@@ -133,8 +133,11 @@ export function renderSenderCard(
   // (notifications.js:13457). Emitting legacy-verbatim per Q-C ("legacy class
   // names verbatim"); revisit if the oracle contract expects `-id-copy`.
   //
-  // `.sender-session-name` is empty until a rename feature lands — SenderRecord
-  // carries no session-name field (mirrors legacy `${sessionName || ''}`).
+  // `.sender-session-name` shows the session name/topic (R5, 2026-07-01):
+  // SenderRecord.session_name is populated from `session_topic` control
+  // notifications (SenderStore, localStorage-mirrored) — mirrors legacy
+  // `${sessionName || ''}` (notifications.js refreshSessionNameDisplay). Empty
+  // string when no name has arrived. (Manual click-to-rename — R5b — deferred.)
   //
   // VOICE-INPUT ROW (F5 lane, 2026-06-22 — Rick-ratified MATCH-LEGACY rebuild):
   // CC sessions ALSO emit the legacy inline `.cc-voice-input` > `.cc-voice-input-row`
@@ -155,7 +158,7 @@ export function renderSenderCard(
     sessionBlock = html`
       <span class="sender-session-copy copy-btn" role="button" tabindex="0" title="Copy session ID">📋</span>
       <button class="sender-gist-btn" type="button" title="Generate smart gist from conversation">✨</button>
-      <span class="sender-session-name" role="button" tabindex="0" title="Click to rename"></span>
+      <span class="sender-session-name" role="button" tabindex="0" title="Click to rename">${sender.session_name ?? ""}</span>
     ` as DocumentFragment;
     voiceInputRow = renderVoiceInputRow(sender, sessionHash);
   }

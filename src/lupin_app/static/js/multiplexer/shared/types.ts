@@ -68,6 +68,11 @@ export type LupinEventType =
   | "job_state_transition"
   | "job_removed"
   | "sys_time_update"
+  // R5 (2026-07-01) — session-name/topic control event. NotificationStore
+  // intercepts a `session_topic` notification (raw notification_type), skips
+  // carding it (legacy notifications.js:5862 "skip history card"), and re-emits
+  // it on this bus event; SenderStore consumes it to set SenderRecord.session_name.
+  | "session_topic"
   // 00c (Phase-6 TTS playback) — server end-of-utterance marker on /ws/audio
   // (`speech.py:818-822` OpenAI / `:1115-1119` ElevenLabs). AudioTransport
   // already subscribes (`AudioTransport.ts:24`) and re-emits it on the bus via
@@ -462,6 +467,20 @@ export interface SenderRecord {
   // numeric .sender-new-count for workers (faint sign-of-life pulse kept via the
   // shared parity sheet's .sender-card[data-worker="true"] rule). Undefined ⇒ not a worker.
   is_worker?               : boolean;
+  // R5 (2026-07-01): human-readable session name/topic, populated from
+  // `session_topic` control notifications (legacy notifications.js:5856
+  // saveSessionName + refreshSessionNameDisplay). Rendered into the card
+  // header's `.sender-session-name` span. Client-persisted (localStorage
+  // mirror in SenderStore) since the cold-load hydration does NOT carry it.
+  session_name?            : string;
+}
+
+// R5 (2026-07-01) — payload of the `session_topic` bus event (NotificationStore
+// → SenderStore). Both fields required at the emit site (NotificationStore only
+// emits when raw sender_id + session_name are present).
+export interface SessionTopicPayload {
+  sender_id    : string;
+  session_name : string;
 }
 
 export type SenderChangeKind = "added" | "updated" | "removed" | "hydrated";
