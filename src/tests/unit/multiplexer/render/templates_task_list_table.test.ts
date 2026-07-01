@@ -327,6 +327,29 @@ test("renderTaskRow: leading ID cell shows first 8 chars of id; absent → em-da
   assert.equal(tr2.querySelector(".task-col-id")?.textContent, "—");
 });
 
+test("renderTaskRow: real-id ID cell carries the click-to-copy affordance (role/tabindex/title)", () => {
+  const cell = renderTaskRow({ id: "3b85863e-ccb9-49", title: "t", status: "queued" }, undefined)
+    .querySelector<HTMLElement>(".task-col-id")!;
+  assert.equal(cell.getAttribute("role"), "button");
+  assert.equal(cell.getAttribute("tabindex"), "0");
+  assert.equal(cell.getAttribute("title"), "Click to copy ID");
+});
+
+test("renderTaskRow: empty-string id → em-dash ID cell is INERT (no copy affordance)", () => {
+  const cell = renderTaskRow({ id: "", title: "t", status: "queued" }, undefined)
+    .querySelector<HTMLElement>(".task-col-id")!;
+  assert.equal(cell.textContent, "—");
+  assert.equal(cell.getAttribute("role"), null);
+  assert.equal(cell.getAttribute("tabindex"), null);
+  assert.equal(cell.getAttribute("title"), null);
+});
+
+test("renderTaskRow: absent id → em-dash ID cell is INERT (no copy affordance)", () => {
+  const cell = renderTaskRow({ title: "t", status: "queued" }, undefined)
+    .querySelector<HTMLElement>(".task-col-id")!;
+  assert.equal(cell.getAttribute("role"), null);
+});
+
 test("renderTaskRow: long title truncated in cell, FULL title in title= tooltip", () => {
   const long = "Z".repeat(90);
   const tr = renderTaskRow({ id: "x", title: long, status: "queued" }, undefined);

@@ -601,3 +601,108 @@ test("detail 📄: unmount dismisses an open overlay + detaches its Esc listener
   r.unmount();
   assert.equal(document.getElementById("task-body-overlay"), null, "unmount tore the overlay down");
 });
+
+// ---------------------------------------------------------------------------
+// F1 (2026.07.01) — ID cell click-to-copy the FULL uuid
+// ---------------------------------------------------------------------------
+
+// A full uuid whose 8-char DISPLAY prefix ("3b85863e") differs from the copy
+// payload — proving the handler copies the FULL id, not the visible slice.
+const FULL_ID = "3b85863e-ccb9-49af-9f3c-0011deadbeef";
+
+// Swap navigator.clipboard for the duration of a test; returns a restore fn.
+function stubClipboard( impl: { writeText: ( t: string ) => Promise<void> } | undefined ): () => void {
+  const original = Object.getOwnPropertyDescriptor( navigator, "clipboard" );
+  Object.defineProperty( navigator, "clipboard", { value: impl, configurable: true } );
+  return () => {
+    if ( original ) { Object.defineProperty( navigator, "clipboard", original ); }
+    else { delete ( navigator as { clipboard?: unknown } ).clipboard; }
+  };
+}
+
+// Mount a renderer with a captured flash-timer, render the given tasks, return
+// the root + the list of scheduled timers (so a test can fire the flash timeout).
+function renderCopyableWith( tasks: TaskListComposite["tasks"] ): {
+  root: HTMLElement;
+  timers: Array<{ cb: () => void; ms: number }>;
+} {
+  const bus = createEventBusForTesting();
+  const store = makeStore();
+  const timers: Array<{ cb: () => void; ms: number }> = [];
+  const r = createTaskListRenderer({
+    eventBus: bus,
+    stores: { taskList: store },
+    nowDateFn: FIXED_DATE,
+    setTimeoutFn: ( cb, ms ) => { timers.push( { cb, ms } ); return 0; },
+  });
+  const root = document.createElement("div");
+  r.mount(root);
+  store.setComposite( okComposite( tasks ) );
+  bus.emit<StoreTaskListChangedPayload>({ type: "store_task_list_changed", payload: { stampUpdated: true }, source: "test", ts: 0 });
+  return { root, timers };
+}
+
+const renderCopyable = (): ReturnType<typeof renderCopyableWith> =>
+  renderCopyableWith([{ id: FULL_ID, title: "one", status: "in_progress", owner_persona: "amy", priority: "P2" }]);
+
+test("F1: clicking the ID cell copies the FULL uuid + flashes a no-reflow copied state that reverts on timeout", async () => {
+  const writes: string[] = [];
+  const restore = stubClipboard({ writeText: ( t ) => { writes.push( t ); return Promise.resolve(); } });
+  const { root, timers } = renderCopyable();
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  assert.equal(cell.textContent, "3b85863e");                 // display is the 8-char PREFIX
+  cell.dispatchEvent(new Event("click", { bubbles: true }));
+  await tick();
+  assert.deepEqual(writes, [FULL_ID]);                        // …but the FULL uuid was copied
+  assert.ok(cell.classList.contains("task-id-copied"));       // transient flash ON
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 1200);
+  timers[0].cb();                                             // fire the flash timeout
+  assert.ok(!cell.classList.contains("task-id-copied"));      // …flash reverted (no reflow, class only)
+  restore();
+});
+
+test("F1: Enter and Space on the focused ID cell copy the full uuid (keyboard a11y)", async () => {
+  const writes: string[] = [];
+  const restore = stubClipboard({ writeText: ( t ) => { writes.push( t ); return Promise.resolve(); } });
+  const { root } = renderCopyable();
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  cell.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await tick();
+  cell.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+  await tick();
+  assert.deepEqual(writes, [FULL_ID, FULL_ID]);
+  restore();
+});
+
+test("F1: clicking an idless (em-dash) ID cell is a no-op — nothing copied", async () => {
+  const writes: string[] = [];
+  const restore = stubClipboard({ writeText: ( t ) => { writes.push( t ); return Promise.resolve(); } });
+  const { root } = renderCopyableWith([{ title: "no-id", status: "queued" }]);
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  assert.equal(cell.textContent, "—");
+  cell.dispatchEvent(new Event("click", { bubbles: true }));
+  await tick();
+  assert.deepEqual(writes, []);
+  restore();
+});
+
+test("F1: clipboard unavailable → graceful no-op (no throw, no flash)", () => {
+  const restore = stubClipboard(undefined);
+  const { root } = renderCopyable();
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  assert.doesNotThrow(() => cell.dispatchEvent(new Event("click", { bubbles: true })));
+  assert.ok(!cell.classList.contains("task-id-copied"));
+  restore();
+});
+
+test("F1: writeText rejection (permission denied) is swallowed — no flash, no throw", async () => {
+  const restore = stubClipboard({ writeText: () => Promise.reject(new Error("denied")) });
+  const { root, timers } = renderCopyable();
+  const cell = root.querySelector<HTMLElement>("td.task-col-id")!;
+  cell.dispatchEvent(new Event("click", { bubbles: true }));
+  await tick();
+  assert.ok(!cell.classList.contains("task-id-copied"));
+  assert.equal(timers.length, 0);
+  restore();
+});

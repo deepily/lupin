@@ -66,7 +66,13 @@ export interface TaskListRendererOptions {
   stores     : TaskListRendererStores;
   /** Test injection — the clock for the "updated" stamp. Defaults to `new Date()`. */
   nowDateFn? : () => Date;
+  /** Test injection — the timer for the ID click-to-copy flash. Defaults to `setTimeout`. */
+  setTimeoutFn? : ( cb: () => void, ms: number ) => unknown;
 }
+
+// How long the transient "copied" flash stays on the ID cell (F1 2026.07.01).
+// Mirrors the notifications.js checkmark dwell (~1.2s).
+const COPIED_FLASH_MS = 1200;
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
   const p = document.createElement( "p" );
@@ -79,6 +85,7 @@ class TaskListRendererImpl implements TaskListRenderer {
   private readonly bus       : EventBus;
   private readonly stores    : TaskListRendererStores;
   private readonly nowDateFn : () => Date;
+  private readonly setTimeoutFn : ( cb: () => void, ms: number ) => unknown;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root      : HTMLElement | null = null;
@@ -106,6 +113,8 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.stores = opts.stores;
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    /* c8 ignore next */ // production-default fallback: `setTimeout` is the runtime timer; tests inject a controllable fn.
+    this.setTimeoutFn = opts.setTimeoutFn ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) );
   }
 
   mount( root: HTMLElement ): void {
@@ -180,10 +189,13 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.container.addEventListener( "keydown", ( e ) => {
       const ke = e as KeyboardEvent;
       if ( ke.key !== "Enter" && ke.key !== " " && ke.key !== "Spacebar" ) return;
-      // Enter/Space activates a focused detail 📄 OR an accordion header (a11y).
+      // Enter/Space activates a focused detail 📄, an accordion header, OR an
+      // interactive ID cell (F1 2026.07.01 — copy-to-clipboard). The ID cell is
+      // only keyboard-operable when it carries [role="button"] (a real id).
       const emoji  = ( e.target as Element ).closest( ".task-detail-emoji" );
       const header = ( e.target as Element ).closest( ".task-group-header" );
-      if ( !emoji && !header ) return;
+      const idCell = ( e.target as Element ).closest( '.task-col-id[role="button"]' );
+      if ( !emoji && !header && !idCell ) return;
       e.preventDefault();   // Space must act, not scroll the page
       this.handleContainerClick( e.target );
     } );
@@ -316,6 +328,14 @@ class TaskListRendererImpl implements TaskListRenderer {
       this.handleDropClick( dropButton );
       return;
     }
+    // ID cell click-to-copy (F1 2026.07.01): a real-id cell copies its FULL uuid.
+    // An em-dash (idless) cell has no [role="button"] but still matches .task-col-id;
+    // handleIdCopy no-ops on the empty id, so the click is a harmless dead-end.
+    const idCell = ( target as Element ).closest( ".task-col-id" );
+    if ( idCell !== null ) {
+      this.handleIdCopy( idCell as HTMLElement );
+      return;
+    }
     this.handleAccordionToggle( target );
   }
 
@@ -358,6 +378,40 @@ class TaskListRendererImpl implements TaskListRenderer {
       return;
     }
     this.commitMutation( `${id}:drop`, id, () => this.stores.taskList.dropTask( id, reason ) );
+  }
+
+  /**
+   * ID-cell click / Enter / Space (F1 2026.07.01): copy the row's FULL id (the
+   * uuid on `data-task-id`, not the visible 8-char prefix) to the clipboard, then
+   * flash a transient no-reflow "copied" state on the cell.
+   *
+   * Guards (never throws):
+   *   - idless row (data-task-id === "") → no-op (nothing to copy)
+   *   - runtime without `navigator.clipboard` → graceful no-op (no feedback)
+   *   - writeText rejection (permission denied) → swallowed, no flash
+   */
+  private handleIdCopy( idCell: HTMLElement ): void {
+    const row = idCell.closest<HTMLElement>( ".task-row" );
+    /* c8 ignore next */ // defensive: an ID cell only ever lives inside a .task-row per the template invariant.
+    if ( row === null ) return;
+    const fullId = this.rowId( row );
+    if ( fullId === "" ) return;   // idless row → nothing to copy
+    const clipboard = navigator.clipboard;
+    if ( clipboard == null ) return;   // unsupported runtime → graceful no-op
+    void clipboard.writeText( fullId )
+      .then( () => this.flashCopied( idCell ) )
+      .catch( () => { /* clipboard denied/failed → no feedback, no throw */ } );
+  }
+
+  /**
+   * Flash the transient "copied" affordance on the ID cell: add `.task-id-copied`
+   * (a same-width color/overlay change via CSS — NO text swap, so the row never
+   * reflows and the visual snapshot is unaffected), then remove it after
+   * COPIED_FLASH_MS. Mirrors the notifications.js checkmark dwell.
+   */
+  private flashCopied( idCell: HTMLElement ): void {
+    idCell.classList.add( "task-id-copied" );
+    this.setTimeoutFn( () => idCell.classList.remove( "task-id-copied" ), COPIED_FLASH_MS );
   }
 
   // Resolve a control's owning task id from its `.task-row[data-task-id]`.
