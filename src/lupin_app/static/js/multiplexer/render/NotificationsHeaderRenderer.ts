@@ -39,6 +39,13 @@ export interface NotificationDeleteApiLike {
   delete<T>(path: string): Promise<T>;
 }
 
+// Narrowed sys_time_update payload (server clock loop, main.py:265 →
+// {date, env_label}). Both fields optional — the renderer degrades to empty.
+export interface SysTimeUpdatePayload {
+  date?      : string;
+  env_label? : string;
+}
+
 export interface NotificationsHeaderRendererOptions {
   eventBus  : EventBus;
   store     : NotificationsHeaderStoreLike;
@@ -68,6 +75,8 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private historyBtn   : HTMLButtonElement | null   = null;
   private historyPanel : HTMLElement | null        = null;
   private statusEl     : HTMLElement | null        = null;
+  private envLabelEl   : HTMLElement | null        = null;
+  private clockEl      : HTMLElement | null        = null;
   private historyOpen  = false;
 
   private readonly unsubscribers : Array<() => void> = [];
@@ -90,9 +99,28 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     header.className = "notifications-header";
     header.setAttribute("data-testid", "multiplexer-notifications-header");
 
+    // H2 (parity) — env-label prefix + live clock suffix, ported from legacy
+    // notifications.html:80 `<h2><span id=env-label></span>Notifications <span id=clock></span></h2>`
+    // + notifications.js:2793-2798 (both driven off the sys_time_update WS frame,
+    // payload {date, env_label} from main.py:265). Empty until the first tick —
+    // exactly like legacy, which also populates via that same WS event.
     const title = document.createElement("h2");
     title.className = "notifications-header-title";
-    title.textContent = "🔔 Notifications";
+
+    this.envLabelEl = document.createElement("span");
+    this.envLabelEl.className = "notifications-env-label";
+    this.envLabelEl.id = "env-label";
+    this.envLabelEl.setAttribute("data-testid", "multiplexer-notifications-env-label");
+    title.appendChild(this.envLabelEl);
+
+    title.appendChild(document.createTextNode("🔔 Notifications "));
+
+    this.clockEl = document.createElement("span");
+    this.clockEl.className = "notifications-clock";
+    this.clockEl.id = "clock";
+    this.clockEl.setAttribute("data-testid", "multiplexer-notifications-clock");
+    title.appendChild(this.clockEl);
+
     header.appendChild(title);
 
     this.countEl = document.createElement("span");
@@ -139,6 +167,12 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
         "store_notifications_changed",
         () => this.refresh(),
       ),
+      // H2 (parity) — server clock/env broadcast (main.py clock loop). Legacy
+      // notifications.js:2793-2798 updates #clock + #env-label off the same frame.
+      this.bus.on<SysTimeUpdatePayload>(
+        "sys_time_update",
+        (e) => this.onSysTimeUpdate(e.payload),
+      ),
     );
 
     this.refresh();
@@ -152,8 +186,21 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.root = this.countEl = this.clearBtn = null;
     this.historyBtn = null;
     this.historyPanel = this.statusEl = null;
+    this.envLabelEl = this.clockEl = null;
     this.historyOpen = false;
     this.mounted = false;
+  }
+
+  // -------------------------------------------------------------------------
+  // H2 — env-label + live clock (sys_time_update WS frame → header)
+  // -------------------------------------------------------------------------
+
+  private onSysTimeUpdate(payload: SysTimeUpdatePayload): void {
+    /* c8 ignore next */ // defensive: fires only between mount and unmount, when the els are set.
+    if (this.envLabelEl === null || this.clockEl === null) return;
+    // Legacy: `[${env_label}]: ` prefix + the server-formatted date string.
+    this.envLabelEl.textContent = payload.env_label ? `[${payload.env_label}]: ` : "";
+    this.clockEl.textContent    = payload.date ?? "";
   }
 
   // -------------------------------------------------------------------------

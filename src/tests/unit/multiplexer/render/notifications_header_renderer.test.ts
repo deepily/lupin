@@ -11,6 +11,7 @@ import { createNotificationsHeaderRenderer } from "../../../../lupin_app/static/
 import type {
   NotificationsHeaderStoreLike,
   NotificationDeleteApiLike,
+  SysTimeUpdatePayload,
 } from "../../../../lupin_app/static/js/multiplexer/render/NotificationsHeaderRenderer";
 import type { Notification, StoreNotificationsChangedPayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
@@ -132,6 +133,44 @@ test("clear-all is disabled when nothing visible, enabled when visible", () => {
   const full = makeStore({ active: [note("a")], visible: [note("a")] });
   const r2 = mountInto({ store: full.store, api });
   assert.equal(($(r2.root, "#clear-all-notifications") as HTMLButtonElement).disabled, false);
+});
+
+// ---------------------------------------------------------------------------
+// H2 — env-label + live clock (sys_time_update)
+// ---------------------------------------------------------------------------
+
+test("mount builds empty env-label + clock spans", () => {
+  const { store } = makeStore();
+  const { api } = makeApi();
+  const { root } = mountInto({ store, api });
+  assert.notEqual(root.querySelector("#env-label"), null);
+  assert.notEqual(root.querySelector("#clock"), null);
+  assert.equal($(root, "#env-label").textContent, "");
+  assert.equal($(root, "#clock").textContent, "");
+});
+
+test("sys_time_update with env_label + date populates env-label prefix + clock", () => {
+  const { store } = makeStore();
+  const { api } = makeApi();
+  const { bus, root } = mountInto({ store, api });
+  bus.emit<SysTimeUpdatePayload>({
+    type: "sys_time_update",
+    payload: { env_label: "DEVELOPMENT", date: "2026-07-01 @ 14:30" },
+    source: "t", ts: 0,
+  });
+  assert.equal($(root, "#env-label").textContent, "[DEVELOPMENT]: ");
+  assert.equal($(root, "#clock").textContent, "2026-07-01 @ 14:30");
+});
+
+test("sys_time_update with empty env_label + missing date clears both", () => {
+  const { store } = makeStore();
+  const { api } = makeApi();
+  const { bus, root } = mountInto({ store, api });
+  // First populate, then send a falsy/absent payload to exercise the "" branches.
+  bus.emit<SysTimeUpdatePayload>({ type: "sys_time_update", payload: { env_label: "TEST", date: "d" }, source: "t", ts: 0 });
+  bus.emit<SysTimeUpdatePayload>({ type: "sys_time_update", payload: {}, source: "t", ts: 0 });
+  assert.equal($(root, "#env-label").textContent, "");
+  assert.equal($(root, "#clock").textContent, "");
 });
 
 // ---------------------------------------------------------------------------
