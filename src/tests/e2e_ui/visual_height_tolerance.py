@@ -148,3 +148,92 @@ def compare_pngs_height_tolerant(
         mismatch_pixels = mismatch,
         tolerated_delta = 0,
     )
+
+
+def compare_pngs_structure_only(
+    actual_png       : bytes,
+    baseline_png     : bytes,
+    *,
+    max_height_delta : int = 1,
+) -> HeightTolerantResult:
+    """
+    Structural-only snapshot comparison: verify WIDTH (exact) + HEIGHT (within
+    max_height_delta) WITHOUT any per-pixel comparison — PIXEL-BLIND BY DESIGN.
+
+    LOUD NOTE FOR FUTURE MAINTAINERS: the pixel-blindness is INTENTIONAL, not a
+    defect. A future run of two SAME-SIZE images with TOTALLY DIFFERENT pixel
+    content returns matched=True HERE ON PURPOSE. Do NOT "fix" this back into a
+    per-pixel compare — that reintroduces the bug 660d02b4 flake. If you want
+    pixel coverage on this card back, do it via the P3 (C) deterministic-font /
+    sub-pixel-positioning harness, NOT by re-arming a pixel assertion here.
+
+    Rationale (bug 660d02b4, resolution D — ratified by Tiberius 2026-07-01):
+    `test_task_editing_controls_visual` is the single most glyph-dense of the 37
+    mux visual snapshots (a full task-list data table of 11-13px text). Even with
+    the suite-wide deterministic-font launch args ALREADY in place
+    (`--font-render-hinting=none` / `--disable-lcd-text` / `--force-color-profile=srgb`
+    / `--force-device-scale-factor=1`, see conftest `browser_type_launch_args`) its
+    per-pixel glyph anti-aliasing is non-deterministic run-to-run — HIGH-VARIANCE,
+    up to ~3800 scattered mismatched px. That magnitude is beyond any pixel/count
+    budget that could stay safe: a budget large enough to forgive ~3800 benign px
+    would also mask a genuine <2000px regression (a recolored pill / wrong
+    heat-tint), which crosses the never-false-green line. The exact-pixel
+    assertion is therefore DROPPED for this one card; its FUNCTIONAL behaviour is
+    covered by the sibling E2E tests in the same file
+    (`test_actions_column_and_controls_render`, the priority/owner PATCH-body
+    tests, the drop-reason/blank-reason tests). This structural gate is retained
+    because it is DETERMINISTIC (the control-height pin + the settle-fix stabilise
+    the card size) and still catches a genuine STRUCTURAL regression — a card that
+    renders at the wrong WIDTH or a HEIGHT outside ±max_height_delta
+    (broken / missing / resized). Restoring pixel coverage under a stronger
+    deterministic-font / sub-pixel-positioning harness is deferred to the P3
+    follow-on (the existing font flags are already present and insufficient here).
+
+    Requires:
+        - actual_png and baseline_png are valid PNG byte strings
+        - max_height_delta is a non-negative pixel budget for the height tolerance
+
+    Ensures:
+        - returns matched=True iff the widths are EQUAL and the height delta is
+          <= max_height_delta — REGARDLESS of pixel content (pixel-blind by
+          design; that is the entire point of resolution D)
+        - returns matched=False (never raises on a size mismatch) when the width
+          differs OR the height delta exceeds max_height_delta
+        - mismatch_pixels is always 0 (no pixel comparison is performed)
+        - tolerated_delta reflects the height delta accepted, else 0
+
+    Raises:
+        - PIL.UnidentifiedImageError if either byte string is not a valid image
+    """
+    w_a, h_a = Image.open( BytesIO( actual_png ) ).size
+    w_b, h_b = Image.open( BytesIO( baseline_png ) ).size
+
+    # Width stays load-bearing (bug 99326963): a width flip is a real structural
+    # regression, never forgiven.
+    if w_a != w_b:
+        return HeightTolerantResult(
+            matched         = False,
+            reason          = f"width mismatch: actual {w_a}px vs baseline {w_b}px "
+                              f"(structural gate; not tolerated)",
+            mismatch_pixels = 0,
+            tolerated_delta = 0,
+        )
+
+    height_delta = abs( h_a - h_b )
+    if height_delta > max_height_delta:
+        return HeightTolerantResult(
+            matched         = False,
+            reason          = f"height delta {height_delta}px exceeds tolerance {max_height_delta}px "
+                              f"(actual {h_a}px vs baseline {h_b}px); structural gate",
+            mismatch_pixels = 0,
+            tolerated_delta = 0,
+        )
+
+    return HeightTolerantResult(
+        matched         = True,
+        reason          = f"structural match: width {w_a}px, height delta {height_delta}px "
+                          f"within {max_height_delta}px (pixel comparison intentionally "
+                          f"skipped — bug 660d02b4 resolution D)",
+        mismatch_pixels = 0,
+        tolerated_delta = height_delta,
+    )

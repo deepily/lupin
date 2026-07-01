@@ -38,7 +38,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 
 import pytest
 import requests
@@ -274,26 +273,44 @@ def test_drop_blank_reason_shows_inline_error_and_fires_no_request( page ):
 # Visual regression — the editable Actions controls
 # ---------------------------------------------------------------------------
 
-def test_task_editing_controls_visual( page, assert_snapshot_height_tolerant ):
+def test_task_editing_controls_visual( page, assert_snapshot_structure_only ):
     """
-    Baseline the task-list card WITH the Phase-2 editing controls rendered.
+    Baseline the task-list card WITH the Phase-2 editing controls rendered —
+    STRUCTURE-ONLY (width + height-tolerance), PIXEL-BLIND BY DESIGN.
 
-    Run #1 with `--update-snapshots` establishes the PNG; later runs pixel-diff.
     Snapshot scope is the whole card container so the priority/owner selects +
-    drop affordance are all in frame.
+    drop affordance are all in frame. Run #1 with `--update-snapshots` establishes
+    the PNG (used as a SIZE reference only); later runs assert structural size.
 
-    Uses `assert_snapshot_height_tolerant` (NOT the stock zero-tolerance
-    `assert_snapshot`) because of straggler bug 660d02b4: the card's form-control
-    rows (11px <select>/<input>/<button> in the Actions column) carry a
-    sub-pixel `normal` line-height that rounds the container height 169↔170
-    between capture and compare in the SAME container. The stock comparator
-    raises on that ±1px size flip with no reconcilable rebaseline; the tolerant
-    variant forgives a benign bottom-edge 1px delta while staying strict on
-    width, on pixels, and on any larger/shifted change.
+    Resolution D for straggler bug 660d02b4 (ratified by Tiberius 2026-07-01):
+    this is the most glyph-dense of the 37 mux visual snapshots (a full task-list
+    data table of 11-13px text). Its per-pixel glyph anti-aliasing is
+    non-deterministic run-to-run — HIGH-VARIANCE, up to ~3800 scattered mismatched
+    px — EVEN WITH the suite-wide deterministic-font launch args already applied
+    (`--font-render-hinting=none` / `--disable-lcd-text` / `--force-color-profile=srgb`
+    / `--force-device-scale-factor=1`, see conftest `browser_type_launch_args`).
+    No pixel/count budget can forgive ~3800 benign px without also masking a real
+    <2000px regression (a recolored pill), which would cross the never-false-green
+    line. So the exact-pixel assertion is DROPPED: FUNCTIONAL coverage of these
+    controls lives in the sibling E2E tests above
+    (`test_actions_column_and_controls_render`, the priority/owner PATCH-body
+    tests, the drop-reason/blank-reason tests). What is RETAINED is a deterministic
+    STRUCTURAL gate — `assert_snapshot_structure_only` (width exact + height ±1px)
+    — plus two genuine render-determinism improvements kept because they help
+    regardless: the Actions-column control-height pin (task-list.css, fixed the
+    original 169↔170 flap) and the settle below. Restoring pixel coverage is
+    deferred to the P3 (C) deterministic-font / sub-pixel-positioning follow-on
+    (the existing font flags are already present + insufficient for THIS card).
     """
     _open_card( page )
-    # Settle layout after the table + controls paint.
-    time.sleep( 0.3 )
     container = page.locator( ".task-list-container" )
-    assert_snapshot_height_tolerant( container, name="multiplexer_task_editing_controls.png" )
-    print( "✓ multiplexer_task_editing_controls: visual snapshot compared (height-tolerant)" )
+    # Deterministic pre-snapshot settle (kept as a genuine improvement): wait for
+    # the network to idle, web fonts to finish, and two full animation frames
+    # (layout + paint committed) so the captured frame is the final one. This
+    # reduced but did NOT eliminate the glyph-AA jitter (hence resolution D above);
+    # it still stabilises the card SIZE the structural gate checks.
+    page.wait_for_load_state( "networkidle" )
+    page.evaluate( "() => document.fonts.ready" )
+    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+    assert_snapshot_structure_only( container, name="multiplexer_task_editing_controls.png" )
+    print( "✓ multiplexer_task_editing_controls: structural snapshot verified (width + height-tolerance; pixel-blind by design — bug 660d02b4 D)" )

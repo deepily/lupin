@@ -33,7 +33,7 @@ import sys as _sys_vt
 _THIS_DIR = os.path.dirname( os.path.abspath( __file__ ) )
 if _THIS_DIR not in _sys_vt.path:
     _sys_vt.path.insert( 0, _THIS_DIR )
-from visual_height_tolerance import compare_pngs_height_tolerant
+from visual_height_tolerance import compare_pngs_height_tolerant, compare_pngs_structure_only
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +192,85 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
         ( fail_dir / f"actual_{name}" ).write_bytes( img )
         ( fail_dir / f"expected_{name}" ).write_bytes( baseline_file.read_bytes() )
         pytest.fail( f"[height-tolerant-snapshot] Snapshots DO NOT match! {name} — {result.reason}" )
+
+    return _assert
+
+
+# ---------------------------------------------------------------------------
+# Structure-only snapshot assertion  (bug 660d02b4, resolution D)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def assert_snapshot_structure_only( pytestconfig, request ):
+    """
+    A snapshot assertion that verifies WIDTH + HEIGHT-tolerance ONLY — it is
+    PIXEL-BLIND BY DESIGN (bug 660d02b4, resolution D, ratified 2026-07-01).
+
+    LOUD NOTE FOR FUTURE MAINTAINERS: dropping the per-pixel compare here is
+    INTENTIONAL, not an oversight. `test_task_editing_controls_visual` is the
+    most glyph-dense of the 37 mux visual snapshots; even with the suite-wide
+    deterministic-font launch args already applied (see
+    `browser_type_launch_args`) its per-pixel glyph anti-aliasing is
+    non-deterministic run-to-run, HIGH-VARIANCE up to ~3800 scattered px — a
+    magnitude no safe pixel/count budget can forgive without risking a
+    false-green on a real <2000px regression. Its FUNCTIONAL behaviour is covered
+    by the sibling E2E tests in the same file. This retained gate is
+    DETERMINISTIC (the control-height pin + settle-fix stabilise the card size)
+    and still fails a genuine STRUCTURAL regression (wrong width, or height
+    outside the ±delta tolerance). Do NOT re-arm a pixel assertion here — restore
+    pixel coverage via the P3 (C) deterministic-font/sub-pixel harness instead.
+
+    Requires:
+        - the pytest-playwright-visual-snapshot ini keys are set (same config the
+          height-tolerant + stock fixtures read)
+        - the passed object is a Playwright Locator/Page (screenshotted here) or
+          raw PNG bytes
+
+    Ensures:
+        - `--update-snapshots` writes the capture as the baseline (then fails the
+          test with a "review" note, mirroring the stock fixture)
+        - a missing baseline is created (then flagged for review)
+        - otherwise the capture is compared STRUCTURE-ONLY (width exact + height
+          within max_height_delta, NO pixel compare); a structural mismatch calls
+          `pytest.fail` and saves actual/expected artifacts under the failures dir
+    """
+    from pathlib import Path as _Path
+    from playwright.sync_api import Locator as _Locator, Page as _Page
+
+    root_dir       = _Path( pytestconfig.rootdir )
+    snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
+    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    update         = bool( request.config.getoption( "--update-snapshots" ) )
+
+    test_file_stem = _Path( request.node.fspath ).stem
+    test_name      = request.node.name.split( "[", 1 )[ 0 ]
+
+    def _assert( locator_or_bytes, *, name, max_height_delta=1 ):
+        if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
+            img = locator_or_bytes.screenshot( animations="disabled", type="png" )
+        else:
+            img = locator_or_bytes
+
+        snapshot_dir  = snapshots_path / test_file_stem / test_name
+        snapshot_dir.mkdir( parents=True, exist_ok=True )
+        baseline_file = snapshot_dir / name
+
+        if update or not baseline_file.exists():
+            baseline_file.write_bytes( img )
+            verb = "updated" if update else "created (new)"
+            pytest.fail( f"[structure-only-snapshot] Snapshot {verb}; please review. {baseline_file}" )
+
+        result = compare_pngs_structure_only(
+            img, baseline_file.read_bytes(), max_height_delta=max_height_delta,
+        )
+        if result.matched:
+            return
+
+        fail_dir = failures_path / test_file_stem / test_name
+        fail_dir.mkdir( parents=True, exist_ok=True )
+        ( fail_dir / f"actual_{name}" ).write_bytes( img )
+        ( fail_dir / f"expected_{name}" ).write_bytes( baseline_file.read_bytes() )
+        pytest.fail( f"[structure-only-snapshot] Structural mismatch! {name} — {result.reason}" )
 
     return _assert
 
