@@ -274,17 +274,26 @@ def test_drop_blank_reason_shows_inline_error_and_fires_no_request( page ):
 # Visual regression — the editable Actions controls
 # ---------------------------------------------------------------------------
 
-def test_task_editing_controls_visual( page, assert_snapshot ):
+def test_task_editing_controls_visual( page, assert_snapshot_height_tolerant ):
     """
     Baseline the task-list card WITH the Phase-2 editing controls rendered.
 
     Run #1 with `--update-snapshots` establishes the PNG; later runs pixel-diff.
     Snapshot scope is the whole card container so the priority/owner selects +
     drop affordance are all in frame.
+
+    Uses `assert_snapshot_height_tolerant` (NOT the stock zero-tolerance
+    `assert_snapshot`) because of straggler bug 660d02b4: the card's form-control
+    rows (11px <select>/<input>/<button> in the Actions column) carry a
+    sub-pixel `normal` line-height that rounds the container height 169↔170
+    between capture and compare in the SAME container. The stock comparator
+    raises on that ±1px size flip with no reconcilable rebaseline; the tolerant
+    variant forgives a benign bottom-edge 1px delta while staying strict on
+    width, on pixels, and on any larger/shifted change.
     """
     _open_card( page )
     # Settle layout after the table + controls paint.
     time.sleep( 0.3 )
     container = page.locator( ".task-list-container" )
-    assert_snapshot( container, name="multiplexer_task_editing_controls.png" )
-    print( "✓ multiplexer_task_editing_controls: visual snapshot compared" )
+    assert_snapshot_height_tolerant( container, name="multiplexer_task_editing_controls.png" )
+    print( "✓ multiplexer_task_editing_controls: visual snapshot compared (height-tolerant)" )

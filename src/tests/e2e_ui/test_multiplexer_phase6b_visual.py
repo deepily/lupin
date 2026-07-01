@@ -221,8 +221,22 @@ def test_multiplexer_phase6b_tts_chrome_visual(
         timeout=15000,
     )
 
-    # Wait for the tts-chrome controls to render (sanity check before snapshot).
-    page.wait_for_selector( '#tts-pane .tts-controls', timeout=2000 )
+    # Wait for the tts-chrome to render its IDLE panel (sanity check before
+    # snapshot). Straggler bug a90cc63e: the prior gate waited for
+    # `#tts-pane .tts-controls`, but `.tts-controls` is emitted ONLY by the
+    # PLAYING/paused branch of renderTtsChrome (templates/ttsChrome.ts:135). This
+    # test captures the IDLE state (no audio flowing), where the STATE-driven
+    # empty panel renders `.tts-chrome-empty` + `.tts-queue-empty-state` and NO
+    # `.tts-controls` (renderTtsEmpty, ttsChrome.ts:86-92; locked by unit test
+    # templates_tts_chrome.test.ts:48). The old selector could therefore NEVER
+    # resolve idle → a guaranteed 2000ms timeout, not a contention flake. Wait
+    # instead for the idle observability handle the template DOES emit for every
+    # state (data-testid + data-state, ttsChrome.test.ts:223), with a generous
+    # timeout matching the test-hook wait above.
+    page.wait_for_selector(
+        '#tts-pane [data-testid="multiplexer-tts-chrome"][data-state="idle"]',
+        timeout=15000,
+    )
 
     # Brief settle window for any post-mount layout repaint.
     time.sleep( 0.2 )

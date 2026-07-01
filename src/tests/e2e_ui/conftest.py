@@ -27,6 +27,14 @@ import requests
 # Override via LUPIN_TEST_BASE_URL env var for custom setups or Docker-internal routing.
 BASE_URL = os.environ.get( "LUPIN_TEST_BASE_URL", "http://localhost:8000" )
 
+# Height-tolerant snapshot comparison core (bug 660d02b4). Imported via a
+# path-guard so the pure helper resolves regardless of pytest import mode.
+import sys as _sys_vt
+_THIS_DIR = os.path.dirname( os.path.abspath( __file__ ) )
+if _THIS_DIR not in _sys_vt.path:
+    _sys_vt.path.insert( 0, _THIS_DIR )
+from visual_height_tolerance import compare_pngs_height_tolerant
+
 
 # ---------------------------------------------------------------------------
 # Deterministic Font Rendering for Visual Regression
@@ -109,6 +117,83 @@ def browser_context_args( browser_context_args ):
         **browser_context_args,
         "viewport": { "width": 1280, "height": 720 },
     }
+
+
+# ---------------------------------------------------------------------------
+# Height-tolerant snapshot assertion  (bug 660d02b4)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def assert_snapshot_height_tolerant( pytestconfig, request ):
+    """
+    A snapshot assertion that tolerates a bounded HEIGHT-only delta.
+
+    Straggler bug 660d02b4: `test_task_editing_controls_visual` renders the
+    task-list card at 960x169 on `--update-snapshots` but 960x170 on a plain
+    COMPARE — a benign sub-pixel row-height rounding that flips run-to-run in the
+    SAME container. The stock `assert_snapshot` is zero-tolerance on dimensions
+    (it raises `ValueError` the instant the sizes differ), so no rebaseline can
+    reconcile the flap. This fixture forgives ONLY a benign bottom-edge ±N px
+    (default 1) via `compare_pngs_height_tolerant`, while staying strict on
+    width, on pixels within the overlapping region, and on the size of the delta
+    — it can never green a genuine regression (a content SHIFT still fails).
+
+    Requires:
+        - the pytest-playwright-visual-snapshot ini keys are set
+          (`playwright_visual_snapshots_path`, `..._threshold`,
+          `..._failures_path`) — the same config the stock fixture reads
+        - the passed object is a Playwright Locator/Page (screenshotted here) or
+          raw PNG bytes
+
+    Ensures:
+        - `--update-snapshots` writes the capture as the baseline (then fails the
+          test with a "review" note, mirroring the stock fixture)
+        - a missing baseline is created (then flagged for review)
+        - otherwise the capture is compared height-tolerantly; a mismatch calls
+          `pytest.fail` and saves actual/expected artifacts under the failures dir
+    """
+    from pathlib import Path as _Path
+    from playwright.sync_api import Locator as _Locator, Page as _Page
+
+    root_dir       = _Path( pytestconfig.rootdir )
+    snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
+    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
+    update         = bool( request.config.getoption( "--update-snapshots" ) )
+
+    test_file_stem = _Path( request.node.fspath ).stem
+    test_name      = request.node.name.split( "[", 1 )[ 0 ]
+
+    def _assert( locator_or_bytes, *, name, max_height_delta=1 ):
+        if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
+            img = locator_or_bytes.screenshot( animations="disabled", type="png" )
+        else:
+            img = locator_or_bytes
+
+        snapshot_dir  = snapshots_path / test_file_stem / test_name
+        snapshot_dir.mkdir( parents=True, exist_ok=True )
+        baseline_file = snapshot_dir / name
+
+        if update or not baseline_file.exists():
+            baseline_file.write_bytes( img )
+            verb = "updated" if update else "created (new)"
+            pytest.fail( f"[height-tolerant-snapshot] Snapshot {verb}; please review. {baseline_file}" )
+
+        result = compare_pngs_height_tolerant(
+            img, baseline_file.read_bytes(),
+            threshold=threshold, max_height_delta=max_height_delta,
+        )
+        if result.matched:
+            return
+
+        # Save artifacts for triage (parity with the stock fixture's layout).
+        fail_dir = failures_path / test_file_stem / test_name
+        fail_dir.mkdir( parents=True, exist_ok=True )
+        ( fail_dir / f"actual_{name}" ).write_bytes( img )
+        ( fail_dir / f"expected_{name}" ).write_bytes( baseline_file.read_bytes() )
+        pytest.fail( f"[height-tolerant-snapshot] Snapshots DO NOT match! {name} — {result.reason}" )
+
+    return _assert
 
 
 # ---------------------------------------------------------------------------
