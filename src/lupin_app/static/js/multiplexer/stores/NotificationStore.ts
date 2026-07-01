@@ -37,6 +37,7 @@ import type {
   NotificationChangeKind,
   NotificationFilterMode,
   PredictionHint,
+  SessionTopicPayload,
   StoreNotificationsChangedPayload,
   VoicePersona,
 } from "../shared/types";
@@ -227,6 +228,13 @@ interface ServerNotificationFields {
   message             ?: string;
   title               ?: string;
   sender_id           ?: string;
+  // R5 (2026-07-01) — control-notification discriminator + payload. The server
+  // sends `notification_type` (legacy reads `type || notification_type`,
+  // notifications.js:5855); neither survives normalize(), so the session_topic
+  // intercept reads them off the RAW field here, before normalization.
+  notification_type   ?: string;
+  type                ?: string;
+  session_name        ?: string;
   timestamp           ?: string;       // ISO string — normalized to ms epoch
   response_requested  ?: boolean;       // → action_required
   response_type       ?: Notification["response_type"];
@@ -521,6 +529,23 @@ class NotificationStoreImpl implements NotificationStore {
       // no new notification. We do NOT trust the server's unplayed_count over
       // our local readSet bookkeeping (different semantics: server-side
       // "played" vs client-side "user acknowledged"). No-op.
+      return;
+    }
+    // R5 — `session_topic` is control metadata, not a message: route the name
+    // to SenderStore via the bus and DO NOT card it (legacy notifications.js:5862
+    // "skip history card"). The discriminator + session_name are raw-only fields
+    // (dropped by normalize()), so intercept here, BEFORE normalization.
+    const raw  = env.notification;
+    const kind = raw.notification_type ?? raw.type;
+    if (kind === "session_topic") {
+      if (raw.sender_id !== undefined && raw.session_name !== undefined) {
+        this.bus.emit<SessionTopicPayload>({
+          type   : "session_topic",
+          payload: { sender_id: raw.sender_id, session_name: raw.session_name },
+          source : "notification-store",
+          ts     : this.nowFn(),
+        });
+      }
       return;
     }
     const norm = this.normalize(env.notification);
