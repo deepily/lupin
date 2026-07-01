@@ -2,6 +2,24 @@
 
 > **Archives**: See [history/README.md](history/README.md) for the full chronological index. Most recent: [2026-05-19 to 05-22](history/2026-05-19-to-22-history.md). History health: ✅ **HEALTHY at 12,208 tokens (48.8% of 25k)** — archived 2026-06-10 by Mr. Radio 🦉 (session 0102cf69), ~11,476 tokens moved to archive.
 
+### 2026.06.30 - Session ef70b5f4 (Mr. Radio 🦉) | Mux MVP-finish BUILD end-to-end: 4 lanes + coverage fix built·reviewed·committed·merged·integrated · gate E4 + dir-wide c8 + suite 2051/2051 + WS 50/50 GREEN · wip advanced + :8000 gates submitted · 11PM checkpoint · PUSH+backup (Rick-auth)
+
+**Accomplishments**:
+- **Drove the ratified mux MVP-finish remediation to a verified integration as fleet manager** (MANAGE-don't-build; visible workers; adversarial review vs LIVE code, invariants VERIFIED not trusted; committed-held → merged clean):
+  - **L1** interactive bugs — Tiffany 💍 `d9d8d651`: Bug#2 reading-pane URIError (raw/raw symmetry) + Bug#1 progress-group head 176→1 (senderCard election + pre-filter). VERIFIED head/history invariant @`buildHistoryFragment:690` (consumes the single rendered `.progress-group-head` — no divergence); single-sender-by-construction grep-confirmed.
+  - **L2** AR+PLY panels — Sam 🎙️ `f48b0bf0`: shared `renderActionRequiredEmpty()` anti-drift across all owner-branches + 2 necessary added branches; PLY `Exclude<idle>` (no dead arm, 6 states).
+  - **L3** VIS polish — Krishna 🦚 `ce164056`: V9 strip-icon alloc-status PORT (server-verified `borrowed`+`active` shapes BEFORE porting), V5 new header CSS, V6/V7 inline; V13 HELD for Oracle (verify-don't-manufacture, no blind-fix).
+  - **L4** NAV port — Clayton 😎 `6c20b7c3`: `lupin-nav.js`→`NavBarRenderer`; D1 logout persisted-token fix (`clearTokens` not `clearToken`), outcome-based test asserts token ABSENCE.
+  - **AudioRecorder.ts:255** pre-existing c8 gap — Clayton `8a2c421a`: documented tsx phantom-brace ignore (`StorageService:217` precedent).
+- **Rick's cascade decisions applied**: V9=BUILD-as-PORT (OQ-6), V10b topic=DEFER (OQ-7), NAV=KEEP "Notifications" (OQ-1). Reconciliation ground-truth-verified by Tiffany. **3 shared-file carve-outs** (senderCard.ts L1↔L3, multiplexer.html L3↔L4, NLR L1↔L2 dissolved) composed clean in reviewed merges.
+- **Gates GREEN**: V-P6 Phase-6 audible-speak wire 3/3 (:7999); gate E4 (tsc + c8 --100 senderCard.ts); directory-wide c8 --100 all files 100%; full merged suite **2051/2051**; WS smoke **50/50**. Integrated dist builds.
+- **Integration**: 4 lanes + coverage fix merged clean in an isolated worktree, verified, then **wip advanced to `1351976f`** (peer-coordinated with Rachel — disjoint from her uncommitted GCP work); dist rebuilt; :8000 bounced; **E2E + integration gates submitted** (`ts-55f92b50` / `ts-13e9fc86`) — results for AM review (Rick: rerun in morning OK).
+- **11 PM fleet checkpoint** (Rick broadcast `2dd610ad`) executed: documented + pinged María, crew held ALIVE (no reap).
+- **PUSH + backup** Rick-authorized at session-end (gated: Tiberius commits Rachel's GCP set first).
+- **Fleet**: 4 workers (Tiffany/Sam/Krishna/Clayton) driven lane→committed→standby, held alive per no-reap. Clean adversarial-review loop — cleared a false `sessionHash`-orphan finding by reading live code; caught the cross-sender/head-consistency question on Bug#1; corrected Clayton's c8 to the directory-wide glob.
+
+**Files changed** (doc commit): `history.md` + `TODO.md` + execution log `src/rnd/v0.1.9/2026.06.30-mux-mvp-finish-build-execution-log.md` + plan/handoff docs. Code on `wip-v0.1.9` HEAD `1351976f`. Store: lane sub-tasks done w/ receipts; umbrella `b722bf58` in_progress (→ integration). **Flip stays gated on Rick's visual sign-off — push authorized, flip (`lupin-app.ini:883`) separate.** ⚠️ history.md over 25k tokens → **archival debt for next session**.
+
 ### 2026.06.29 - Session 2f4feb0a (Mr. Radio 🦉) | Mux-parity Plan-01 chain DRIVEN to completion (B3·B2·B4·F0 + 2 reds) · 4 workers spawned+reaped clean · serial-merge + PUSH + backup · architecture gate filed · post-game defer-bias lesson
 
 **Accomplishments**:
