@@ -62,6 +62,11 @@ dependencies = [
   "sqlalchemy==2.0.40",
   "psycopg2-binary==2.9.11",
   "alembic==1.18.1",
+  "pgvector==0.4.2",                      # SQLAlchemy Vector type for postgres/pgvector vector-store
+                                          # models (v0.2.0 Lane A). Imported at BOOT via
+                                          # postgres_models -> vector_store_models. Mirrors the pin in
+                                          # src/cosa/requirements.txt:162 — uv sync builds the image
+                                          # from pyproject.toml + uv.lock, so it MUST be declared here.
 
   # --- Push (S6 FCM silent-relay wake channel) ---
   "firebase-admin>=6.5,<7",               # REAL FCM admin SDK (named app "lupin-fcm-wake");
