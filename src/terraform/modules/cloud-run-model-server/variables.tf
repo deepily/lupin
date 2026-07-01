@@ -91,6 +91,41 @@ variable "launch_stage" {
   default     = "GA"
 }
 
+# --- Startup probe (finding #10: guard a slow first cold start) ----------------
+# The ~20 GB GPU image pull + model load (.to(cuda)) can exceed a default
+# startup budget; without a probe Cloud Run may mark the revision unhealthy
+# before the server is ready. The probe polls /health (no-auth) until ready.
+# Startup budget ≈ period_seconds × failure_threshold.
+variable "health_check_path" {
+  type        = string
+  description = "HTTP path for the startup probe (the model server's no-auth /health endpoint)."
+  default     = "/health"
+}
+
+variable "startup_probe_period_seconds" {
+  type        = number
+  description = "Seconds between startup-probe attempts. Startup budget ≈ this × failure_threshold."
+  default     = 10
+}
+
+variable "startup_probe_failure_threshold" {
+  type        = number
+  description = "Consecutive startup-probe failures tolerated before the revision is marked failed. Default 24 → a 240s startup budget covering the GPU image pull + model load."
+  default     = 24
+}
+
+variable "startup_probe_timeout_seconds" {
+  type        = number
+  description = "Per-attempt startup-probe timeout. Must be ≤ startup_probe_period_seconds."
+  default     = 5
+}
+
+variable "startup_probe_initial_delay_seconds" {
+  type        = number
+  description = "Delay before the first startup-probe attempt."
+  default     = 10
+}
+
 # --- Security (Decision #4: internal+VPC [rec] vs public+key quick-start) ------
 variable "ingress" {
   type        = string
@@ -108,8 +143,27 @@ variable "ingress" {
 
 variable "allow_unauthenticated" {
   type        = bool
-  description = "Quick-start escape hatch: bind allUsers → roles/run.invoker (public, X-API-Key still enforced by the app). DEFAULT false — keep IAM-gated. Pairs naturally with ingress=INGRESS_TRAFFIC_ALL."
-  default     = false
+  description = <<-EOT
+    Bind allUsers → roles/run.invoker on the service. DEFAULT true.
+
+    Ingress and IAM invoker are ORTHOGONAL layers, not substitutes:
+      - ingress (network layer) decides WHO can reach the service —
+        INTERNAL_ONLY restricts reachability to VPC-internal callers.
+      - the invoker IAM binding (identity layer) decides whether a reachable
+        caller must present a valid Google OIDC identity token.
+
+    Ratified Decision #3 is "X-API-Key is the gate; NO OIDC / app-auth rework."
+    The app client sends ONLY X-API-Key (no OIDC bearer), so WITHOUT this
+    binding Cloud Run rejects every call with 403 at the platform IAM layer
+    before the app's X-API-Key is ever checked. With INTERNAL_ONLY ingress
+    the allUsers grant is scoped to VPC-internal callers, and X-API-Key is the
+    real auth — the standard internal+unauthenticated pattern. Hence default
+    true so the binding materializes and Decision #3 actually serves traffic.
+
+    Set false ONLY if the client is reworked to fetch + attach an OIDC id-token
+    (which contradicts Decision #3).
+  EOT
+  default     = true
 }
 
 variable "service_account_email" {
@@ -225,14 +279,14 @@ variable "enable_scale_schedule" {
 
 variable "scale_up_cron" {
   type        = string
-  description = "Cron for the warm-up job (min_instances → 1). Default 9am."
-  default     = "0 9 * * *"
+  description = "Cron for the warm-up job (min_instances → 1). WEEKDAY-ONLY per Rick's 2026-07-01 correction (Mon–Fri 09:00) — the model server is only utilized Mon–Fri 09:00–23:00 EDT."
+  default     = "0 9 * * 1-5"
 }
 
 variable "scale_down_cron" {
   type        = string
-  description = "Cron for the cool-down job (min_instances → 0). Default 11pm."
-  default     = "0 23 * * *"
+  description = "Cron for the cool-down job (min_instances → 0). WEEKDAY-ONLY (Mon–Fri 23:00); weekends stay at min=0 because there is no weekday warm-up until Monday 09:00."
+  default     = "0 23 * * 1-5"
 }
 
 variable "scheduler_time_zone" {
@@ -249,6 +303,6 @@ variable "scheduler_region" {
 
 variable "scheduler_service_account_email" {
   type        = string
-  description = "Service account the scheduler uses to mint the OIDC token for the Cloud Run Admin API PATCH (needs run.services.update). Required only when enable_scale_schedule = true."
+  description = "Service account the scheduler uses to mint the OAuth access token (cloud-platform scope) for the Cloud Run Admin API PATCH (needs run.services.update). Required only when enable_scale_schedule = true. NB: OAuth access token, NOT an OIDC id-token — the run.googleapis.com management API is a Google API; OIDC/audience is for invoking a Cloud Run service."
   default     = ""
 }

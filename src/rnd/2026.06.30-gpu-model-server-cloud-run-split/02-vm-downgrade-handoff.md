@@ -18,9 +18,14 @@ The GPU inference workload (Whisper + 2 text encoders) is moving **off** the
 (Lupin-repo Lane 1 = the Terraform module; Lane 2 = the deploy script + env
 switch). Once that lands, the VM **no longer needs an L4 GPU**. This handoff
 asks the `terraforming-vms` owner to **downgrade the VM machine type from the
-GPU-bearing `g2-standard-8` to a CPU-only type and drop the L4 accelerator +
-GPU driver bits** — converting an always-on GPU bill into "GPU only when
-serving" plus a much cheaper CPU VM.
+GPU-bearing `g2-standard-8` to `e2-standard-8` (CPU-only) and drop the L4
+accelerator + GPU driver bits** — converting an always-on GPU bill into "GPU
+only during the warm window" plus a much cheaper CPU VM.
+
+> **RULED (2026-07-01, Rick — Decision #4): `e2-standard-8`.** Keep the current
+> 8 vCPU / 32 GB envelope, drop the L4. This is no longer a 3-way choice — the
+> trade-off table below is retained for context, but `e2-standard-8` is the
+> locked target. (Open question #1 "machine type" is CLOSED.)
 
 **Do NOT apply this until the Cloud Run model server is live and the app has
 been re-pointed at it** (`LUPIN_MODEL_SERVER_URL` → the `…run.app` URL) and a
@@ -46,9 +51,10 @@ remove the local GPU only after the remote GPU is proven. See **Sequencing**.
 
 In the Compute Engine instance resource for `lupin-host-test`:
 
-1. **`machine_type`**: `"g2-standard-8"` → a CPU-only type (see trade-off
-   table below). The G2 family *requires* an attached GPU; you cannot keep
-   `g2-*` without the accelerator.
+1. **`machine_type`**: `"g2-standard-8"` → `"e2-standard-8"` (RULED — CPU-only,
+   same 8 vCPU / 32 GB). The G2 family *requires* an attached GPU; you cannot
+   keep `g2-*` without the accelerator. (Trade-off table below retained for
+   context only; the target is locked.)
 2. **Remove the `guest_accelerator { … }` block** entirely (and any
    `scheduling { on_host_maintenance = "TERMINATE" }` that was only there to
    satisfy the GPU constraint — CPU VMs can use `MIGRATE`).
@@ -72,6 +78,97 @@ envelope (so the on-VM bounded-CC / tmux workload keeps its headroom) while
 dropping the GPU premium. Step down to `e2-standard-4` only if the VM is
 confirmed to run *nothing* but REST + the SQL proxy. Choose `n2-standard-8` if
 a committed-use discount is on the table (E2 is not CUD-friendly the same way).
+
+## VM-side networking for INTERNAL_ONLY reachability (finding #2 — NEW owned task)
+
+> **OWNER: the `terraforming-vms` repo owner** — the SAME owner executing this
+> VM downgrade. This is VM-side / VPC-side networking (Private Google Access +
+> DNS), **not** a Lupin-repo Terraform edit, which is why it lands here and not
+> in `src/terraform`. Without it, the app on the VM **cannot reach** the Cloud
+> Run model server and every embedding/STT call fails at connect time.
+
+**Why this is required (and why Direct VPC egress does NOT cover it).** Ratified
+Decision #3 sets the Cloud Run service to `INGRESS_TRAFFIC_INTERNAL_ONLY`. The
+module's Direct VPC egress governs the **service's OUTBOUND** traffic only — and
+a stateless inference server makes no outbound calls — so it does **not** make an
+internal-only service reachable **INBOUND** from the VM. For the VM to reach an
+INTERNAL_ONLY `…run.app` endpoint over Google's private path, the VM's VPC needs:
+
+1. **Private Google Access (PGA)** enabled on the subnet the VM lives in
+   (`google_compute_subnetwork.private_ip_google_access = true`), so the VM can
+   reach Google APIs without an external IP.
+2. **A DNS override** so `*.run.app` (and the googleapis endpoints) resolve to the
+   **restricted Google APIs VIP** `199.36.153.4/30` instead of public IPs. Do this
+   with Cloud DNS private managed zones on the app VPC:
+   - zone for `run.app.` → A record `199.36.153.4` (and the wildcard as the
+     provider supports), plus the standard `googleapis.com.` →
+     `restricted.googleapis.com` (`199.36.153.4/30`) private zone.
+3. **A route to the restricted VIP** — a static route for `199.36.153.4/30`
+   with next-hop `default-internet-gateway` (the VIP is reached via the Google
+   backbone, no external IP needed), tagged/scoped to the VM as appropriate.
+
+**Alternative** (if PGA+DNS is undesirable): front the service with an internal
+Application Load Balancer / PSC endpoint on the app VPC and point the app at that
+internal address instead of the `…run.app` name. Heavier; PGA+DNS is the
+lighter-weight fit for a single internal caller.
+
+### Seed TODOs (VM-side networking — `terraforming-vms` owner)
+
+- [ ] [TFVMS] Enable Private Google Access on the `lupin-host-test` VM's subnet.
+- [ ] [TFVMS] Create Cloud DNS private zones on the app VPC: `run.app.` → `199.36.153.4`, and `googleapis.com.` → restricted VIP (`199.36.153.4/30`).
+- [ ] [TFVMS] Add a static route `199.36.153.4/30` → `default-internet-gateway` scoped to the app VPC/VM.
+- [ ] [TFVMS] Verify from the VM: `dig <service>.run.app` resolves to `199.36.153.4`, and a request to the `…run.app` endpoint connects (paired with the Lupin-side X-API-Key smoke — design doc §"Apply runbook" finding #6).
+
+> **Sequencing:** this VM-side networking must be in place **before** the cloud
+> smoke (embedding + STT against the `…run.app` endpoint) can pass — i.e. before
+> re-pointing the app and before the CPU downgrade. It is added to the ordering
+> diagram below as the step gating the smoke.
+
+## VM suspend/resume scheduling for weekday-only utilization (2026-07-01)
+
+> **The SCHEDULER is now BUILT in the Lupin repo** (dry-verified): module
+> `src/terraform/modules/vm-power-schedule` wired into `envs/test` provisions the
+> two Cloud Scheduler jobs that POST to the Compute Engine API
+> `instances.suspend` (`0 23 * * 1-5`) / `instances.resume` (`0 9 * * 1-5`),
+> America/New_York. They reference the VM by name + zone only (no cross-state
+> data source), so they build cleanly without the terraforming-vms state.
+> **What remains for the `terraforming-vms` / IAM owner** is only the two items
+> below (the scheduler itself is no longer their build task).
+
+Rick's 2026-07-01 schedule correction: the VM is utilized **only Mon–Fri
+09:00–23:00 EDT** and **PAUSED (suspended)** all other hours (weeknights + all
+weekend). Rick specified **suspend, not stop** — a *suspended* VM incurs no
+compute (cores/RAM) charge, only the saved memory-state + boot disk at
+Persistent-Disk rates, and (the reason for suspend over stop) **preserves RAM
+state for near-instant resume** — no cold boot / docker-compose-up cycle.
+
+> Note: suspend has a max preserved-state duration (historically 60 days) — well
+> within a weekend. e2-standard-8 (CPU-only) supports suspend.
+
+### 🎁 Suspend design win — in-memory state survives the pause
+
+Because suspend snapshots the VM's **RAM to disk** (rather than a cold stop), the
+resume restores process memory intact. For Lupin that means the **in-memory FIFO
+queues** (todo/running/done) **and the `WebSocketManager` singleton survive the
+nightly/weekend pause** — no queue drain, no singleton re-init. This **retires the
+2026-05-30 "lose-singleton / lose-in-memory-state" concern** that argued against
+pausing the monolith: with suspend (not stop) that objection no longer applies.
+
+### 🔔 Resume-burst runbook note (expected, NOT a fault)
+
+On the Monday-09:00 (or any weekday) **resume**, expect a short burst of activity
+as the snapshot resumes with a stale wall-clock: **daemon-timer fires** pile up —
+the heartbeat self-poke, the CJ-Flow ghost-job sweeper, and the arbiter's
+2700s-staleness tick may all fire near-simultaneously — and **WebSocket clients
+reconnect** en masse. This is **expected post-resume behavior, not a fault**; the
+timers self-rate-limit and the WS layer re-auths normally. Do not treat the burst
+as a regression.
+
+### Remaining owned items (IAM / `terraforming-vms` owner)
+
+- [ ] [IAM] Grant the scheduler SA (`vm_power_scheduler_sa_email`) `compute.instances.suspend` + `compute.instances.resume` (+ `.get`) on `lupin-host-test` (custom role or `roles/compute.instanceAdmin.v1`). REQUIRED before the Lupin-built jobs can act.
+- [ ] [TFVMS] Confirm the VM's actual **zone** matches `vm_power_vm_zone` (default `us-central1-a`) — the Compute Engine API is zonal; a mismatch 404s the suspend/resume call.
+- [ ] [TFVMS] Confirm the app auto-recovers on resume (docker containers resume with the VM; record resume-to-ready time) and that OFFLINE weeknights 23:00–09:00 + all weekend is acceptable (03-cost-reprice.md flags this).
 
 ## Verification (post-apply, with creds — Rick/owner)
 
@@ -101,8 +198,9 @@ machine_type value in the PR description for a one-line revert.
 ```mermaid
 flowchart TD
     A["Lupin Lane 1: TF module for Cloud Run GPU model-server"] --> B["Rick: apply Set B + deploy model server (creds)"]
-    B --> C["Re-point app: LUPIN_MODEL_SERVER_URL = https://...run.app"]
-    C --> D["Smoke: embedding + STT pass against Cloud Run endpoint"]
+    B --> N["terraforming-vms: VM-side PGA + *.run.app→restricted-VIP DNS (finding #2)"]
+    N --> C["Re-point app: LUPIN_MODEL_SERVER_URL = https://...run.app"]
+    C --> D["Smoke: embedding + STT pass against INTERNAL_ONLY Cloud Run endpoint"]
     D --> E["THEN this handoff: terraforming-vms VM → CPU-only, drop L4"]
     E --> F["Verify nvidia-smi gone + app still green via cloud-gpu compose"]
 ```

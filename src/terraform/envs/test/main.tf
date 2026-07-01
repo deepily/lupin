@@ -80,12 +80,15 @@ module "onprem_vpn" {
   # enable_vpn defaults false — provisions the tunnel once the on-prem peer is coordinated.
 }
 
-# --- GPU inference plane (Set B): the carve-out model server on Cloud Run GPU,
-#     scale-to-zero. Image pulled from the artifact-registry module's repo; the
-#     X-API-Key is mounted from the secret-manager module's inventory. Direct VPC
-#     egress attaches to the app VPC only once both the VPC self-link and a
-#     subnetwork are supplied (else the block is omitted → validate stays clean).
-#     See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+# --- GPU inference plane (Set B): the carve-out model server on Cloud Run GPU.
+#     LOCKED to Rick's ruled decisions (2026-07-01): SCHEDULED-WARM (min=1 seed +
+#     the ×2 Cloud Scheduler jobs dial 1↔0 on 9am/11pm America/New_York), and
+#     INTERNAL-ONLY ingress + Direct VPC egress. Image pulled from the
+#     artifact-registry module's repo; the X-API-Key is mounted from the
+#     secret-manager module's inventory. Direct VPC egress attaches to the app
+#     VPC only once both the VPC self-link and a subnetwork are supplied (else
+#     the block is omitted → validate stays clean before the terraforming-vms
+#     net exists). See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
 module "cloud_run_model_server" {
   source     = "../../modules/cloud-run-model-server"
   project_id = var.project_id
@@ -111,4 +114,27 @@ module "cloud_run_model_server" {
 
   # The secret container must exist before the service mounts it.
   depends_on = [module.secret_manager]
+}
+
+# --- VM power schedule (Set B companion): weekday suspend/resume of the app VM.
+#     Rick 2026-07-01 — the app VM (lupin-host-test) is utilized Mon–Fri
+#     09:00–23:00 EDT and PAUSED (suspended) off-hours. Cloud Run's min-toggle
+#     cannot pause a VM, so this provisions two Cloud Scheduler jobs hitting the
+#     Compute Engine API (instances.suspend at 23:00 / instances.resume at 09:00,
+#     weekdays; weekends stay suspended). The VM lives in the standalone
+#     terraforming-vms repo/state — referenced here by name + zone only (no
+#     cross-state data source), so validate/plan stay clean. Suspend snapshots
+#     RAM → preserves the in-memory FIFO queues + WebSocketManager singleton
+#     across the pause. See 01-design.md + 02-vm-downgrade-handoff.md.
+module "vm_power_schedule" {
+  source     = "../../modules/vm-power-schedule"
+  project_id = var.project_id
+  region     = var.region
+
+  enable                          = var.vm_power_schedule_enable
+  vm_instance_name                = var.vm_power_instance_name
+  vm_zone                         = var.vm_power_vm_zone
+  scheduler_service_account_email = var.vm_power_scheduler_sa_email
+  # suspend_cron / resume_cron / time_zone use the module's weekday defaults
+  # (0 23 * * 1-5 / 0 9 * * 1-5, America/New_York).
 }

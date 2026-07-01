@@ -106,7 +106,10 @@ services:
       # non-existent local :7998 GPU container.
       LUPIN_MODEL_SERVER_URL: ${LUPIN_MODEL_SERVER_URL:?set LUPIN_MODEL_SERVER_URL to the Cloud Run service URL (https://lupin-model-server-XXXX.run.app)}
       LUPIN_API_KEY_FILE: /var/lupin/src/conf/keys/notification-api-claude-code-dev
-      LUPIN_MODEL_SERVER_API_KEY_FILE: /var/lupin/src/conf/keys/lupin-model-server-auth
+      # NOTE: LUPIN_MODEL_SERVER_API_KEY_FILE removed (finding #7) — no code reads
+      # it and it named the wrong key file (lupin-model-server-auth); the client
+      # loads notification-api-claude-code-dev via du.get_api_key(). The 3 other
+      # compose files still carry the dead var (out of this remediation's scope).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       PYTHONUNBUFFERED: "1"
     healthcheck:

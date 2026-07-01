@@ -4,9 +4,14 @@
 # server (src/lupin_model_server/main.py: Whisper distil-large-v3 + CodeRankEmbed
 # + nomic-embed-text-v1.5, ~2.9 GB VRAM, cuda:0) on an L4 GPU that scales to zero.
 #
-# Recommended defaults (per design 2026.06.30): min_instances=0 (overnight
-# zero-cost), INGRESS_TRAFFIC_INTERNAL_ONLY, nvidia-l4, scheduler OFF. Every one
-# is a var → Rick's pending decisions flip a value, not this file.
+# Module defaults remain the generic recommended set (min_instances=0, internal
+# ingress, nvidia-l4, scheduler OFF) — every one is a var. The envs/test caller
+# now LOCKS them to Rick's ruled decisions (2026-07-01): SCHEDULED-WARM (min=1
+# seed + the ×2 Cloud Scheduler jobs, min=1 09:00–23:00 / min=0 23:00–09:00
+# America/New_York), INTERNAL-ONLY ingress + Direct VPC egress. Because the
+# schedule is the LIVE authority over min_instance_count, the service ignores
+# drift on that field (lifecycle below) so re-applies never revert the
+# scheduler's runtime PATCH. See 01-design.md § "Ratified Decisions (2026-07-01)".
 #
 # The X-API-Key (ck_live_*) is NEVER a tfvar: it lives in Secret Manager and is
 # mounted as a FILE at {keys_dir}/{api_key_name} — exactly the path main.py reads
@@ -43,6 +48,16 @@ resource "google_cloud_run_v2_service" "lupin_model_server" {
   ingress             = var.ingress
   launch_stage        = var.launch_stage
   deletion_protection = var.deletion_protection
+
+  # Cloud Scheduler is the LIVE authority over min_instance_count (Decision #2
+  # SCHEDULED-WARM): the two google_cloud_scheduler_job resources PATCH it 1↔0
+  # on the 9am/11pm crons. Terraform seeds it once from var.min_instances at
+  # create, then must NOT revert the scheduler's runtime value on later applies
+  # — otherwise an off-hours apply would re-warm the L4 until the next 11pm cron
+  # (a real overnight cost leak). ignore_changes hands the field to the scheduler.
+  lifecycle {
+    ignore_changes = [template[0].scaling[0].min_instance_count]
+  }
 
   template {
     # Stateless + single-GPU singleton: scale 0..1 (min is the dial-to-zero knob).
@@ -95,6 +110,20 @@ resource "google_cloud_run_v2_service" "lupin_model_server" {
         name       = local.api_key_volume
         mount_path = var.keys_dir
       }
+
+      # Startup probe (finding #10): the ~20GB GPU image pull + model load can
+      # be slow; poll /health (no-auth) so the revision isn't failed before the
+      # server is ready. Startup budget ≈ period_seconds × failure_threshold.
+      startup_probe {
+        http_get {
+          path = var.health_check_path
+          port = var.container_port
+        }
+        initial_delay_seconds = var.startup_probe_initial_delay_seconds
+        timeout_seconds       = var.startup_probe_timeout_seconds
+        period_seconds        = var.startup_probe_period_seconds
+        failure_threshold     = var.startup_probe_failure_threshold
+      }
     }
 
     # Secret volume: one item → the file named {api_key_name} under the mount.
@@ -125,8 +154,13 @@ resource "google_cloud_run_v2_service" "lupin_model_server" {
   }
 }
 
-# --- Quick-start: public invoker (X-API-Key still enforced by the app). --------
-# Default OFF (count 0) → service stays IAM-gated.
+# --- allUsers invoker binding (X-API-Key remains the app-layer gate). ----------
+# Default ON (allow_unauthenticated=true). Ingress and IAM invoker are
+# orthogonal: with ingress=INTERNAL_ONLY this grant is scoped to VPC-internal
+# callers, and it is REQUIRED so the X-API-Key-only client isn't 403'd at the
+# platform IAM layer before app auth runs (Ratified Decision #3 — no OIDC/app-
+# auth rework). count 0 (allow_unauthenticated=false) makes the service OIDC-
+# gated → the current client, which sends no OIDC token, gets 403 on every call.
 resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   count    = var.allow_unauthenticated ? 1 : 0
   project  = var.project_id
@@ -160,9 +194,15 @@ resource "google_cloud_scheduler_job" "scale_up" {
         }
       }
     }))
-    oidc_token {
+    # Cloud Run ADMIN API (run.googleapis.com management endpoint) is a Google
+    # API → authenticate with an OAuth access token (cloud-platform scope), NOT
+    # an OIDC id-token (OIDC/audience is for INVOKING a Cloud Run service, not
+    # for calling the services-management API). Mirrors the vm-power-schedule
+    # jobs. With OIDC here the PATCH 403s → min_instances never flips → the
+    # weekday-warm window silently never activates.
+    oauth_token {
       service_account_email = var.scheduler_service_account_email
-      audience              = "https://run.googleapis.com/"
+      scope                 = "https://www.googleapis.com/auth/cloud-platform"
     }
   }
 }
@@ -190,9 +230,15 @@ resource "google_cloud_scheduler_job" "scale_down" {
         }
       }
     }))
-    oidc_token {
+    # Cloud Run ADMIN API (run.googleapis.com management endpoint) is a Google
+    # API → authenticate with an OAuth access token (cloud-platform scope), NOT
+    # an OIDC id-token (OIDC/audience is for INVOKING a Cloud Run service, not
+    # for calling the services-management API). Mirrors the vm-power-schedule
+    # jobs. With OIDC here the PATCH 403s → min_instances never flips → the
+    # weekday-warm window silently never activates.
+    oauth_token {
       service_account_email = var.scheduler_service_account_email
-      audience              = "https://run.googleapis.com/"
+      scope                 = "https://www.googleapis.com/auth/cloud-platform"
     }
   }
 }
