@@ -10,6 +10,7 @@ import { createStorageServiceForTesting, InMemoryStorage } from "../../../lupin_
 import { createNotificationStore } from "../../../lupin_app/static/js/multiplexer/stores/NotificationStore";
 import type {
   LupinEvent,
+  SessionTopicPayload,
   StoreNotificationsChangedPayload,
 } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
@@ -619,4 +620,40 @@ test("notification_expired for unknown id is silently dropped (idempotency guard
     ts      : 0,
   });
   assert.equal(store.list().length, 1, "n1 untouched");
+});
+
+// ===========================================================================
+// R5 — session_topic interception (route to SenderStore, DO NOT card it)
+// ===========================================================================
+
+function emitRaw(bus: ReturnType<typeof createEventBusForTesting>, notification: Record<string, unknown>): void {
+  bus.emit({ type: "notification_queue_update", payload: { notification }, source: "test", ts: 0 });
+}
+
+test("R5: a session_topic notification emits a session_topic event and is NOT carded", () => {
+  const { bus, store } = setupStore();
+  const captured: SessionTopicPayload[] = [];
+  bus.on<SessionTopicPayload>("session_topic", (e) => captured.push(e.payload));
+  emitRaw(bus, { notification_type: "session_topic", sender_id: "cc@x#a1", session_name: "Deploy pipeline", id_hash: "h1", message: "ignored" });
+  assert.equal(store.list().length, 0, "session_topic is control metadata — no history card");
+  assert.deepEqual(captured, [ { sender_id: "cc@x#a1", session_name: "Deploy pipeline" } ]);
+});
+
+test("R5: the `type` field also triggers the intercept (notification_type ?? type)", () => {
+  const { bus, store } = setupStore();
+  const captured: SessionTopicPayload[] = [];
+  bus.on<SessionTopicPayload>("session_topic", (e) => captured.push(e.payload));
+  emitRaw(bus, { type: "session_topic", sender_id: "cc@x#a2", session_name: "Nightly", id_hash: "h2", message: "ignored" });
+  assert.equal(store.list().length, 0);
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0]!.session_name, "Nightly");
+});
+
+test("R5: a session_topic MISSING session_name intercepts (no card) but emits nothing", () => {
+  const { bus, store } = setupStore();
+  const captured: SessionTopicPayload[] = [];
+  bus.on<SessionTopicPayload>("session_topic", (e) => captured.push(e.payload));
+  emitRaw(bus, { notification_type: "session_topic", sender_id: "cc@x#a3", id_hash: "h3", message: "ignored" });
+  assert.equal(store.list().length, 0, "still skips the card");
+  assert.equal(captured.length, 0, "no name → no event");
 });

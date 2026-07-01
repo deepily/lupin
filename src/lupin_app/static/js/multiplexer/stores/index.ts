@@ -139,7 +139,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // ORDER MATTERS — see file header. Do not reorder without also updating
   // the integration test assertion.
   const notifications  = createNotificationStore({ bus: opts.eventBus, storage: opts.storage });
-  const senders        = createSenderStore       ({ bus: opts.eventBus });
+  const senders        = createSenderStore       ({ bus: opts.eventBus, storage: opts.storage });
   const actionRequired = createActionRequiredStore({ bus: opts.eventBus, api: opts.api });
   const audio          = createAudioStore        ({
     bus                 : opts.eventBus,

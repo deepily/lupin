@@ -7,10 +7,16 @@ import assert from "node:assert/strict";
 
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createSenderStore } from "../../../lupin_app/static/js/multiplexer/stores/SenderStore";
+import { createStorageServiceForTesting, InMemoryStorage } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import type {
   LupinEvent,
+  SessionTopicPayload,
   StoreSendersChangedPayload,
 } from "../../../lupin_app/static/js/multiplexer/shared/types";
+
+function emitSessionTopic(bus: ReturnType<typeof createEventBusForTesting>, p: SessionTopicPayload): void {
+  bus.emit<SessionTopicPayload>({ type: "session_topic", payload: p, source: "test", ts: 0 });
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -448,4 +454,64 @@ test("never-regress on the hot path: a worker stays is_worker=true after a later
   // A subsequent plain notification with NO manager must NOT regress the flag.
   emitNotification(bus, { type: "task", sender_id: "stayworker@x", timestamp: "2026-06-24T10:05:00Z" });
   assert.equal(store.get("stayworker@x")!.is_worker, true, "set-true-only never clears on the hot path");
+});
+
+// ===========================================================================
+// R5 — session name/topic (session_topic event · buffer · localStorage mirror)
+// ===========================================================================
+
+test("R5: session_topic for an EXISTING sender sets session_name + emits updated", () => {
+  const { bus, store, events } = setup();
+  emitNotification(bus, { type: "task", sender_id: "s@x", timestamp: "2026-07-01T10:00:00Z" });
+  const before = events.length;
+  emitSessionTopic(bus, { sender_id: "s@x", session_name: "Deploy pipeline" });
+  assert.equal(store.get("s@x")!.session_name, "Deploy pipeline");
+  const updated = events.slice(before).find(e => e.payload.changeKind === "updated");
+  assert.ok(updated, "emits updated for the named sender");
+});
+
+test("R5: session_topic BEFORE the sender's card is BUFFERED, applied on create", () => {
+  const { bus, store } = setup();
+  // Name arrives first — sender not yet known → no record, no throw.
+  emitSessionTopic(bus, { sender_id: "later@x", session_name: "Nightly batch" });
+  assert.equal(store.get("later@x"), undefined, "no record created by a bare session_topic");
+  // Sender's first real notification creates the record → buffered name applied.
+  emitNotification(bus, { type: "task", sender_id: "later@x", timestamp: "2026-07-01T11:00:00Z" });
+  assert.equal(store.get("later@x")!.session_name, "Nightly batch");
+});
+
+test("R5: buffered name is applied on a persona-event create path too", () => {
+  const { bus, store } = setup();
+  emitSessionTopic(bus, { sender_id: "p@x#a1", session_name: "Persona-first" });
+  // First event for this sender is a persona assignment (a state-update create).
+  emitNotification(bus, {
+    type      : "voice_persona_assigned",
+    sender_id : "p@x#a1",
+    voice_persona: { name: "Tiberius", icon: "👑", color: "#7E57C2" },
+  });
+  assert.equal(store.get("p@x#a1")!.session_name, "Persona-first");
+});
+
+test("R5: with StorageService, session_topic persists + a fresh store restores it", () => {
+  const bus     = createEventBusForTesting();
+  const backend = new InMemoryStorage();
+  const storage = createStorageServiceForTesting(bus, backend);
+  const store1  = createSenderStore({ bus, nowFn: () => 1_000_000, storage });
+  emitSessionTopic(bus, { sender_id: "keep@x", session_name: "Persisted topic" });
+  store1.disposeForTesting();
+
+  // A fresh store over the SAME backend seeds sessionNames from localStorage →
+  // the name applies when the sender's card is created (cold-load reload parity).
+  const bus2   = createEventBusForTesting();
+  const store2 = createSenderStore({ bus: bus2, nowFn: () => 2_000_000, storage: createStorageServiceForTesting(bus2, backend) });
+  bus2.emit({ type: "notification_queue_update", payload: { notification: { type: "task", sender_id: "keep@x", timestamp: "2026-07-01T12:00:00Z" } }, source: "t", ts: 0 });
+  assert.equal(store2.get("keep@x")!.session_name, "Persisted topic");
+});
+
+test("R5: a fresh store over an empty backend seeds nothing (getJSON null path)", () => {
+  const bus     = createEventBusForTesting();
+  const storage = createStorageServiceForTesting(bus, new InMemoryStorage());
+  const store   = createSenderStore({ bus, nowFn: () => 1_000_000, storage });
+  emitNotification(bus, { type: "task", sender_id: "fresh@x", timestamp: "2026-07-01T10:00:00Z" });
+  assert.equal(store.get("fresh@x")!.session_name, undefined, "no persisted name → session_name stays unset");
 });

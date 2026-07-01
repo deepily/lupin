@@ -37,10 +37,12 @@
 // re-scope.
 
 import type { EventBus } from "../shared/EventBus";
+import type { StorageService } from "../shared/StorageService";
 import type {
   LupinEvent,
   SenderChangeKind,
   SenderRecord,
+  SessionTopicPayload,
   StoreSendersChangedPayload,
   VoicePersona,
 } from "../shared/types";
@@ -132,26 +134,44 @@ export interface SenderStore {
 }
 
 export interface SenderStoreOptions {
-  bus    : EventBus;
-  nowFn? : () => number;
+  bus      : EventBus;
+  nowFn?   : () => number;
+  // R5 — optional StorageService for the session-name localStorage mirror
+  // (cold-load hydration does NOT carry session_name — notifications.py:2495 —
+  // so names are client-persisted, mirroring legacy saveSessionName). Omitted in
+  // unit tests that don't exercise persistence; the in-memory map still buffers.
+  storage? : StorageService;
 }
+
+// R5 — localStorage mirror key + schema for the sender_id→session_name map.
+const SESSION_NAMES_KEY           = "session_names";
+const SESSION_NAMES_SCHEMA_VERSION = 1;
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
 class SenderStoreImpl implements SenderStore {
-  private readonly bus   : EventBus;
-  private readonly nowFn : () => number;
+  private readonly bus     : EventBus;
+  private readonly nowFn   : () => number;
+  private readonly storage : StorageService | undefined;
 
   private readonly senders = new Map<string, SenderRecord>();
+
+  // R5 — sender_id → session_name. Doubles as (a) the pre-card BUFFER (a
+  // session_topic that arrives before the sender's first card is applied when
+  // the record is created) and (b) the in-memory view of the localStorage
+  // mirror (seeded on construct, written on every session_topic).
+  private readonly sessionNames = new Map<string, string>();
 
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(opts: SenderStoreOptions) {
-    this.bus   = opts.bus;
+    this.bus     = opts.bus;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
-    this.nowFn = opts.nowFn ?? (() => Date.now());
+    this.nowFn   = opts.nowFn ?? (() => Date.now());
+    this.storage = opts.storage;
+    this.loadSessionNames();
     this.subscribe();
   }
 
@@ -181,6 +201,7 @@ class SenderStoreImpl implements SenderStore {
           unread_count             : newCount,
           conversation_mode_active : false,
         };
+        this.applyBufferedSessionName(record);
         this.senders.set(senderId, record);
       } else {
         // Never-regress merge — see interface docstring.
@@ -219,7 +240,46 @@ class SenderStoreImpl implements SenderStore {
   private subscribe(): void {
     this.unsubscribers.push(
       this.bus.on<QueueUpdatePayload>("notification_queue_update", (e) => this.onQueueUpdate(e)),
+      // R5 — session-name/topic control event (NotificationStore intercepts the
+      // raw session_topic notification + re-emits it here).
+      this.bus.on<SessionTopicPayload>("session_topic", (e) => this.onSessionTopic(e.payload)),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // R5 — session name/topic (localStorage-mirrored, buffered pre-card)
+  // -------------------------------------------------------------------------
+
+  // Seed the in-memory map from the localStorage mirror (if a StorageService is
+  // wired). Cold-load hydration lacks session_name, so this restores names
+  // across reloads — legacy parity via saveSessionName's localStorage.
+  private loadSessionNames(): void {
+    if (this.storage === undefined) return;
+    const stored = this.storage.getJSON<Record<string, string>>(SESSION_NAMES_KEY, SESSION_NAMES_SCHEMA_VERSION);
+    if (stored === null) return;
+    for (const [senderId, name] of Object.entries(stored)) this.sessionNames.set(senderId, name);
+  }
+
+  private persistSessionNames(): void {
+    if (this.storage === undefined) return;
+    this.storage.setJSON(SESSION_NAMES_KEY, Object.fromEntries(this.sessionNames), SESSION_NAMES_SCHEMA_VERSION);
+  }
+
+  // Stamp a freshly-created record with any buffered/persisted session name.
+  private applyBufferedSessionName(record: SenderRecord): void {
+    const name = this.sessionNames.get(record.sender_id);
+    if (name !== undefined) record.session_name = name;
+  }
+
+  private onSessionTopic(payload: SessionTopicPayload): void {
+    this.sessionNames.set(payload.sender_id, payload.session_name);
+    this.persistSessionNames();
+    const existing = this.senders.get(payload.sender_id);
+    if (existing !== undefined) {
+      existing.session_name = payload.session_name;
+      this.emit("updated", payload.sender_id);
+    }
+    // else: buffered — applied when the sender's record is created.
   }
 
   // -------------------------------------------------------------------------
@@ -270,6 +330,7 @@ class SenderStoreImpl implements SenderStore {
         conversation_mode_active : false,           // Phase 6c Node D — default off; flipped by handleConversationModeUpdate
       };
       if (isWorker) record.is_worker = true;
+      this.applyBufferedSessionName(record);
       this.senders.set(senderId, record);
       this.emit("added", senderId);
       return;
@@ -299,6 +360,7 @@ class SenderStoreImpl implements SenderStore {
         unread_count             : 0,
         conversation_mode_active : false,
       };
+      this.applyBufferedSessionName(record);
       this.senders.set(senderId, record);
     }
 
@@ -365,6 +427,7 @@ class SenderStoreImpl implements SenderStore {
         unread_count             : 0,
         conversation_mode_active : false,
       };
+      this.applyBufferedSessionName(record);
       this.senders.set(senderId, record);
     }
 

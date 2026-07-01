@@ -453,3 +453,20 @@ describe("Bug#1 — progress-group head election (176× → 1×)", () => {
     assert.equal(headMsg?.getAttribute("data-id-hash"), "d1");   // earliest ts, regardless of list order
   });
 });
+
+// R5 — session name/topic rendered into .sender-session-name (CC sessions only).
+test("R5: a CC session's session_name renders into .sender-session-name", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "claude.code@lupin.deepily.ai#a1b2c3d4", session_name: "Deploy pipeline" }),
+    [], { appTimezone: "UTC" },
+  );
+  assert.equal(card.querySelector(".sender-session-name")!.textContent, "Deploy pipeline");
+});
+
+test("R5: a CC session without a session_name renders an empty .sender-session-name", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: "claude.code@lupin.deepily.ai#b2c3d4e5" }),
+    [], { appTimezone: "UTC" },
+  );
+  assert.equal(card.querySelector(".sender-session-name")!.textContent, "");
+});

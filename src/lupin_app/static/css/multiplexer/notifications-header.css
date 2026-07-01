@@ -30,6 +30,20 @@
   white-space : nowrap;
 }
 
+/* H2 (parity) — env-label prefix (title emphasis) + muted live clock suffix.
+   Ports legacy notifications.html:80 `#env-label` + `#clock`. */
+.notifications-env-label {
+  font-weight : 700;
+  color       : #e8e8ec;
+}
+
+.notifications-clock {
+  margin-inline-start : 0.4rem;
+  font-size           : 0.8125rem;
+  font-weight         : 500;
+  color               : #9aa0aa;
+}
+
 .notifications-count {
   display         : inline-flex;
   align-items     : center;
