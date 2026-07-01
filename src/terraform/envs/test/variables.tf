@@ -69,7 +69,7 @@ variable "model_server_allow_unauthenticated" {
 
 variable "model_server_vpc_subnetwork" {
   type        = string
-  description = "Subnetwork (name/self-link) for the model server's Direct VPC egress. Empty → no VPC access block (validate-clean before the terraforming-vms subnet exists). Pair with app_vpc_self_link as the network."
+  description = "Subnetwork (name/self-link) for the model server's Direct VPC egress; wired to the module vpc_subnetwork, paired with app_vpc_self_link as the network. REQUIRED whenever app_vpc_self_link is set — the module's vpc_subnetwork validation rejects network-set-with-subnetwork-empty at PLAN time (Cloud Run otherwise assumes a subnet named like the network → apply-time code-9 subnet-not-found). Empty is valid ONLY while app_vpc_self_link is also empty (VPC access block omitted; validate-clean before the terraforming-vms subnet exists)."
   default     = ""
 }
 

@@ -241,8 +241,20 @@ variable "vpc_network" {
 
 variable "vpc_subnetwork" {
   type        = string
-  description = "Subnetwork (name or self-link) for Direct VPC egress. Required when vpc_network is set."
+  description = "Subnetwork (name or self-link) for Direct VPC egress. REQUIRED whenever vpc_network is set — the vpc_access block emits BOTH fields, and Cloud Run treats an empty subnetwork as 'use the subnet NAMED LIKE THE NETWORK' (e.g. network dev-vpc → nonexistent subnet dev-vpc), an APPLY-TIME code-9 error invisible to `terraform plan`. Empty is valid ONLY when vpc_network is also empty (VPC access block omitted; validate-clean before the app VPC exists). Enforced by the validation below."
   default     = ""
+
+  # FAIL-LOUD (Lupin doctrine: no silent fallbacks). Reject the network-set +
+  # subnetwork-empty combination at PLAN time so the operator gets a clear
+  # variable error instead of the opaque Cloud Run code-9 subnet-not-found on
+  # apply. The silent-skip alternative (omit the block when subnetwork is empty)
+  # was rejected: it would deploy an INTERNAL_ONLY service with NO VPC egress —
+  # unreachable from the app VM — as a silent misconfiguration. See task cb0e145a
+  # + src/rnd/2026.06.30-gpu-model-server-cloud-run-split/06-apply-verification-green-bar.md §2.
+  validation {
+    condition     = var.vpc_network == "" || var.vpc_subnetwork != ""
+    error_message = "vpc_subnetwork is REQUIRED when vpc_network is set. Cloud Run treats an empty subnetwork as the subnet named like the network (e.g. 'dev-vpc'), producing a plan-invisible apply-time code-9 subnet-not-found. Set vpc_subnetwork to the target subnet (projects/<project>/regions/<region>/subnetworks/<name>) — or clear vpc_network to omit the VPC access block entirely."
+  }
 }
 
 variable "vpc_egress" {
