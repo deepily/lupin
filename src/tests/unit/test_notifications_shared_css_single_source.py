@@ -232,3 +232,42 @@ def test_shared_sheet_excludes_mux_only_rules( forbidden ):
     rules = _strip_css_comments( _read( SHARED_CSS ) )
     assert forbidden not in rules, \
         f"shared contract sheet must NOT carry mux-only/mechanism rule {forbidden!r}"
+
+
+# ---------------------------------------------------------------------------
+# BE2 hygiene follow-on (task 80479273, Cheech 2026-07-01) — the mux
+# `.tts-preview-slider-*` component CSS is CO-LOCATED into the shared sheet
+# (single-source hygiene, sibling to the legacy `.cc-tts-fraction-*` block B5
+# already folded in). The standalone multiplexer/tts-preview-slider.css file is
+# retired and no page <link>s it — the rules ride the already-linked shared
+# sheet. ZERO parity/render impact: the mux slider classes are disjoint from
+# legacy (which emits none of them), so the rules are inert on /app/notifications
+# and byte-identical on /app/multiplexer.
+# ---------------------------------------------------------------------------
+
+TTS_SLIDER_CSS  = os.path.join( STATIC, "css", "multiplexer", "tts-preview-slider.css" )
+TTS_SLIDER_HREF = "tts-preview-slider.css"
+
+
+@pytest.mark.parametrize( "selector", [
+    ".tts-preview-slider",
+    ".tts-preview-slider-label",
+    ".tts-preview-slider-input",
+    ".tts-preview-slider-value",
+] )
+def test_tts_preview_slider_rules_in_shared( selector ):
+    rules = _strip_css_comments( _read( SHARED_CSS ) )
+    assert selector + " {" in rules or selector + "{" in rules, \
+        f"BE2 co-location: {selector!r} must live in the shared sheet"
+
+
+def test_tts_preview_slider_file_retired():
+    assert not os.path.isfile( TTS_SLIDER_CSS ), \
+        "multiplexer/tts-preview-slider.css should be retired (folded into the shared sheet)"
+
+
+def test_no_page_links_retired_tts_preview_slider():
+    for page in ( NOTIF_HTML, MUX_HTML ):
+        hrefs = re.findall( r'href="([^"]+)"', _read( page ) )
+        assert not any( TTS_SLIDER_HREF in h for h in hrefs ), \
+            f"{os.path.basename( page )} still <link>s the retired tts-preview-slider.css"
