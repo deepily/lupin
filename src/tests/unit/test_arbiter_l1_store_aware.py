@@ -416,6 +416,24 @@ class TestSessionIsNotOwed:
         job = _job( owed_work_fn=lambda ps: { } )                    # reader returned nothing → UNKNOWN
         assert job.session_is_not_owed( "Ghost" ) is False
 
+    # 262c59f6 (A) follow-up (2): the single-persona seam must ALSO thread the
+    # known-persona fail-safe, else (A) is inert on this narrower path (Tiberius's
+    # consistency nit). A contaminated would-be-DONE label ∉ known owners → UNKNOWN →
+    # NOT suppressed (escalates); a genuinely-done KNOWN persona stays suppressed.
+    def test_contaminated_label_not_suppressed_with_known_owners( self ):
+        job = _job( owed_work_fn=lambda ps: { "tiberius eb4b105f": [ ] },
+                    known_owners_fn=lambda: [ "tiberius", "mr radio" ] )
+        assert job.session_is_not_owed( "tiberius eb4b105f" ) is False   # UNKNOWN → not suppressed
+
+    def test_genuinely_done_known_persona_still_suppressed( self ):
+        job = _job( owed_work_fn=lambda ps: { "Mr Radio": [ ] },
+                    known_owners_fn=lambda: [ "mr radio" ] )
+        assert job.session_is_not_owed( "Mr Radio" ) is True             # DONE ∈ known → suppressed
+
+    def test_unwired_known_seam_is_todays_suppression( self ):
+        job = _job( owed_work_fn=lambda ps: { "tiberius eb4b105f": [ ] } )   # no known_owners_fn → inert
+        assert job.session_is_not_owed( "tiberius eb4b105f" ) is True        # DONE → suppressed (today's behavior)
+
 
 # ── 262c59f6 H1: re-spin attribution — created_by must NOT orphan owed rows ────
 #

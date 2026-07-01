@@ -2695,8 +2695,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
             - returns True iff persona classifies BLOCKED_ON_USER or DONE
             - ACTIVE / UNKNOWN (incl. unwired seam / store hiccup / absent) → False
               (fail-SAFE — never suppress a real escalation); one store read; never raises
+            - 262c59f6 (A): threads the known-persona fail-safe so a re-spin /
+              label-contamination would-be-DONE persona (∉ known owners → UNKNOWN) is
+              NOT falsely suppressed here either — consistent with the case-17 path
+              (inert when known_owners_fn is unwired → today's behavior)
         """
-        cls = self._classify_owed( [ persona ], fleet_view or { } ).get( persona, CLASS_UNKNOWN )
+        cls = self._classify_owed(
+            [ persona ], fleet_view or { }, known_owners=self._read_known_owners()
+        ).get( persona, CLASS_UNKNOWN )
         return owed_class_suppresses( cls )
 
     def _stale_hold_holders( self, fleet_view, now ):
