@@ -1559,6 +1559,17 @@ class FcmToken( Base ):
         return f"<FcmToken(user_id='{self.user_id}', platform='{self.platform}', token='…{self.token[ -8: ]}')>"
 
 
+# ============================================================================
+# pgvector Vector Store Models (v0.2.0 — LanceDB → Postgres migration)
+# ============================================================================
+# Import at module tail (AFTER Base + all relational models are defined) so the
+# vector-store tables register in Base.metadata for EVERY consumer of this module
+# — alembic env.py, auto_migrate create_all, and reflection — via a single point
+# of truth. The reverse import (vector_store_models → Base) resolves cleanly
+# because Base is already bound above. Kept last to avoid a forward-ref cycle.
+from cosa.rest.db import vector_store_models  # noqa: E402,F401  (registers vector tables on Base.metadata)
+
+
 def quick_smoke_test():
     """
     Quick smoke test for postgres_models module - validates PostgreSQL ORM model definitions.
