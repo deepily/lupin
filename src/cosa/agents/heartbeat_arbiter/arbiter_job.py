@@ -1215,7 +1215,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
         taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers )  # #7 / #8
-        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm )  # #9 (L1 store-aware, 5-signal ACK)
+        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm, owed_items=owed_items )  # #9 (L1 store-aware, 5-signal ACK; owed_items → de3c5b87/33949e83 diagnostics)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
         pokes_fired   = self._auto_poke( fleet_view, now, active_managers, owed_class=owed_class )  # 2b-3 auto-poke (262c59f6 store-aware)
@@ -2779,7 +2779,66 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 stale.add( persona )
         return stale
 
-    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None, count_dm=True ):
+    def _log_manager_ack_diagnostic( self, verdict, manager, cls, owed_items, fleet_view, now, tapped_at, last_activity ):
+        """
+        de3c5b87 + 33949e83 (re-scoped observability): at every MANAGER-DONE (case-17)
+        and MANAGER-DOWN (case-9) EMISSION, log the exact ground-truth inputs so the
+        true root of a false-fire is captured DETERMINISTICALLY on the next occurrence
+        (ground-truth-before-fix — Cheech's live /state capture DISPROVED the
+        session-suffix-contamination premise, so we instrument rather than guess). ONE
+        instrument serves BOTH open bugs:
+          - de3c5b87 (false MANAGER-DONE): fed_label + canonical(fed_label) +
+            label_is_canonical + owed_class + owed_read_ok + store_row_count +
+            hold_work_owed → distinguishes a label→canonical mismatch (the disproven
+            premise) from a genuine empty read from a 25ba173e hold-override
+            (work_owed=false) from a degraded/raised store read.
+          - 33949e83 (false MANAGER-DOWN during the :7999 bog): owed_read_ok
+            (store-read health) + last_activity vs tapped_at → confirms whether the
+            reads were degraded when both managers false-DOWNed.
+
+        PURE telemetry via the swallow-safe `_log` seam — it reads only (never mutates)
+        and has NO control-flow effect (a diagnostic blow-up is swallowed by `_log`).
+
+        Requires:
+            - manager is the fed persona label; cls is its owed_class; owed_items is
+              the per-poll { persona: [items] } dict or None (None ⇒ the store read
+              was unwired / raised); tapped_at is an aware datetime; last_activity is
+              an aware datetime or None
+        Ensures:
+            - emits exactly one `arbiter_manager_ack_diagnostic` line; never raises
+        """
+        canon     = canonical_persona_key( manager )
+        read_ok   = owed_items is not None
+        row_count = None if owed_items is None else len( owed_items.get( manager ) or [ ] )
+        sid       = None
+        for v in ( fleet_view or { } ).values():
+            if isinstance( v, dict ) and v.get( "persona" ) == manager:
+                sid = v.get( "session_id" )
+                break
+        work_owed = None
+        if self._hold_reader_fn is not None and sid:
+            try:
+                work_owed = declared_work_owed( self._hold_reader_fn( sid ) )
+            except Exception:
+                work_owed = None                                # telemetry never crashes the poll
+        self._log(
+            "arbiter_manager_ack_diagnostic",
+            verdict             = verdict,
+            fed_label           = manager,
+            canonical_label     = canon,
+            label_is_canonical  = ( canon == manager ),
+            owed_class          = cls,
+            owed_read_ok        = read_ok,
+            store_row_count     = row_count,
+            hold_work_owed      = work_owed,
+            session_id          = sid,
+            tapped_at           = tapped_at.isoformat(),
+            last_activity       = last_activity.isoformat() if last_activity is not None else None,
+            secs_since_activity = ( now - last_activity ).total_seconds() if last_activity is not None else None,
+            ack_window_secs     = self.manager_ack_window_seconds,
+        )
+
+    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None, count_dm=True, owed_items=None ):
         """
         B4/D4 manager-down detector via the liveness-proxy ACK.
 
@@ -2885,6 +2944,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             if cls == CLASS_DONE:
                 if manager not in self._manager_done_advised:       # L1 §3.2 advisory-once
                     self._manager_done_advised.add( manager )
+                    self._log_manager_ack_diagnostic( "manager_done", manager, cls,   # de3c5b87 ground-truth capture
+                                                      owed_items, fleet_view, now, tapped_at, last_activity )
                     self._route(
                         CASE_MANAGER_DONE_ADVISORY,
                         f"MANAGER-DONE (advisory, NOT manager-down): {manager} owes NO "
@@ -2895,6 +2956,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 continue
             if manager not in self._manager_down_escalated:         # ACTIVE / UNKNOWN → today's MANAGER-DOWN
                 self._manager_down_escalated.add( manager )
+                self._log_manager_ack_diagnostic( "manager_down", manager, cls,       # 33949e83 ground-truth capture
+                                                  owed_items, fleet_view, now, tapped_at, last_activity )
                 note = ""
                 if cls == CLASS_UNKNOWN and holding.get( manager, "" ).startswith( "user:" ):
                     note = ( f" (holding_on={holding[ manager ]} — possibly blocked on Rick, "

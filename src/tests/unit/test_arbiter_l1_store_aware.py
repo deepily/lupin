@@ -46,7 +46,7 @@ class _Gateway:
     def read( self, topic, since=None, limit=50 ): return [ ]
 
 
-def _job( *, owed_work_fn=None, notify=None, known_owners_fn=None ):
+def _job( *, owed_work_fn=None, notify=None, known_owners_fn=None, log_fn=None, hold_reader_fn=None ):
     """Bare arbiter job with no bridge liveness (bridge_mtime_fn → None), so the
     tap-ACK path always reaches the window/classification logic under test."""
     return ArbiterConsumerJob(
@@ -55,6 +55,8 @@ def _job( *, owed_work_fn=None, notify=None, known_owners_fn=None ):
         manager_recipient = "DeclaredMgr",
         owed_work_fn    = owed_work_fn,
         known_owners_fn = known_owners_fn,
+        hold_reader_fn  = hold_reader_fn,
+        log_fn          = log_fn,
         bridge_mtime_fn = lambda sid: None,
         notify_fn       = notify or ( lambda *a, **k: None ),
     )
@@ -563,3 +565,136 @@ class TestReadKnownOwners:
         """A raising reader is swallowed (observer invariant) → None → fail-SAFE."""
         def _boom(): raise RuntimeError( "store hiccup" )
         assert _job( known_owners_fn=_boom )._read_known_owners() is None
+
+
+# ── de3c5b87 + 33949e83 (re-scoped): MANAGER-DONE/DOWN emission diagnostics ────
+#
+# Ground-truth-before-fix instrument (Tiberius-approved re-scope of de3c5b87 after
+# Cheech's live /state capture DISPROVED the session-suffix-contamination premise).
+# At every MANAGER-DONE (case-17) and MANAGER-DOWN (case-9) emission, log the exact
+# inputs so the true root of a false-fire is captured deterministically on the next
+# occurrence — WIDENED to serve BOTH open bugs in one instrument:
+#   • de3c5b87 (false MANAGER-DONE): fed_label + canonical(fed_label) +
+#     label_is_canonical + owed_class + owed_read_ok + store_row_count + hold work_owed
+#     → distinguishes a label→canonical mismatch from a genuine empty read from a
+#     hold-override (work_owed=false) from a degraded/raised read.
+#   • 33949e83 (false MANAGER-DOWN during the :7999 bog): owed_read_ok (store-read
+#     health) + last_activity vs tapped_at → confirms whether the reads were degraded.
+# Pure telemetry via the swallow-safe _log seam — NO control-flow effect.
+class TestManagerAckDiagnostics:
+
+    @staticmethod
+    def _capturing( **kw ):
+        logs = [ ]
+        job  = _job( log_fn=lambda event, **f: logs.append( ( event, f ) ), **kw )
+        return job, logs
+
+    @staticmethod
+    def _diags( logs ):
+        return [ f for e, f in logs if e == "arbiter_manager_ack_diagnostic" ]
+
+    def test_manager_done_emits_diagnostic( self ):
+        """case-17 MANAGER-DONE fires the diagnostic with de3c5b87's fields: the
+        fed_label + its canonical form + owed_read_ok + store_row_count."""
+        job, logs = self._capturing( owed_work_fn=lambda ps: { "Mgr": [ ] } )
+        job._last_tap_at[ "Mgr" ] = NOW
+        job._check_manager_acks( LATE, [ ], { }, [ ], owed_class={ "Mgr": CLASS_DONE },
+                                 owed_items={ "Mgr": [ ] } )
+        diag = self._diags( logs )
+        assert len( diag ) == 1
+        d = diag[ 0 ]
+        assert d[ "verdict" ] == "manager_done"
+        assert d[ "fed_label" ] == "Mgr"
+        assert d[ "canonical_label" ] == "mgr"
+        assert d[ "label_is_canonical" ] is False        # 'Mgr' ≠ 'mgr' → a real contamination would flag here
+        assert d[ "owed_class" ] == CLASS_DONE
+        assert d[ "owed_read_ok" ] is True
+        assert d[ "store_row_count" ] == 0
+        assert d[ "hold_work_owed" ] is None             # no hold-reader wired
+        assert d[ "session_id" ] is None                 # empty fleet_view → sid not resolved
+        assert d[ "last_activity" ] is None              # no activity candidate
+
+    def test_manager_down_emits_diagnostic_with_read_health( self ):
+        """case-9 MANAGER-DOWN fires the diagnostic capturing 33949e83's signal:
+        owed_read_ok False (store read degraded/raised → owed_items None) + a stale
+        last_activity older than tapped_at. Uses a CANONICAL label → is_canonical True."""
+        who = [ { "persona_name": "mr radio",
+                  "last_post_ts": ( NOW - datetime.timedelta( seconds=100 ) ).isoformat() } ]
+        fv  = { "s1": { "session_id": "s1", "persona": "mr radio" } }
+        job, logs = self._capturing(
+            owed_work_fn=lambda ps: { "mr radio": [ _normal() ] },
+            hold_reader_fn=lambda sid: { "work_owed": True } )
+        job._last_tap_at[ "mr radio" ] = NOW
+        down = job._check_manager_acks( LATE, who, fv, [ ], owed_class={ "mr radio": CLASS_ACTIVE },
+                                        owed_items=None )
+        assert down == 1
+        diag = self._diags( logs )
+        assert len( diag ) == 1
+        d = diag[ 0 ]
+        assert d[ "verdict" ] == "manager_down"
+        assert d[ "label_is_canonical" ] is True         # 'mr radio' == canonical
+        assert d[ "owed_read_ok" ] is False              # owed_items None → store read degraded/raised
+        assert d[ "store_row_count" ] is None
+        assert d[ "session_id" ] == "s1"                 # resolved from fleet_view
+        assert d[ "hold_work_owed" ] is True             # read from the wired hold-reader
+        assert d[ "last_activity" ] is not None and d[ "secs_since_activity" ] >= 100
+
+    def test_diagnostic_hold_reader_raise_swallowed( self ):
+        """A raising hold-reader in the diagnostic is swallowed → hold_work_owed None
+        (telemetry never crashes the poll — observer invariant)."""
+        def _boom( sid ): raise RuntimeError( "hold hiccup" )
+        fv  = { "s1": { "session_id": "s1", "persona": "Mgr" } }
+        job, logs = self._capturing( owed_work_fn=lambda ps: { "Mgr": [ ] },
+                                     hold_reader_fn=_boom )
+        job._last_tap_at[ "Mgr" ] = NOW
+        job._check_manager_acks( LATE, [ ], fv, [ ], owed_class={ "Mgr": CLASS_DONE },
+                                 owed_items={ "Mgr": [ ] } )
+        d = self._diags( logs )[ 0 ]
+        assert d[ "hold_work_owed" ] is None and d[ "session_id" ] == "s1"
+
+    def test_no_diagnostic_when_acked_or_window_open( self ):
+        """No emission when the manager acked (fresh activity ≥ tap) or the ack
+        window has not elapsed — the diagnostic fires ONLY at an actual emission."""
+        # acked: fresh activity after tap
+        who = [ { "persona_name": "Mgr", "last_post_ts": ( LATE ).isoformat() } ]
+        job, logs = self._capturing( owed_work_fn=lambda ps: { "Mgr": [ ] } )
+        job._last_tap_at[ "Mgr" ] = NOW
+        job._check_manager_acks( LATE, who, { }, [ ], owed_class={ "Mgr": CLASS_DONE },
+                                 owed_items={ "Mgr": [ ] } )
+        assert self._diags( logs ) == [ ]
+        # window not elapsed
+        job2, logs2 = self._capturing( owed_work_fn=lambda ps: { "Mgr": [ ] } )
+        job2._last_tap_at[ "Mgr" ] = NOW
+        job2._check_manager_acks( NOW + datetime.timedelta( seconds=1 ), [ ], { }, [ ],
+                                  owed_class={ "Mgr": CLASS_DONE }, owed_items={ "Mgr": [ ] } )
+        assert self._diags( logs2 ) == [ ]
+
+    def test_diagnostic_fires_once_per_episode( self ):
+        """Advisory-once: a manager that stays DONE across polls emits the case-17
+        diagnostic exactly ONCE (tied to the emission, not per-poll — no spam)."""
+        job, logs = self._capturing( owed_work_fn=lambda ps: { "Mgr": [ ] } )
+        job._last_tap_at[ "Mgr" ] = NOW
+        for _ in range( 3 ):
+            job._check_manager_acks( LATE, [ ], { }, [ ], owed_class={ "Mgr": CLASS_DONE },
+                                     owed_items={ "Mgr": [ ] } )
+        assert len( self._diags( logs ) ) == 1
+
+    def test_blocked_on_user_emits_no_diagnostic( self ):
+        """The awaiting-Rick (case-16) suppression is NOT under investigation — it
+        emits NO ack-diagnostic (scope stays the two false-positive verdicts)."""
+        job, logs = self._capturing( owed_work_fn=lambda ps: { "Mgr": [ _operator() ] } )
+        job._last_tap_at[ "Mgr" ] = NOW
+        job._check_manager_acks( LATE, [ ], { }, [ ], owed_class={ "Mgr": CLASS_BLOCKED_ON_USER },
+                                 owed_items={ "Mgr": [ _operator() ] } )
+        assert self._diags( logs ) == [ ]
+
+    def test_diagnostic_sid_unresolved_when_no_matching_row( self ):
+        """The sid-resolution loop exhausts without a break when NO fleet_view row
+        matches the manager (or the row is non-dict) → session_id stays None."""
+        fv = { "o": { "session_id": "o1", "persona": "Other" }, "bad": "not-a-dict" }
+        job, logs = self._capturing( owed_work_fn=lambda ps: { "Mgr": [ ] } )
+        job._last_tap_at[ "Mgr" ] = NOW
+        job._check_manager_acks( LATE, [ ], fv, [ ], owed_class={ "Mgr": CLASS_DONE },
+                                 owed_items={ "Mgr": [ ] } )
+        d = self._diags( logs )[ 0 ]
+        assert d[ "session_id" ] is None
