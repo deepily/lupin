@@ -268,6 +268,35 @@ def _default_owed_work_fn( personas ):   # pragma: no cover - production store-r
     return out
 
 
+def _default_known_owners_fn():   # pragma: no cover - production store-read IO boundary
+    """
+    Default KNOWN-OWNER store reader (262c59f6 option A — the known-persona
+    fail-safe belt). Return the DISTINCT set of `owner_persona` values across ALL
+    store rows (any status) — the personas the store recognizes as real owners of
+    work. Feeds `_classify_owed`'s DONE→UNKNOWN downgrade: a would-be-DONE persona
+    whose canonical label is NOT in this set is a likely re-spin / label-contamination
+    false DONE (an empty read from a mismatched label), not genuine completion.
+
+    ALL statuses (not just non-terminal) BY DESIGN: a genuinely-finished persona
+    ('mr radio' with only terminal rows) MUST remain a known owner so its real
+    completion still classifies DONE — only a persona that never owned ANY row (the
+    spurious canonicalized key) is treated as contamination. ONE DB session per poll.
+    The classification LOGIC that consumes this is fully unit-tested via an injected
+    fake, so this IO boundary is no-cover (mirrors _default_owed_work_fn).
+
+    Ensures:
+        - returns an iterable of owner_persona strings (canonicalization happens in
+          the caller `_read_known_owners`)
+        - raising is acceptable — `_read_known_owners` swallows any exception into
+          None (fail-SAFE: the downgrade goes inert, never mass-UNKNOWNs the fleet)
+    """
+    from cosa.rest.db.database import get_db
+    from cosa.rest.db.repositories.task_repository import TaskRepository
+    with get_db() as session:
+        repo = TaskRepository( session )
+        return { it.owner_persona for it in repo.query_tasks() if it.owner_persona }
+
+
 def _default_operator_gates_fn():   # pragma: no cover - production store-read IO boundary
     """
     Default OPEN-operator-gate store reader (proactive-manager A2/A3, fcb5dbc0).
@@ -608,6 +637,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         hold_mtime_fn            : Optional[ Callable ] = None,   # task 70be69f2: per-session hold-file mtime reader (None → real reader; hold-as-liveness)
         transcript_mtime_fn      : Optional[ Callable ] = None,   # bug fb332fcd: per-session transcript-file mtime reader (None → real reader; transcript-as-liveness, 7th signal)
         owed_work_fn             : Optional[ Callable ] = None,   # L1: per-poll store read (None → inert; classify UNKNOWN → fail-safe)
+        known_owners_fn          : Optional[ Callable ] = None,   # 262c59f6 (A): fleet-wide known-owner-persona read () -> [canonical keys] (None → inert; DONE→UNKNOWN fail-safe never fires)
         hold_reader_fn           : Optional[ Callable ] = None,   # 6929f4ac: per-session hold reader (session_id) -> hold|None (None → inert: classify-override + resurface tier never fire)
         user_gate_resurface_seconds : int               = 1800,  # 6929f4ac: aged-gate ceiling (30 min) — resurface a DARK session's open gate older than this to Rick
         operator_gates_fn        : Optional[ Callable ] = None,   # A2/A3 (fcb5dbc0): fleet-wide open-operator-gate store read () -> [gate-dict] (None → inert: operator-gate routing never fires)
@@ -790,6 +820,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # stays inert unless a fake is injected. (Mirrors the Item B None-seam
         # pattern: a None seam is visibly inert, never a hidden behavior change.)
         self._owed_work_fn = owed_work_fn
+        # 262c59f6 (A) known-persona fail-safe seam: the fleet-wide KNOWN-OWNER read
+        # (distinct owner_persona over all store rows → canonical keys). None keeps it
+        # INERT — the _classify_owed DONE→UNKNOWN downgrade never fires, so unit-fake
+        # construction needs no wiring (byte-identical to today). The production paths
+        # WIRE _default_known_owners_fn so the belt against re-spin/label-contamination
+        # false MANAGER-DONE activates live. Mirrors the owed_work_fn None-seam pattern.
+        self._known_owners_fn = known_owners_fn
         # 6929f4ac outward-twin backstop (§9.2): the per-session hold reader. None
         # keeps the seam INERT — the _classify_owed open-gate→ACTIVE override and the
         # user-gate resurface detector both no-op — so unit-fake construction needs no
@@ -1124,7 +1161,8 @@ class ArbiterConsumerJob( AgenticJobBase ):
             | set( self._last_tap_at.keys() )
         )
         owed_items  = self._read_owed( eval_personas )                    # ONE per-poll owed read, shared below
-        owed_class  = self._classify_owed( eval_personas, fleet_view, owed=owed_items )
+        known_owners = self._read_known_owners()                          # 262c59f6 (A): known store-owner set (None/empty → downgrade inert)
+        owed_class  = self._classify_owed( eval_personas, fleet_view, owed=owed_items, known_owners=known_owners )
         # bug 436a366b: the AUTHORITATIVE store dependency ring — the deadlock
         # escalation is corroborated against THIS, never the derived holding_on
         # edges alone. Built from the SAME owed read (one query per poll).
@@ -1180,7 +1218,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm )  # #9 (L1 store-aware, 5-signal ACK)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
-        pokes_fired   = self._auto_poke( fleet_view, now, active_managers )          # 2b-3 auto-poke
+        pokes_fired   = self._auto_poke( fleet_view, now, active_managers, owed_class=owed_class )  # 2b-3 auto-poke (262c59f6 store-aware)
         rendered      = self._publish_fleet_snapshot( fleet_view, now, count_dm )
         # post-game F2/F3 detectors read the FULL (include_offline=True) detection
         # snapshot + published count the publish step just stashed on the instance.
@@ -2504,7 +2542,30 @@ class ArbiterConsumerJob( AgenticJobBase ):
         except Exception:
             return None        # store hiccup → None → fail SAFE (observer invariant)
 
-    def _classify_owed( self, personas, fleet_view, owed=_UNREAD ):
+    def _read_known_owners( self ):
+        """
+        262c59f6 (A): ONE swallow-safe read of the store's KNOWN owner personas →
+        a set of CANONICAL persona keys, or None when the seam is unwired / the read
+        raised. Feeds `_classify_owed`'s known-persona fail-safe (a would-be-DONE
+        persona whose canonical key is not a known owner is a likely label-contamination
+        false DONE → UNKNOWN).
+
+        Ensures:
+            - returns None when the seam is unwired (known_owners_fn is None) or the
+              read RAISED (swallowed → None = fail-SAFE: the downgrade goes inert,
+              never mass-UNKNOWNs the fleet)
+            - otherwise returns the set of canonical owner keys (falsy owners
+              filtered); an empty store → empty set (also inert downstream); never raises
+        """
+        if self._known_owners_fn is None:
+            return None
+        try:
+            owners = self._known_owners_fn()
+        except Exception:
+            return None        # store hiccup → None → fail SAFE (observer invariant)
+        return { canonical_persona_key( o ) for o in ( owners or ( ) ) if o }
+
+    def _classify_owed( self, personas, fleet_view, owed=_UNREAD, known_owners=None ):
         """
         L1 (2026-06-17): classify each persona under evaluation this poll into
         BLOCKED_ON_USER / DONE / ACTIVE / UNKNOWN from a SINGLE swallow-safe store
@@ -2542,6 +2603,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         names = sorted( { p for p in ( personas or [ ] ) if p } )
         if owed is _UNREAD:                # default: do our own one read (single-persona callers)
             owed = self._read_owed( names )
+        # 262c59f6 (A) known-persona fail-safe: canonicalize the known-owner set ONCE.
+        # Non-empty ⇒ arm the DONE→UNKNOWN downgrade below; empty / None ⇒ inert
+        # (degenerate roster / unwired seam → today's behavior, NEVER mass-UNKNOWN).
+        known_canon = { canonical_persona_key( o ) for o in ( known_owners or ( ) ) if o }
         result = { }
         for persona in names:
             if owed is None or persona not in owed:
@@ -2549,7 +2614,19 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 continue
             items = owed.get( persona ) or [ ]
             if not items:
-                result[ persona ] = CLASS_DONE
+                # 262c59f6 (A): a STORE-derived DONE (zero non-terminal rows) whose
+                # canonical label is NOT a known store owner is a likely re-spin /
+                # label-contamination false DONE — the empty read came from a label
+                # that canonicalizes to a key no real persona owns ('tiberius eb4b105f'
+                # ≠ 'tiberius'), NOT genuine completion. Fail-SAFE to UNKNOWN (escalate,
+                # never a false MANAGER-DONE). Only the STORE DONE is guarded here; a
+                # hold-declared work_owed=false DONE (below) stays authoritative. Inert
+                # when known_canon is empty (the literal idempotence assert was rejected —
+                # every legit display label is non-idempotent by design).
+                if known_canon and canonical_persona_key( persona ) not in known_canon:
+                    result[ persona ] = CLASS_UNKNOWN
+                else:
+                    result[ persona ] = CLASS_DONE
             elif all( self._item_is_user_gated( it ) for it in items ):
                 result[ persona ] = CLASS_BLOCKED_ON_USER
             else:
@@ -3147,7 +3224,51 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return True
         return bool( open_gates( get_pending_user_gates( hold ) ) )
 
-    def _auto_poke( self, fleet_view, now, active_managers ):
+    def _session_awaiting_peer( self, session_id, now ):
+        """
+        262c59f6 (H2): is this session correctly MANAGER-AWAITING-PEER — a delegating
+        manager parked on LIVE WORKERS — a state the stuck-poke must NOT treat as
+        wedged? True iff the session carries a FRESH HONORED hold that BOTH declares
+        `work_owed=true` AND names `awaiting: peer:...`. A manager that has correctly
+        delegated its owed work shows NO self-transition BY DESIGN (the workers make
+        the progress, not the manager), so the activity-tail stuck oracle misreads
+        "no progress + work owed" as wedged — exactly wrong for a delegating manager.
+        The honored work_owed=true peer-hold is the defended-quiescence artifact the
+        store classification cannot express (a delegated ACTIVE persona looks the same
+        as a self-owned wedged one in owed_class).
+
+        Sibling of `_session_awaiting_user` (c9575068 covered awaiting-USER; this
+        covers awaiting-PEER). TIGHTER than the user path: it additionally REQUIRES
+        `work_owed` to be explicitly True — a manager awaiting a peer while owing
+        nothing is not the MANAGE-not-BUILD posture, so it stays pokeable. Same inert
+        / fail-SAFE seam discipline: an unwired reader, a raised read, an absent /
+        not-honored hold, or a work_owed that is not explicitly True → False (never
+        silences a real stuck-poke).
+
+        Requires:
+            - session_id is a string; now is an aware datetime
+
+        Ensures:
+            - returns False when the hold-reader seam is unwired (None), the read
+              raises, the hold is absent / not-honored, or work_owed is not
+              explicitly True — INERT / fail-SAFE (today's poke behavior preserved)
+            - returns True iff is_honored( hold, now ) AND declared_work_owed( hold )
+              is True AND awaiting is a str starting "peer:"; never raises
+        """
+        if self._hold_reader_fn is None:
+            return False                                        # inert seam → today's behavior
+        try:
+            hold = self._hold_reader_fn( session_id )
+        except Exception:
+            return False                                        # store hiccup → fail SAFE (observer invariant)
+        if not is_honored( hold, now ):
+            return False                                        # no fresh, reasoned hold → not defended
+        if declared_work_owed( hold ) is not True:
+            return False                                        # not a delegating-with-work posture → still pokeable
+        awaiting = hold.get( "awaiting" )
+        return isinstance( awaiting, str ) and awaiting.startswith( "peer:" )
+
+    def _auto_poke( self, fleet_view, now, active_managers, owed_class=None ):
         """
         2b-3 auto-poke: fire a BOUNDED, TARGETED, NON-DESTRUCTIVE wake-nudge at each
         genuinely-stuck LIVE session; after ≤N pokes with no recovery, emit ONE
@@ -3166,26 +3287,51 @@ class ArbiterConsumerJob( AgenticJobBase ):
         poke_stall_threshold_seconds (observed by the arbiter) before its FIRST
         poke — a brief stick that self-resolves is never poked.
 
+        Suppression (262c59f6): a stuck session is DROPPED from the pokeable set —
+        no harsh "you appear STUCK — wedged?" poke — when it is DEFENDED by any of
+        awaiting-USER hold / awaiting-PEER work_owed hold / a store `owed_class` of
+        DONE|BLOCKED_ON_USER (see the suppression block). `owed_class` unifies the
+        stuck path onto the SAME store authority the three other detectors read, so
+        the activity-tail and store oracles can no longer contradict within one poll.
+
+        Requires:
+            - owed_class is the per-poll { persona: CLASS_* } map (or None/empty →
+              the store cross-check is inert → today's activity-tail-only behavior)
+
         Ensures:
             - no-op when auto_poke_enabled is False (the make-before-break flag)
             - pokes ≤ poke_max_per_episode times per session per episode, then
               escalates exactly once, then silent
+            - an awaiting-user / awaiting-peer / store-not-owed session is never poked
             - returns the count of pokes fired this poll; never raises
         """
         if not self.auto_poke_enabled:
             return 0
 
+        owed_class = owed_class or { }
+
         pokeable = self._pokeable_sessions( fleet_view )
 
-        # c9575068: SUPPRESS the harsh stuck-poke for a session that is correctly
-        # MANAGER-AWAITING-RICK — a fresh honored hold declaring awaiting:user (or
-        # holding an open user-gate). Such a session is advisory (the case-16
-        # MANAGER-AWAITING-USER path emits its one-time notice), NOT wedged — mirror
-        # the other three detectors' not-owed suppression. Dropping it from `pokeable`
-        # ends any in-flight poke episode via the clear-on-resume loop below (the cap
-        # re-arms), exactly as a recovery would.
+        # SUPPRESS the harsh stuck-poke for a session that is DEFENDED — across BOTH
+        # owed-work oracles the two detectors disagreed on in bug 262c59f6:
+        #   (a) c9575068 awaiting-USER — a fresh honored hold declaring awaiting:user
+        #       (or an open user-gate): correctly MANAGER-AWAITING-RICK, advisory
+        #       (the case-16 path emits its one-time notice), NOT wedged; OR
+        #   (b) 262c59f6 H2 awaiting-PEER — a fresh honored work_owed=true hold
+        #       declaring awaiting:peer: a delegating manager parked on live workers,
+        #       proper MANAGE-not-BUILD with NO self-transition to show BY DESIGN; OR
+        #   (c) 262c59f6 UNIFY — the STORE owed_class says the persona owes nothing
+        #       pokeable (DONE / BLOCKED_ON_USER). Cross-check the SAME store authority
+        #       the other three detectors read (owed_class_suppresses), so the
+        #       activity-tail oracle and the store oracle can no longer contradict
+        #       within one poll. ACTIVE / UNKNOWN / unclassified → today's behavior
+        #       (fail-SAFE — never silence a real stuck-poke).
+        # Dropping a session from `pokeable` ends any in-flight poke episode via the
+        # clear-on-resume loop below (the cap re-arms), exactly as a recovery would.
         pokeable = { sid: v for sid, v in pokeable.items()
-                     if not self._session_awaiting_user( sid, now ) }
+                     if not self._session_awaiting_user( sid, now )
+                     and not self._session_awaiting_peer( sid, now )
+                     and not owed_class_suppresses( owed_class.get( v.get( "persona" ) ) ) }
 
         # episode bookkeeping: a session no longer pokeable ended its episode →
         # clear its state so the cap re-arms (clear-on-resume, mirrors _auto_ping).

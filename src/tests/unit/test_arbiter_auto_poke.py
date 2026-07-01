@@ -26,7 +26,10 @@ _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
-from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+from cosa.agents.heartbeat_arbiter.arbiter_job import (
+    ArbiterConsumerJob,
+    CLASS_BLOCKED_ON_USER, CLASS_DONE, CLASS_ACTIVE, CLASS_UNKNOWN,
+)
 
 
 NOW = datetime.datetime( 2026, 6, 9, 0, 0, 0, tzinfo=datetime.timezone.utc )
@@ -332,6 +335,123 @@ def test_session_awaiting_user_predicate_branches():
     assert job._session_awaiting_user( "gate",   NOW ) is True
     assert job._session_awaiting_user( "plain",  NOW ) is False
     assert job._session_awaiting_user( "absent", NOW ) is False
+
+
+# ── 262c59f6 H2: awaiting-PEER honored-hold suppresses the harsh STUCK poke ────
+#
+# A delegating MANAGER correctly parked on LIVE WORKERS carries a FRESH HONORED
+# hold that declares work_owed=true AND awaiting:peer:... — proper MANAGE-not-BUILD
+# posture, with NO self-transition to show BY DESIGN (the workers make the
+# progress, not the manager). The activity-tail stuck oracle reads "no progress +
+# work owed" as wedged, which is exactly wrong for a delegating manager; the
+# honored work_owed=true peer-hold is the defended-quiescence artifact the store
+# classification cannot see. The c9575068 awaiting-USER suppressor did NOT cover
+# this — the sibling _session_awaiting_peer does. Repro: Tiberius eb4b105f, hold
+# awaiting:peer:Rachel,peer:Cheech + work_owed=true, DM'd "you appear STUCK" ~2 min
+# after a MANAGER-DONE advisory (the 262c59f6 contradiction). Same inert / fail-SAFE
+# seam as the user path (unwired reader / hiccup / stale / no-work_owed → still poke).
+
+def test_awaiting_peer_honored_work_owed_hold_suppresses_stuck_poke():
+    """RED→GREEN (262c59f6 H2): a LIVE+stuck MANAGER whose FRESH HONORED hold
+    declares work_owed=true + awaiting:peer:... is NOT poked — it is correctly
+    delegating to live workers, not wedged."""
+    gw   = _GW()
+    hold = _honored_hold( awaiting="peer:Rachel,peer:Cheech", work_owed=True )
+    job  = _job( gw, poke_stall_threshold_seconds=0,
+                 hold_reader_fn=_reader( { "s1": hold } ) )
+    for k in range( 5 ):
+        assert job._auto_poke( _live_stuck(), NOW + datetime.timedelta( seconds=k * 100 ), [ ] ) == 0
+    assert _pokes( gw ) == [ ]
+
+
+def test_awaiting_peer_hold_without_work_owed_still_pokes():
+    """A peer-hold that does NOT declare work_owed=true is NOT the defended
+    delegating posture (an absent/non-bool work_owed → None, NOT True) → no
+    suppression → the genuinely stuck session is still poked (fail-SAFE)."""
+    gw   = _GW()
+    hold = _honored_hold( awaiting="peer:Rachel" )                         # no work_owed field
+    job  = _job( gw, poke_stall_threshold_seconds=0,
+                 hold_reader_fn=_reader( { "s1": hold } ) )
+    assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_awaiting_peer_hold_work_owed_false_still_pokes():
+    """work_owed EXPLICITLY false + awaiting:peer is DONE-equivalent, not a defended
+    delegating posture → still poked (only work_owed IS True suppresses)."""
+    gw   = _GW()
+    hold = _honored_hold( awaiting="peer:Rachel", work_owed=False )
+    job  = _job( gw, poke_stall_threshold_seconds=0,
+                 hold_reader_fn=_reader( { "s1": hold } ) )
+    assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_session_awaiting_peer_predicate_branches():
+    """Direct leaf coverage of _session_awaiting_peer across every branch: unwired
+    seam, read-raises, stale (not honored), honored+peer+work_owed (True), honored+
+    peer+no-work_owed, honored+peer+work_owed-false, honored+user (wrong prefix),
+    honored+work_owed+no-awaiting (non-str), absent."""
+    job_inert = _job( _GW() )                                              # no hold-reader
+    assert job_inert._session_awaiting_peer( "s1", NOW ) is False          # unwired seam
+    def _boom( sid ): raise RuntimeError( "hiccup" )
+    assert _job( _GW(), hold_reader_fn=_boom )._session_awaiting_peer( "x", NOW ) is False  # read raises → SAFE
+    stale = { "held_at": ( NOW - datetime.timedelta( hours=3 ) ).isoformat(),
+              "ttl_seconds": 60, "awaiting": "peer:Rachel", "work_owed": True }
+    job = _job( _GW(), hold_reader_fn=_reader( {
+        "peer_owed" : _honored_hold( awaiting="peer:Rachel", work_owed=True ),
+        "peer_none" : _honored_hold( awaiting="peer:Rachel" ),
+        "peer_false": _honored_hold( awaiting="peer:Rachel", work_owed=False ),
+        "user"      : _honored_hold( awaiting="user:rick", work_owed=True ),
+        "no_await"  : _honored_hold( work_owed=True ),                     # awaiting absent → non-str
+        "stale"     : stale,
+        "absent"    : None,
+    } ) )
+    assert job._session_awaiting_peer( "peer_owed",  NOW ) is True
+    assert job._session_awaiting_peer( "peer_none",  NOW ) is False
+    assert job._session_awaiting_peer( "peer_false", NOW ) is False
+    assert job._session_awaiting_peer( "user",       NOW ) is False
+    assert job._session_awaiting_peer( "no_await",   NOW ) is False
+    assert job._session_awaiting_peer( "stale",      NOW ) is False
+    assert job._session_awaiting_peer( "absent",     NOW ) is False
+
+
+# ── 262c59f6 unify: the stuck path cross-checks the STORE owed_class ───────────
+#
+# The stuck oracle (activity tail, fleet_view["stuck"]) and the MANAGER-DONE oracle
+# (store owed_class) read DIFFERENT sources and can contradict within one poll (the
+# 262c59f6 root). Unify: the stuck poke consults the SAME store authority the other
+# three detectors read (owed_class_suppresses) — a session the store says owes
+# nothing pokeable (DONE / BLOCKED_ON_USER) is NOT harshly poked as "wedged WITH
+# work owed". ACTIVE / UNKNOWN / omitted → today's behavior (fail-SAFE).
+
+@pytest.mark.parametrize( "cls", [ CLASS_DONE, CLASS_BLOCKED_ON_USER ] )
+def test_owed_class_not_owed_suppresses_stuck_poke( cls ):
+    """A LIVE+stuck session the STORE classifies DONE / BLOCKED_ON_USER owes nothing
+    pokeable → the stuck path suppresses, unifying with the other three detectors."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    assert job._auto_poke( _live_stuck(), NOW, [ ], owed_class={ "Stuckie": cls } ) == 0
+    assert _pokes( gw ) == [ ]
+
+
+@pytest.mark.parametrize( "cls", [ CLASS_ACTIVE, CLASS_UNKNOWN ] )
+def test_owed_class_owed_or_unknown_still_pokes( cls ):
+    """ACTIVE (owes real work) and UNKNOWN (fail-SAFE: seam unwired / store hiccup)
+    → the store cross-check does NOT suppress → today's poke fires."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    assert job._auto_poke( _live_stuck(), NOW, [ ], owed_class={ "Stuckie": cls } ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_owed_class_omitted_defaults_to_today_behavior():
+    """owed_class omitted (caller passes nothing) → None default → today's poke
+    behavior (the store cross-check can only ADD suppression, never silence)."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )
+    assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 1                  # no owed_class arg
+    assert len( _pokes( gw ) ) == 1
 
 
 if __name__ == "__main__":

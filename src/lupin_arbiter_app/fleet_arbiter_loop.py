@@ -39,7 +39,7 @@ import threading
 from typing import Any, Callable, Optional
 
 from lupin_arbiter_app.health_watcher import SystemClock
-from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_owed_work_fn, _default_dm_activity_fn, _default_operator_gates_fn
+from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, _default_owed_work_fn, _default_known_owners_fn, _default_dm_activity_fn, _default_operator_gates_fn
 from cosa.agents.heartbeat_arbiter.operator_gate_routing import DEFAULT_DIGEST_CADENCE_SECONDS
 # 6929f4ac outward-twin backstop (§9.2): the per-session hold reader — defaulted
 # real here so the :8001 service actually resurfaces a dark session's aged user-gate
@@ -249,6 +249,11 @@ def build_fleet_arbiter_job_factory(
     # activates the store-aware suppression of the false-escalating detectors;
     # injectable for tests (construction is pure — the reader is never CALLED here).
     owed_work_fn         : Optional[ Callable ] = None,
+    # 262c59f6 (A): the fleet-wide known-owner-persona reader (distinct owner_persona
+    # over all store rows). Defaults to the real DB reader so the :8001 service arms
+    # the known-persona fail-safe (a re-spin/label-contamination would-be-DONE persona
+    # ∉ known owners → UNKNOWN, never a false MANAGER-DONE); injectable for tests.
+    known_owners_fn      : Optional[ Callable ] = None,
     # 6929f4ac (outward-twin backstop): the per-session hold reader + the aged-gate
     # resurface ceiling. hold_reader_fn defaults to the real read_hold so the :8001
     # service resurfaces a DARK session's open, aged user-gate to Rick (None →
@@ -292,6 +297,10 @@ def build_fleet_arbiter_job_factory(
     # L1: wire the real DB owed-work reader by default so the :8001 service gets
     # store-aware detector suppression; an injected fake overrides it for tests.
     owed_work_fn = owed_work_fn if owed_work_fn is not None else _default_owed_work_fn
+    # 262c59f6 (A): wire the real known-owner reader by default so the :8001 service
+    # arms the known-persona fail-safe against re-spin/label-contamination false
+    # MANAGER-DONE; an injected fake overrides it for tests.
+    known_owners_fn = known_owners_fn if known_owners_fn is not None else _default_known_owners_fn
     # DM-as-liveness: wire the real SENT-DM reader by default so the :8001 service
     # activates the 5th signal; an injected fake overrides it for tests. The
     # runtime-flag re-read is wired by app.py (cfg-closed lambda); None here lets
@@ -312,6 +321,7 @@ def build_fleet_arbiter_job_factory(
         return ArbiterConsumerJob(
             commons                    = gateway,
             owed_work_fn               = owed_work_fn,                              # L1 store-aware seam
+            known_owners_fn            = known_owners_fn,                           # 262c59f6 (A) known-persona fail-safe seam
             hold_reader_fn             = hold_reader_fn,                            # 6929f4ac outward-twin backstop
             user_gate_resurface_seconds = user_gate_resurface_seconds,             # 6929f4ac aged-gate ceiling
             operator_gates_fn          = operator_gates_fn,                         # A2/A3 operator-gate store reader

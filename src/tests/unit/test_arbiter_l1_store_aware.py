@@ -46,7 +46,7 @@ class _Gateway:
     def read( self, topic, since=None, limit=50 ): return [ ]
 
 
-def _job( *, owed_work_fn=None, notify=None ):
+def _job( *, owed_work_fn=None, notify=None, known_owners_fn=None ):
     """Bare arbiter job with no bridge liveness (bridge_mtime_fn → None), so the
     tap-ACK path always reaches the window/classification logic under test."""
     return ArbiterConsumerJob(
@@ -54,6 +54,7 @@ def _job( *, owed_work_fn=None, notify=None ):
         poll_seconds    = 5,
         manager_recipient = "DeclaredMgr",
         owed_work_fn    = owed_work_fn,
+        known_owners_fn = known_owners_fn,
         bridge_mtime_fn = lambda sid: None,
         notify_fn       = notify or ( lambda *a, **k: None ),
     )
@@ -414,3 +415,133 @@ class TestSessionIsNotOwed:
     def test_absent_persona_fails_safe_to_owed( self ):
         job = _job( owed_work_fn=lambda ps: { } )                    # reader returned nothing → UNKNOWN
         assert job.session_is_not_owed( "Ghost" ) is False
+
+
+# ── 262c59f6 H1: re-spin attribution — created_by must NOT orphan owed rows ────
+#
+# The 262c59f6 MANAGER-DONE false-positive fired despite 2 live in_progress rows
+# owner_persona=tiberius. Leading suspect: a re-spin attribution mismatch — the
+# rows were created_by the PRE-/clear session ("Tiberius 91de0c54") while the poked
+# session is the re-spun eb4b105f. The store read keys on owner_persona
+# (canonicalized), NOT created_by, so a re-spin (which changes ONLY created_by)
+# must keep the rows attributed to the persona → CLASS_ACTIVE, never a false DONE.
+# This guards _classify_owed against created_by leaking into attribution AND against
+# a display-vs-canonical label mismatch (the canonicalizing read seam absorbs case /
+# accent / icon so "Tiberius" resolves the "tiberius" rows).
+class TestClassifyOwedRespinAttribution:
+
+    @staticmethod
+    def _canonicalizing_fn( rows ):
+        """Faithful mirror of _default_owed_work_fn: query by CANONICAL owner_persona,
+        drop terminal, key the OUTPUT by the raw persona requested. created_by is
+        NEVER consulted (exactly as the production repo query ignores it)."""
+        from lupin_mcp.persona_normalization import canonical_persona_key
+        _TERMINAL = ( "done", "dropped" )
+        def _fn( personas ):
+            out = { }
+            for p in personas:
+                key = canonical_persona_key( p ) or p
+                out[ p ] = [ r for r in rows
+                             if canonical_persona_key( r[ "owner_persona" ] ) == key
+                             and r[ "status" ] not in _TERMINAL ]
+            return out
+        return _fn
+
+    def _respun_rows( self ):
+        # 2 in_progress rows owned by canonical "tiberius", created_by the PRIOR
+        # (pre-/clear) session id — the exact 262c59f6 ground truth (dab6cdfa +
+        # a5559b49 in the field; shapes here mirror _normal()).
+        return [
+            { "owner_persona": "tiberius", "status": "in_progress",
+              "created_by": "Tiberius 91de0c54", "gate_class": "none", "blocked_by": None },
+            { "owner_persona": "tiberius", "status": "in_progress",
+              "created_by": "Tiberius 91de0c54", "gate_class": "none", "blocked_by": None },
+        ]
+
+    def test_respun_manager_in_progress_rows_classify_active_not_done( self ):
+        """The re-spun session's clean display label 'Tiberius' must resolve its
+        'tiberius' rows (created_by the prior session) → CLASS_ACTIVE, not DONE."""
+        job = _job( owed_work_fn=self._canonicalizing_fn( self._respun_rows() ) )
+        assert job._classify_owed( [ "Tiberius" ], { } ) == { "Tiberius": CLASS_ACTIVE }
+
+    def test_iconified_display_label_still_resolves_active( self ):
+        """A persona label carrying the icon ('Tiberius 👑') canonicalizes to
+        'tiberius' → still resolves the rows → ACTIVE (never a false DONE)."""
+        job = _job( owed_work_fn=self._canonicalizing_fn( self._respun_rows() ) )
+        assert job._classify_owed( [ "Tiberius 👑" ], { } ) == { "Tiberius 👑": CLASS_ACTIVE }
+
+
+# ── 262c59f6 (A): known-persona fail-safe on STORE-derived DONE ────────────────
+#
+# Tiberius-approved belt (option A). A would-be-DONE persona (zero non-terminal owed
+# rows) whose CANONICAL label is NOT among the store's known owner personas is a
+# likely re-spin / label-contamination false DONE — the empty read came from a label
+# that canonicalizes to a key no real persona owns ('tiberius eb4b105f' ≠ 'tiberius'),
+# NOT from genuine completion. Reclassify UNKNOWN → escalate, NEVER a false
+# MANAGER-DONE. A genuinely-finished KNOWN persona ('mr radio' ∈ known, zero owed)
+# stays legitimately DONE (don't over-catch real completion). A degenerate (empty /
+# None) known set NEVER mass-UNKNOWNs the fleet (fail-SAFE). The literal idempotence
+# assert was REJECTED: every legit display label is non-idempotent by design and an
+# already-lowercased suffix slips through (evidence in the 262c59f6 characterization).
+class TestClassifyOwedKnownOwnerFailSafe:
+
+    def test_contaminated_label_would_be_done_downgrades_to_unknown( self ):
+        """Zero owed rows on a contaminated label → would-be DONE; canonical
+        'tiberius eb4b105f' ∉ known owners → UNKNOWN (escalate), not a false DONE."""
+        job = _job( owed_work_fn=lambda ps: { "tiberius eb4b105f": [ ] } )
+        out = job._classify_owed( [ "tiberius eb4b105f" ], { },
+                                  known_owners={ "tiberius", "mr radio" } )
+        assert out == { "tiberius eb4b105f": CLASS_UNKNOWN }
+
+    def test_genuinely_done_known_persona_stays_done( self ):
+        """A REAL persona ('Mr Radio' → 'mr radio' ∈ known) with zero owed rows is
+        genuinely finished → stays DONE (the fail-safe must not over-catch)."""
+        job = _job( owed_work_fn=lambda ps: { "Mr Radio": [ ] } )
+        out = job._classify_owed( [ "Mr Radio" ], { }, known_owners={ "mr radio" } )
+        assert out == { "Mr Radio": CLASS_DONE }
+
+    def test_empty_known_owners_never_downgrades( self ):
+        """Degenerate known set (empty) → NEVER mass-UNKNOWN the fleet → today's
+        DONE stands (fail-SAFE: the belt only fires with a real known-owner set)."""
+        job = _job( owed_work_fn=lambda ps: { "tiberius eb4b105f": [ ] } )
+        out = job._classify_owed( [ "tiberius eb4b105f" ], { }, known_owners=set() )
+        assert out == { "tiberius eb4b105f": CLASS_DONE }
+
+    def test_none_known_owners_is_todays_behavior( self ):
+        """known_owners omitted (default None) → inert → today's store-only DONE."""
+        job = _job( owed_work_fn=lambda ps: { "tiberius eb4b105f": [ ] } )
+        out = job._classify_owed( [ "tiberius eb4b105f" ], { } )
+        assert out == { "tiberius eb4b105f": CLASS_DONE }
+
+    def test_active_persona_absent_from_known_is_untouched( self ):
+        """Only STORE-derived DONE downgrades; an ACTIVE persona missing from the
+        known set is NOT touched (the belt guards false-DONE, not false-ACTIVE)."""
+        job = _job( owed_work_fn=lambda ps: { "ghost worker": [ _normal() ] } )
+        out = job._classify_owed( [ "ghost worker" ], { }, known_owners={ "mr radio" } )
+        assert out == { "ghost worker": CLASS_ACTIVE }
+
+    def test_known_owners_canonicalized_before_compare( self ):
+        """A display-form entry in the known set ('Mr Radio') is canonicalized before
+        the membership test → matches the canonicalized persona → stays DONE."""
+        job = _job( owed_work_fn=lambda ps: { "mr radio": [ ] } )
+        out = job._classify_owed( [ "mr radio" ], { }, known_owners={ "Mr Radio" } )
+        assert out == { "mr radio": CLASS_DONE }
+
+
+# ── 262c59f6 (A): _read_known_owners seam (swallow-safe) ───────────────────────
+class TestReadKnownOwners:
+
+    def test_unwired_seam_returns_none( self ):
+        """No known_owners_fn wired → None (inert → _classify_owed downgrade never
+        fires → today's behavior)."""
+        assert _job()._read_known_owners() is None
+
+    def test_wired_returns_canonical_filtered_set( self ):
+        """Wired reader → a set of CANONICAL owner keys; falsy entries dropped."""
+        job = _job( known_owners_fn=lambda: [ "Mr Radio", "Tiberius", None, "" ] )
+        assert job._read_known_owners() == { "mr radio", "tiberius" }
+
+    def test_read_raises_swallowed_to_none( self ):
+        """A raising reader is swallowed (observer invariant) → None → fail-SAFE."""
+        def _boom(): raise RuntimeError( "store hiccup" )
+        assert _job( known_owners_fn=_boom )._read_known_owners() is None
