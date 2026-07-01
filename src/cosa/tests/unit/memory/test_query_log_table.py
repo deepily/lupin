@@ -225,5 +225,140 @@ class TestGetCacheHitStats( unittest.TestCase ):
         self.assertEqual( table.get_cache_hit_stats(), { "verbatim": 0.0, "normalized": 0.0 } )
 
 
+class TestPostgresBackend( unittest.TestCase ):
+    """v0.2.0 §6 postgres backend: __init__ skips LanceDB; methods delegate to the repo."""
+
+    @staticmethod
+    def _pg_cfg():
+        m = Mock()
+        m.get.side_effect = lambda key, default=None, **kw: {
+            "normalization version":            "v2.0",
+            "llm spec key for gist generation": "gpt-x",
+            "path to database wo root":         "/test/db",
+            "vector store backend":             "postgres",
+        }.get( key, default )
+        return m
+
+    def _make_pg( self, debug=False ):
+        with patch( "cosa.memory.query_log_table.ConfigurationManager", return_value=self._pg_cfg() ), \
+             patch( "cosa.memory.query_log_table.lancedb.connect",
+                    side_effect=AssertionError( "postgres ctor must not connect to LanceDB" ) ), \
+             patch( "builtins.print" ):
+            return QueryLogTable( debug=debug )
+
+    @staticmethod
+    def _patch_repo():
+        import contextlib
+        session   = MagicMock()
+        repo_inst = MagicMock()
+
+        @contextlib.contextmanager
+        def fake_get_db():
+            yield session
+
+        ctx      = patch( "cosa.rest.db.database.get_db", fake_get_db )
+        repo_ctx = patch( "cosa.rest.db.repositories.query_log_repository.QueryLogRepository",
+                          return_value=repo_inst )
+        return repo_inst, ctx, repo_ctx
+
+    def test_init_uses_postgres( self ):
+        self.assertTrue( self._make_pg()._use_postgres )
+
+    def test_log_query_maps_fields_and_returns_id( self ):
+        table = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        with ctx, repo_ctx, \
+             patch( "cosa.memory.query_log_table.du.get_current_datetime", return_value="QID" ), \
+             patch( "cosa.memory.query_log_table.du.get_timestamp_ms", return_value="TS" ):
+            qid = table.log_query(
+                query_verbatim="v", query_normalized="n", query_gist="g", user_id="u",
+                embeddings={ "verbatim": [ 1.0 ], "normalized": [ 2.0 ] },
+                match_result={ "snapshot_id": "s1", "type": "similarity", "confidence": 0.8 },
+                processing_time_ms=12, cache_hits={ "verbatim": True, "normalized": False },
+            )
+        self.assertEqual( qid, "QID" )
+        kw = repo.log_query.call_args.kwargs
+        self.assertEqual( kw[ "id" ], "QID" )
+        self.assertEqual( kw[ "matched_snapshot_id" ], "s1" )
+        self.assertEqual( kw[ "embedding_verbatim" ], [ 1.0 ] )
+        self.assertTrue( kw[ "cache_hit_verbatim" ] )
+        self.assertEqual( kw[ "normalization_version" ], "v2.0" )
+
+    def test_log_query_defaults_when_optional_none( self ):
+        table = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        with ctx, repo_ctx, \
+             patch( "cosa.memory.query_log_table.du.get_current_datetime", return_value="QID" ), \
+             patch( "cosa.memory.query_log_table.du.get_timestamp_ms", return_value="TS" ):
+            table.log_query( query_verbatim="v", query_normalized="n", query_gist="g", user_id="u" )
+        kw = repo.log_query.call_args.kwargs
+        self.assertEqual( kw[ "embedding_verbatim" ], [] )
+        self.assertEqual( kw[ "match_type" ], "none" )
+        self.assertFalse( kw[ "cache_hit_normalized" ] )
+
+    def test_log_query_error_returns_empty( self ):
+        table = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.log_query.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx, \
+             patch( "cosa.memory.query_log_table.du.get_current_datetime", return_value="QID" ), \
+             patch( "cosa.memory.query_log_table.du.get_timestamp_ms", return_value="TS" ), \
+             patch( "cosa.memory.query_log_table.du.print_stack_trace" ) as trace:
+            self.assertEqual( table.log_query( "v", "n", "g", "u" ), "" )
+        trace.assert_called_once()
+
+    def test_get_recent_queries_delegates( self ):
+        table = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_recent_queries.return_value = [ "row" ]
+        with ctx, repo_ctx:
+            self.assertEqual( table.get_recent_queries( limit=5, user_id="u" ), [ "row" ] )
+        repo.get_recent_queries.assert_called_once_with( limit=5, user_id="u" )
+
+    def test_get_recent_queries_error_returns_empty( self ):
+        table = self._make_pg( debug=True )
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_recent_queries.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx, patch( "builtins.print" ):
+            self.assertEqual( table.get_recent_queries(), [] )
+
+    def test_get_cache_hit_stats_rates_and_empty( self ):
+        table = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_cache_hit_stats.return_value = {
+            "total_queries": 4, "verbatim_hit_rate": 0.5, "normalized_hit_rate": 0.25, "gist_hit_rate": 0.0,
+        }
+        with ctx, repo_ctx:
+            stats = table.get_cache_hit_stats( days=3 )
+        self.assertEqual( stats, { "verbatim": 50.0, "normalized": 25.0, "total_queries": 4 } )
+
+        repo.get_cache_hit_stats.return_value = {
+            "total_queries": 0, "verbatim_hit_rate": 0.0, "normalized_hit_rate": 0.0, "gist_hit_rate": 0.0,
+        }
+        with ctx, repo_ctx:
+            self.assertEqual( table.get_cache_hit_stats(), { "verbatim": 0.0, "normalized": 0.0 } )
+
+    def test_get_cache_hit_stats_error_returns_default( self ):
+        table = self._make_pg( debug=True )
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_cache_hit_stats.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx, patch( "builtins.print" ):
+            self.assertEqual( table.get_cache_hit_stats(), { "verbatim": 0.0, "normalized": 0.0 } )
+
+    def test_recent_queries_error_debug_off_skips_log( self ):
+        table = self._make_pg( debug=False )       # covers the `if self.debug` False branch
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_recent_queries.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx:
+            self.assertEqual( table.get_recent_queries(), [] )
+
+    def test_cache_hit_stats_error_debug_off_skips_log( self ):
+        table = self._make_pg( debug=False )       # covers the `if self.debug` False branch
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_cache_hit_stats.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx:
+            self.assertEqual( table.get_cache_hit_stats(), { "verbatim": 0.0, "normalized": 0.0 } )
+
+
 if __name__ == "__main__":
     unittest.main()

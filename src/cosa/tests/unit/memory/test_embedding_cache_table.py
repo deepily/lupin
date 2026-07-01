@@ -195,5 +195,75 @@ class TestCacheEmbedding( unittest.TestCase ):
         self.assertEqual( trace.call_args.kwargs[ "explanation" ], "cache_embedding() failed" )
 
 
+class TestPostgresBackend( unittest.TestCase ):
+    """v0.2.0 §6 postgres backend: __init__ skips LanceDB; methods delegate to the repo."""
+
+    @staticmethod
+    def _pg_cfg():
+        m = Mock()
+        m.get.side_effect = lambda key, default=None, **kw: {
+            "embedding dimensions":     "768",
+            "path to database wo root": "/test/db",
+            "vector store backend":     "postgres",
+        }.get( key, default )
+        return m
+
+    def _make_pg_table( self ):
+        # No lancedb.connect patch needed — the postgres ctor path must NOT touch it.
+        with patch( "cosa.memory.embedding_cache_table.ConfigurationManager", return_value=self._pg_cfg() ), \
+             patch( "cosa.memory.embedding_cache_table.lancedb.connect",
+                    side_effect=AssertionError( "postgres ctor must not connect to LanceDB" ) ), \
+             patch( "builtins.print" ):
+            return EmbeddingCacheTable()
+
+    @staticmethod
+    def _patch_repo():
+        """Patch get_db (ctx mgr → mock session) + the repo class; return (repo_instance, ctx)."""
+        import contextlib
+        session   = MagicMock()
+        repo_inst = MagicMock()
+
+        @contextlib.contextmanager
+        def fake_get_db():
+            yield session
+
+        ctx = patch.multiple(
+            "cosa.rest.db.database",
+            get_db = fake_get_db,
+        )
+        repo_ctx = patch(
+            "cosa.rest.db.repositories.embedding_cache_repository.EmbeddingCacheRepository",
+            return_value=repo_inst,
+        )
+        return repo_inst, ctx, repo_ctx
+
+    def test_init_uses_postgres_and_skips_lancedb( self ):
+        table = self._make_pg_table()
+        self.assertTrue( table._use_postgres )
+
+    def test_has_delegates_to_repo( self ):
+        table = self._make_pg_table()
+        repo_inst, ctx, repo_ctx = self._patch_repo()
+        repo_inst.has_cached_embedding.return_value = True
+        with ctx, repo_ctx:
+            self.assertTrue( table.has_cached_embedding( "q" ) )
+        repo_inst.has_cached_embedding.assert_called_once_with( "q" )
+
+    def test_get_delegates_to_repo( self ):
+        table = self._make_pg_table()
+        repo_inst, ctx, repo_ctx = self._patch_repo()
+        repo_inst.get_cached_embedding.return_value = _EMB
+        with ctx, repo_ctx:
+            self.assertEqual( table.get_cached_embedding( "q" ), _EMB )
+        repo_inst.get_cached_embedding.assert_called_once_with( "q" )
+
+    def test_cache_delegates_to_repo( self ):
+        table = self._make_pg_table()
+        repo_inst, ctx, repo_ctx = self._patch_repo()
+        with ctx, repo_ctx:
+            self.assertIsNone( table.cache_embedding( "q", _EMB ) )
+        repo_inst.cache_embedding.assert_called_once_with( "q", _EMB )
+
+
 if __name__ == "__main__":
     unittest.main()

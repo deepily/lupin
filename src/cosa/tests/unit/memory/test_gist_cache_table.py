@@ -25,7 +25,7 @@ the module previously had no dedicated unit-test coverage.
 """
 
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 
 
 class TestGistCacheTable( unittest.TestCase ):
@@ -508,6 +508,115 @@ class TestGistCacheTable( unittest.TestCase ):
         mocks["tbl"].count_rows.side_effect = Exception( "clear boom" )
 
         cache.clear_cache()   # should not raise
+
+
+class TestPostgresGistCacheBackend( unittest.TestCase ):
+    """v0.2.0 §6 postgres backend: __init__ skips LanceDB; methods delegate to the repo."""
+
+    def _build_pg( self, debug=False ):
+        # is_postgres_backend → True; ctor must NOT connect to LanceDB.
+        with patch( "cosa.memory.gist_cache_table.is_postgres_backend", return_value=True ), \
+             patch( "cosa.memory.gist_cache_table.Normalizer" ) as norm, \
+             patch( "cosa.memory.gist_cache_table.lancedb.connect",
+                    side_effect=AssertionError( "postgres ctor must not connect to LanceDB" ) ), \
+             patch( "builtins.print" ):
+            from cosa.memory.gist_cache_table import GistCacheTable
+            cache = GistCacheTable( "/unused", debug=debug )
+        return cache, norm.return_value
+
+    @staticmethod
+    def _patch_repo():
+        import contextlib
+        session   = MagicMock()
+        repo_inst = MagicMock()
+
+        @contextlib.contextmanager
+        def fake_get_db():
+            yield session
+
+        ctx      = patch( "cosa.rest.db.database.get_db", fake_get_db )
+        repo_ctx = patch( "cosa.rest.db.repositories.gist_cache_repository.GistCacheRepository",
+                          return_value=repo_inst )
+        return repo_inst, ctx, repo_ctx
+
+    def test_init_uses_postgres_and_skips_lancedb( self ):
+        cache, _ = self._build_pg()
+        self.assertTrue( cache._use_postgres )
+
+    def test_has_cached_gist_true_and_false( self ):
+        cache, _ = self._build_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_by_verbatim.return_value = object()
+        with ctx, repo_ctx:
+            self.assertTrue( cache.has_cached_gist( "q" ) )
+        repo.get_by_verbatim.return_value = None
+        with ctx, repo_ctx:
+            self.assertFalse( cache.has_cached_gist( "q" ) )
+
+    def test_get_cached_gist_verbatim_tier( self ):
+        cache, _ = self._build_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_cached_gist.return_value = "hit"
+        with ctx, repo_ctx:
+            self.assertEqual( cache.get_cached_gist( "q" ), "hit" )
+        repo.get_cached_gist.assert_called_once_with( question_verbatim="q" )
+
+    def test_get_cached_gist_normalized_tier( self ):
+        cache, norm = self._build_pg()
+        norm.normalize.return_value = "q norm"
+        repo, ctx, repo_ctx = self._patch_repo()
+        # verbatim tier misses (None), normalized tier hits.
+        repo.get_cached_gist.side_effect = [ None, "hit_norm" ]
+        with ctx, repo_ctx:
+            self.assertEqual( cache.get_cached_gist( "q" ), "hit_norm" )
+        norm.normalize.assert_called_once_with( "q" )
+        self.assertEqual( repo.get_cached_gist.call_args_list[ 1 ].kwargs,
+                          { "question_normalized": "q norm" } )
+
+    def test_cache_gist_inserts_when_absent( self ):
+        cache, _ = self._build_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_by_verbatim.return_value = None
+        with ctx, repo_ctx, patch( "cosa.memory.gist_cache_table.time.strftime", return_value="TS" ):
+            cache.cache_gist( "q", "g", "n" )
+        repo.cache_gist.assert_called_once_with(
+            question_verbatim="q", question_gist="g", question_normalized="n",
+            created_date="TS", access_count=0, last_accessed="TS",
+        )
+
+    def test_cache_gist_skips_duplicate( self ):
+        cache, _ = self._build_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_by_verbatim.return_value = object()      # already present
+        with ctx, repo_ctx:
+            cache.cache_gist( "q", "g", "n" )
+        repo.cache_gist.assert_not_called()
+
+    def test_get_statistics_populated_and_empty( self ):
+        cache, _ = self._build_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_statistics.return_value = { "total_entries": 4, "total_access_count": 10 }
+        with ctx, repo_ctx:
+            stats = cache.get_statistics()
+        self.assertEqual( stats[ "total_entries" ], 4 )
+        self.assertEqual( stats[ "avg_access_count" ], 2.5 )
+        self.assertEqual( stats[ "sample_size" ], 4 )
+
+        repo.get_statistics.return_value = { "total_entries": 0, "total_access_count": 0 }
+        with ctx, repo_ctx:
+            empty = cache.get_statistics()
+        self.assertEqual( empty[ "avg_access_count" ], 0 )
+
+    def test_clear_cache_noop_debug_on_and_off( self ):
+        cache_dbg, _ = self._build_pg( debug=True )
+        with patch( "builtins.print" ) as p:
+            cache_dbg.clear_cache()
+        p.assert_called_once()
+
+        cache_off, _ = self._build_pg( debug=False )
+        with patch( "builtins.print" ) as p2:
+            cache_off.clear_cache()
+        p2.assert_not_called()
 
 
 if __name__ == "__main__":
