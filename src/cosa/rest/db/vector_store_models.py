@@ -23,6 +23,13 @@ Index rule (design §4.2, per-column, gated on "is it ANN-searched?"):
     Scalar KV lookup keys get btree; write-only telemetry / never-searched vectors
     get NO index until a real ANN consumer appears.
 
+Synthetic-PK note (Rachel review N1): the four tables whose LanceDB source carried
+no natural key — ``input_and_output``, ``question_embeddings``, ``embedding_cache``,
+``gist_cache`` — get a synthetic ``BigInteger autoincrement`` surrogate PK (Postgres
+requires a primary key; LanceDB did not). Tables with an authoritative natural key
+(``canonical_synonyms``, ``query_log``, ``prediction_decisions``, ``solution_snapshots``)
+keep that key as their PK instead.
+
 Created: 2026-07-01 (Lane A · Tiffany 💍) · v0.2.0
 """
 

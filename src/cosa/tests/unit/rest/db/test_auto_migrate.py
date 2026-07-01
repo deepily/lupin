@@ -177,6 +177,22 @@ def _pgvector_available():
         return False
 
 
+def _resolve_alembic_head():
+    """Return the CURRENT single alembic head from the on-disk migration scripts.
+
+    Ensures:
+        - resolved from the ScriptDirectory (no DB connection), so the head
+          assertions below track the live chain instead of a pinned constant
+          that goes stale the moment a new migration lands. This file was
+          pinned to "d4e5f6a7b8c9" (then-head); six later migrations advanced
+          the chain, silently breaking these live tests the whole time they
+          were skip-gated. Dynamic resolution is the durable fix (cf. the same
+          stale-hardcoded-head drift addressed in task ad2e40bc).
+    """
+    from alembic.script import ScriptDirectory
+    return ScriptDirectory.from_config( auto_migrate.build_alembic_config() ).get_current_head()
+
+
 @unittest.skipUnless(
     _pg_reachable() and _pgvector_available(),
     "local Postgres not reachable OR lacks pgvector (GATED on image swap → "
@@ -185,7 +201,11 @@ def _pgvector_available():
 class TestAutoMigrateLive( unittest.TestCase ):
     """Real alembic chain against throwaway DBs — created and dropped per test."""
 
-    HEAD = "d4e5f6a7b8c9"
+    # HEAD tracks the live chain (see _resolve_alembic_head) — never pinned.
+    HEAD = _resolve_alembic_head()
+    # PREV is a FIXED historical anchor: the parent of the is_protected migration
+    # (d4e5f6a7b8c9). The cloud/dev scenarios exercise THAT migration
+    # specifically, so PREV is tied to it, not to the moving head.
     PREV = "c3d4e5f6a7b8"
 
     def setUp( self ):
@@ -244,24 +264,30 @@ class TestAutoMigrateLive( unittest.TestCase ):
         self.assertEqual( self._head(), [ ( self.HEAD, ) ] )
 
     def test_cloud_scenario_missing_column_gets_added( self ):
-        # Tables exist, is_protected ABSENT, stamped one-behind-head.
-        self._exec( "CREATE TABLE users ( id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email varchar(255) )" )
+        # Cloud-shaped DB: the full app schema exists UP TO the is_protected
+        # migration's parent — built via the REAL chain so every prior table
+        # physically exists (a bare hand-created `users` + stamp would fake
+        # "prior applied" and crash later migrations on missing FK targets like
+        # `notifications`). is_protected is still ABSENT here; the auto-migrator
+        # must run the remaining chain to head and ADD it end-to-end.
         from alembic import command
-        command.stamp( auto_migrate.build_alembic_config( database_url=self.url ), self.PREV )
+        command.upgrade( auto_migrate.build_alembic_config( database_url=self.url ), self.PREV )
+        self.assertFalse( self._has_is_protected() )                   # not added yet
         auto_migrate.run_migrations_to_head( database_url=self.url )
         self.assertTrue( self._has_is_protected() )
         self.assertEqual( self._head(), [ ( self.HEAD, ) ] )
 
     def test_dev_scenario_existing_column_no_crash( self ):
-        # Tables exist, is_protected PRESENT, stamped one-behind-head — the
-        # idempotent migration must NOT raise DuplicateColumn.
-        self._exec(
-            "CREATE TABLE users ( id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "
-            "email varchar(255), is_protected boolean NOT NULL DEFAULT false )"
-        )
+        # Dev-shaped DB: full app schema up to the is_protected parent (real
+        # chain), then is_protected added OUT-OF-BAND while still stamped one
+        # revision behind its migration. Upgrading to head must run the
+        # inspector-guarded is_protected migration IDEMPOTENTLY — no
+        # DuplicateColumn.
         from alembic import command
-        command.stamp( auto_migrate.build_alembic_config( database_url=self.url ), self.PREV )
+        command.upgrade( auto_migrate.build_alembic_config( database_url=self.url ), self.PREV )
+        self._exec( "ALTER TABLE users ADD COLUMN is_protected boolean NOT NULL DEFAULT false" )
         auto_migrate.run_migrations_to_head( database_url=self.url )   # must not raise
+        self.assertTrue( self._has_is_protected() )
         self.assertEqual( self._head(), [ ( self.HEAD, ) ] )
 
     def test_legacy_unstamped_schema_refused( self ):
