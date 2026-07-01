@@ -153,7 +153,6 @@ export function renderSenderCard(
     /* c8 ignore next */ // `?? ""` is a noUncheckedIndexedAccess type-guard; isCCSession guarantees a '#', so split("#")[1] is always a string (possibly "" for a trailing '#') — the ?? branch is unreachable at runtime.
     const sessionHash = sender.sender_id.split("#")[1] ?? "";
     sessionBlock = html`
-      <span class="sender-session-id">#${sessionHash}</span>
       <span class="sender-session-copy copy-btn" role="button" tabindex="0" title="Copy session ID">📋</span>
       <button class="sender-gist-btn" type="button" title="Generate smart gist from conversation">✨</button>
       <span class="sender-session-name" role="button" tabindex="0" title="Click to rename"></span>
