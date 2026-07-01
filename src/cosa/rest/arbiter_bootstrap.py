@@ -114,6 +114,19 @@ def build_arbiter_job( config_mgr ):   # pragma: no cover - production IO bounda
             age_threshold_hours = janitor_age_hrs,
         )
 
+    # ROLLBACK-INCOMPLETENESS (task 2a885154, Option A — Tiberius 2026-07-01). This
+    # in-process path is DEAD in steady state (gated OFF by `arbiter in-process
+    # bootstrap enabled = false`, R0 cutover complete); it is retained ONLY as the
+    # spec-§4 rollback (2026.06.07-arbiter-r0-inprocess-decommission-spec.md §4:
+    # "re-flip to True + bounce restores the in-process arbiter"). It is NOT
+    # physically removed because deletion would destroy that documented fallback.
+    # CAVEAT if that rollback is ever exercised: unlike the live :8001
+    # fleet_arbiter_loop, this constructor wires hold_reader_fn + operator_gates_fn
+    # but NEITHER owed_work_fn NOR known_owners_fn — so on rollback the L1
+    # store-aware MANAGER-DOWN/STALE suppression AND the known-persona fail-safe
+    # would both be INERT. Wiring the two missing fns (Option B) is a Rick-gated
+    # follow-up, deferred as out-of-scope for this P3; complete it BEFORE relying on
+    # this path as a true feature-parity rollback.
     gateway = LupinArbiterGateway.from_environment( sender_session_id="heartbeat-arbiter" )
     return ArbiterConsumerJob(
         commons                    = gateway,
