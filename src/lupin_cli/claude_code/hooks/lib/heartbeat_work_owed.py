@@ -95,6 +95,21 @@ SPINUP_BACKLOG_MIN_N = 3
 # descriptive name everywhere — they derive their prefix from this constant).
 POKE_PROMPT_SENTINEL = "Do not stop yet — you stopped with work owed"
 
+# Arbiter-poke sentinel (b33c8e96, 2026-06-30) — the SHARED opening clause of the
+# arbiter's stuck-poke and manager-staleness poke bodies. Unlike the heartbeat
+# self-poke (POKE_PROMPT_SENTINEL, which rides the Stop-hook `reason` and lands at
+# the START of the re-submitted prompt), an arbiter poke is delivered WRAPPED in a
+# peer-DM <system-reminder> envelope (build_peer_dm_reminder) via tmux, so its body
+# sits in the MIDDLE of the prompt. The matcher therefore keys on this sentinel as a
+# SUBSTRING (not a prefix). CROSS-PACKAGE single source of truth: the cosa-side
+# arbiter (_format_poke + _format_manager_stale_poke) DERIVES both poke prefixes from
+# this constant so the emitter and this matcher cannot drift. Without the match, a
+# wrapped arbiter poke was mistaken for genuine user re-engagement and RESET the
+# Stop-hook poke-cap (user_prompt_submit.py:86), so each arbiter escalation reopened a
+# fresh poke budget → the two detectors could reset each other → token burn while the
+# user is away.
+ARBITER_POKE_SENTINEL = "Heartbeat arbiter ("
+
 # Poke reason template (rides the top-level `reason` field — NEVER systemMessage;
 # see 01-…-seam-analysis.md §ERRATA). The hold-write instruction names the FULL
 # hyphenated session id explicitly (c121037b facet 2): get_session_info hands an
@@ -120,26 +135,36 @@ NO_WORK_SPECIFICS = "no owed work detected"
 
 def is_heartbeat_poke_prompt( prompt ):
     """
-    Is `prompt` the heartbeat hook's OWN injected self-poke (not user input)?
+    Is `prompt` an injected liveness poke (heartbeat self-poke OR arbiter poke),
+    rather than genuine user input?
 
-    The self-poke rides the Stop-hook `reason` field and is re-submitted as a
-    prompt via tmux send-keys; UserPromptSubmit must NOT treat that synthetic
-    prompt as user re-engagement — doing so resets the per-session poke-cap on
-    every poke, so the cap never halts (c121037b root cause: poke_count stuck at
-    1 across 23 consecutive pokes). Both heartbeat poke reasons open with
-    POKE_PROMPT_SENTINEL.
+    UserPromptSubmit must NOT treat either synthetic prompt as user re-engagement —
+    doing so resets the per-session poke-cap on every poke, so the cap never halts
+    (c121037b root cause: poke_count stuck at 1 across 23 consecutive pokes; b33c8e96
+    amplifier: an arbiter poke reopened a fresh budget on top).
+
+    Two shapes are recognized, by two matching modes reflecting how each is delivered:
+        1. Heartbeat SELF-POKE — rides the Stop-hook `reason` field, re-submitted as a
+           prompt via tmux send-keys, so POKE_PROMPT_SENTINEL lands at the START.
+           Matched by PREFIX (after left-strip; tmux/console may prepend whitespace).
+        2. Arbiter POKE (stuck / manager-stale) — delivered WRAPPED in a peer-DM
+           <system-reminder> envelope, so ARBITER_POKE_SENTINEL sits in the MIDDLE.
+           Matched by SUBSTRING (contains).
 
     Requires:
         - prompt is a string or None (foreign hook-payload data)
 
     Ensures:
         - Returns True iff prompt (left-stripped) starts with POKE_PROMPT_SENTINEL
+          OR prompt contains ARBITER_POKE_SENTINEL
         - Returns False for None / non-string / empty / genuine user prompts
         - Never raises
     """
     if not isinstance( prompt, str ):
         return False
-    return prompt.lstrip().startswith( POKE_PROMPT_SENTINEL )
+    if prompt.lstrip().startswith( POKE_PROMPT_SENTINEL ):
+        return True
+    return ARBITER_POKE_SENTINEL in prompt
 
 
 def _actionable_todos( todo_items ):

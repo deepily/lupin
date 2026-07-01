@@ -579,3 +579,80 @@ def test_non_string_and_empty_are_not_pokes():
     assert o.is_heartbeat_poke_prompt( "   " )     is False
     assert o.is_heartbeat_poke_prompt( 12345 )     is False   # non-string foreign payload
     assert o.is_heartbeat_poke_prompt( [ "x" ] )   is False
+
+
+# ── is_heartbeat_poke_prompt — b33c8e96 (arbiter-poke cap-reset amplifier) ────────
+#
+# SECONDARY amplifier split out of c9575068. An arbiter auto-poke / manager-stale
+# poke is delivered to the recipient session WRAPPED in a peer-DM <system-reminder>
+# envelope (build_peer_dm_reminder) — so the arbiter body is NOT at the START of the
+# delivered prompt. The c121037b matcher keyed ONLY on POKE_PROMPT_SENTINEL via
+# `startswith`, so the wrapped arbiter poke fell through → user_prompt_submit.py:86
+# reset the Stop-hook poke-cap → each arbiter escalation reopened a fresh poke budget
+# (the two detectors could reset each other → token burn while the user is away).
+#
+# FIX (cross-package, single shared constant): both arbiter formatters emit
+# ARBITER_POKE_SENTINEL; is_heartbeat_poke_prompt ALSO returns True when the delivered
+# prompt CONTAINS it (substring), so a wrapped arbiter poke — like the self-poke — does
+# NOT reset the cap. These tests build the REAL arbiter bodies through the REAL peer-DM
+# envelope to pin the end-to-end contract (RED before the fix, GREEN after).
+
+def _arbiter_job():
+    """A bare ArbiterConsumerJob (skip heavy __init__) with the attrs the two poke
+    formatters read — mirrors test_role_goal_poke_lines.TestRoleGoalPokeLines._job."""
+    from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+    j = ArbiterConsumerJob.__new__( ArbiterConsumerJob )
+    j.manager_goal_line = ""          # inert goal echo — isolate the body/envelope
+    j.worker_goal_line  = ""
+    j.manager_stale_poke_threshold_seconds = 2700
+    return j
+
+
+def _wrap_as_peer_dm( body ):
+    """Wrap an arbiter poke body in the REAL delivered peer-DM <system-reminder>
+    envelope — exactly what lands as the recipient's UserPromptSubmit prompt."""
+    from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
+    return build_peer_dm_reminder(
+        body, persona="Rio", icon="⚡", msg_id="m1", thread_id="t1" )
+
+
+def test_both_arbiter_formatters_emit_shared_sentinel():
+    """One-source-of-truth contract: both poke bodies CONTAIN the shared sentinel so
+    the cosa-side emitter and the lupin_cli-side matcher cannot drift apart."""
+    job = _arbiter_job()
+    stuck = job._format_poke( { "persona": "Rio", "role": "worker", "session_id": "s1" } )
+    stale = job._format_manager_stale_poke( { "persona": "Tiberius", "session_id": "s3" }, 3000 )
+    assert o.ARBITER_POKE_SENTINEL in stuck
+    assert o.ARBITER_POKE_SENTINEL in stale
+
+
+def test_wrapped_arbiter_stuck_poke_is_a_poke():
+    # RED before fix: startswith(POKE_PROMPT_SENTINEL) misses the wrapped body.
+    env = _wrap_as_peer_dm(
+        _arbiter_job()._format_poke( { "persona": "Rio", "role": "worker", "session_id": "s1" } ) )
+    assert o.is_heartbeat_poke_prompt( env ) is True
+
+
+def test_wrapped_arbiter_manager_stale_poke_is_a_poke():
+    # RED before fix: the manager-stale body is likewise buried mid-envelope.
+    env = _wrap_as_peer_dm(
+        _arbiter_job()._format_manager_stale_poke( { "persona": "Tiberius", "session_id": "s3" }, 3000 ) )
+    assert o.is_heartbeat_poke_prompt( env ) is True
+
+
+def test_bare_arbiter_sentinel_substring_is_a_poke():
+    # Substring match holds even without the full envelope (sentinel not at start).
+    assert o.is_heartbeat_poke_prompt( "PEER DM: " + o.ARBITER_POKE_SENTINEL + "auto-poke): x" ) is True
+
+
+def test_self_poke_still_matches_after_arbiter_extension():
+    # PIN: the c121037b self-poke path is unchanged (prefix match preserved).
+    reason = o.build_poke_reason(
+        o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] ) )
+    assert o.is_heartbeat_poke_prompt( reason ) is True
+
+
+def test_genuine_user_prompt_still_not_a_poke_no_overmatch():
+    # PIN: a real user prompt contains NEITHER sentinel → still resets the cap.
+    assert o.is_heartbeat_poke_prompt( "please fix the arbiter poke bug" ) is False
+    assert o.is_heartbeat_poke_prompt( "what does the heartbeat arbiter do?" ) is False

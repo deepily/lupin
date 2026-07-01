@@ -96,6 +96,11 @@ from lupin_mcp.persona_normalization import canonical_persona_key
 # arbiter resurfaces a dark session's aged user-gate to Rick.
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path, declared_work_owed, is_honored
 from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates
+# b33c8e96: cross-package SINGLE source of truth for the arbiter-poke sentinel. Both
+# poke bodies below DERIVE their prefix from this constant so the emitter (here) and
+# the Stop-hook matcher (is_heartbeat_poke_prompt) cannot drift — a wrapped arbiter
+# poke must NOT reset the recipient's Stop-hook poke-cap (user_prompt_submit.py:86).
+from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
 # Proactive-manager A2/A3 (fcb5dbc0): the PURE D4 operator-gate urgency router — the
 # arbiter is its single thin consumer (interrupt urgent / digest normal / queue low).
 from cosa.agents.heartbeat_arbiter.operator_gate_routing import (
@@ -3002,7 +3007,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         who        = view.get( "persona" ) or view.get( "session_id" )
         is_manager = ( view.get( "role" ) or "" ).strip().lower() == "manager"
         prefix     = (
-            f"Heartbeat arbiter (auto-poke): {who}, you appear STUCK — repeated "
+            f"{ARBITER_POKE_SENTINEL}auto-poke): {who}, you appear STUCK — repeated "
             f"cap-reached with work owed and no progress. Are you blocked or wedged? "
             f"Post your status, ask for help, "
         )
@@ -3155,7 +3160,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         """The bounded, non-destructive staleness nudge sent to a dark MANAGER session."""
         who  = row.get( "persona" ) or row.get( "session_id" )
         body = (
-            f"Heartbeat arbiter (manager-staleness poke): {who}, no signal from your "
+            f"{ARBITER_POKE_SENTINEL}manager-staleness poke): {who}, no signal from your "
             f"session for {_fmt_minutes( age )} (threshold "
             f"{self.manager_stale_poke_threshold_seconds}s). Are you wedged or idle-dark? "
             f"Post your status, or — you manage a crew — tap/assign your crew (staff up if "
