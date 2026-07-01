@@ -100,6 +100,10 @@ class TestRunMigrationsToHead( unittest.TestCase ):
         engine.dispose.assert_called_once()
         cmd.stamp.assert_called_once()
         cmd.upgrade.assert_not_called()
+        # v0.2.0 pgvector: the `vector` extension is created before create_all.
+        conn = engine.begin.return_value.__enter__.return_value
+        conn.execute.assert_called_once()
+        self.assertIn( "CREATE EXTENSION", str( conn.execute.call_args[ 0 ][ 0 ] ) )
 
     def test_empty_db_bootstraps_debug_false( self ):
         engine = MagicMock()
@@ -149,7 +153,35 @@ def _pg_reachable():
         return False
 
 
-@unittest.skipUnless( _pg_reachable(), "local Postgres (localhost:5432 lupin_dev) not reachable" )
+def _pgvector_available():
+    """
+    True iff the reachable Postgres advertises the `vector` extension.
+
+    Since v0.2.0 the app schema (Base.metadata) includes the pgvector vector-store
+    tables, so the empty-DB bootstrap these live tests exercise now creates a
+    `vector` column and therefore requires pgvector. On the stock
+    postgres:16.3-alpine image the extension is absent; these tests skip until the
+    docker-compose image swap → pgvector/pgvector:pg16 lands (shared-infra,
+    operator-applied). NOT a mask — the precondition genuinely expanded.
+    """
+    try:
+        import psycopg2
+        conn = psycopg2.connect( dbname="lupin_db_dev", connect_timeout=2, **_PG )
+        try:
+            with conn.cursor() as cur:
+                cur.execute( "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'" )
+                return cur.fetchone() is not None
+        finally:
+            conn.close()
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(
+    _pg_reachable() and _pgvector_available(),
+    "local Postgres not reachable OR lacks pgvector (GATED on image swap → "
+    "pgvector/pgvector:pg16; v0.2.0 app schema now includes vector tables)",
+)
 class TestAutoMigrateLive( unittest.TestCase ):
     """Real alembic chain against throwaway DBs — created and dropped per test."""
 

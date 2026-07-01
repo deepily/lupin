@@ -40,7 +40,7 @@ import os
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 import cosa.utils.util as cu
 
@@ -167,6 +167,12 @@ def run_migrations_to_head( database_url=None, debug=False ):
         from cosa.rest.postgres_models import Base
         engine = create_engine( url )
         try:
+            # pgvector (v0.2.0 vector store): the `vector` type must exist BEFORE
+            # create_all builds any Vector column / HNSW index. Idempotent — a no-op
+            # when the extension is already present. Requires the base image to
+            # bundle pgvector (docker-compose: pgvector/pgvector:pg16; Cloud-SQL native).
+            with engine.begin() as conn:
+                conn.execute( text( "CREATE EXTENSION IF NOT EXISTS vector" ) )
             Base.metadata.create_all( engine )
         finally:
             engine.dispose()

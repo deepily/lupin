@@ -2,8 +2,14 @@ version: '3.8'
 
 services:
   # PostgreSQL database server (hosts both lupin_db_dev and lupin_db_test)
+  # v0.2.0: image swapped stock postgres:16.3-alpine → pgvector/pgvector:pg16 so
+  # `CREATE EXTENSION vector` succeeds (LanceDB → pgvector migration). Same PG
+  # major 16 → the existing postgresql-dev-data volume is compatible (design §11).
+  # Applying this needs `docker compose up -d --force-recreate` (NOT restart) —
+  # SHARED-INFRA, coordinated with the operator, not applied from a build session.
+  # Cloud-SQL supports pgvector natively → cloud-test/prod compose need no change.
   postgres:
-    image: postgres:16.3-alpine
+    image: pgvector/pgvector:pg16
     container_name: lupin-postgres
     restart: unless-stopped
     environment:
