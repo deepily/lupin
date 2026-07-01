@@ -112,7 +112,7 @@ function buildShell(): HTMLElement {
           <div id="sender-cards-container">
             <div class="sender-card" data-sender-id="alice">
               <span class="message-text">Hello from Alice with a fairly long message body</span>
-              <span class="abstract-indicator" data-abstract="${encodeURIComponent("**details**")}">📋</span>
+              <span class="abstract-indicator" data-abstract="**details**">📋</span>
             </div>
           </div>
         </section>
@@ -525,7 +525,7 @@ test("indicator title fallback when indicator has no enclosing card", () => {
   const { store } = setup({ seed: HORIZ });
   const loose = document.createElement("span");
   loose.className = "abstract-indicator";
-  loose.setAttribute("data-abstract", encodeURIComponent("loose"));
+  loose.setAttribute("data-abstract", "loose");
   document.body.appendChild(loose);
   clickEl(loose);
   assert.equal(store.currentEntry()?.title, "Notification details");
@@ -539,6 +539,28 @@ test("abstract-indicator with no data-abstract attribute opens empty abstract", 
   clickEl(ind);
   assert.equal(store.currentEntry()?.type, "abstract");
   assert.equal(store.currentEntry()?.payload, "");
+});
+
+test("abstract-indicator with bare % ('100% done') reads RAW — pane opens, no URIError (Bug#2)", () => {
+  // The real writer (notificationItem.ts abstractIndicator) stores data-abstract
+  // RAW via setAttribute. A bare `%` in prose (e.g. "100% done") is NOT valid
+  // percent-encoding, so the prior decodeURIComponent(...) threw URIError and the
+  // click failed silently (~10% of clicks). The reader now reads raw.
+  const { store } = setup({ seed: HORIZ });
+  const ind = document.createElement("span");
+  ind.className = "abstract-indicator";
+  ind.setAttribute("data-abstract", "100% done");   // RAW, bare % — a decode would throw
+  document.body.appendChild(ind);
+  // Outcome-based proof (mechanism-independent): had decode thrown, open() at
+  // ReadingPaneRenderer.ts:436 would never run → the pane would stay closed and
+  // the payload would be absent. A green pane + the raw payload IS the no-URIError proof.
+  assert.doesNotThrow(() => clickEl(ind));
+  assert.equal(store.isPaneOpen(), true);
+  assert.equal(store.currentEntry()?.type, "abstract");
+  assert.equal(store.currentEntry()?.payload, "100% done");
+  // Second click on the SAME raw abstract toggles the pane closed.
+  clickEl(ind);
+  assert.equal(store.isPaneOpen(), false);
 });
 
 test("doc-link anchor click opens the pane as a doc", () => {

@@ -1,7 +1,7 @@
 // Multiplexer Phase 5 — senderCard template tests.
 // AC5 floor: ≥3 tests.
 
-import { test, before, beforeEach } from "node:test";
+import { test, describe, before, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -389,4 +389,68 @@ test("hexToRgbTriplet: wrong-length input returns null", () => {
 
 test("hexToRgbTriplet: non-hex characters return null", () => {
   assert.equal(hexToRgbTriplet("#gggggg"), null);
+});
+
+// ---------------------------------------------------------------------------
+// Bug#1 — progress-group head election (self-contained block; composes with
+// any L3/V10 header-render cases). Fix lives in renderSenderCard's grouping
+// body: elect ONE head per progress_group_id + pre-filter non-heads, so the
+// group renders exactly one `.progress-group-head` instead of one-per-member.
+// ---------------------------------------------------------------------------
+
+describe("Bug#1 — progress-group head election (176× → 1×)", () => {
+  const pgNotif = (id: string, ts: number, gid: string): Notification => ({
+    ...makeNotification(id, ts),
+    progress_group_id: gid,
+  });
+
+  test("elects exactly ONE head per group + pre-filters non-heads; non-progress row kept", () => {
+    // A single group `g1` whose 5 members exercise every election branch:
+    //   m: first-seen (cur === undefined)        → head = m
+    //   a: tie ts, "a" < "m"  (id_hash lower)     → head = a
+    //   z: tie ts, "z" < "a"  false               → keep a
+    //   q: ts 50 < 100        (earlier arrives)   → head = q  ← elected (earliest)
+    //   b: ts 200, not earlier, not tie           → keep q
+    // Plus one non-progress row (no group) that must survive the pre-filter.
+    const notifs: Notification[] = [
+      pgNotif("m", 100, "g1"),
+      pgNotif("a", 100, "g1"),
+      pgNotif("z", 100, "g1"),
+      pgNotif("q",  50, "g1"),
+      pgNotif("b", 200, "g1"),
+      makeNotification("np", 100),
+    ];
+    const card = renderSenderCard(makeSender(), notifs, { appTimezone: "UTC" });
+
+    // Exactly ONE head across the whole card (pre-fix: one per member).
+    assert.equal(card.querySelectorAll(".progress-group-head").length, 1);
+    // The elected head is the earliest-ts member (q).
+    const headMsg = card.querySelector(".progress-group-head")?.closest(".sender-message");
+    assert.equal(headMsg?.getAttribute("data-id-hash"), "q");
+    // Non-head group members are pre-filtered → NOT rendered as flat rows.
+    for (const gone of ["m", "a", "z", "b"]) {
+      assert.equal(card.querySelector(`.sender-message[data-id-hash="${gone}"]`), null);
+    }
+    // The non-progress row survives and renders flat (no head wrapper).
+    const np = card.querySelector('.sender-message[data-id-hash="np"]');
+    assert.ok(np, "non-progress row should render");
+    assert.equal(np!.querySelector(".progress-group-head"), null);
+  });
+
+  test("cross-date-span group elects exactly ONE head (not one-per-date)", () => {
+    // Two members of the SAME group on DIFFERENT calendar dates. Pre-fix, each
+    // date accordion renders its own head → 2 heads. Electing on the full list
+    // BEFORE date-grouping yields exactly ONE head (the earlier-ts member),
+    // guarding the cross-date multi-head hazard.
+    const day1 = Date.UTC(2026, 4, 5, 10, 0);   // 2026-05-05
+    const day2 = Date.UTC(2026, 4, 6, 10, 0);   // 2026-05-06
+    const card = renderSenderCard(makeSender(), [
+      pgNotif("d2", day2, "gx"),   // list order deliberately newest-first
+      pgNotif("d1", day1, "gx"),
+    ], { appTimezone: "UTC" });
+
+    assert.equal(card.querySelectorAll(".progress-group-head").length, 1);
+    const headMsg = card.querySelector(".progress-group-head")?.closest(".sender-message");
+    assert.equal(headMsg?.getAttribute("data-id-hash"), "d1");   // earliest ts, regardless of list order
+  });
 });

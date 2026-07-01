@@ -183,9 +183,44 @@ export function renderSenderCard(
   ` as DocumentFragment;
   root.appendChild(headerFrag);
 
+  // Bug#1 — elect ONE head per progress group, then pre-filter the non-head
+  // members OUT of the flat render list. Without this, EVERY member of a
+  // progress group renders its own `.progress-group-head` (the 176× bug). The
+  // election runs on the FULL per-sender list BEFORE date-grouping, so a group
+  // whose members straddle a date boundary still elects exactly ONE head (the
+  // cross-date multi-head hazard). Election is deterministic — the first-arrived
+  // (earliest `ts`) member per `progress_group_id`, ties broken by `id_hash` —
+  // so the same head is chosen on every re-render. Non-heads are removed HERE,
+  // not suppressed downstream: `keyedListMerge.create` is typed
+  // `(entry) => Element` and cannot return null. The collapsed members still
+  // surface via `NotificationsListRenderer.buildHistoryFragment`, which reads the
+  // full notification store (not this filtered render list).
+  //
+  // INVARIANT (verified): a `progress_group_id` is single-sender by construction
+  // — its purpose is to update ONE in-place DOM element (notifications.py §539),
+  // and each group is emitted by one job/session (e.g. deep_research's single
+  // `research_group_id`) so every member resolves to the same `sender_id`. Hence
+  // this per-sender election equals the global result, and buildHistoryFragment's
+  // global `progress_group_id` filter consumes THIS elected head (via the single
+  // rendered `.progress-group-head`) by construction.
+  const headByGroup = new Map<string, Notification>();
+  for (const n of notifications) {
+    const gid = n.progress_group_id;
+    if (typeof gid !== "string" || gid.length === 0) continue;
+    const cur = headByGroup.get(gid);
+    if (cur === undefined || n.ts < cur.ts || (n.ts === cur.ts && n.id_hash < cur.id_hash)) {
+      headByGroup.set(gid, n);
+    }
+  }
+  const renderList = notifications.filter(n => {
+    const gid = n.progress_group_id;
+    if (typeof gid !== "string" || gid.length === 0) return true;   // non-progress row — always keep
+    return headByGroup.get(gid)!.id_hash === n.id_hash;             // progress row — keep only the elected head
+  });
+
   // Group notifications by date key.
   const datesContainer = root.querySelector(".sender-card-dates") as HTMLElement;
-  const groupedByDate = groupByDateKey(notifications, opts.appTimezone);
+  const groupedByDate = groupByDateKey(renderList, opts.appTimezone);
 
   keyedListMerge({
     parent  : datesContainer,

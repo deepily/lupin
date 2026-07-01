@@ -425,7 +425,15 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     const indicator = target.closest(".abstract-indicator");
     if (indicator !== null) {
       ev.stopPropagation();
-      const abstract = decodeURIComponent(indicator.getAttribute("data-abstract") ?? "");
+      // Read data-abstract RAW — the mux writer stores it raw via setAttribute
+      // (no encode), so the reader must be raw too (within-mux write/read
+      // symmetry). A prior decodeURIComponent here threw URIError on any bare
+      // `%` in prose (e.g. "100% done") → ~10% of clicks failed silently.
+      // Do NOT "match legacy": legacy ENCODES both sides (notifications.js
+      // write :7230+ / read :10022); matching it would mean ADDING
+      // encodeURIComponent to BOTH mux writer + reader — the opposite of this
+      // fix. The raw/raw symmetry is the intended end-state.
+      const abstract = indicator.getAttribute("data-abstract") ?? "";
       // Second click on the SAME abstract toggles the pane closed (97bfb8c).
       if (this.store.isAbstractShown(abstract)) {
         this.store.close();
