@@ -7,11 +7,12 @@
 // fragment is parsed outside a <table> ancestor, AND createElement is inherently
 // safe-write (no markup-injection surface for store-sourced strings).
 //
-// Columns (row redesign 2026.06.29, AUGMENT): ID · Title · Class · Status ·
-// Blocked by · Next chase · Accountable · Priority · Project · Detail · Actions.
-// The leading ID column + the Detail 📄 column (body-overlay affordance) augment
-// the original eight; Actions stays the trailing edit column. The owner_persona
-// is the GROUP HEADER (not a per-row column), so a row never repeats its owner.
+// Columns (row redesign 2026.06.29 + Detail reposition F2 2026.07.01): ID ·
+// Title · Detail · Class · Status · Blocked by · Next chase · Accountable ·
+// Priority · Project · Actions. The leading ID column + the Detail 📄 column
+// (body-overlay affordance, now directly after Title) augment the original
+// eight; Actions stays the trailing edit column. The owner_persona is the GROUP
+// HEADER (not a per-row column), so a row never repeats its owner.
 
 import {
   EDITABLE_PRIORITIES,
@@ -225,6 +226,10 @@ export function renderTaskRow(
   titleCell.setAttribute( "title", fullTitle );
   tr.appendChild( titleCell );
 
+  // Detail column (F2 2026.07.01: repositioned 10→3, directly after Title and
+  // before Class): 📄 body-overlay affordance. renderDetailCell is unchanged.
+  tr.appendChild( renderDetailCell( task ) );
+
   const classCell = document.createElement( "td" );
   classCell.className = "task-col-class";
   const classBadge = document.createElement( "span" );
@@ -252,9 +257,6 @@ export function renderTaskRow(
     taskCellOrDash( task.priority ),
   ) );
   tr.appendChild( td( "task-col-project", taskCellOrDash( task.project ) ) );
-
-  // NEW Detail column (before Actions): 📄 body-overlay affordance.
-  tr.appendChild( renderDetailCell( task ) );
 
   tr.appendChild( renderActionsCell( task, reassignTargets ) );
 
@@ -321,6 +323,7 @@ export function renderTaskListTable(
   const headers: ReadonlyArray<[string, string]> = [
     [ "task-col-id", "ID" ],
     [ "task-col-title", "Title" ],
+    [ "task-col-detail", "Detail" ],
     [ "task-col-class", "Class" ],
     [ "task-col-status", "Status" ],
     [ "task-col-blocked", "Blocked by" ],
@@ -328,7 +331,6 @@ export function renderTaskListTable(
     [ "task-col-accountable", "Accountable" ],
     [ "task-col-priority", "Priority" ],
     [ "task-col-project", "Project" ],
-    [ "task-col-detail", "Detail" ],
     [ "task-col-actions", "Actions" ],
   ];
   for ( const [ cls, label ] of headers ) {

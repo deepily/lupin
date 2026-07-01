@@ -124,6 +124,12 @@ test("renderTaskListTable: 11 headers (ID + Detail augment Actions); owner + Una
   assert.equal(table.querySelector("thead th.task-col-id")?.textContent, "ID");
   assert.equal(table.querySelector("thead th.task-col-detail")?.textContent, "Detail");
   assert.equal(table.querySelector("thead th.task-col-actions")?.textContent, "Actions");
+  // F2 (2026.07.01): exact header ORDER — Detail repositioned 10→3 (after Title,
+  // before Class). This assertion locks the full L→R order against regression.
+  assert.deepEqual(
+    Array.from(table.querySelectorAll("thead th")).map((th) => th.textContent),
+    ["ID", "Title", "Detail", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Priority", "Project", "Actions"],
+  );
 
   const groupHeaders = table.querySelectorAll(".task-group-header");
   assert.equal(groupHeaders.length, 2);
@@ -392,4 +398,14 @@ test("renderTaskRow: Detail cell sits BEFORE the Actions cell (read affordance, 
   const cells = Array.from(tr.children).map((c) => (c as HTMLElement).className.split(" ")[0]);
   assert.ok(cells.indexOf("task-col-detail") < cells.indexOf("task-col-actions"));
   assert.equal(cells[0], "task-col-id");   // ID is leftmost
+});
+
+test("renderTaskRow: F2 cell order — Detail sits between Title and Class (repositioned 10→3)", () => {
+  const tr = renderTaskRow({ id: "x", title: "t", status: "queued", body: "d" }, undefined, ["amy"]);
+  const cells = Array.from(tr.children).map((c) => (c as HTMLElement).className.split(" ")[0]);
+  assert.deepEqual(cells, [
+    "task-col-id", "task-col-title", "task-col-detail", "task-col-class", "task-col-status",
+    "task-col-blocked", "task-col-chase", "task-col-accountable", "task-col-priority",
+    "task-col-project", "task-col-actions",
+  ]);
 });
