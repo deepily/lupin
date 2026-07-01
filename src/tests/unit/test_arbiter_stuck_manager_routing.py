@@ -157,6 +157,50 @@ def test_stuck_manager_tap_throttled_on_unchanged_signature():
     assert len( [ m for m in escal if "appears STUCK/DEAD" in m ] ) == 1
 
 
+# ── de3c5b87 + 33949e83 ROOT (12:18 ground truth): 'stuck-mgr:' prefix pollution ──
+#
+# The 12:18 diagnostic captured fed_label='stuck-mgr:Tiberius', label_is_canonical=
+# FALSE, owed_read_ok=TRUE, store_row_count=0, owed_class=unknown. ROOT: the
+# stuck-manager advisory throttled itself on a 'stuck-mgr:<persona>' key stored in
+# _last_tap_at — but that dict feeds eval_personas + the owed-read + _check_manager_acks
+# as CLEAN manager personas. canonical('stuck-mgr:Tiberius')='stuckmgrtiberius' ≠ store
+# owner 'tiberius' → 0-row read → UNKNOWN (first poll → MANAGER-DOWN) / DONE (later
+# polls, once the owed-read returns the prefixed key with an empty list → MANAGER-DONE).
+# ONE root, BOTH the 33949e83 false-DOWN and de3c5b87 false-DONE storms. Fix-at-source:
+# the throttle lives in DEDICATED state so _last_tap_at stays pure clean personas.
+
+def test_stuck_manager_throttle_key_does_not_pollute_last_tap_at():
+    """ROOT GUARD: after a stuck-manager tap, _last_tap_at carries NO 'stuck-mgr:'
+    key — the throttle is isolated in dedicated state, so eval_personas + the owed
+    read + _check_manager_acks only ever see clean manager personas."""
+    job = _job( declared_managers=[ "Tiberius", "Mr. Radio" ],
+                resolve_manager_fn=lambda sid, declared_manager=None: { "manager_persona": "Mr. Radio" } )
+    fleet = _live_stuck( sid="tib", persona="Tiberius" )
+    graph = { "edges": { }, "cycles": [ ] }
+    assert job._tap_managers( fleet, graph, roster=[ ], now=NOW, active_managers=[ "Mr. Radio" ] ) == 1
+    assert all( not str( k ).startswith( "stuck-mgr:" ) for k in job._last_tap_at )
+    assert job._last_tap_at == { }                             # a manager subject makes NO clean crew-tap either
+    # the dedicated throttle DID record the tap (so the anti-storm still holds)
+    assert any( str( k ).startswith( "stuck-mgr:" ) for k in job._last_stuck_tap_at )
+
+
+def test_stuck_manager_tap_does_not_false_fire_manager_down():
+    """END-TO-END: a stuck-manager tap must not later manufacture a MANAGER-DOWN on
+    the prefixed key. Past the ack window, _check_manager_acks emits ZERO downs — the
+    polluted 'stuck-mgr:Tiberius' key is gone from _last_tap_at (RED before fix: 1)."""
+    gw, escal = _GW(), [ ]
+    job = _job( gw, notify=lambda m, *a, **k: escal.append( m ),
+                declared_managers=[ "Tiberius", "Mr. Radio" ],
+                resolve_manager_fn=lambda sid, declared_manager=None: { "manager_persona": "Mr. Radio" } )
+    fleet = _live_stuck( sid="tib", persona="Tiberius" )
+    graph = { "edges": { }, "cycles": [ ] }
+    job._tap_managers( fleet, graph, roster=[ ], now=NOW, active_managers=[ "Mr. Radio" ] )
+    later = NOW + datetime.timedelta( seconds=700 )           # past the 600s ack window
+    down  = job._check_manager_acks( later, [ ], fleet, [ "Mr. Radio" ], owed_class={ } )
+    assert down == 0
+    assert not any( "MANAGER-DOWN" in m for m in escal )
+
+
 def test_format_stuck_manager_advisory_persona_then_session_id():
     """Leaf coverage of the advisory body: persona preferred, session_id fallback."""
     job = _job( declared_managers=[ "Tiberius" ] )

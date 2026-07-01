@@ -976,6 +976,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # min-interval (never tap on no-change).
         self._last_tap_sig = { }
         self._last_tap_at  = { }
+        # de3c5b87/33949e83 ROOT FIX: the stuck-MANAGER-subject advisory (ff91cff4,
+        # Rick-only case-20) throttles on a "stuck-mgr:<persona>" key. That key MUST
+        # live in DEDICATED state — NOT _last_tap_at — because _last_tap_at feeds
+        # eval_personas + the owed-read + _check_manager_acks as CLEAN manager personas.
+        # A "stuck-mgr:Tiberius" key there canonicalizes to "stuckmgrtiberius" ≠ the
+        # store owner "tiberius" → 0-row read → UNKNOWN (→ false MANAGER-DOWN) / DONE
+        # (→ false MANAGER-DONE). Same throttle semantics, isolated key space.
+        self._last_stuck_tap_sig = { }
+        self._last_stuck_tap_at  = { }
         # v2.2 B4/D4 manager-ack tracking: managers already escalated as down for
         # their current (un-acked) tap — so manager-down escalates ONCE, not every
         # poll, until the manager re-acks (shows liveness after the tap).
@@ -2245,14 +2254,21 @@ class ArbiterConsumerJob( AgenticJobBase ):
         ) )
         return ( crew, len( graph[ "cycles" ] ) )
 
-    def _should_tap( self, manager, sig, now ):
+    def _should_tap( self, manager, sig, now, at_map=None, sig_map=None ):
         """
         Tap iff the crew-summary CHANGED since the last tap AND (first-ever tap OR
         ≥ tap_min_interval_seconds elapsed). NEVER tap on no-change (anti-storm).
+
+        `at_map`/`sig_map` select the throttle-state store: None → the crew-tap dicts
+        (_last_tap_at / _last_tap_sig); the stuck-manager-subject path passes its
+        DEDICATED dicts so its "stuck-mgr:<persona>" throttle key never pollutes the
+        clean-persona _last_tap_at (de3c5b87/33949e83 root fix).
         """
-        if self._last_tap_sig.get( manager ) == sig:
+        at_map  = self._last_tap_at  if at_map  is None else at_map
+        sig_map = self._last_tap_sig if sig_map is None else sig_map
+        if sig_map.get( manager ) == sig:
             return False                              # no change → never tap
-        last_at = self._last_tap_at.get( manager )
+        last_at = at_map.get( manager )
         if last_at is None:
             return True                               # first tap for this manager
         return ( now - last_at ).total_seconds() >= self.tap_min_interval_seconds
@@ -2356,19 +2372,24 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # peer/owning manager (a manager can't own itself → the resolver would tap
         # the OTHER declared manager). Worker-subjects keep the case-7 owning-manager
         # grouping below, byte-identical. The Rick-only advisory is throttled on a
-        # DISTINCT tap key ("stuck-mgr:<persona>") so it never collides with the
-        # crew-tap state keyed by manager persona.
+        # DISTINCT tap key ("stuck-mgr:<persona>") in DEDICATED throttle state — NOT
+        # _last_tap_at (de3c5b87/33949e83 root fix): _last_tap_at feeds eval_personas +
+        # the owed-read + _check_manager_acks as clean manager personas, so a prefixed
+        # key there canonicalizes to a non-persona ("stuckmgrtiberius") → 0-row read →
+        # false MANAGER-DOWN/DONE. The dedicated dicts preserve the identical anti-storm
+        # throttle without touching the tap-ACK manager-identity space.
         groups = { }                                 # manager_persona -> [view, ...]
         for view in attention:
             if self._subject_is_manager( view ):
                 subject = view.get( "persona" ) or view.get( "session_id" )
                 tap_key = "stuck-mgr:" + str( subject )
                 sig     = ( "stuck_manager", subject )
-                if self._should_tap( tap_key, sig, now ):
+                if self._should_tap( tap_key, sig, now,
+                                     at_map=self._last_stuck_tap_at, sig_map=self._last_stuck_tap_sig ):
                     self._route( CASE_STUCK_MANAGER_RICK_ONLY,        # → Rick only (no peer manager)
                                  self._format_stuck_manager_advisory( view, free_n ) )
-                    self._last_tap_sig[ tap_key ] = sig
-                    self._last_tap_at[ tap_key ]  = now
+                    self._last_stuck_tap_sig[ tap_key ] = sig
+                    self._last_stuck_tap_at[ tap_key ]  = now
                     fired += 1
                 continue
             res     = self._resolve_manager_fn( view.get( "session_id" ),
