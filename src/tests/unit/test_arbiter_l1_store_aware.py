@@ -698,3 +698,78 @@ class TestManagerAckDiagnostics:
                                  owed_items={ "Mgr": [ ] } )
         d = self._diags( logs )[ 0 ]
         assert d[ "session_id" ] is None
+
+
+# ── 33949e83: store-health gate — suppress MANAGER-DOWN on a self-observed outage ──
+#
+# The :7999/store bog on 2026-07-01 ~11:40-11:52 swallowed tap-acks → the arbiter's
+# 600s-since-tap timer expired for BOTH live managers within 1s → false MANAGER-DOWN
+# to Rick. Root IS known (infra outage, not darkness). Fix: when the arbiter's OWN
+# owed store read is degraded THIS poll (it RAISED / timed-out → owed_items None while
+# the seam is wired AND personas exist), the missing-tap-ACK reading is untrustworthy
+# → SUPPRESS the MANAGER-DOWN escalation (UNKNOWN-INFRA, not dark) and do NOT set the
+# escalate-once flag → re-arms on the next clean read window.
+class TestStoreReadDegraded:
+
+    def test_unwired_seam_not_degraded( self ):
+        """No owed seam wired → not 'degraded' (inert ≠ outage)."""
+        assert _job( owed_work_fn=None )._store_read_degraded( None, [ "Mgr" ] ) is False
+
+    def test_no_personas_not_degraded( self ):
+        """Nothing to read (empty / all-falsy personas) → not degraded."""
+        job = _job( owed_work_fn=lambda ps: { } )
+        assert job._store_read_degraded( None, [ ] ) is False
+        assert job._store_read_degraded( None, [ None, "" ] ) is False
+
+    def test_wired_personas_none_result_is_degraded( self ):
+        """Seam wired + ≥1 persona but None result → the read RAISED/timed-out → degraded."""
+        assert _job( owed_work_fn=lambda ps: { } )._store_read_degraded( None, [ "Mgr" ] ) is True
+
+    def test_wired_personas_present_result_not_degraded( self ):
+        """A successful read (dict result) → healthy, not degraded."""
+        assert _job( owed_work_fn=lambda ps: { } )._store_read_degraded( { "Mgr": [ ] }, [ "Mgr" ] ) is False
+
+
+class TestManagerDownStoreHealthGate:
+
+    @staticmethod
+    def _cap( **kw ):
+        logs, routes = [ ], [ ]
+        job = _job( log_fn=lambda e, **f: logs.append( ( e, f ) ),
+                    notify=lambda m, *a, **k: routes.append( m ), **kw )
+        return job, logs, routes
+
+    def test_manager_down_suppressed_when_store_degraded( self ):
+        """A tapped, past-window, UNKNOWN manager during a degraded read → NO
+        MANAGER-DOWN: down count 0, no Rick escalation, escalate-once flag NOT set
+        (re-arms), and a 'manager_down_suppressed_infra' diagnostic is logged."""
+        job, logs, routes = self._cap( owed_work_fn=lambda ps: { } )
+        job._last_tap_at[ "Mgr" ] = NOW
+        down = job._check_manager_acks( LATE, [ ], { }, [ ], owed_class={ "Mgr": CLASS_UNKNOWN },
+                                        owed_items=None, store_read_degraded=True )
+        assert down == 0
+        assert routes == [ ]                                          # no MANAGER-DOWN escalation to Rick
+        assert "Mgr" not in job._manager_down_escalated              # flag NOT set → re-arms on clean poll
+        diag = [ f for e, f in logs if e == "arbiter_manager_ack_diagnostic" ]
+        assert len( diag ) == 1 and diag[ 0 ][ "verdict" ] == "manager_down_suppressed_infra"
+
+    def test_manager_down_fires_when_store_healthy( self ):
+        """Store healthy (not degraded) → today's MANAGER-DOWN still fires (the gate
+        only suppresses on a self-observed outage — never silences a real down)."""
+        job, logs, routes = self._cap( owed_work_fn=lambda ps: { "Mgr": [ _normal() ] } )
+        job._last_tap_at[ "Mgr" ] = NOW
+        down = job._check_manager_acks( LATE, [ ], { }, [ ], owed_class={ "Mgr": CLASS_ACTIVE },
+                                        owed_items={ "Mgr": [ _normal() ] }, store_read_degraded=False )
+        assert down == 1
+        assert "Mgr" in job._manager_down_escalated
+        assert any( "MANAGER-DOWN" in m for m in routes )
+
+    def test_suppressed_then_rearms_on_clean_poll( self ):
+        """Re-arm: a degraded poll suppresses (flag unset); the next CLEAN poll with
+        the manager still unacked + ACTIVE escalates (only-after-a-clean-read-window)."""
+        job, logs, routes = self._cap( owed_work_fn=lambda ps: { "Mgr": [ _normal() ] } )
+        job._last_tap_at[ "Mgr" ] = NOW
+        assert job._check_manager_acks( LATE, [ ], { }, [ ], owed_class={ "Mgr": CLASS_UNKNOWN },
+                                        owed_items=None, store_read_degraded=True ) == 0
+        assert job._check_manager_acks( LATE, [ ], { }, [ ], owed_class={ "Mgr": CLASS_ACTIVE },
+                                        owed_items={ "Mgr": [ _normal() ] }, store_read_degraded=False ) == 1

@@ -38,7 +38,7 @@ _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
-from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
+from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob, CLASS_UNKNOWN
 
 
 NOW = datetime.datetime( 2026, 6, 11, 18, 0, 0, tzinfo=datetime.timezone.utc )
@@ -99,6 +99,33 @@ def test_fresh_manager_gets_nothing():
     snap = _snap( _row( "m1", "manager", 120 ) )                       # 2 min fresh
     assert job._check_manager_staleness( snap, NOW, [ ] ) == 0
     assert gw.sent == [ ] and escal == [ ]
+
+
+# ── 33949e83: store-health gate — MANAGER-STALE suppressed on a self-observed outage ──
+
+def test_manager_stale_suppressed_when_store_degraded():
+    """A stale (in-window) MANAGER whose owed_class is UNKNOWN DURING a degraded
+    arbiter read → the silence is untrustworthy (infra outage swallowed signals) →
+    SUPPRESS the case-14 poke + Rick advisory; the episode is NOT started (re-arms)."""
+    gw, escal = _GW(), [ ]
+    job = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000 ) )                      # stale, in [2700, 7200]
+    fired = job._check_manager_staleness( snap, NOW, [ ], owed_class={ "m1": CLASS_UNKNOWN },
+                                          store_read_degraded=True )
+    assert fired == 0
+    assert _stale_pokes( gw ) == [ ] and escal == [ ]
+    assert "m1" not in job._mgr_stale_since                           # episode NOT started → re-arms
+
+
+def test_manager_stale_fires_when_store_healthy():
+    """Store healthy → today's MANAGER-STALE case-14 poke still fires (the gate only
+    suppresses on a self-observed outage — never silences a genuinely-dark manager)."""
+    gw, escal = _GW(), [ ]
+    job = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "m1", "manager", 3000 ) )
+    fired = job._check_manager_staleness( snap, NOW, [ ], owed_class={ "m1": CLASS_UNKNOWN },
+                                          store_read_degraded=False )
+    assert fired == 1
 
 
 # ── task 70be69f2: hold-file mtime is a sign of life (the canonical repro) ────

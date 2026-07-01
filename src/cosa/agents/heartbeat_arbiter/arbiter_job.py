@@ -1162,6 +1162,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         )
         owed_items  = self._read_owed( eval_personas )                    # ONE per-poll owed read, shared below
         known_owners = self._read_known_owners()                          # 262c59f6 (A): known store-owner set (None/empty → downgrade inert)
+        store_degraded = self._store_read_degraded( owed_items, eval_personas )  # 33949e83: self-observed store outage → gate MANAGER-DOWN/STALE
         owed_class  = self._classify_owed( eval_personas, fleet_view, owed=owed_items, known_owners=known_owners )
         # bug 436a366b: the AUTHORITATIVE store dependency ring — the deadlock
         # escalation is corroborated against THIS, never the derived holding_on
@@ -1215,14 +1216,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # #6 roster broadcast DROPPED (Part-6 cut) — the fleet roster is PULL-state,
         # served by /state via the snapshot below; no per-tick commons post.
         taps_fired    = self._tap_managers( fleet_view, graph, roster, now, active_managers )  # #7 / #8
-        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm, owed_items=owed_items )  # #9 (L1 store-aware, 5-signal ACK; owed_items → de3c5b87/33949e83 diagnostics)
+        managers_down = self._check_manager_acks( now, who_rows, fleet_view, active_managers, owed_class=owed_class, count_dm=count_dm, owed_items=owed_items, store_read_degraded=store_degraded )  # #9 (L1 store-aware, 5-signal ACK; owed_items → de3c5b87/33949e83 diagnostics; store gate)
         decisions     = self._check_decision_needed( now )          # #10 Rick (+owning mgr if known)
         stalled       = self._check_fleet_stall( fleet_view, now, active_managers, owed_class=owed_class )  # #11 (L1 store-aware)
         pokes_fired   = self._auto_poke( fleet_view, now, active_managers, owed_class=owed_class )  # 2b-3 auto-poke (262c59f6 store-aware)
         rendered      = self._publish_fleet_snapshot( fleet_view, now, count_dm )
         # post-game F2/F3 detectors read the FULL (include_offline=True) detection
         # snapshot + published count the publish step just stashed on the instance.
-        manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers, owed_class=owed_class )  # #F2 (L1 store-aware, lane 4)
+        manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers, owed_class=owed_class, store_read_degraded=store_degraded )  # #F2 (L1 store-aware, lane 4; 33949e83 store gate)
         fleet_dark          = self._check_fleet_dark( self._last_full_snapshot, self._last_published_n, now )
         # 6929f4ac outward-twin backstop: resurface a dark session's aged user-gate
         # to Rick (case 18). Reads the FULL snapshot (offline rows included) so a
@@ -2565,6 +2566,31 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return None        # store hiccup → None → fail SAFE (observer invariant)
         return { canonical_persona_key( o ) for o in ( owners or ( ) ) if o }
 
+    def _store_read_degraded( self, owed_items, personas ):
+        """
+        33949e83 store-health gate: True iff the per-poll owed store read was EXPECTED
+        to return data (the seam is WIRED and ≥1 persona was under evaluation) but
+        returned None — i.e. it RAISED / timed out, a self-observed arbiter-side infra
+        outage (the 2026-07-01 :7999 bog that swallowed tap-acks and false-DOWNed BOTH
+        live managers in 1s). When True, the liveness-derived "no tap-ACK" reading is
+        untrustworthy, so the MANAGER-DOWN / MANAGER-STALE escalations SUPPRESS (treat
+        as UNKNOWN-INFRA, not dark) and re-arm only after a clean read window.
+
+        Distinguishes an OUTAGE from the two innocent None cases: the seam UNWIRED
+        (owed_work_fn None — inert config, not a failure) and an EMPTY roster (no
+        persona to read). Neither is degradation → never manufactures a fleet-wide
+        escalation freeze from a benign None.
+
+        Ensures:
+            - returns False when the owed seam is unwired OR no persona was under
+              evaluation; True iff a wired read over ≥1 persona yielded None; never raises
+        """
+        if self._owed_work_fn is None:
+            return False
+        if not any( p for p in ( personas or [ ] ) ):
+            return False
+        return owed_items is None
+
     def _classify_owed( self, personas, fleet_view, owed=_UNREAD, known_owners=None ):
         """
         L1 (2026-06-17): classify each persona under evaluation this poll into
@@ -2838,7 +2864,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
             ack_window_secs     = self.manager_ack_window_seconds,
         )
 
-    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None, count_dm=True, owed_items=None ):
+    def _check_manager_acks( self, now, who_rows, fleet_view=None, active_managers=None, owed_class=None, count_dm=True, owed_items=None, store_read_degraded=False ):
         """
         B4/D4 manager-down detector via the liveness-proxy ACK.
 
@@ -2953,6 +2979,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
                         f"it (the arbiter never reaps — redline). One-time notice.",
                         active_managers=active_managers
                     )
+                continue
+            # 33949e83 STORE-HEALTH GATE: when the arbiter's OWN owed read is degraded
+            # this poll (raised/timed out), the missing tap-ACK liveness is an infra
+            # artifact, NOT manager darkness (the 2026-07-01 :7999 bog false-DOWNed
+            # BOTH managers in 1s). SUPPRESS the escalation (UNKNOWN-INFRA) and do NOT
+            # set the escalate-once flag → it re-arms on the next CLEAN read window. The
+            # diagnostic still records the suppression (verifies the gate on a real outage).
+            if store_read_degraded:
+                self._log_manager_ack_diagnostic( "manager_down_suppressed_infra", manager, cls,
+                                                  owed_items, fleet_view, now, tapped_at, last_activity )
                 continue
             if manager not in self._manager_down_escalated:         # ACTIVE / UNKNOWN → today's MANAGER-DOWN
                 self._manager_down_escalated.add( manager )
@@ -3465,7 +3501,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # the Manager goal echo (inert when unconfigured).
         return self._append_goal_line( body, "manager" )
 
-    def _check_manager_staleness( self, snapshot, now, active_managers, owed_class=None ):
+    def _check_manager_staleness( self, snapshot, now, active_managers, owed_class=None, store_read_degraded=False ):
         """
         F2: the SECOND, role-gated pokeable criterion — a MANAGER-role session
         whose freshest union signal is older than the threshold gets a bounded
@@ -3639,6 +3675,14 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     )
                 continue
             # ACTIVE / UNKNOWN → today's case-14 poke + Rick advisory (UNKNOWN = fail-SAFE)
+            # 33949e83 STORE-HEALTH GATE: a self-observed degraded owed read this poll
+            # means the manager's "silence" is an infra outage artifact, not darkness →
+            # SUPPRESS the case-14 escalation (UNKNOWN-INFRA) and do NOT start an episode
+            # → re-arms on the next CLEAN read window. Mirrors the MANAGER-DOWN gate.
+            if store_read_degraded:
+                self._log( "arbiter_manager_stale_suppressed_infra",
+                           session_id=sid, persona=persona, freshest_age_s=age )
+                continue
             if sid not in self._mgr_stale_since:
                 self._mgr_stale_since[ sid ] = now                # episode start
                 self._mgr_poke_count[ sid ]  = 0
