@@ -146,8 +146,16 @@ resource "google_cloud_run_v2_service" "lupin_model_server" {
       content {
         egress = var.vpc_egress
         network_interfaces {
-          network    = var.vpc_network
-          subnetwork = var.vpc_subnetwork
+          # Cloud Run v2 network_interface wants the SHORT `projects/*/global/networks/*`
+          # (and `projects/*/regions/*/subnetworks/*`) form — NOT the compute self-link
+          # (`https://www.googleapis.com/compute/v1/...`) that app_vpc_self_link + the
+          # subnetwork self-link carry (and that the VPC-peering + Cloud SQL resources
+          # correctly consume as-is). Strip the API prefix so either form works; replace()
+          # is a no-op on an already-short or empty value. This is an APPLY-TIME API
+          # validation `terraform plan` cannot catch — it slipped the plan-only review
+          # (c89c31ea) and surfaced on the first real apply (2026-07-01).
+          network    = replace(var.vpc_network, "https://www.googleapis.com/compute/v1/", "")
+          subnetwork = replace(var.vpc_subnetwork, "https://www.googleapis.com/compute/v1/", "")
         }
       }
     }
