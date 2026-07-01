@@ -31,7 +31,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     TIER_OWNING_MANAGER, TIER_BLOCKER_AND_MANAGER, TIER_DROP, TIER_LOG_THEN_RICK,
     CASE_AUTO_POKE_REAP_REC, CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
     CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
-    CASE_USER_GATE_RESURFACE, CASE_OPERATOR_GATE,
+    CASE_USER_GATE_RESURFACE, CASE_OPERATOR_GATE, CASE_STUCK_MANAGER_RICK_ONLY,
 )
 from cosa.agents.heartbeat_arbiter.arbiter_job import ArbiterConsumerJob
 from cosa.agents.heartbeat_arbiter import manager_resolver as MR
@@ -115,7 +115,17 @@ def test_case_tiers_is_exhaustive_part6_plus_2b3_reap_rec():
     # + the L1 store-aware advisories (16 manager-awaiting-user, 17 manager-done — 2026-06-17)
     # + the 6929f4ac user-gate resurface (18 — 2026-06-22)
     # + the A2/A3 operator-gate urgency routing (19 — fcb5dbc0)
-    assert set( CASE_TIERS ) == set( range( 1, 20 ) )
+    # + the ff91cff4 stuck/dead-MANAGER Rick-only case (20 — 2026-06-30)
+    assert set( CASE_TIERS ) == set( range( 1, 21 ) )
+
+
+def test_stuck_manager_subject_routes_rick_only():
+    """ff91cff4 (2026-06-30): a stuck/dead MANAGER subject escalates to RICK ONLY —
+    a manager can't own itself, so routing it to a peer/owning manager was the
+    Mr.-Radio-tapped-about-Tiberius misroute. Mirrors the human-domain Rick-only
+    cases (1-3/10/15/18/19)."""
+    assert CASE_STUCK_MANAGER_RICK_ONLY == 20
+    assert tier_for( CASE_STUCK_MANAGER_RICK_ONLY ) == TIER_RICK_ONLY
 
 
 def test_user_gate_resurface_routes_rick_only():

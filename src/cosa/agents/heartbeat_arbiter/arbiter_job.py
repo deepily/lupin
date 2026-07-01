@@ -90,6 +90,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
     CASE_MANAGER_STALE_ADVISORY, CASE_FLEET_DARK,
     CASE_MANAGER_AWAITING_USER, CASE_MANAGER_DONE_ADVISORY,
     CASE_USER_GATE_RESURFACE, CASE_OPERATOR_GATE,
+    CASE_STUCK_MANAGER_RICK_ONLY,
 )
 from lupin_mcp.persona_normalization import canonical_persona_key
 # 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
@@ -748,6 +749,15 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # (resolve_manager's contract): the roster head outranks the INI
         # manager-on-duty placeholder when a roster is declared.
         self.declared_fallback_manager = self.declared_managers[ 0 ] if self.declared_managers else manager_recipient
+        # ff91cff4: the canonical-key set of declared managers — the authority the
+        # manager-subject routing guard (`_subject_is_manager`) keys on, MIRRORING
+        # build_snapshot's `is_declared` role assignment (canonical persona key vs
+        # the declared roster). Precomputed once; the raw fleet_view rows passed to
+        # _tap_managers / _auto_poke carry no `role` (added later in build_snapshot),
+        # so the guard resolves manager-ness from the persona against THIS set.
+        self._declared_manager_keys  = { canonical_persona_key( str( m ) )
+                                         for m in self.declared_managers
+                                         if canonical_persona_key( str( m ) ) }
         self.alive_threshold_seconds = alive_threshold_seconds
         self.quiet_threshold_seconds = quiet_threshold_seconds
         self.ping_global_cap         = ping_global_cap
@@ -2233,6 +2243,48 @@ class ArbiterConsumerJob( AgenticJobBase ):
         )
         return "\n".join( lines )
 
+    def _subject_is_manager( self, view ):
+        """
+        ff91cff4: is the escalation SUBJECT itself a declared manager?
+
+        A stuck/dead MANAGER's escalation is Rick's to actuate (reap/replace/
+        re-staff), never a peer manager's — a manager can't own itself, so the
+        case-7 "owning manager" resolver and the case-13 Rick+managers fan-out
+        both mis-route it to the OTHER declared manager. This predicate gates the
+        Rick-only redirect at both sites. It mirrors build_snapshot's `is_declared`
+        role assignment (canonical persona key vs the declared-manager roster) —
+        used here because the raw fleet_view rows carry no `role` yet (that is
+        added later in build_snapshot, AFTER _tap_managers / _auto_poke run).
+
+        Requires:
+            - view is a dict (foreign data) or anything (defensive)
+
+        Ensures:
+            - returns True iff view is a dict with a persona whose canonical key is
+              in the declared-manager set; False for non-dict / missing persona /
+              empty declared roster; never raises
+        """
+        if not isinstance( view, dict ):
+            return False
+        persona = view.get( "persona" )
+        if not persona:
+            return False
+        return canonical_persona_key( str( persona ) ) in self._declared_manager_keys
+
+    def _format_stuck_manager_advisory( self, view, free_n ):
+        """
+        ff91cff4: the RICK-ONLY advisory body for a stuck/dead MANAGER subject —
+        the case-7 tap's manager-subject twin. Names the manager and frames the
+        actuation as Rick's (reap/replace/re-staff), NOT a peer manager's.
+        """
+        who = view.get( "persona" ) or view.get( "session_id" )
+        return (
+            f"Heartbeat arbiter (advisory — I observe + recommend; you actuate). "
+            f"MANAGER {who} appears STUCK/DEAD — a manager's escalation is yours to "
+            f"actuate (reap/replace/re-staff), not a peer manager's. {free_n} free "
+            f"worker(s) fleet-wide. (Recommendation only — I do not reap.)"
+        )
+
     def _tap_managers( self, fleet_view, graph, roster, now, active_managers=None ):
         """
         Actively TAP each manager-on-duty with their crew's actionable ADVISORY
@@ -2257,8 +2309,29 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if not attention:
             return 0
 
+        free_n = len( roster )
+        fired  = 0
+
+        # ff91cff4: split OUT manager-subjects — a stuck/dead session that is ITSELF
+        # a declared manager escalates RICK-ONLY (case 20), never grouped under a
+        # peer/owning manager (a manager can't own itself → the resolver would tap
+        # the OTHER declared manager). Worker-subjects keep the case-7 owning-manager
+        # grouping below, byte-identical. The Rick-only advisory is throttled on a
+        # DISTINCT tap key ("stuck-mgr:<persona>") so it never collides with the
+        # crew-tap state keyed by manager persona.
         groups = { }                                 # manager_persona -> [view, ...]
         for view in attention:
+            if self._subject_is_manager( view ):
+                subject = view.get( "persona" ) or view.get( "session_id" )
+                tap_key = "stuck-mgr:" + str( subject )
+                sig     = ( "stuck_manager", subject )
+                if self._should_tap( tap_key, sig, now ):
+                    self._route( CASE_STUCK_MANAGER_RICK_ONLY,        # → Rick only (no peer manager)
+                                 self._format_stuck_manager_advisory( view, free_n ) )
+                    self._last_tap_sig[ tap_key ] = sig
+                    self._last_tap_at[ tap_key ]  = now
+                    fired += 1
+                continue
             res     = self._resolve_manager_fn( view.get( "session_id" ),
                                                 declared_manager=self.declared_fallback_manager )
             persona = res.get( "manager_persona" ) if isinstance( res, dict ) else None
@@ -2273,8 +2346,6 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 continue
             groups.setdefault( persona, [ ] ).append( view )
 
-        fired  = 0
-        free_n = len( roster )
         for manager, members in groups.items():
             sig = self._tap_signature( members, graph )
             if self._should_tap( manager, sig, now ):
@@ -3148,9 +3219,17 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 fired += 1
             elif sid not in self._poke_escalated:
                 self._poke_escalated.add( sid )
-                self._route( CASE_AUTO_POKE_REAP_REC,             # → Rick + active managers
-                             self._format_reap_recommendation( view, self._poke_count[ sid ] ),
-                             active_managers=active_managers )
+                # ff91cff4: a stuck/dead MANAGER subject escalates its reap-rec to
+                # RICK ONLY (case 20) — never fanned to peer managers (managers
+                # answer to Rick, not each other). A worker subject keeps the case-13
+                # Rick + active-managers fan-out, byte-identical.
+                if self._subject_is_manager( view ):
+                    self._route( CASE_STUCK_MANAGER_RICK_ONLY,   # → Rick only
+                                 self._format_reap_recommendation( view, self._poke_count[ sid ] ) )
+                else:
+                    self._route( CASE_AUTO_POKE_REAP_REC,             # → Rick + active managers
+                                 self._format_reap_recommendation( view, self._poke_count[ sid ] ),
+                                 active_managers=active_managers )
             # else: capped AND already escalated → silence (anti-storm)
         return fired
 
