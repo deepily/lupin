@@ -265,19 +265,28 @@ CHROME_ROWS: list[ dict[ str, Any ] ] = [
     { "key": "V3-AR",        "legacy": "#action-required-section",               "mux": "#action-required-section",                     "category": "B" },
     { "key": "V3-AR-empty",  "legacy": "#action-required-empty",                 "mux": "#action-required-empty",                       "category": "B" },
     { "key": "V4-PLY",       "legacy": "#tts-queue-section",                     "mux": "#tts-pane",                                    "category": "C" },
-    { "key": "V5-header",    "legacy": "#section-notifications > .section-header","mux": "#notifications-header-mount",                  "category": "B" },
+    { "key": "V5-header",    "legacy": "#section-notifications > .section-header","mux": ".notifications-header-region",                  "category": "B" },
     { "key": "V7-broadcast", "legacy": "#broadcast-submit-card",                 "mux": "#broadcast-card-mount",                        "category": "B" },
     { "key": "V7-toggle",    "legacy": "#broadcast-submit-toggle",               "mux": "#broadcast-submit-toggle",                     "category": "B" },
     { "key": "V9-strip",     "legacy": "#cc-session-strip",                      "mux": "#cc-session-strip",                            "category": "C" },
     { "key": "V13-toolbar",  "legacy": None,                                     "mux": "#section-toolbar-mount",                       "category": "C" },
 ]
 
-# Rows KNOWN to be OPEN gaps in the mux right now (ground-truthed: the mux header
-# renders neither an env label nor a live clock — H2/V2). Tier 1 asserts these are
-# STILL ABSENT so the row is a pinned finding, NOT a silent pass; the assertion
-# FLIPS (fails loudly) the moment the gap closes, forcing this set to shrink — the
-# same break-on-close freshness discipline the sender-card allowlist uses.
-KNOWN_OPEN_CHROME_ROWS = { "V2-env-label", "V2-clock" }
+# V5 header boundary (Rachel's verdict, batch-merge): the mux V5 node is the header
+# REGION wrapper (.notifications-header-region), NOT #notifications-header-mount
+# alone. Legacy NESTS the TTS-fraction slider inside its section-header (→ 956px
+# full-width); the mux SPLITS the slider to a sibling #tts-preview-slider-mount, so
+# #notifications-header-mount alone reads 733px — measuring it would false-flag a
+# 733-vs-956 width gap that is really just the slider relocation. The region wrapper
+# spans BOTH mounts → full-width, the true parity boundary (Tier 3 asserts it).
+
+# Rows KNOWN to be OPEN gaps in the mux. EMPTIED at the H2 batch-merge (Sam commit
+# a81b2114 — env-label + live clock now render in the mux notifications header): the
+# break-on-close sentinel FIRED by design, so V2-env-label + V2-clock were promoted
+# from expect-ABSENT to Tier-1 present-required — that GREEN is H2's full-page proof.
+# The set stays as the freshness-guard hook for any FUTURE chrome gap: add a row here
+# to pin it, and Tier 1 breaks loudly the moment the mux starts rendering it.
+KNOWN_OPEN_CHROME_ROWS: set[ str ] = set()
 
 # The declarative layout property subset compared for Category-A style-iso (nav) —
 # same spirit as LAYOUT_STYLE_PROPS but page-frame oriented.

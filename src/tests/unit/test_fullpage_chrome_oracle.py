@@ -90,8 +90,18 @@ def test_fullpage_golden_is_stale_false_when_hashes_match_live():
 # --------------------------------------------------------------------------- #
 def test_known_open_rows_are_real_chrome_rows():
     keys = { r[ "key" ] for r in po.CHROME_ROWS }
+    # Any pinned-open row must be a real chrome row; the set is EMPTY post-H2 batch-merge
+    # (V2 env-label + clock promoted to present-required). It stays as the future-gap hook.
     assert po.KNOWN_OPEN_CHROME_ROWS <= keys
-    assert po.KNOWN_OPEN_CHROME_ROWS == { "V2-env-label", "V2-clock" }
+    assert po.KNOWN_OPEN_CHROME_ROWS == set()
+
+
+def test_v5_header_row_measures_the_region_boundary():
+    """V5 mux selector is the header REGION (spans both mounts), not the sub-mount —
+    Rachel's boundary fix so the TTS-slider relocation doesn't false-flag a width gap."""
+    v5 = next( r for r in po.CHROME_ROWS if r[ "key" ] == "V5-header" )
+    assert v5[ "mux" ] == ".notifications-header-region"
+    assert v5[ "mux" ] != "#notifications-header-mount"
 
 
 def test_shared_chrome_sheets_and_style_props_populated():

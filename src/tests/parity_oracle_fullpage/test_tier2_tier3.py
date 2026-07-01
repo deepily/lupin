@@ -128,6 +128,33 @@ def test_tier3_action_required_full_width( page ):
     )
 
 
+def test_tier3_notifications_header_full_width( page ):
+    """Tier 3 (V5) — the notifications HEADER REGION is full-width on both clients.
+    Legacy nests the TTS-fraction slider inside its section-header (~956px); the mux
+    splits the slider to a sibling mount, so #notifications-header-mount ALONE reads
+    ~733px — a FALSE width gap. Measured at the region boundary
+    (.notifications-header-region, which spans both mounts) the mux is full-width,
+    matching legacy — Rachel's boundary correction, encoded so V5 stops false-flagging.
+    The legitimate STRUCTURAL claim is that EACH region is full-width (spans its
+    container minus its own symmetric inset) — which proves the mux measures the full
+    ~960px region, NOT the cramped ~733px sub-mount. The exact cross-client width
+    (legacy 956 vs mux 960 — a 2px-per-side container-inset difference) is Cat-B
+    look-fidelity the iso deliberately SKIPS, so it is NOT asserted here (Rachel's
+    verdict). Absolute page-dy is excluded as elsewhere."""
+    golden = _golden()
+    mux    = _mux_walk( page )
+    lg     = golden[ "rows" ][ "V5-header" ][ "geom" ]
+    mg     = mux[ "V5-header" ][ "geom" ]
+
+    for label, g in ( ( "legacy", lg ), ( "mux", mg ) ):
+        expected = g[ "cw" ] - 2 * g[ "dx" ]
+        assert abs( g[ "w" ] - expected ) <= GEOM_TOL_PX, (
+            f"{label} notifications header region is not full-width: w={g['w']} vs expected "
+            f"{round( expected, 1 )} (cw={g['cw']} dx={g['dx']}) — if this is the mux, the V5 node "
+            "boundary regressed off .notifications-header-region back onto the cramped sub-mount."
+        )
+
+
 def test_tier3_broadcast_toggle_inline( page ):
     """Tier 3 (V7) — the broadcast ▼ toggle sits INLINE in the card's top header
     band (not orphaned on its own line below the title) on BOTH clients. Measured

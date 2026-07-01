@@ -40,7 +40,9 @@ MUX_URL = f"{base_url()}{MUX_FULLPAGE_PATH}"
 # Rows the mux MUST render at idle (every chrome surface that is not a known-open
 # gap, not a display-asymmetric Cat-C row, and not the legacy-absent toolbar case).
 PRESENT_REQUIRED = [
-    "V1-nav", "V1-logout", "V3-AR", "V3-AR-empty",
+    "V1-nav", "V1-logout",
+    "V2-env-label", "V2-clock",   # promoted from KNOWN-OPEN at the H2 batch-merge (a81b2114) — H2's full-page proof
+    "V3-AR", "V3-AR-empty",
     "V5-header", "V7-broadcast", "V7-toggle", "V13-toolbar",
 ]
 
@@ -70,14 +72,17 @@ def test_tier1_present_required_rows( page ):
 
 def test_tier1_known_open_rows_still_absent( page ):
     """
-    The KNOWN-OPEN gaps (V2 env-label + clock) are STILL absent in the mux. This
-    pins the gap as a finding; when H2/V2 lands the mux will start rendering these
-    and THIS assertion fails loudly — forcing KNOWN_OPEN_CHROME_ROWS to shrink.
+    Break-on-close sentinel: every KNOWN-OPEN chrome gap is STILL absent in the mux.
+    V2 env-label + clock were promoted OUT of this set at the H2 batch-merge (a81b2114
+    — they now render, and are asserted present in test_tier1_present_required_rows).
+    The set is currently EMPTY (no pinned-open gaps remain); it stays as the live
+    freshness-guard hook — add a future gap here and this fails loudly the instant the
+    mux starts rendering it, forcing the pin to be resolved rather than silently drift.
     """
     rows = _mux_walk( page )
     unexpectedly_present = [ key for key in KNOWN_OPEN_CHROME_ROWS if rows.get( key, {} ).get( "present" ) ]
     assert not unexpectedly_present, (
-        "KNOWN-OPEN chrome rows now RENDER in the mux — the V2 gap closed! Remove them from "
+        "KNOWN-OPEN chrome rows now RENDER in the mux — a pinned gap closed! Remove them from "
         "KNOWN_OPEN_CHROME_ROWS and promote to present-required: " + ", ".join( unexpectedly_present )
     )
 
