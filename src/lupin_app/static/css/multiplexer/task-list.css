@@ -202,6 +202,41 @@ tbody.task-group.collapsed .task-row {
     font-size: 12px;
     color: #868e96;
     white-space: nowrap;
+    /* Anchor for the click-to-copy overlay badge (F1 2026.07.01) — absolutely
+       positioned, so it never contributes to the cell's layout box. */
+    position: relative;
+}
+
+/* Click-to-copy affordance (F1 2026.07.01): only a real-id cell carries
+   [role="button"] — an em-dash (idless) cell stays a plain, non-interactive td. */
+.task-list-table td.task-col-id[role="button"] {
+    cursor: pointer;
+}
+
+.task-list-table td.task-col-id[role="button"]:hover,
+.task-list-table td.task-col-id[role="button"]:focus-visible {
+    color: #495057;
+    outline: none;
+}
+
+/* Transient "copied" state: a same-width color shift + an absolutely-positioned
+   ✓ badge. Because the badge is position:absolute it does NOT reflow the cell —
+   the row width is byte-identical copied vs. not, so the visual snapshot is
+   unaffected (F1 acceptance: row width unchanged). */
+.task-list-table td.task-col-id.task-id-copied {
+    color: #2b8a3e;
+}
+
+.task-list-table td.task-col-id.task-id-copied::after {
+    content: "✓";
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY( -50% );
+    font-size: 11px;
+    font-weight: 700;
+    color: #2b8a3e;
+    pointer-events: none;
 }
 
 /* ---- Detail column (row redesign 2026.06.29 — 📄 body overlay) ---- */

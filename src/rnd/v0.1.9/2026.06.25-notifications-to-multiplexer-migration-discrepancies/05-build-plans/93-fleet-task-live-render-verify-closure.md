@@ -49,3 +49,11 @@ A true **subjective visual glance** — "does the rendered pane LOOK right pixel
 | #6/#7 | Fleet Status + Task List | ✅ **verified at parity (this note)** |
 
 The review/verify side of the minimum-viable switchover is complete. Remaining downstream (not this task): the `eb84266b` B1 build-sequencing gate (per-card-collapse double-ownership with Rachel + Tiberius) before Plan 01 B1 BUILDS; corpus 02–11 fast-follow.
+
+## §6 Read-only-contract note — DISPLAY surfaces are non-mutating (closes gate `21fdcd89`)
+
+Added 2026-07-01 (Cheech 🌿), folded into the task-list copy-ID + Detail-column-move build (spec `src/rnd/2026.07.01-tasklist-copy-id-and-detail-column-move.md`, Feature 3) because that build touches these exact surfaces. This is the last sub-item of the retired final-MVP-gate seat (plan-side task `21fdcd89`).
+
+**Contract**: the **Fleet Status** table and the **Task List** table are *render-only display surfaces* — they PAINT task-store / fleet state and NEVER write it. Every display cell (ID · Title · Detail · Class · Status · Blocked by · Next chase · Accountable · Priority · Project) is non-mutating. The ONLY mutation surface is the trailing **Actions** column (priority select · owner-reassign select · drop-with-reason), whose controls the renderer dispatches through the optimistic-write interface (`TaskListRenderer.ts` `patchTask`/`dropTask`, §30 above / the ratified superset in §2). This is consistent with ruling (d): the mux Task List is a deliberate SUPERSET of legacy's read-only view; the added mutations are the task-store control plane, confined to the Actions column.
+
+**F1 (click-to-copy ID) does NOT breach this contract**: the ID-cell click/Enter/Space handler READS the row's `data-task-id` and copies it to the clipboard — a pure read affordance with zero task-store write. The display surfaces remain non-mutating; copy is an egress convenience, not a mutation. Gate `21fdcd89` is closed.

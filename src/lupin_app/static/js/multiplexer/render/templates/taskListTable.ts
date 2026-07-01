@@ -7,11 +7,12 @@
 // fragment is parsed outside a <table> ancestor, AND createElement is inherently
 // safe-write (no markup-injection surface for store-sourced strings).
 //
-// Columns (row redesign 2026.06.29, AUGMENT): ID · Title · Class · Status ·
-// Blocked by · Next chase · Accountable · Priority · Project · Detail · Actions.
-// The leading ID column + the Detail 📄 column (body-overlay affordance) augment
-// the original eight; Actions stays the trailing edit column. The owner_persona
-// is the GROUP HEADER (not a per-row column), so a row never repeats its owner.
+// Columns (row redesign 2026.06.29 + Detail reposition F2 2026.07.01): ID ·
+// Title · Detail · Class · Status · Blocked by · Next chase · Accountable ·
+// Priority · Project · Actions. The leading ID column + the Detail 📄 column
+// (body-overlay affordance, now directly after Title) augment the original
+// eight; Actions stays the trailing edit column. The owner_persona is the GROUP
+// HEADER (not a per-row column), so a row never repeats its owner.
 
 import {
   EDITABLE_PRIORITIES,
@@ -39,6 +40,29 @@ function td( className: string, text: string ): HTMLTableCellElement {
   const cell = document.createElement( "td" );
   cell.className = className;
   cell.textContent = text;
+  return cell;
+}
+
+/**
+ * Build the leftmost ID cell (row redesign 2026.06.29 + F1 2026.07.01). Displays
+ * the compact 8-char id label; the FULL id rides the row's `data-task-id`. When
+ * the row carries a real id the cell is a click-to-copy affordance: role=button
+ * + tabindex + title, and `.task-col-id` gets cursor:pointer via CSS (gated on
+ * [role="button"]). A row with no id (label "—") gets NO affordance — there is
+ * nothing to copy — so an em-dash cell is inert.
+ *
+ * Ensures:
+ *   - text = taskIdLabel(task) (8-char prefix, or "—" when the id is absent)
+ *   - task has a non-empty id → role="button", tabindex="0", title set
+ *   - task has no id → a plain cell (no interactive attributes)
+ */
+function renderIdCell( task: TaskItem ): HTMLTableCellElement {
+  const cell = td( "task-col-id", taskIdLabel( task ) );
+  if ( task.id != null && String( task.id ) !== "" ) {
+    cell.setAttribute( "role", "button" );
+    cell.setAttribute( "tabindex", "0" );
+    cell.setAttribute( "title", "Click to copy ID" );
+  }
   return cell;
 }
 
@@ -190,7 +214,9 @@ export function renderTaskRow(
   tr.setAttribute( "data-task-id", task.id ?? "" );
 
   // NEW leftmost ID column — first 8 chars of the id, monospace (via CSS).
-  tr.appendChild( td( "task-col-id", taskIdLabel( task ) ) );
+  // Click-to-copy affordance (F1 2026.07.01): a real-id cell copies the FULL
+  // uuid (read from data-task-id) via the renderer's delegated click/keydown.
+  tr.appendChild( renderIdCell( task ) );
 
   // Title cell: truncated text + the FULL title on a hover-tooltip (title attr).
   const titleCell = document.createElement( "td" );
@@ -199,6 +225,10 @@ export function renderTaskRow(
   titleCell.textContent = truncateTaskTitle( fullTitle );
   titleCell.setAttribute( "title", fullTitle );
   tr.appendChild( titleCell );
+
+  // Detail column (F2 2026.07.01: repositioned 10→3, directly after Title and
+  // before Class): 📄 body-overlay affordance. renderDetailCell is unchanged.
+  tr.appendChild( renderDetailCell( task ) );
 
   const classCell = document.createElement( "td" );
   classCell.className = "task-col-class";
@@ -227,9 +257,6 @@ export function renderTaskRow(
     taskCellOrDash( task.priority ),
   ) );
   tr.appendChild( td( "task-col-project", taskCellOrDash( task.project ) ) );
-
-  // NEW Detail column (before Actions): 📄 body-overlay affordance.
-  tr.appendChild( renderDetailCell( task ) );
 
   tr.appendChild( renderActionsCell( task, reassignTargets ) );
 
@@ -296,6 +323,7 @@ export function renderTaskListTable(
   const headers: ReadonlyArray<[string, string]> = [
     [ "task-col-id", "ID" ],
     [ "task-col-title", "Title" ],
+    [ "task-col-detail", "Detail" ],
     [ "task-col-class", "Class" ],
     [ "task-col-status", "Status" ],
     [ "task-col-blocked", "Blocked by" ],
@@ -303,7 +331,6 @@ export function renderTaskListTable(
     [ "task-col-accountable", "Accountable" ],
     [ "task-col-priority", "Priority" ],
     [ "task-col-project", "Project" ],
-    [ "task-col-detail", "Detail" ],
     [ "task-col-actions", "Actions" ],
   ];
   for ( const [ cls, label ] of headers ) {

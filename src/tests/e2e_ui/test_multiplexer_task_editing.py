@@ -125,9 +125,13 @@ _FLEET = {
 }
 
 
-def _open_card( page ) -> dict:
+def _open_card( page, tasks: dict | None = None ) -> dict:
     """
     Seed auth, stub list/fleet/patch/transition, navigate, wait for boot hook.
+
+    `tasks` overrides the list-endpoint payload (defaults to `_TASKS`); the
+    F1 copy-ID tests inject a full-uuid task so the clipboard assertion can
+    distinguish the FULL id from the 8-char displayed prefix.
 
     Returns a mutable `recorded` dict capturing the PATCH / transition requests
     the controls fire, so tests can assert the wire bodies.
@@ -153,7 +157,7 @@ def _open_card( page ) -> dict:
         route.fulfill( status=200, content_type="application/json", body=json.dumps( { "ok": True } ) )
 
     # Most-specific (transition) registered LAST so it wins over the patch glob.
-    page.route( TASKS_LIST_ROUTE,  _fulfill( _TASKS ) )
+    page.route( TASKS_LIST_ROUTE,  _fulfill( tasks or _TASKS ) )
     page.route( FLEET_ROUTE,       _fulfill( _FLEET ) )
     page.route( TASKS_PATCH_ROUTE, _record_patch )
     page.route( TASKS_TRANS_ROUTE, _record_transition )
@@ -314,3 +318,124 @@ def test_task_editing_controls_visual( page, assert_snapshot_structure_only ):
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     assert_snapshot_structure_only( container, name="multiplexer_task_editing_controls.png" )
     print( "✓ multiplexer_task_editing_controls: structural snapshot verified (width + height-tolerance; pixel-blind by design — bug 660d02b4 D)" )
+
+
+# ---------------------------------------------------------------------------
+# F2 (task fdfb5b05) — Detail column repositioned 10 → 3 (after Title, before
+# Class). Verified in the REAL page: the served bundle actually paints the
+# Detail header + cell in slot 3, which the render-unit tests cannot confirm
+# (they assert the DOM the template BUILDS, not the DOM the browser SERVES).
+# ---------------------------------------------------------------------------
+
+# Target L→R order (0-based) after the F2 reposition — Detail at index 2.
+_EXPECTED_COL_ORDER = [
+    "task-col-id", "task-col-title", "task-col-detail", "task-col-class",
+    "task-col-status", "task-col-blocked", "task-col-chase",
+    "task-col-accountable", "task-col-priority", "task-col-project",
+    "task-col-actions",
+]
+
+
+def _classes( locator ) -> list[ str ]:
+    """First class token of each element under `locator`, in DOM order."""
+    out: list[ str ] = []
+    for i in range( locator.count() ):
+        cls = locator.nth( i ).get_attribute( "class" ) or ""
+        out.append( cls.split()[ 0 ] if cls.split() else "" )
+    return out
+
+
+def test_detail_header_in_position_three( page ):
+    _open_card( page )
+    # Scope to the task-list table — the multiplexer page ALSO renders a
+    # fleet-status table whose <thead th> would otherwise collide.
+    order = _classes( page.locator( ".task-list-table thead th" ) )
+    assert order == _EXPECTED_COL_ORDER, f"header order drifted: { order }"
+    # Detail sits in slot 3 (index 2), directly between Title and Class.
+    assert order[ 1 ] == "task-col-title"
+    assert order[ 2 ] == "task-col-detail"
+    assert order[ 3 ] == "task-col-class"
+
+
+def test_detail_cell_in_position_three_in_row( page ):
+    _open_card( page )
+    row_cells = _row( page, "t1" ).locator( "td" )
+    order = _classes( row_cells )
+    assert order == _EXPECTED_COL_ORDER, f"row cell order drifted: { order }"
+    # Detail affordance (📄) survives the move — the emoji still renders in the
+    # repositioned cell (renderDetailCell unchanged, only its append site moved).
+    assert _row( page, "t1" ).locator( "td.task-col-detail .task-detail-emoji" ).count() == 1
+    # Actions remains the trailing column (no regression to the edit controls).
+    assert order[ -1 ] == "task-col-actions"
+
+
+# ---------------------------------------------------------------------------
+# F1 (task fdfb5b05) — Click-to-copy the FULL task id. Verified end-to-end
+# against the REAL browser clipboard (permission-granted context): the cell
+# DISPLAYS the 8-char prefix but the clipboard receives the FULL uuid. The
+# render-unit tests mock `navigator.clipboard.writeText`; only this E2E proves
+# the affordance drives the actual OS clipboard through the delegated handler.
+# ---------------------------------------------------------------------------
+
+_FULL_UUID = "fdfb5b05-aaaa-bbbb-cccc-0123456789ab"
+
+# A single task whose id is a full uuid → the displayed label is the 8-char
+# prefix, so copy-full-vs-display-prefix is observable.
+_TASKS_UUID = {
+    "tasks" : [
+        { "id": _FULL_UUID, "item_class": "task", "title": "Copyable row",
+          "status": "in_progress", "owner_persona": "amy",
+          "accountable_manager": "tiberius", "priority": "P2",
+          "project": "lupin", "blocked_by": None, "next_chase_ts": None,
+          "body": "some detail body" },
+    ],
+    "count" : 1,
+}
+
+
+def test_id_cell_carries_copy_affordance( page ):
+    _open_card( page, tasks=_TASKS_UUID )
+    id_cell = _row( page, _FULL_UUID ).locator( "td.task-col-id" )
+    # a11y affordance: keyboard-operable button semantics + hint.
+    assert id_cell.get_attribute( "role" ) == "button"
+    assert id_cell.get_attribute( "tabindex" ) == "0"
+    assert id_cell.get_attribute( "title" ) == "Click to copy ID"
+    # Cell DISPLAYS only the 8-char prefix (the full uuid lives on the row).
+    assert id_cell.text_content().strip() == _FULL_UUID[ :8 ]
+
+
+def test_id_cell_click_copies_full_uuid_to_clipboard( page ):
+    page.context.grant_permissions( [ "clipboard-read", "clipboard-write" ] )
+    _open_card( page, tasks=_TASKS_UUID )
+    id_cell = _row( page, _FULL_UUID ).locator( "td.task-col-id" )
+    id_cell.click()
+    # Transient no-reflow "copied" flash appears...
+    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    # ...and the FULL uuid (not the 8-char prefix) landed on the real clipboard.
+    clip = page.evaluate( "() => navigator.clipboard.readText()" )
+    assert clip == _FULL_UUID, f"clipboard has { clip!r }, expected full uuid"
+
+
+def test_id_cell_keyboard_enter_copies_full_uuid( page ):
+    page.context.grant_permissions( [ "clipboard-read", "clipboard-write" ] )
+    _open_card( page, tasks=_TASKS_UUID )
+    id_cell = _row( page, _FULL_UUID ).locator( "td.task-col-id" )
+    id_cell.focus()
+    page.keyboard.press( "Enter" )
+    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    assert page.evaluate( "() => navigator.clipboard.readText()" ) == _FULL_UUID
+
+
+def test_id_cell_copied_flash_does_not_reflow_row( page ):
+    """The copied state is a same-width color/overlay change (absolutely-positioned
+    ✓ badge) — the row width MUST be byte-identical copied vs. not (F1 acceptance:
+    row width unchanged; keeps the visual snapshot stable)."""
+    page.context.grant_permissions( [ "clipboard-read", "clipboard-write" ] )
+    _open_card( page, tasks=_TASKS_UUID )
+    row     = _row( page, _FULL_UUID )
+    id_cell = row.locator( "td.task-col-id" )
+    width_before = row.bounding_box()[ "width" ]
+    id_cell.click()
+    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    width_after = row.bounding_box()[ "width" ]
+    assert width_after == width_before, f"row reflowed on copy: { width_before } → { width_after }"
