@@ -96,6 +96,13 @@ export {
   type MissedBadgeRendererOptions,
   type MissedStoreLike,
 } from "./MissedBadgeRenderer";
+// Lane L4 (v0.1.9) — top nav / logout bar (PORT of lupin-nav.js).
+export {
+  createNavBarRenderer,
+  type NavBarRenderer,
+  type NavBarRendererOptions,
+  type NavAuthPort,
+} from "./NavBarRenderer";
 export {
   createFleetStatusRenderer,
   type FleetStatusRenderer,

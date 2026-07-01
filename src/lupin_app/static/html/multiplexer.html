@@ -46,6 +46,13 @@
     <script src="/static/js/vendor/purify.min.js"></script>
 </head>
 <body>
+    <!-- Lane L4 (v0.1.9) — top nav / logout bar mount (PORT of lupin-nav.js).
+         NavBarRenderer builds the <nav.lupin-nav> into this div (first child of
+         <body>); styled by the already-linked lupin-nav.css (head, above).
+         Body-padding for the fixed nav is DEFERRED to the E2E visual-snapshot
+         check (F-K-D3) — a scoped mux override is added ONLY if the snapshot
+         shows a fixed-nav / page-frame collision. -->
+    <div id="lupin-nav-mount" data-testid="multiplexer-lupin-nav-mount"></div>
     <!-- WP4 master-detail two-pane shell (multiplexer parity, 2026-06-10 —
          ports notifications.js master-detail; ReadingPaneRenderer mounts on
          .content-shell). In vertical mode (default) .content-shell + .left-column

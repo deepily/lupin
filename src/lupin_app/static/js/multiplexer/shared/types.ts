@@ -734,6 +734,10 @@ export interface BootCompletePayload {
     // "mounted" emitted after the section-toolbar mounts at the NEW-LANE MOUNT
     // SLOT. Optional per the forward/backward-compat pattern.
     sectionToolbarRenderer?     : string;
+    // Lane L4 (v0.1.9): literal "mounted" emitted after the top nav / logout
+    // bar mounts at the NEW-LANE MOUNT SLOT. Optional per the same
+    // forward/backward-compat pattern.
+    navBarRenderer?             : string;
   };
 }
 
