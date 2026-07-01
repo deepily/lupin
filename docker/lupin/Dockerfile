@@ -136,6 +136,18 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
 #     visual-baseline tests (12 ERRORs in the 2026-04-27 run). Authoritative
 #     list re-extracted via `playwright install-deps chromium --dry-run`
 #     against the existing image. Refresh when playwright bumps a major.
+#   - fonts-dejavu-core / -extra (bug a5559b49, 2026-06-30): the WG-1 dry-run
+#     list ALSO omitted DejaVu, which `--with-deps` used to pull in. Lupin's CSS
+#     stacks all terminate in the generic `sans-serif` (named fonts -apple-system
+#     / Segoe UI / Roboto / Helvetica Neue do not exist on Linux), so fontconfig
+#     falls through to the terminal generic. WITHOUT DejaVu, `sans-serif` resolves
+#     to fonts-wqy-zenhei (WenQuanYi Zen Hei — a CJK face) IN THE CONTAINER, while
+#     the HOST (which has fonts-dejavu-core) resolves to DejaVu Sans. Every page's
+#     body text then renders in a different typeface container-vs-host → ALL 37
+#     visual baselines mismatch (baselines are host-captured). Adding DejaVu makes
+#     `fc-match sans-serif` → DejaVu Sans in the container, matching the host and
+#     the host-captured baselines. Guarded by src/tests/e2e_ui/test_render_env_fingerprint.py.
+#     Root-cause: src/rnd/v0.1.9/2026.06.30-visual-regression-env-drift-root-cause.md
 # ----------------------------------------------------------------------------
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -153,6 +165,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libgbm1 libpango-1.0-0 libcairo2 libasound2 \
         libx11-6 libxcb1 libxext6 libwayland-client0 \
         libfontconfig1 libfreetype6 xvfb \
+        fonts-dejavu-core fonts-dejavu-extra \
         fonts-noto-color-emoji fonts-unifont xfonts-cyrillic xfonts-scalable \
         fonts-liberation fonts-ipafont-gothic fonts-wqy-zenhei \
         fonts-tlwg-loma-otf fonts-freefont-ttf
