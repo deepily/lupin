@@ -148,6 +148,19 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
 #     `fc-match sans-serif` → DejaVu Sans in the container, matching the host and
 #     the host-captured baselines. Guarded by src/tests/e2e_ui/test_render_env_fingerprint.py.
 #     Root-cause: src/rnd/v0.1.9/2026.06.30-visual-regression-env-drift-root-cause.md
+#   - libfreetype6 CONTAINER-CANONICAL (task 47e0dfa9 / 6975970a residual, 2026-07-01):
+#     libfreetype6 is intentionally left UNPINNED here — the container's freetype patch
+#     level (currently 2.11.1+dfsg-1ubuntu0.3) is the AUTHORITATIVE baseline rasterizer.
+#     Visual baselines are captured in-container (Option-1, 6975970a: 37/37 green) and the
+#     :8000 merge gate renders in-container, so container-vs-baseline is always aligned.
+#     The host dev box sits one security-patch behind (…0.2); that patch delta is a benign
+#     AA glyph-edge axis (~0.1px), so HOST-side `-k visual` dev runs are NON-AUTHORITATIVE
+#     (informational only — trust the :8000 gate). We deliberately do NOT pin both sides:
+#     downgrading the container to …0.2 would REVERT a security update (and …0.2 is gone
+#     from the apt security pocket), and upgrading the host is a non-reproducible box
+#     mutation. The fingerprint guard asserts freetype MAJOR only for exactly this reason
+#     (a full-version pin would false-fail the intentionally-unaligned host). Decision:
+#     src/rnd/v0.1.9/2026.06.30-visual-regression-env-drift-root-cause.md §Resolution (Option-2).
 # ----------------------------------------------------------------------------
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \

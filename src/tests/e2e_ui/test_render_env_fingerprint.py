@@ -44,9 +44,19 @@ import pytest
 # mismatch here means the render binary drifted out from under the baselines.
 CHROMIUM_EXPECTED_BUILD = "1208"
 
-# FreeType is the glyph rasterizer. Only the MAJOR line is load-bearing for baseline
-# stability (patch deltas are absorbed by the hinting=none / disable-lcd flags in
-# conftest.py); a MAJOR bump would change rasterization enough to invalidate baselines.
+# FreeType is the glyph rasterizer. This guard asserts the MAJOR line ONLY — deliberately,
+# NOT because patch deltas are cosmetically irrelevant. Task 6975970a proved the opposite:
+# the host↔container patch delta (host 2.11.1+dfsg-1ubuntu0.2 vs container …0.3) shifts
+# glyph-edge anti-aliasing just past the 0.1px threshold — a real, if benign, AA axis.
+# The resolution (task 47e0dfa9, Option-2, 2026-07-01) is CONTAINER-CANONICAL: baselines
+# are captured in-container and the :8000 merge gate renders in-container, so the gate is
+# always self-consistent at the container's freetype patch level. The host dev box sits one
+# security patch behind, so HOST-side `-k visual` runs are NON-AUTHORITATIVE on glyph edges.
+# This guard therefore stays MAJOR-only ON PURPOSE: it runs on BOTH :7999 (host, …0.2) and
+# :8000 (container, …0.3), so a FULL-version assertion would false-fail the intentionally-
+# unaligned host. A MAJOR bump WOULD change rasterization enough to invalidate baselines, so
+# that remains load-bearing and asserted. Decision + rejected "pin both sides" alternatives:
+# src/rnd/v0.1.9/2026.06.30-visual-regression-env-drift-root-cause.md §Resolution (Option-2).
 FREETYPE_EXPECTED_MAJOR = "2"
 
 
