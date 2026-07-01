@@ -226,5 +226,113 @@ def test_poll_once_summary_carries_pokes_fired( tmp_path ):
     assert "pokes_fired" in summary and summary[ "pokes_fired" ] == 0       # empty fleet → no pokes
 
 
+# ── c9575068: awaiting-user honored-hold suppresses the harsh STUCK poke ──────
+#
+# A session with a FRESH HONORED hold declaring awaiting:user (or holding ≥1 open
+# user-gate) is MANAGER-AWAITING-RICK — advisory, NOT wedged. The stuck-tier poke
+# must SUPPRESS the "you appear STUCK — wedged?" escalation for it, mirroring the
+# other three detectors' not-owed suppression. The truth lives in the HOLD (the
+# 6929f4ac open-gate override reclassifies this state ACTIVE in owed_class, so the
+# store classification cannot see it). Repro: Tiberius session eb4b105f, hold
+# awaiting:user:rick + 4 open pending_user_gates, DM'd "you appear STUCK" on a
+# ~60s cadence. Seam is INERT (fail-SAFE) when the hold-reader is unwired / the
+# read hiccups / the hold is not honored — today's poke behavior is preserved.
+
+def _honored_hold( **extra ):
+    hold = { "held_at": NOW.isoformat(), "ttl_seconds": 7200, "reason": "awaiting Rick" }
+    hold.update( extra )
+    return hold
+
+
+def _reader( sid_to_hold ):
+    return lambda sid: sid_to_hold.get( sid )
+
+
+def test_awaiting_user_honored_hold_suppresses_stuck_poke():
+    """RED→GREEN (c9575068): a LIVE+stuck session whose FRESH HONORED hold declares
+    awaiting:user:rick is NOT poked — it is correctly parked on Rick, not wedged."""
+    gw   = _GW()
+    hold = _honored_hold( awaiting="user:rick", work_owed=True )
+    job  = _job( gw, poke_stall_threshold_seconds=0,
+                 hold_reader_fn=_reader( { "s1": hold } ) )
+    for k in range( 5 ):
+        assert job._auto_poke( _live_stuck(), NOW + datetime.timedelta( seconds=k * 100 ), [ ] ) == 0
+    assert _pokes( gw ) == [ ]
+
+
+def test_open_user_gates_honored_hold_suppresses_stuck_poke():
+    """A FRESH HONORED hold with ≥1 OPEN pending_user_gate (awaiting=none) also
+    suppresses — all pending gates awaiting the user IS the awaiting-Rick state."""
+    gw   = _GW()
+    hold = _honored_hold( awaiting="none",
+                          pending_user_gates=[ { "answered": False, "last_asked_ts": NOW.isoformat() } ] )
+    job  = _job( gw, poke_stall_threshold_seconds=0,
+                 hold_reader_fn=_reader( { "s1": hold } ) )
+    assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 0
+    assert _pokes( gw ) == [ ]
+
+
+def test_no_hold_reader_seam_still_pokes():
+    """INERT seam (fail-SAFE): with no hold-reader wired, the stuck poke fires
+    exactly as today — the suppression can only ADD, never silence by default."""
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0 )                       # hold_reader_fn defaults None
+    assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_non_honored_hold_still_pokes():
+    """A STALE (past-TTL) hold is NOT honored → no suppression → the genuinely
+    stuck session is still poked (a dead hold cannot defend quiescence)."""
+    gw    = _GW()
+    stale = { "held_at": ( NOW - datetime.timedelta( hours=3 ) ).isoformat(),
+              "ttl_seconds": 60, "reason": "old", "awaiting": "user:rick" }
+    job   = _job( gw, poke_stall_threshold_seconds=0,
+                  hold_reader_fn=_reader( { "s1": stale } ) )
+    assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_hold_read_hiccup_still_pokes():
+    """A hold-reader that RAISES is swallowed (observer invariant) → no
+    suppression → the stuck session is still poked (never silence on a hiccup)."""
+    def _boom( sid ): raise RuntimeError( "store hiccup" )
+    gw  = _GW()
+    job = _job( gw, poke_stall_threshold_seconds=0, hold_reader_fn=_boom )
+    assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_honored_hold_not_awaiting_user_still_pokes():
+    """A FRESH HONORED hold that does NOT declare awaiting:user and has NO open
+    user-gate (awaiting=none, gates all answered) does NOT suppress — a genuinely
+    stuck session carrying an unrelated hold is still poked."""
+    gw   = _GW()
+    hold = _honored_hold( awaiting="none",
+                          pending_user_gates=[ { "answered": True } ] )
+    job  = _job( gw, poke_stall_threshold_seconds=0,
+                 hold_reader_fn=_reader( { "s1": hold } ) )
+    assert job._auto_poke( _live_stuck(), NOW, [ ] ) == 1
+    assert len( _pokes( gw ) ) == 1
+
+
+def test_session_awaiting_user_predicate_branches():
+    """Direct leaf coverage of the _session_awaiting_user predicate across every
+    branch: unwired seam, honored+awaiting-user, honored+open-gate, honored+neither."""
+    job_inert = _job( _GW() )                                              # no hold-reader
+    assert job_inert._session_awaiting_user( "s1", NOW ) is False
+    job = _job( _GW(), hold_reader_fn=_reader( {
+        "await": _honored_hold( awaiting="user:rick" ),
+        "gate" : _honored_hold( awaiting="none",
+                                pending_user_gates=[ { "answered": False } ] ),
+        "plain": _honored_hold( awaiting="none" ),
+        "absent": None,
+    } ) )
+    assert job._session_awaiting_user( "await",  NOW ) is True
+    assert job._session_awaiting_user( "gate",   NOW ) is True
+    assert job._session_awaiting_user( "plain",  NOW ) is False
+    assert job._session_awaiting_user( "absent", NOW ) is False
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

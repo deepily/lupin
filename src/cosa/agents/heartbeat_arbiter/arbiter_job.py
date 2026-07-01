@@ -94,7 +94,7 @@ from cosa.agents.heartbeat_arbiter.arbiter_routing import (
 from lupin_mcp.persona_normalization import canonical_persona_key
 # 6929f4ac outward-twin backstop (§9.2): the pure hold/gate readers reused so the
 # arbiter resurfaces a dark session's aged user-gate to Rick.
-from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path, declared_work_owed
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import get_pending_user_gates, hold_path, declared_work_owed, is_honored
 from lupin_cli.claude_code.hooks.lib.heartbeat_user_gates import open_gates, aged_open_gates
 # Proactive-manager A2/A3 (fcb5dbc0): the PURE D4 operator-gate urgency router — the
 # arbiter is its single thin consumer (interrupt urgent / digest normal / queue low).
@@ -3029,6 +3029,48 @@ class ArbiterConsumerJob( AgenticJobBase ):
             f"takes NO destructive action."
         )
 
+    def _session_awaiting_user( self, session_id, now ):
+        """
+        c9575068: is this session in the MANAGER-AWAITING-RICK state the stuck-poke
+        must NOT treat as wedged? True iff the session carries a FRESH HONORED hold
+        that EITHER declares `awaiting: user:...` OR holds ≥1 OPEN pending_user_gate
+        (all pending gates awaiting the user). Either signal means the session is
+        correctly parked on Rick with a defended quiescence — advisory, not stuck.
+
+        Mirrors the other three detectors' not-owed suppression (`_has_live_owed_work`
+        / `_check_manager_acks` / `_check_manager_staleness`), but keys on the HOLD
+        rather than owed_class: the 6929f4ac open-gate override reclassifies an
+        awaiting-user session as CLASS_ACTIVE in owed_class (it owes Rick a RE-ASK,
+        so it must keep re-asking, not go dark), so the store classification CANNOT
+        see this state — the awaiting-user truth lives ONLY in the hold artifact.
+        Suppressing the arbiter's harsh stuck-poke here does NOT stop the Stop-hook's
+        own bounded re-ask channel (poke_cap=3, by design — reference memory
+        reference_user_gate_poke_overrides_honored_hold); it only silences the
+        inappropriate "you appear STUCK — wedged?" escalation on top of it.
+
+        Requires:
+            - session_id is a string; now is an aware datetime
+
+        Ensures:
+            - returns False when the hold-reader seam is unwired (None), the read
+              raises, or the hold is absent / not-honored — INERT / fail-SAFE
+              (today's poke behavior preserved; never silences a real stuck-poke)
+            - returns True iff is_honored( hold, now ) AND ( awaiting starts "user:"
+              OR open_gates( pending_user_gates ) is non-empty ); never raises
+        """
+        if self._hold_reader_fn is None:
+            return False                                        # inert seam → today's behavior
+        try:
+            hold = self._hold_reader_fn( session_id )
+        except Exception:
+            return False                                        # store hiccup → fail SAFE (observer invariant)
+        if not is_honored( hold, now ):
+            return False                                        # no fresh, reasoned hold → not defended
+        awaiting = hold.get( "awaiting" )
+        if isinstance( awaiting, str ) and awaiting.startswith( "user:" ):
+            return True
+        return bool( open_gates( get_pending_user_gates( hold ) ) )
+
     def _auto_poke( self, fleet_view, now, active_managers ):
         """
         2b-3 auto-poke: fire a BOUNDED, TARGETED, NON-DESTRUCTIVE wake-nudge at each
@@ -3058,6 +3100,16 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return 0
 
         pokeable = self._pokeable_sessions( fleet_view )
+
+        # c9575068: SUPPRESS the harsh stuck-poke for a session that is correctly
+        # MANAGER-AWAITING-RICK — a fresh honored hold declaring awaiting:user (or
+        # holding an open user-gate). Such a session is advisory (the case-16
+        # MANAGER-AWAITING-USER path emits its one-time notice), NOT wedged — mirror
+        # the other three detectors' not-owed suppression. Dropping it from `pokeable`
+        # ends any in-flight poke episode via the clear-on-resume loop below (the cap
+        # re-arms), exactly as a recovery would.
+        pokeable = { sid: v for sid, v in pokeable.items()
+                     if not self._session_awaiting_user( sid, now ) }
 
         # episode bookkeeping: a session no longer pokeable ended its episode →
         # clear its state so the cap re-arms (clear-on-resume, mirrors _auto_ping).
