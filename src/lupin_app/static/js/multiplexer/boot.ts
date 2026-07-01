@@ -26,7 +26,7 @@
 import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
 import { createAuthManager } from "./auth/AuthManager";
-import { redirectToLoginIfUnauthenticated } from "./auth/authGuard";
+import { redirectToLoginIfUnauthenticated, logout } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
@@ -51,6 +51,7 @@ import {
   createFleetStatusRenderer,
   createTaskListRenderer,
   createSectionToolbarRenderer,
+  createNavBarRenderer,
   type TtsPreviewSliderRenderer,
 } from "./render";
 import { DEFAULT_TTS_FRACTION } from "./render/TtsPreviewSliderRenderer";
@@ -405,6 +406,26 @@ function bootMultiplexer(): void {
   // each lane also updates bootCompletePayload.handlers + the AC9 console line.
   // ===============================================================
 
+  // Lane L4 (v0.1.9) — top nav / logout bar (PORT of lupin-nav.js → mux-TS).
+  // Mounts into #lupin-nav-mount (first child of <body>). auth adapter:
+  //   isAuthenticated ← persisted access token (legacy presence-semantics);
+  //   email           ← AuthManager.getCurrentUserEmail() (null-guarded, F-K-D2);
+  //   logout          ← authGuard.logout(storage, window.location) — clears the
+  //                     PERSISTED tokens (F-K-D1) then redirects to LOGIN_PATH.
+  // Re-renders on auth_state_change (SPA has no full reload — F-K-D4).
+  const navBarRenderer = createNavBarRenderer({
+    eventBus,
+    auth : {
+      isAuthenticated     : (): boolean       => storage.getAccessToken() !== null,
+      getCurrentUserEmail : (): string | null => authManager.getCurrentUserEmail(),
+      logout              : (): void          => logout( storage, window.location ),
+    },
+    getActivePath : (): string => window.location.pathname,
+  });
+  const navBarMountEl = document.getElementById("lupin-nav-mount");
+  if (navBarMountEl === null) throw new Error("multiplexer: #lupin-nav-mount not found");
+  navBarRenderer.mount(navBarMountEl);
+
   // Lane B WP2 — CC-session strip renderer. Mounts on <main.container> (like
   // FocusTrayRenderer) because the renderer queries #cc-session-strip AND its
   // child controls as descendants of root — it cannot mount on
@@ -596,6 +617,8 @@ function bootMultiplexer(): void {
       taskListRenderer            : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
       sectionToolbarRenderer      : "mounted",
+      // Lane L4 (v0.1.9) — top nav / logout bar.
+      navBarRenderer              : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -623,6 +646,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] fleetStatusRenderer:mounted");
   console.log("[multiplexer] taskListRenderer:mounted");
   console.log("[multiplexer] sectionToolbarRenderer:mounted");
+  console.log("[multiplexer] navBarRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose
