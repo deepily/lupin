@@ -168,3 +168,5 @@ coverage/
 .claude-session.md
 .claude-memento.md
 .claude-memento-*.md
+io/mementos/
+lupin-worktrees/
