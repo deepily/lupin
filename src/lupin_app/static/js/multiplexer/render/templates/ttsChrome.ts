@@ -21,10 +21,20 @@
 //     else enabled → onClearAll
 //   - the 6-state toggle/stop/skip matrix below is UNCHANGED
 //
-// State → control enable/disable matrix:
+// desync-fix (2026-07-02, Tiberius ruling msg 193ae189): the "🔇 Nothing in the
+// queue" empty panel is QUEUE-driven, NOT audio-idle-driven. renderTtsChrome
+// short-circuits to the empty panel iff `opts.queueEmpty` (the renderer computes
+// it as activeItem===null && pending empty). When the queue is NON-empty the
+// chrome renders for ANY audio state — including `idle` (item queued but not yet
+// speaking, the common state until the playback consumer 4f14d38f lands). This
+// fixes the pre-fix bug where an idle-but-fed queue rendered the empty panel AND
+// the cards at once (only latent because pre-F0-d the queue was always empty).
+//
+// State → control enable/disable matrix (drives HEADER/CONTROLS only; the
+// empty-vs-populated decision is queueEmpty, above):
 //   | state    | toggle | stop | skip |
 //   |----------|--------|------|------|
-//   | idle     |   ✗    |  ✗  |  ✗  |
+//   | idle     |   ✗    |  ✗  |  ✗  |   (queue non-empty, nothing playing yet)
 //   | decoding |   ✗    |  ✗  |  ✗  |
 //   | playing  | "Pause"|  ✓  |  ✓  |
 //   | paused   |"Resume"|  ✓  |  ✓  |
@@ -49,6 +59,10 @@ export interface TtsChromeHandlers {
 export interface TtsChromeOpts {
   state              : AudioPlaybackState;
   queueLength        : number;
+  // desync-fix — QUEUE-driven empty gate (activeItem===null && pending empty),
+  // computed by the renderer. true → the empty panel; false → the chrome (for
+  // ANY audio state). Decouples the empty-vs-populated decision from audio state.
+  queueEmpty         : boolean;
   currentTrackName?  : string;
   // WP3 — focus mode: the queue is paused awaiting an action-required response.
   // The template is a PURE function of this flag; WHERE the flag lives (the §8.3
@@ -64,14 +78,14 @@ interface ControlState {
   skipEnabled   : boolean;
 }
 
-// L2 (mux MVP-finish): `idle` short-circuits to the empty-state BEFORE these
-// helpers, so both take the idle-excluded state. Narrowing (not a runtime
-// guard) keeps c8 branch-coverage honest — there is no dead `idle` arm to
-// leave uncovered once idle renders the `🔇 Nothing in the queue` panel.
-type ActiveState = Exclude<AudioPlaybackState, "idle">;
-
-function deriveControlState(state: ActiveState): ControlState {
+// desync-fix: the empty panel is now QUEUE-driven (queueEmpty short-circuit), so
+// these helpers see the FULL AudioPlaybackState — `idle` is reachable here when
+// the queue is non-empty but nothing is speaking yet. idle → all three transport
+// controls disabled (matrix row idle = ✗✗✗).
+function deriveControlState(state: AudioPlaybackState): ControlState {
   switch (state) {
+    case "idle":
+      return { toggleEnabled: false, toggleLabel: "—",      toggleAction: "noop",   stopEnabled: false, skipEnabled: false };
     case "playing":
       return { toggleEnabled: true,  toggleLabel: "Pause",  toggleAction: "pause",  stopEnabled: true,  skipEnabled: true  };
     case "paused":
@@ -85,7 +99,7 @@ function deriveControlState(state: ActiveState): ControlState {
   }
 }
 
-function rootClass(state: ActiveState): string {
+function rootClass(state: AudioPlaybackState): string {
   // Per Q-B8 — port .is-playing-current / .is-paused-current verbatim.
   const base = "tts-chrome";
   if (state === "playing") return `${base} is-playing-current`;
@@ -94,11 +108,11 @@ function rootClass(state: ActiveState): string {
 }
 
 /**
- * L2 (mux MVP-finish): the idle empty-state panel — legacy parity for
- * `🔇 Nothing in the queue` (`notifications.html:589+`, class
- * `.tts-queue-empty-state`). STATE-driven (`audio.state() === "idle"`), NOT
- * count-driven. Carries the same `data-testid` + `data-state` as the active
- * chrome so E2E observability is uniform across all six states.
+ * The empty-state panel — legacy parity for `🔇 Nothing in the queue`
+ * (`notifications.html:589+`, class `.tts-queue-empty-state`). desync-fix:
+ * QUEUE-driven (rendered iff the item queue is empty), not audio-idle-driven.
+ * Carries `data-state="idle"` (an empty queue means nothing is playing) + the
+ * shared `data-testid` so E2E observability is uniform.
  */
 function renderTtsEmpty(): HTMLElement {
   const root = document.createElement("div");
@@ -130,11 +144,12 @@ export function renderTtsChrome(
   opts     : TtsChromeOpts,
   handlers : TtsChromeHandlers,
 ): HTMLElement {
-  // L2 (mux MVP-finish): idle → the `🔇 Nothing in the queue` empty panel.
-  // STATE-driven, not count-driven — the burst counter is irrelevant when idle.
-  if (opts.state === "idle") return renderTtsEmpty();
+  // desync-fix: QUEUE-driven empty panel. Empty iff the item queue is empty
+  // (activeItem===null && pending empty — computed by the renderer as
+  // opts.queueEmpty), NOT iff audio is idle. A non-empty queue always renders the
+  // chrome, even at idle (item queued, not yet speaking).
+  if (opts.queueEmpty) return renderTtsEmpty();
 
-  // opts.state is now narrowed to ActiveState (idle excluded above).
   const ctl = deriveControlState(opts.state);
   const root = document.createElement("div");
   root.className = rootClass(opts.state);
@@ -215,15 +230,17 @@ export function renderTtsChrome(
   const resume = root.querySelector<HTMLButtonElement>(".tts-btn-resume");
   if (resume !== null) resume.addEventListener("click", () => handlers.onResume());
 
-  // WP3 — Clear-all: disabled + hidden when the queue is empty, else enabled and
-  // wired to onClearAll (legacy "hidden+disabled when no items").
+  // WP3 + desync-fix — Clear-all: the chrome renders ONLY when the queue is
+  // non-empty (queueEmpty short-circuits to the empty panel above), so Clear-all
+  // is always enabled + shown here, and wired to onClearAll when supplied. (This
+  // also fixes the old queueLength===0 gate, which wrongly disabled Clear-all for
+  // an active-item-only queue — active head present, zero pending.)
   const clearAll = root.querySelector<HTMLButtonElement>(".tts-btn-clear-all");
   /* c8 ignore next */ // defensive: html`` always produces clear-all button.
   if (clearAll !== null) {
-    const empty = opts.queueLength === 0;
-    clearAll.disabled = empty;
-    clearAll.hidden   = empty;
-    if (!empty && handlers.onClearAll !== undefined) {
+    clearAll.disabled = false;
+    clearAll.hidden   = false;
+    if (handlers.onClearAll !== undefined) {
       const onClearAll = handlers.onClearAll;
       clearAll.addEventListener("click", () => onClearAll());
     }

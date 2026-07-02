@@ -231,6 +231,12 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     const pendingCount = tts.itemQueueLength();
     // Section-header chip = TOTAL notification items (active head + pending tail).
     const total        = (activeItem !== null ? 1 : 0) + pending.length;
+    // desync-fix (Tiberius ruling 2026-07-02): the empty panel is QUEUE-driven,
+    // not audio-idle-driven. The chrome shows the empty state iff the item queue
+    // is truly empty (no active head AND no pending tail); otherwise it renders
+    // the transport chrome + cards even while audio is idle (item queued, not yet
+    // speaking). This prevents "🔇 Nothing in the queue" rendering alongside cards.
+    const queueEmpty   = activeItem === null && pending.length === 0;
 
     // Transport chrome (WP3). count = pending (waiting) item count. Focus mode is
     // deferred (§8.3 — its own follow-on cycle), so focusMode is omitted (false).
@@ -238,6 +244,7 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
       {
         state       : this.stores.audio.state(),
         queueLength : pendingCount,
+        queueEmpty,
         // currentTrackName omitted — Phase 0 prereq #3 pending.
       },
       {
