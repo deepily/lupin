@@ -91,15 +91,11 @@
     color : #92400e;
 }
 
-/* L2: `🔇 Nothing in the queue` idle empty-state — legacy parity for
-   `.tts-queue-empty-state` (notifications.css:531-537): centered italic muted. */
-.tts-chrome-empty .tts-queue-empty-state {
-    padding     : 10px;
-    text-align  : center;
-    color       : #6c757d;
-    font-size   : 14px;
-    font-style  : italic;
-}
+/* Idle empty-state text — DE-FORKED (WP7 single-source, 2026-07-02): the empty
+   panel's `tts-queue-empty-state` element is now styled by the single shared
+   declaration in shared/notifications-surface.css (linked by multiplexer.html),
+   identical to legacy. No mux-side re-declaration here (was a fork of the legacy
+   rule). `.tts-chrome-empty` remains the mux-only root class the template sets. */
 
 /* ============================================================================
    Controls row
