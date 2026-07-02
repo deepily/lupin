@@ -101,6 +101,29 @@ def test_fresh_manager_gets_nothing():
     assert gw.sent == [ ] and escal == [ ]
 
 
+# ── 46eb7b98: union freshest_age future-mtime lower bound (097778b8 sibling) ──
+
+def test_future_mtime_twin_does_not_suppress_stale_manager_poke():
+    """46eb7b98 (sibling of 097778b8): a manager incarnation whose union
+    freshest_age_s is NEGATIVE (future / corrupt mtime — clock skew) must NOT be
+    counted LIVE. Pre-fix the `fa < threshold` live-set test carries no lower
+    bound, so fa=-5 reads as fresh → the persona lands in live_personas → a
+    genuinely-stale twin of the SAME persona is twin-suppressed → the warranted
+    poke is silently swallowed (fail toward silence). Post-fix (0 <= fa) the
+    corrupt incarnation is not counted live → the stale twin pokes (fail toward
+    action). The eligibility gate at :3764-3765 already excludes negatives via
+    threshold>0, so the real 097778b8 sibling is the live_personas floor."""
+    gw  = _GW()
+    job = _job( gw )
+    snap = _snap(
+        _row( "dorky-future", "manager", -5,   persona="Dorky" ),      # future mtime → negative union age
+        _row( "dorky-stale",  "manager", 3000, persona="Dorky" ),      # genuinely stale twin, in [thr, max]
+    )
+    fired = job._check_manager_staleness( snap, NOW, active_managers=[ ] )
+    assert fired == 1                                                  # the stale twin pokes...
+    assert len( _stale_pokes( gw ) ) == 1                             # ...unshielded by the corrupt incarnation
+
+
 # ── 33949e83: store-health gate — MANAGER-STALE suppressed on a self-observed outage ──
 
 def test_manager_stale_suppressed_when_store_degraded():

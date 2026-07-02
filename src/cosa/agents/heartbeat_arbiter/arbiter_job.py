@@ -3745,7 +3745,13 @@ class ArbiterConsumerJob( AgenticJobBase ):
             persona  = row.get( "persona" )
             liveness = row.get( "liveness" )
             fa       = liveness.get( "freshest_age_s" ) if isinstance( liveness, dict ) else None
-            if persona and fa is not None and fa < self.manager_stale_poke_threshold_seconds:
+            # 0 <= fa lower bound (bug 46eb7b98, sibling of 097778b8): a FUTURE /
+            # corrupt union mtime (clock skew ⇒ negative freshest_age_s) is NOT
+            # ground-truth liveness → do not count it live, else it would shield a
+            # genuinely-stale twin of the same persona from its warranted poke.
+            # Fail toward action (poke), never toward silent suppression. (The
+            # eligibility gate below already excludes negatives via threshold>0.)
+            if persona and fa is not None and 0 <= fa < self.manager_stale_poke_threshold_seconds:
                 live_personas.add( persona )
 
         eligible   = { }
