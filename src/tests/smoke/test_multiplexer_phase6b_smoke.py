@@ -173,8 +173,9 @@ _BULK_INJECT_50_PROMPTS_JS = """
 
 def test_phase6b_functional_smoke():
     """AC8a — page loads; 3 action_required prompts render as interactive
-    widgets (`.action-required-widget`), one per response_type; tts-pane lifts
-    hidden + data-phase6-pending; `.tts-chrome` renders the control row."""
+    widgets (`.action-required-widget`), one per response_type; #tts-pane is live
+    (no `data-phase6-pending`) and, with an EMPTY queue on a fresh load, renders
+    the empty-state panel (desync-fix: queue-driven empty), not the control row."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -193,9 +194,15 @@ def test_phase6b_functional_smoke():
             assert tts_pane.evaluate( "el => el.hasAttribute('data-phase6-pending')" ) is False, (
                 "tts-pane still has data-phase6-pending after Phase 6b mount"
             )
-            # tts-chrome control row rendered.
-            assert page.locator( '#tts-pane .tts-controls' ).count() == 1, (
-                "tts-chrome controls not rendered inside #tts-pane"
+            # desync-fix (queue-driven empty): a fresh page has an EMPTY tts queue,
+            # so #tts-pane renders the empty-state panel (🔇 Nothing in the queue),
+            # NOT the control row — controls appear once an item is queued (the
+            # live-fed path is proven by the :8000 whole-chain E2E post-merge).
+            assert page.locator( '#tts-pane .tts-queue-empty-state' ).count() == 1, (
+                "tts-pane empty-state panel not rendered on a fresh (empty-queue) load"
+            )
+            assert page.locator( '#tts-pane .tts-controls' ).count() == 0, (
+                "tts-pane should render the empty panel (no control row) when the queue is empty"
             )
 
             # Inject 3 action_required prompts (one per response_type).
@@ -232,8 +239,9 @@ def test_phase6b_functional_smoke():
 def test_phase6b_no_pending_markers_after_mount():
     """AC2a / AC2b — post-mount, action-required widgets carry ZERO
     `data-phase6-pending` markers and ZERO `aria-disabled="true"` attributes.
-    The Phase 6a remnant marker on #tts-pane has been lifted by the
-    TtsChromeRenderer mount in boot.ts."""
+    #tts-pane's stub marker is now REMOVED from the static HTML (WP5 user-live
+    flip, 2026-07-02); boot.ts retains a defensive lift. Either way the page
+    carries zero `data-phase6-pending` after mount."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -247,7 +255,8 @@ def test_phase6b_no_pending_markers_after_mount():
             page.wait_for_selector( '.action-required-widget', timeout=2000 )
 
             # AC2a — NO data-phase6-pending markers anywhere on the page
-            # (Phase 6a's exact-count baseline was 1 for #tts-pane; Phase 6b lifts it).
+            # (#tts-pane's stub marker was removed from the HTML in the WP5 user-live
+            # flip; historically Phase 6b lifted it on mount — either way, count 0).
             pending_count = page.locator( '[data-phase6-pending="true"]' ).count()
             assert pending_count == 0, (
                 f"AC2a violated: {pending_count} elements still carry data-phase6-pending=true "
