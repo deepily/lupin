@@ -876,5 +876,96 @@ class TestWorkOwedFalseSuppression:
         assert job._classify_owed( [ "Krishna" ], self._FV ) == { "Krishna": CLASS_ACTIVE }
 
 
+# ── bug 26dd3afb: session-bridge mtime as a MANAGER-STALE veto ───────────────
+# The union `freshest_age_s` can read stale even while the manager is
+# demonstrably alive (its hooks-driven bridge file was touched seconds ago but
+# that mtime never reached the union — sid→bridge resolution gap, or a re-spun
+# twin whose live bridge is under a different session_id the live_personas guard
+# didn't catch: the 2026-07-02 Tiberius false-positive). A fresh bridge is
+# ground-truth liveness → veto the stale tier. Keyed by PERSONA (the always-
+# present analog of the sid-keyed union signal). Sibling of the hold-mtime 6th
+# signal (a1395315) which Tiberius lacked (no hold file).
+
+from lupin_mcp.persona_normalization import canonical_persona_key
+
+
+def _bridge_key( persona ):
+    return canonical_persona_key( persona ) or persona
+
+
+def test_fresh_bridge_vetoes_stale_manager():
+    """The Tiberius repro: a manager whose UNION age is stale (9000s) but whose
+    session-bridge mtime is fresh (60s) is VETOED — no poke, no advisory, no
+    episode started. Fresh bridge ⇒ not stale, regardless of comms silence."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "s_tib", "manager", 5000, persona="tiberius" ) )
+    bridge_mtimes = { _bridge_key( "tiberius" ): NOW.timestamp() - 60 }   # touched 60s ago → fresh
+    fired = job._check_manager_staleness( snap, NOW, [ ], bridge_mtimes=bridge_mtimes )
+    assert fired == 0
+    assert _stale_pokes( gw ) == [ ]
+    assert escal == [ ]
+    assert job._mgr_stale_since == { }                                    # episode NOT started
+
+
+def test_stale_bridge_does_not_veto():
+    """A stale bridge (mtime older than the threshold) does NOT veto — the manager
+    really is dark on every signal → the case-14 poke + advisory fire as before."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "s_dark", "manager", 5000, persona="tiberius" ) )
+    bridge_mtimes = { _bridge_key( "tiberius" ): NOW.timestamp() - 9000 }  # bridge equally stale
+    fired = job._check_manager_staleness( snap, NOW, [ ], bridge_mtimes=bridge_mtimes )
+    assert fired == 1
+    assert len( _stale_pokes( gw ) ) == 1
+
+
+def test_absent_persona_bridge_does_not_veto():
+    """A bridge map that lacks the subject persona (fresh bridge for someone else)
+    does NOT veto — the veto is persona-specific."""
+    gw = _GW()
+    job  = _job( gw )
+    snap = _snap( _row( "s_dark", "manager", 5000, persona="tiberius" ) )
+    bridge_mtimes = { _bridge_key( "someone_else" ): NOW.timestamp() - 60 }
+    fired = job._check_manager_staleness( snap, NOW, [ ], bridge_mtimes=bridge_mtimes )
+    assert fired == 1
+    assert len( _stale_pokes( gw ) ) == 1
+
+
+def test_bridge_mtimes_none_is_inert():
+    """bridge_mtimes=None (seam unwired / read failed) → veto inert → today's
+    behavior (poke fires). This is the fail-safe default."""
+    gw = _GW()
+    job  = _job( gw )
+    snap = _snap( _row( "s_dark", "manager", 5000, persona="tiberius" ) )
+    fired = job._check_manager_staleness( snap, NOW, [ ], bridge_mtimes=None )
+    assert fired == 1
+    assert len( _stale_pokes( gw ) ) == 1
+
+
+# ── the swallow-safe per-poll reader (mirrors _read_known_owners) ────────────
+
+def test_read_manager_bridge_mtimes_none_when_unwired():
+    """Seam unwired (bridge_mtimes_fn=None) → reader returns None (veto inert)."""
+    job = _job()
+    assert job._read_manager_bridge_mtimes() is None
+
+
+def test_read_manager_bridge_mtimes_passthrough():
+    """A wired reader's map is returned verbatim."""
+    m   = { "tiberius": 1234.5 }
+    job = _job( bridge_mtimes_fn=lambda: m )
+    assert job._read_manager_bridge_mtimes() == m
+
+
+def test_read_manager_bridge_mtimes_swallows_exception():
+    """A read that RAISES is swallowed → None (fail-SAFE: veto never suppresses a
+    genuine escalation on an infra hiccup)."""
+    def _boom():
+        raise RuntimeError( "bridge scan blew up" )
+    job = _job( bridge_mtimes_fn=_boom )
+    assert job._read_manager_bridge_mtimes() is None
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

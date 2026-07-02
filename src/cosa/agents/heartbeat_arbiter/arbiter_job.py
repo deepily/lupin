@@ -645,6 +645,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         worktree_janitor_fn      : Optional[ Callable ] = None,   # §4b janitor: per-poll abandoned-worktree reconcile (None → INERT, no sweep; the :8001 factory wires worktree_reaper.reconcile_worktrees)
         count_dm_as_liveness_fn  : Optional[ Callable ] = None,   # DM-toggle: per-poll INI re-read (None → lambda True; runtime-tunable)
         dm_activity_fn           : Optional[ Callable ] = None,   # DM-toggle: per-poll SENT-DM store read (None → inert; dm_ts None everywhere)
+        bridge_mtimes_fn         : Optional[ Callable ] = None,   # bug 26dd3afb: () -> {canonical_persona_key: freshest bridge mtime}; None → MANAGER-STALE veto INERT (fail-safe, today's behavior)
         bridge_discovery_fn      : Optional[ Callable ] = None,
         snapshot_sink            : Optional[ Callable ] = None,
         render_sink              : Optional[ Callable ] = None,
@@ -811,6 +812,12 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # to None, so unit/in-pool construction stays clean without injection.
         self._hold_mtime_fn   = hold_mtime_fn if hold_mtime_fn is not None else _default_hold_mtime_fn
         self._transcript_mtime_fn = transcript_mtime_fn if transcript_mtime_fn is not None else _default_transcript_mtime_fn
+        # bug 26dd3afb MANAGER-STALE bridge-mtime veto seam: () -> {canonical_persona_key:
+        # freshest bridge-file mtime}. UNLIKE the mtime readers above this defaults to
+        # None-INERT (NOT a real reader) — the veto is a NEW suppressor, so an unwired
+        # seam must degrade to TODAY'S behavior (never silently suppress a genuine dark
+        # manager). The :8001 factory wires the real persona-scan reader.
+        self._bridge_mtimes_fn = bridge_mtimes_fn
         # L1 (2026-06-17) store-awareness seam: per-poll owed-work reader (the
         # arbiter as reader #2 of the one-store/three-readers design). Default
         # None keeps the seam INERT — every manager classifies UNKNOWN → the two
@@ -1172,6 +1179,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         owed_items  = self._read_owed( eval_personas )                    # ONE per-poll owed read, shared below
         known_owners = self._read_known_owners()                          # 262c59f6 (A): known store-owner set (None/empty → downgrade inert)
         store_degraded = self._store_read_degraded( owed_items, eval_personas )  # 33949e83: self-observed store outage → gate MANAGER-DOWN/STALE
+        manager_bridge_mtimes = self._read_manager_bridge_mtimes()        # bug 26dd3afb: persona→bridge-mtime map for the MANAGER-STALE veto (None → inert)
         owed_class  = self._classify_owed( eval_personas, fleet_view, owed=owed_items, known_owners=known_owners )
         # bug 436a366b: the AUTHORITATIVE store dependency ring — the deadlock
         # escalation is corroborated against THIS, never the derived holding_on
@@ -1232,7 +1240,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         rendered      = self._publish_fleet_snapshot( fleet_view, now, count_dm )
         # post-game F2/F3 detectors read the FULL (include_offline=True) detection
         # snapshot + published count the publish step just stashed on the instance.
-        manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers, owed_class=owed_class, store_read_degraded=store_degraded )  # #F2 (L1 store-aware, lane 4; 33949e83 store gate)
+        manager_stale_pokes = self._check_manager_staleness( self._last_full_snapshot, now, active_managers, owed_class=owed_class, store_read_degraded=store_degraded, bridge_mtimes=manager_bridge_mtimes )  # #F2 (L1 store-aware, lane 4; 33949e83 store gate; bug 26dd3afb bridge-mtime veto)
         fleet_dark          = self._check_fleet_dark( self._last_full_snapshot, self._last_published_n, now )
         # 6929f4ac outward-twin backstop: resurface a dark session's aged user-gate
         # to Rick (case 18). Reads the FULL snapshot (offline rows included) so a
@@ -2596,6 +2604,27 @@ class ArbiterConsumerJob( AgenticJobBase ):
             return None        # store hiccup → None → fail SAFE (observer invariant)
         return { canonical_persona_key( o ) for o in ( owners or ( ) ) if o }
 
+    def _read_manager_bridge_mtimes( self ):
+        """
+        bug 26dd3afb: ONE swallow-safe read of the live persona'd bridge files →
+        { canonical_persona_key : freshest bridge-file mtime (epoch) }, or None when
+        the seam is unwired / the read raised. Feeds the MANAGER-STALE bridge-mtime
+        VETO — a fresh bridge is ground-truth liveness the union `freshest_age_s`
+        can miss (sid→bridge resolution gap, or a re-spun twin under a new sid).
+
+        Ensures:
+            - returns None when the seam is unwired (bridge_mtimes_fn is None) or the
+              read RAISED (swallowed → None = fail-SAFE: the veto goes INERT = today's
+              behavior, never silently suppressing a genuine dark-manager escalation)
+            - otherwise returns the persona→mtime map from the injected reader; never raises
+        """
+        if self._bridge_mtimes_fn is None:
+            return None
+        try:
+            return self._bridge_mtimes_fn()
+        except Exception:
+            return None        # bridge-scan hiccup → None → fail SAFE (observer invariant)
+
     def _store_read_degraded( self, owed_items, personas ):
         """
         33949e83 store-health gate: True iff the per-poll owed store read was EXPECTED
@@ -3608,7 +3637,7 @@ class ArbiterConsumerJob( AgenticJobBase ):
         # the Manager goal echo (inert when unconfigured).
         return self._append_goal_line( body, "manager" )
 
-    def _check_manager_staleness( self, snapshot, now, active_managers, owed_class=None, store_read_degraded=False ):
+    def _check_manager_staleness( self, snapshot, now, active_managers, owed_class=None, store_read_degraded=False, bridge_mtimes=None ):
         """
         F2: the SECOND, role-gated pokeable criterion — a MANAGER-role session
         whose freshest union signal is older than the threshold gets a bounded
@@ -3725,6 +3754,24 @@ class ArbiterConsumerJob( AgenticJobBase ):
                 self._log( "arbiter_manager_stale_twin_suppressed",
                            session_id=sid, persona=persona, freshest_age_s=age )
                 continue
+            # BRIDGE-MTIME VETO (bug 26dd3afb): the union freshest_age_s can read
+            # stale even while the manager is demonstrably alive — its hooks-driven
+            # session-bridge file was touched seconds ago but that mtime never
+            # reached the union (sid→bridge resolution gap; or a re-spun twin whose
+            # LIVE bridge is under a different session_id the live_personas guard
+            # above didn't catch — the 2026-07-02 Tiberius false-positive). A fresh
+            # bridge is ground-truth liveness → this manager is NOT stale. Keyed by
+            # PERSONA (the always-present analog of the sid-keyed union signal; also
+            # catches the twin case). bridge_mtimes None → seam unwired / read failed
+            # → INERT (today's behavior). Placed AFTER the twin guard so a live-in-
+            # snapshot twin logs the more-specific twin suppression.
+            if bridge_mtimes and persona is not None:
+                bridge_mtime = bridge_mtimes.get( canonical_persona_key( persona ) )
+                if bridge_mtime is not None and ( now.timestamp() - bridge_mtime ) <= self.manager_stale_poke_threshold_seconds:
+                    self._log( "arbiter_manager_stale_bridge_veto",
+                               session_id=sid, persona=persona, freshest_age_s=age,
+                               bridge_age_s=( now.timestamp() - bridge_mtime ) )
+                    continue
             eligible[ sid ] = ( row, age )
 
         # episode end: a manager freshened (or left the roster) → clear state so

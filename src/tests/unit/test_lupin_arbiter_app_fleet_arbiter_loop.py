@@ -267,6 +267,29 @@ def test_build_factory_threads_resurface_seconds_and_allows_fake_reader():
     assert job.user_gate_resurface_seconds == 900
 
 
+# ── bug 26dd3afb: the :8001 factory MUST wire the real bridge-mtime veto reader ─
+# Same deploy-honesty guard as the hold-reader test above — without factory
+# wiring the veto seam is None → the MANAGER-STALE bridge-mtime veto is DECORATIVE
+# on the real :8001 deploy and Tiberius-class false positives recur.
+
+def test_build_factory_wires_real_bridge_mtimes_by_default():
+    """The :8001 factory defaults bridge_mtimes_fn to the real persona→bridge-mtime
+    reader so the MANAGER-STALE veto is LIVE on deploy (not inert)."""
+    from lupin_arbiter_app.fleet_arbiter_loop import _default_manager_bridge_mtimes
+    gw, store = FakeGateway(), LocalSnapshotStore()
+    job = build_fleet_arbiter_job_factory( gw, store, log_fn=lambda *a, **k: None )()
+    assert job._bridge_mtimes_fn is _default_manager_bridge_mtimes
+
+
+def test_build_factory_allows_fake_bridge_mtimes_reader():
+    """An injected fake bridge-mtime reader overrides the default (test seam)."""
+    gw, store = FakeGateway(), LocalSnapshotStore()
+    fake = lambda: { "tiberius": 1.0 }
+    job  = build_fleet_arbiter_job_factory(
+        gw, store, log_fn=lambda *a, **k: None, bridge_mtimes_fn=fake )()
+    assert job._bridge_mtimes_fn is fake
+
+
 # ── eng#7: follow-through watcher factory (build-plan §3b) ───────────────────
 
 import types

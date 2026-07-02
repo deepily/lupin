@@ -35,6 +35,7 @@ pragma'd, in app.create_production_app.
 """
 import datetime
 import json
+import os
 import threading
 from typing import Any, Callable, Optional
 
@@ -46,10 +47,48 @@ from cosa.agents.heartbeat_arbiter.operator_gate_routing import DEFAULT_DIGEST_C
 # to Rick (without this wiring the seam stays None → the backstop is decorative).
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import read_hold as _default_hold_reader
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import prune_stale_hold_files as _default_hold_janitor
+from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_voice_persona_sessions as _find_active_voice_persona_sessions
+from lupin_mcp.persona_normalization import canonical_persona_key
 from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
 
 
 ESCALATION_TOPIC = "fleet-escalations"
+
+
+def _default_manager_bridge_mtimes():   # pragma: no cover - production bridge-scan IO boundary
+    """
+    bug 26dd3afb: scan the LIVE persona'd bridge files → { canonical_persona_key :
+    freshest bridge-file mtime (epoch) } — the real reader wired into the MANAGER-
+    STALE bridge-mtime veto on the :8001 deploy.
+
+    Keyed by PERSONA (not session_id) so a re-spun twin's fresh bridge (a NEW
+    session_id) still vetoes the superseded row's stale poke — the always-present
+    analog of the sid-keyed union signal. Reuses find_active_voice_persona_sessions
+    (PID-alive + persona-required projection) rather than hand-globbing. Exercised
+    at the :8001 integration tier like the other _default_* IO boundaries; unit
+    tests inject a fake, so this boundary is no-cover.
+
+    Ensures:
+        - returns { canonical_persona_key : max bridge mtime } across live persona'd
+          bridges; a persona with several live sessions keeps the FRESHEST mtime
+        - skips bridges with no persona name / unreadable mtime; never raises here
+          (the arbiter's swallow-safe _read_manager_bridge_mtimes wraps it anyway)
+    """
+    result = { }
+    for path, _sid, persona in _find_active_voice_persona_sessions():
+        name = ( persona or { } ).get( "name" )
+        if not name:
+            continue
+        key = canonical_persona_key( name )
+        if not key:
+            continue
+        try:
+            mtime = os.path.getmtime( path )
+        except OSError:
+            continue
+        if key not in result or mtime > result[ key ]:
+            result[ key ] = mtime
+    return result
 
 
 # Item A (2026.06.11 receipts design §2.3): the line shape has ONE owner —
@@ -273,6 +312,11 @@ def build_fleet_arbiter_job_factory(
     # activates the 5th signal; injectable for tests (never CALLED at construction).
     count_dm_as_liveness_fn : Optional[ Callable ] = None,
     dm_activity_fn          : Optional[ Callable ] = None,
+    # bug 26dd3afb: the MANAGER-STALE bridge-mtime veto reader. Defaulted REAL here
+    # (like hold_reader_fn) so the veto is LIVE on the :8001 deploy — without this
+    # wiring the seam stays None → the veto is decorative and Tiberius-class false
+    # positives recur. A fake overrides it for tests.
+    bridge_mtimes_fn        : Optional[ Callable ] = None,
     # eng#7 (2026-06-17): the follow-through aged-escalation watcher factory
     # ((job) -> watcher). None keeps it INERT (no watcher wired); app.py builds the
     # real one (make_follow_through_watcher_factory) so the :8001 job rides it. Even
@@ -313,6 +357,9 @@ def build_fleet_arbiter_job_factory(
     # A2/A3 (fcb5dbc0): wire the real fleet-wide operator-gate reader by default so the
     # :8001 service activates the operator-gate urgency routing; a fake overrides it.
     operator_gates_fn = operator_gates_fn if operator_gates_fn is not None else _default_operator_gates_fn
+    # bug 26dd3afb: wire the real persona→bridge-mtime reader by default so the :8001
+    # service arms the MANAGER-STALE bridge-mtime veto; an injected fake overrides it.
+    bridge_mtimes_fn = bridge_mtimes_fn if bridge_mtimes_fn is not None else _default_manager_bridge_mtimes
     escalation_notify = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn )
 
     def factory() -> ArbiterConsumerJob:
@@ -328,6 +375,7 @@ def build_fleet_arbiter_job_factory(
             operator_digest_cadence_seconds = operator_digest_cadence_seconds,      # A2/A3 normal-digest cadence
             count_dm_as_liveness_fn    = count_dm_as_liveness_fn,                   # DM-toggle runtime flag (app.py wires cfg read)
             dm_activity_fn             = dm_activity_fn,                            # DM-toggle SENT-DM store reader
+            bridge_mtimes_fn           = bridge_mtimes_fn,                          # bug 26dd3afb MANAGER-STALE bridge-mtime veto reader
             poll_seconds               = poll_seconds,
             manager_recipient          = manager_on_duty,
             declared_managers          = declared_managers,
