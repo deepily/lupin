@@ -161,6 +161,10 @@ coverage/
 .heartbeat-hold-*.json
 .heartbeat-acked-*.json
 
+# DM inbox reconcile — per-session high-water mark (runtime state; bug 59f355e0)
+# See src/rnd/v0.1.9/2026.07.02-dm-loss-surfacing-leg-triage.md
+.dm-inbox-hwm-*.json
+
 # Task-store mirror — per-session correlation map + C8 failure spool (runtime
 # state; same family). See src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/
 .task-store-map-*.json

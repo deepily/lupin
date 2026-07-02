@@ -24,7 +24,7 @@ import sys
 
 # Bootstrap: ensure src/ is on PYTHONPATH for lupin_cli imports
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
-if _src_path not in sys.path:
+if _src_path not in sys.path:                 # pragma: no cover - bootstrap-exception (PATH MANAGEMENT mandate): sets sys.path BEFORE the lupin_cli package is importable, so it is genuinely unreachable under pytest (src already on sys.path) — not a coverable branch
     sys.path.insert( 0, _src_path )
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
@@ -38,6 +38,7 @@ from lupin_cli.claude_code.hooks.lib.session_bridge import (
 )
 from lupin_cli.claude_code.hooks.lib.heartbeat_poke_cap import reset_poke_count
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import is_heartbeat_poke_prompt
+from lupin_cli.claude_code.hooks.lib.dm_inbox_reconcile import surface_dm_inbox
 
 
 def main():
@@ -102,14 +103,27 @@ def main():
     # See: src/rnd/v0.1.7/2026.04.30-conv-mode-three-layer-enforcement/01-design.md
     reminder = speakerphone_reminder_block( "terminal-typed", session_id )
 
-    if voice_ctx and reminder:
-        enriched = enrich_voice_context( voice_ctx, messages )
-        emit_json( build_additional_context( enriched + "\n\n" + reminder, "UserPromptSubmit" ) )
-    elif voice_ctx:
-        enriched = enrich_voice_context( voice_ctx, messages )
-        emit_json( build_additional_context( enriched, "UserPromptSubmit" ) )
-    elif reminder:
-        emit_json( build_additional_context( reminder, "UserPromptSubmit" ) )
+    # Store-backed DM inbox reconcile (bug 59f355e0, Option A — Mr. Radio ruling
+    # 2026-07-02): the durable notifications store is the delivery guarantee the
+    # lossy voice buffer never was. Surface any peer DMs the buffer dropped
+    # (recipient mid-turn → buffered → never drained, or drained at low salience)
+    # as additionalContext at start-of-turn, with NO interrupt/deny. The buffer/
+    # inject/PreToolUse-deny paths stay UNTOUCHED — this is purely additive.
+    # extra_surfaced_ids = the ai_to_ai ids drained THIS turn (above), so a DM
+    # delivered by BOTH paths in one turn is not shown twice. Fail-open — never
+    # raises. See: src/rnd/v0.1.9/2026.07.02-dm-loss-surfacing-leg-triage.md
+    drained_dm_ids = [ m.get( "notification_id" ) for m in messages
+                       if m.get( "direction" ) == "ai_to_ai" ]
+    dm_ctx = surface_dm_inbox( session_id, extra_surfaced_ids=drained_dm_ids )
+
+    if voice_ctx:
+        voice_ctx = enrich_voice_context( voice_ctx, messages )
+
+    # Assemble additionalContext: human voice first, then reconciled peer DMs,
+    # then the conv-mode rider. Any subset may be empty; {} when all are.
+    parts = [ part for part in ( voice_ctx, dm_ctx, reminder ) if part ]
+    if parts:
+        emit_json( build_additional_context( "\n\n".join( parts ), "UserPromptSubmit" ) )
     else:
         emit_json( {} )
 
