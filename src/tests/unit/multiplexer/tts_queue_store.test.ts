@@ -361,3 +361,32 @@ test("disposeForTesting detaches the bus subscriptions (audio events no longer s
   emitAudioState(bus, "idle");            // would de-light if still subscribed
   assert.equal(store.current(), "A", "post-dispose the store ignores audio events");
 });
+
+// ---------------------------------------------------------------------------
+// F0-a — activeItem() read-only getter (WP4 consume-surface completion)
+// ---------------------------------------------------------------------------
+
+test("activeItem: returns the active item object; activeItem().id_hash === current() (consistency)", () => {
+  const { store } = setup();
+  store.enqueue(item("a"));
+  const active = store.activeItem();
+  assert.notEqual(active, null);
+  assert.equal(active!.id_hash, "a");
+  // Clayton's headline getter assert — the object and the id must agree.
+  assert.equal(store.activeItem()?.id_hash, store.current());
+});
+
+test("activeItem: null when the queue is empty; current() is null too", () => {
+  const { store } = setup();
+  assert.equal(store.activeItem(), null);
+  assert.equal(store.current(), null);
+});
+
+test("activeItem: tracks the promoted head across advance() — stays consistent with current()", () => {
+  const { store } = setup();
+  store.enqueue(item("a"));
+  store.enqueue(item("b"));   // b waits in pending
+  store.advance();            // a popped, b promoted to active
+  assert.equal(store.activeItem()?.id_hash, "b");
+  assert.equal(store.activeItem()?.id_hash, store.current());
+});
