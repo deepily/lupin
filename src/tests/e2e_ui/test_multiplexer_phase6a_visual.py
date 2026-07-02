@@ -200,6 +200,18 @@ def test_multiplexer_phase6a_jobs_pane_visual(
 
     Per design doc 08 § AC11: the baseline established here is the canonical
     Phase 6a visual state. NOT measured against `/app/notifications`.
+
+    Cold-hidden-wait CLASS SWEEP (2026-07-02, Rachel 🕊️ — Tiberius sweep-for-
+    pattern-offenders rule): the Job Queues pane boots COLD-HIDDEN (ratified item
+    2aad5b7b / commit 75a1bad3; multiplexer.html:195 `<section id="jobs-pane"
+    hidden`). `DEFAULT_HIDDEN_SECTION_IDS = {"jobs-pane"}` is the ONLY cold-hidden
+    section, so every e2e/visual test that waits-for-visible or snapshots the
+    jobs-pane must reveal it via the section-toolbar toggle first. Class swept +
+    closed: the 3 mux waiters — this test, test_multiplexer_section_toolbar.py, and
+    test_multiplexer_cold_load_hydration.py (last two via bug 302d170f) — are all
+    fixed toggle-first. The 4 other job-card e2e files (test_job_history_ui,
+    test_cj_flow_pause_schedule, test_history_card_parity, test_repair_loop_ui)
+    target legacy `/app/notifications?classic=1`, NOT the mux pane — out of class.
     """
     page = logged_in_page
 
@@ -214,6 +226,17 @@ def test_multiplexer_phase6a_jobs_pane_visual(
 
     # Inject the 5 job fixtures.
     page.evaluate( _INJECT_JOB_FIXTURES_JS )
+
+    # Lane 0c (RATIFIED item 2aad5b7b / commit 75a1bad3; multiplexer.html:195
+    # `<section id="jobs-pane" hidden` cold-start): the Job Queues pane boots
+    # COLD-HIDDEN — its cards render into the DOM but resolve HIDDEN, so the
+    # visible-wait below (and the snapshot) can't see them. Reveal the pane via
+    # its real section-toolbar toggle first (the user flow), NOT a default-visible
+    # assumption (that predated the 0c ruling), so the seeded cards become visible
+    # and the pane snapshots in its rendered state.
+    page.wait_for_selector( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]', timeout=5000 )
+    page.locator( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]' ).click()
+    page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', state="visible", timeout=10000 )
 
     # Wait for all 5 cards to render across their buckets.
     for id_hash in [
