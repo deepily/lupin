@@ -135,12 +135,16 @@
         <div id="action-required-section"
              data-testid="multiplexer-action-required-section"></div>
 
-        <!-- (2) PLAYING / TTS — position 2, cold-VISIBLE (legacy shows Playing):
-             the `hidden` attribute is removed. data-phase6-pending is retained
-             (boot.ts lifts it on TtsChromeRenderer mount). -->
+        <!-- (2) PLAYING / TTS — position 2, cold-VISIBLE (legacy shows Playing).
+             USER-LIVE FLIP (2026-07-02, WP5 final unit): the pane is now a
+             first-class LIVE section — F0-d feeds the queue (3c0da5e9), the
+             consumer plays it audibly (0dc1e19a), and the render surface + card
+             CSS are single-sourced (8f2817eb). The stub `data-phase6-pending`
+             marker is REMOVED from the static HTML; boot.ts retains a DEFENSIVE
+             marker-lift on TtsChromeRenderer mount (a no-op now that the HTML has
+             no marker, still exercised by boot_order_mount_integrity's fixture). -->
         <section id="tts-pane"
-                 data-testid="multiplexer-tts-pane"
-                 data-phase6-pending="true"></section>
+                 data-testid="multiplexer-tts-pane"></section>
 
         <!-- (3) CC NOTIFICATIONS — the section-header REGION (count · history ·
              clear-all + relocated TTS-preview slider) sits directly ABOVE its

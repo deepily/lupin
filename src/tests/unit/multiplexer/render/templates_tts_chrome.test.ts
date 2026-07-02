@@ -40,30 +40,48 @@ function makeHandlers(): { handlers: TtsChromeHandlers; calls: CallLog } {
 }
 
 function makeOpts(over: Partial<TtsChromeOpts> = {}): TtsChromeOpts {
-  return { state: "idle", queueLength: 0, ...over };
+  // desync-fix: queueEmpty defaults false so bare opts render the chrome; the
+  // empty-panel tests pass queueEmpty:true explicitly.
+  return { state: "idle", queueLength: 0, queueEmpty: false, ...over };
 }
 
 // ---------------------------------------------------------------------------
 // State-driven render (6 cases, one per AudioPlaybackState)
 // ---------------------------------------------------------------------------
 
-test("idle: renders the 🔇 empty panel (no controls, no state-class); data-state=idle", () => {
-  // L2 (mux MVP-finish): idle is STATE-driven empty — the `🔇 Nothing in the
-  // queue` panel, NOT a disabled control row.
-  const el = renderTtsChrome(makeOpts({ state: "idle" }), makeHandlers().handlers);
+test("queueEmpty: renders the 🔇 empty panel (no controls, no state-class); data-state=idle", () => {
+  // desync-fix: the empty panel is QUEUE-driven — queueEmpty:true renders the
+  // `🔇 Nothing in the queue` panel (regardless of audio state), NOT a control row.
+  const el = renderTtsChrome(makeOpts({ state: "idle", queueEmpty: true }), makeHandlers().handlers);
   const empty = el.querySelector(".tts-queue-empty-state");
-  assert.notEqual(empty, null, "idle renders .tts-queue-empty-state");
+  assert.notEqual(empty, null, "queueEmpty renders .tts-queue-empty-state");
   assert.match(empty!.textContent ?? "", /Nothing in the queue/);
   // No controls in the empty panel.
   assert.equal(el.querySelector(".tts-btn-toggle"), null);
   assert.equal(el.querySelector(".tts-btn-stop"),   null);
   assert.equal(el.querySelector(".tts-btn-skip"),   null);
-  assert.equal(el.querySelector(".tts-playing-header"), null, "no playing-header when idle");
-  assert.ok(el.classList.contains("tts-chrome-empty"), "idle root carries .tts-chrome-empty");
+  assert.equal(el.querySelector(".tts-playing-header"), null, "no playing-header when empty");
+  assert.ok(el.classList.contains("tts-chrome-empty"), "empty root carries .tts-chrome-empty");
   assert.equal(el.classList.contains("is-playing-current"), false);
   assert.equal(el.classList.contains("is-paused-current"),  false);
   assert.equal(el.dataset.state, "idle");
   assert.equal(el.getAttribute("data-testid"), "multiplexer-tts-chrome");
+});
+
+test("idle + non-empty queue: renders the control row (all disabled) — NOT the empty panel", () => {
+  // desync-fix unlocks this state: queueEmpty:false at audio-state idle (item
+  // queued, nothing speaking yet) → the chrome renders with all three transport
+  // controls disabled (matrix row idle = ✗✗✗) and Clear-all enabled.
+  const el = renderTtsChrome(makeOpts({ state: "idle", queueLength: 2, queueEmpty: false }), makeHandlers().handlers);
+  assert.equal(el.querySelector(".tts-queue-empty-state"), null, "non-empty queue → NOT the empty panel");
+  assert.equal(el.classList.contains("tts-chrome-empty"), false, "chrome, not the empty panel");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.disabled, true, "idle toggle disabled");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled,   true, "idle stop disabled");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.disabled,   true, "idle skip disabled");
+  const clear = el.querySelector<HTMLButtonElement>(".tts-btn-clear-all")!;
+  assert.equal(clear.disabled, false, "Clear-all enabled (queue non-empty)");
+  assert.equal(clear.hidden,   false);
+  assert.equal(el.dataset.state, "idle");
 });
 
 test("decoding: all 3 controls disabled (transient)", () => {
@@ -257,7 +275,7 @@ test("focus Resume click dispatches onResume", () => {
   assert.equal(calls.resume, 1);
 });
 
-test("Clear-all: enabled + shown when the queue is non-empty", () => {
+test("Clear-all: enabled + shown whenever the chrome renders (queue non-empty)", () => {
   const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 2 }), makeHandlers().handlers);
   const clear = el.querySelector(".tts-btn-clear-all") as HTMLButtonElement;
   assert.notEqual(clear, null);
@@ -265,21 +283,23 @@ test("Clear-all: enabled + shown when the queue is non-empty", () => {
   assert.equal(clear.hidden, false);
 });
 
-test("Clear-all: disabled + hidden when the queue is empty (count 0)", () => {
-  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 0 }), makeHandlers().handlers);
+// desync-fix: the old "Clear-all disabled/hidden when empty (count 0)" case is
+// GONE — an empty queue renders the empty panel (no Clear-all button at all), so
+// within the chrome Clear-all is ALWAYS enabled. This also fixes the old
+// queueLength===0 gate that wrongly disabled Clear-all for an active-item-only
+// queue (1 active head, 0 pending → chrome renders, Clear-all must still fire).
+test("Clear-all: enabled at queueLength 0 in the chrome (active-item-only queue)", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 0, queueEmpty: false }), makeHandlers().handlers);
   const clear = el.querySelector(".tts-btn-clear-all") as HTMLButtonElement;
-  assert.equal(clear.disabled, true);
-  assert.equal(clear.hidden, true);
+  assert.equal(clear.disabled, false, "active-only queue (0 pending) still lets Clear-all fire");
+  assert.equal(clear.hidden, false);
 });
 
-test("Clear-all click dispatches onClearAll (non-empty); empty has no listener", () => {
+test("Clear-all click dispatches onClearAll (chrome path)", () => {
   const { handlers, calls } = makeHandlers();
   const nonEmpty = renderTtsChrome(makeOpts({ state: "playing", queueLength: 3 }), handlers);
   (nonEmpty.querySelector(".tts-btn-clear-all") as HTMLButtonElement).click();
   assert.equal(calls.clearAll, 1);
-  const empty = renderTtsChrome(makeOpts({ state: "playing", queueLength: 0 }), handlers);
-  (empty.querySelector(".tts-btn-clear-all") as HTMLButtonElement).click();
-  assert.equal(calls.clearAll, 1, "empty clear-all is disabled with no listener → count unchanged");
 });
 
 test("Clear-all: no onClearAll handler → button present + enabled but no listener (inert)", () => {

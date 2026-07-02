@@ -220,7 +220,11 @@ const TRANSITIONS: Array<[AudioPlaybackState, AudioPlaybackState, string]> = [
 
 for (const [from, to, label] of TRANSITIONS) {
   test(`state transition: ${label} re-renders chrome with new data-state`, () => {
-    const { renderer, root, bus, audio, raf } = setupRenderer(from);
+    // desync-fix: seed 1 pending so the chrome (queue-driven non-empty) renders
+    // for EVERY audio state incl. idle — this test asserts the chrome's
+    // data-state tracks the audio state, which requires a non-empty queue (an
+    // empty queue renders the empty panel, always data-state idle).
+    const { renderer, root, bus, audio, raf } = setupRenderer(from, 1);
     renderer.mount(root);
     assert.equal(root.querySelector<HTMLElement>(".tts-chrome")!.dataset.state, from);
     audio.setState(to);
@@ -236,7 +240,7 @@ for (const [from, to, label] of TRANSITIONS) {
 // ===========================================================================
 
 test("Pause/Resume toggle in playing state dispatches AudioStore.pause()", () => {
-  const { renderer, root, audio } = setupRenderer("playing");
+  const { renderer, root, audio } = setupRenderer("playing", 1);   // desync-fix: seed queue → chrome renders controls
   renderer.mount(root);
   root.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
   assert.equal(audio.calls.pause,  1);
@@ -245,7 +249,7 @@ test("Pause/Resume toggle in playing state dispatches AudioStore.pause()", () =>
 });
 
 test("Pause/Resume toggle in paused state dispatches AudioStore.resume()", () => {
-  const { renderer, root, audio } = setupRenderer("paused");
+  const { renderer, root, audio } = setupRenderer("paused", 1);   // desync-fix: seed queue → chrome renders controls
   renderer.mount(root);
   root.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
   assert.equal(audio.calls.resume, 1);
@@ -261,7 +265,7 @@ test("Stop button dispatches AudioStore.stop() (Pass 2 A6)", () => {
 });
 
 test("Skip button dispatches AudioStore.skip()", () => {
-  const { renderer, root, audio } = setupRenderer("playing");
+  const { renderer, root, audio } = setupRenderer("playing", 1);   // desync-fix: seed queue → chrome renders controls
   renderer.mount(root);
   root.querySelector<HTMLButtonElement>(".tts-btn-skip")!.click();
   assert.equal(audio.calls.skip, 1);
@@ -296,7 +300,9 @@ test("storm safety (a): 100 chunk_decoded events coalesce into ≤1 render cycle
 });
 
 test("storm safety (b): 5 state_change events coalesce into ≤1 render cycle", () => {
-  const { renderer, root, bus, raf, audio } = setupRenderer("idle");
+  // desync-fix: seed 1 pending so the chrome tracks each audio state (empty queue
+  // would render the empty panel, always data-state idle).
+  const { renderer, root, bus, raf, audio } = setupRenderer("idle", 1);
   renderer.mount(root);
   // Fire 5 transitions synchronously.
   const states: AudioPlaybackState[] = ["decoding", "playing", "paused", "playing", "ended"];
@@ -328,11 +334,14 @@ test("stop semantics: clicking Stop clears queue to 0 + transitions state to idl
   // Simulate the AudioStore-emitted state_change(idle, prev: playing) that fires after stop().
   emitState(bus, { state: "idle", prev: "playing" });
   raf.flush();
-  // Re-render reflects: state=idle → the 🔇 empty panel (L2: idle is
-  // STATE-driven empty, so there is no queue-length element to show "0").
+  // desync-fix: after stop→idle the audio state is idle, but the item queue's
+  // pending tail is RETAINED (stop de-lights the active head, keeps pending —
+  // F0-f), so the pane is queue-driven NON-empty → the chrome renders at
+  // state=idle (all controls disabled), NOT the empty panel. (Pre-fix this
+  // asserted the empty panel because the empty-state was audio-idle-driven.)
   assert.equal(root.querySelector<HTMLElement>(".tts-chrome")!.dataset.state, "idle");
-  assert.equal(root.querySelector(".tts-queue-length"), null, "idle empty panel has no queue-length");
-  assert.match(root.querySelector(".tts-queue-empty-state")!.textContent ?? "", /Nothing in the queue/);
+  assert.match(root.querySelector(".tts-queue-length")!.textContent ?? "", /Queued: 5/, "pending retained after stop");
+  assert.equal(root.querySelector(".tts-queue-empty-state"), null, "pending retained → not the empty panel");
   renderer.unmount();
 });
 
@@ -357,12 +366,16 @@ test("mixed-event storm: state_change + chunk_decoded events share the same pend
 });
 
 test("forceRenderForTesting: synchronous re-render (bypasses RAF)", () => {
-  const { renderer, root, ttsQueue } = setupRenderer("playing", 0);
+  // desync-fix: seed pending=1 (not 0) so the chrome (queue-driven non-empty)
+  // renders throughout — pending=0 would render the empty panel (no queue-length).
+  const { renderer, root, ttsQueue } = setupRenderer("playing", 1);
   renderer.mount(root);
+  // Initial paint shows the seeded pending count.
+  assert.match(root.querySelector(".tts-queue-length")!.textContent ?? "", /Queued: 1/);
   // Mutate the item queue WITHOUT firing an event.
   ttsQueue.setPending(pendingItems(42));
-  // Without forceRenderForTesting, DOM still shows queue=0 (no event fired).
-  assert.match(root.querySelector(".tts-queue-length")!.textContent ?? "", /Queued: 0/);
+  // Without forceRenderForTesting, DOM still shows the old count (no event fired).
+  assert.match(root.querySelector(".tts-queue-length")!.textContent ?? "", /Queued: 1/);
   renderer.forceRenderForTesting();
   // Now DOM reflects queue=42.
   assert.match(root.querySelector(".tts-queue-length")!.textContent ?? "", /Queued: 42/);

@@ -155,6 +155,20 @@ export type LupinEventType =
   // merge deduped the two identical-semantic lines to this single canonical
   // declaration (manager-owned reconcile — Mr. Radio, 2026-06-29). See 00b §2 F0-c.
   | "store_tts_queue_changed"
+  // store_notification_tts_intent — F0-d producer seam. NotificationStore emits
+  // this ONCE per SPOKEN new-arrival (a high/urgent notification, dedup'd by the
+  // byId.has re-arrival guard; live-only path so hydration never emits). It is a
+  // DECOUPLING signal: NotificationStore does NOT reach into TtsQueueStore (two
+  // stores must not couple — codebase idiom is stores-emit / boot-wires); instead
+  // boot subscribes and calls `TtsQueueStore.enqueue()`. SPEC (Tiberius ruling
+  // 2026-07-02, sustained on primary-artifact grounds — reviewed against legacy,
+  // NOT memento): gate = priority ∈ {high, urgent} ONLY (legacy notifications.js
+  // :5917 job-card + :5985 fire-and-forget both enqueue TTS for ALL high/urgent;
+  // suppress_ding affects the ding + enqueue-delay only, NEVER speech). ttsText =
+  // tts_raw === true ? message : formatTtsMessage(priority, message) — the
+  // fire-and-forget default-contextualized derivation (legacy :5987-5989 +
+  // formatter :4176-4187). Payload: StoreNotificationTtsIntentPayload.
+  | "store_notification_tts_intent"
   // store_audio_ended — 00c (Phase-6 playback engine) emits this signal-OUT-only
   // on NATURAL utterance completion. F0's TtsQueueStore SUBSCRIBES and self-
   // advances (COND-2 ownership boundary: P6 never calls advance() / touches the
@@ -660,6 +674,20 @@ export interface TtsQueueItem {
 export interface StoreTtsQueueChangedPayload {
   activeNotificationId : string | null;
   pending              : ReadonlyArray<TtsQueueItem>;
+}
+
+// store_notification_tts_intent payload (F0-d producer seam). Emitted by
+// NotificationStore on every SPOKEN new-arrival (high/urgent). `id_hash` is the
+// canonical notification key (equals Notification.id_hash / TtsQueueItem.id_hash
+// — what the boot wire enqueues and TtsQueueStore.current() returns). `ttsText`
+// is the already-derived text to speak (contextualized unless tts_raw). `priority`
+// is carried through for the renderer/consumer (never re-gated downstream — the
+// gate lives ONLY at the emit site). See the LupinEventType member comment for the
+// full ratified SPEC + legacy line citations.
+export interface StoreNotificationTtsIntentPayload {
+  id_hash  : string;
+  ttsText  : string;
+  priority : string;
 }
 
 // store_audio_ended payload (F0-f / 00c seam). 00c's Phase-6 playback engine

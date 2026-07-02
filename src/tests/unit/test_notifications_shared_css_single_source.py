@@ -271,3 +271,74 @@ def test_no_page_links_retired_tts_preview_slider():
         hrefs = re.findall( r'href="([^"]+)"', _read( page ) )
         assert not any( TTS_SLIDER_HREF in h for h in hrefs ), \
             f"{os.path.basename( page )} still <link>s the retired tts-preview-slider.css"
+
+
+# ---------------------------------------------------------------------------
+# WP7 (Krishna 🦚, 2026-07-02) — TTS queue CARD classes single-sourced into the
+# shared sheet. The mux emits these exact class names (render/templates/
+# ttsActiveCard.ts, ttsMinimizedCard.ts, ttsChrome.ts's renderTtsEmpty) but
+# styled NONE of them; legacy declared them in its monolith. Now: ONE declaration
+# in the shared sheet; both pages already link it (legacy before its monolith).
+# The CHROME is a divergent per-surface taxonomy — mux `.tts-chrome`/`.tts-btn*`
+# vs legacy `#tts-queue-section`/`.tts-control-button` — legitimately NOT shared.
+# `.tts-minimized.shrink-fade` + `@keyframes shrinkFadeOut` stay legacy-only (the
+# mux applies no `.shrink-fade`; the keyframe is shared with a legacy-only rule).
+# ---------------------------------------------------------------------------
+
+MUX_TTS_CHROME_CSS = os.path.join( STATIC, "css", "multiplexer", "tts-chrome.css" )
+MONOLITH_CSS       = os.path.join( STATIC, "css", "notifications.css" )
+
+TTS_CARD_SELECTORS = [
+    ".tts-queue-empty-state",
+    ".tts-active-card",
+    ".tts-active-card .tts-type-icon",
+    ".tts-active-card .tts-message",
+    ".tts-active-card .tts-stop-button",
+    ".tts-minimized",
+    ".tts-minimized .tts-position",
+    ".tts-minimized .tts-type-badge",
+    ".tts-minimized .tts-text",
+    ".tts-minimized.priority",
+    ".tts-delete-button",
+]
+
+
+@pytest.mark.parametrize( "selector", TTS_CARD_SELECTORS )
+def test_wp7_tts_card_rules_in_shared( selector ):
+    """WP7: each TTS card selector is declared in the shared sheet (single source)."""
+    rules = _strip_css_comments( _read( SHARED_CSS ) )
+    assert selector + " {" in rules, f"WP7: {selector!r} must live in the shared sheet"
+
+
+@pytest.mark.parametrize( "selector", TTS_CARD_SELECTORS )
+def test_wp7_tts_card_rules_single_declaration( selector ):
+    """WP7 single-source: each TTS card selector is declared EXACTLY ONCE
+    repo-wide (in the shared sheet) — no fork in the mux chrome sheet or the
+    legacy monolith. A future re-fork fails loudly here."""
+    decl  = selector + " {"
+    total = sum(
+        _strip_css_comments( _read( path ) ).count( decl )
+        for path in ( SHARED_CSS, MUX_TTS_CHROME_CSS, MONOLITH_CSS )
+    )
+    assert total == 1, f"WP7: {selector!r} must have EXACTLY ONE declaration repo-wide, found {total}"
+
+
+def test_wp7_mux_chrome_sheet_does_not_fork_empty_state():
+    """WP7 de-fork: the mux tts-chrome.css must NOT re-declare the empty-state
+    text (was `.tts-chrome-empty .tts-queue-empty-state`) — the empty panel's
+    element is now styled by the single shared `.tts-queue-empty-state`."""
+    mux = _strip_css_comments( _read( MUX_TTS_CHROME_CSS ) )
+    assert ".tts-queue-empty-state" not in mux, \
+        "mux tts-chrome.css must not re-declare .tts-queue-empty-state (de-forked to shared)"
+
+
+def test_wp7_legacy_monolith_dropped_card_rules():
+    """WP7: the legacy monolith no longer declares the moved card classes (they
+    ride the shared sheet linked before the monolith). Legacy-only survivors: the
+    CHROME (`#tts-queue-section`) and the `.tts-minimized.shrink-fade` animation."""
+    monolith = _strip_css_comments( _read( MONOLITH_CSS ) )
+    for selector in TTS_CARD_SELECTORS:
+        assert selector + " {" not in monolith, \
+            f"WP7: legacy monolith must drop {selector!r} (moved to shared)"
+    assert "#tts-queue-section {" in monolith, "legacy-only chrome #tts-queue-section must stay"
+    assert ".tts-minimized.shrink-fade {" in monolith, "legacy-only .shrink-fade animation must stay"

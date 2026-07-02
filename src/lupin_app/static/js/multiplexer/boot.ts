@@ -31,6 +31,8 @@ import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
 import type { ServerSenderHydrationRecord, SchedulableAudioContext } from "./stores";
+import { wireNotificationTtsIntent } from "./wireTtsIntent";
+import { wireTtsPlayback } from "./wireTtsPlayback";
 import {
   createNotificationsListRenderer,
   createNotificationsHeaderRenderer,
@@ -225,6 +227,23 @@ function bootMultiplexer(): void {
       return new Ctor({ sampleRate: 24000 });
     },
   });
+
+  // F0-d — wire the TTS producer seam. NotificationStore emits
+  // store_notification_tts_intent for every SPOKEN new-arrival (high/urgent);
+  // this glue enqueues each onto TtsQueueStore (stores-emit / boot-wires idiom —
+  // the two stores never couple directly). Registered here, BEFORE transports
+  // start, so a high/urgent frame arriving immediately after transport.start()
+  // is captured (F13 ordering invariant). Page-lifetime subscription (like the
+  // stores themselves); the returned unsubscriber is unused in boot.
+  wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now());
+
+  // 4f14d38f — TTS playback request-initiation. When TtsQueueStore's active item
+  // rolls to a NEW notification, POST its text to /api/get-speech-elevenlabs with
+  // the mux's OWN audio sessionId (the PCM routing key); the server streams PCM
+  // back over this session's /ws/audio → AudioStore plays → store_audio_ended →
+  // TtsQueueStore.advance(). Registered before transports start so an item queued
+  // immediately after connect still triggers a request. Page-lifetime subscription.
+  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, sessionId);
 
   // =====================================================================
   // boot.ts MOUNT-SLOT CONVENTION (Lane A deliverable — multiplexer parity)
