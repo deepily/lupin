@@ -20,19 +20,21 @@ before(() => {
 });
 
 interface CallLog {
-  pause  : number;
-  resume : number;
-  stop   : number;
-  skip   : number;
+  pause    : number;
+  resume   : number;
+  stop     : number;
+  skip     : number;
+  clearAll : number;
 }
 
 function makeHandlers(): { handlers: TtsChromeHandlers; calls: CallLog } {
-  const calls: CallLog = { pause: 0, resume: 0, stop: 0, skip: 0 };
+  const calls: CallLog = { pause: 0, resume: 0, stop: 0, skip: 0, clearAll: 0 };
   const handlers: TtsChromeHandlers = {
-    onPause()  : void { calls.pause  += 1; },
-    onResume() : void { calls.resume += 1; },
-    onStop()   : void { calls.stop   += 1; },
-    onSkip()   : void { calls.skip   += 1; },
+    onPause()    : void { calls.pause    += 1; },
+    onResume()   : void { calls.resume   += 1; },
+    onStop()     : void { calls.stop     += 1; },
+    onSkip()     : void { calls.skip     += 1; },
+    onClearAll() : void { calls.clearAll += 1; },
   };
   return { handlers, calls };
 }
@@ -210,14 +212,17 @@ test("disabled controls are non-interactive (clicks on disabled stop in decoding
   assert.equal(calls.resume, 0);
 });
 
-test("playing/paused render the 🔊 Playing: N accordion header; idle does not", () => {
-  // L2 (mux MVP-finish): the green colored-accordion header shows the count.
+test("header state machine (WP3): playing → 🔊 Playing: N; paused → Paused: N (paused class)", () => {
   const playing = renderTtsChrome(makeOpts({ state: "playing", queueLength: 3 }), makeHandlers().handlers);
   const header = playing.querySelector(".tts-playing-header");
   assert.notEqual(header, null, "playing renders .tts-playing-header");
   assert.match(header!.textContent ?? "", /🔊 Playing: 3/);
-  const paused = renderTtsChrome(makeOpts({ state: "paused", queueLength: 0 }), makeHandlers().handlers);
-  assert.match(paused.querySelector(".tts-playing-header")!.textContent ?? "", /🔊 Playing: 0/);
+  assert.equal(header!.className, "tts-playing-header", "playing has no modifier class");
+  const paused = renderTtsChrome(makeOpts({ state: "paused", queueLength: 2 }), makeHandlers().handlers);
+  const ph = paused.querySelector(".tts-playing-header")!;
+  assert.match(ph.textContent ?? "", /Paused: 2/);
+  assert.doesNotMatch(ph.textContent ?? "", /Playing/, "manual pause header drops the Playing label");
+  assert.equal(ph.className, "tts-playing-header paused");
 });
 
 test("data-testid + data-state always set for E2E observability", () => {
@@ -226,6 +231,68 @@ test("data-testid + data-state always set for E2E observability", () => {
     assert.equal(el.getAttribute("data-testid"), "multiplexer-tts-chrome", `testid for ${s}`);
     assert.equal(el.dataset.state, s, `dataset.state for ${s}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// WP3 — header transport: focus mode, Resume, Clear-all
+// ---------------------------------------------------------------------------
+
+test("focus mode: header 'Paused: N waiting' + .focus-mode class + Resume present", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 4, focusMode: true }), makeHandlers().handlers);
+  const header = el.querySelector(".tts-playing-header")!;
+  assert.match(header.textContent ?? "", /Paused: 4 waiting/);
+  assert.equal(header.className, "tts-playing-header focus-mode");
+  assert.notEqual(el.querySelector(".tts-btn-resume"), null, "Resume present in focus mode");
+});
+
+test("non-focus mode: no Resume button (querySelector null)", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 1 }), makeHandlers().handlers);
+  assert.equal(el.querySelector(".tts-btn-resume"), null);
+});
+
+test("focus Resume click dispatches onResume", () => {
+  const { handlers, calls } = makeHandlers();
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 1, focusMode: true }), handlers);
+  (el.querySelector(".tts-btn-resume") as HTMLButtonElement).click();
+  assert.equal(calls.resume, 1);
+});
+
+test("Clear-all: enabled + shown when the queue is non-empty", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 2 }), makeHandlers().handlers);
+  const clear = el.querySelector(".tts-btn-clear-all") as HTMLButtonElement;
+  assert.notEqual(clear, null);
+  assert.equal(clear.disabled, false);
+  assert.equal(clear.hidden, false);
+});
+
+test("Clear-all: disabled + hidden when the queue is empty (count 0)", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 0 }), makeHandlers().handlers);
+  const clear = el.querySelector(".tts-btn-clear-all") as HTMLButtonElement;
+  assert.equal(clear.disabled, true);
+  assert.equal(clear.hidden, true);
+});
+
+test("Clear-all click dispatches onClearAll (non-empty); empty has no listener", () => {
+  const { handlers, calls } = makeHandlers();
+  const nonEmpty = renderTtsChrome(makeOpts({ state: "playing", queueLength: 3 }), handlers);
+  (nonEmpty.querySelector(".tts-btn-clear-all") as HTMLButtonElement).click();
+  assert.equal(calls.clearAll, 1);
+  const empty = renderTtsChrome(makeOpts({ state: "playing", queueLength: 0 }), handlers);
+  (empty.querySelector(".tts-btn-clear-all") as HTMLButtonElement).click();
+  assert.equal(calls.clearAll, 1, "empty clear-all is disabled with no listener → count unchanged");
+});
+
+test("Clear-all: no onClearAll handler → button present + enabled but no listener (inert)", () => {
+  // WP3-before-WP4: a caller that omits the optional onClearAll still renders the
+  // count-gated button; clicking is a safe no-op (no listener, no throw).
+  const noClear: TtsChromeHandlers = {
+    onPause() {}, onResume() {}, onStop() {}, onSkip() {},
+  };
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 2 }), noClear);
+  const clear = el.querySelector(".tts-btn-clear-all") as HTMLButtonElement;
+  assert.notEqual(clear, null);
+  assert.equal(clear.disabled, false);
+  clear.click();   // no listener wired → no throw
 });
 
 // ---------------------------------------------------------------------------

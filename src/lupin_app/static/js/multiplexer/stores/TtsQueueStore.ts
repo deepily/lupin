@@ -50,6 +50,13 @@ export interface TtsQueueStore {
    * Rio's B4 driver consumes via `TtsQueueStoreLike { current(): string | null }`.
    */
   current(): string | null;
+  /**
+   * F0-a active ITEM object (or null when nothing plays). A pure READ-ONLY getter
+   * over the existing private `active` head — the active-slot card renderer (WP4)
+   * needs the full TtsQueueItem (icon/text/time), not just `current()`'s id_hash.
+   * Consume-surface completion: zero new state, zero mutation, zero events.
+   */
+  activeItem(): TtsQueueItem | null;
   /** The FIFO tail of items waiting to be spoken (excludes the active head). */
   pending(): ReadonlyArray<TtsQueueItem>;
   /** Number of PENDING items (excludes the active head). Named distinctly from
@@ -98,6 +105,10 @@ class TtsQueueStoreImpl implements TtsQueueStore {
 
   current(): string | null {
     return this.active === null ? null : this.active.id_hash;
+  }
+
+  activeItem(): TtsQueueItem | null {
+    return this.active;
   }
 
   pending(): ReadonlyArray<TtsQueueItem> {

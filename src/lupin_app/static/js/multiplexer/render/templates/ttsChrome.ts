@@ -13,6 +13,14 @@
 //   - `.is-playing-current` / `.is-paused-current` classes follow legacy
 //     `notifications.css:4692-4712, 4718-4725` semantics
 //
+// WP3 (2026-07-02) — rich header transport (legacy `updateTTSQueueSection`):
+//   - header text: "🔊 Playing: N" / "Paused: N" (manual pause) / "Paused: N
+//     waiting" (focus mode); a `.paused` / `.focus-mode` modifier on the header
+//   - Resume button (`.tts-btn-resume`) present ONLY in focus mode → onResume
+//   - Clear-all button (`.tts-btn-clear-all`) disabled + hidden when N === 0,
+//     else enabled → onClearAll
+//   - the 6-state toggle/stop/skip matrix below is UNCHANGED
+//
 // State → control enable/disable matrix:
 //   | state    | toggle | stop | skip |
 //   |----------|--------|------|------|
@@ -27,16 +35,25 @@ import { html } from "../html";
 import type { AudioPlaybackState } from "../../shared/types";
 
 export interface TtsChromeHandlers {
-  onPause()  : void;
-  onResume() : void;
-  onStop()   : void;
-  onSkip()   : void;
+  onPause()    : void;
+  onResume()   : void;
+  onStop()     : void;
+  onSkip()     : void;
+  // WP3 — empty the whole queue (Clear-all button). OPTIONAL: the button renders
+  // count-gated regardless, but its click-listener is wired only when a handler
+  // is supplied. WP4 provides it (→ TtsQueueStore.clear()); pre-WP4 callers omit
+  // it, so the button is present but inert (never a misleading no-op call).
+  onClearAll?(): void;
 }
 
 export interface TtsChromeOpts {
   state              : AudioPlaybackState;
   queueLength        : number;
   currentTrackName?  : string;
+  // WP3 — focus mode: the queue is paused awaiting an action-required response.
+  // The template is a PURE function of this flag; WHERE the flag lives (the §8.3
+  // open question — TtsQueueStore vs a higher coordinator) is WP4's concern.
+  focusMode?         : boolean;
 }
 
 interface ControlState {
@@ -103,6 +120,9 @@ function renderTtsEmpty(): HTMLElement {
  * Ensures:
  *   - Returned HTMLElement carries `.tts-chrome` (+ optional state class)
  *   - Toggle button reflects state-driven label/disabled per the matrix above
+ *   - Header text follows the WP3 state machine (Playing / Paused / focus) with
+ *     a `.paused` / `.focus-mode` modifier; Resume renders only in focus mode;
+ *     Clear-all is disabled + hidden when the queue is empty
  *   - currentTrackName renders inside `.tts-current-track` only when present
  *   - All writes are safe per AC2e (no .innerHTML / rawHTML / .outerHTML)
  */
@@ -128,14 +148,41 @@ export function renderTtsChrome(
     : html``;
 
   const queueStr = String(opts.queueLength);
-  /* c8 ignore next 10 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every test that renders the chrome (Phase 6a jobCard.ts:251 precedent).
+  const focus    = opts.focusMode === true;
+
+  // WP3 header state machine: focus mode → "Paused: N waiting" (queue held for an
+  // action-required response); manual pause → "Paused: N"; else "🔊 Playing: N".
+  // A `.focus-mode` / `.paused` modifier on the header carries the skin (WP7 CSS).
+  // NOTE: focus rendering rides an ACTIVE state — the idle short-circuit above
+  // still wins when nothing plays; that boundary + where `focusMode` is sourced
+  // are the §8.3 open question WP4 resolves.
+  const headerText = focus
+    ? `Paused: ${queueStr} waiting`
+    : opts.state === "paused"
+      ? `Paused: ${queueStr}`
+      : `🔊 Playing: ${queueStr}`;
+  const headerClass = focus
+    ? "tts-playing-header focus-mode"
+    : opts.state === "paused"
+      ? "tts-playing-header paused"
+      : "tts-playing-header";
+
+  // Focus Resume button — present ONLY in focus mode (querySelector null
+  // otherwise, mirroring the currentTrackName idiom).
+  const resumeBlock = focus
+    ? html`<button type="button" class="tts-btn tts-btn-resume">Resume</button>`
+    : html``;
+
+  /* c8 ignore next 13 */ // tagged-template literal: c8 reports phantom branches on $-interpolations; the runtime path is straight-line and exercised by every test that renders the chrome (Phase 6a jobCard.ts:251 precedent).
   const frag = html`
-    <div class="tts-playing-header">🔊 Playing: ${queueStr}</div>
+    <div class="${headerClass}">${headerText}</div>
     ${trackBlock}
+    ${resumeBlock}
     <div class="tts-controls">
       <button type="button" class="tts-btn tts-btn-toggle" data-action="${ctl.toggleAction}">${ctl.toggleLabel}</button>
       <button type="button" class="tts-btn tts-btn-stop">Stop</button>
       <button type="button" class="tts-btn tts-btn-skip">Skip</button>
+      <button type="button" class="tts-btn tts-btn-clear-all">Clear all</button>
     </div>
     <div class="tts-queue-length" data-queue-length="${queueStr}">Queued: ${queueStr}</div>
   ` as DocumentFragment;
@@ -162,6 +209,24 @@ export function renderTtsChrome(
   if (skip !== null) {
     skip.disabled = !ctl.skipEnabled;
     if (ctl.skipEnabled) skip.addEventListener("click", () => handlers.onSkip());
+  }
+
+  // WP3 — focus Resume (present only in focus mode) → onResume.
+  const resume = root.querySelector<HTMLButtonElement>(".tts-btn-resume");
+  if (resume !== null) resume.addEventListener("click", () => handlers.onResume());
+
+  // WP3 — Clear-all: disabled + hidden when the queue is empty, else enabled and
+  // wired to onClearAll (legacy "hidden+disabled when no items").
+  const clearAll = root.querySelector<HTMLButtonElement>(".tts-btn-clear-all");
+  /* c8 ignore next */ // defensive: html`` always produces clear-all button.
+  if (clearAll !== null) {
+    const empty = opts.queueLength === 0;
+    clearAll.disabled = empty;
+    clearAll.hidden   = empty;
+    if (!empty && handlers.onClearAll !== undefined) {
+      const onClearAll = handlers.onClearAll;
+      clearAll.addEventListener("click", () => onClearAll());
+    }
   }
 
   return root;

@@ -332,7 +332,7 @@ function bootMultiplexer(): void {
   // (canonical AC9 order: notifications → jobs → actionRequired → ttsChrome).
   const ttsChromeRenderer = createTtsChromeRenderer({
     eventBus,
-    stores : { audio: stores.audio },
+    stores : { audio: stores.audio, ttsQueue: stores.ttsQueue },   // WP4 — item queue
   });
   const ttsMountEl = document.getElementById("tts-pane");
   if (ttsMountEl === null) throw new Error("multiplexer: #tts-pane not found");

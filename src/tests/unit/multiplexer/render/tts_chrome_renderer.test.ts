@@ -10,11 +10,13 @@ import {
   createTtsChromeRenderer,
   type TtsChromeRenderer,
   type AudioStoreLike,
+  type TtsQueueStoreLike,
 } from "../../../../lupin_app/static/js/multiplexer/render/TtsChromeRenderer";
 import type {
   AudioPlaybackState,
   StoreAudioStateChangePayload,
   StoreAudioChunkDecodedPayload,
+  TtsQueueItem,
 } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before(() => {
@@ -67,6 +69,46 @@ function makeAudioStore(initialState: AudioPlaybackState = "playing", initialQue
   };
 }
 
+// WP4 — TtsQueueStore mock (active head + pending tail + mutator call tracking).
+interface FakeTtsQueueCalls {
+  removeById : string[];
+  clear      : number;
+}
+
+function makeTtsQueueStore(): {
+  store      : TtsQueueStoreLike;
+  calls      : FakeTtsQueueCalls;
+  setActive  : (item: TtsQueueItem | null) => void;
+  setPending : (items: TtsQueueItem[]) => void;
+} {
+  let active  : TtsQueueItem | null = null;
+  let pending : TtsQueueItem[] = [];
+  const calls : FakeTtsQueueCalls = { removeById: [], clear: 0 };
+  const store : TtsQueueStoreLike = {
+    current        : (): string | null => (active === null ? null : active.id_hash),
+    activeItem     : (): TtsQueueItem | null => active,
+    pending        : (): ReadonlyArray<TtsQueueItem> => pending.slice(),
+    itemQueueLength: (): number => pending.length,
+    removeById     : (id: string): void => { calls.removeById.push(id); },
+    clear          : (): void => { calls.clear += 1; },
+  };
+  return {
+    store,
+    calls,
+    setActive : (item: TtsQueueItem | null): void => { active = item; },
+    setPending: (items: TtsQueueItem[]): void => { pending = items; },
+  };
+}
+
+// N dummy pending items — for the count-driven tests that predate the WP4 queue.
+function pendingItems(n: number): TtsQueueItem[] {
+  return Array.from({ length: n }, (_v, i) => ({ id_hash: `seed-${i}`, ttsText: `say ${i}`, addedAt: 0 }));
+}
+
+function ttsItem(idHash: string, over: Partial<TtsQueueItem> = {}): TtsQueueItem {
+  return { id_hash: idHash, ttsText: `say ${idHash}`, addedAt: 0, ...over };
+}
+
 interface RafHarness {
   raf: (cb: FrameRequestCallback) => number;
   caf: (h: number) => void;
@@ -96,25 +138,31 @@ function makeRafHarness(): RafHarness {
 interface Setup {
   bus      : ReturnType<typeof createEventBusForTesting>;
   audio    : ReturnType<typeof makeAudioStore>;
+  ttsQueue : ReturnType<typeof makeTtsQueueStore>;
   raf      : RafHarness;
   renderer : TtsChromeRenderer;
   root     : HTMLElement;
 }
 
 function setupRenderer(initialState: AudioPlaybackState = "playing", initialQueue: number = 0): Setup {
-  const bus   = createEventBusForTesting();
-  const audio = makeAudioStore(initialState, initialQueue);
-  const raf   = makeRafHarness();
+  const bus      = createEventBusForTesting();
+  const audio    = makeAudioStore(initialState, initialQueue);
+  const ttsQueue = makeTtsQueueStore();
+  // WP4 — the header/queue count is now sourced from the item queue (pending),
+  // not the audio burst. Seed pending = initialQueue so the pre-WP4 count tests
+  // stay valid against the new source.
+  ttsQueue.setPending(pendingItems(initialQueue));
+  const raf      = makeRafHarness();
   const renderer = createTtsChromeRenderer({
     eventBus               : bus,
-    stores                 : { audio: audio.store },
+    stores                 : { audio: audio.store, ttsQueue: ttsQueue.store },
     requestAnimationFrameFn: raf.raf,
     cancelAnimationFrameFn : raf.caf,
   });
   const root = document.createElement("div");
   root.id = "tts-pane";
   document.body.appendChild(root);
-  return { bus, audio, raf, renderer, root };
+  return { bus, audio, ttsQueue, raf, renderer, root };
 }
 
 function emitState(bus: ReturnType<typeof createEventBusForTesting>, payload: StoreAudioStateChangePayload): void {
@@ -225,14 +273,14 @@ test("Skip button dispatches AudioStore.skip()", () => {
 // ===========================================================================
 
 test("storm safety (a): 100 chunk_decoded events coalesce into ≤1 render cycle", () => {
-  const { renderer, root, bus, raf, audio } = setupRenderer("playing", 0);
+  const { renderer, root, bus, raf, ttsQueue } = setupRenderer("playing", 0);
   renderer.mount(root);
   const initialChromeEl = root.querySelector(".tts-chrome");
   // Track render cycles by counting chrome replacements via MutationObserver-free
   // proxy: spy via `forceRenderForTesting` emulation? Simpler: count actual
   // RAF invocations needed to flush all queued events.
   for (let i = 0; i < 100; i++) {
-    audio.setQueue(i);
+    ttsQueue.setPending(pendingItems(i));
     emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
   }
   // Even after 100 events, only ONE RAF should be pending (storm coalescing).
@@ -293,11 +341,11 @@ test("stop semantics: clicking Stop clears queue to 0 + transitions state to idl
 // ===========================================================================
 
 test("mixed-event storm: state_change + chunk_decoded events share the same pendingRender flag", () => {
-  const { renderer, root, bus, raf, audio } = setupRenderer("idle");
+  const { renderer, root, bus, raf, audio, ttsQueue } = setupRenderer("idle");
   renderer.mount(root);
   audio.setState("playing");
   emitState(bus, { state: "playing", prev: "idle" });
-  audio.setQueue(7);
+  ttsQueue.setPending(pendingItems(7));
   emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
   emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
   // Three events of two kinds → still just ONE pending RAF (shared flag).
@@ -309,10 +357,10 @@ test("mixed-event storm: state_change + chunk_decoded events share the same pend
 });
 
 test("forceRenderForTesting: synchronous re-render (bypasses RAF)", () => {
-  const { renderer, root, audio } = setupRenderer("playing", 0);
+  const { renderer, root, ttsQueue } = setupRenderer("playing", 0);
   renderer.mount(root);
-  // Mutate audio store WITHOUT firing an event.
-  audio.setQueue(42);
+  // Mutate the item queue WITHOUT firing an event.
+  ttsQueue.setPending(pendingItems(42));
   // Without forceRenderForTesting, DOM still shows queue=0 (no event fired).
   assert.match(root.querySelector(".tts-queue-length")!.textContent ?? "", /Queued: 0/);
   renderer.forceRenderForTesting();
@@ -331,7 +379,7 @@ test("forceRenderForTesting before mount is a no-op (no throw)", () => {
 // ===========================================================================
 
 test("Lane 0a: TTS pane renders the .section-header bar (🔊 Playing), count = queue length, chrome nested in .section-content", () => {
-  const { renderer, root, audio } = setupRenderer("playing", 3);
+  const { renderer, root, ttsQueue } = setupRenderer("playing", 3);
   renderer.mount(root);
 
   const header = root.querySelector(".section-header") as HTMLElement;
@@ -346,7 +394,7 @@ test("Lane 0a: TTS pane renders the .section-header bar (🔊 Playing), count = 
   assert.notEqual(root.querySelector(".section-content .tts-queue-length"), null, "chrome nested in section-content");
 
   // Count tracks the queue length on re-render.
-  audio.setQueue(5);
+  ttsQueue.setPending(pendingItems(5));
   renderer.forceRenderForTesting();
   assert.equal(count.textContent, "5", "header count updated to 5");
   renderer.unmount();
@@ -365,5 +413,105 @@ test("Lane 0a: clicking the TTS header toggles session-only collapse (data-colla
   chevron.dispatchEvent(new Event("click", { bubbles: true }));
   assert.equal(root.getAttribute("data-collapsed"), "false");
   assert.equal(chevron.textContent, "▼");
+  renderer.unmount();
+});
+
+// ===========================================================================
+// WP4 — active/pending/empty rendering + store_tts_queue_changed + handlers
+// ===========================================================================
+
+test("WP4: active + pending render one .tts-active-card + N .tts-minimized; header count = TOTAL", () => {
+  const { renderer, root, ttsQueue } = setupRenderer("playing", 0);
+  ttsQueue.setActive(ttsItem("A"));
+  ttsQueue.setPending([ttsItem("p1"), ttsItem("p2")]);
+  renderer.mount(root);
+  assert.equal(root.querySelectorAll(".tts-active-card").length, 1);
+  assert.equal(root.querySelectorAll(".tts-minimized").length, 2);
+  assert.equal(root.querySelector(".section-header-count")!.textContent, "3", "count = 1 active + 2 pending");
+  renderer.unmount();
+});
+
+test("WP4: pending minimized cards render in 1-indexed queue order", () => {
+  const { renderer, root, ttsQueue } = setupRenderer("playing", 0);
+  ttsQueue.setActive(ttsItem("A"));
+  ttsQueue.setPending([ttsItem("p1"), ttsItem("p2"), ttsItem("p3")]);
+  renderer.mount(root);
+  const positions = Array.from(root.querySelectorAll(".tts-minimized .tts-position")).map(e => e.textContent);
+  assert.deepEqual(positions, ["1", "2", "3"]);
+  renderer.unmount();
+});
+
+test("WP4: empty queue (no active, no pending) → no cards; idle chrome shows empty panel; count 0", () => {
+  const { renderer, root } = setupRenderer("idle", 0);
+  renderer.mount(root);
+  assert.equal(root.querySelector(".tts-active-card"), null);
+  assert.equal(root.querySelector(".tts-minimized"), null);
+  assert.match(root.querySelector(".tts-queue-empty-state")!.textContent ?? "", /Nothing in the queue/);
+  assert.equal(root.querySelector(".section-header-count")!.textContent, "0");
+  renderer.unmount();
+});
+
+test("WP4 CLEAR-PRIOR-THEN-SET: current() A→B leaves exactly one active card (=B), never both", () => {
+  const { renderer, root, ttsQueue, bus, raf } = setupRenderer("playing", 0);
+  ttsQueue.setActive(ttsItem("A", { ttsText: "alpha" }));
+  renderer.mount(root);
+  assert.equal(root.querySelectorAll(".tts-active-card").length, 1);
+  assert.match(root.querySelector(".tts-active-card .tts-message")!.textContent ?? "", /alpha/);
+  // Store advanced A→B; emit the queue-changed event → coalesced re-render.
+  ttsQueue.setActive(ttsItem("B", { ttsText: "bravo" }));
+  bus.emit({ type: "store_tts_queue_changed", payload: { activeNotificationId: "B", pending: [] }, source: "test", ts: 0 });
+  raf.flush();
+  const actives = root.querySelectorAll(".tts-active-card");
+  assert.equal(actives.length, 1, "exactly one active card after A→B — the prior bubble is cleared before the new one is set");
+  assert.match(root.querySelector(".tts-active-card .tts-message")!.textContent ?? "", /bravo/);
+  renderer.unmount();
+});
+
+test("WP4: store_tts_queue_changed schedules a coalesced render (RAF), NOT a direct paint", () => {
+  const { renderer, root, ttsQueue, bus, raf } = setupRenderer("playing", 0);
+  renderer.mount(root);
+  ttsQueue.setActive(ttsItem("A"));
+  bus.emit({ type: "store_tts_queue_changed", payload: { activeNotificationId: "A", pending: [] }, source: "test", ts: 0 });
+  assert.equal(raf.pendingCount(), 1, "queue-changed → 1 pending RAF");
+  raf.flush();
+  assert.equal(root.querySelectorAll(".tts-active-card").length, 1);
+  renderer.unmount();
+});
+
+test("WP4: active-card delete dispatches ttsQueue.removeById(id_hash) (consume-only mutator)", () => {
+  const { renderer, root, ttsQueue } = setupRenderer("playing", 0);
+  ttsQueue.setActive(ttsItem("act-id"));
+  renderer.mount(root);
+  (root.querySelector(".tts-active-card .tts-delete-button") as HTMLButtonElement).click();
+  assert.deepEqual(ttsQueue.calls.removeById, ["act-id"]);
+  renderer.unmount();
+});
+
+test("WP4: active-card Stop dispatches audio.stop()", () => {
+  const { renderer, root, ttsQueue, audio } = setupRenderer("playing", 0);
+  ttsQueue.setActive(ttsItem("A"));
+  renderer.mount(root);
+  (root.querySelector(".tts-active-card .tts-stop-button") as HTMLButtonElement).click();
+  assert.equal(audio.calls.stop, 1);
+  renderer.unmount();
+});
+
+test("WP4: minimized-card delete dispatches ttsQueue.removeById(id_hash)", () => {
+  const { renderer, root, ttsQueue } = setupRenderer("playing", 0);
+  ttsQueue.setActive(ttsItem("A"));
+  ttsQueue.setPending([ttsItem("pend-id")]);
+  renderer.mount(root);
+  (root.querySelector(".tts-minimized .tts-delete-button") as HTMLButtonElement).click();
+  assert.deepEqual(ttsQueue.calls.removeById, ["pend-id"]);
+  renderer.unmount();
+});
+
+test("WP4: Clear-all dispatches ttsQueue.clear() (non-empty queue)", () => {
+  const { renderer, root, ttsQueue } = setupRenderer("playing", 0);
+  ttsQueue.setActive(ttsItem("A"));
+  ttsQueue.setPending([ttsItem("p1")]);   // non-empty → clear-all enabled
+  renderer.mount(root);
+  (root.querySelector(".tts-btn-clear-all") as HTMLButtonElement).click();
+  assert.equal(ttsQueue.calls.clear, 1);
   renderer.unmount();
 });
