@@ -2265,7 +2265,8 @@ def spawn_sessions(
     project            : str = "lupin",
     persona_preference = None,
     seed_memento       = None,
-    dry_run            : bool = False
+    dry_run            : bool = False,
+    model              : Optional[ str ] = None
 ) -> dict:
     """
     **[SPAWN — host-side; launches real Claude Code sessions]** Spin up `count`
@@ -2297,15 +2298,32 @@ def spawn_sessions(
             walk the same chain and take successive unclaimed elements.
         seed_memento: path/ref to a prior memento; restores author continuity
         dry_run: build + print the spawn commands without launching
+        model: explicit model id to pin each child to (e.g. "claude-opus-4-8").
+            Resolution: this explicit param → the INI role key
+            `cc session spawn model <role>` → the INI `cc session spawn model
+            default` key (covers unknown/new roles) → None. None resolves to NO
+            `--model` flag, so the child inherits the user default (fail-open;
+            today's behavior, zero-risk rollout). The cost-split default posture
+            (2026-07-02) is Fable-5-managers (via Rick's user default, zero code)
+            / Opus-4.8-workers (the `claude-opus-4-8` INI keys). The resolved
+            model is echoed on every roster entry + at the top level (spawn-ack
+            verification).
 
     Returns:
-        dict: { spawned:[{session_name, requested_role, status, ...}],
-                manager_persona, collection_topic, ... } or {status:"error",...}
+        dict: { spawned:[{session_name, requested_role, status, model, ...}],
+                manager_persona, collection_topic, model, ... } or {status:"error",...}
     """
     _wait_for_sender_id()
     from lupin_mcp import session_spawner
     sid, persona = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
     cfg          = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
+    # Resolve the child's model: explicit param wins; else the per-role INI key;
+    # else the INI `default` key (covers unknown/new roles); else None (no flag →
+    # inherit the user default, fail-open). See ruling #2 (2026-07-02): managers
+    # get Fable-5 via Rick's user default, zero code — no `manager` INI key ships;
+    # the cost goal is met entirely by the worker-side flag.
+    spawn_models   = cfg[ "spawn_models" ]
+    resolved_model = model or spawn_models.get( role ) or spawn_models.get( "default" )
     try:
         return session_spawner.spawn_sessions(
             count, task_prompt, sid,
@@ -2316,7 +2334,8 @@ def spawn_sessions(
             persona_preference = persona_preference,
             seed_memento       = seed_memento,
             spawn_cap          = cfg[ "spawn_cap" ],
-            dry_run            = dry_run
+            dry_run            = dry_run,
+            model              = resolved_model
         )
     except ValueError as e:
         return { "status": "error", "reason": str( e ) }

@@ -250,6 +250,7 @@ def spawn_sessions(
     tokens             : Optional[ Dict[ str, Any ] ] = None,
     spawn_cap          : int = DEFAULT_SPAWN_CAP,
     dry_run            : bool = False,
+    model              : Optional[ str ] = None,
     runner             : Callable = default_runner,
     session_dir        : Path = SESSION_DIR
 ) -> Dict[ str, Any ]:
@@ -280,9 +281,16 @@ def spawn_sessions(
           fail, never a silent random re-allocation). Each child walks the
           SAME chain and takes the first unclaimed element; sibling boots
           serialize via the server's atomic allocate-or-409.
-        - Returns { spawned: [ {session_name, requested_role, status, ...} ],
+        - When `model` is a non-empty string, forwards `--model <model>` to every
+          child via the build_spawn_argv claude_args seam, so the child boots on
+          that model instead of the user default (Fable-5-managers / Opus-4.8-
+          workers cost split, 2026-07-02). When `model` is None/empty, NO --model
+          flag is passed and the child inherits the user default (today's fail-open
+          behavior). The resolved model is echoed on EVERY roster entry and at the
+          top level (spawn-ack verification → verify-allocated-MODEL).
+        - Returns { spawned: [ {session_name, requested_role, status, model, ...} ],
                     manager_session_id, collection_topic, dry_run, requested,
-                    persona_preference }
+                    persona_preference, model }
         - Never raises except the cap ValueError
 
     Args:
@@ -299,6 +307,7 @@ def spawn_sessions(
         tokens: extra template tokens
         spawn_cap: max children
         dry_run: pass --dry-run; do not persist the manifest
+        model: resolved model id to pin via `--model` (None → inherit user default)
         name_prefix: tmux session name prefix
         runner: injected subprocess runner
         session_dir: injected session/manifest directory
@@ -360,7 +369,12 @@ def spawn_sessions(
         merged.update( tokens or {} )
         rendered     = render_task_prompt( task_prompt, merged, seed_memento )
 
-        argv = build_spawn_argv( script_path, session_name, rendered, dry_run=dry_run )
+        # Model-directive (2026-07-02): pin the child's model via the existing
+        # claude_args pass-through seam. None/empty model → no flag → inherit the
+        # user default (fail-open). The resolved model is chosen upstream (the MCP
+        # wrapper's explicit-param → INI role key → INI default resolution).
+        claude_args = [ "--model", model ] if model else None
+        argv = build_spawn_argv( script_path, session_name, rendered, dry_run=dry_run, claude_args=claude_args )
         env  = {
             "COSA_VOICE_SPAWNED_BY" : manager_session_id,
             "COSA_VOICE_HEADLESS"   : "1",
@@ -391,7 +405,8 @@ def spawn_sessions(
             "requested_role" : role,
             "project"        : project,
             "status"         : "spawned" if ok else "failed",
-            "dry_run"        : dry_run
+            "dry_run"        : dry_run,
+            "model"          : model
         } )
 
     if not dry_run:
@@ -409,7 +424,8 @@ def spawn_sessions(
         "collection_topic"   : collection_topic,
         "persona_preference" : persona_preference,
         "requested"          : count,
-        "dry_run"            : dry_run
+        "dry_run"            : dry_run,
+        "model"              : model
     }
 
 
@@ -1042,9 +1058,14 @@ def resolve_spawn_config( config_mgr: Any ) -> Dict[ str, Any ]:
           .get(key, default=, return_type=, silent=)) or None
 
     Ensures:
-        - Returns { spawn_cap, ack_timeout_seconds, write_memento_default } with
-          documented defaults (8, 120, True) when config_mgr is None or a key is
-          absent
+        - Returns { spawn_cap, ack_timeout_seconds, write_memento_default,
+          spawn_models } with documented defaults (8, 120, True, all-None model
+          map) when config_mgr is None or a key is absent
+        - spawn_models maps each spawn role (reviewer / author / observer /
+          default) to its configured model id, or None when the key is absent
+          (absent → no --model flag → child inherits the user default, fail-open).
+          The MCP wrapper resolves a child's model as explicit-param → role key →
+          the "default" key (covers unknown/new roles) → None.
         - Never raises
 
     Args:
@@ -1053,9 +1074,10 @@ def resolve_spawn_config( config_mgr: Any ) -> Dict[ str, Any ]:
     Returns:
         dict of resolved spawn config
     """
-    cap = DEFAULT_SPAWN_CAP
-    ack = 120
-    wm  = True
+    cap    = DEFAULT_SPAWN_CAP
+    ack    = 120
+    wm     = True
+    models = { "reviewer": None, "author": None, "observer": None, "default": None }
     if config_mgr is not None:
         cap = config_mgr.get( "cc session spawn max reviewers",
                               default=DEFAULT_SPAWN_CAP, return_type="int", silent=True )
@@ -1063,7 +1085,11 @@ def resolve_spawn_config( config_mgr: Any ) -> Dict[ str, Any ]:
                               default=120, return_type="int", silent=True )
         wm  = config_mgr.get( "cc session spawn write memento default",
                               default=True, return_type="boolean", silent=True )
-    return { "spawn_cap": cap, "ack_timeout_seconds": ack, "write_memento_default": wm }
+        for spawn_role in models:
+            models[ spawn_role ] = config_mgr.get( f"cc session spawn model {spawn_role}",
+                                                   default=None, return_type="string", silent=True )
+    return { "spawn_cap": cap, "ack_timeout_seconds": ack, "write_memento_default": wm,
+             "spawn_models": models }
 
 
 def _slug( text: str ) -> str:

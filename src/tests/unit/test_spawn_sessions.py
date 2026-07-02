@@ -402,6 +402,63 @@ class TestSpawnSessions:
         assert "msg #4" in last_argv
 
 
+# ── spawn_sessions model-directive (argv threading + roster echo) ─────────────
+
+class TestSpawnSessionsModel:
+    """Model-directive (2026-07-02): the resolved model threads to `--model` via
+    the claude_args seam and is echoed on every roster entry + at the top level."""
+
+    def _argv_of( self, runner, i=0 ):
+        return runner.calls[ i ][ 0 ]
+
+    def test_model_threads_into_argv_before_prompt( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 1, "t", "sid-m", script_path="/s.sh", manager_persona="Rio",
+                              model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+        argv = self._argv_of( runner )
+        # --model <id> present, and inserted BEFORE --prompt (the claude_args seam)
+        assert "--model" in argv
+        assert argv[ argv.index( "--model" ) + 1 ] == "claude-opus-4-8"
+        assert argv.index( "--model" ) < argv.index( "--prompt" )
+        # echoed on the roster entry AND the top-level result
+        assert res[ "spawned" ][ 0 ][ "model" ] == "claude-opus-4-8"
+        assert res[ "model" ] == "claude-opus-4-8"
+
+    def test_model_none_omits_flag_and_echoes_none( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 1, "t", "sid-mn", script_path="/s.sh", manager_persona="Rio",
+                              runner=runner, session_dir=tmp_path )
+        argv = self._argv_of( runner )
+        assert "--model" not in argv          # fail-open: no flag → inherit user default
+        assert res[ "spawned" ][ 0 ][ "model" ] is None
+        assert res[ "model" ] is None
+
+    def test_empty_model_string_omits_flag( self, tmp_path ):
+        # An empty string is falsy → treated as "no model" (no --model flag).
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 1, "t", "sid-me", script_path="/s.sh", manager_persona="Rio",
+                              model="", runner=runner, session_dir=tmp_path )
+        assert "--model" not in self._argv_of( runner )
+        assert res[ "model" ] == ""
+
+    def test_model_on_every_child_in_a_batch( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        res = spawn_sessions( 3, "t", "sid-mb", script_path="/s.sh", manager_persona="Rio",
+                              model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+        assert all( s[ "model" ] == "claude-opus-4-8" for s in res[ "spawned" ] )
+        for i in range( 3 ):
+            assert "--model" in self._argv_of( runner, i )
+
+    def test_model_coexists_with_dry_run( self, tmp_path ):
+        runner = FakeRunner( returncode=0 )
+        spawn_sessions( 1, "t", "sid-md", script_path="/s.sh", dry_run=True,
+                        model="claude-opus-4-8", runner=runner, session_dir=tmp_path )
+        argv = self._argv_of( runner )
+        # both flags present; --dry-run precedes the session name, --model follows it
+        assert "--dry-run" in argv and "--model" in argv
+        assert argv.index( "--dry-run" ) < argv.index( "--model" )
+
+
 # ── dismiss_sessions ──────────────────────────────────────────────────────────
 
 class TestDismissSessions:
@@ -604,22 +661,41 @@ class TestResolveManagerIdentity:
 # ── resolve_spawn_config ──────────────────────────────────────────────────────
 
 class TestResolveSpawnConfig:
+    _NO_MODELS = { "reviewer": None, "author": None, "observer": None, "default": None }
+
     def test_defaults_when_none( self ):
         cfg = resolve_spawn_config( None )
-        assert cfg == { "spawn_cap": 8, "ack_timeout_seconds": 120, "write_memento_default": True }
+        assert cfg == { "spawn_cap": 8, "ack_timeout_seconds": 120, "write_memento_default": True,
+                        "spawn_models": self._NO_MODELS }
 
     def test_reads_from_config_mgr( self ):
         mgr = _FakeConfigMgr( {
             "cc session spawn max reviewers"                 : 5,
             "cc session spawn reviewer ack timeout seconds"  : 90,
             "cc session spawn write memento default"         : False,
+            "cc session spawn model reviewer"                : "claude-opus-4-8",
+            "cc session spawn model author"                  : "claude-opus-4-8",
+            "cc session spawn model observer"                : "claude-opus-4-8",
+            "cc session spawn model default"                 : "claude-opus-4-8",
         } )
         cfg = resolve_spawn_config( mgr )
-        assert cfg == { "spawn_cap": 5, "ack_timeout_seconds": 90, "write_memento_default": False }
+        assert cfg == { "spawn_cap": 5, "ack_timeout_seconds": 90, "write_memento_default": False,
+                        "spawn_models": { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
+                                          "observer": "claude-opus-4-8", "default": "claude-opus-4-8" } }
 
     def test_missing_keys_fall_back_to_defaults( self ):
         cfg = resolve_spawn_config( _FakeConfigMgr( {} ) )
         assert cfg[ "spawn_cap" ] == 8 and cfg[ "ack_timeout_seconds" ] == 120
+        # absent model keys → all-None map (fail-open: no --model flag)
+        assert cfg[ "spawn_models" ] == self._NO_MODELS
+
+    def test_partial_model_keys_only_configured_roles_set( self ):
+        # A role key present but others absent → only the present one resolves;
+        # the rest stay None (fail-open per un-keyed role).
+        mgr = _FakeConfigMgr( { "cc session spawn model author": "claude-fable-5" } )
+        cfg = resolve_spawn_config( mgr )
+        assert cfg[ "spawn_models" ] == { "reviewer": None, "author": "claude-fable-5",
+                                          "observer": None, "default": None }
 
 
 # ── MCP-WRAPPER LAYER: dismiss_sessions param-typing regression (2026-06-01) ──
@@ -780,3 +856,107 @@ class TestDismissSessionsWrapperCoercion:
         monkeypatch.setattr( ss, "dismiss_sessions", _spy_dismiss )
         asyncio.run( cv_mcp.dismiss_sessions.run( {} ) )
         assert captured[ "reconcile_items_fn" ] is ss._default_reconcile_store_items
+
+
+# ── MCP-WRAPPER LAYER: spawn_sessions model-directive (2026-07-02) ────────────
+#
+# Two concerns, mirroring the dismiss-wrapper regression lock above:
+#   (schema) the new `model` param MUST be typed Optional[str] so FastMCP emits a
+#     string/null JSON schema — an UNTYPED param emits no `type` and a client's
+#     string arrives uncoerced (the exact class of bug the dismiss lock caught).
+#   (resolution) the wrapper resolves a child's model explicit-param → INI role
+#     key → INI `default` key → None, then threads the RESOLVED value into the
+#     inner session_spawner.spawn_sessions. Driven via `.fn()` (the underlying
+#     function) with a spy inner fn — the wrapper body (the resolution) runs; only
+#     FastMCP's own schema coercion is bypassed (that is the schema test's job).
+
+class TestSpawnSessionsWrapperSchema:
+    def test_model_schema_allows_string( self, cv_mcp ):
+        m = cv_mcp.spawn_sessions.parameters[ "properties" ][ "model" ]
+        assert "string" in _type_options( m ), f"model must allow string, got {m}"
+
+    def test_model_schema_allows_null_optional( self, cv_mcp ):
+        # Optional[str] → the null branch is what lets the param be omitted.
+        m = cv_mcp.spawn_sessions.parameters[ "properties" ][ "model" ]
+        assert "null" in _type_options( m ), f"model must allow null (Optional), got {m}"
+
+
+class TestSpawnSessionsWrapperResolution:
+    """explicit-param → role key → `default` key → None, threaded to the inner fn."""
+
+    def _patch( self, cv_mcp, monkeypatch, captured, spawn_models ):
+        import lupin_mcp.session_spawner as ss
+
+        def _spy_spawn( count, task_prompt, sid, *, model=None, role="reviewer", **_kw ):
+            captured[ "model" ] = model
+            captured[ "role" ]  = role
+            return { "spawned": [], "model": model }
+
+        monkeypatch.setattr( cv_mcp, "_wait_for_sender_id", lambda: "sender" )
+        monkeypatch.setattr( cv_mcp, "_get_cc_metadata",   lambda: { "session_id": "abc12345" } )
+        monkeypatch.setattr( cv_mcp, "_spawn_config_mgr",  lambda: None )
+        monkeypatch.setattr( cv_mcp, "_spawn_script_path", lambda: "/s.sh" )
+        monkeypatch.setattr( ss, "resolve_manager_identity",
+                             lambda meta, fallback_session_id=None: ( "mgr-sid", "Rio" ) )
+        monkeypatch.setattr( ss, "resolve_spawn_config",
+                             lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
+                                           "write_memento_default": True, "spawn_models": spawn_models } )
+        monkeypatch.setattr( ss, "spawn_sessions", _spy_spawn )
+        return ss
+
+    _ALL_OPUS = { "reviewer": "claude-opus-4-8", "author": "claude-opus-4-8",
+                  "observer": "claude-opus-4-8", "default": "claude-opus-4-8" }
+
+    def test_explicit_param_wins_over_ini( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured, self._ALL_OPUS )
+        cv_mcp.spawn_sessions.fn( 1, "t", model="claude-fable-5" )
+        assert captured[ "model" ] == "claude-fable-5"   # explicit beats the opus INI
+
+    def test_role_key_used_when_no_explicit( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured,
+                     { "reviewer": "claude-opus-4-8", "author": None, "observer": None, "default": None } )
+        cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
+        assert captured[ "model" ] == "claude-opus-4-8"  # from the reviewer role key
+
+    def test_role_specific_beats_default( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured,
+                     { "reviewer": "claude-opus-4-8", "author": None, "observer": None,
+                       "default": "claude-fable-5" } )
+        cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
+        assert captured[ "model" ] == "claude-opus-4-8"  # role key beats the default key
+
+    def test_falls_to_default_key_for_unkeyed_role( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured,
+                     { "reviewer": None, "author": None, "observer": None, "default": "claude-opus-4-8" } )
+        # an unknown/new role has no map entry → .get(role) is None → the default key
+        cv_mcp.spawn_sessions.fn( 1, "t", role="manager" )
+        assert captured[ "model" ] == "claude-opus-4-8"
+
+    def test_all_none_resolves_to_none_no_flag( self, cv_mcp, monkeypatch ):
+        captured = {}
+        self._patch( cv_mcp, monkeypatch, captured,
+                     { "reviewer": None, "author": None, "observer": None, "default": None } )
+        cv_mcp.spawn_sessions.fn( 1, "t", role="reviewer" )
+        assert captured[ "model" ] is None               # fail-open: inner fn omits --model
+
+    def test_valueerror_becomes_error_dict( self, cv_mcp, monkeypatch ):
+        # The cap ValueError from the inner fn must surface as {status:"error"} —
+        # the model= threading must not disturb that pre-existing contract.
+        import lupin_mcp.session_spawner as ss
+        monkeypatch.setattr( cv_mcp, "_wait_for_sender_id", lambda: "sender" )
+        monkeypatch.setattr( cv_mcp, "_get_cc_metadata",   lambda: { "session_id": "abc12345" } )
+        monkeypatch.setattr( cv_mcp, "_spawn_config_mgr",  lambda: None )
+        monkeypatch.setattr( cv_mcp, "_spawn_script_path", lambda: "/s.sh" )
+        monkeypatch.setattr( ss, "resolve_manager_identity",
+                             lambda meta, fallback_session_id=None: ( "mgr-sid", "Rio" ) )
+        monkeypatch.setattr( ss, "resolve_spawn_config",
+                             lambda mgr: { "spawn_cap": 8, "ack_timeout_seconds": 120,
+                                           "write_memento_default": True, "spawn_models": self._ALL_OPUS } )
+        def _raise( *a, **k ): raise ValueError( "count 99 exceeds spawn cap 8" )
+        monkeypatch.setattr( ss, "spawn_sessions", _raise )
+        res = cv_mcp.spawn_sessions.fn( 99, "t" )
+        assert res[ "status" ] == "error" and "cap" in res[ "reason" ]
