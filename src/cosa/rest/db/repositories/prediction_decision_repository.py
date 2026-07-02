@@ -110,6 +110,16 @@ class PredictionDecisionRepository( BaseRepository[PredictionDecision] ):
             ).exists()
         ).scalar()
 
+    def delete_all( self ) -> int:
+        """
+        Delete every row in prediction_decisions (test-reset parity with the
+        LanceDB drop_table path; the table itself is alembic-managed and kept).
+
+        Ensures:
+            - removes all rows; returns the count deleted (caller commits)
+        """
+        return self.session.query( PredictionDecision ).delete( synchronize_session=False )
+
     def update_ratification_state( self, id: str, new_state: str ) -> Optional[PredictionDecision]:
         """
         Update a decision's ratification_state.

@@ -172,7 +172,11 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
 
     def _common_patches( self, lancedb_mock, table_present=True, pe_side_effect=None ):
         cfg = Mock()
-        cfg.get.return_value = "prediction_decisions"
+        # Flag-aware (v0.2.0 §6): the backend flag resolves to lancedb; every other
+        # key (e.g. the table name) returns "prediction_decisions" as before.
+        cfg.get.side_effect = lambda key, default=None, **kw: (
+            "lancedb" if key == "vector store backend" else "prediction_decisions"
+        )
         engine = Mock()
         engine.lancedb_table = "prediction_decisions"
         pe_cls = Mock()
@@ -244,6 +248,56 @@ class TestResetPredictionEngine( unittest.IsolatedAsyncioTestCase ):
             result = await reset_prediction_engine( drop_table=True )
         self.assertEqual( result[ "status" ], "error" )
         self.assertIn( "PredictionEngine reset failed", result[ "message" ] )
+
+    # --- v0.2.0 §6 postgres backend: clear pgvector rows instead of LanceDB drop ---
+    def _pg_patches( self ):
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None, **kw: (
+            "postgres" if key == "vector store backend" else "prediction_decisions"
+        )
+        engine = Mock()
+        engine.lancedb_table = "prediction_decisions"
+        pe_cls = Mock()
+        get_pe = Mock( return_value=engine )
+        return cfg, pe_cls, get_pe
+
+    async def test_postgres_backend_clears_rows( self ):
+        import contextlib
+        cfg, pe_cls, get_pe = self._pg_patches()
+        session   = Mock()
+        repo_inst = Mock()
+
+        @contextlib.contextmanager
+        def fake_get_db():
+            yield session
+
+        with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
+             patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
+             patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
+             patch( "cosa.rest.db.database.get_db", fake_get_db ), \
+             patch( "cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository",
+                    return_value=repo_inst ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
+            result = await reset_prediction_engine( drop_table=True )
+        repo_inst.delete_all.assert_called_once()
+        self.assertEqual( result[ "status" ], "success" )
+        self.assertTrue( result[ "table_dropped" ] )
+
+    async def test_postgres_backend_clear_error_swallowed( self ):
+        cfg, pe_cls, get_pe = self._pg_patches()
+
+        def boom_get_db():
+            raise RuntimeError( "pg down" )
+
+        with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=cfg ), \
+             patch( "cosa.agents.prediction_engine.prediction_engine.PredictionEngine", pe_cls ), \
+             patch( "cosa.agents.prediction_engine.prediction_engine.get_prediction_engine", get_pe ), \
+             patch( "cosa.rest.db.database.get_db", boom_get_db ), \
+             patch( "builtins.print" ), \
+             patch( "cosa.utils.util.get_current_datetime_iso", return_value=_TS ):
+            result = await reset_prediction_engine( drop_table=True )
+        self.assertEqual( result[ "status" ], "success" )      # non-fatal
+        self.assertFalse( result[ "table_dropped" ] )
 
 
 class TestWebsocketSessionsFalsyUser( unittest.IsolatedAsyncioTestCase ):

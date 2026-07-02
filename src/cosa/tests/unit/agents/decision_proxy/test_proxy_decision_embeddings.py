@@ -304,3 +304,122 @@ def test_update_exception_swallowed_quiet( capsys ):
     store._table.search.side_effect = RuntimeError( "boom" )
     store.update_ratification_state( "x", "new" )
     assert capsys.readouterr().out == ""
+
+
+# ===========================================================================
+# v0.2.0 §6 postgres backend: __init__ flag → methods delegate to the repo.
+# ===========================================================================
+import contextlib
+
+
+def _pg_store( **kwargs ):
+    """Store constructed in postgres mode (is_postgres_backend patched True)."""
+    with patch.object( pde, "is_postgres_backend", return_value=True ):
+        return ProxyDecisionEmbeddings( "/db", **kwargs )
+
+
+@contextlib.contextmanager
+def _pg_repo():
+    """Patch get_db (ctx mgr) + PredictionDecisionRepository; yield the repo mock."""
+    session   = MagicMock()
+    repo_inst = MagicMock()
+
+    @contextlib.contextmanager
+    def fake_get_db():
+        yield session
+
+    with patch( "cosa.rest.db.database.get_db", fake_get_db ), \
+         patch( "cosa.rest.db.repositories.prediction_decision_repository.PredictionDecisionRepository",
+                return_value=repo_inst ):
+        yield repo_inst
+
+
+def test_pg_init_flag_set():
+    assert _pg_store()._use_postgres is True
+
+
+def test_pg_add_decision_delegates():
+    store = _pg_store()
+    with _pg_repo() as repo:
+        store.add_decision( "id1", "q", "cat", "yes", "pending", [ 0.1 ] * 768, "2026-07-01",
+                            data_origin="organic", response_type="yes_no" )
+    kw = repo.add_decision.call_args.kwargs
+    assert kw[ "id" ] == "id1" and kw[ "question_embedding" ] == [ 0.1 ] * 768
+    assert kw[ "data_origin" ] == "organic"
+
+
+def test_pg_add_decision_non_fatal( capsys ):
+    store = _pg_store( debug=True )
+    with _pg_repo() as repo:
+        repo.add_decision.side_effect = RuntimeError( "boom" )
+        store.add_decision( "id1", "q", "c", "v", "s", [ 0.1 ] * 768, "t" )   # must not raise
+    assert "non-fatal" in capsys.readouterr().out
+
+
+def test_pg_find_similar_maps_pct_and_clean_record():
+    store = _pg_store()
+    entity = MagicMock( id="id1", question="q", category="c", decision_value="yes",
+                        ratification_state="pending", data_origin="organic",
+                        response_type="yes_no", question_embedding=[ 0.2 ] * 768, created_at="t" )
+    with _pg_repo() as repo:
+        repo.find_similar.return_value = [ ( 88.0, entity ) ]
+        out = store.find_similar( [ 0.2 ] * 768, category="c", limit=5, threshold=0.75 )
+    assert out[ 0 ][ 0 ] == 88.0
+    rec = out[ 0 ][ 1 ]
+    assert rec[ "id" ] == "id1" and rec[ "question_embedding" ] == [ 0.2 ] * 768
+    assert not any( k.startswith( "_" ) for k in rec )      # clean record
+
+
+def test_pg_find_similar_null_embedding_and_non_fatal( capsys ):
+    store = _pg_store( debug=True )
+    entity = MagicMock( id="id1", question="q", category="c", decision_value="v",
+                        ratification_state="s", data_origin="o", response_type="r",
+                        question_embedding=None, created_at="t" )
+    with _pg_repo() as repo:
+        repo.find_similar.return_value = [ ( 90.0, entity ) ]
+        out = store.find_similar( [ 0.2 ] * 768 )
+    assert out[ 0 ][ 1 ][ "question_embedding" ] is None
+
+    with _pg_repo() as repo:
+        repo.find_similar.side_effect = RuntimeError( "boom" )
+        assert store.find_similar( [ 0.2 ] * 768 ) == []
+    assert "non-fatal" in capsys.readouterr().out
+
+
+def test_pg_exists_true_false_and_error():
+    store = _pg_store( debug=True )
+    with _pg_repo() as repo:
+        repo.exists.return_value = True
+        assert store.exists( "id1" ) is True
+    with _pg_repo() as repo:
+        repo.exists.side_effect = RuntimeError( "boom" )
+        assert store.exists( "id1" ) is False
+
+
+def test_pg_update_ratification_found_missing_and_error( capsys ):
+    store = _pg_store( debug=True )
+    with _pg_repo() as repo:
+        repo.update_ratification_state.return_value = MagicMock()      # found
+        store.update_ratification_state( "id1", "ratified" )
+    assert "Updated ratification state (pg)" in capsys.readouterr().out
+
+    with _pg_repo() as repo:
+        repo.update_ratification_state.return_value = None             # missing
+        store.update_ratification_state( "id1", "ratified" )
+    assert "Record not found for update (pg)" in capsys.readouterr().out
+
+    with _pg_repo() as repo:
+        repo.update_ratification_state.side_effect = RuntimeError( "boom" )
+        store.update_ratification_state( "id1", "ratified" )
+    assert "non-fatal" in capsys.readouterr().out
+
+
+def test_pg_ops_quiet_when_debug_off( capsys ):
+    """debug=False → the pg branches take the no-log arcs (both success + error)."""
+    store = _pg_store( debug=False )
+    with _pg_repo() as repo:
+        repo.add_decision.side_effect = RuntimeError( "boom" )
+        store.add_decision( "id1", "q", "c", "v", "s", [ 0.1 ] * 768, "t" )
+        repo.update_ratification_state.return_value = MagicMock()
+        store.update_ratification_state( "id1", "new" )
+    assert capsys.readouterr().out == ""

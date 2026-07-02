@@ -19,6 +19,7 @@ import lancedb
 import pyarrow as pa
 
 import cosa.utils.util as cu
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 
 class ProxyDecisionEmbeddings:
@@ -83,6 +84,11 @@ class ProxyDecisionEmbeddings:
 
         self._db    = None
         self._table = None
+
+        # v0.2.0 backend flag (§6): when 'postgres', route to the
+        # PredictionDecisionRepository (the 1:1 pgvector mirror of this store) and
+        # skip LanceDB entirely. 'lancedb' (default) preserves the legacy path.
+        self._use_postgres = is_postgres_backend()
 
     def _get_schema( self ):
         """
@@ -168,6 +174,10 @@ class ProxyDecisionEmbeddings:
             data_origin: Provenance tag (organic, synthetic_seed, synthetic_generated)
             response_type: Notification response type (yes_no, multiple_choice, open_ended, open_ended_batch)
         """
+        if self._use_postgres:
+            return self._pg_add_decision( id, question, category, decision_value,
+                                          ratification_state, question_embedding,
+                                          created_at, data_origin, response_type )
         try:
             if not self._ensure_table():
                 return
@@ -217,6 +227,9 @@ class ProxyDecisionEmbeddings:
         Returns:
             list[ tuple[ float, dict ] ]: ( similarity_pct, record ) pairs
         """
+        if self._use_postgres:
+            return self._pg_find_similar( query_embedding, category, limit, threshold,
+                                          data_origin, response_type )
         try:
             if not self._ensure_table():
                 return []
@@ -287,6 +300,7 @@ class ProxyDecisionEmbeddings:
         Ensures:
             - returns False on any error or missing table (never raises)
         """
+        if self._use_postgres: return self._pg_exists( id )
         try:
             if not self._ensure_table():
                 return False
@@ -312,6 +326,7 @@ class ProxyDecisionEmbeddings:
             id: Decision identifier to update
             new_state: New ratification state value
         """
+        if self._use_postgres: return self._pg_update_ratification_state( id, new_state )
         try:
             if not self._ensure_table():
                 return
@@ -340,3 +355,79 @@ class ProxyDecisionEmbeddings:
 
         except Exception as e:
             if self.debug: print( f"[ProxyDecisionEmbeddings] update_ratification_state failed (non-fatal): {e}" )
+
+    # ----------------------------------------------------------------------- #
+    # Postgres+pgvector backend (v0.2.0 §6). The prediction_decisions repo is the
+    # 1:1 mirror of this store; similarity_pct scale + [0,100] clamp are identical
+    # (repo dot_topk clamps to [0,100] → matches the legacy (1-distance)*100 clamp
+    # at line 258). All ops stay best-effort / non-fatal, as the LanceDB path is.
+    # ----------------------------------------------------------------------- #
+    _PG_RECORD_FIELDS = (
+        "id", "question", "category", "decision_value", "ratification_state",
+        "data_origin", "response_type", "question_embedding", "created_at",
+    )
+
+    @classmethod
+    def _pg_record_to_dict( cls, entity ):
+        """Project a PredictionDecision entity to the clean record dict (no _-fields)."""
+        record = { f: getattr( entity, f ) for f in cls._PG_RECORD_FIELDS }
+        if record[ "question_embedding" ] is not None:
+            record[ "question_embedding" ] = list( record[ "question_embedding" ] )
+        return record
+
+    def _pg_add_decision( self, id, question, category, decision_value, ratification_state,
+                          question_embedding, created_at, data_origin, response_type ):
+        """Postgres mirror of add_decision (best-effort insert via the repo)."""
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
+            with get_db() as session:
+                PredictionDecisionRepository( session ).add_decision(
+                    id=id, question=question, category=category, decision_value=decision_value,
+                    ratification_state=ratification_state, question_embedding=question_embedding,
+                    created_at=created_at, data_origin=data_origin, response_type=response_type,
+                )
+            if self.debug: print( f"[ProxyDecisionEmbeddings] Added decision (pg): {id}" )
+        except Exception as e:
+            if self.debug: print( f"[ProxyDecisionEmbeddings] add_decision (pg) failed (non-fatal): {e}" )
+
+    def _pg_find_similar( self, query_embedding, category, limit, threshold, data_origin, response_type ):
+        """Postgres mirror of find_similar (dot; [0,100] clamp; ≥threshold; (pct, dict))."""
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
+            with get_db() as session:
+                hits = PredictionDecisionRepository( session ).find_similar(
+                    query_embedding, category=category, limit=limit, threshold=threshold,
+                    data_origin=data_origin, response_type=response_type,
+                )
+                return [ ( pct, self._pg_record_to_dict( entity ) ) for pct, entity in hits ]
+        except Exception as e:
+            if self.debug: print( f"[ProxyDecisionEmbeddings] find_similar (pg) failed (non-fatal): {e}" )
+            return []
+
+    def _pg_exists( self, id ) -> bool:
+        """Postgres mirror of exists (False on any error)."""
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
+            with get_db() as session:
+                return PredictionDecisionRepository( session ).exists( id )
+        except Exception as e:
+            if self.debug: print( f"[ProxyDecisionEmbeddings] exists (pg) check failed: {e}" )
+            return False
+
+    def _pg_update_ratification_state( self, id, new_state ):
+        """Postgres mirror of update_ratification_state (best-effort update via the repo)."""
+        try:
+            from cosa.rest.db.database import get_db
+            from cosa.rest.db.repositories.prediction_decision_repository import PredictionDecisionRepository
+            with get_db() as session:
+                updated = PredictionDecisionRepository( session ).update_ratification_state( id, new_state )
+            if self.debug:
+                if updated is None:
+                    print( f"[ProxyDecisionEmbeddings] Record not found for update (pg): {id}" )
+                else:
+                    print( f"[ProxyDecisionEmbeddings] Updated ratification state (pg): {id} -> {new_state}" )
+        except Exception as e:
+            if self.debug: print( f"[ProxyDecisionEmbeddings] update_ratification_state (pg) failed (non-fatal): {e}" )
