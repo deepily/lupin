@@ -18,7 +18,6 @@ import {
 import type {
   Notification,
   SenderRecord,
-  ActionRequiredItem,
   StoreViewStateChangedPayload,
 } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
@@ -68,13 +67,11 @@ function setup( viewState?: FakeViewState ): Harness {
   const bus = createEventBusForTesting();
   const notifList: Notification[]  = [];
   const senderList: SenderRecord[] = [];
-  const arList: ActionRequiredItem[] = [];
   const renderer = createNotificationsListRenderer( {
     eventBus: bus,
     stores  : {
       notifications  : { list: () => notifList },
       senders        : { list: () => senderList },
-      actionRequired : { list: () => arList },
       viewState,
     },
     appTimezone: "UTC",
