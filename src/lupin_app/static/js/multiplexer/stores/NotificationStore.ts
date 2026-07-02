@@ -39,6 +39,7 @@ import type {
   PredictionHint,
   SessionTopicPayload,
   StoreNotificationsChangedPayload,
+  StoreNotificationTtsIntentPayload,
   VoicePersona,
 } from "../shared/types";
 // Cold-load hydration (2026-06-11): type-only import of the ONE canonical
@@ -248,6 +249,15 @@ interface ServerNotificationFields {
   was_expired         ?: boolean;
   time_display        ?: string;
   prediction_hint     ?: PredictionHint;   // WP14 (F8) — thumbs-vote training-signal source
+  // F0-d (2026-07-02) — TTS-intent gate fields. RAW-ONLY: normalize() drops all
+  // three, so the store_notification_tts_intent emit reads them off the RAW
+  // notification here (same pattern as the session_topic discriminator above).
+  // `priority` gates the emit (high/urgent); `tts_raw` selects the ttsText
+  // derivation (contextualized unless true); `suppress_ding` is carried for
+  // completeness but does NOT gate speech (Tiberius ruling — see the emit site).
+  priority            ?: string;
+  suppress_ding       ?: boolean;
+  tts_raw             ?: boolean;
 }
 
 interface ResponsePayload {
@@ -259,6 +269,16 @@ interface ResponsePayload {
 interface ExpiredPayload {
   id_hash         ?: string;
   notification_id ?: string;
+}
+
+// F0-d — TTS message contextualizer. Ported VERBATIM from legacy
+// `notifications.js:4176-4187` (formatNotificationTTSMessage), the single source
+// of notification→TTS text formatting: prefix "Urgent! " for urgent priority,
+// otherwise the message unchanged. Kept module-private (the sole caller is the
+// store_notification_tts_intent emit below); `message` is pre-nullish-coalesced
+// by the caller so this fn has exactly one branch (urgent vs not).
+function formatTtsMessage( priority: string | undefined, message: string ): string {
+  return priority === "urgent" ? `Urgent! ${message}` : message;
 }
 
 class NotificationStoreImpl implements NotificationStore {
@@ -569,6 +589,38 @@ class NotificationStoreImpl implements NotificationStore {
     this.unread++;
     this.schedulePersist();
     this.emit("added", norm.id_hash);
+
+    // ── F0-d — TTS producer seam ──────────────────────────────────────────
+    // Emit store_notification_tts_intent for SPOKEN new-arrivals so the boot
+    // wire can enqueue them onto TtsQueueStore. Emitting HERE (only reached via
+    // the byId.has ELSE, i.e. a genuinely-new id) gives dedup for free — a
+    // re-arrival returns above and never re-speaks. onQueueUpdate is the
+    // LIVE-only path (hydrate()/hydrateHistory() never call it), so a cold-load
+    // history rehydrate emits ZERO intents by construction.
+    //
+    // SPEC (Tiberius ruling 2026-07-02, sustained on primary-artifact grounds —
+    // Clayton reviews this against legacy line numbers, NOT memento §6):
+    //   • GATE = priority ∈ {high, urgent} ONLY. Legacy enqueues TTS for ALL
+    //     high/urgent (job-card notifications.js:5917-5942; fire-and-forget
+    //     :5985-6017); suppress_ding affects the ding + enqueue-delay only,
+    //     never speech (confirmed firsthand: manager closing-turn notifies send
+    //     suppress_ding=True + priority=high and ARE heard). Deliberately NO
+    //     suppress_ding condition.
+    //   • ttsText = tts_raw === true ? message : formatTtsMessage(...) — the
+    //     fire-and-forget default-contextualized derivation (legacy :5987-5989).
+    if ( raw.priority === "high" || raw.priority === "urgent" ) {
+      // normalize() above guarantees norm.message is a NON-EMPTY string — a
+      // message-less frame returns null at `if (!norm) return` before reaching
+      // here — so reading norm.message needs no nullish guard and stays typed
+      // `string` (priority/tts_raw are raw-only, dropped by normalize, read off raw).
+      const ttsText = raw.tts_raw === true ? norm.message : formatTtsMessage( raw.priority, norm.message );
+      this.bus.emit<StoreNotificationTtsIntentPayload>({
+        type    : "store_notification_tts_intent",
+        payload : { id_hash: norm.id_hash, ttsText, priority: raw.priority },
+        source  : "notification-store",
+        ts      : this.nowFn(),
+      });
+    }
   }
 
   private onResponded(e: LupinEvent<ResponsePayload>): void {

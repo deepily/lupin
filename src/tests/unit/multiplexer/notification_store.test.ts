@@ -12,6 +12,7 @@ import type {
   LupinEvent,
   SessionTopicPayload,
   StoreNotificationsChangedPayload,
+  StoreNotificationTtsIntentPayload,
 } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
@@ -656,4 +657,78 @@ test("R5: a session_topic MISSING session_name intercepts (no card) but emits no
   emitRaw(bus, { notification_type: "session_topic", sender_id: "cc@x#a3", id_hash: "h3", message: "ignored" });
   assert.equal(store.list().length, 0, "still skips the card");
   assert.equal(captured.length, 0, "no name → no event");
+});
+
+// ===========================================================================
+// F0-d — store_notification_tts_intent producer seam.
+//
+// SPEC (Tiberius ruling 2026-07-02, reviewed against legacy notifications.js,
+// NOT memento §6): gate = priority ∈ {high, urgent} ONLY (suppress_ding never
+// gates speech — legacy :5917/:5985); ttsText = tts_raw === true ? message :
+// formatTtsMessage(...) (fire-and-forget default-contextualized, legacy
+// :5987-5989 + formatter :4176-4187). Emit only on SPOKEN new-arrivals (dedup
+// via the byId.has re-arrival guard); live-only path = hydration-zero.
+// ===========================================================================
+
+function captureTtsIntents(bus: ReturnType<typeof createEventBusForTesting>): StoreNotificationTtsIntentPayload[] {
+  const out: StoreNotificationTtsIntentPayload[] = [];
+  bus.on<StoreNotificationTtsIntentPayload>("store_notification_tts_intent", (e) => out.push(e.payload));
+  return out;
+}
+
+test("F0-d: a HIGH-priority new-arrival emits a TTS intent (contextualized, non-urgent → message unchanged)", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-high", sender_id: "cc@x#s1", message: "build finished", priority: "high" });
+  assert.deepEqual(intents, [ { id_hash: "t-high", ttsText: "build finished", priority: "high" } ]);
+});
+
+test("F0-d: an URGENT new-arrival emits a TTS intent with the \"Urgent! \" prefix", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-urg", sender_id: "cc@x#s2", message: "disk full", priority: "urgent" });
+  assert.deepEqual(intents, [ { id_hash: "t-urg", ttsText: "Urgent! disk full", priority: "urgent" } ]);
+});
+
+test("F0-d: tts_raw === true bypasses the contextualizer — the raw message is spoken verbatim", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  // urgent + tts_raw:true → NO "Urgent!" prefix (raw wins).
+  emitRaw(bus, { id_hash: "t-raw", sender_id: "cc@x#s3", message: "raw text only", priority: "urgent", tts_raw: true });
+  assert.deepEqual(intents, [ { id_hash: "t-raw", ttsText: "raw text only", priority: "urgent" } ]);
+});
+
+test("F0-d: suppress_ding does NOT gate speech — a suppressed high/urgent still emits (manager closing-turn parity)", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-sd", sender_id: "cc@x#s4", message: "manager report", priority: "high", suppress_ding: true });
+  assert.equal(intents.length, 1, "suppress_ding=true must NOT silence a high-priority arrival");
+  assert.equal(intents[0]!.ttsText, "manager report");
+});
+
+test("F0-d: a LOW/MEDIUM-priority arrival emits NO TTS intent (gate is high/urgent only)", () => {
+  const { bus, store } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-low", sender_id: "cc@x#s5", message: "fyi", priority: "low" });
+  assert.equal(intents.length, 0, "low priority is not spoken");
+  assert.equal(store.list().length, 1, "…but it IS still carded");
+});
+
+test("F0-d: a message-less high-priority frame is rejected by normalize BEFORE the emit — zero intents", () => {
+  // normalize() returns null for a message-less frame, so onQueueUpdate returns
+  // at `if (!norm) return` and never reaches the TTS emit. Proves the emit reads
+  // a guaranteed-non-empty norm.message (no nullish path exists).
+  const { bus, store } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-nomsg", sender_id: "cc@x#s6", priority: "high" });
+  assert.equal(intents.length, 0, "no message → normalize rejects → no card, no intent");
+  assert.equal(store.list().length, 0);
+});
+
+test("F0-d: a re-arrival (same id_hash) does NOT re-emit — dedup via the byId.has guard", () => {
+  const { bus } = setupStore();
+  const intents = captureTtsIntents(bus);
+  emitRaw(bus, { id_hash: "t-dup", sender_id: "cc@x#s7", message: "once", priority: "urgent" });
+  emitRaw(bus, { id_hash: "t-dup", sender_id: "cc@x#s7", message: "once", priority: "urgent" });
+  assert.equal(intents.length, 1, "the second arrival returns at byId.has — no double-speak");
 });

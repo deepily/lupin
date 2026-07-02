@@ -19,6 +19,7 @@ import type { ServerSenderHydrationRecord } from "../../../lupin_app/static/js/m
 import type {
   LupinEvent,
   StoreNotificationsChangedPayload,
+  StoreNotificationTtsIntentPayload,
 } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
@@ -395,4 +396,23 @@ test("responded-split: non-string response_value.value is ignored (defensive) �
   });
   await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
   assert.equal(store.list().length, 1);
+});
+
+// ===========================================================================
+// F0-d — hydration-zero guard (watch-out #1, by construction)
+// ===========================================================================
+
+test("F0-d: cold-load hydration emits ZERO store_notification_tts_intent, even for a would-be-spoken high-priority row", async () => {
+  const { bus, store } = setupStore();
+  const intents: StoreNotificationTtsIntentPayload[] = [];
+  bus.on<StoreNotificationTtsIntentPayload>("store_notification_tts_intent", (e) => intents.push(e.payload));
+  const api = makeApiStub({
+    // priority:"high" would be SPOKEN on the live path — but the TTS emit lives
+    // only in onQueueUpdate, which hydrateHistory never calls. Zero intents proves
+    // the live-only property by construction (no re-speak of history on reload).
+    "ext-sender" : { "2026-06-11" : [makeRow({ priority: "high" })] },
+  });
+  await store.hydrateHistory(api, { ...OPTS_BASE, senders: [makeSenderRec()] });
+  assert.equal(store.list().length, 1, "row seeded into history");
+  assert.equal(intents.length, 0, "hydration must never emit a TTS intent");
 });
