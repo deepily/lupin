@@ -350,6 +350,23 @@ class TestHeartbeatPokeReset:
                 _run_hook_main( payload, tmp_dir )
             mock_reset.assert_called_once_with( "abc12345-fake-uuid" )
 
+    # ── bug d0d7f068 Part 2 (option C): an injected peer-DM is NOT re-engagement ─
+
+    def test_reset_skipped_when_prompt_is_injected_peer_dm( self ):
+        """THE ENABLER FIX: a peer-DM inject arrives via tmux-wake as the prompt,
+        wrapped in build_peer_dm_reminder. It was NEVER genuine USER re-engagement,
+        so it must NOT reset the poke-cap — treating DMs/taps as re-engagement is
+        what kept reopening the budget so the relief valve never engaged. Frame
+        matched via the SHARED constant (46a17f5a: no re-typed literals)."""
+        from lupin_cli.claude_code.hooks.lib.hook_common import build_peer_dm_reminder
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            dm      = build_peer_dm_reminder( "where are we on X?", persona="mr radio",
+                                              icon="🦉", msg_id="mid1", thread_id="th1" )
+            payload = { "session_id": "abc12345-fake-uuid", "prompt": dm }
+            with patch( "lupin_cli.claude_code.hooks.user_prompt_submit.reset_poke_count" ) as mock_reset:
+                _run_hook_main( payload, tmp_dir )
+            mock_reset.assert_not_called()
+
 
 # ── Standalone ───────────────────────────────────────────────────────────────
 

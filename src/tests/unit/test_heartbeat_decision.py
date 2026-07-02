@@ -159,6 +159,28 @@ def test_no_obligation_leaves_fresh_hold_honored():
     assert r[ "outcome" ] == hd.OUTCOME_HONORED
 
 
+# ── bug d0d7f068: honest poke text under an honored-but-overridden hold ───────
+
+def test_gate_override_under_honored_hold_uses_honest_text():
+    """A DUE user-gate pokes past an HONORED hold (obligation override). The reason
+    must state honored-but-OVERRIDDEN, NOT the false 'no fresh hold'."""
+    gate_verdict = owed_mod.evaluate_work_owed( open_user_gates=[ { "id": "g1" } ] )
+    r = hd.decide_heartbeat( _hold(), gate_verdict, 0, 3, now=NOW )
+    assert r[ "outcome" ] == hd.OUTCOME_POKE
+    reason = r[ "hook_output" ][ "reason" ]
+    assert "OVERRIDDEN" in reason                 # honest override clause
+    assert "and no fresh hold" not in reason      # the false assertion is gone
+
+
+def test_oracle_owed_no_hold_keeps_no_fresh_hold_text():
+    """The ordinary oracle-owed poke with NO honored hold keeps the byte-identical
+    'and no fresh hold' clause (hold_overridden is False on the non-override path)."""
+    r = hd.decide_heartbeat( None, _owed_verdict(), 0, 3, now=NOW )
+    reason = r[ "hook_output" ][ "reason" ]
+    assert "and no fresh hold" in reason
+    assert "OVERRIDDEN" not in reason
+
+
 # ── quick_smoke_test ──────────────────────────────────────────────────────────
 
 def test_quick_smoke_test_passes():

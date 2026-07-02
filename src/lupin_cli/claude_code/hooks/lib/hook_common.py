@@ -402,6 +402,14 @@ def drain_and_acknowledge( session_id ):
 VOICE_LINE_PREFIX = "[Voice]: "
 
 
+# bug d0d7f068 (Part 2 / option C): the peer-DM envelope's frame prefix as a SHARED
+# constant. build_peer_dm_reminder emits it; is_injected_peer_dm + the Stop-hook
+# poke-cap reset guard MATCH on it. Deriving both the emit and the match from ONE
+# constant (never a re-typed literal) is the 46a17f5a literal-drift lesson — the
+# "Heartbeat arbiter (" family is exactly how a match silently drifts from its source.
+PEER_DM_FRAME_PREFIX = "PEER DM from "
+
+
 def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_id=None ):
     """
     Build the peer-DM <system-reminder> block — the SINGLE source of peer-DM
@@ -446,11 +454,36 @@ def build_peer_dm_reminder( body, persona=None, icon=None, msg_id=None, thread_i
         f'reply_to="{msg_id}", thread_id="{thread_id}" )'
     )
     reminder_body = (
-        f"PEER DM from {sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
+        f"{PEER_DM_FRAME_PREFIX}{sender_label} (message_id {msg_id}, thread {thread_id}):\n\n"
         f"{body}\n\n"
         f"{reply_affordance}"
     )
     return f"<system-reminder>\n{reminder_body}\n</system-reminder>"
+
+
+def is_injected_peer_dm( prompt ):
+    """
+    Is `prompt` an injected peer-DM (a build_peer_dm_reminder envelope delivered as
+    the turn's prompt via the listener's idle tmux-wake), rather than genuine USER
+    typing? (bug d0d7f068 Part 2 / option C.)
+
+    A peer-DM inject / arbiter tap was never USER re-engagement — so the Stop-hook
+    poke-cap reset (user_prompt_submit) must NOT treat it as such (that reset kept
+    reopening the poke budget on every inbound DM/tap, so the cap relief valve never
+    engaged). This predicate keys on the SHARED PEER_DM_FRAME_PREFIX (never a re-typed
+    literal — 46a17f5a). The frame sits inside the <system-reminder> wrapper, so it is
+    matched by SUBSTRING (mirrors the arbiter-poke ARBITER_POKE_SENTINEL match).
+
+    Requires:
+        - prompt is a string or None (foreign hook-payload data)
+
+    Ensures:
+        - Returns True iff prompt is a str containing PEER_DM_FRAME_PREFIX
+        - Returns False for None / non-string / genuine user prompts; never raises
+    """
+    if not isinstance( prompt, str ):
+        return False
+    return PEER_DM_FRAME_PREFIX in prompt
 
 
 def format_voice_context( messages ):

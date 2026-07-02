@@ -116,8 +116,20 @@ ARBITER_POKE_SENTINEL = "Heartbeat arbiter ("
 # agent the SHORT 8-char id, and a hold written at the short id while the hook
 # reads at the full stable id is silently ignored. read_hold also falls back
 # across id forms (heartbeat_hold._read_hold_path) as belt-and-suspenders.
+# bug d0d7f068 (honest text): the clause between the specifics and the menu is
+# VARIABLE. Default = "and no fresh hold" (unchanged byte-for-byte). But when the
+# poke fires via the obligation-OVERRIDE while a hold IS honored (a DUE user-gate /
+# a verification debt outranks the hold's quiescence by design), asserting "no
+# fresh hold" is FALSE — the hold is fresh, just overridden. The override clause
+# states the true state so the pokee isn't told to declare a hold it already has.
+NO_FRESH_HOLD_CLAUSE   = " and no fresh hold"
+HOLD_OVERRIDDEN_CLAUSE = (
+    " — your fresh hold is HONORED but OVERRIDDEN by a due obligation (a user-gate "
+    "re-ask or a worker-verification debt), which is owed work a declared hold cannot suppress"
+)
+
 POKE_REASON_TEMPLATE = (
-    POKE_PROMPT_SENTINEL + " ({specifics}) and no fresh hold. "
+    POKE_PROMPT_SENTINEL + " ({specifics}){hold_clause}. "
     "Pick one and act before you stop:\n"
     "1. Owe work? Resume and drive it now — but if you manage a crew: assign/delegate it to a worker "
     "(spawn one if you have more open tasks than workers); do NOT build it yourself.\n"
@@ -528,7 +540,7 @@ def evaluate_work_owed( todo_items=None, pending_decisions=None,
     }
 
 
-def build_poke_reason( verdict, goal_line="" ):
+def build_poke_reason( verdict, goal_line="", hold_overridden=False ):
     """
     Compose the self-poke `reason` string from a work-owed verdict.
 
@@ -543,14 +555,21 @@ def build_poke_reason( verdict, goal_line="" ):
         - verdict is the dict returned by evaluate_work_owed (has "specifics")
         - goal_line is a string (the role-selected goal echo) or "" — empty ⇒
           nothing appended (output byte-identical to the pre-role-goals reason)
+        - hold_overridden is a bool (bug d0d7f068) — True when the poke fires via
+          the obligation-override while a hold is HONORED (the caller passes
+          obligation_overrides AND is_honored). Selects the honest hold clause so
+          the reason never asserts "no fresh hold" against a fresh honored hold.
+          Default False ⇒ the byte-identical "and no fresh hold" clause.
 
     Ensures:
-        - Returns the POKE_REASON_TEMPLATE filled with verdict["specifics"], with
-          goal_line appended as a trailing blank-line-separated block when
-          goal_line is non-empty
+        - Returns the POKE_REASON_TEMPLATE filled with verdict["specifics"] and the
+          hold clause (NO_FRESH_HOLD_CLAUSE by default, HOLD_OVERRIDDEN_CLAUSE when
+          hold_overridden), with goal_line appended as a trailing blank-line-separated
+          block when goal_line is non-empty
         - Rides the top-level Stop-hook `reason` field — NEVER systemMessage
     """
-    reason = POKE_REASON_TEMPLATE.format( specifics=verdict[ "specifics" ] )
+    hold_clause = HOLD_OVERRIDDEN_CLAUSE if hold_overridden else NO_FRESH_HOLD_CLAUSE
+    reason = POKE_REASON_TEMPLATE.format( specifics=verdict[ "specifics" ], hold_clause=hold_clause )
     if goal_line:
         reason = reason + "\n\n" + goal_line
     return reason

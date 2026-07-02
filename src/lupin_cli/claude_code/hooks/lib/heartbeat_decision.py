@@ -156,7 +156,13 @@ def decide_heartbeat( hold, oracle_verdict, poke_count, cap, now=None, goal_line
     # threads it for the oracle-owed reason; the self-declared DECLARED_OWED_REASON
     # gets the same trailing block here. Empty goal_line ⇒ unchanged output.
     if oracle_owed:
-        reason = build_poke_reason( oracle_verdict, goal_line=goal_line )
+        # bug d0d7f068 (honest text): when this poke fired via the obligation-override
+        # (steps 2-3 skipped) AND a hold is genuinely honored, the reason must state
+        # "honored-but-overridden", NOT the false "no fresh hold". Only the override
+        # path can poke past a honored hold — the else branch above already returned
+        # OUTCOME_HONORED for any honored hold, so hold_overridden is False there.
+        hold_overridden = obligation_overrides and is_honored( hold, now=now )
+        reason = build_poke_reason( oracle_verdict, goal_line=goal_line, hold_overridden=hold_overridden )
     else:
         reason = DECLARED_OWED_REASON + ( "\n\n" + goal_line if goal_line else "" )
     return _result( OUTCOME_POKE, { "decision": "block", "reason": reason }, should_increment=True )

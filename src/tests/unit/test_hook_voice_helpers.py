@@ -28,6 +28,8 @@ from lupin_cli.claude_code.hooks.lib.hook_common import (
     increment_stop_block_count,
     reset_stop_block_count,
     build_peer_dm_reminder,
+    is_injected_peer_dm,
+    PEER_DM_FRAME_PREFIX,
     enrich_voice_context,
     deliver_pending_peer_dms,
     inject_qualifier_via_tmux,
@@ -660,3 +662,28 @@ class TestInjectQualifierWrapParam:
     def test_outer_exception_swallowed( self, mock_find ):
         """An error resolving the session is swallowed (hook must never crash CC)."""
         inject_qualifier_via_tmux( "abc12345", "text" )   # must not raise
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TestIsInjectedPeerDm — bug d0d7f068 Part 2 (option C): the peer-DM inject
+# predicate the Stop-hook poke-cap reset guard uses to NOT treat a DM/tap as
+# genuine user re-engagement. Matched via the SHARED PEER_DM_FRAME_PREFIX.
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestIsInjectedPeerDm:
+    def test_true_on_build_peer_dm_reminder_envelope( self ):
+        """A real build_peer_dm_reminder envelope (the SINGLE source of framing) is
+        recognized — derived from the shared constant, no re-typed literal."""
+        dm = build_peer_dm_reminder( "where are we on X?", persona="mr radio", icon="🦉",
+                                     msg_id="m1", thread_id="t1" )
+        assert PEER_DM_FRAME_PREFIX in dm                 # frame really is present
+        assert is_injected_peer_dm( dm ) is True
+
+    def test_false_on_genuine_user_prompt( self ):
+        """Real user typing carries no peer-DM frame → resets the cap (re-engagement)."""
+        assert is_injected_peer_dm( "please fix the failing test" ) is False
+
+    def test_false_on_non_string( self ):
+        """Foreign hook-payload data (None / non-str) → False, never raises."""
+        assert is_injected_peer_dm( None ) is False
+        assert is_injected_peer_dm( { "prompt": "x" } ) is False

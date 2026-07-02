@@ -656,3 +656,32 @@ def test_genuine_user_prompt_still_not_a_poke_no_overmatch():
     # PIN: a real user prompt contains NEITHER sentinel → still resets the cap.
     assert o.is_heartbeat_poke_prompt( "please fix the arbiter poke bug" ) is False
     assert o.is_heartbeat_poke_prompt( "what does the heartbeat arbiter do?" ) is False
+
+
+# ── bug d0d7f068: build_poke_reason honest hold clause ────────────────────────
+
+def _specifics_verdict():
+    return o.evaluate_work_owed( open_user_gates=[ { "id": "g1" } ] )
+
+
+def test_build_poke_reason_default_says_no_fresh_hold():
+    """Default (hold_overridden=False) keeps the byte-identical 'and no fresh hold'."""
+    reason = o.build_poke_reason( _specifics_verdict() )
+    assert "and no fresh hold" in reason
+    assert "OVERRIDDEN" not in reason
+    assert reason.startswith( o.POKE_PROMPT_SENTINEL )     # still recognized as a poke
+
+
+def test_build_poke_reason_overridden_uses_honest_clause():
+    """hold_overridden=True swaps in the honored-but-OVERRIDDEN clause and drops the
+    false 'no fresh hold' — and still opens with the sentinel (poke-recognizable)."""
+    reason = o.build_poke_reason( _specifics_verdict(), hold_overridden=True )
+    assert "OVERRIDDEN" in reason
+    assert "and no fresh hold" not in reason
+    assert o.is_heartbeat_poke_prompt( reason ) is True    # cap-reset guard still recognizes it
+
+
+def test_build_poke_reason_overridden_composes_with_goal_line():
+    """The goal-line append still works on the overridden clause path."""
+    reason = o.build_poke_reason( _specifics_verdict(), goal_line="GOAL: ship it", hold_overridden=True )
+    assert "OVERRIDDEN" in reason and reason.endswith( "GOAL: ship it" )

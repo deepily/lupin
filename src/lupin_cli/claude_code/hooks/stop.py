@@ -1753,7 +1753,7 @@ def _resolve_owed_state( session_id, transcript_path=None, cwd=None ):
         unanswered_inbound_questions = open_inbound,
         outstanding_delegations      = delegations,
         needs_verification           = needs_verification,
-        open_user_gates              = open_gates,
+        open_user_gates              = due_gates,   # bug d0d7f068: the obligation-OVERRIDE + poke key on DUE gates (reask-interval elapsed), NOT any-open — an open-but-not-due gate stays tracked in the hold (still "not answered") but must NOT poke through an honored hold every Stop. Its re-ask cadence IS reask_interval_s; the row's existence, not per-Stop poking, is the not-done tracker. (open_gates still logged below for observability.)
         needs_question_surface       = needs_question_surface,
         needs_spinup_check           = needs_spinup_check,
     )

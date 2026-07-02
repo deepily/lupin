@@ -339,6 +339,46 @@ class TestRunHeartbeat:
         assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None       # honored → no poke
         mock_incr.assert_not_called()
 
+    # ── bug d0d7f068: the gate OVERRIDE + poke must respect the reask cadence ────
+    # The 2026-07-02 Mr-Radio loop: an OPEN but NOT-DUE gate (asked seconds ago,
+    # inside reask_interval_s) fired the obligation-override every Stop, poking
+    # through an honored hold 7× in 20 min. FIX: the override keys on DUE gates
+    # (reask interval elapsed), not any-open. A not-due gate stays tracked in the
+    # hold but does NOT poke — the honored hold stands until the gate is DUE again.
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
+    def test_open_not_due_gate_leaves_hold_honored( self, mock_load, mock_read, mock_count, mock_incr ):
+        """THE REPRO: an OPEN, RECENTLY-asked (NOT due) gate must NOT override a fresh
+        reasoned hold — no poke, no increment. Before the fix this poked every Stop."""
+        from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates as ug
+        fresh_ask = _now().isoformat()                                # just asked → inside interval → NOT due
+        gate = ug.make_gate( "g1", "Proceed with Q1?", "ask_yes_no", last_asked_ts=fresh_ask )
+        mock_read.return_value = self._hold_with( pending_user_gates=[ gate ] )
+        self.mock_replay.return_value = _EMPTY_STATE
+        assert _run_heartbeat( "sid", "/t.jsonl" )[ 0 ] is None       # not-due gate → honored, no poke
+        mock_incr.assert_not_called()
+
+    @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )
+    @patch( "lupin_cli.claude_code.hooks.stop.get_poke_count", return_value=0 )
+    @patch( "lupin_cli.claude_code.hooks.stop.read_hold_resilient" )
+    @patch( "lupin_cli.claude_code.hooks.stop.load_heartbeat_settings",
+            return_value={ "enabled": True, "poke_cap": 3, "owed_source_from_store": False, "verification_threshold_seconds": 600 } )
+    def test_never_asked_gate_is_immediately_due( self, mock_load, mock_read, mock_count, mock_incr ):
+        """GUARD-RAIL (Mr. Radio): a NEVER-asked gate (last_asked_ts absent) is
+        immediately DUE — first surfacing can't wait out an interval it never
+        started — so it DOES override the hold and poke."""
+        from lupin_cli.claude_code.hooks.lib import heartbeat_user_gates as ug
+        gate = ug.make_gate( "g1", "First surfacing?", "ask_yes_no" )   # no last_asked_ts → never asked
+        mock_read.return_value = self._hold_with( pending_user_gates=[ gate ] )
+        self.mock_replay.return_value = _EMPTY_STATE
+        out, _ = _run_heartbeat( "sid", "/t.jsonl" )
+        assert out[ "decision" ] == "block"                          # never-asked ⇒ due ⇒ poke
+        mock_incr.assert_called_once_with( "sid" )
+
     # ── emit details ──
 
     @patch( "lupin_cli.claude_code.hooks.stop.increment_poke_count" )

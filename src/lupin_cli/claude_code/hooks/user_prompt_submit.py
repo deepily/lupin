@@ -30,7 +30,7 @@ if _src_path not in sys.path:                 # pragma: no cover - bootstrap-exc
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
     format_voice_context, enrich_voice_context, build_additional_context,
-    write_turn_start_marker, speakerphone_reminder_block
+    write_turn_start_marker, speakerphone_reminder_block, is_injected_peer_dm
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, resolve_stable_session_id,
@@ -83,7 +83,13 @@ def main():
     # consecutive pokes spanning ~9h). Gating on the poke sentinel keeps the cap
     # accumulating across pokes (1→2→3→halt) while a real user prompt still
     # reopens the budget.
-    if not is_heartbeat_poke_prompt( payload.get( "prompt", "" ) ):
+    # d0d7f068 Part 2 (option C): a heartbeat/arbiter poke OR an injected peer-DM is
+    # NOT genuine user re-engagement — none may reopen the poke budget (that
+    # misclassification reset the cap on every inbound DM/tap so the relief valve
+    # never engaged). Only real USER typing resets. Both predicates match on SHARED
+    # constants (no re-typed frame literals — 46a17f5a).
+    _prompt = payload.get( "prompt", "" )
+    if not is_heartbeat_poke_prompt( _prompt ) and not is_injected_peer_dm( _prompt ):
         reset_poke_count( session_id )
 
     # Record turn start time for stop hook duration gating
