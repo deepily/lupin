@@ -501,26 +501,70 @@ test("F13: initial mount paints from notificationStore.list() (no events fired y
 // Branch-coverage close-out tests (added 2026-05-06 for the 100% c8 mandate).
 // ===========================================================================
 
-test("mount fallback: root without inner mount points uses root for both sections", () => {
+// bug 2826d65c — the silent `?? root` fallbacks are GONE. #sender-cards-container
+// is owned + required → mount THROWS LOUDLY when it is missing (no silent retarget
+// that could wipe siblings).
+test("mount fail-loud: root WITHOUT #sender-cards-container throws (bug 2826d65c — no silent fallback)", () => {
   const bus = createEventBusForTesting();
-  const notifList: Notification[]   = [makeNotification()];
-  const senderList: SenderRecord[]  = [makeSender()];
+  const renderer = createNotificationsListRenderer({
+    eventBus: bus,
+    stores  : {
+      notifications  : { list: () => [makeNotification()] },
+      senders        : { list: () => [makeSender()] },
+      actionRequired : { list: () => [] as ActionRequiredItem[] },
+    },
+    appTimezone: "UTC",
+  });
+  const root = document.createElement("section");   // no #sender-cards-container child
+  assert.throws(() => renderer.mount(root), /#sender-cards-container not found/);
+});
+
+// bug 2826d65c regression guard (unit-level) — the PRODUCTION post-0c shape:
+// #notifications-pane holds ONLY #sender-cards-container; #action-required-section
+// is a SEPARATE element owned by ActionRequiredRenderer. mount() must NOT wipe the
+// pane, and the un-owned AR render/tick paths must be safe guarded no-ops.
+test("mount 0c-shape: AR section absent from pane → no wipe of #sender-cards-container; AR render + tick are no-ops (bug 2826d65c)", () => {
+  const bus = createEventBusForTesting();
   const arList: ActionRequiredItem[] = [];
   const renderer = createNotificationsListRenderer({
     eventBus: bus,
     stores  : {
-      notifications  : { list: () => notifList },
-      senders        : { list: () => senderList },
+      notifications  : { list: () => [makeNotification()] },
+      senders        : { list: () => [makeSender()] },
       actionRequired : { list: () => arList },
     },
     appTimezone: "UTC",
   });
-  // Bare root WITHOUT #action-required-section or #sender-cards-container —
-  // the renderer should fall back to root for both mounts (line 99-100 ?? root).
+  // Production pane shape: #sender-cards-container present, NO #action-required-section.
   const root = document.createElement("section");
-  renderer.mount(root);
-  // Sender card landed directly in root (the senderCardsMount fallback).
-  assert.notEqual(root.querySelector(".sender-card"), null);
+  root.id = "notifications-pane";
+  const sCards = document.createElement("div");
+  sCards.id = "sender-cards-container";
+  root.appendChild(sCards);
+
+  renderer.mount(root);   // must NOT throw and must NOT wipe #sender-cards-container
+
+  // THE regression assertion: the container survives mount (renderAll →
+  // renderActionRequiredSection hit the null-AR guard, not a pane replaceChildren).
+  assert.notEqual(root.querySelector("#sender-cards-container"), null,
+    "#sender-cards-container must survive mount");
+  assert.notEqual(root.querySelector("#sender-cards-container .sender-card"), null,
+    "sender card renders into the surviving container");
+
+  // A non-tick AR change re-enters renderActionRequiredSection with a null AR
+  // mount → guarded no-op (no throw, container still intact).
+  bus.emit({
+    type    : "store_action_required_changed",
+    payload : { changeKind: "added", id_hash: "ar-x" },
+  } as unknown as Parameters<typeof bus.emit>[0]);
+  // A tick AR change hits the tick-branch null-AR guard → no-op.
+  bus.emit({
+    type    : "store_action_required_changed",
+    payload : { changeKind: "tick", id_hash: "ar-x" },
+  } as unknown as Parameters<typeof bus.emit>[0]);
+
+  assert.notEqual(root.querySelector("#sender-cards-container"), null,
+    "#sender-cards-container still intact after AR change + tick");
   renderer.unmount();
 });
 
