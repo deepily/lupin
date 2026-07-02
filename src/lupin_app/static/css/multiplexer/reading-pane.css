@@ -16,6 +16,28 @@
     display       : flex;
     margin-bottom : 8px;
 }
+
+/* ============================================================================
+   c31c2d61 (2026-07-02, Rachel 🕊️) — #layout-mode-toggle OCCLUSION fix.
+   The fixed nav (lupin-nav.css:11-18 — .lupin-nav { position:fixed; top:0;
+   height:56px; z-index:9999 }) overlaps the top of the flowed content. In
+   VERTICAL/default mode .reading-pane-toolbar is normal-flow with NO nav
+   clearance, so #layout-mode-toggle sits UNDER the nav and the nav-brand link
+   intercepts its clicks (Sam's :8000 probe: 8/8 horizontal e2e fail on a real
+   non-force click; the failing click is the first action, in vertical mode).
+
+   Fix is TOOLBAR-SIDE only (D3: the nav stays as-is; Clayton-agreed): clear the
+   56px nav by offsetting the toolbar below it — mirroring HORIZONTAL mode, which
+   already floats the toolbar at `top: 56px` (below), and legacy's below-nav
+   coexistence. `padding-top` (not `margin-top`) is used so the offset can't
+   margin-collapse through the plain-block .content-shell/.left-column. Excludes
+   horizontal mode, whose fixed-toolbar rule below owns its own offset.
+   Real-click verification = the :8000 0b re-run gate (happy-dom cannot hit-test,
+   pre-ratified verification chain).
+   ============================================================================ */
+body:not( [ data-layout-mode="horizontal" ] ) .reading-pane-toolbar {
+    padding-top: 56px;
+}
 .layout-mode-btn {
     background    : transparent;
     border        : 1px solid #ced4da;
