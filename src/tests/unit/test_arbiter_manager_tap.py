@@ -214,6 +214,21 @@ class TestAttentionWorkers:
         out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=None )
         assert { v[ "persona" ] for v in out } == { "Rachel" }
 
+    def test_holder_awaiting_future_bridge_peer_kept( self ):
+        """097778b8: a FUTURE bridge mtime (clock skew/corruption ⇒ negative age)
+        must NOT count the peer alive — without the 0<=age lower bound a negative
+        age slips under the threshold and falsely excludes the holder. Fail toward
+        rostering: the holder is KEPT."""
+        job   = _job( _Gateway(), { } )
+        fleet = {
+            "h":    _working( "h", "Rachel" ),
+            "busy": _working( "busy", "Busy", alive=False ),
+        }
+        graph = { "edges": { "Rachel": "Busy" }, "cycles": [ ] }
+        bridge_mtimes = { _bridge_key( "Busy" ): NOW.timestamp() + 60 }   # future mtime → age -60
+        out   = job._attention_workers( fleet, graph, now=NOW, bridge_mtimes=bridge_mtimes )
+        assert { v[ "persona" ] for v in out } == { "Rachel" }            # negative age ⇒ not alive ⇒ kept
+
 
 # ── tap firing / throttle ──────────────────────────────────────────────────────
 

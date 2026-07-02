@@ -943,6 +943,20 @@ def test_bridge_mtimes_none_is_inert():
     assert len( _stale_pokes( gw ) ) == 1
 
 
+def test_future_bridge_does_not_veto():
+    """097778b8: a FUTURE bridge mtime (clock skew/corruption ⇒ negative age) must
+    NOT veto — without the 0<=age lower bound a negative age slips under the
+    threshold and falsely suppresses a real escalation. Fail toward poking: the
+    case-14 poke + advisory fire as if the bridge signal were absent."""
+    gw, escal = _GW(), [ ]
+    job  = _job( gw, notify=lambda m, *a, **k: escal.append( m ) )
+    snap = _snap( _row( "s_dark", "manager", 5000, persona="tiberius" ) )
+    bridge_mtimes = { _bridge_key( "tiberius" ): NOW.timestamp() + 60 }   # future mtime → age -60
+    fired = job._check_manager_staleness( snap, NOW, [ ], bridge_mtimes=bridge_mtimes )
+    assert fired == 1
+    assert len( _stale_pokes( gw ) ) == 1
+
+
 # ── the swallow-safe per-poll reader (mirrors _read_known_owners) ────────────
 
 def test_read_manager_bridge_mtimes_none_when_unwired():

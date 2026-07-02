@@ -2246,7 +2246,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
                     continue
                 p  = v.get( "persona" )
                 mt = bridge_mtimes.get( canonical_persona_key( p ) ) if p else None
-                if mt is not None and ( now_epoch - mt ) <= self.manager_stale_poke_threshold_seconds:
+                # 0 <= age lower bound (bug 097778b8): a FUTURE mtime (clock
+                # skew/corruption ⇒ negative age) is NOT ground-truth liveness →
+                # do not count it alive; fail toward rostering (the safe direction).
+                if mt is not None and 0 <= ( now_epoch - mt ) <= self.manager_stale_poke_threshold_seconds:
                     alive_personas.add( p )
         cycle_personas = { p for cycle in graph[ "cycles" ] for p in cycle }
         out            = [ ]
@@ -3782,7 +3785,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
             # snapshot twin logs the more-specific twin suppression.
             if bridge_mtimes and persona is not None:
                 bridge_mtime = bridge_mtimes.get( canonical_persona_key( persona ) )
-                if bridge_mtime is not None and ( now.timestamp() - bridge_mtime ) <= self.manager_stale_poke_threshold_seconds:
+                # 0 <= age lower bound (bug 097778b8): a FUTURE bridge mtime (clock
+                # skew/corruption ⇒ negative age) is NOT ground-truth liveness → do
+                # not veto; fail toward poking (the safe direction).
+                if bridge_mtime is not None and 0 <= ( now.timestamp() - bridge_mtime ) <= self.manager_stale_poke_threshold_seconds:
                     self._log( "arbiter_manager_stale_bridge_veto",
                                session_id=sid, persona=persona, freshest_age_s=age,
                                bridge_age_s=( now.timestamp() - bridge_mtime ) )
