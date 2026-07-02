@@ -309,8 +309,11 @@ function bootMultiplexer(): void {
   // (transports.audio.start(...) MUST land after every renderer mount).
   const jobsRenderer = createJobsPaneRenderer({
     eventBus,
-    stores : { jobs: stores.jobs },
-    api    : apiClient,
+    stores      : { jobs: stores.jobs },
+    api         : apiClient,
+    // W5 — the WS/session id sent as `websocket_id` in the per-job retry POST so
+    // the server routes the re-queued job's events back to this client.
+    websocketId : sessionId,
   });
   const jobsMountEl = document.getElementById("jobs-pane");
   if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");
