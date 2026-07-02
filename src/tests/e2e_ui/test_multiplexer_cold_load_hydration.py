@@ -390,7 +390,16 @@ def test_boot_has_zero_4xx_and_jobs_pane_hydrates( page ):
     )
 
     # --- DOM corroboration: hydrated rows actually paint --------------------
-    page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', timeout=10_000 )
+    # Lane 0c (RATIFIED item 2aad5b7b): the Job Queues pane is COLD-HIDDEN at boot;
+    # visibility is owned by the section-toolbar. The store-level hydration
+    # assertions above are visibility-INDEPENDENT (they read the live store via the
+    # boot hook), so they already fired against the cold-hidden pane. To corroborate
+    # the RENDERED .job-card DOM we first reveal the pane through its real toolbar
+    # control (the user flow) — NOT a default-visible assumption (that predated the
+    # 0c ruling) — then assert the hydrated rows painted.
+    page.wait_for_selector( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]', timeout=5_000 )
+    page.locator( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]' ).click()
+    page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', state="visible", timeout=10_000 )
     card_count = page.locator( "#jobs-buckets-container .job-card" ).count()
     assert card_count >= 1, (
         "the jobs-pane must render .job-card elements for hydrated history "
