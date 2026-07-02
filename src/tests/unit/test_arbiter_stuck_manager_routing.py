@@ -202,9 +202,13 @@ def test_stuck_manager_tap_does_not_false_fire_manager_down():
 
 
 def test_format_stuck_manager_advisory_persona_then_session_id():
-    """Leaf coverage of the advisory body: persona preferred, session_id fallback."""
+    """Leaf coverage of the advisory body: persona preferred, session_id fallback,
+    and the F1 one-source-of-truth pin — the opening clause is derived from the
+    shared ARBITER_POKE_SENTINEL (b33c8e96), not a drift-prone literal."""
+    from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
     job = _job( declared_managers=[ "Tiberius" ] )
     named = job._format_stuck_manager_advisory( { "persona": "Tiberius", "session_id": "s" }, 4 )
+    assert named.startswith( ARBITER_POKE_SENTINEL )
     assert "Tiberius" in named and "MANAGER" in named and "I do not reap" in named and "4 free" in named
     fallback = job._format_stuck_manager_advisory( { "persona": None, "session_id": "sid-x" }, 0 )
     assert "sid-x" in fallback

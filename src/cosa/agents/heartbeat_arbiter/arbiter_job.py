@@ -2333,8 +2333,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         actuation as Rick's (reap/replace/re-staff), NOT a peer manager's.
         """
         who = view.get( "persona" ) or view.get( "session_id" )
+        # ff91cff4 F1 nit: derive the "Heartbeat arbiter (" prefix from the shared
+        # ARBITER_POKE_SENTINEL (b33c8e96 one-source-of-truth) so every arbiter body
+        # has a single source for that opening clause — no drift-prone literal.
         return (
-            f"Heartbeat arbiter (advisory — I observe + recommend; you actuate). "
+            f"{ARBITER_POKE_SENTINEL}advisory — I observe + recommend; you actuate). "
             f"MANAGER {who} appears STUCK/DEAD — a manager's escalation is yours to "
             f"actuate (reap/replace/re-staff), not a peer manager's. {free_n} free "
             f"worker(s) fleet-wide. (Recommendation only — I do not reap.)"
