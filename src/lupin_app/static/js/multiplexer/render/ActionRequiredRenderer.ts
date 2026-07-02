@@ -41,6 +41,11 @@ import type {
 import { renderActionRequiredInteractive } from "./templates/actionRequiredInteractive";
 import { renderActionRequiredEmpty } from "./templates/actionRequiredReadOnly";
 import { formatCountdown } from "./time";
+import {
+  renderSectionHeader,
+  wireSectionCollapse,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -86,7 +91,13 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private readonly stores : ActionRequiredRendererStores;
   private readonly unsubscribers: Array<() => void> = [];
 
-  private root: HTMLElement | null = null;
+  private root    : HTMLElement | null = null;
+  // Lane 0a: the `.section-content` body wrapper (all widget DOM lands here, so
+  // the persistent `.section-header` bar survives repaints) + the header handle
+  // (count chip) + the collapse-listener teardown.
+  private content : HTMLElement | null = null;
+  private header  : SectionHeaderHandle | null = null;
+  private collapseOff: ( () => void ) | null = null;
   private mounted = false;
 
   constructor(opts: ActionRequiredRendererOptions) {
@@ -104,6 +115,28 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // renderActionRequiredSection() call sees the flag and bails.
     root.dataset.phase6bOwner = "true";
 
+    // Lane 0a — the uniform `.section-header` bar (legacy: "⚠️ Action Required:
+    // <count>", notifications.html:565) + a `.section-content` body wrapper. The
+    // header is a persistent sibling; every render targets `this.content`.
+    const header = renderSectionHeader( {
+      icon   : "⚠️",
+      title  : "Action Required",
+      testid : "multiplexer-action-required-header",
+    } );
+    this.header  = header;
+    const content = document.createElement( "div" );
+    content.className = "section-content";
+    content.setAttribute( "data-testid", "multiplexer-action-required-content" );
+    // Absorb any pre-existing Phase-5 read-only widgets (rendered directly into
+    // the section before 6b claimed ownership) INTO the content wrapper, so the
+    // subsequent renderAll swaps them in place via replaceWith (AC2c atomic
+    // read-only→interactive swap) rather than discarding + re-appending them.
+    content.append( ...Array.from( root.childNodes ) );
+    this.content = content;
+    root.replaceChildren( header.header, content );
+    // Session-only collapse on the section root (07 §3.A U-A3).
+    this.collapseOff = wireSectionCollapse( root, header );
+
     this.renderAll();
 
     this.unsubscribers.push(
@@ -117,12 +150,18 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
+    if (this.collapseOff !== null) {
+      this.collapseOff();
+      this.collapseOff = null;
+    }
     if (this.root !== null) {
       delete this.root.dataset.phase6bOwner;
       // L2 (mux MVP-finish): unmount-at-0 boundary edge. Once ownership is
       // released, Phase-5 read-only will NOT repaint until the next AR event,
       // so if the section is empty at teardown the outgoing Phase-6b path owns
-      // painting `#action-required-empty` — never leave a blank panel.
+      // painting `#action-required-empty` — never leave a blank panel. Lane 0a:
+      // the whole section (header + content) is cleared on teardown so ownership
+      // returns cleanly to the Phase-5 read-only path.
       if (this.stores.actionRequired.list().length === 0) {
         this.root.replaceChildren(renderActionRequiredEmpty());
       } else {
@@ -130,6 +169,8 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       }
       this.root = null;
     }
+    this.content = null;
+    this.header  = null;
     this.mounted = false;
   }
 
@@ -142,12 +183,13 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // -------------------------------------------------------------------------
 
   private renderAll(): void {
-    /* c8 ignore next */ // defensive: renderAll is only called after mount() sets root; null only after unmount, which detaches the subscription first.
-    if (this.root === null) return;
+    /* c8 ignore next */ // defensive: renderAll is only called after mount() sets content; null only after unmount, which detaches the subscription first.
+    if (this.content === null) return;
     const items = this.stores.actionRequired.list();
+    this.updateCount(items.length);
     // L2 (mux MVP-finish): count===0 → the shared `✓ No pending actions` panel.
     if (items.length === 0) {
-      this.root.replaceChildren(renderActionRequiredEmpty());
+      this.content.replaceChildren(renderActionRequiredEmpty());
       return;
     }
     for (const item of items) {
@@ -155,26 +197,32 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     }
   }
 
+  // Lane 0a — the header count chip reflects the number of action-required items.
+  private updateCount(n: number): void {
+    /* c8 ignore next */ // defensive: header is set/nulled in lockstep with content, so it is non-null whenever renderAll/onChange run.
+    if (this.header !== null) this.header.setCount(n);
+  }
+
   // L2: remove the empty-state element (if present) before a widget paints, so
   // the `✓ No pending actions` panel never lingers beside a live widget.
   private clearEmpty(): void {
-    /* c8 ignore next */ // defensive: caller guards null root before reaching here.
-    if (this.root === null) return;
-    const empty = this.root.querySelector("#action-required-empty");
+    /* c8 ignore next */ // defensive: caller guards null content before reaching here.
+    if (this.content === null) return;
+    const empty = this.content.querySelector("#action-required-empty");
     if (empty !== null) empty.remove();
   }
 
   private renderOrReplaceWidget(item: ActionRequiredItem): void {
-    /* c8 ignore next */ // defensive: caller flow always guards against null root before reaching here.
-    if (this.root === null) return;
+    /* c8 ignore next */ // defensive: caller flow always guards against null content before reaching here.
+    if (this.content === null) return;
     this.clearEmpty();
     const widget = this.buildWidgetFor(item);
-    const existing = this.root.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(item.id_hash)}"]`);
+    const existing = this.content.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(item.id_hash)}"]`);
     if (existing !== null) {
       // Atomic swap — single MutationObserver childList entry per AC2c.
       existing.replaceWith(widget);
     } else {
-      this.root.appendChild(widget);
+      this.content.appendChild(widget);
     }
   }
 
@@ -306,12 +354,12 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // -------------------------------------------------------------------------
 
   private onChange(e: LupinEvent<StoreActionRequiredChangedPayload>): void {
-    /* c8 ignore next */ // defensive: subscriptions are detached in unmount BEFORE root is nulled.
-    if (this.root === null) return;
+    /* c8 ignore next */ // defensive: subscriptions are detached in unmount BEFORE content is nulled.
+    if (this.content === null) return;
     const { changeKind, id_hash, countdownMs } = e.payload;
     if (changeKind === "tick") {
       // Per Pass 2 a2 — countdown driven by store's 1Hz tick events; renderer
-      // uses .textContent only, NEVER requestAnimationFrame.
+      // uses .textContent only, NEVER requestAnimationFrame. (No count change.)
       this.updateCountdown(id_hash, countdownMs ?? 0);
       return;
     }
@@ -324,17 +372,19 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       // L2 (mux MVP-finish): if that was the last widget, repaint the shared
       // `✓ No pending actions` panel rather than leave the section blank.
       if (this.stores.actionRequired.list().length === 0) {
-        this.root.replaceChildren(renderActionRequiredEmpty());
+        this.content.replaceChildren(renderActionRequiredEmpty());
       }
+      this.updateCount(this.stores.actionRequired.list().length);   // Lane 0a
       return;
     }
     this.renderOrReplaceWidget(item);
+    this.updateCount(this.stores.actionRequired.list().length);     // Lane 0a
   }
 
   private updateCountdown(idHash: string, countdownMs: number): void {
-    /* c8 ignore next */ // defensive: caller already guards root null.
-    if (this.root === null) return;
-    const widget = this.root.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
+    /* c8 ignore next */ // defensive: caller already guards content null.
+    if (this.content === null) return;
+    const widget = this.content.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
     if (widget === null) return;   // tick for a widget that's not in the DOM (yet) — silently skip
     const countdown = widget.querySelector<HTMLElement>(".action-required-countdown");
     if (countdown === null) return; // widget exists but has no countdown (e.g. submitting/responded/expired states)
@@ -342,9 +392,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   }
 
   private removeWidget(idHash: string): void {
-    /* c8 ignore next */ // defensive: caller already guards root null.
-    if (this.root === null) return;
-    const widget = this.root.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
+    /* c8 ignore next */ // defensive: caller already guards content null.
+    if (this.content === null) return;
+    const widget = this.content.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
     if (widget !== null) widget.remove();
   }
 }

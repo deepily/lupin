@@ -72,19 +72,26 @@ const goodSessions = (sessions: FleetComposite["fleet_arbiter"]): FleetComposite
 // Chrome + initial paint
 // ---------------------------------------------------------------------------
 
-test("mount builds chrome (title, count, refresh, updated, container)", () => {
+test("mount builds chrome (Lane 0a section-header: title, count, refresh, updated, container)", () => {
   const { root } = setup();
-  assert.ok(root.querySelector(".fleet-status-title"));
-  assert.ok(root.querySelector(".fleet-status-count"));
+  // Lane 0a — the bespoke .fleet-status-header is now the uniform .section-header
+  // bar; the title lives in its <h3> (🛰️ Fleet Status), count in the shared
+  // .section-header-count chip. Refresh/updated/container classes are preserved.
+  const header = root.querySelector(".section-header") as HTMLElement;
+  assert.ok(header, "section-header bar present");
+  assert.ok(header.querySelector("h3")!.textContent!.includes("🛰️ Fleet Status"), "title in h3");
+  assert.ok(root.querySelector(".section-header-count"));
   assert.ok(root.querySelector(".fleet-status-refresh"));
   assert.ok(root.querySelector(".fleet-status-updated"));
   assert.ok(root.querySelector(".fleet-status-container"));
+  // The container is the collapsible body (carries .section-content).
+  assert.ok(root.querySelector(".section-content.fleet-status-container"), "container is the section-content body");
 });
 
 test("initial paint with null composite → arbiter-offline banner, count 0", () => {
   const { root } = setup();
   assert.ok(root.querySelector(".fleet-status-offline"));
-  assert.equal(root.querySelector(".fleet-status-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
   assert.equal(root.querySelector(".fleet-status-updated")?.textContent, ""); // no stamp on initial
 });
 
@@ -97,7 +104,7 @@ test("auth_required → sign-in message; count 0; no stamp", () => {
   store.setComposite({ status: "auth_required" });
   emit(true);
   assert.ok(root.querySelector(".fleet-status-signin"));
-  assert.equal(root.querySelector(".fleet-status-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
   assert.equal(root.querySelector(".fleet-status-updated")?.textContent, "");
 });
 
@@ -154,7 +161,7 @@ test("populated live sessions → table; count reflects visible; stamp set", () 
   ] }));
   emit(true);
   assert.ok(root.querySelector(".fleet-status-table"));
-  assert.equal(root.querySelector(".fleet-status-count")?.textContent, "2");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "2");
 });
 
 test("all sessions offline + hidden → toggle + 'No live sessions'; count 0", () => {
@@ -166,7 +173,7 @@ test("all sessions offline + hidden → toggle + 'No live sessions'; count 0", (
   emit(true);
   assert.ok(root.querySelector(".fleet-offline-toggle"));
   assert.equal(root.querySelector(".fleet-status-empty")?.textContent, "No live sessions.");
-  assert.equal(root.querySelector(".fleet-status-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
 });
 
 test("showOffline=true reveals offline rows in the table + 'Hide offline' label", () => {
@@ -178,7 +185,7 @@ test("showOffline=true reveals offline rows in the table + 'Hide offline' label"
   ] }));
   emit(true);
   assert.ok(root.querySelector(".fleet-status-table"));
-  assert.equal(root.querySelector(".fleet-status-count")?.textContent, "2"); // both visible
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "2"); // both visible
   assert.match(root.querySelector(".fleet-offline-toggle-btn")!.textContent!, /Hide offline \(1\)/);
 });
 

@@ -23,6 +23,11 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type { Notification, StoreNotificationsChangedPayload } from "../shared/types";
+import {
+  renderSectionHeader,
+  setSectionCollapsed,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 // Narrowed NotificationStore surface this renderer consumes (the production
 // NotificationStore satisfies it structurally).
@@ -77,6 +82,11 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private statusEl     : HTMLElement | null        = null;
   private envLabelEl   : HTMLElement | null        = null;
   private clockEl      : HTMLElement | null        = null;
+  // Lane 0a — the section-header handle + the collapse click-listener (the
+  // notifications body pane is a SEPARATE mount, so collapse targets the sibling
+  // #notifications-pane rather than a child .section-content).
+  private header       : SectionHeaderHandle | null = null;
+  private headerClick  : ( ( e: Event ) => void ) | null = null;
   private historyOpen  = false;
 
   private readonly unsubscribers : Array<() => void> = [];
@@ -95,39 +105,20 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.root    = root;
     this.mounted = true;
 
-    const header = document.createElement("header");
-    header.className = "notifications-header";
-    header.setAttribute("data-testid", "multiplexer-notifications-header");
-
     // H2 (parity) — env-label prefix + live clock suffix, ported from legacy
     // notifications.html:80 `<h2><span id=env-label></span>Notifications <span id=clock></span></h2>`
     // + notifications.js:2793-2798 (both driven off the sys_time_update WS frame,
     // payload {date, env_label} from main.py:265). Empty until the first tick —
     // exactly like legacy, which also populates via that same WS event.
-    const title = document.createElement("h2");
-    title.className = "notifications-header-title";
-
     this.envLabelEl = document.createElement("span");
     this.envLabelEl.className = "notifications-env-label";
     this.envLabelEl.id = "env-label";
     this.envLabelEl.setAttribute("data-testid", "multiplexer-notifications-env-label");
-    title.appendChild(this.envLabelEl);
-
-    title.appendChild(document.createTextNode("🔔 Notifications "));
 
     this.clockEl = document.createElement("span");
     this.clockEl.className = "notifications-clock";
     this.clockEl.id = "clock";
     this.clockEl.setAttribute("data-testid", "multiplexer-notifications-clock");
-    title.appendChild(this.clockEl);
-
-    header.appendChild(title);
-
-    this.countEl = document.createElement("span");
-    this.countEl.className = "notifications-count";
-    this.countEl.id = "notifications-count";
-    this.countEl.setAttribute("data-testid", "multiplexer-notifications-count");
-    header.appendChild(this.countEl);
 
     // History dropdown — toggle button + (initially hidden) panel.
     this.historyBtn = document.createElement("button");
@@ -137,7 +128,6 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.historyBtn.setAttribute("data-testid", "multiplexer-notifications-history-toggle");
     this.historyBtn.textContent = "History ▾";
     this.historyBtn.addEventListener("click", () => this.toggleHistory());
-    header.appendChild(this.historyBtn);
 
     // Clear-all.
     this.clearBtn = document.createElement("button");
@@ -147,12 +137,32 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.clearBtn.setAttribute("data-testid", "multiplexer-notifications-clear-all");
     this.clearBtn.textContent = "Clear all";
     this.clearBtn.addEventListener("click", () => void this.onClearAll());
-    header.appendChild(this.clearBtn);
 
     this.statusEl = document.createElement("span");
     this.statusEl.className = "notifications-header-status";
     this.statusEl.setAttribute("data-testid", "multiplexer-notifications-header-status");
-    header.appendChild(this.statusEl);
+
+    // Lane 0a — convert the bespoke `.notifications-header` into the uniform
+    // `.section-header` bar (🔔 Notifications). The history-toggle + clear-all +
+    // status move into `.section-header-actions`; the count uses the shared
+    // `.section-header-count` chip (its legacy id + testid preserved so existing
+    // selectors resolve). The env-label prefix + live clock are injected into the
+    // h3 around the "🔔 Notifications" title (legacy parity).
+    const header = renderSectionHeader({
+      icon    : "🔔",
+      title   : "Notifications",
+      testid  : "multiplexer-notifications-header",
+      actions : [ this.historyBtn, this.clearBtn, this.statusEl ],
+    });
+    this.header  = header;
+    this.countEl = header.countEl;
+    this.countEl.id = "notifications-count";
+    this.countEl.setAttribute("data-testid", "multiplexer-notifications-count");
+
+    const h3 = header.header.querySelector("h3") as HTMLElement;
+    // env-label BEFORE the icon/title; clock AFTER the title, before the count.
+    h3.insertBefore(this.envLabelEl, h3.firstChild);
+    h3.insertBefore(this.clockEl, this.countEl);
 
     this.historyPanel = document.createElement("div");
     this.historyPanel.className = "notifications-history-panel";
@@ -160,7 +170,24 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.historyPanel.setAttribute("data-testid", "multiplexer-notifications-history-panel");
     this.historyPanel.hidden = true;
 
-    root.replaceChildren(header, this.historyPanel);
+    root.replaceChildren(header.header, this.historyPanel);
+
+    // Session-only collapse — the notifications LIST lives in the sibling
+    // #notifications-pane (a separate mount owned by NotificationsListRenderer),
+    // so the chevron toggles `data-collapsed` on THAT pane (mux rule
+    // `#notifications-pane[data-collapsed="true"]` hides it), not a child of this
+    // header's mount. A click on a header control (button/etc.) does not collapse.
+    this.headerClick = ( e: Event ): void => {
+      const target = e.target as Element | null;
+      /* c8 ignore next */ // defensive: a dispatched click always carries a target.
+      if ( target === null ) return;
+      if ( target.closest("button, a, input, select") !== null ) return;
+      const pane = root.ownerDocument.getElementById("notifications-pane");
+      if ( pane === null ) return;   // header-only context (no body pane): no-op
+      const collapsed = pane.getAttribute("data-collapsed") === "true";
+      setSectionCollapsed( pane, header, !collapsed );
+    };
+    header.header.addEventListener("click", this.headerClick);
 
     this.unsubscribers.push(
       this.bus.on<StoreNotificationsChangedPayload>(
@@ -182,6 +209,11 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     if (!this.mounted) return;
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
+    if (this.header !== null && this.headerClick !== null) {
+      this.header.header.removeEventListener("click", this.headerClick);
+    }
+    this.headerClick = null;
+    this.header = null;
     if (this.root !== null) this.root.replaceChildren();
     this.root = this.countEl = this.clearBtn = null;
     this.historyBtn = null;
@@ -210,7 +242,12 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private refresh(): void {
     /* c8 ignore next */ // defensive: refresh only fires between mount and unmount, when countEl/clearBtn are set.
     if (this.countEl === null || this.clearBtn === null) return;
-    // Count = raw active TOTAL (F-Sam-BC3), not the filtered view.
+    // Lane 0a — the section-header count = the active-list TOTAL. RULED
+    // 2026-07-02 (Tiberius, from legacy ground truth: notifications.js:14417-14428
+    // updateTotalNotificationsCount() sums group.totalCount into
+    // #notifications-count → TOTAL). 07 §3.A F-Clay-A4's "UNREAD" was a
+    // transcription error (corrected in-file with a ⚠️ marker); this matches
+    // legacy AND the pre-cascade F-Sam-BC3 intent (list().length).
     this.countEl.textContent = String(this.store.list().length);
     // Clear-all clears the active filter scope — disabled when nothing visible.
     this.clearBtn.disabled = this.store.visibleEntries().length === 0;
