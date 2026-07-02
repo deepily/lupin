@@ -205,11 +205,34 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       throw new Error("NotificationsListRenderer.mount: already mounted");
     }
     this.root = root;
-    // Per D-L: route to specific mount points if present; fall back to root
-    // (test fixtures + simple shells may put the renderer's content directly
-    // into a single element).
-    this.actionRequiredMount = (root.querySelector("#action-required-section") as HTMLElement | null) ?? root;
-    this.senderCardsMount    = (root.querySelector("#sender-cards-container") as HTMLElement | null) ?? root;
+    // Mount-point resolution (bug 2826d65c — Lane 0c boot regression fix).
+    //
+    // The former `?? root` fallbacks were the exact silent-defensive-fallback
+    // pattern CLAUDE.md prohibits ("missing should fail at runtime, not silently
+    // fallback"). They masked a real contract break: Lane 0c EXTRACTED
+    // #action-required-section OUT of #notifications-pane (it is now owned by the
+    // separate ActionRequiredRenderer, mounted document-level in boot.ts). So the
+    // pane-scoped `querySelector("#action-required-section")` now MISSES → the old
+    // `?? root` retargeted the AR render path at the WHOLE pane → its
+    // replaceChildren() wiped the sibling #sender-cards-container before boot's
+    // recorder-mount lookup → "#sender-cards-container not found" boot crash.
+    //
+    // Ownership-differentiated resolution:
+    //   - #sender-cards-container is OWNED by this renderer + guaranteed by the
+    //     page contract → resolve strictly; THROW LOUDLY if absent (boot.ts:328
+    //     models this fail-fast).
+    //   - #action-required-section is NO LONGER owned here (fully transferred to
+    //     ActionRequiredRenderer post-0c) → resolve to null when it is not a
+    //     descendant (the production case) with NO root fallback. The AR render
+    //     path becomes an EXPLICIT guarded no-op (a documented design decision,
+    //     not a silent fallback). A follow-up (P3) rips out the vestigial AR
+    //     rendering here entirely.
+    const senderCardsEl = root.querySelector("#sender-cards-container") as HTMLElement | null;
+    if (senderCardsEl === null) {
+      throw new Error("NotificationsListRenderer.mount: required #sender-cards-container not found in root");
+    }
+    this.senderCardsMount    = senderCardsEl;
+    this.actionRequiredMount = root.querySelector("#action-required-section") as HTMLElement | null;
 
     this.attachClickDelegation();
     this.subscribe();
@@ -419,7 +442,10 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   }
 
   private renderActionRequiredSection(): void {
-    /* c8 ignore next */ // defensive: actionRequiredMount is set in mount() and only nulled in unmount(); subscriptions are detached in unmount BEFORE this null happens.
+    // NULL in production (bug 2826d65c): post-0c #action-required-section lives
+    // OUTSIDE this renderer's root (#notifications-pane) — it is owned by
+    // ActionRequiredRenderer — so mount() resolves actionRequiredMount to null and
+    // this is an explicit guarded no-op (NOT a wipe of the pane). Covered.
     if (this.actionRequiredMount === null) return;
     // Phase 6b ownership flag (per Pass 2 A3 Path A in `09-phase6b-interactive-widgets-design.md`):
     // when ActionRequiredRenderer.mount() has fired, this section is owned by Phase 6b
@@ -453,7 +479,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     if (payload.changeKind === "tick") {
       // Per Q-B: tick MUST NOT touch parent DOM. Only mutate the countdown
       // text node inline. AC4 verifies via `data-test-canary` sentinel.
-      /* c8 ignore next */ // defensive: actionRequiredMount post-mount is always set; tick events fire only between mount and unmount.
+      // NULL in production (bug 2826d65c): AR section is not owned here post-0c;
+      // a tick with a null AR mount is a safe no-op. Covered.
       if (this.actionRequiredMount === null) return;
       const widget = this.actionRequiredMount.querySelector(`[data-id-hash="${cssEscape(payload.id_hash)}"]`) as HTMLElement | null;
       /* c8 ignore next */ // defensive: widget null only if AR item never rendered (id_hash not in arList); reducer guarantees consistency.
