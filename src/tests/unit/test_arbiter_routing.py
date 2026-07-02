@@ -371,6 +371,10 @@ def test_blocker_ping_dms_blocker_and_ccs_manager():
     assert gw.sent[ 0 ][ 0 ] == "Bob" and "blocking worker Alice" in gw.sent[ 0 ][ 1 ]
     assert gw.sent[ 1 ][ 0 ] == "MgrB" and "blocking worker Alice" in gw.sent[ 1 ][ 1 ]   # cc
     assert "chase if they stay silent" in gw.sent[ 1 ][ 1 ]
+    # e8eee4c4 (family-close): the blocker-cc opening clause derives from the shared
+    # ARBITER_POKE_SENTINEL (b33c8e96 one-source-of-truth), not a drift-prone literal.
+    from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
+    assert ARBITER_POKE_SENTINEL in gw.sent[ 1 ][ 1 ]   # sentinel-derived clause (after the _stamp timestamp)
 
 
 def test_blocker_ping_no_cc_when_manager_unresolved():

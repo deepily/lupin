@@ -221,9 +221,14 @@ class TestManageNotBuildPokeWording:
         assert "Rick has been advised." in b                 # §3.4 PRESERVE clause
 
     def test_manager_tap_recommends_staff_and_never_absorb( self ):
+        # e8eee4c4 (sibling of d34efe7a): the deadlock/fleet advisory opening clause is
+        # derived from the shared ARBITER_POKE_SENTINEL (b33c8e96 one-source-of-truth),
+        # not a drift-prone literal.
+        from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
         members = [ { "persona": "W1", "stuck": True }, { "persona": "W2", "stuck": False } ]
         graph   = { "cycles": [ ] }
         b = self._job()._format_manager_tap( "M1", members, graph, free_n=2 )
+        assert b.startswith( ARBITER_POKE_SENTINEL )             # F1 one-source-of-truth pin
         assert "spawn/assign" in b
         assert "NEVER absorb the work yourself" in b
         assert "reap+replace a dark worker" in b

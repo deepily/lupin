@@ -2101,7 +2101,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
             manager = None
         if not manager or manager == blocker:
             return None, None
-        cc = ( f"Heartbeat arbiter (cc): {blocker} is blocking worker {blocked_worker}. "
+        # e8eee4c4 (family-close): derive the "Heartbeat arbiter (" prefix from the shared
+        # ARBITER_POKE_SENTINEL (b33c8e96 one-source-of-truth) so every arbiter body has a
+        # single source for that opening clause — no drift-prone literal.
+        cc = ( f"{ARBITER_POKE_SENTINEL}cc): {blocker} is blocking worker {blocked_worker}. "
                f"I've nudged {blocker} directly — chase if they stay silent." )
         return manager, cc
 
@@ -2281,8 +2284,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         stuck   = [ ( v.get( "persona" ) or v.get( "session_id" ) ) for v in members if v.get( "stuck" ) ]
         blocked = [ ( v.get( "persona" ) or v.get( "session_id" ) ) for v in members if not v.get( "stuck" ) ]
         k       = len( graph[ "cycles" ] )
+        # ff91cff4 F1 nit (sibling of d34efe7a): derive the "Heartbeat arbiter (" prefix
+        # from the shared ARBITER_POKE_SENTINEL (b33c8e96 one-source-of-truth) so every
+        # arbiter body has a single source for that opening clause — no drift-prone literal.
         lines = [
-            "Heartbeat arbiter (advisory — I observe + recommend; you actuate).",
+            f"{ARBITER_POKE_SENTINEL}advisory — I observe + recommend; you actuate).",
             f"I observe: {len( stuck )} stuck/dead · {len( blocked )} blocked · "
             f"{free_n} free fleet-wide · {k} deadlock cycle(s).",
         ]
@@ -3093,8 +3099,10 @@ class ArbiterConsumerJob( AgenticJobBase ):
         except Exception:
             manager = None
         if manager:
+            # e8eee4c4 (family-close): opening clause derived from ARBITER_POKE_SENTINEL
+            # (b33c8e96 one-source-of-truth) — no drift-prone literal.
             cc_body = self._stamp(                                  # Item B: direct-send site (bypasses _route)
-                f"Heartbeat arbiter (cc): your crew posted a decision-needed — "
+                f"{ARBITER_POKE_SENTINEL}cc): your crew posted a decision-needed — "
                 f"{entry.get( 'body', '' )}. Rick has it; weigh in if it's yours." )
             outreach_id = self._mint_outreach_id()
             self._log_outreach( "decision_cc", "send_to", [ manager ], cc_body,

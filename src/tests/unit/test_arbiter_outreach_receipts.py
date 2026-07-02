@@ -602,6 +602,10 @@ def test_decision_cc_uses_emit_dm_with_ack():
     job._cc_decision_manager( { "sender_session_id": "s1", "body": "pick A or B" } )
     intent = log.of( "arbiter_outreach" )[ 0 ]
     assert intent[ "kind" ] == "decision_cc" and intent[ "outreach_id" ]
+    # e8eee4c4 (family-close): the decision-cc opening clause derives from the shared
+    # ARBITER_POKE_SENTINEL (b33c8e96 one-source-of-truth), not a drift-prone literal.
+    from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import ARBITER_POKE_SENTINEL
+    assert ARBITER_POKE_SENTINEL in gw.sent[ 0 ][ 1 ]   # sentinel-derived clause (after the _stamp timestamp)
     assert gw.sent[ 0 ][ 2 ][ "expects_ack" ] is True
     assert len( job._awaiting_ack ) == 1
 
