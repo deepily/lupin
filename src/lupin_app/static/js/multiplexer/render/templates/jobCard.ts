@@ -1,8 +1,10 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // Multiplexer Phase 6a — job card template (`.job-card`).
 //
-// Per Q-C: legacy class names verbatim; status-{todo|running|done|dead} variants;
-// disabled `.job-delete-button` per Q-A6 (handler lands in 6b — see C-6 tooltip).
+// Per Q-C: legacy class names verbatim; status-{todo|running|done|dead} variants.
+// W1 (Jobs/04): the `.job-delete-button` ships ENABLED (the Q-A6 inert markers —
+// aria-disabled/tabindex/"Delete coming in Phase 6b" — are gone); JobsPaneRenderer's
+// delegated click handler owns the optimistic-delete flow + bucket-aware routing.
 //
 // Per Pass 2 F23: `data-id-hash` is on `.job-card` ONLY (NEVER on the delete
 // button). The renderer's click delegation early-returns when the click target
@@ -27,6 +29,10 @@ import type { Job, JobStatus } from "../../shared/types";
 
 interface RenderOptions {
   appTimezone?: string;
+  // W5 — when true (dead bucket + history terminal cards), render the retry ↻
+  // affordance. The JobsPaneRenderer's delegated `.job-retry-button` handler owns
+  // the confirm + POST. Absent/false on live todo/running/done cards.
+  retryable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,13 +238,13 @@ const STATUS_ICONS: Record<JobStatus, string> = {
  *   - Outer element carries `data-id-hash="${job.id_hash}"` (F12)
  *   - Outer element class includes `.status-${job.status}`
  *   - `data-job-type="${job.job_type}"` is set as auxiliary metadata (NOT a key)
- *   - The disabled `.job-delete-button` carries `aria-disabled="true"`,
- *     `tabindex="-1"`, and `title="Delete coming in Phase 6b"` (Q-A6 + C-6)
+ *   - The `.job-delete-button` ships ENABLED (W1): `type="button"`, `title="Delete"`,
+ *     NO `aria-disabled` / `tabindex="-1"` / Phase-6b placeholder title
  *   - `.job-card-details` ships `.collapsed` initially; `<pre.job-meta-json>`
  *     is empty + `hidden` until first expand
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-export function renderJobCard(job: Job, _opts: RenderOptions = {}): HTMLElement {
+export function renderJobCard(job: Job, opts: RenderOptions = {}): HTMLElement {
   const root = document.createElement("div");
   root.className = `job-card status-${job.status}`;
   root.setAttribute("data-id-hash",  job.id_hash);
@@ -255,13 +261,28 @@ export function renderJobCard(job: Job, _opts: RenderOptions = {}): HTMLElement 
       <span class="job-type">${job.job_type}</span>
       <span class="job-id-short">${idShort}</span>
       <span class="job-timing">${timingText}</span>
-      <button class="job-delete-button" aria-disabled="true" tabindex="-1" title="Delete coming in Phase 6b">×</button>
+      <button type="button" class="job-delete-button" title="Delete">×</button>
     </div>
     <div class="job-card-details collapsed">
       <pre class="job-meta-json" hidden></pre>
     </div>
   ` as DocumentFragment;
   root.appendChild(inner);
+
+  // W5 — retry ↻ on terminal cards (dead + history). Built via DOM (OUTSIDE the
+  // c8-ignored html`` template) so the retryable branch is counted + tested.
+  // Inserted before the delete button in the header.
+  if (opts.retryable) {
+    const retryBtn = document.createElement("button");
+    retryBtn.type        = "button";
+    retryBtn.className    = "job-retry-button";
+    retryBtn.title        = "Retry";
+    retryBtn.textContent  = "↻";
+    retryBtn.setAttribute("aria-label", "Retry this job");
+    const cardHeader = root.querySelector(".job-card-header") as HTMLElement;
+    const deleteBtn  = cardHeader.querySelector(".job-delete-button");
+    cardHeader.insertBefore(retryBtn, deleteBtn);
+  }
 
   return root;
 }

@@ -76,6 +76,25 @@ export interface JobHistoryApiClient {
   get<T>(path: string): Promise<T>;
 }
 
+// W3 — parametrized history hydration (time-window select + load-more).
+// `hydrateHistory(api)` with no opts stays backward-compatible: the mount call
+// in JobsPaneRenderer is unchanged and gets the legacy 30-day virgin window.
+export interface HydrateHistoryOptions {
+  // Time window in days. KEY ABSENT → legacy 30-day default (DEFAULT_HISTORY_
+  // WINDOW_DAYS). KEY PRESENT but `undefined` → all-time (the `days` query param
+  // is omitted). A number → that rolling window. On a load-more (append) the
+  // window is the ALREADY-SELECTED one (this.historyDays), NOT re-read from opts.
+  days?   : number;
+  // Page size. Default 20 (legacy / W4 load-more parity — NOT the old 100).
+  limit?  : number;
+  // Pagination offset for a REPLACE fetch (default 0). Ignored on append —
+  // append fetches at the tracked cursor (this.historyOffset).
+  offset? : number;
+  // false (default) = REPLACE the window (clear history bucket + refetch, used
+  // for initial mount / window-change / retry). true = APPEND (load-more).
+  append? : boolean;
+}
+
 interface JobHistoryResponse {
   jobs : ReadonlyArray<Record<string, unknown>>;
   total       ?: number;
@@ -84,6 +103,11 @@ interface JobHistoryResponse {
   offset      ?: number;
 }
 
+// W3 — legacy virgin defaults (plan 04 §W3: "default 30 per legacy"; limit 20
+// for load-more parity, replacing the old hardcoded limit=100 single fetch).
+const DEFAULT_HISTORY_WINDOW_DAYS = 30;
+const DEFAULT_HISTORY_PAGE_LIMIT  = 20;
+
 // ---------------------------------------------------------------------------
 // Public interface (per design § JobStore)
 // ---------------------------------------------------------------------------
@@ -91,8 +115,36 @@ interface JobHistoryResponse {
 export interface JobStore {
   bucket(name: JobBucket): ReadonlyArray<Job>;
   getById(idHash: string): Job | undefined;
-  hydrateHistory(api: JobHistoryApiClient): Promise<void>;
+  /**
+   * W3: parametrized + re-runnable. `opts.append=false` (default) REPLACES the
+   * history window (clears the bucket + refetches); `append=true` loads the next
+   * page. Backward-compatible: `hydrateHistory(api)` with no opts fetches the
+   * legacy 30-day window (first page). See HydrateHistoryOptions.
+   */
+  hydrateHistory(api: JobHistoryApiClient, opts?: HydrateHistoryOptions): Promise<void>;
   isHistoryHydrated(): boolean;
+  /** W3: server cursor — rows fetched for the current window (Load-More gate LHS). */
+  historyLoadedCount(): number;
+  /** W3: server-reported total for the current window (Load-More gate RHS). */
+  historyTotalCount(): number;
+  /**
+   * W3/W2: the current history window in days (`undefined` = all-time). Read by
+   * the renderer for the W2 history delete-all `days` query param (and, once it
+   * lands, the W3 time-window `<select>`'s current value).
+   */
+  historyWindowDays(): number | undefined;
+  /**
+   * W2: bulk-clear a bucket in place. Removes every job in `name` (and its
+   * `indexById` entries) and emits `store_jobs_changed{changeKind:"removed",
+   * bucket:name}`. This is the post-2xx local clear for delete-all on the
+   * WS-fed LIVE buckets (todo/running/done/dead), which have no GET-refetch
+   * endpoint — clearing AFTER the 2xx is authoritative, not optimistic. History
+   * delete-all does NOT use this (it refetches via `hydrateHistory` so the
+   * server stays the source of truth + the pagination cursors reset). Emits
+   * unconditionally so the caller can rely on a re-render even for an already-
+   * empty bucket.
+   */
+  clearBucket(name: JobBucket): void;
   /**
    * Phase 6b: remove a job from its current bucket and emit
    * `store_jobs_changed{changeKind:"removed"}`. Returns a closure
@@ -133,6 +185,15 @@ class JobStoreImpl implements JobStore {
 
   private historyHydrated = false;
 
+  // W3 — history pagination + window state. `historyOffset` is the server cursor
+  // (raw rows fetched so far, NOT the deduped bucket length), so the next append
+  // fetches at the correct offset. `historyTotal` is the server's window total
+  // (Load-More gate). `historyDays` is the current window (undefined = all-time),
+  // read back on append so load-more stays in the same window.
+  private historyOffset = 0;
+  private historyTotal  = 0;
+  private historyDays: number | undefined = DEFAULT_HISTORY_WINDOW_DAYS;
+
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(opts: JobStoreOptions) {
@@ -152,23 +213,55 @@ class JobStoreImpl implements JobStore {
     return this.buckets[bucketName].find(j => j.id_hash === idHash);
   }
 
-  async hydrateHistory(api: JobHistoryApiClient): Promise<void> {
-    if (this.historyHydrated) return;
+  async hydrateHistory(api: JobHistoryApiClient, opts: HydrateHistoryOptions = {}): Promise<void> {
+    // W3 — re-runnable: the old `if (this.historyHydrated) return;` once-guard is
+    // GONE. A REPLACE (append=false) must refetch on every window-change / retry.
+    const append = opts.append ?? false;
+    const limit  = opts.limit ?? DEFAULT_HISTORY_PAGE_LIMIT;
+
+    // Window + offset resolution differs between REPLACE and APPEND:
+    //   - REPLACE: window comes from opts (key absent → 30-day legacy default;
+    //     key present but undefined → all-time / omit the `days` param); offset
+    //     from opts (default 0).
+    //   - APPEND (load-more): window is the ALREADY-SELECTED one (historyDays)
+    //     so paging stays in the same window; offset is the tracked cursor.
+    let days: number | undefined;
+    let offset: number;
+    if (append) {
+      days   = this.historyDays;
+      offset = this.historyOffset;
+    } else {
+      days   = "days" in opts ? opts.days : DEFAULT_HISTORY_WINDOW_DAYS;
+      offset = opts.offset ?? 0;
+    }
+
+    // REPLACE clears the history bucket (+ its index entries) BEFORE the fetch:
+    // the server is authoritative for the window; in-session removals within the
+    // window come back from the server (they were persisted on removal).
+    if (!append) {
+      for (const j of this.buckets.history) this.indexById.delete(j.id_hash);
+      this.buckets.history.length = 0;
+    }
 
     // /api/job-history is mounted under the queues router, which uses the `/api`
     // prefix (queues.py) — matches the legacy client (notifications.js). It is NOT
     // `/api/queue/...`: that prefix is reserved for per-queue item ops, e.g.
-    // /api/queue/{queueName}/{jobId}. The endpoint accepts limit 1-100.
-    // Phase 4 scope: fetch the first page. Phase 5+ renderer can request more
-    // via paged calls.
-    const resp = await api.get<JobHistoryResponse>("/api/job-history?limit=100");
+    // /api/queue/{queueName}/{jobId}. Params: days (omit → all-time), limit
+    // (1-100), offset (pagination).
+    const params = new URLSearchParams();
+    if (days !== undefined) params.set("days", String(days));
+    params.set("limit",  String(limit));
+    params.set("offset", String(offset));
+    const resp = await api.get<JobHistoryResponse>(`/api/job-history?${params.toString()}`);
 
-    const inSessionIds = new Set(this.buckets.history.map(j => j.id_hash));
+    // Keyed-merge dedup: skip any id already tracked in ANY bucket (replace has
+    // just cleared history, so this only skips a still-live done/dead job — never
+    // overwrites its indexById mapping; append skips already-loaded history rows).
     for (const raw of resp.jobs) {
       const job = this.normalizeRaw(raw);
       /* c8 ignore next */ // defensive: server response is normally well-formed; null only on malformed rows missing id or unmappable status — server-contract enforced upstream.
       if (!job) continue;
-      if (inSessionIds.has(job.id_hash)) continue;
+      if (this.indexById.has(job.id_hash)) continue;
       // Hydrated jobs land in the history bucket directly; their UI status
       // is whatever maps from their persisted server state (must be done/dead
       // since they're terminal).
@@ -176,6 +269,12 @@ class JobStoreImpl implements JobStore {
       this.indexById.set(job.id_hash, "history");
     }
 
+    // Advance the server cursor by the RAW page size (not the deduped count) so
+    // the next append offset mirrors the server's row position. Total falls back
+    // to the cursor when the server omits it (keeps the Load-More gate closed).
+    this.historyOffset   = offset + resp.jobs.length;
+    this.historyTotal    = resp.total ?? this.historyOffset;
+    this.historyDays     = days;
     this.historyHydrated = true;
     this.bus.emit<StoreJobsChangedPayload>({
       type    : "store_jobs_changed",
@@ -187,6 +286,25 @@ class JobStoreImpl implements JobStore {
 
   isHistoryHydrated(): boolean {
     return this.historyHydrated;
+  }
+
+  historyLoadedCount(): number {
+    return this.historyOffset;
+  }
+
+  historyTotalCount(): number {
+    return this.historyTotal;
+  }
+
+  historyWindowDays(): number | undefined {
+    return this.historyDays;
+  }
+
+  clearBucket(name: JobBucket): void {
+    const list = this.buckets[name];
+    for (const j of list) this.indexById.delete(j.id_hash);
+    list.length = 0;
+    this.emit({ changeKind: "removed", bucket: name });
   }
 
   delete(idHash: string): { restoreState: () => void } {

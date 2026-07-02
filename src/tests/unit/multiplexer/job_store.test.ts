@@ -248,7 +248,9 @@ test("hydrateHistory dedups against in-session history entries", async () => {
   assert.equal(store.bucket("history").length, 2, "should NOT double-count h1");
 });
 
-test("hydrateHistory is idempotent — second call is a no-op", async () => {
+// W3 — the old once-guard is GONE: a REPLACE (append=false) must refetch on
+// every call so window-change + retry actually re-hit the server.
+test("hydrateHistory REPLACE refetches on every call (no once-guard) — W3", async () => {
   const { store, events } = setup();
   let callCount = 0;
   const api: JobHistoryApiClient = {
@@ -259,16 +261,19 @@ test("hydrateHistory is idempotent — second call is a no-op", async () => {
   };
   await store.hydrateHistory(api);
   await store.hydrateHistory(api);
-  assert.equal(callCount, 1, "API called only once");
+  assert.equal(callCount, 2, "REPLACE refetches every call");
   const hydrated = events.filter(e => e.payload.changeKind === "hydrated");
-  assert.equal(hydrated.length, 1, "hydrated event emitted only once");
+  assert.equal(hydrated.length, 2, "each REPLACE emits a hydrated event");
+  // isHistoryHydrated stays a "≥1 hydrate completed" latch.
+  assert.equal(store.isHistoryHydrated(), true);
 });
 
-test("hydrateHistory calls the canonical /api/job-history?limit=100 endpoint (NOT /api/queue/...)", async () => {
+test("hydrateHistory default (no opts) calls /api/job-history?days=30&limit=20&offset=0 (NOT /api/queue/...) — W3", async () => {
   // Regression guard for the migration 404 bug: the queues router mounts
   // job-history under the `/api` prefix (matches the legacy client). A call to
   // `/api/queue/job-history` 404s and is silently swallowed by the renderer's
   // .catch(), so nothing else here would surface a wrong URL. Assert it explicitly.
+  // W3: the virgin default is the 30-day window, page size 20 (NOT the old 100).
   const { store } = setup();
   const calledPaths: string[] = [];
   const api: JobHistoryApiClient = {
@@ -278,8 +283,138 @@ test("hydrateHistory calls the canonical /api/job-history?limit=100 endpoint (NO
     },
   };
   await store.hydrateHistory(api);
-  assert.deepEqual(calledPaths, ["/api/job-history?limit=100"]);
+  assert.deepEqual(calledPaths, ["/api/job-history?days=30&limit=20&offset=0"]);
   assert.ok(!calledPaths[0].startsWith("/api/queue/"), "must NOT use the /api/queue/ per-item prefix");
+});
+
+// ===========================================================================
+// W3 — parametrized hydrateHistory: window / pagination / load-more
+// ===========================================================================
+
+test("hydrateHistory with explicit days builds days={N}&limit=20&offset=0 — W3", async () => {
+  const { store } = setup();
+  const calledPaths: string[] = [];
+  const api: JobHistoryApiClient = {
+    get: async (path: string) => { calledPaths.push(path); return { jobs: [] }; },
+  };
+  await store.hydrateHistory(api, { days: 7 });
+  assert.deepEqual(calledPaths, ["/api/job-history?days=7&limit=20&offset=0"]);
+});
+
+test("hydrateHistory with days present-but-undefined ('all') OMITS the days param — W3", async () => {
+  const { store } = setup();
+  const calledPaths: string[] = [];
+  const api: JobHistoryApiClient = {
+    get: async (path: string) => { calledPaths.push(path); return { jobs: [] }; },
+  };
+  // The renderer maps the "all" select option to days:undefined (key present).
+  await store.hydrateHistory(api, { days: undefined });
+  assert.deepEqual(calledPaths, ["/api/job-history?limit=20&offset=0"]);
+});
+
+test("hydrateHistory honors custom limit + offset on a REPLACE — W3", async () => {
+  const { store } = setup();
+  const calledPaths: string[] = [];
+  const api: JobHistoryApiClient = {
+    get: async (path: string) => { calledPaths.push(path); return { jobs: [], total: 0 }; },
+  };
+  await store.hydrateHistory(api, { days: 14, limit: 5, offset: 10 });
+  assert.deepEqual(calledPaths, ["/api/job-history?days=14&limit=5&offset=10"]);
+});
+
+test("hydrateHistory tracks historyLoadedCount + historyTotalCount from the response — W3", async () => {
+  const { store } = setup();
+  const api: JobHistoryApiClient = {
+    get: async () => ({
+      jobs: [
+        { id_hash: "p1", status: "completed", created_at: "2026-05-01T10:00:00Z" },
+        { id_hash: "p2", status: "failed",    created_at: "2026-05-02T10:00:00Z" },
+      ],
+      total: 5,
+    }),
+  };
+  await store.hydrateHistory(api, { days: 30, limit: 2 });
+  assert.equal(store.historyLoadedCount(), 2, "cursor = offset(0) + fetched(2)");
+  assert.equal(store.historyTotalCount(), 5, "total from server");
+  assert.equal(store.bucket("history").length, 2);
+});
+
+test("hydrateHistory total falls back to the cursor when the server omits total — W3", async () => {
+  const { store } = setup();
+  const api: JobHistoryApiClient = {
+    get: async () => ({ jobs: [ { id_hash: "z1", status: "completed", created_at: "2026-05-01T10:00:00Z" } ] }),
+  };
+  await store.hydrateHistory(api);
+  assert.equal(store.historyLoadedCount(), 1);
+  assert.equal(store.historyTotalCount(), 1, "no server total → gate stays closed (loaded === total)");
+});
+
+test("hydrateHistory APPEND (load-more) fetches at the tracked cursor + same window, dedups + appends — W3", async () => {
+  const { store } = setup();
+  const calledPaths: string[] = [];
+  const pages: Record<number, ReadonlyArray<Record<string, unknown>>> = {
+    0: [ { id_hash: "a1", status: "completed", created_at: "2026-05-01T10:00:00Z" },
+         { id_hash: "a2", status: "failed",    created_at: "2026-05-02T10:00:00Z" } ],
+    2: [ // page 2 re-includes a2 (overlap) + a new a3 — a2 must NOT double-count
+         { id_hash: "a2", status: "failed",    created_at: "2026-05-02T10:00:00Z" },
+         { id_hash: "a3", status: "completed", created_at: "2026-05-03T10:00:00Z" } ],
+  };
+  const api: JobHistoryApiClient = {
+    get: async (path: string) => {
+      calledPaths.push(path);
+      const offset = Number(new URL(path, "http://x").searchParams.get("offset"));
+      return { jobs: pages[offset] ?? [], total: 3 };
+    },
+  };
+  // Initial REPLACE with a specific window.
+  await store.hydrateHistory(api, { days: 7, limit: 2 });
+  assert.equal(store.historyLoadedCount(), 2);
+  // Load-more: append the next page at the cursor, staying in the days=7 window.
+  await store.hydrateHistory(api, { append: true, limit: 2 });
+  assert.deepEqual(calledPaths, [
+    "/api/job-history?days=7&limit=2&offset=0",
+    "/api/job-history?days=7&limit=2&offset=2",   // same window, cursor offset
+  ]);
+  // a2 deduped; a3 appended → 3 unique rows.
+  assert.deepEqual(store.bucket("history").map(j => j.id_hash), ["a1", "a2", "a3"]);
+  // Cursor advances by the RAW page size (2), not the deduped count (1).
+  assert.equal(store.historyLoadedCount(), 4);
+  assert.equal(store.historyTotalCount(), 3);
+});
+
+test("hydrateHistory REPLACE clears the prior window before refetching — W3", async () => {
+  const { store } = setup();
+  const responses: ReadonlyArray<Record<string, unknown>>[] = [
+    [ { id_hash: "old1", status: "completed", created_at: "2026-04-01T10:00:00Z" },
+      { id_hash: "old2", status: "failed",    created_at: "2026-04-02T10:00:00Z" } ],
+    [ { id_hash: "new1", status: "completed", created_at: "2026-05-01T10:00:00Z" } ],
+  ];
+  let call = 0;
+  const api: JobHistoryApiClient = {
+    get: async () => ({ jobs: responses[call++]!, total: responses[call - 1]!.length }),
+  };
+  await store.hydrateHistory(api, { days: 30 });
+  assert.deepEqual(store.bucket("history").map(j => j.id_hash), ["old1", "old2"]);
+  // Window-change REPLACE: old rows cleared (+ index entries), new window populated.
+  await store.hydrateHistory(api, { days: 1 });
+  assert.deepEqual(store.bucket("history").map(j => j.id_hash), ["new1"]);
+  assert.equal(store.getById("old1"), undefined, "cleared rows leave indexById too");
+  assert.equal(store.historyLoadedCount(), 1);
+});
+
+test("hydrateHistory REPLACE does NOT overwrite a still-live done job's bucket mapping — W3", async () => {
+  const { bus, store } = setup();
+  // A done job is live in the done bucket (not yet removed to history).
+  emitTransition(bus, { job_id: "live1", to_state: "completed" });
+  assert.equal(store.getById("live1")?.status, "done");
+  // Server history returns the SAME id — dedup by indexById.has() must skip it
+  // so its done-bucket mapping is preserved (never clobbered to "history").
+  const api: JobHistoryApiClient = {
+    get: async () => ({ jobs: [ { id_hash: "live1", status: "completed", created_at: "2026-05-01T10:00:00Z" } ], total: 1 }),
+  };
+  await store.hydrateHistory(api);
+  assert.equal(store.bucket("history").length, 0, "live done job not duplicated into history");
+  assert.equal(store.getById("live1")?.status, "done");
 });
 
 // ===========================================================================
@@ -306,4 +441,53 @@ test("transition without to_state or job_id is silently dropped", () => {
   bus.emit({ type: "job_state_transition", payload: { job_id: "j1" }, source: "test", ts: 0 });
   assert.equal(store.bucket("todo").length, 0);
   assert.equal(events.length, before);
+});
+
+// ===========================================================================
+// W2 — clearBucket (bulk delete-all local clear) + historyWindowDays getter
+// ===========================================================================
+
+test("clearBucket: empties the bucket + clears indexById + emits removed{bucket}; other buckets untouched", () => {
+  const { bus, store, events } = setup();
+  emitTransition(bus, { job_id: "a", to_state: "running" });
+  emitTransition(bus, { job_id: "b", to_state: "running" });
+  emitTransition(bus, { job_id: "c", to_state: "pending" });   // todo — must survive
+  assert.equal(store.bucket("running").length, 2);
+
+  events.length = 0;
+  store.clearBucket("running");
+
+  assert.equal(store.bucket("running").length, 0, "running bucket emptied");
+  assert.equal(store.getById("a"), undefined, "indexById entry a cleared");
+  assert.equal(store.getById("b"), undefined, "indexById entry b cleared");
+  assert.equal(store.bucket("todo").length, 1, "unrelated bucket untouched");
+  assert.equal(events.length, 1, "exactly one change event");
+  assert.equal(events[0]!.payload.changeKind, "removed");
+  assert.equal(events[0]!.payload.bucket, "running");
+});
+
+test("clearBucket: on an already-empty bucket still emits removed{bucket} (unconditional re-render contract)", () => {
+  const { store, events } = setup();
+  events.length = 0;
+  store.clearBucket("dead");
+  assert.equal(store.bucket("dead").length, 0);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.payload.changeKind, "removed");
+  assert.equal(events[0]!.payload.bucket, "dead");
+});
+
+test("historyWindowDays: defaults to 30 (legacy virgin window) before any hydrate", () => {
+  const { store } = setup();
+  assert.equal(store.historyWindowDays(), 30);
+});
+
+test("historyWindowDays: reflects a custom hydrated window; undefined after an all-time hydrate", async () => {
+  const { store } = setup();
+  const api: JobHistoryApiClient = {
+    get: async <T>(): Promise<T> => ({ jobs: [], total: 0 } as unknown as T),
+  };
+  await store.hydrateHistory(api, { days: 7, append: false });
+  assert.equal(store.historyWindowDays(), 7);
+  await store.hydrateHistory(api, { days: undefined, append: false });   // all-time → omit days
+  assert.equal(store.historyWindowDays(), undefined);
 });
