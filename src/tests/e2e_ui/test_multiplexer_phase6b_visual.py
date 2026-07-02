@@ -138,7 +138,7 @@ _STABILIZE_COUNTDOWN_JS = """
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6b_action_required_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_height_tolerant, logged_in_page,
 ):
     """
     Capture the Phase 6b action-required-section in its rendered baseline state.
@@ -151,7 +151,8 @@ def test_multiplexer_phase6b_action_required_visual(
     Requires:
         - Server running on `:8000` with Testing config
         - `logged_in_page` fixture (authenticated session)
-        - `assert_snapshot` fixture (pytest-playwright-visual-snapshot)
+        - `assert_snapshot_height_tolerant` fixture (bug 660d02b4 — ≤1px
+          height-tolerant; forgives the benign --update-vs-compare row-height flap)
         - `--update-snapshots` flag on first run to establish the baseline
 
     Ensures:
@@ -185,8 +186,13 @@ def test_multiplexer_phase6b_action_required_visual(
     # Brief settle window for layout repaint after stabilization.
     time.sleep( 0.2 )
 
+    # Height-tolerant compare (bug 660d02b4): forgives a benign ≤1px sub-pixel
+    # row-height rounding flap between --update-snapshots and a plain COMPARE,
+    # while staying strict on width + overlapping pixels. (A larger genuine
+    # height change — e.g. the 0a/0c section-header +57px — still fails until the
+    # baseline is legitimately re-captured.)
     section = page.locator( '#action-required-section' )
-    assert_snapshot( section, name="multiplexer_phase6b_action_required.png" )
+    assert_snapshot_height_tolerant( section, name="multiplexer_phase6b_action_required.png" )
 
     print( "✓ multiplexer_phase6b_action_required: visual snapshot compared" )
 
@@ -196,7 +202,7 @@ def test_multiplexer_phase6b_action_required_visual(
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6b_tts_chrome_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_height_tolerant, logged_in_page,
 ):
     """
     Capture the Phase 6b TTS chrome in its idle baseline state.
@@ -241,7 +247,10 @@ def test_multiplexer_phase6b_tts_chrome_visual(
     # Brief settle window for any post-mount layout repaint.
     time.sleep( 0.2 )
 
+    # Height-tolerant compare (bug 660d02b4): forgives the benign ≤1px sub-pixel
+    # row-height rounding flap (e.g. 129 vs 130) between --update-snapshots and a
+    # plain COMPARE, while staying strict on width + overlapping pixels.
     pane = page.locator( '#tts-pane' )
-    assert_snapshot( pane, name="multiplexer_phase6b_tts_chrome.png" )
+    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6b_tts_chrome.png" )
 
     print( "✓ multiplexer_phase6b_tts_chrome: visual snapshot compared" )
