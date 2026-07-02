@@ -184,7 +184,16 @@ body[data-layout-mode="horizontal"] .reading-pane-toolbar {
     z-index   : 10;
     margin    : 0;
 }
-body[data-layout-mode="horizontal"] .content-shell.pane-open .container {
+/* Container clears the fixed toolbar row. UN-GATED on .pane-open (Lane 0b,
+   F-Clay-A1): the .reading-pane-toolbar floats fixed in horizontal mode
+   REGARDLESS of pane state (see the un-gated rule above), so the container must
+   clear it whenever horizontal — not only once a pane opens. Byte-faithful to
+   the legacy un-gated rule (notifications.css `body[data-layout-mode="horizontal"]
+   .container { padding-top: 52px }`, :5632). Before this fix the mux gated the
+   padding on .content-shell.pane-open, so pane-closed horizontal left the
+   floating toolbar overlapping the top of the content and produced no visible
+   reflow on toggle — the Lane 0b defect. */
+body[data-layout-mode="horizontal"] .container {
     /* Clear the fixed toolbar row (~40px tall + breathing room). */
     padding-top: 52px;
 }
