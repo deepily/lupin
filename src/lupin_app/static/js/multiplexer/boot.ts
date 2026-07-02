@@ -266,7 +266,6 @@ function bootMultiplexer(): void {
     stores : {
       notifications  : stores.notifications,
       senders        : stores.senders,
-      actionRequired : stores.actionRequired,
       // WP14 (F8) — wire the prediction-vote store so prediction-hint
       // notifications mount interactive thumbs-vote controls in the
       // notification-item render path (createStores already builds the store).

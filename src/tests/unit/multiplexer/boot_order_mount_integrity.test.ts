@@ -25,7 +25,6 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createNotificationsListRenderer } from "../../../lupin_app/static/js/multiplexer/render/NotificationsListRenderer";
 import type { Notification, SenderRecord } from "../../../lupin_app/static/js/multiplexer/shared/types";
-import type { ActionRequiredItem } from "../../../lupin_app/static/js/multiplexer/stores/ActionRequiredStore";
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -39,7 +38,6 @@ function makeEmptyStores() {
   return {
     notifications  : { list: () => [] as Notification[] },
     senders        : { list: () => [] as SenderRecord[] },
-    actionRequired : { list: () => [] as ActionRequiredItem[] },
   };
 }
 

@@ -1,14 +1,13 @@
 /* c8 ignore next */ // tsx phantom-branch artifact on file-header line (TypeScript module-init transpile produces a fake branch on line 1 in c8's source-map view; no actual code on this line — it's a comment).
 // Multiplexer Phase 5 — NotificationsListRenderer.
 //
-// Orchestrates the notifications-list pane:
-//   - Subscribes to store_notifications_changed, store_senders_changed,
-//     store_action_required_changed via EventBus
-//   - Performs hybrid render (Q-B): hydrate=full, add/update/expire=keyed,
-//     tick=text-node only on .action-required-countdown (NO parent-tree
-//     mutation; explicit invariant tested by AC4)
-//   - Routes mounts per D-L: action-required widgets → #action-required-section;
-//     sender cards → #sender-cards-container
+// Orchestrates the notifications-list pane — SENDER CARDS ONLY. The
+// action-required section is owned wholesale by the separate
+// ActionRequiredRenderer (mounted document-level in boot.ts); bug 56e422aa
+// ripped this renderer's vestigial AR rendering post-Lane-0c.
+//   - Subscribes to store_notifications_changed, store_senders_changed via EventBus
+//   - Performs hybrid render (Q-B): hydrate=full, add/update/expire=keyed
+//   - Renders sender cards into #sender-cards-container
 //   - Empty-state per Q-K: <div data-testid="multiplexer-empty-state"> when
 //     notificationStore.list() is empty
 //   - Progress-group lazy-render per Q-G + F14: history materializes on first
@@ -16,7 +15,7 @@
 //     across re-renders so keyedListMerge stable elements get re-marked
 //
 // Per F12: every keyed-merge element carries `data-id-hash`.
-// Per D-I: factory takes `stores: { notifications, senders, actionRequired }`
+// Per D-I: factory takes `stores: { notifications, senders }`
 // (plural keys matching `StoreSet`).
 // Per F13: renderer.mount() must be called BEFORE transports start; mount()
 // reads notificationStore.list() once for the initial paint.
@@ -25,12 +24,9 @@ import type { EventBus } from "../shared/EventBus";
 import type {
   Notification,
   SenderRecord,
-  ActionRequiredItem,
-  LupinEvent,
   SenderSortComparator,
   PredictionVoteDir,
   StoreNotificationsChangedPayload,
-  StoreActionRequiredChangedPayload,
   StorePredictionVoteChangedPayload,
   StoreViewStateChangedPayload,
   AudioPlaybackState,
@@ -38,9 +34,7 @@ import type {
 import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
 import { keyedListMerge } from "./dom";
-import { formatCountdown } from "./time";
 import { renderSenderCard } from "./templates/senderCard";
-import { renderActionRequiredReadOnly, renderActionRequiredEmpty } from "./templates/actionRequiredReadOnly";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 
 interface NotificationStoreLike {
@@ -54,9 +48,6 @@ interface NotificationStoreLike {
 }
 interface SenderStoreLike {
   list(): ReadonlyArray<SenderRecord>;
-}
-interface ActionRequiredStoreLike {
-  list(): ReadonlyArray<ActionRequiredItem>;
 }
 // WP14 (F8) — narrowed PredictionVoteStore surface this renderer consumes
 // (getVote for the highlight, setContext + vote for the cast). The production
@@ -104,7 +95,6 @@ interface ProxyRatifierLike {
 export interface NotificationsListRendererStores {
   notifications  : NotificationStoreLike;
   senders        : SenderStoreLike;
-  actionRequired : ActionRequiredStoreLike;
   // WP14 (F8) — optional. Prediction-hint controls RENDER from pure data
   // (notification.prediction_hint) regardless; this store makes them
   // INTERACTIVE (cast-vote highlight + click → POST + reconcile). Absent (some
@@ -163,7 +153,6 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private readonly historyCache   : Map<string, DocumentFragment> = new Map();
 
   private root                : HTMLElement | null = null;
-  private actionRequiredMount : HTMLElement | null = null;
   private senderCardsMount    : HTMLElement | null = null;
   private clickHandler        : ((e: Event) => void) | null = null;
 
@@ -205,34 +194,19 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       throw new Error("NotificationsListRenderer.mount: already mounted");
     }
     this.root = root;
-    // Mount-point resolution (bug 2826d65c — Lane 0c boot regression fix).
+    // Mount-point resolution — SENDER CARDS ONLY (bug 56e422aa AR-rip). This
+    // renderer owns ONLY #sender-cards-container; #action-required-section is
+    // owned wholesale by the separate ActionRequiredRenderer (mounted
+    // document-level in boot.ts), so this renderer never resolves or touches it.
     //
-    // The former `?? root` fallbacks were the exact silent-defensive-fallback
-    // pattern CLAUDE.md prohibits ("missing should fail at runtime, not silently
-    // fallback"). They masked a real contract break: Lane 0c EXTRACTED
-    // #action-required-section OUT of #notifications-pane (it is now owned by the
-    // separate ActionRequiredRenderer, mounted document-level in boot.ts). So the
-    // pane-scoped `querySelector("#action-required-section")` now MISSES → the old
-    // `?? root` retargeted the AR render path at the WHOLE pane → its
-    // replaceChildren() wiped the sibling #sender-cards-container before boot's
-    // recorder-mount lookup → "#sender-cards-container not found" boot crash.
-    //
-    // Ownership-differentiated resolution:
-    //   - #sender-cards-container is OWNED by this renderer + guaranteed by the
-    //     page contract → resolve strictly; THROW LOUDLY if absent (boot.ts:328
-    //     models this fail-fast).
-    //   - #action-required-section is NO LONGER owned here (fully transferred to
-    //     ActionRequiredRenderer post-0c) → resolve to null when it is not a
-    //     descendant (the production case) with NO root fallback. The AR render
-    //     path becomes an EXPLICIT guarded no-op (a documented design decision,
-    //     not a silent fallback). A follow-up (P3) rips out the vestigial AR
-    //     rendering here entirely.
+    // #sender-cards-container is OWNED here + guaranteed by the page contract →
+    // resolve strictly; THROW LOUDLY if absent (boot.ts:328 models this fail-fast;
+    // the former silent `?? root` fallback wiped this node — the 2826d65c crash).
     const senderCardsEl = root.querySelector("#sender-cards-container") as HTMLElement | null;
     if (senderCardsEl === null) {
       throw new Error("NotificationsListRenderer.mount: required #sender-cards-container not found in root");
     }
-    this.senderCardsMount    = senderCardsEl;
-    this.actionRequiredMount = root.querySelector("#action-required-section") as HTMLElement | null;
+    this.senderCardsMount = senderCardsEl;
 
     this.attachClickDelegation();
     this.subscribe();
@@ -241,7 +215,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // transport activity. If a notification arrives between createStores and
     // mount, it's already in the list (synchronous reducer); the initial
     // paint catches it.
-    this.renderAll();
+    this.renderSenderSection();
   }
 
   unmount(): void {
@@ -253,18 +227,16 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     }
     this.clickHandler = null;
 
-    if (this.actionRequiredMount !== null) this.actionRequiredMount.replaceChildren();
-    if (this.senderCardsMount !== null)    this.senderCardsMount.replaceChildren();
+    if (this.senderCardsMount !== null) this.senderCardsMount.replaceChildren();
 
     this.expandedGroups.clear();
     this.historyCache.clear();
     this.root = null;
-    this.actionRequiredMount = null;
     this.senderCardsMount = null;
   }
 
   forceRenderForTesting(): void {
-    this.renderAll();
+    this.renderSenderSection();
   }
 
   // -------------------------------------------------------------------------
@@ -282,12 +254,6 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       this.bus.on(
         "store_senders_changed",
         () => this.renderSenderSection(),
-      ),
-    );
-    this.unsubscribers.push(
-      this.bus.on<StoreActionRequiredChangedPayload>(
-        "store_action_required_changed",
-        (e) => this.onActionRequiredChange(e),
       ),
     );
     // WP14 (F8) — reconcile prediction-vote highlight to authoritative store
@@ -326,11 +292,6 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // -------------------------------------------------------------------------
   // Render — hybrid (Q-B): hydrate=full, add/update/expire=keyed, tick=text-only
   // -------------------------------------------------------------------------
-
-  private renderAll(): void {
-    this.renderActionRequiredSection();
-    this.renderSenderSection();
-  }
 
   private renderSenderSection(): void {
     /* c8 ignore next */ // defensive: senderCardsMount is set in mount() and only nulled in unmount(); store-event subscriptions are detached in unmount BEFORE this null happens, so this branch is unreachable in normal flow.
@@ -439,63 +400,6 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     }).catch(() => {
       this.renderSenderSection();
     });
-  }
-
-  private renderActionRequiredSection(): void {
-    // NULL in production (bug 2826d65c): post-0c #action-required-section lives
-    // OUTSIDE this renderer's root (#notifications-pane) — it is owned by
-    // ActionRequiredRenderer — so mount() resolves actionRequiredMount to null and
-    // this is an explicit guarded no-op (NOT a wipe of the pane). Covered.
-    if (this.actionRequiredMount === null) return;
-    // Phase 6b ownership flag (per Pass 2 A3 Path A in `09-phase6b-interactive-widgets-design.md`):
-    // when ActionRequiredRenderer.mount() has fired, this section is owned by Phase 6b
-    // and we must not nuke the interactive widget out from under it. The early-return
-    // here is a no-op for the read-only Phase 5 path; the interactive renderer drives
-    // its own DOM updates via store_action_required_changed subscriptions.
-    if (this.actionRequiredMount.dataset.phase6bOwner === "true") return;
-    const items = this.stores.actionRequired.list();
-    // L2 (mux MVP-finish): Phase-5 read-only owner-branch for the empty state.
-    // When Phase-6b is NOT mounted and the section is empty, paint the shared
-    // `✓ No pending actions` panel via the same helper Phase-6b uses (anti-drift).
-    if (items.length === 0) {
-      this.actionRequiredMount.replaceChildren(renderActionRequiredEmpty());
-      return;
-    }
-    keyedListMerge({
-      parent  : this.actionRequiredMount,
-      entries : items.map(item => ({ idHash: item.id_hash, item })),
-      create  : (e) => renderActionRequiredReadOnly(e.item, this.computeCountdownMs(e.item)),
-      // Re-create-and-replace on match; tick-only updates take a different path
-      // (`onActionRequiredChange` below) that does NOT call this method.
-      update  : (existing, e) => {
-        const fresh = renderActionRequiredReadOnly(e.item, this.computeCountdownMs(e.item));
-        existing.replaceWith(fresh);
-      },
-    });
-  }
-
-  private onActionRequiredChange(e: LupinEvent<StoreActionRequiredChangedPayload>): void {
-    const payload = e.payload;
-    if (payload.changeKind === "tick") {
-      // Per Q-B: tick MUST NOT touch parent DOM. Only mutate the countdown
-      // text node inline. AC4 verifies via `data-test-canary` sentinel.
-      // NULL in production (bug 2826d65c): AR section is not owned here post-0c;
-      // a tick with a null AR mount is a safe no-op. Covered.
-      if (this.actionRequiredMount === null) return;
-      const widget = this.actionRequiredMount.querySelector(`[data-id-hash="${cssEscape(payload.id_hash)}"]`) as HTMLElement | null;
-      /* c8 ignore next */ // defensive: widget null only if AR item never rendered (id_hash not in arList); reducer guarantees consistency.
-      if (widget === null) return;
-      const countdown = widget.querySelector(".action-required-countdown") as HTMLElement | null;
-      /* c8 ignore next */ // defensive: countdown null only if widget template missing the .action-required-countdown element; template invariant guarantees it.
-      if (countdown === null) return;
-      const ms = payload.countdownMs ?? 0;
-      countdown.textContent = `⏱ ${formatCountdown(ms)}`;
-      return;
-    }
-    // Any other changeKind ("added" | "responded" | "expired" | "cancelled" |
-    // "offline-frozen" | "offline-resumed") triggers a full re-render of the
-    // section. The keyedListMerge preserves DOM identity for unchanged items.
-    this.renderActionRequiredSection();
   }
 
   // -------------------------------------------------------------------------
@@ -809,14 +713,6 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
-
-  private computeCountdownMs(item: ActionRequiredItem): number {
-    // The store emits already-corrected countdownMs on tick; for the initial
-    // render (before the first tick), derive from expires_at + browser clock.
-    // Per D-H this is OK at render-time (initial paint) but the formatter
-    // itself stays pure.
-    return Math.max(0, item.expires_at - Date.now());
-  }
 
   private stubSender(senderId: string, notifs: ReadonlyArray<Notification>): SenderRecord {
     // Synthesize a SenderRecord when SenderStore doesn't have one yet

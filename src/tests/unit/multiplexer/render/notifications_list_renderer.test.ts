@@ -18,7 +18,6 @@ import {
 import type {
   Notification,
   SenderRecord,
-  ActionRequiredItem,
   PredictionVoteDir,
 } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 import type { PredictionVoteContext } from "../../../../lupin_app/static/js/multiplexer/stores/PredictionVoteStore";
@@ -46,28 +45,28 @@ interface TestSetup {
   bus       : ReturnType<typeof createEventBusForTesting>;
   notifList : Notification[];
   senderList: SenderRecord[];
-  arList    : ActionRequiredItem[];
   renderer  : NotificationsListRenderer;
   root      : HTMLElement;
 }
 
 function setupRenderer(): TestSetup {
   const bus = createEventBusForTesting();
-  const notifList : Notification[]       = [];
-  const senderList: SenderRecord[]       = [];
-  const arList    : ActionRequiredItem[] = [];
+  const notifList : Notification[] = [];
+  const senderList: SenderRecord[] = [];
 
   const renderer = createNotificationsListRenderer({
     eventBus: bus,
     stores  : {
       notifications  : { list: () => notifList },
       senders        : { list: () => senderList },
-      actionRequired : { list: () => arList },
     },
     appTimezone: "UTC",
   });
 
-  // Build the D-L two-child layout the renderer expects.
+  // Production pane shape (post-56e422aa AR-rip): #notifications-pane holds
+  // #sender-cards-container. A stray #action-required-section is included on
+  // purpose to prove this renderer NEVER touches it (it is owned document-level
+  // by the separate ActionRequiredRenderer).
   const root = document.createElement("section");
   root.id = "notifications-pane";
   const arSection = document.createElement("div");
@@ -77,7 +76,7 @@ function setupRenderer(): TestSetup {
   root.appendChild(arSection);
   root.appendChild(sCards);
 
-  return { bus, notifList, senderList, arList, renderer, root };
+  return { bus, notifList, senderList, renderer, root };
 }
 
 function makeNotification(over: Partial<Notification> = {}): Notification {
@@ -98,18 +97,6 @@ function makeSender(over: Partial<SenderRecord> = {}): SenderRecord {
     last_active_ts           : Date.UTC(2026, 4, 5, 14, 7),
     unread_count             : 1,
     conversation_mode_active : false,
-    ...over,
-  };
-}
-
-function makeAR(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
-  return {
-    id_hash       : "ar1",
-    prompt        : "Proceed?",
-    response_type : "yes_no",
-    options       : [],
-    expires_at    : Date.now() + 30_000,
-    state         : "pending",
     ...over,
   };
 }
@@ -252,105 +239,14 @@ test("on store_senders_changed: re-renders sender chrome (e.g. unread count upda
 });
 
 // ===========================================================================
-// 10 : Tick invariant (per F5 + A13 — the core Q-B contract test)
+// AR-rip (bug 56e422aa): this renderer is SENDER-CARDS ONLY. It no longer
+// subscribes to store_action_required_changed, renders action-required widgets,
+// or touches #action-required-section — that section is owned wholesale by the
+// separate ActionRequiredRenderer (document-level). The former AR tests (tick
+// invariant, non-tick re-render, read-only empty panel, Phase-6b ownership guard)
+// are removed with the code; the non-interference guarantee is asserted below by
+// "mount: routes..." + "AR store events are ignored".
 // ===========================================================================
-
-test("tick invariant: 10 ticks at 100ms intervals mutate ONLY .action-required-countdown text — sentinel survives", () => {
-  const { renderer, root, bus, arList } = setupRenderer();
-  const item = makeAR();
-  arList.push(item);
-  renderer.mount(root);
-
-  const widget = root.querySelector(`[data-id-hash="${item.id_hash}"]`) as HTMLElement;
-  assert.notEqual(widget, null);
-
-  // Plant a sentinel attribute on the widget root.
-  const canary = "canary-uuid-v4-" + Math.random().toString(36).slice(2);
-  widget.setAttribute("data-test-canary", canary);
-
-  // Snapshot the parent's outerHTML for non-countdown identity comparison.
-  const initialOuterHtmlSansCountdown = widget.outerHTML.replace(/⏱\s*\d\d:\d\d/g, "⏱ ##:##");
-
-  // Burst 10 tick events — countdownMs decrements from 10000 down to 100.
-  for (let i = 0; i < 10; i++) {
-    bus.emit({
-      type    : "store_action_required_changed",
-      payload : { changeKind: "tick", id_hash: item.id_hash, countdownMs: 10000 - i * 1000 },
-      source  : "test",
-      ts      : i * 100,
-    });
-  }
-
-  // Sentinel attribute survives untouched.
-  assert.equal(widget.getAttribute("data-test-canary"), canary);
-
-  // Outer HTML (modulo countdown) is unchanged.
-  const finalOuterHtmlSansCountdown = widget.outerHTML.replace(/⏱\s*\d\d:\d\d/g, "⏱ ##:##");
-  assert.equal(finalOuterHtmlSansCountdown, initialOuterHtmlSansCountdown);
-
-  // Countdown text reflects the LAST emitted ms (1000ms = "00:01").
-  const cd = widget.querySelector(".action-required-countdown");
-  assert.match(cd!.textContent ?? "", /00:01/);
-
-  renderer.unmount();
-});
-
-// ===========================================================================
-// 11 : Action-required full re-render on non-tick changeKinds
-// ===========================================================================
-
-test("action-required: non-tick changeKind triggers section re-render via keyedListMerge", () => {
-  const { renderer, root, bus, arList } = setupRenderer();
-  arList.push(makeAR());
-  renderer.mount(root);
-  assert.equal(root.querySelectorAll(".action-required-widget").length, 1);
-
-  // Add a second item.
-  arList.push(makeAR({ id_hash: "ar2", prompt: "Second" }));
-  bus.emit({
-    type    : "store_action_required_changed",
-    payload : { changeKind: "added", id_hash: "ar2" },
-    source  : "test",
-    ts      : 0,
-  });
-  assert.equal(root.querySelectorAll(".action-required-widget").length, 2);
-
-  // Cancel the first one.
-  arList.shift();   // remove ar1
-  bus.emit({
-    type    : "store_action_required_changed",
-    payload : { changeKind: "cancelled", id_hash: "ar1" },
-    source  : "test",
-    ts      : 0,
-  });
-  assert.equal(root.querySelectorAll(".action-required-widget").length, 1);
-  assert.equal(root.querySelector('[data-id-hash="ar2"]')!.tagName, "DIV");
-  renderer.unmount();
-});
-
-test("action-required: Phase-5 read-only paints #action-required-empty when the section is empty (L2)", () => {
-  // L2 (mux MVP-finish): the Phase-5 read-only owner-branch. With Phase-6b NOT
-  // mounted (no phase6bOwner flag) and zero items, renderActionRequiredSection
-  // paints the shared `✓ No pending actions` empty-state via renderActionRequiredEmpty.
-  const { renderer, root, bus, arList } = setupRenderer();   // arList empty
-  renderer.mount(root);
-  const empty = root.querySelector("#action-required-empty");
-  assert.notEqual(empty, null, "empty panel painted on the read-only path at count 0");
-  assert.match(empty!.textContent ?? "", /No pending actions/);
-  assert.equal(root.querySelector(".action-required-widget"), null);
-
-  // An item arrives → the empty panel gives way to a widget.
-  arList.push(makeAR());
-  bus.emit({ type: "store_action_required_changed", payload: { changeKind: "added", id_hash: "ar1" }, source: "test", ts: 0 });
-  assert.equal(root.querySelector("#action-required-empty"), null, "empty cleared once a widget paints");
-  assert.equal(root.querySelectorAll(".action-required-widget").length, 1);
-
-  // Last item cancelled → the read-only re-render repaints the empty panel.
-  arList.shift();
-  bus.emit({ type: "store_action_required_changed", payload: { changeKind: "cancelled", id_hash: "ar1" }, source: "test", ts: 0 });
-  assert.notEqual(root.querySelector("#action-required-empty"), null, "empty repainted after last item removed");
-  renderer.unmount();
-});
 
 // ===========================================================================
 // 12-13 : Multi-sender + sender ordering
@@ -511,7 +407,6 @@ test("mount fail-loud: root WITHOUT #sender-cards-container throws (bug 2826d65c
     stores  : {
       notifications  : { list: () => [makeNotification()] },
       senders        : { list: () => [makeSender()] },
-      actionRequired : { list: () => [] as ActionRequiredItem[] },
     },
     appTimezone: "UTC",
   });
@@ -519,19 +414,18 @@ test("mount fail-loud: root WITHOUT #sender-cards-container throws (bug 2826d65c
   assert.throws(() => renderer.mount(root), /#sender-cards-container not found/);
 });
 
-// bug 2826d65c regression guard (unit-level) — the PRODUCTION post-0c shape:
+// bug 56e422aa (AR-rip) regression guard — the PRODUCTION post-0c shape:
 // #notifications-pane holds ONLY #sender-cards-container; #action-required-section
-// is a SEPARATE element owned by ActionRequiredRenderer. mount() must NOT wipe the
-// pane, and the un-owned AR render/tick paths must be safe guarded no-ops.
-test("mount 0c-shape: AR section absent from pane → no wipe of #sender-cards-container; AR render + tick are no-ops (bug 2826d65c)", () => {
+// is a SEPARATE element owned by ActionRequiredRenderer. mount() must NOT throw or
+// wipe the pane when the AR section is absent, and store_action_required_changed
+// events must be IGNORED (this renderer no longer subscribes to them).
+test("mount 0c-shape: AR section absent from pane → no throw, no wipe; AR store events are ignored (bug 56e422aa)", () => {
   const bus = createEventBusForTesting();
-  const arList: ActionRequiredItem[] = [];
   const renderer = createNotificationsListRenderer({
     eventBus: bus,
     stores  : {
       notifications  : { list: () => [makeNotification()] },
       senders        : { list: () => [makeSender()] },
-      actionRequired : { list: () => arList },
     },
     appTimezone: "UTC",
   });
@@ -544,47 +438,23 @@ test("mount 0c-shape: AR section absent from pane → no wipe of #sender-cards-c
 
   renderer.mount(root);   // must NOT throw and must NOT wipe #sender-cards-container
 
-  // THE regression assertion: the container survives mount (renderAll →
-  // renderActionRequiredSection hit the null-AR guard, not a pane replaceChildren).
+  // THE regression assertion: the container survives mount + the sender card
+  // renders into it (mount never resolves or touches the AR section).
   assert.notEqual(root.querySelector("#sender-cards-container"), null,
     "#sender-cards-container must survive mount");
   assert.notEqual(root.querySelector("#sender-cards-container .sender-card"), null,
     "sender card renders into the surviving container");
 
-  // A non-tick AR change re-enters renderActionRequiredSection with a null AR
-  // mount → guarded no-op (no throw, container still intact).
+  // An AR store event is IGNORED post-rip (no subscription) — no throw, no AR
+  // widget painted, container still intact.
   bus.emit({
     type    : "store_action_required_changed",
     payload : { changeKind: "added", id_hash: "ar-x" },
   } as unknown as Parameters<typeof bus.emit>[0]);
-  // A tick AR change hits the tick-branch null-AR guard → no-op.
-  bus.emit({
-    type    : "store_action_required_changed",
-    payload : { changeKind: "tick", id_hash: "ar-x" },
-  } as unknown as Parameters<typeof bus.emit>[0]);
-
+  assert.equal(root.querySelector(".action-required-widget"), null,
+    "no AR widget is painted — the renderer ignores action-required entirely");
   assert.notEqual(root.querySelector("#sender-cards-container"), null,
-    "#sender-cards-container still intact after AR change + tick");
-  renderer.unmount();
-});
-
-test("tick handler: countdownMs undefined in payload falls back to 0", () => {
-  const { renderer, root, arList, bus } = setupRenderer();
-  arList.push(makeAR());
-  renderer.mount(root);
-  // Emit a tick payload with countdownMs intentionally omitted — the renderer
-  // must fall back to 0 (line 252 `payload.countdownMs ?? 0`).
-  bus.emit({
-    type    : "store_action_required_changed",
-    payload : { changeKind: "tick", id_hash: "ar1" },
-  } as unknown as Parameters<typeof bus.emit>[0]);
-  const widget = root.querySelector('[data-id-hash="ar1"]');
-  assert.notEqual(widget, null);
-  const countdown = widget!.querySelector(".action-required-countdown");
-  assert.notEqual(countdown, null);
-  // formatCountdown(0) renders as "0:00" or similar — the assertion is that
-  // SOME text was set (no exception from undefined.toString or similar).
-  assert.ok((countdown!.textContent ?? "").length > 0);
+    "#sender-cards-container still intact after an ignored AR event");
   renderer.unmount();
 });
 
@@ -668,39 +538,27 @@ test("reapplyExpandedGroups: expanded group whose DOM disappeared is silently sk
   renderer.unmount();
 });
 
-test("cssEscape: explicit fallback path when CSS global is fully removed", () => {
-  // Direct exercise of the fallback by clearing globalThis.CSS BEFORE setup
-  // so the captured renderer's first cssEscape call also hits the fallback.
-  // happy-dom may install its own CSS object; we delete the property
-  // entirely (rather than just =undefined) so the optional-chaining hits null.
+test("cssEscape: fallback path used when globalThis.CSS is removed (progress-group re-render)", () => {
+  // Post-AR-rip, cssEscape is exercised via reapplyExpandedGroups, which selects
+  // an expanded group with `[data-progress-group="${cssEscape(groupId)}"]`. With
+  // globalThis.CSS removed (property fully deleted so the optional-chaining hits
+  // null), cssEscape must fall back to its manual backslash-escape for a weird
+  // group id without throwing.
   const desc = Object.getOwnPropertyDescriptor(globalThis, "CSS");
-  // Force the property to undefined via redefinition (covers both writable
-  // and non-writable cases).
   Object.defineProperty(globalThis, "CSS", { value: undefined, configurable: true, writable: true });
   try {
-    const bus = createEventBusForTesting();
-    const arList: ActionRequiredItem[] = [makeAR({ id_hash: "ar:weird/id" })];
-    const renderer = createNotificationsListRenderer({
-      eventBus: bus,
-      stores  : {
-        notifications  : { list: () => [] },
-        senders        : { list: () => [] },
-        actionRequired : { list: () => arList },
-      },
-      appTimezone: "UTC",
-    });
-    const root = document.createElement("section");
-    const arSection = document.createElement("div");
-    arSection.id = "action-required-section";
-    const sCards = document.createElement("div");
-    sCards.id = "sender-cards-container";
-    root.appendChild(arSection);
-    root.appendChild(sCards);
+    const { renderer, root, notifList, senderList } = setupRenderer();
+    const weirdGroup = "pg:weird/id";
+    notifList.push(makeNotification({ id_hash: "head1", progress_group_id: weirdGroup, message: "head" }));
+    notifList.push(makeNotification({ id_hash: "hist1", progress_group_id: weirdGroup, message: "older", ts: Date.UTC(2026, 4, 5, 14, 0) }));
+    senderList.push(makeSender());
     renderer.mount(root);
-    bus.emit({
-      type    : "store_action_required_changed",
-      payload : { changeKind: "tick", id_hash: "ar:weird/id", countdownMs: 1000 },
-    } as unknown as Parameters<typeof bus.emit>[0]);
+    // Expand the group so it enters expandedGroups.
+    const toggle = root.querySelector(".progress-group-toggle") as HTMLElement | null;
+    if (toggle !== null) toggle.dispatchEvent(new Event("click", { bubbles: true }));
+    // Force a re-render → reapplyExpandedGroups runs cssEscape(weirdGroup) via the
+    // manual fallback (no throw = branch covered).
+    assert.doesNotThrow(() => renderer.forceRenderForTesting());
     renderer.unmount();
   } finally {
     if (desc !== undefined) {
@@ -709,93 +567,6 @@ test("cssEscape: explicit fallback path when CSS global is fully removed", () =>
       delete (globalThis as { CSS?: unknown }).CSS;
     }
   }
-});
-
-test("cssEscape fallback works when globalThis.CSS.escape is unavailable", () => {
-  // Save + remove globalThis.CSS to force the fallback path.
-  const originalCSS = (globalThis as { CSS?: unknown }).CSS;
-  (globalThis as { CSS?: unknown }).CSS = undefined;
-  try {
-    const { renderer, root, arList, bus } = setupRenderer();
-    // Use an id_hash with characters that need escaping.
-    arList.push(makeAR({ id_hash: "ar:weird/id" }));
-    renderer.mount(root);
-    bus.emit({
-      type    : "store_action_required_changed",
-      payload : { changeKind: "tick", id_hash: "ar:weird/id", countdownMs: 1000 },
-    } as unknown as Parameters<typeof bus.emit>[0]);
-    // No exception → cssEscape ran without CSS.escape and returned the
-    // backslash-escaped form (line 406 fallback). Verify the widget can be
-    // located via the same selector.
-    const widget = root.querySelector('[data-id-hash="ar:weird/id"]');
-    // Note: querySelector with literal CSS selector may interpret colons/slashes
-    // differently from the renderer's escape; the assertion is that mount + tick
-    // ran without throwing (the renderer's internal querySelector uses cssEscape).
-    assert.ok(widget !== null || widget === null);  // either result is OK as long as no throw
-    renderer.unmount();
-  } finally {
-    (globalThis as { CSS?: unknown }).CSS = originalCSS;
-  }
-});
-
-// ===========================================================================
-// Phase 6b — ownership-flag early-return guard (per Pass 2 A3 Path A)
-// When ActionRequiredRenderer.mount() sets dataset.phase6bOwner="true", this
-// renderer's renderActionRequiredSection() must short-circuit so it does not
-// nuke the interactive widget out from under the Phase 6b owner.
-// ===========================================================================
-
-test("ownership flag set: renderActionRequiredSection() short-circuits — interactive widget DOM survives", () => {
-  const { renderer, root, bus, arList } = setupRenderer();
-  arList.push(makeAR());
-  renderer.mount(root);
-  // Phase 5 read-only widget rendered initially (1 widget).
-  assert.equal(root.querySelectorAll(".action-required-widget").length, 1);
-
-  // Simulate Phase 6b ActionRequiredRenderer mount: claim ownership + replace
-  // the widget DOM with a marker the test will check for.
-  const arSection = root.querySelector("#action-required-section") as HTMLElement;
-  arSection.dataset.phase6bOwner = "true";
-  arSection.innerHTML = '<div class="phase6b-interactive-marker" data-id-hash="ar1">phase6b</div>';
-
-  // A non-tick store change would normally trigger renderActionRequiredSection().
-  // With ownership claimed, the guard early-returns and leaves the marker intact.
-  arList.push(makeAR({ id_hash: "ar2", prompt: "Second" }));
-  bus.emit({
-    type    : "store_action_required_changed",
-    payload : { changeKind: "added", id_hash: "ar2" },
-    source  : "test",
-    ts      : 0,
-  });
-  // Phase 6b marker survives the would-be re-render.
-  assert.equal(arSection.querySelector(".phase6b-interactive-marker") !== null, true,
-    "ownership-flag short-circuit must preserve the Phase 6b widget");
-  // Phase 5 read-only widget did NOT get re-rendered into the section.
-  assert.equal(arSection.querySelector(".action-required-widget"), null,
-    "Phase 5 path must not touch the section while phase6bOwner=true");
-  renderer.unmount();
-});
-
-test("ownership flag absent: renderActionRequiredSection() runs normally (Phase 5 default behavior)", () => {
-  const { renderer, root, bus, arList } = setupRenderer();
-  arList.push(makeAR());
-  renderer.mount(root);
-  const arSection = root.querySelector("#action-required-section") as HTMLElement;
-  // Confirm flag is NOT set by default.
-  assert.equal(arSection.dataset.phase6bOwner, undefined);
-  assert.equal(arSection.querySelectorAll(".action-required-widget").length, 1);
-
-  // Add a second widget — non-tick store change triggers the section re-render.
-  arList.push(makeAR({ id_hash: "ar2", prompt: "Second" }));
-  bus.emit({
-    type    : "store_action_required_changed",
-    payload : { changeKind: "added", id_hash: "ar2" },
-    source  : "test",
-    ts      : 0,
-  });
-  // Both widgets present — the Phase 5 read-only path ran (no early return).
-  assert.equal(arSection.querySelectorAll(".action-required-widget").length, 2);
-  renderer.unmount();
 });
 
 // ===========================================================================
@@ -811,16 +582,14 @@ interface SortTestSetup extends TestSetup {
 
 function setupRendererForSort(comparator?: SenderSortComparator): SortTestSetup {
   const bus = createEventBusForTesting();
-  const notifList : Notification[]       = [];
-  const senderList: SenderRecord[]       = [];
-  const arList    : ActionRequiredItem[] = [];
+  const notifList : Notification[] = [];
+  const senderList: SenderRecord[] = [];
 
   const renderer = createNotificationsListRenderer({
     eventBus: bus,
     stores  : {
       notifications  : { list: () => notifList },
       senders        : { list: () => senderList },
-      actionRequired : { list: () => arList },
     },
     appTimezone          : "UTC",
     senderSortComparator : comparator,
@@ -828,14 +597,11 @@ function setupRendererForSort(comparator?: SenderSortComparator): SortTestSetup 
 
   const root = document.createElement("section");
   root.id = "notifications-pane";
-  const arSection = document.createElement("div");
-  arSection.id = "action-required-section";
   const sCards = document.createElement("div");
   sCards.id = "sender-cards-container";
-  root.appendChild(arSection);
   root.appendChild(sCards);
 
-  return { bus, notifList, senderList, arList, renderer, root, sCardsRoot: sCards };
+  return { bus, notifList, senderList, renderer, root, sCardsRoot: sCards };
 }
 
 function senderIdsInOrder(sCardsRoot: HTMLElement): string[] {
@@ -989,24 +755,21 @@ function setupRendererWithVote(
   bus: ReturnType<typeof createEventBusForTesting>,
   voteStore: FakeVoteStore | undefined,
 ): { notifList: Notification[]; senderList: SenderRecord[]; renderer: NotificationsListRenderer; root: HTMLElement } {
-  const notifList : Notification[]       = [];
-  const senderList: SenderRecord[]       = [];
-  const arList    : ActionRequiredItem[] = [];
+  const notifList : Notification[] = [];
+  const senderList: SenderRecord[] = [];
   const renderer = createNotificationsListRenderer({
     eventBus: bus,
     stores  : {
       notifications  : { list: () => notifList },
       senders        : { list: () => senderList },
-      actionRequired : { list: () => arList },
       predictionVote : voteStore,
     },
     appTimezone: "UTC",
   });
   const root = document.createElement("section");
   root.id = "notifications-pane";
-  const arSection = document.createElement("div"); arSection.id = "action-required-section";
   const sCards    = document.createElement("div"); sCards.id    = "sender-cards-container";
-  root.appendChild(arSection); root.appendChild(sCards);
+  root.appendChild(sCards);
   return { notifList, senderList, renderer, root };
 }
 
@@ -1131,17 +894,13 @@ function setupFilterableRenderer(opts: {
         isFilterActive : () => opts.isFilterActive,
       },
       senders        : { list: () => [] as SenderRecord[] },
-      actionRequired : { list: () => [] as ActionRequiredItem[] },
     },
     appTimezone: "UTC",
   });
   const root = document.createElement("section");
   root.id = "notifications-pane";
-  const arSection = document.createElement("div");
-  arSection.id = "action-required-section";
   const sCards = document.createElement("div");
   sCards.id = "sender-cards-container";
-  root.appendChild(arSection);
   root.appendChild(sCards);
   return { renderer, root, bus };
 }

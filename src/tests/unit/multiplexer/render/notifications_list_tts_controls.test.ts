@@ -106,7 +106,6 @@ function setup(notifs: Notification[], senders: SenderRecord[], o: SetupOpts = {
     stores   : {
       notifications  : { list: () => notifs },
       senders        : { list: () => senders },
-      actionRequired : { list: () => [] },
       ...((o.withAudio ?? true) ? { audio } : {}),
       ...((o.withTts ?? true)   ? { ttsQueue: tts } : {}),
     },
