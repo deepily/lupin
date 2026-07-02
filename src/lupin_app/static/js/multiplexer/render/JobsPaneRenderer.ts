@@ -40,6 +40,11 @@ import type { JobStore, JobHistoryApiClient } from "../stores/JobStore";
 import { ApiError } from "../api/ApiClient";
 import { renderJobBucket } from "./templates/jobBucket";
 import { populateJobMetaIfNeeded } from "./templates/jobCard";
+import {
+  renderSectionHeader,
+  wireSectionCollapse,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -90,6 +95,10 @@ export interface JobsPaneRendererOptions {
 
 const ALL_BUCKETS: ReadonlyArray<JobBucket> = ["todo", "running", "done", "dead", "history"];
 
+// Lane 0a — the section-header count = total across the 4 LIVE buckets (net-new
+// source per F-Clay-A4), history EXCLUDED (it is a scrollback, not a live queue).
+const LIVE_BUCKETS: ReadonlyArray<JobBucket> = ["todo", "running", "done", "dead"];
+
 // Phase 6b — UI status → server queue-name mapping for the DELETE endpoint
 // at `cosa/rest/routers/queues.py:1188`. Note the `running` → `run` collapse:
 // the server queue is named `run` (legacy) but the UI bucket is `running`.
@@ -115,6 +124,9 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   private root           : HTMLElement | null = null;
   private bucketsMount   : HTMLElement | null = null;
   private clickHandler   : ((e: Event) => void) | null = null;
+  // Lane 0a — section-header handle (count chip) + collapse-listener teardown.
+  private header         : SectionHeaderHandle | null = null;
+  private collapseOff    : (() => void) | null = null;
 
   // The visible hydration-failure banner (null when no failure is showing).
   // Tracked so repeated failures replace rather than stack, and so unmount
@@ -157,11 +169,34 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.bucketsMount = bucketsMount;
     this.mounted      = true;
 
-    // Lift the data-phase6-pending sentinel + hidden attribute from #jobs-pane
-    // (the design contract for Phase 6a — `data-phase6-pending` stays on
-    // #tts-pane until 6b lands).
-    root.removeAttribute("hidden");
+    // Lift the data-phase6-pending sentinel from #jobs-pane (Phase 6a design
+    // contract — `data-phase6-pending` stays on #tts-pane until 6b lands).
+    //
+    // Lane 0c (2026-07-02, Rachel 🕊️): the `hidden` attribute is NO LONGER
+    // stripped here. Job Queues is cold-HIDDEN by default (legacy parity, Q3
+    // RULED) via the HTML `hidden` attribute; stripping it on mount would defeat
+    // that default. Visibility is now owned by the section-toolbar (a persisted
+    // user choice overrides the cold `hidden` default — F-Clay-A3), NOT by this
+    // renderer. The renderer still populates the pane's buckets regardless of
+    // whether the section is shown.
     root.removeAttribute("data-phase6-pending");
+
+    // Lane 0a — emit the uniform `.section-header` bar (📝 Jobs) as the FIRST
+    // child of the pane, replacing the inert static `.jobs-pane-header` that
+    // used to live in multiplexer.html (that markup + its unwired "Load history"
+    // button are removed). The count chip = total across the 4 LIVE buckets. The
+    // pre-existing `#jobs-buckets-container` becomes the collapsible body
+    // (`.section-content`), so the shared `[data-collapsed] > .section-content`
+    // rule hides it on collapse.
+    const header = renderSectionHeader({
+      icon   : "📝",
+      title  : "Jobs",
+      testid : "multiplexer-jobs-header",
+    });
+    this.header = header;
+    bucketsMount.classList.add("section-content");
+    root.insertBefore(header.header, bucketsMount);
+    this.collapseOff = wireSectionCollapse(root, header);
 
     this.attachClickDelegation();
     this.subscribe();
@@ -198,6 +233,11 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 
     this.clearHydrationError();
 
+    if (this.collapseOff !== null) {
+      this.collapseOff();
+      this.collapseOff = null;
+    }
+
     if (this.clickHandler !== null && this.root !== null) {
       this.root.removeEventListener("click", this.clickHandler);
     }
@@ -205,6 +245,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 
     if (this.bucketsMount !== null) this.bucketsMount.replaceChildren();
     this.bucketsMount = null;
+    this.header       = null;
     this.root         = null;
     this.mounted      = false;
   }
@@ -325,6 +366,18 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     // Phase 6b — strip Q-A6 inertness markers from every `.job-delete-button`
     // so AC2a/AC2b grep guards return zero hits post-mount (5B-9).
     this.stripInertnessMarkers();
+
+    // Lane 0a — the header count reflects the total across the 4 live buckets.
+    this.updateCount();
+  }
+
+  // Lane 0a — section-header count = todo + running + done + dead (history
+  // excluded; F-Clay-A4 net-new source).
+  private updateCount(): void {
+    /* c8 ignore next */ // defensive: header is set/nulled in lockstep with bucketsMount, so non-null whenever renderAll runs.
+    if (this.header === null) return;
+    const total = LIVE_BUCKETS.reduce((sum, b) => sum + this.stores.jobs.bucket(b).length, 0);
+    this.header.setCount(total);
   }
 
   private stripInertnessMarkers(): void {

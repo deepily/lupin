@@ -13,6 +13,7 @@ import {
 import {
   renderSectionToolbar,
   SECTION_TOGGLES,
+  DEFAULT_HIDDEN_SECTION_IDS,
   COLLAPSE_ALL_ID,
   EXPAND_ALL_ID,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/sectionToolbar";
@@ -22,20 +23,22 @@ before(() => {
 });
 
 // --- Fake ViewStateStore ----------------------------------------------------
+// Lane 0c: the store now models EXPLICIT preferences. `prefs` seeds persisted
+// choices (a present key = an explicit visible/hidden preference); an absent key
+// = no preference (the section falls back to its cold-start default).
 interface FakeViewState extends ViewStateStoreLike {
   visible : Map<string, boolean>;
-  hidden  : string[];
   bulkCalls : boolean[];
 }
-function makeFakeViewState( hidden: string[] = [] ): FakeViewState {
-  const visible = new Map<string, boolean>();
+function makeFakeViewState( prefs: Record<string, boolean> = {} ): FakeViewState {
+  const visible = new Map<string, boolean>( Object.entries( prefs ) );
   const fake: FakeViewState = {
     visible,
-    hidden,
     bulkCalls: [],
     isSectionVisible: ( id ) => visible.get( id ) !== false,
     setSectionVisible: ( id, v ) => { visible.set( id, v ); },
-    getHiddenSectionIds: () => hidden,
+    getHiddenSectionIds: () => [ ...visible.entries() ].filter( ( [ , v ] ) => v === false ).map( ( [ k ] ) => k ),
+    hasSectionPreference: ( id ) => visible.has( id ),
     requestBulkAccordionCollapse: ( collapsed ) => { fake.bulkCalls.push( collapsed ); },
   };
   return fake;
@@ -69,13 +72,18 @@ test( "template: builds #section-toolbar with collapse/expand + one toolbar-btn 
   assert.notEqual( el.querySelector( `#${EXPAND_ALL_ID}` ), null );
   const btns = el.querySelectorAll( ".toolbar-btn" );
   assert.equal( btns.length, SECTION_TOGGLES.length );
-  // Every section button is rendered `.active` with its data-section + title.
+  // Lane 0c: a cold-default-VISIBLE section renders `.active`; a
+  // cold-default-HIDDEN section (DEFAULT_HIDDEN_SECTION_IDS, e.g. jobs-pane)
+  // renders dimmed. SECTION_TOGGLES spans both, so both ternary arms render.
   for ( const spec of SECTION_TOGGLES ) {
     const btn = el.querySelector( `.toolbar-btn[data-section="${spec.sectionId}"]` ) as HTMLElement;
     assert.notEqual( btn, null );
-    assert.ok( btn.classList.contains( "active" ) );
+    assert.equal( btn.classList.contains( "active" ), !DEFAULT_HIDDEN_SECTION_IDS.has( spec.sectionId ) );
     assert.equal( btn.getAttribute( "title" ), spec.title );
   }
+  // At least one of each kind exists (guards the assertion above from vacuity).
+  assert.ok( SECTION_TOGGLES.some( s => DEFAULT_HIDDEN_SECTION_IDS.has( s.sectionId ) ) );
+  assert.ok( SECTION_TOGGLES.some( s => !DEFAULT_HIDDEN_SECTION_IDS.has( s.sectionId ) ) );
 } );
 
 test( "template: a custom toggles list renders exactly those buttons", () => {
@@ -104,26 +112,52 @@ test( "mount: builds toolbar into root; double mount throws; unmount idempotent"
 // Renderer — per-section visibility toggle
 // ===========================================================================
 
-test( "click a section button: toggles section .section-hidden + button .active + persists", () => {
+test( "click a cold-VISIBLE section button: hide → show toggles .section-hidden + hidden attr + .active + persists", () => {
   clearBody();
   const mount   = makeMount();
-  const section = makeSection( "notifications-pane" );
+  const section = makeSection( "notifications-pane" );   // cold-default visible
   const vs      = makeFakeViewState();
   const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
   r.mount( mount );
 
   const btn = mount.querySelector( `.toolbar-btn[data-section="notifications-pane"]` ) as HTMLElement;
-  assert.ok( btn.classList.contains( "active" ) );
+  assert.ok( btn.classList.contains( "active" ) );       // reconcile left it visible
+  assert.ok( !section.hidden );
 
-  clickBubbling( btn );   // hide
+  clickBubbling( btn );   // hide (no-preference → cold visible → flip to hidden)
   assert.ok( section.classList.contains( "section-hidden" ) );
+  assert.ok( section.hidden );
   assert.ok( !btn.classList.contains( "active" ) );
   assert.equal( vs.visible.get( "notifications-pane" ), false );
 
-  clickBubbling( btn );   // show
+  clickBubbling( btn );   // show (now has a preference=false → flip to visible)
   assert.ok( !section.classList.contains( "section-hidden" ) );
+  assert.ok( !section.hidden );
   assert.ok( btn.classList.contains( "active" ) );
   assert.equal( vs.visible.get( "notifications-pane" ), true );
+  r.unmount();
+} );
+
+test( "click a cold-HIDDEN section button (jobs-pane): FIRST click REVEALS it (persisted choice overrides cold hidden)", () => {
+  clearBody();
+  const mount   = makeMount();
+  const section = makeSection( "jobs-pane" );
+  section.hidden = true;                                  // cold-start HTML `hidden` default
+  const vs      = makeFakeViewState();                    // no preference yet
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
+  r.mount( mount );
+
+  const btn = mount.querySelector( `.toolbar-btn[data-section="jobs-pane"]` ) as HTMLElement;
+  // Reconcile: cold-hidden → dimmed + hidden retained.
+  assert.ok( !btn.classList.contains( "active" ) );
+  assert.ok( section.hidden );
+  assert.ok( section.classList.contains( "section-hidden" ) );
+
+  clickBubbling( btn );   // FIRST click: no-preference → cold hidden → flip to VISIBLE
+  assert.ok( btn.classList.contains( "active" ) );
+  assert.ok( !section.classList.contains( "section-hidden" ) );
+  assert.ok( !section.hidden );                          // HTML `hidden` cold default CLEARED (F-Clay-A3)
+  assert.equal( vs.visible.get( "jobs-pane" ), true );
   r.unmount();
 } );
 
@@ -186,23 +220,53 @@ test( "click with null target is a no-op (defensive)", () => {
 } );
 
 // ===========================================================================
-// Renderer — persisted section visibility re-applied on mount
+// Renderer — reconcile on mount (cold defaults + persisted overrides)
 // ===========================================================================
 
-test( "mount re-applies persisted hidden sections (button dimmed + section hidden); unknown ids skipped", () => {
+test( "mount reconcile (NO preferences): cold defaults — jobs-pane hidden+dimmed, notifications visible+active", () => {
   clearBody();
-  const mount   = makeMount();
-  const section = makeSection( "jobs-pane" );
-  // "jobs-pane" is a real toggle + real section; "ghost-pane" is neither →
-  // exercises the btn-null + section-null skip branches in applyPersisted.
-  const vs = makeFakeViewState( [ "jobs-pane", "ghost-pane" ] );
+  const mount    = makeMount();
+  const jobs     = makeSection( "jobs-pane" );          // cold-default hidden
+  jobs.hidden    = true;
+  const notifs   = makeSection( "notifications-pane" ); // cold-default visible
+  // tts-pane / fleet-status-pane / task-list-pane / commons-activity-pane are
+  // toggle specs WITHOUT a DOM element here → exercises the section-null skip
+  // inside applyVisibilityToDom during reconcile.
+  const vs = makeFakeViewState();                        // no persisted prefs
   const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
   r.mount( mount );
 
   const jobsBtn = mount.querySelector( `.toolbar-btn[data-section="jobs-pane"]` ) as HTMLElement;
-  assert.ok( !jobsBtn.classList.contains( "active" ) );           // dimmed
-  assert.ok( section.classList.contains( "section-hidden" ) );    // hidden
-  // ghost-pane: no button, no section → silently skipped (no throw).
-  assert.equal( mount.querySelector( `.toolbar-btn[data-section="ghost-pane"]` ), null );
+  assert.ok( !jobsBtn.classList.contains( "active" ) );          // dimmed
+  assert.ok( jobs.hidden );                                       // stays hidden
+  assert.ok( jobs.classList.contains( "section-hidden" ) );
+
+  const notifsBtn = mount.querySelector( `.toolbar-btn[data-section="notifications-pane"]` ) as HTMLElement;
+  assert.ok( notifsBtn.classList.contains( "active" ) );         // visible
+  assert.ok( !notifs.hidden );
+  assert.ok( !notifs.classList.contains( "section-hidden" ) );
+  r.unmount();
+} );
+
+test( "mount reconcile (WITH preferences): persisted choice OVERRIDES cold default (F-Clay-A3)", () => {
+  clearBody();
+  const mount  = makeMount();
+  const jobs   = makeSection( "jobs-pane" );             // cold hidden…
+  jobs.hidden  = true;
+  const notifs = makeSection( "notifications-pane" );    // cold visible…
+  // …but the user persisted the OPPOSITE for each.
+  const vs = makeFakeViewState( { "jobs-pane": true, "notifications-pane": false } );
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
+  r.mount( mount );
+
+  const jobsBtn = mount.querySelector( `.toolbar-btn[data-section="jobs-pane"]` ) as HTMLElement;
+  assert.ok( jobsBtn.classList.contains( "active" ) );           // persisted-visible wins
+  assert.ok( !jobs.hidden );                                      // cold `hidden` CLEARED
+  assert.ok( !jobs.classList.contains( "section-hidden" ) );
+
+  const notifsBtn = mount.querySelector( `.toolbar-btn[data-section="notifications-pane"]` ) as HTMLElement;
+  assert.ok( !notifsBtn.classList.contains( "active" ) );        // persisted-hidden wins
+  assert.ok( notifs.hidden );
+  assert.ok( notifs.classList.contains( "section-hidden" ) );
   r.unmount();
 } );

@@ -982,3 +982,111 @@ li.is-playing-current .notification-corner-stop-btn,
     color: #198754; /* green to match the slider accent */
 }
 
+/* ============================================================================
+   ACCORDION SECTION-HEADER BAR — Lane 0a (2026-07-02, Rachel 🕊️). The uniform
+   collapsible section-header chrome the multiplexer's 6 accordions lacked
+   (06 §3 Lane 0a / 07 §3.A). Transcribed BYTE-FAITHFUL from the legacy monolith
+   `notifications.css` (the parity REFERENCE); source line numbers cited
+   per-block. Two 07 §3.A deltas baked in: (U-A2) headers are SOLID
+   `background-color` — "gradient" was a misnomer; (U-A3) collapse is the
+   session-only `data-collapsed` idiom (NOT the legacy `.collapsed`-on-content
+   mechanism, NOT the localStorage `taskListCollapse`), so the hide rule keys on
+   the mux `[data-collapsed="true"]` on the section root.
+
+   ISOLATION: no mux element used the bare `.section-header` / `.section-content`
+   classes before this block (grep-verified), and NO global `.section-content`
+   padding rule is added here — the broadcast card's `.section-content`
+   (broadcastCard.ts) collapses off `data-card-open`, never `data-collapsed`, so
+   these rules cannot leak onto it. Lane 0a = header chrome only; the
+   `#action-required-section` PANEL border/bg (notifications.css:509-512) is
+   Lane-2 skin territory and intentionally NOT ported here — only the header-bar
+   rules (:514-521) are.
+   ============================================================================ */
+
+/* Base header cluster — notifications.css:126-135 (.section-header),
+   :137-140 (h3), :142-156 (.toggle-button + :hover), :158-162
+   (.section-header-actions). */
+.section-header {
+    padding: 15px 20px;
+    background-color: #e9ecef;
+    border-bottom: 1px solid #dee2e6;
+    border-radius: 6px 6px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+}
+
+.section-header h3 {
+    margin: 0;
+    color: #495057;
+}
+
+.toggle-button {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #6c757d;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: color 0.2s;
+}
+
+.toggle-button:hover {
+    color: #495057;
+    background-color: rgba( 0, 0, 0, 0.05 );
+}
+
+.section-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Count chip (F-Clay-A4) — NEW shared class. Legacy renders per-section counts
+   via distinct `#…-count-badge` ids (no shared class existed); the mux converges
+   the 6 accordions on ONE `.section-header-count` span. Muted to sit inside the
+   header's `#495057`/`#6c757d` palette. */
+.section-header-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: #6c757d;
+}
+
+/* Session-only collapse (07 §3.A U-A3). The chevron toggles `data-collapsed` on
+   the section root; hide its `.section-content` body. Scoped to a DIRECT-child
+   `.section-content` under `[data-collapsed="true"]` so it can never hide the
+   broadcast card's `.section-content` (that card carries `data-card-open`, not
+   `data-collapsed`). */
+[data-collapsed="true"] > .section-content {
+    display: none;
+}
+
+/* Action-Required header variant — notifications.css:514-521. SOLID BLUE
+   (`#0d6efd`), white title (07 §3.A U-A2/U-C1 — the original table's "green" was
+   wrong). Selector UNCHANGED — the mux mount id (`#action-required-section`)
+   equals the legacy id (07 §3.A F-Clay-A2: "AR unchanged"). */
+#action-required-section .section-header {
+    background-color: #0d6efd;
+    color: white;
+}
+
+#action-required-section .section-header h3 {
+    color: white;
+}
+
+/* Playing/TTS header variant — notifications.css:2951-2958. SOLID green
+   (`#198754`), white title. RE-KEYED `#tts-queue-section .section-header
+   .tts-queue-header` → `#tts-pane .section-header` (07 §3.A F-Clay-A2: mux TTS
+   pane id is `#tts-pane`; the `.tts-queue-header` qualifier is dropped — the mux
+   header carries the bare `.section-header` contract). */
+#tts-pane .section-header {
+    background-color: #198754;
+    color: white;
+}
+
+#tts-pane .section-header h3 {
+    color: white;
+}
+

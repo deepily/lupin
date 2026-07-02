@@ -104,10 +104,14 @@ const okComposite = (tasks: TaskListComposite["tasks"]): TaskListComposite => ({
 // Chrome + initial paint
 // ---------------------------------------------------------------------------
 
-test("mount builds chrome (title, count, refresh, updated, container)", () => {
+test("mount builds chrome (Lane 0a section-header: title, count, refresh, updated, container)", () => {
   const { root } = setup();
-  assert.ok(root.querySelector(".task-list-title"));
-  assert.ok(root.querySelector(".task-list-count"));
+  // Lane 0a — bespoke .task-list-header → uniform .section-header (📋 Task List
+  // in the <h3>); count in the shared .section-header-count chip.
+  const hdr = root.querySelector(".section-header") as HTMLElement;
+  assert.ok(hdr, "section-header bar present");
+  assert.ok(hdr.querySelector("h3")!.textContent!.includes("📋 Task List"), "title in h3");
+  assert.ok(root.querySelector(".section-header-count"));
   assert.ok(root.querySelector(".task-list-refresh"));
   assert.ok(root.querySelector(".task-list-updated"));
   assert.ok(root.querySelector(".task-list-container"));
@@ -125,7 +129,7 @@ test("initial paint with null composite → unreachable indicator + 'no tasks lo
   const { root } = setup();
   assert.ok(root.querySelector(".task-list-unreachable"));
   assert.ok(root.querySelector(".task-list-empty"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
   assert.equal(root.querySelector(".task-list-updated")?.textContent, ""); // no stamp on initial (stampUpdated=false path)
 });
 
@@ -138,7 +142,7 @@ test("auth_required → sign-in banner, count 0", () => {
   store.setComposite({ status: "auth_required" });
   emit(true);
   assert.ok(root.querySelector(".task-list-signin"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
 });
 
 // ---------------------------------------------------------------------------
@@ -154,7 +158,7 @@ test("ok with open tasks → table renders, count = open count, stamp set", () =
   ]));
   emit(true);
   assert.ok(root.querySelector(".task-list-table"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "2"); // done excluded
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "2"); // done excluded
   // The blocked row surfaces blocked_by + next_chase.
   const blockedRow = root.querySelector(".task-status-blocked");
   assert.ok(blockedRow);
@@ -168,7 +172,7 @@ test("ok but all terminal → filtered to empty → 'No open tasks.', count 0", 
   emit(true);
   assert.ok(root.querySelector(".task-list-empty"));
   assert.equal(root.querySelector(".task-list-empty")?.textContent, "✅ No open tasks.");
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
 });
 
 // ---------------------------------------------------------------------------
@@ -181,7 +185,7 @@ test("explicit unreachable (no prior good) → indicator + 'no tasks loaded yet'
   emit(true);
   assert.ok(root.querySelector(".task-list-unreachable"));
   assert.ok(root.querySelector(".task-list-empty"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
 });
 
 test("composite with non-array tasks → unreachable branch (3rd OR leg)", () => {
@@ -197,14 +201,14 @@ test("graceful degradation: good fetch then unreachable → last-known rows repl
   store.setComposite(okComposite([{ id: "1", title: "live", status: "in_progress", owner_persona: "amy" }]));
   emit(true);
   assert.ok(root.querySelector(".task-list-table"));
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "1");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "1");
 
   // 2) store goes unreachable — indicator + LAST-KNOWN table (never blank).
   store.setComposite({ status: "unreachable", tasks: null });
   emit(true);
   assert.ok(root.querySelector(".task-list-unreachable"), "indicator shown");
   assert.ok(root.querySelector(".task-list-table"), "last-known rows still rendered");
-  assert.equal(root.querySelector(".task-list-count")?.textContent, "1", "count holds at last-known");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "1", "count holds at last-known");
 });
 
 // ---------------------------------------------------------------------------
@@ -236,7 +240,7 @@ test("unmount clears the root subtree", () => {
   const r = createTaskListRenderer({ eventBus: bus, stores: { taskList: store }, nowDateFn: FIXED_DATE });
   const root = document.createElement("div");
   r.mount(root);
-  assert.ok(root.querySelector(".task-list-header"));
+  assert.ok(root.querySelector(".section-header"));
   r.unmount();
   assert.equal(root.childNodes.length, 0);
   // After unmount the subscription is detached — a later emit is a no-op (no throw).

@@ -139,10 +139,11 @@ test("Test 2: mount() throws when #jobs-buckets-container is missing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test 3-4: Lifecycle — mount lifts hidden + data-phase6-pending; unmount idempotent
+// Test 3-4: Lifecycle — mount lifts data-phase6-pending but RETAINS `hidden`
+// (Lane 0c cold-hidden default); unmount idempotent
 // ---------------------------------------------------------------------------
 
-test("Test 3: mount() lifts hidden + data-phase6-pending from #jobs-pane", () => {
+test("Test 3: mount() lifts data-phase6-pending but RETAINS `hidden` on #jobs-pane (Lane 0c cold-hidden default)", () => {
   const bus  = createEventBusForTesting();
   const api  = makeStubApi();
   const jobs = createJobStore({ bus });
@@ -151,7 +152,11 @@ test("Test 3: mount() lifts hidden + data-phase6-pending from #jobs-pane", () =>
   assert.equal(root.hasAttribute("hidden"), true);
   assert.equal(root.getAttribute("data-phase6-pending"), "true");
   renderer.mount(root);
-  assert.equal(root.hasAttribute("hidden"), false);
+  // Lane 0c (Rachel 🕊️): the `hidden` cold-hidden default is NO LONGER stripped
+  // on mount — Job Queues starts hidden (legacy parity, Q3 RULED); the
+  // section-toolbar owns visibility, and a persisted user choice overrides the
+  // cold `hidden` default (F-Clay-A3). Only data-phase6-pending is lifted.
+  assert.equal(root.hasAttribute("hidden"), true);
   assert.equal(root.hasAttribute("data-phase6-pending"), false);
   renderer.unmount();
   jobs.disposeForTesting();
@@ -1199,6 +1204,54 @@ test("Test 34: Retry that fails again repaints the banner (replace, not stack)",
   // Exactly ONE banner — the second failure replaced the first, did not stack.
   const banners = root.querySelectorAll(".jobs-hydration-error");
   assert.equal(banners.length, 1, "repeated failure replaces the banner, never stacks");
+
+  renderer.unmount();
+  jobs.disposeForTesting();
+});
+
+// ---------------------------------------------------------------------------
+// Lane 0a — uniform section-header bar (📝 Jobs + 4-live-bucket count + collapse)
+// ---------------------------------------------------------------------------
+
+test("Lane 0a: Jobs renders the 📝 section-header; count = 4 live buckets (history excluded); collapse toggles", () => {
+  const bus  = createEventBusForTesting();
+  const api  = makeStubApi();
+  const jobs = createJobStore({ bus });
+  const renderer = createJobsPaneRenderer({ eventBus: bus, stores: { jobs }, api });
+  const root = makeRoot();
+  renderer.mount(root);
+
+  const header = root.querySelector(".section-header") as HTMLElement;
+  assert.ok(header, "section-header bar present");
+  assert.ok(header.querySelector("h3")!.textContent!.includes("📝 Jobs"), "📝 Jobs title in h3");
+  assert.equal(root.querySelector(".jobs-pane-header"), null, "inert static header is gone");
+
+  const count = root.querySelector(".section-header-count") as HTMLElement;
+  assert.equal(count.textContent, "0", "count 0 initially");
+
+  emitJobAdded(bus, makeJob({ id_hash: "j1", status: "running" }));
+  assert.equal(count.textContent, "1", "1 live job");
+  emitJobAdded(bus, makeJob({ id_hash: "j2", status: "todo" }));
+  assert.equal(count.textContent, "2", "2 live jobs across buckets");
+
+  // Move j1 to the HISTORY bucket (transition done → remove). It leaves the live
+  // buckets, so the count drops — history is excluded from the header count.
+  bus.emit<JobStateTransitionPayload>({
+    type: "job_state_transition",
+    payload: { job_id: "j1", id_hash: "j1", from_state: "running", to_state: "completed" },
+    source: "test", ts: Date.now(),
+  });
+  emitJobRemoved(bus, "j1");
+  assert.equal(count.textContent, "1", "history bucket excluded from the live count");
+
+  // The buckets container is the collapsible body.
+  assert.ok((root.querySelector("#jobs-buckets-container") as HTMLElement).classList.contains("section-content"));
+
+  // Session-only collapse on the pane root.
+  const chevron = header.querySelector(".toggle-button") as HTMLElement;
+  (header.querySelector("h3") as HTMLElement).dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(root.getAttribute("data-collapsed"), "true");
+  assert.equal(chevron.textContent, "▶");
 
   renderer.unmount();
   jobs.disposeForTesting();

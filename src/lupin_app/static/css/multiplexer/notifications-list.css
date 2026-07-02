@@ -241,3 +241,16 @@
 
     .sender-stats-group  { gap: 4px; }
 }
+
+/* ============================================================================
+   Lane 0a (2026-07-02, Rachel 🕊️) — CC Notifications section collapse. The
+   notifications section-header bar is emitted by NotificationsHeaderRenderer
+   into #notifications-header-mount (a SEPARATE mount ABOVE the list pane), so
+   the chevron toggles `data-collapsed` on the sibling #notifications-pane. This
+   MUX-ONLY rule hides the list pane when collapsed (the header bar stays). Kept
+   in the mux sheet — #notifications-pane is a mux-only id and is barred from the
+   shared contract sheet by design. Session-only (07 §3.A U-A3).
+   ============================================================================ */
+#notifications-pane[ data-collapsed="true" ] {
+    display: none;
+}

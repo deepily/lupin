@@ -325,3 +325,45 @@ test("forceRenderForTesting before mount is a no-op (no throw)", () => {
   const { renderer } = setupRenderer();
   renderer.forceRenderForTesting();
 });
+
+// ===========================================================================
+// Lane 0a — uniform section-header bar (🔊 Playing + queue count + collapse)
+// ===========================================================================
+
+test("Lane 0a: TTS pane renders the .section-header bar (🔊 Playing), count = queue length, chrome nested in .section-content", () => {
+  const { renderer, root, audio } = setupRenderer("playing", 3);
+  renderer.mount(root);
+
+  const header = root.querySelector(".section-header") as HTMLElement;
+  assert.notEqual(header, null, "section-header bar present");
+  assert.ok(header.querySelector("h3")!.textContent!.includes("🔊 Playing"), "🔊 Playing title");
+  assert.equal(root.firstElementChild, header, "header is above the body");
+
+  const count = root.querySelector(".section-header-count") as HTMLElement;
+  assert.equal(count.textContent, "3", "header count = initial queue length");
+
+  // Transport chrome lives in the content wrapper below the header.
+  assert.notEqual(root.querySelector(".section-content .tts-queue-length"), null, "chrome nested in section-content");
+
+  // Count tracks the queue length on re-render.
+  audio.setQueue(5);
+  renderer.forceRenderForTesting();
+  assert.equal(count.textContent, "5", "header count updated to 5");
+  renderer.unmount();
+});
+
+test("Lane 0a: clicking the TTS header toggles session-only collapse (data-collapsed + chevron)", () => {
+  const { renderer, root } = setupRenderer("playing", 0);
+  renderer.mount(root);
+  const header = root.querySelector(".section-header") as HTMLElement;
+  const chevron = header.querySelector(".toggle-button") as HTMLElement;
+
+  (header.querySelector("h3") as HTMLElement).dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(root.getAttribute("data-collapsed"), "true");
+  assert.equal(chevron.textContent, "▶");
+
+  chevron.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(root.getAttribute("data-collapsed"), "false");
+  assert.equal(chevron.textContent, "▼");
+  renderer.unmount();
+});

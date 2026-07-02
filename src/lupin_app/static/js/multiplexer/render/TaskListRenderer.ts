@@ -32,6 +32,11 @@ import {
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
 import { renderTaskListTable } from "./templates/taskListTable";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
+import {
+  renderSectionHeader,
+  wireSectionCollapse,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 export interface TaskListStoreLike {
   composite(): TaskListComposite | null;
@@ -92,6 +97,9 @@ class TaskListRendererImpl implements TaskListRenderer {
   private container : HTMLElement | null = null;
   private countEl   : HTMLElement | null = null;
   private updatedEl : HTMLElement | null = null;
+  // Lane 0a — section-header handle + collapse-listener teardown.
+  private header    : SectionHeaderHandle | null = null;
+  private collapseOff: ( () => void ) | null = null;
   private mounted   = false;
 
   // Last successfully-fetched OPEN rows — replayed under the "store unreachable"
@@ -124,27 +132,12 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.mounted = true;
     this.root = root;
 
-    const header = document.createElement( "header" );
-    header.className = "task-list-header";
-
-    const title = document.createElement( "h2" );
-    title.className = "task-list-title";
-    title.textContent = "📋 Task List";
-    header.appendChild( title );
-
-    this.countEl = document.createElement( "span" );
-    this.countEl.className = "task-list-count";
-    this.countEl.setAttribute( "data-testid", "multiplexer-task-list-count" );
-    this.countEl.textContent = "0";
-    header.appendChild( this.countEl );
-
     const refreshBtn = document.createElement( "button" );
     refreshBtn.type = "button";
     refreshBtn.className = "task-list-refresh";
     refreshBtn.setAttribute( "data-testid", "multiplexer-task-list-refresh" );
     refreshBtn.textContent = "⟳";
     refreshBtn.addEventListener( "click", () => void this.stores.taskList.refresh() );
-    header.appendChild( refreshBtn );
 
     // Per-persona accordion: collapse-all / expand-all. The JS card puts these in
     // its #section-toolbar; the multiplexer has no such toolbar, so they live in
@@ -157,7 +150,6 @@ class TaskListRendererImpl implements TaskListRenderer {
     collapseAllBtn.setAttribute( "title", "Collapse all task owners" );
     collapseAllBtn.textContent = "⊟";
     collapseAllBtn.addEventListener( "click", () => this.collapseAll() );
-    header.appendChild( collapseAllBtn );
 
     const expandAllBtn = document.createElement( "button" );
     expandAllBtn.type = "button";
@@ -166,15 +158,32 @@ class TaskListRendererImpl implements TaskListRenderer {
     expandAllBtn.setAttribute( "title", "Expand all task owners" );
     expandAllBtn.textContent = "⊞";
     expandAllBtn.addEventListener( "click", () => this.expandAll() );
-    header.appendChild( expandAllBtn );
 
     this.updatedEl = document.createElement( "span" );
     this.updatedEl.className = "task-list-updated";
     this.updatedEl.setAttribute( "data-testid", "multiplexer-task-list-updated" );
-    header.appendChild( this.updatedEl );
+
+    // Lane 0a — convert the bespoke .task-list-header into the uniform
+    // .section-header bar (📋 Task List). Refresh + collapse-all/expand-all +
+    // updated stamp move into the .section-header-actions slot; the count uses
+    // the shared .section-header-count chip (legacy testid preserved). NOTE: the
+    // per-owner ROW collapse (collapseAll/expandAll → taskListCollapse.ts,
+    // localStorage) is SEPARATE from the section-header's session-only collapse.
+    const header = renderSectionHeader( {
+      icon    : "📋",
+      title   : "Task List",
+      testid  : "multiplexer-task-list-header",
+      actions : [ refreshBtn, collapseAllBtn, expandAllBtn, this.updatedEl ],
+    } );
+    this.header  = header;
+    this.countEl = header.countEl;
+    this.countEl.setAttribute( "data-testid", "multiplexer-task-list-count" );
+    this.countEl.textContent = "0";
 
     this.container = document.createElement( "div" );
-    this.container.className = "task-list-container";
+    // The container IS the collapsible body — carries `.section-content` so the
+    // shared `[data-collapsed="true"] > .section-content` rule hides it.
+    this.container.className = "section-content task-list-container";
     this.container.setAttribute( "data-testid", "multiplexer-task-list-container" );
 
     // Delegation: ONE set of listeners on the persistent container (its children
@@ -200,7 +209,8 @@ class TaskListRendererImpl implements TaskListRenderer {
       this.handleContainerClick( e.target );
     } );
 
-    root.replaceChildren( header, this.container );
+    root.replaceChildren( header.header, this.container );
+    this.collapseOff = wireSectionCollapse( root, header );
 
     // Initial paint (composite may be null until the first poll resolves).
     this.renderFromStore( false );
@@ -217,6 +227,10 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.dismissTaskBodyOverlay();   // tear down any open body overlay + its Esc listener
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
+    if ( this.collapseOff !== null ) {
+      this.collapseOff();
+      this.collapseOff = null;
+    }
     if ( this.root !== null ) {
       this.root.replaceChildren();
       this.root = null;
@@ -224,6 +238,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.container = null;
     this.countEl = null;
     this.updatedEl = null;
+    this.header = null;
     this.mounted = false;
   }
 

@@ -19,7 +19,13 @@
 // listener on the toolbar root. Lifecycle mirrors MissedBadgeRenderer (throw on
 // double-mount; idempotent unmount).
 
-import { renderSectionToolbar, COLLAPSE_ALL_ID, EXPAND_ALL_ID } from "./templates/sectionToolbar";
+import {
+  renderSectionToolbar,
+  COLLAPSE_ALL_ID,
+  EXPAND_ALL_ID,
+  SECTION_TOGGLES,
+  DEFAULT_HIDDEN_SECTION_IDS,
+} from "./templates/sectionToolbar";
 
 // Minimal store surface this renderer needs (subset of ViewStateStore) — keeps
 // the unit test free to inject a fake.
@@ -27,6 +33,8 @@ export interface ViewStateStoreLike {
   isSectionVisible(sectionId: string): boolean;
   setSectionVisible(sectionId: string, visible: boolean): void;
   getHiddenSectionIds(): string[];
+  /** True when the section has an explicit persisted preference (Lane 0c). */
+  hasSectionPreference(sectionId: string): boolean;
   requestBulkAccordionCollapse(collapsed: boolean): void;
 }
 
@@ -76,7 +84,7 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     this.toolbar  = toolbar;
     root.replaceChildren( toolbar );
 
-    this.applyPersistedSectionVisibility();
+    this.reconcileSectionVisibility();
 
     this.clickHandler = ( e: Event ): void => this.onClick( e );
     toolbar.addEventListener( "click", this.clickHandler );
@@ -125,31 +133,61 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   }
 
   private toggleSection( sectionId: string, btn: HTMLElement ): void {
-    const nextVisible = !this.stores.viewState.isSectionVisible( sectionId );
+    // Flip the CURRENT EFFECTIVE visibility (cold-default aware) — NOT
+    // isSectionVisible(), which reads "no preference" as visible and would make
+    // the first click on a cold-hidden section a no-op instead of a reveal.
+    const nextVisible = !this.currentEffectiveVisible( sectionId );
     this.stores.viewState.setSectionVisible( sectionId, nextVisible );
-    btn.classList.toggle( "active", nextVisible );
+    this.applyVisibilityToDom( sectionId, btn, nextVisible );
+  }
 
+  // -------------------------------------------------------------------------
+  // Visibility model (Lane 0c — cold-default + persisted-override precedence)
+  // -------------------------------------------------------------------------
+
+  // Effective CURRENT visibility of a section: a persisted user preference wins;
+  // absent one, the cold-start default (DEFAULT_HIDDEN_SECTION_IDS → hidden,
+  // otherwise visible). This is the axis the toggle flips and the reconcile
+  // applies (F-Clay-A3: persisted choice OVERRIDES the HTML `hidden` cold default).
+  private currentEffectiveVisible( sectionId: string ): boolean {
+    if ( this.stores.viewState.hasSectionPreference( sectionId ) ) {
+      return this.stores.viewState.isSectionVisible( sectionId );
+    }
+    return !DEFAULT_HIDDEN_SECTION_IDS.has( sectionId );
+  }
+
+  // Apply an effective-visibility decision to the DOM: the button `.active`
+  // state, the `.section-hidden` class, AND the HTML `hidden` attribute. The
+  // `hidden` attribute is managed in lockstep so a persisted-VISIBLE choice
+  // actually reveals a section that carried the cold-start `hidden` default —
+  // clearing `.section-hidden` alone would leave `hidden` still hiding it. The
+  // pane element may be absent (e.g. a toolbar-managed section not present in a
+  // given page/test) — the button is always flipped, the section only if found.
+  private applyVisibilityToDom( sectionId: string, btn: HTMLElement, visible: boolean ): void {
+    btn.classList.toggle( "active", visible );
     const section = this.doc.getElementById( sectionId );
     if ( section !== null ) {
-      section.classList.toggle( "section-hidden", !nextVisible );
+      section.classList.toggle( "section-hidden", !visible );
+      section.hidden = !visible;
     }
   }
 
   // -------------------------------------------------------------------------
-  // Persisted-state replay (mount)
+  // Reconcile (mount) — apply every toolbar section's effective visibility so
+  // the button state + pane visibility agree with the cold defaults AND any
+  // persisted overrides. Replaces the prior hidden-only replay.
   // -------------------------------------------------------------------------
 
-  private applyPersistedSectionVisibility(): void {
-    /* c8 ignore next */ // defensive: applyPersistedSectionVisibility runs only from mount(), after this.toolbar is set.
+  private reconcileSectionVisibility(): void {
+    /* c8 ignore next */ // defensive: reconcileSectionVisibility runs only from mount(), after this.toolbar is set.
     if ( this.toolbar === null ) return;
-    for ( const sectionId of this.stores.viewState.getHiddenSectionIds() ) {
+    for ( const spec of SECTION_TOGGLES ) {
       const btn = this.toolbar.querySelector(
-        `.toolbar-btn[data-section="${sectionId}"]`,
+        `.toolbar-btn[data-section="${spec.sectionId}"]`,
       ) as HTMLElement | null;
-      if ( btn !== null ) btn.classList.remove( "active" );
-
-      const section = this.doc.getElementById( sectionId );
-      if ( section !== null ) section.classList.add( "section-hidden" );
+      /* c8 ignore next */ // the template renders exactly one button per SECTION_TOGGLES spec, so this querySelector always resolves; guarded defensively.
+      if ( btn === null ) continue;
+      this.applyVisibilityToDom( spec.sectionId, btn, this.currentEffectiveVisible( spec.sectionId ) );
     }
   }
 }

@@ -46,6 +46,14 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
 export const COLLAPSE_ALL_ID = "section-toolbar-collapse-all";
 export const EXPAND_ALL_ID    = "section-toolbar-expand-all";
 
+// Lane 0c (2026-07-02, Rachel 🕊️) — sections that are HIDDEN by default on a
+// cold start (no persisted user preference). Legacy hides Job Queues by default
+// (06 §3 Lane 0c, Q3 RULED). Their toolbar button renders NOT `.active` (dimmed)
+// so the button state stays consistent with the pane's cold-hidden default; a
+// persisted user choice overrides this (F-Clay-A3), reconciled by
+// SectionToolbarRenderer on mount.
+export const DEFAULT_HIDDEN_SECTION_IDS: ReadonlySet<string> = new Set( [ "jobs-pane" ] );
+
 /**
  * Build the `#section-toolbar` element (collapse-all + expand-all, then the six
  * per-section visibility toggles).
@@ -82,9 +90,13 @@ export function renderSectionToolbar(
   root.appendChild(accordionControls);
 
   for (const spec of toggles) {
+    // Cold-default-hidden sections render dimmed (no `.active`); all others
+    // render `.active`. The renderer re-reconciles against persisted state on
+    // mount (F-Clay-A3), so this is the no-flash cold-start appearance.
+    const activeClass = DEFAULT_HIDDEN_SECTION_IDS.has( spec.sectionId ) ? "toolbar-btn" : "toolbar-btn active";
     /* c8 ignore next 6 */ // tagged-template literal: c8 reports phantom branches on every interpolation line ($-expressions); the per-spec button build is straight-line and covered by the template tests (default + custom toggles).
     const btn = html`
-      <button class="toolbar-btn active" type="button"
+      <button class="${activeClass}" type="button"
               data-section="${spec.sectionId}"
               data-testid="${spec.testid}"
               title="${spec.title}">${spec.icon}</button>

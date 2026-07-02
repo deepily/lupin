@@ -75,6 +75,16 @@ test("getHiddenSectionIds returns only the explicitly-hidden ids", () => {
   assert.deepEqual(store.getHiddenSectionIds().sort(), ["a", "c"]);
 });
 
+test("hasSectionPreference: true only for an explicit preference (visible OR hidden), false otherwise", () => {
+  const { store } = setup();
+  assert.equal(store.hasSectionPreference("jobs-pane"), false);   // no preference → cold default applies
+  store.setSectionVisible("jobs-pane", true);
+  assert.equal(store.hasSectionPreference("jobs-pane"), true);    // explicit VISIBLE preference
+  store.setSectionVisible("tts-pane", false);
+  assert.equal(store.hasSectionPreference("tts-pane"), true);     // explicit HIDDEN preference
+  assert.equal(store.hasSectionPreference("never-touched"), false);
+});
+
 // ===========================================================================
 // 3 — Accordion collapse: toggle + persist
 // ===========================================================================

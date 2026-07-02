@@ -33,6 +33,11 @@ import type {
   StoreAudioStateChangePayload,
 } from "../shared/types";
 import { renderTtsChrome } from "./templates/ttsChrome";
+import {
+  renderSectionHeader,
+  wireSectionCollapse,
+  type SectionHeaderHandle,
+} from "./templates/sectionHeader";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -90,6 +95,10 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
   private readonly unsubscribers: Array<() => void> = [];
 
   private root: HTMLElement | null = null;
+  // Lane 0a — persistent `.section-header` bar + `.section-content` body wrapper.
+  private content : HTMLElement | null = null;
+  private header  : SectionHeaderHandle | null = null;
+  private collapseOff: ( () => void ) | null = null;
   private mounted = false;
   private pendingRender = false;
   private rafHandle: number | null = null;
@@ -110,7 +119,23 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     this.mounted = true;
     this.root = root;
 
-    // Initial paint — atomic.
+    // Lane 0a — the uniform `.section-header` bar (🔊 Playing) + a
+    // `.section-content` body wrapper. The header is a persistent sibling; the
+    // transport chrome repaints into `this.content`.
+    const header = renderSectionHeader( {
+      icon   : "🔊",
+      title  : "Playing",
+      testid : "multiplexer-tts-header",
+    } );
+    this.header = header;
+    const content = document.createElement( "div" );
+    content.className = "section-content";
+    content.setAttribute( "data-testid", "multiplexer-tts-content" );
+    this.content = content;
+    root.replaceChildren( header.header, content );
+    this.collapseOff = wireSectionCollapse( root, header );
+
+    // Initial paint — atomic (into the content wrapper).
     this.renderNow();
 
     // Q-B9 + Pass 1 F-13: BOTH state_change AND chunk_decoded are RAF-coalesced
@@ -137,10 +162,16 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
       this.rafHandle = null;
     }
     this.pendingRender = false;
+    if (this.collapseOff !== null) {
+      this.collapseOff();
+      this.collapseOff = null;
+    }
     if (this.root !== null) {
       this.root.replaceChildren();
       this.root = null;
     }
+    this.content = null;
+    this.header  = null;
     this.mounted = false;
   }
 
@@ -163,12 +194,13 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
   }
 
   private renderNow(): void {
-    /* c8 ignore next */ // defensive: subscriptions are detached in unmount BEFORE root is nulled.
-    if (this.root === null) return;
+    /* c8 ignore next */ // defensive: subscriptions are detached in unmount BEFORE content is nulled.
+    if (this.content === null) return;
+    const burst = this.stores.audio.burstLength();
     const chrome = renderTtsChrome(
       {
         state       : this.stores.audio.state(),
-        queueLength : this.stores.audio.burstLength(),   // OQ-F0.4 rename; render-field name (template contract) unchanged
+        queueLength : burst,   // OQ-F0.4 rename; render-field name (template contract) unchanged
         // currentTrackName intentionally omitted — Phase 0 prereq #3 pending.
       },
       {
@@ -178,8 +210,11 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
         onSkip   : () => this.stores.audio.skip(),
       },
     );
-    // replaceChildren — single childList mutation, atomic for the whole pane.
-    this.root.replaceChildren(chrome);
+    // replaceChildren — single childList mutation, atomic for the whole body.
+    this.content.replaceChildren(chrome);
+    // Lane 0a — the header count chip mirrors the TTS queue (burst) length.
+    /* c8 ignore next */ // defensive: header is set/nulled in lockstep with content, so non-null whenever renderNow runs.
+    if (this.header !== null) this.header.setCount(burst);
   }
 }
 

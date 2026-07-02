@@ -114,7 +114,10 @@ test("unmount clears the root + is idempotent", () => {
 // Count + clear-all enablement
 // ---------------------------------------------------------------------------
 
-test("count reflects list().length (raw total) and updates on store change", () => {
+test("count reflects the active-list TOTAL (Lane 0a — RULED TOTAL, legacy parity) and updates on store change", () => {
+  // The header count is the active-list TOTAL (list().length) — RULED 2026-07-02
+  // from legacy ground truth (notifications.js:14417-14428 sums into
+  // #notifications-count). NOT the unread tally.
   const { store, setActive } = makeStore({ active: [note("a"), note("b")] });
   const { api } = makeApi();
   const { bus, root } = mountInto({ store, api });
@@ -266,4 +269,55 @@ test("clear-all: empty visible scope → early return (no confirm, no delete)", 
   await flush();
   assert.equal(confirmCalls, 0);
   assert.equal(deleted.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// Lane 0a — uniform section-header bar (🔔 + total count + env-label/clock in
+// the h3) + session-only collapse of the sibling #notifications-pane
+// ---------------------------------------------------------------------------
+
+test("Lane 0a: 🔔 section-header bar with env-label/clock in the h3; chevron collapses the sibling #notifications-pane; control clicks do not", () => {
+  const pane = document.createElement("section");
+  pane.id = "notifications-pane";
+  document.body.appendChild(pane);
+
+  const { store } = makeStore({ active: [note("a")] });
+  const { api } = makeApi();
+  const { root, renderer } = mountInto({ store, api });
+
+  const header = root.querySelector(".section-header") as HTMLElement;
+  assert.ok(header, "section-header bar present");
+  const h3 = header.querySelector("h3") as HTMLElement;
+  assert.ok(h3.textContent!.includes("🔔 Notifications"), "🔔 Notifications title");
+  assert.notEqual(h3.querySelector("#env-label"), null, "env-label injected into h3");
+  assert.notEqual(h3.querySelector("#clock"), null, "clock injected into h3");
+  assert.equal($(root, "#notifications-count").textContent, "1", "total count in header");
+
+  const chevron = header.querySelector(".toggle-button") as HTMLElement;
+  // Header-background click → collapse the sibling pane.
+  h3.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(pane.getAttribute("data-collapsed"), "true");
+  assert.equal(chevron.textContent, "▶");
+  // Chevron click → expand.
+  chevron.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(pane.getAttribute("data-collapsed"), "false");
+  assert.equal(chevron.textContent, "▼");
+
+  // A control click (history-toggle button) must NOT collapse.
+  $(root, "#history-dropdown-toggle").dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(pane.getAttribute("data-collapsed"), "false", "control click does not collapse");
+
+  renderer.unmount();
+  pane.remove();
+});
+
+test("Lane 0a: a header click with NO #notifications-pane in the doc is a safe no-op", () => {
+  const { store } = makeStore({ active: [] });
+  const { api } = makeApi();
+  const { root, renderer } = mountInto({ store, api });
+  const header = root.querySelector(".section-header") as HTMLElement;
+  // No sibling pane → the collapse handler returns early (no throw, chevron stays).
+  (header.querySelector("h3") as HTMLElement).dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(header.querySelector(".toggle-button")!.textContent, "▼", "chevron unchanged");
+  renderer.unmount();
 });

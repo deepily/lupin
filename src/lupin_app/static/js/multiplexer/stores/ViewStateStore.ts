@@ -47,6 +47,13 @@ export interface ViewStateStore {
   setSectionVisible(sectionId: string, visible: boolean): void;
   /** The sectionIds explicitly recorded as hidden (visible === false). */
   getHiddenSectionIds(): string[];
+  /**
+   * True when the section carries an EXPLICIT persisted preference (visible OR
+   * hidden). Lets the toolbar distinguish "no preference → use the cold-start
+   * default (HTML `hidden`)" from "user explicitly showed/hid it" — the
+   * precedence rule (F-Clay-A3): a persisted choice overrides the cold default.
+   */
+  hasSectionPreference(sectionId: string): boolean;
 
   /** True only when the accordion was explicitly collapsed. Default: expanded. */
   isAccordionCollapsed(accordionId: string): boolean;
@@ -121,6 +128,10 @@ class ViewStateStoreImpl implements ViewStateStore {
 
   getHiddenSectionIds(): string[] {
     return Object.keys(this.sectionVisibility).filter(id => this.sectionVisibility[id] === false);
+  }
+
+  hasSectionPreference(sectionId: string): boolean {
+    return Object.prototype.hasOwnProperty.call(this.sectionVisibility, sectionId);
   }
 
   // -------------------------------------------------------------------------
