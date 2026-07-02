@@ -12,7 +12,7 @@
 
 ## 1. Goal & parity target
 
-The mux `jobs-pane` already **displays** the 5 buckets (todo / running / done / dead / history) with collapse, counts, aria, and single-shot history hydration — that half is a faithful port (audit §#9). This plan closes the remaining **mutation / control** gaps so a user can manage jobs from the mux exactly as in legacy `#section-queues`: per-job delete (enabled, correctly routed), per-bucket delete-all 🗑, history time-window selector (1/7/14/30/all days), history load-more pagination, and per-job retry. "Done" = every legacy `#section-queues` control has a working mux equivalent on the same endpoints, at 100% L/B/F, with the queues filter-badge wired to plan 08's filter store.
+The mux `jobs-pane` already **displays** the 5 buckets (todo / running / done / dead / history) with collapse, counts, aria, and single-shot history hydration — that half is a faithful port (audit §#9). This plan closes the remaining **mutation / control** gaps so a user can manage jobs from the mux exactly as in legacy `#section-queues`: per-job delete (enabled, correctly routed), per-bucket delete-all 🗑, history time-window selector (1/7/14/30/all days), history load-more pagination, and per-job retry. "Done" = every legacy `#section-queues` control has a working mux equivalent on the same endpoints, at 100% L/B/F, with the queues filter-badge landed as a **hidden static badge + TODO seam** (live plan-08 filter-store wiring is OUT of D1 scope — per F-Clay-B4).
 
 ## 2. Scope
 
@@ -111,18 +111,18 @@ Each task: **what · files · ACs (functional + structural) · Oracle tier(s)**.
 - **ACs (structural)**: no retry button rendered for non-terminal statuses (unit-tested per status).
 - **Oracle**: T1 (retry button present iff terminal), T0 (↻ styling).
 
-### W6 — Queues filter-badge (display hook; plan-08-coupled)
-- **What**: Render `.queues-filter-badge` in the jobs-pane header reflecting the filter mode (👤 Mine / others / all). Per §4, land as a hidden default-Mine badge with a documented seam reading plan 08's store when present.
-- **Files**: `multiplexer.html` (jobs-pane-header span) or `jobBucket`/renderer, `jobs-pane.css`, a small subscribe to plan 08's filter event when available.
-- **ACs (functional)**: badge hidden by default (mode = own); when plan 08's store reports others/all, badge text + visibility update. No behavior change to fetches here (that's plan 08).
-- **ACs (structural)**: `data-testid="queues-filter-badge"` present (legacy parity); no `exclude_own_jobs` logic in this file.
-- **Oracle**: T1 (testid present), deferred T2/T3 until plan 08 lands the live states.
+### W6 — Queues filter-badge (static no-op seam; plan-08 live-wiring OUT of D1 scope)
+- **What**: Render a `.queues-filter-badge` in the jobs-pane header as a **hidden static default-Mine badge** with a **TODO seam COMMENT** marking where plan 08 will later wire it. Per §4 + **F-Clay-B4**: the live plan-08 store-wiring (others/all states) is **OUT of D1 scope** — plan 08's filter store does not exist under D1, so W6 does NOT subscribe to it. D1's W6 deliverable is the static hidden badge + the seam comment ONLY.
+- **Files**: `multiplexer.html` (jobs-pane-header span) or `jobBucket`/renderer, `jobs-pane.css`. **No plan-08 event subscription** (that store does not exist and is OUT of D1 scope) — a TODO seam COMMENT marks the future wire point.
+- **ACs (functional, D1)**: badge renders **hidden by default** (mode = own) as a static element. **OUT of D1 scope — NOT an AC here (deferred to plan 08)**: the others/all store-driven text+visibility updates. That branch depends on a plan-08 store absent under D1, so it is **not built and not tested here** — this deliberately avoids an unreachable branch colliding with the 100% L/B/F mandate (no `c8 ignore` needed because the branch is never authored). No behavior change to fetches.
+- **ACs (structural)**: `data-testid="queues-filter-badge"` present (legacy parity); no `exclude_own_jobs` logic in this file; a `// TODO(plan-08): wire to filter store when it lands` seam comment present.
+- **Oracle**: T1 (testid present, badge hidden). T2/T3 for the live others/all states are OUT of D1 scope (deferred to plan 08).
 
 ## 6. Test strategy & venue routing
 
 Inherits venue rubric from index mandate 4. This plan is **TS/CSS-only**; no server mutation in the unit layer (stubbed `api.delete`/`api.get`/`api.post`).
 
-- **Unit (`:7999`, AI-discretionary)** — `src/tests/unit/multiplexer/render/jobs_pane_renderer.test.ts` (+ a new `job_bucket.test.ts` / extend `jobCard`/`JobStore` specs). Cover: W1 bucket-routing branches (live vs history vs 404 vs 5xx-rollback), W2 confirm-cancel + per-bucket endpoint + stopPropagation, W3 re-hydrate-on-change + days param, W4 append + Load-More gating + dedup, W5 terminal-only button + retry POST + session id, W6 badge default-hidden + store-driven states. Mock `confirm`/`fetch`. **100% L/B/F** (`c8 --100`) — every new branch tested or `c8 ignore` + same-line reason (mandate 1).
+- **Unit (`:7999`, AI-discretionary)** — `src/tests/unit/multiplexer/render/jobs_pane_renderer.test.ts` (+ a new `job_bucket.test.ts` / extend `jobCard`/`JobStore` specs). Cover: W1 bucket-routing branches (live vs history vs 404 vs 5xx-rollback), W2 confirm-cancel + per-bucket endpoint + stopPropagation, W3 re-hydrate-on-change + days param, W4 append + Load-More gating + dedup, W5 terminal-only button + retry POST + session id, W6 badge renders default-hidden (static — the plan-08 store-driven others/all states are OUT of D1 scope, not authored, not tested → no unreachable branch). Mock `confirm`/`fetch`. **100% L/B/F** (`c8 --100`) — every new branch tested or `c8 ignore` + same-line reason (mandate 1).
 - **WebSocket smoke (`:7999`)** — confirm a retried job's `job_state_transition` repopulates the todo bucket end-to-end via `run-websocket-smoke-tests.sh` (extend if a jobs-pane scenario doesn't exist).
 - **E2E UI + visual (`:8000`, scheduled via `POST /api/test-suite/submit`)** — Playwright: click delete on a live + a history card, delete-all per bucket, change time-window, load-more, retry. Visual-regression snapshots for the new buttons/select (rebaseline — §7). Self-authorized on a verified-idle `:8000` per index mandate 4 / CLAUDE.local.md.
 - **Integration (`:8000`, FINAL gate)** — the real `DELETE /api/queue/.../all`, `DELETE /api/job-history/all`, and `POST .../retry` against API+DB+auth (these mutate persistent state — :8000 only, never :7999, never curl). Add to `run-integration-tests.sh` if a job-mutation workflow isn't already covered.
