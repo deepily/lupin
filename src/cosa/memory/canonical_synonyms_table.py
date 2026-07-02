@@ -19,6 +19,7 @@ from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
 from cosa.memory.normalizer import Normalizer
 from cosa.memory.embedding_manager import EmbeddingManager
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 
 
@@ -61,33 +62,40 @@ class CanonicalSynonymsTable:
         self._config_mgr_local = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         self._embedding_dim = int( self._config_mgr_local.get( "embedding dimensions", default="768" ) )
 
-        # Get database path from parameter or config
-        if db_path:
-            # Use provided path (for testing or custom scenarios)
-            uri = db_path
-        else:
-            # Load from configuration (production use)
-            self._config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
-            uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
+        # v0.2.0 backend flag (§6): when 'postgres', route storage through the
+        # CanonicalSynonymRepository and skip LanceDB entirely. Normalization +
+        # embedding generation (add_synonym) stay here. 'lancedb' (default)
+        # preserves the legacy path below byte-for-byte.
+        self._use_postgres = is_postgres_backend( self._config_mgr_local )
 
-        if self.debug:
-            print( f"Connecting to LanceDB at: {uri}" )
+        if not self._use_postgres:
+            # Get database path from parameter or config
+            if db_path:
+                # Use provided path (for testing or custom scenarios)
+                uri = db_path
+            else:
+                # Load from configuration (production use)
+                self._config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+                uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
 
-        db = lancedb.connect( uri )
-
-        # Validate existing table dimensions match config before creating/opening
-        self._validate_embedding_dimensions( db, "canonical_synonyms", "embedding_verbatim" )
-
-        # Check if table exists, create if it doesn't
-        if "canonical_synonyms" not in db.table_names():
             if self.debug:
-                print( "Table 'canonical_synonyms' doesn't exist, creating it..." )
-            self._create_table_if_needed( db )
-        else:
-            self._canonical_synonyms_table = db.open_table( "canonical_synonyms" )
+                print( f"Connecting to LanceDB at: {uri}" )
 
-        if self.verbose:
-            print( f"Opened canonical_synonyms table w/ [{self._canonical_synonyms_table.count_rows()}] rows" )
+            db = lancedb.connect( uri )
+
+            # Validate existing table dimensions match config before creating/opening
+            self._validate_embedding_dimensions( db, "canonical_synonyms", "embedding_verbatim" )
+
+            # Check if table exists, create if it doesn't
+            if "canonical_synonyms" not in db.table_names():
+                if self.debug:
+                    print( "Table 'canonical_synonyms' doesn't exist, creating it..." )
+                self._create_table_if_needed( db )
+            else:
+                self._canonical_synonyms_table = db.open_table( "canonical_synonyms" )
+
+            if self.verbose:
+                print( f"Opened canonical_synonyms table w/ [{self._canonical_synonyms_table.count_rows()}] rows" )
 
     def _validate_embedding_dimensions( self, db, table_name, embedding_field_name ):
         """
@@ -230,6 +238,9 @@ class CanonicalSynonymsTable:
         Raises:
             - None (catches and logs errors)
         """
+        if self._use_postgres:
+            return self._pg_add_synonym( snapshot_id, question_verbatim, confidence_score, source )
+
         if self.debug:
             timer = Stopwatch( msg=f"Adding synonym: '{du.truncate_string( question_verbatim )}'" )
 
@@ -315,6 +326,8 @@ class CanonicalSynonymsTable:
         Returns:
             snapshot_id if found, None otherwise
         """
+        if self._use_postgres: return self._pg_find_exact( "question_verbatim", question )
+
         if self.debug:
             timer = Stopwatch( msg=f"Exact verbatim search: '{du.truncate_string( question )}'" )
 
@@ -364,6 +377,8 @@ class CanonicalSynonymsTable:
         Returns:
             snapshot_id if found, None otherwise
         """
+        if self._use_postgres: return self._pg_find_exact( "question_normalized", question_normalized )
+
         if self.debug:
             timer = Stopwatch( msg=f"Exact normalized search: '{du.truncate_string( question_normalized )}'" )
 
@@ -413,6 +428,8 @@ class CanonicalSynonymsTable:
         Returns:
             snapshot_id if found, None otherwise
         """
+        if self._use_postgres: return self._pg_find_exact( "question_gist", question_gist )
+
         if self.debug:
             timer = Stopwatch( msg=f"Exact gist search: '{du.truncate_string( question_gist )}'" )
 
@@ -461,6 +478,8 @@ class CanonicalSynonymsTable:
         Returns:
             Number of rows deleted
         """
+        if self._use_postgres: return self._pg_delete_by_snapshot_id( snapshot_id )
+
         if self.debug:
             timer = Stopwatch( msg=f"Deleting synonyms for snapshot: {snapshot_id[:8]}..." )
 
@@ -513,6 +532,8 @@ class CanonicalSynonymsTable:
         Returns:
             Dict with total count, usage stats, and performance metrics
         """
+        if self._use_postgres: return self._pg_get_statistics()
+
         try:
             total_rows = self._canonical_synonyms_table.count_rows()
 
@@ -539,6 +560,88 @@ class CanonicalSynonymsTable:
                 ]
             }
 
+        except Exception as e:
+            if self.debug:
+                print( f"Error getting statistics: {e}" )
+            return { "error": str( e ) }
+
+    # ----------------------------------------------------------------------- #
+    # Postgres+pgvector backend (v0.2.0 §6). Exact-match storage via
+    # CanonicalSynonymRepository; normalization + embedding generation stay here.
+    # ----------------------------------------------------------------------- #
+    def _pg_add_synonym( self, snapshot_id: str, question_verbatim: str,
+                         confidence_score: float, source: str ) -> bool:
+        """Postgres mirror of add_synonym (dedupe on verbatim; generate 3 embeddings; insert)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.canonical_synonym_repository import CanonicalSynonymRepository
+        try:
+            if self.find_exact_verbatim( question_verbatim ):
+                return False
+
+            question_normalized = self._normalizer.normalize( question_verbatim )
+            question_gist       = question_normalized      # simplified (parity with LanceDB path)
+
+            embedding_verbatim   = self._embedding_manager.generate_embedding( question_verbatim,   normalize_for_cache=False )
+            embedding_normalized = self._embedding_manager.generate_embedding( question_normalized, normalize_for_cache=False )
+            embedding_gist       = self._embedding_manager.generate_embedding( question_gist,       normalize_for_cache=False )
+
+            synonym_id = f"{snapshot_id}_{du.get_current_datetime( format_str='%Y%m%d_%H%M%S_%f' )}"
+            now        = du.get_timestamp_ms()
+
+            with get_db() as session:
+                CanonicalSynonymRepository( session ).add_synonym(
+                    id=synonym_id, snapshot_id=snapshot_id, question_verbatim=question_verbatim,
+                    question_normalized=question_normalized, question_gist=question_gist,
+                    embedding_verbatim=embedding_verbatim, embedding_normalized=embedding_normalized,
+                    embedding_gist=embedding_gist, confidence_score=confidence_score,
+                    usage_count=0, last_matched=now, created_date=now, source=source,
+                )
+            return True
+        except Exception as e:
+            du.print_stack_trace( e, explanation="add_synonym() failed", caller="CanonicalSynonymsTable._pg_add_synonym()" )
+            return False
+
+    def _pg_find_exact( self, column: str, value: str ) -> Optional[str]:
+        """Postgres mirror of the find_exact_* family (exact-match → snapshot_id)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.canonical_synonym_repository import CanonicalSynonymRepository
+        try:
+            with get_db() as session:
+                repo = CanonicalSynonymRepository( session )
+                finder = {
+                    "question_verbatim":   repo.find_exact_verbatim,
+                    "question_normalized": repo.find_exact_normalized,
+                    "question_gist":       repo.find_exact_gist,
+                }[ column ]
+                return finder( value )
+        except Exception as e:
+            if self.debug:
+                print( f"Error in postgres find_exact({column}): {e}" )
+            return None
+
+    def _pg_delete_by_snapshot_id( self, snapshot_id: str ) -> int:
+        """Postgres mirror of delete_by_snapshot_id (returns count deleted)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.canonical_synonym_repository import CanonicalSynonymRepository
+        try:
+            with get_db() as session:
+                return CanonicalSynonymRepository( session ).delete_by_snapshot_id( snapshot_id )
+        except Exception as e:
+            du.print_stack_trace( e, explanation="delete_by_snapshot_id() failed", caller="CanonicalSynonymsTable._pg_delete_by_snapshot_id()" )
+            return 0
+
+    def _pg_get_statistics( self ) -> Dict[str, Any]:
+        """Postgres mirror of get_statistics (total + usage; top_used omitted — no prod caller)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.canonical_synonym_repository import CanonicalSynonymRepository
+        try:
+            with get_db() as session:
+                stats = CanonicalSynonymRepository( session ).get_statistics()
+            return {
+                "total_synonyms": stats[ "total_synonyms" ],
+                "total_usage":    stats[ "total_usage_count" ],
+                "top_used":       [],
+            }
         except Exception as e:
             if self.debug:
                 print( f"Error getting statistics: {e}" )

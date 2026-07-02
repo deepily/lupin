@@ -21,6 +21,7 @@ class TestDeleteBySnapshotId:
 
         obj = MagicMock()
         obj.debug = True
+        obj._use_postgres = False          # exercise the LanceDB delete path (v0.2.0 §6 flag)
         obj._canonical_synonyms_table = MagicMock()
 
         # Import the real method and bind it

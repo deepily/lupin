@@ -4,6 +4,7 @@ from cosa.memory.embedding_provider import get_embedding_provider
 
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.utils.util_stopwatch import Stopwatch
+from cosa.rest.db.repositories.vector_store_backend import is_postgres_backend
 
 import lancedb
 import pyarrow as pa
@@ -60,19 +61,26 @@ class QuestionEmbeddingsTable():
         # Get standardized embedding dimension from config
         self._embedding_dim = int( self._config_mgr.get( "embedding dimensions", default="768" ) )
 
-        uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
+        # v0.2.0 backend flag (§6): when 'postgres', route storage through the
+        # QuestionEmbeddingRepository and skip LanceDB entirely. Embedding
+        # generation on cache-miss stays here (in the memory layer). 'lancedb'
+        # (default) preserves the legacy path below byte-for-byte.
+        self._use_postgres = is_postgres_backend( self._config_mgr )
 
-        db = lancedb.connect( uri )
+        if not self._use_postgres:
+            uri = du.get_project_root() + self._config_mgr.get( "path to database wo root" )
 
-        # Validate existing table dimensions match config before creating/opening
-        self._validate_embedding_dimensions( db, "question_embeddings_tbl", "embedding" )
+            db = lancedb.connect( uri )
 
-        # Create table if it doesn't exist
-        self._create_table_if_needed( db )
+            # Validate existing table dimensions match config before creating/opening
+            self._validate_embedding_dimensions( db, "question_embeddings_tbl", "embedding" )
 
-        self._question_embeddings_tbl = db.open_table( "question_embeddings_tbl" )
-        
-        print( f"Opened question_embeddings_tbl w/ [{self._question_embeddings_tbl.count_rows()}] rows" )
+            # Create table if it doesn't exist
+            self._create_table_if_needed( db )
+
+            self._question_embeddings_tbl = db.open_table( "question_embeddings_tbl" )
+
+            print( f"Opened question_embeddings_tbl w/ [{self._question_embeddings_tbl.count_rows()}] rows" )
 
     def _validate_embedding_dimensions( self, db, table_name, embedding_field_name ):
         """
@@ -154,6 +162,8 @@ class QuestionEmbeddingsTable():
         Raises:
             - None
         """
+        if self._use_postgres: return self._pg_has( question )
+
         if self.debug and self.verbose: timer = Stopwatch( msg=f"has( '{question}' )" )
         if self.debug and self.verbose: du.print_banner( f"[{question}]" )
         # Escape single quotes by doubling them to prevent SQL parsing errors
@@ -180,6 +190,8 @@ class QuestionEmbeddingsTable():
         Raises:
             - None (handles exceptions internally)
         """
+        if self._use_postgres: return self._pg_get_embedding( question )
+
         if self.debug: timer = Stopwatch( msg=f"get_embedding( '{question}' )", silent=True )
         try:
             # Escape single quotes by doubling them to prevent SQL parsing errors
@@ -211,12 +223,42 @@ class QuestionEmbeddingsTable():
         Raises:
             - None (catches and logs errors)
         """
+        if self._use_postgres: return self._pg_add_embedding( question, embedding )
+
         new_row = [ { "question": question, "embedding": embedding } ]
         # Lance DB fails when a database is accessed via samba mount on OS X
         try:
             self._question_embeddings_tbl.add( new_row )
         except Exception as e:
             du.print_stack_trace( e, explanation="add() failed", caller="QuestionEmbeddingsTable.add_embedding()" )
+
+    # ----------------------------------------------------------------------- #
+    # Postgres+pgvector backend (v0.2.0 §6). Storage via QuestionEmbeddingRepository;
+    # get_embedding's generate-on-miss stays here (memory layer owns generation).
+    # ----------------------------------------------------------------------- #
+    def _pg_has( self, question: str ) -> bool:
+        """Postgres mirror of has (exact-match existence)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.question_embedding_repository import QuestionEmbeddingRepository
+        with get_db() as session:
+            return QuestionEmbeddingRepository( session ).has( question )
+
+    def _pg_get_embedding( self, question: str ) -> list[float]:
+        """Postgres mirror of get_embedding: cached vector, else generate (NOT stored)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.question_embedding_repository import QuestionEmbeddingRepository
+        with get_db() as session:
+            cached = QuestionEmbeddingRepository( session ).get_embedding( question )
+        if cached is not None:
+            return cached
+        return self._embedding_provider.generate_embedding( question, content_type="prose" )
+
+    def _pg_add_embedding( self, question: str, embedding: list[float] ) -> None:
+        """Postgres mirror of add_embedding (append a question→embedding row)."""
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.question_embedding_repository import QuestionEmbeddingRepository
+        with get_db() as session:
+            QuestionEmbeddingRepository( session ).add_embedding( question, embedding )
     
     # def _init_tbl( self ):
     #

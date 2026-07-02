@@ -856,5 +856,140 @@ class TestCanonicalSynonymsTable( unittest.TestCase ):
         self.assertIn( "error", stats )
 
 
+class TestPostgresBackend( unittest.TestCase ):
+    """v0.2.0 §6 postgres backend: __init__ skips LanceDB; exact-match + add via repo."""
+
+    def _make_pg( self, debug=False ):
+        cfg = Mock()
+        cfg.get.side_effect = lambda key, default=None, return_type=None: {
+            "embedding dimensions":     "768",
+            "path to database wo root": "/test/db",
+        }.get( key, default )
+        normalizer = Mock()
+        normalizer.normalize.side_effect = lambda q: q.lower()
+        emb = Mock()
+        emb.generate_embedding.return_value = [ 0.1 ] * 768
+        with patch( "cosa.memory.canonical_synonyms_table.is_postgres_backend", return_value=True ), \
+             patch( "cosa.memory.canonical_synonyms_table.ConfigurationManager", return_value=cfg ), \
+             patch( "cosa.memory.canonical_synonyms_table.Normalizer", return_value=normalizer ), \
+             patch( "cosa.memory.canonical_synonyms_table.EmbeddingManager", return_value=emb ), \
+             patch( "cosa.memory.canonical_synonyms_table.lancedb.connect",
+                    side_effect=AssertionError( "postgres ctor must not connect to LanceDB" ) ), \
+             patch( "builtins.print" ):
+            table = CanonicalSynonymsTable( debug=debug )
+        return table, normalizer, emb
+
+    @staticmethod
+    def _patch_repo():
+        import contextlib
+        session   = MagicMock()
+        repo_inst = MagicMock()
+
+        @contextlib.contextmanager
+        def fake_get_db():
+            yield session
+
+        ctx      = patch( "cosa.rest.db.database.get_db", fake_get_db )
+        repo_ctx = patch( "cosa.rest.db.repositories.canonical_synonym_repository.CanonicalSynonymRepository",
+                          return_value=repo_inst )
+        return repo_inst, ctx, repo_ctx
+
+    def test_init_uses_postgres( self ):
+        table, _, _ = self._make_pg()
+        self.assertTrue( table._use_postgres )
+
+    def test_find_exact_verbatim_normalized_gist( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.find_exact_verbatim.return_value   = "snapV"
+        repo.find_exact_normalized.return_value = "snapN"
+        repo.find_exact_gist.return_value       = "snapG"
+        with ctx, repo_ctx:
+            self.assertEqual( table.find_exact_verbatim( "q" ), "snapV" )
+            self.assertEqual( table.find_exact_normalized( "q" ), "snapN" )
+            self.assertEqual( table.find_exact_gist( "q" ), "snapG" )
+
+    def test_find_exact_error_returns_none( self ):
+        table, _, _ = self._make_pg( debug=True )
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.find_exact_verbatim.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx, patch( "builtins.print" ):
+            self.assertIsNone( table.find_exact_verbatim( "q" ) )
+
+    def test_add_synonym_inserts_when_new( self ):
+        table, normalizer, emb = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.find_exact_verbatim.return_value = None      # not a duplicate
+        with ctx, repo_ctx, \
+             patch( "cosa.memory.canonical_synonyms_table.du.get_current_datetime", return_value="TS" ), \
+             patch( "cosa.memory.canonical_synonyms_table.du.get_timestamp_ms", return_value="NOW" ):
+            self.assertTrue( table.add_synonym( "snap1", "How Are You?", confidence_score=90.0, source="test" ) )
+        kw = repo.add_synonym.call_args.kwargs
+        self.assertEqual( kw[ "snapshot_id" ], "snap1" )
+        self.assertEqual( kw[ "question_normalized" ], "how are you?" )    # normalizer.lower()
+        self.assertEqual( kw[ "embedding_verbatim" ], [ 0.1 ] * 768 )
+        self.assertEqual( kw[ "id" ], "snap1_TS" )
+
+    def test_add_synonym_skips_duplicate( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.find_exact_verbatim.return_value = "existing"    # duplicate
+        with ctx, repo_ctx:
+            self.assertFalse( table.add_synonym( "snap1", "q" ) )
+        repo.add_synonym.assert_not_called()
+
+    def test_add_synonym_error_returns_false( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.find_exact_verbatim.return_value = None
+        repo.add_synonym.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx, patch( "cosa.memory.canonical_synonyms_table.du.print_stack_trace" ) as trace:
+            self.assertFalse( table.add_synonym( "snap1", "q" ) )
+        trace.assert_called_once()
+
+    def test_delete_by_snapshot_id_delegates( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.delete_by_snapshot_id.return_value = 3
+        with ctx, repo_ctx:
+            self.assertEqual( table.delete_by_snapshot_id( "snap1" ), 3 )
+
+    def test_delete_by_snapshot_id_error_returns_zero( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.delete_by_snapshot_id.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx, patch( "cosa.memory.canonical_synonyms_table.du.print_stack_trace" ):
+            self.assertEqual( table.delete_by_snapshot_id( "snap1" ), 0 )
+
+    def test_get_statistics_maps_shape( self ):
+        table, _, _ = self._make_pg()
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_statistics.return_value = { "total_synonyms": 5, "total_usage_count": 12 }
+        with ctx, repo_ctx:
+            stats = table.get_statistics()
+        self.assertEqual( stats, { "total_synonyms": 5, "total_usage": 12, "top_used": [] } )
+
+    def test_get_statistics_error_returns_error_dict( self ):
+        table, _, _ = self._make_pg( debug=True )
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_statistics.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx, patch( "builtins.print" ):
+            self.assertIn( "error", table.get_statistics() )
+
+    def test_find_exact_error_debug_off_skips_log( self ):
+        table, _, _ = self._make_pg( debug=False )      # covers the `if self.debug` False branch
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.find_exact_verbatim.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx:
+            self.assertIsNone( table.find_exact_verbatim( "q" ) )
+
+    def test_get_statistics_error_debug_off_skips_log( self ):
+        table, _, _ = self._make_pg( debug=False )      # covers the `if self.debug` False branch
+        repo, ctx, repo_ctx = self._patch_repo()
+        repo.get_statistics.side_effect = RuntimeError( "boom" )
+        with ctx, repo_ctx:
+            self.assertIn( "error", table.get_statistics() )
+
+
 if __name__ == "__main__":
     unittest.main()
