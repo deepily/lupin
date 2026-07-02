@@ -185,10 +185,24 @@
     display: none;
 }
 
-/* C2-a RESOLVED (WS2): the `.sender-persona-badge` (mux button) styling moved
-   to the shared sheet as a `.persona-badge, .sender-persona-badge` UNION that
-   makes the button compute identically to the legacy span. No mux-only badge
-   rule remains here. */
+/* C2-a RESOLVED (WS2): the `.sender-persona-badge` (mux button) BASE styling
+   lives in the shared sheet as a `.persona-badge, .sender-persona-badge` UNION
+   that makes the button compute identically to the legacy span (inline-flex +
+   gap layout supplied there).
+
+   Lane-2 skin revert (2026-07-02, plan 06 §5): the badge reverted from R4
+   glyph-only back to the legacy inline icon + NAME, so senderCard.ts now emits
+   `.persona-badge-icon` + `.persona-badge-name` children inside the button.
+   These two child rules are byte-faithful from legacy notifications.css:1765-1771
+   and are declared mux-side here (this sheet is mux-only-linked; legacy declares
+   its own copies in the monolith). */
+.persona-badge-icon {
+    font-size: 1.0em;
+}
+
+.persona-badge-name {
+    letter-spacing: 0.02em;
+}
 
 /* ============================================================================
    Date-accordion MUX-ONLY / MECHANISM seams.

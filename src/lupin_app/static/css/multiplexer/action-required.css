@@ -49,7 +49,7 @@
     gap              : 8px;
     margin           : 8px 0 12px;
     padding          : 10px 12px;
-    border           : 2px solid #0d6efd;
+    border           : 3px solid #0d6efd;
     border-radius   : 6px;
     background-color : #e7f1ff;
 }
@@ -86,8 +86,8 @@
 }
 
 .action-required-widget-responded {
-    border-color     : #34d399;
-    background-color : #ecfdf5;
+    border-color     : #198754;
+    background-color : #d1e7dd;
 }
 
 .action-required-widget-expired,
@@ -113,8 +113,8 @@
     margin-left   : 8px;
     padding       : 2px 8px;
     border-radius : 4px;
-    background    : #fef3c7;
-    color         : #92400e;
+    background    : #fff3cd;
+    color         : #664d03;
     font-size     : 12px;
     font-variant-numeric : tabular-nums;
 }
@@ -175,13 +175,13 @@
 }
 
 .action-required-widget .action-required-btn-yes {
-    background   : #34d399;
-    color        : #064e3b;
-    border-color : #10b981;
+    background   : #28a745;
+    color        : #fff;
+    border-color : #28a745;
 }
 
 .action-required-widget .action-required-btn-yes:hover {
-    background : #10b981;
+    background : #218838;
     color      : #fff;
 }
 
@@ -309,7 +309,7 @@
 }
 
 .action-required-widget-responded .action-required-responded-msg {
-    color : #065f46;
+    color : #0f5132;
 }
 
 .action-required-widget-expired .action-required-expired-msg,

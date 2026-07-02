@@ -68,12 +68,15 @@ test("senderCard: voice_persona color applied via style.setProperty (NOT inline 
   const persona = makePersona({ color: "#ab1234", icon: "🦊" });
   const card = renderSenderCard(makeSender({ voice_persona: persona }), [], { appTimezone: "UTC" });
   assert.equal(card.style.getPropertyValue("--persona-color"), "#ab1234");
-  // Phase 6c Node A Step A1: badge is now glyph-only (no inline name);
-  // the name surfaces via the persona-popover modal triggered by popovertarget.
+  // Lane-2 skin revert (2026-07-02, plan 06 §5): the R4 glyph-only badge is
+  // reverted to the legacy inline icon + NAME — icon in `.persona-badge-icon`,
+  // name in `.persona-badge-name`. The button + popovertarget are RETAINED, so
+  // the popover stays an on-demand affordance (not the sole name surface).
   const badge = card.querySelector(".sender-persona-badge");
   assert.notEqual(badge, null);
-  assert.equal(badge!.textContent, "🦊");
-  assert.equal(badge!.tagName.toLowerCase(), "button", "Phase 6c Node A: chip is now a <button> with popovertarget");
+  assert.equal(badge!.querySelector(".persona-badge-icon")!.textContent, "🦊");
+  assert.equal(badge!.querySelector(".persona-badge-name")!.textContent, "Tiberius");
+  assert.equal(badge!.tagName.toLowerCase(), "button", "badge stays a <button> with popovertarget");
   assert.match(badge!.getAttribute("popovertarget") ?? "", /^persona-popover-sess_42/);
 });
 

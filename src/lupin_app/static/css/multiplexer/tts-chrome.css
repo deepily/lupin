@@ -58,37 +58,37 @@
    green; paused shades amber. */
 .tts-chrome.is-playing-current {
     padding          : 8px 10px;
-    border           : 1px solid #34d399;
+    border           : 1px solid #198754;
     border-radius   : 6px;
-    background-color : #ecfdf5;
-    color            : #065f46;
+    background-color : #d1e7dd;
+    color            : #0f5132;
 }
 
 .tts-chrome.is-playing-current .tts-current-track {
-    color : #065f46;
+    color : #0f5132;
 }
 
 .tts-chrome.is-paused-current {
     padding          : 8px 10px;
-    border           : 1px solid #fbbf24;
+    border           : 1px solid #ffc107;
     border-radius   : 6px;
-    background-color : #fffbeb;
-    color            : #92400e;
+    background-color : #fff3cd;
+    color            : #664d03;
 }
 
 .tts-chrome.is-paused-current .tts-current-track {
-    color : #92400e;
+    color : #664d03;
 }
 
 /* L2: `🔊 Playing: N` accordion header — green title line on the active panel. */
 .tts-chrome .tts-playing-header {
     font-weight : 600;
     font-size   : 13px;
-    color       : #065f46;
+    color       : #0f5132;
 }
 
 .tts-chrome.is-paused-current .tts-playing-header {
-    color : #92400e;
+    color : #664d03;
 }
 
 /* Idle empty-state text — DE-FORKED (WP7 single-source, 2026-07-02): the empty
@@ -140,23 +140,23 @@
 }
 
 .tts-chrome.is-playing-current .tts-btn-toggle {
-    background   : #10b981;
+    background   : #28a745;
     color        : #fff;
-    border-color : #059669;
+    border-color : #28a745;
 }
 
 .tts-chrome.is-playing-current .tts-btn-toggle:hover {
-    background : #059669;
+    background : #218838;
 }
 
 .tts-chrome.is-paused-current .tts-btn-toggle {
-    background   : #f59e0b;
-    color        : #fff;
-    border-color : #d97706;
+    background   : #ffc107;
+    color        : #664d03;
+    border-color : #ffc107;
 }
 
 .tts-chrome.is-paused-current .tts-btn-toggle:hover {
-    background : #d97706;
+    background : #e0a800;
 }
 
 .tts-chrome .tts-btn-stop {
@@ -203,11 +203,11 @@
 }
 
 .tts-chrome.is-playing-current .tts-queue-length {
-    background : #d1fae5;
-    color      : #065f46;
+    background : #d1e7dd;
+    color      : #0f5132;
 }
 
 .tts-chrome.is-paused-current .tts-queue-length {
-    background : #fef3c7;
-    color      : #92400e;
+    background : #fff3cd;
+    color      : #664d03;
 }

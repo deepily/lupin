@@ -90,9 +90,17 @@ export function renderSenderCard(
   // F-Arnold-3 (rule-rename-in-place). The button carries `popovertarget`
   // pointing at the matching persona-popover modal id (constructed via the
   // same `slugifySenderId` helper personaModal.ts uses for the popover's
-  // `id` attribute — single source of truth per Recon-A5). The button is
-  // now glyph-only (icon, no inline name); the popover surfaces the name
-  // and other persona fields on demand.
+  // `id` attribute — single source of truth per Recon-A5).
+  //
+  // Lane-2 skin revert (2026-07-02, plan 06 §5, Rick Q2 full-revert): the R4
+  // glyph-only badge is reverted back to the legacy inline icon + NAME — the
+  // button now emits `.persona-badge-icon` + `.persona-badge-name` children
+  // (legacy notifications.js:10818-10823; VoicePersona has no display_name, so
+  // the label is `persona.name`). The button + `popovertarget` are RETAINED:
+  // the popover stays an on-demand affordance, not the sole name surface. Child
+  // styling lives mux-side in notifications-list.css (byte-faithful from legacy
+  // notifications.css:1765-1771); the shared union rule already supplies the
+  // inline-flex + gap layout so icon and name lay out horizontally.
   //
   // F-Arnold-4: when sender has NO voice_persona, the badge element is
   // omitted entirely (not rendered as empty/stub). The `if (persona !==
@@ -102,7 +110,7 @@ export function renderSenderCard(
   if (persona !== undefined) {
     const badgeClass    = persona.borrowed ? "sender-persona-badge borrowed" : "sender-persona-badge";
     const popoverTarget = `persona-popover-${slugifySenderId(sender.sender_id)}`;
-    personaBadge = html`<button class="${badgeClass}" type="button" popovertarget="${popoverTarget}">${persona.icon}</button>` as DocumentFragment;
+    personaBadge = html`<button class="${badgeClass}" type="button" popovertarget="${popoverTarget}"><span class="persona-badge-icon">${persona.icon}</span><span class="persona-badge-name">${persona.name}</span></button>` as DocumentFragment;
   }
 
   const lastActivityText = sender.last_active_ts > 0
