@@ -60,6 +60,45 @@ def _io_rows( n, embed_lead=1.0 ):
     ]
 
 
+def _synonym_rows( n ):
+    """n canonical_synonyms source-row dicts (numpy embeddings + datetimes, like LanceDB)."""
+    return [
+        {
+            "id"                   : f"syn-{i}",
+            "snapshot_id"          : f"snap-{i}",
+            "question_verbatim"    : f"what time is it {i}",
+            "question_normalized"  : f"what time is it {i}",
+            "question_gist"        : "time",
+            "embedding_verbatim"   : np.array( _vec( 1.0, float( i ) ), dtype=np.float32 ),
+            "embedding_normalized" : np.array( _vec( 1.0 ), dtype=np.float32 ),
+            "embedding_gist"       : np.array( _vec( 1.0 ), dtype=np.float32 ),
+            "confidence_score"     : np.float32( 99.5 ),
+            "usage_count"          : np.int32( i ),
+            "last_matched"         : datetime( 2026, 7, 1, 9, 0, 0 ),
+            "created_date"         : np.datetime64( "2026-06-30T00:00:00" ),
+            "source"               : "runtime",
+        }
+        for i in range( n )
+    ]
+
+
+def _snapshot_rows( n ):
+    """n solution_snapshots source-row dicts (array + vector cells; created_date is a string)."""
+    return [
+        {
+            "id_hash"                  : f"hash-{i}",
+            "question"                 : f"add {i} and {i}",
+            "code"                     : np.array( [ f"print({i}+{i})" ] ),
+            "non_synonymous_questions" : [ "subtract" ],
+            "question_embedding"       : np.array( _vec( 1.0, float( i ) ), dtype=np.float32 ),
+            "code_embedding"           : np.array( _vec( 0.0, 1.0 ), dtype=np.float32 ),
+            "is_cache_hit"             : np.bool_( True ),
+            "created_date"             : "2026-07-02",
+        }
+        for i in range( n )
+    ]
+
+
 # =========================================================================== #
 # PURE — _is_na
 # =========================================================================== #
@@ -233,6 +272,36 @@ def test_backfill_apply_into_empty( db_session ):
     assert report[ "inserted" ] == 3 and report[ "existing_before" ] == 0
     assert report[ "purged" ] == 0
     assert db_session.query( InputAndOutput ).count() == 3
+
+def test_backfill_apply_into_empty_canonical_synonyms( db_session ):
+    # Cheech pre-RUN advisory: prove the synonym-heal table round-trips (insert → read back).
+    # canonical_synonyms carries the L1/L2 fast-path; a broken round-trip would silently
+    # re-drop the mappings the backfill exists to preserve.
+    report = vsb.backfill_table( db_session, CanonicalSynonym, _synonym_rows( 3 ), apply=True )
+    assert report[ "inserted" ] == 3 and report[ "existing_before" ] == 0 and report[ "purged" ] == 0
+    assert db_session.query( CanonicalSynonym ).count() == 3
+    read = db_session.query( CanonicalSynonym ).filter_by( id="syn-1" ).one()
+    assert read.question_normalized == "what time is it 1"
+    assert read.source              == "runtime"
+    assert read.usage_count         == 1
+    assert read.confidence_score    == pytest.approx( 99.5, abs=1e-3 )
+    assert read.last_matched        == datetime( 2026, 7, 1, 9, 0, 0 )     # DateTime column
+    assert read.created_date        == datetime( 2026, 6, 30, 0, 0, 0 )    # DateTime column
+    assert list( read.embedding_verbatim )[ :2 ] == pytest.approx( [ 1.0, 1.0 ] )   # vec round-trip
+
+def test_backfill_apply_into_empty_solution_snapshots( db_session ):
+    # Cheech pre-RUN advisory: prove the curated-snapshot table round-trips its ARRAY
+    # (code / non_synonymous_questions) + vector cells + the STRING created_date column.
+    report = vsb.backfill_table( db_session, SolutionSnapshot, _snapshot_rows( 3 ), apply=True )
+    assert report[ "inserted" ] == 3 and report[ "existing_before" ] == 0 and report[ "purged" ] == 0
+    assert db_session.query( SolutionSnapshot ).count() == 3
+    read = db_session.query( SolutionSnapshot ).filter_by( id_hash="hash-2" ).one()
+    assert read.question                 == "add 2 and 2"
+    assert read.code                     == [ "print(2+2)" ]               # ARRAY(Text) round-trip
+    assert read.non_synonymous_questions == [ "subtract" ]                 # ARRAY(Text) round-trip
+    assert read.is_cache_hit is True
+    assert read.created_date             == "2026-07-02"                   # Text column (NOT DateTime)
+    assert list( read.question_embedding )[ :2 ] == pytest.approx( [ 1.0, 2.0 ] )   # vec round-trip
 
 def test_backfill_apply_nonempty_without_truncate_raises( db_session ):
     vsb.backfill_table( db_session, InputAndOutput, _io_rows( 2 ),
