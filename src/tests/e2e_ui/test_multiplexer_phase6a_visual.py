@@ -171,7 +171,7 @@ _STABILIZE_DOM_JS = """
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6a_jobs_pane_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_height_tolerant, logged_in_page,
 ):
     """
     Capture the Phase 6a jobs pane in its rendered baseline state.
@@ -188,7 +188,8 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     Requires:
         - Server running on `:8000` with Testing config
         - `logged_in_page` fixture (authenticated session)
-        - `assert_snapshot` fixture (pytest-playwright-visual-snapshot)
+        - `assert_snapshot_height_tolerant` fixture (bug 660d02b4 — ≤1px
+          height-tolerant; forgives the benign --update-vs-compare row-height flap)
         - `--update-snapshots` flag on first run to establish the baseline
 
     Ensures:
@@ -255,7 +256,12 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     time.sleep( 0.2 )
 
     # Capture the entire #jobs-pane (avoids body-level layout drift).
+    # Height-tolerant compare (bug 660d02b4): --update-snapshots and a plain
+    # COMPARE can differ by ±1px on a benign sub-pixel row-height rounding
+    # (e.g. 403 vs 404). The stock assert_snapshot is zero-tolerance on
+    # dimensions (hard ValueError on a 1px flap); assert_snapshot_height_tolerant
+    # forgives ≤1px height while staying strict on width + overlapping pixels.
     pane = page.locator( '[data-testid="multiplexer-jobs-pane"]' )
-    assert_snapshot( pane, name="multiplexer_phase6a_jobs_pane.png" )
+    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6a_jobs_pane.png" )
 
     print( "✓ multiplexer_phase6a_jobs_pane: visual snapshot compared" )
